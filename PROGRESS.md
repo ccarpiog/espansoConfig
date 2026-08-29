@@ -9,10 +9,12 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. It is **over the soft line bound and under the soft byte bound** as of 2d-4a-F
-— 475 lines, 60 KiB — having archived the spent next-action block and 2d-4a-E's verification block
-that iteration; the next place to look for length is *Open risks and deviations*, not the phase table
-or the next action.
+triggers the move**. As of 2d-4a-G it is **over the soft line bound and about to cross the soft byte
+bound**: **495 lines and 63,634 bytes**, which is under 64 KiB by less than 2 KiB, after archiving
+two spent next-action blocks and two verification blocks during that one iteration. **The next
+session should archive before it writes** — the phase-2d-4a tail adds roughly one verification block
+and one next-action block per phase, and each is 40–100 lines. The next places to look for length
+are *Open risks and deviations* and the *Next action*'s narrative half, not the phase table.
 
 - Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds the phase plan).
 - Rules that bind every session: [`CLAUDE.md`](CLAUDE.md).
@@ -47,11 +49,12 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-1** | The core observation engine with no caller — debounce, stability, read, hash, project, validate, over an injected clock | ✅ complete, after five review rounds |
 | **2d-2** | The watcher lifecycle behind the workspace session, and the real-filesystem adapter | ✅ complete — READY at round 5 |
 | **2d-3** | The write ledger and the admission gate | ✅ complete — **CLOSED at 2d-3-C (2026-08-26)**, after a fourteen-round tail the owner ended |
-| **2d-4a** | The Rust half of the reconciliation wire — the queue, `ReconciliationWake`, `drain_external_changes`, the wire types, the EN/ES JSON | 🔶 **implemented, every gate green, and NOT closed** — **eleven** rounds run; superseded by 2d-4a-D, that by 2d-4a-E, that by 2d-4a-F, and that by 2d-4a-G |
+| **2d-4a** | The Rust half of the reconciliation wire — the queue, `ReconciliationWake`, `drain_external_changes`, the wire types, the EN/ES JSON | 🔶 **implemented, every gate green, and NOT closed** — **twelve** rounds run; superseded by 2d-4a-D, that by 2d-4a-E, that by 2d-4a-F, that by 2d-4a-G, and that by 2d-4a-H |
 | **2d-4a-D** | First corrective phase: round 9's review of the round-8 fix | 🔶 **ran in full, every gate green, NOT closed** — **`do-not-ship`**, 2 High + 3 Medium, all fixed; **superseded by 2d-4a-E** |
 | **2d-4a-E** | Second corrective phase: round 10's review of the round-9 fix | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 2 Medium + 2 Low, three fixed and one declined with a recorded reason; **it cleared round 9's two Highs by its own derivation**; **superseded by 2d-4a-F** |
 | **2d-4a-F** | Third corrective phase: round 11's review of the round-10 fix — two comment edits in one file | 🔶 **ran in full, every gate green, NOT closed** — **`do-not-ship`**, **1 High** + 1 Medium + 1 Low, all three fixed; the High is a clause **older than the fix under review** that four rounds had read past; **superseded by 2d-4a-G** |
-| **2d-4a-G** | Fourth corrective phase: round 12's review of the round-11 fix — one comment edit in one file | ⬜️ not started — **this is the next action**. §19.4 predicted the tail would end at round 11 and it did not; no prediction is made here |
+| **2d-4a-G** | Fourth corrective phase: round 12's review of the round-11 fix — one comment edit in one file | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 2 Medium + 3 Low, **all five fixed**; **it cleared round 11's repair by deriving `evictable_sequence`'s independence from the assertion**; **superseded by 2d-4a-H** |
+| **2d-4a-H** | Fifth corrective phase: round 13's review of the round-12 fix — one comment edit in one file | ⬜️ not started — **this is the next action**. Two source Lows were fixed rather than carried, on the merits recorded in §21.1, and that is what commissions it |
 | **2d-4a-C-1** | The scoped-lifetime contract, stated once, and its pointers | ✅ complete and **CLOSED** — four rounds, round 4 READY with 0 findings |
 | **2d-4a-C-2** | The check that keeps it — `src-tauri/src/prose_sweep.rs` and `src-tauri/src/retained_state_contract.rs` | ✅ implemented, every gate green, **CLOSED by owner decision 2026-08-29** after nine rounds |
 | **2d-4b** | The TypeScript half of the wire — spec `docs/decisions/2d-4-split-notes.md` §2 | ⬜️ not started |
@@ -187,95 +190,92 @@ decision that closed them — those decisions are in
 
 ## Next action
 
-### Round 11 RAN today and found a High in source. The next action is **Phase 2d-4a-G** — round 12's
-### review of the round-11 fix — then **Phase 2d-4b**.
+### Rounds 11 and 12 both RAN today. The next action is **Phase 2d-4a-H** — round 13's review of the
+### round-12 fix — then **Phase 2d-4b**.
 
 **🛑 Do not run a step-2 round 10 of 2d-4a-C.** That tail is closed by owner decision; reopening it
 needs a new owner ruling. **2d-4a's own tail is a different tail** and is the one that is live — it
-has now run *twelve* numbered positions, so a bare round number is ambiguous between the two. Check
+has now run *thirteen* numbered positions, so a bare round number is ambiguous between the two. Check
 which tail before acting. The spent next-action blocks are in
 [`docs/progress-archive/next-action-history.md`](docs/progress-archive/next-action-history.md), which
 is **history and never an instruction**.
 
 #### What happened on 2026-08-29, under `/autoclaude-opus` in driven mode
 
-**Three corrective phases have now run to completion: 2d-4a-D (round 9), 2d-4a-E (round 10) and
-2d-4a-F (round 11).** Each was commissioned by `CLAUDE.md` §7.1 because the fix before it changed a
-source file, and each spent the workflow's single per-phase review invocation.
+**Four corrective phases have now run to completion: 2d-4a-D, -E, -F and -G.** Each was commissioned
+by `CLAUDE.md` §7.1 because the fix before it changed a source file, and each spent the workflow's
+single per-phase review invocation.
 
 | Round | Phase | Verdict | Findings | Report |
 |---|---|---|---|---|
 | 9 | 2d-4a-D | **do-not-ship** | **2 High**, 3 Medium | [`…round-9.md`](docs/reviews/phase-2d-4a-round-9.md) |
 | 10 | 2d-4a-E | ship-with-fixes | 0 High, 2 Medium, 2 Low | [`…round-10.md`](docs/reviews/phase-2d-4a-round-10.md) |
 | 11 | 2d-4a-F | **do-not-ship** | **1 High**, 1 Medium, 1 Low | [`…round-11.md`](docs/reviews/phase-2d-4a-round-11.md) |
+| 12 | 2d-4a-G | ship-with-fixes | **0 High**, 2 Medium, 3 Low | [`…round-12.md`](docs/reviews/phase-2d-4a-round-12.md) |
 
-The record is [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) **§18** (round 9),
-**§19** (round 10) and **§20** (round 11); the briefs are
-`docs/decisions/2d-4a-{D-round-9,E-round-10,F-round-11}-brief.md`.
+The record is [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) **§18** … **§21**, one
+section per round; the briefs are `docs/decisions/2d-4a-{D,E,F,G}-round-{9,10,11,12}-brief.md`.
 
-#### 🔴 What round 11 found, and why it matters more than its count
+#### 🟢 What round 12 cleared, and the one shape it found twice
 
-**§19.4 predicted this tail would end at round 11, and it did not.** The prediction was written as a
-prediction and not as a permission, and §7.2 is explicit that a round finding a real source defect is
-the mechanism working. **Take no forecast from §20 either** — the honest form is the conditional: if
-round 12 finds only record defects or nothing, its fix touches no source file and the tail ends there.
+**It cleared round 11's repair at the level round 11 attacked.** `evictable_sequence` (`:921-935`) is
+a pure function of `pending` over paths, counts and sequences, reading no `DocumentId` and no
+assertion state, **with no coupling direct or indirect** — so *"never because it is the entry that
+trips here"*, *"when `evictable_sequence` picks it"*, *"an overflow that selects this entry"* and
+`retained_state_contract.rs:1089`'s *"an overflow evicting **it**"* are now **all true together**. It
+also checked the **preserved** clauses rather than assuming them (`drain`'s two mutations, `enqueue`'s
+`while … > QUEUE_CAPACITY`, all three `PoisonError::into_inner` sites), confirmed §20.2's figures, and
+agreed for the **third** round that round 10's L2 stays declined.
 
-**The High is a clause four rounds had read past.** `reconciliation.rs` said the eviction victim is
-*"never whichever entry this assertion trips over"* — while the **same sentence's own condition**
-says the entry loses its place *"when `evictable_sequence` picks it"*, the **same paragraph's
-summary** four lines below names what the escape waits on as *"an overflow that selects this
-entry"*, and the `INVENTORY` `reason` at `retained_state_contract.rs:1089` calls it *"an overflow
-evicting **it** inside the enqueue"*. On the literal reading the escape can never fire and the list
-closed at three has two members — **round 9's enumeration-wrong-by-one reached from the other side**.
-The fix moves *never* onto the **reason**, where it was always true: clause 5 *"does not know this
-assertion exists"*, and the entry *"goes when the rule happens to name it, never because it is the
-entry that trips here."* **The defect predates M1** — the pre-M1 text said *not* — so rounds 9 and 10
-both read it, and round 10 rewrote its neighbours while keeping it. **A rewrite is not a review of
-what it preserves.**
+**Its two Mediums and one Low are one shape: a figure measured over one span and labelled with
+another.** The round-11 block said its link count listed *"the doc comment"* when it listed the
+**paragraph** (the doc comment gives 13 over 10; the paragraph gives the six over five it reports);
+§20.4's *"83 citations"* was `rg -c`, which counts **lines** — `rg -o … | wc -l` gives **85**; and the
+round-10 block it all descends from labelled a **hunk's** count as the paragraph's. **Three
+instances, three rounds, one shape**, each found by re-deriving the figure rather than re-reading the
+sentence. All three are corrected.
 
-**What round 11 cleared is again larger than what it found**, all by its own derivation: clause 5
-states the victim rule whole with its tie-break and matches `evictable_sequence`, so M1's pointer is
-accurate; clause 4 satisfies all three surviving claims made about it, so M2's deletion kept nothing
-local; the `retained_state.rs:55-61` header quotes are correct; **L2's declined argument holds on a
-second round's reading**; `+9 / −9` all-`///` and *`retained_state_contract.rs` unchanged* are true of
-`22d1afb`; and no phrase of either family moved. §20's opening lists all six.
+**Its second Medium is the sharper one.** §20.4 said *"H1 is older than the fix under review"*, which
+is true of the words and misleading about the defect: pre-M1 the *not* sat beside a **concrete
+criterion**, under which it read as criterion-versus-criterion and was true. M1 deleted that
+criterion, substituted *"whatever that rule names"*, and strengthened *not* into *never*. **M1 is a
+contributing cause, not merely a preserver**, so the record no longer implies four rounds had read the
+defect.
 
-#### Step 1 — Phase 2d-4a-G, the fourth corrective phase (THE NEXT ACTION)
+#### Step 1 — Phase 2d-4a-H, the fifth corrective phase (THE NEXT ACTION)
 
-**Why it exists.** The round-11 fix changed **one source file** — `src-tauri/src/reconciliation.rs`,
-comment-only, **+4 / −3**, one sentence — so §7.1 commissions **round 12**. `/autoclaude-opus` allows
-one review invocation per phase and 2d-4a-F spent it on round 11, so §7.4 carries the debt into the
-next corrective phase. **2d-4a-F is superseded by 2d-4a-G, never complete.**
+**Why it exists.** Round 12's two source Lows were **fixed rather than carried** — §7.3 would have
+permitted carrying either, and §21.1 records the merits that decided otherwise: L2 broke the
+punctuation of the three-item list **both Highs of this tail were miscounts of**, and L1's ambiguous
+clause was one round old and duplicated the paragraph's own summary. That fix changed
+`src-tauri/src/reconciliation.rs` (**+3 / −4**, comment-only), so §7.1 commissions **round 13**, and
+§7.4 carries the debt into this phase. **2d-4a-G is superseded by 2d-4a-H, never complete.**
 
-**Round 12's scope is one comment edit in one file**, plus §20 and the two round-11 correction blocks
-(one under §19.1's closing paragraph, one under §18.3's round-10 block). **Four things the round-12
-brief should carry**, all from 2d-4a-F:
+**Four things the round-13 brief should carry**, all from 2d-4a-G:
 
-1. **The edit under review** at `reconciliation.rs` ~1500–1505. Ask the sharpest available question
-   about it: the repair keeps the word *never* and moves it from the **victim** to the **reason**
-   (*"never because it is the entry that trips here"*). Is that claim true of `evictable_sequence`,
-   and does the sentence now agree with the paragraph's summary at `:1509` and with the `reason` at
-   `retained_state_contract.rs:1089`? **A repair that relocates a word can relocate the defect.**
-2. **H1 was older than the fix that was under review**, so the round that reviews *its* fix should not
-   assume the surrounding sentences are clean merely because four rounds have read them. §20.4 marks
-   this *recorded only*, and it is the reason the tail keeps producing findings in one paragraph.
-3. **A pointer's target is checked for existence, not for content.** Both crates deny
-   `rustdoc::broken_intra_doc_links`, so deleting `retained_state` breaks the build — but *clause 4*
-   and *clause 5* are ordinals in a hand-numbered list, and **inserting a clause renumbers every
-   citation in the workspace with nothing failing**. §20.4 sizes that surface for the first time:
-   **nine Rust files, 83 citations**, that count being the orchestrator's and **not verified by round
-   11**. Round 12 may verify or break it.
-4. **L2 stays declined on two rounds' reading.** The precedent claim in
-   `retained_state_contract.rs:1089`'s `reason`; §19.1 has the argument in full and round 11 agreed
-   with it. Say so in the brief so round 12 does not spend its budget rediscovering it.
+1. **The edit under review** at `reconciliation.rs` ~1498–1505. It does two things at once: it turns
+   the full stop after *clause 5* back into a comma with an appositive (*"a rule that does not know
+   this assertion exists"*), restoring the *A; B; and C* list, and it **deletes** the clause *"so this
+   escape waits on a state it cannot bring about"*. Ask whether the appositive's antecedent is any
+   clearer than the pronoun it replaced, and whether deleting the clause lost anything the summary at
+   `:1509-1510` does not already carry.
+2. **This paragraph has produced two Highs in twelve rounds, both enumeration miscounts**, and round
+   12's L2 was a punctuation change that damaged the same enumeration. **Count the list.** The
+   preserved clauses are in scope for the same reason: a rewrite is not a review of what it preserves.
+3. **"Measure one span, label another" is now a named shape** (§21.4), found three times in three
+   rounds. Every figure §21 cites — `+3 / −4`, *every line begins `///`*, *six over five*, *13 over
+   10*, the 88/61 phrase families — is the fix round's own derivation. **Re-derive them**, and check
+   each is labelled with the span it was taken over.
+4. **L2 of round 10 stays declined on three rounds' reading.** Say so in the brief so round 13 does
+   not spend budget rediscovering it.
 
 Dispatch it as before: a fresh `autoclaude-reviewer` on `model: "opus"` that did not write the code,
-briefed from [`docs/decisions/2d-4a-F-round-11-brief.md`](docs/decisions/2d-4a-F-round-11-brief.md)'s
-shape, writing to `docs/reviews/phase-2d-4a-round-12.md`. **That would be the sixth consecutive Opus
-round.** To break the run instead,
+briefed from [`docs/decisions/2d-4a-G-round-12-brief.md`](docs/decisions/2d-4a-G-round-12-brief.md)'s
+shape, writing to `docs/reviews/phase-2d-4a-round-13.md`. **That would be the seventh consecutive
+Opus round — now longer than the six-round Codex run it replaced.** To break it,
 [`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md) is the
-Codex route — a `/goahead` procedure, not an `/autoclaude` one, and its known failure modes are worth
-reading before choosing it inside a driven single-shot session.
+route: a `/goahead` procedure, not an `/autoclaude` one, and its known failure modes are worth reading
+before choosing it inside a driven single-shot session.
 
 #### Step 2 — Phase 2d-4b
 
@@ -289,16 +289,19 @@ rule since 2b-2c, a design consult comes before any line of it is written.
 ## Verification baseline
 
 **`1313 / 431 / 2125 / 184`** — `cargo test --workspace` / `npm run check` files / `npm test` /
-`npm run build` modules. **Re-measured end to end on 2026-08-29 during 2d-4a-F**, twice: once at
-`f7bbf6d` before round 11 was dispatched, and once on the tree that phase's fix produced. All four
-figures were re-run rather than inferred, although no frontend file changed in either phase. **Any
+`npm run build` modules. **Re-measured end to end on 2026-08-29**, three times in one iteration: at `f7bbf6d` before round 11
+was dispatched, on the tree 2d-4a-F's fix produced, and on the tree 2d-4a-G's fix produced. The Cargo
+figures were re-run each time; the three frontend figures were measured once at the head of the
+iteration and no `src/` file changed in any of its phases. **Any
 step that touches `src/` must re-measure the three frontend figures**, and a figure produced by a
 tree carrying a probe harness is never copied forward — that scar is recorded in `CLAUDE.md` §4.
 
-**The round-11 fix moved no count**, which is the expected result: it changed one sentence of one doc
-comment, and a comment is not a test. It was also checked *before* being applied, by counting all 88
-retained-state and 61 liveness phrases against the exact prose removed and the exact prose added —
-none occurs in either — and `cargo test --workspace` is what proves it.
+**Neither the round-11 nor the round-12 fix moved a count**, which is the expected result: each
+changed one sentence of one doc comment, and a comment is not a test. Both were also checked *before*
+being applied, by counting all 88 retained-state and 61 liveness phrases against the exact prose
+removed and the exact prose added — none occurs in either — and `cargo test --workspace` is what
+proves it. **That check is the fix round's own**: round 12 states under `NOT-VERIFIED` that it did not
+walk the phrase families, so it has one pair of eyes on it rather than two.
 
 ```sh
 cargo build --workspace
@@ -332,50 +335,59 @@ reports `tail`'s status, and it hid ten failures once.
 
 `npm install` (or `npm ci`) is required before any frontend command will run.
 
-### Phase 2d-4a-F — round 11 (2026-08-29, `/autoclaude-opus`, driven mode)
+### Phase 2d-4a-G — round 12 (2026-08-29, `/autoclaude-opus`, driven mode)
 
-**Reviews: 1/1 — the workflow's whole per-phase allowance. Verdict `do-not-ship`: 1 High, 1 Medium,
-1 Low.** Reviewer: a fresh `autoclaude-reviewer` on `model: "opus"`, briefed from
-[`docs/decisions/2d-4a-F-round-11-brief.md`](docs/decisions/2d-4a-F-round-11-brief.md), writing its
-own report to [`docs/reviews/phase-2d-4a-round-11.md`](docs/reviews/phase-2d-4a-round-11.md). Not
-reproduced into the queue, for the reason §18 gives. **The fifth consecutive Opus round, and the
-first of the five to find a High.**
+**Reviews: 1/1 — the workflow's whole per-phase allowance. Verdict `ship-with-fixes`: 0 High, 2
+Medium, 3 Low — two Mediums in the record, two Lows in source, one Low in the record. All five
+fixed.** Reviewer: a fresh `autoclaude-reviewer` on `model: "opus"`, briefed from
+[`docs/decisions/2d-4a-G-round-12-brief.md`](docs/decisions/2d-4a-G-round-12-brief.md), writing its
+own report to [`docs/reviews/phase-2d-4a-round-12.md`](docs/reviews/phase-2d-4a-round-12.md). Not
+reproduced into the queue, for the reason §18 gives. **The sixth consecutive Opus round.**
 
-- **H1 (High, source)** — `reconciliation.rs:1503` said the eviction victim is *"**never** whichever
-  entry this assertion trips over"*, contradicting the **same sentence's condition** (*"when
-  `evictable_sequence` picks it"*), the **same paragraph's summary** (*"an overflow that selects this
-  entry"*) and the `INVENTORY` `reason` at `retained_state_contract.rs:1089` (*"an overflow evicting
-  **it**"*). `evictable_sequence` is blind to which entry tripped the assertion, so on the literal
-  reading escape 2 can never fire and the three-item list has two members. **Fixed by moving *never*
-  onto the reason** — clause 5 *"does not know this assertion exists"*, the entry *"goes when the rule
-  happens to name it, never because it is the entry that trips here."* **+4 / −3, every line `///`.**
-- **Medium (record)** — §19.1's closing check was run against M2 and not M1, and reported the `reason`
-  at `:1089` as *more nearly true than before* while M1 was busy denying its other half. Corrected by
-  a round-11 block under that paragraph.
-- **Low (record)** — §18.3's round-10 correction block says it states the figure *"of the paragraph as
-  it now stands"* and gives the figure of the **four targets the hunk added**. The paragraph holds
-  **six occurrences over five targets**; §19.3 is right. Corrected by a round-11 block.
-- **What round 11 cleared, all by its own derivation**: clause 5 states the victim rule whole with its
-  tie-break and matches `evictable_sequence`; clause 4 satisfies all three surviving claims about it;
-  the `retained_state.rs:55-61` header quotes are correct; **L2's declined argument holds**; `+9 / −9`
-  all-`///` and *`retained_state_contract.rs` unchanged* are true of `22d1afb`; and no phrase of
-  either family moved. What it does not cover, in its own words: no gate was run, and the prose guard
-  itself was not executed.
-- **§19.4 predicted the tail would end here and it did not.** §7.2's guarantee is the *shape*, not the
-  stopping point. **§20 makes no forecast**; the conditional is that if round 12 finds only record
-  defects its fix touches no source and the tail ends there.
-- **Round 12 is owed and cannot run here.** The round-11 fix changed one source file, so §7.1
-  commissions it; the one-invocation cap is spent; §7.4 makes the debt a corrective phase.
-  **2d-4a-F is superseded by 2d-4a-G, never complete.**
+- **What it cleared is the substantive result.** `evictable_sequence` (`:921-935`) is a pure function
+  of `pending` over paths, counts and sequences, reading no assertion state, so round 11's repair is
+  true and **four statements that round 11 found in contradiction are now consistent**. It also
+  checked the **preserved** clauses rather than assuming them — `drain`'s two mutations, `enqueue`'s
+  `while … > QUEUE_CAPACITY`, all three `PoisonError::into_inner` sites — verified §20.2's figures,
+  and agreed for the **third** round that round 10's L2 stays declined.
+- **M1 + L3 (record)** — the same shape twice: the round-11 block said its link count listed *"the
+  doc comment"* when it listed the **paragraph** (13 over 10 vs six over five), and §20.4's *"83
+  citations"* was `rg -c`, which counts **lines** — `rg -o … | wc -l` gives **85** over the same nine
+  files. Both corrected by round-12 blocks, both figures re-derived over both spans.
+- **M2 (record)** — *"H1 is older than the fix under review"* is true of the words and misleading
+  about the defect: pre-M1 the *not* sat beside a **concrete criterion** and read as
+  criterion-versus-criterion. M1 deleted the criterion, substituted *"whatever that rule names"* and
+  strengthened *not* → *never*. **M1 is a contributing cause, not merely a preserver.** Corrected.
+- **L1 + L2 (source, one edit)** — *"so this escape waits on a state it cannot bring about"* had three
+  candidate antecedents and duplicated the summary at `:1509-1510`; and the full stop after *clause 5*
+  had broken the three-item list so item 3 hung off item 2's second sentence. **Fixed together**: the
+  full stop becomes a comma with an appositive, and the ambiguous clause is deleted. **+3 / −4, every
+  line `///`.**
+- **Why those two were fixed rather than carried** — §7.3 permitted carrying either. §21.1 records the
+  merits: L2 damaged the enumeration **both Highs of this tail were miscounts of**, and L1's clause
+  was one round old. **Neither *it would end the tail* nor *it would commission a round* was an
+  input.**
+- **Round 13 is owed and cannot run here.** §7.1 commissions it, the one-invocation cap is spent, and
+  §7.4 makes the debt a corrective phase. **2d-4a-G is superseded by 2d-4a-H, never complete.**
 
 **Gates on the tree this iteration produced**, measured by the orchestrator alone, each command
-issued separately and **redirected to a file rather than piped**, so every status reported is the
-tool's own: `cargo test --workspace` **1313** passed / 0 failed over **26** result lines all `ok`, exit 0; `clippy -D warnings` clean;
-`cargo fmt --check` clean; `cargo doc --workspace --no-deps` **73** warnings, all `private_intra_doc_links`, and **0 unresolved**, run after `touch`ing `reconciliation.rs`;
-`cargo tree -p espansoconfig-core | rg tauri` empty; `npm run check` **431** files / 0
-errors / 0 warnings; `npm test` **2125** over **56** files; `npm run build` **184** modules, server
-oracle absent and client oracle present with 2 matches. **The three frontend figures were re-measured
-at the start of this iteration rather than reasoned about**, although no `src/` file changed in it.
+issued separately and **redirected to a file rather than piped**, so every status is the tool's own:
+`cargo test --workspace` **1313** passed / 0 failed over **26** result lines all `ok`, exit 0; `clippy -D warnings` clean; `cargo fmt --check` clean;
+`cargo doc --workspace --no-deps` **73** warnings, all `private_intra_doc_links`, and **0 unresolved**, run after `touch`ing `reconciliation.rs`; `cargo tree -p espansoconfig-core | rg tauri` empty;
+`npm run check` **431** files / 0 errors / 0 warnings; `npm test` **2125** over **56** files; `npm run
+build` **184** modules, server oracle absent and client oracle present with 2 matches. **The three
+frontend figures were measured at the start of this iteration**, and no `src/` file changed in any of
+its phases.
+
+### Phase 2d-4a-F — round 11 (2026-08-29, `/autoclaude-opus`, driven mode)
+
+**Archived** at [`docs/progress-archive/phase-2d.md`](docs/progress-archive/phase-2d.md), verbatim,
+now that 2d-4a-G has replaced it as the live narrative. In one line: verdict **`do-not-ship`**, **1
+High** — the eviction sentence's *never* denying the very state its own escape requires — plus 1
+Medium and 1 Low, all three fixed, and round 12 then cleared the repair by deriving
+`evictable_sequence`'s independence from the assertion. Round 11's own record is
+[`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) §20; the report is
+[`docs/reviews/phase-2d-4a-round-11.md`](docs/reviews/phase-2d-4a-round-11.md).
 
 ### Phase 2d-4a-E — round 10 (2026-08-29, `/autoclaude-opus`, driven mode)
 
@@ -412,14 +424,14 @@ beside it. These are the ones the next phase needs.
 
 | Path | Why it matters next |
 |---|---|
-| [`docs/reviews/phase-2d-4a-round-11.md`](docs/reviews/phase-2d-4a-round-11.md) | **What 2d-4a-G reviews the fix to.** Round 11's report — `do-not-ship`, 1 High — and the one-sentence diff its fix produced is round 12's whole scope. Read its *Cleared by derivation* section too: it is what round 12 need not redo |
-| [`docs/decisions/2d-4a-F-round-11-brief.md`](docs/decisions/2d-4a-F-round-11-brief.md) | **The shape round 12's brief should copy.** For the `autoclaude-reviewer`, not for Codex; note how it names the consecutive-Opus bound to the reviewer rather than hiding it, and how it asks which of two record figures is wrong without saying which |
-| [`docs/reviews/phase-2d-4a-round-10.md`](docs/reviews/phase-2d-4a-round-10.md) | Round 10's report — the two Mediums whose fix round 11 reviewed, and the clause its M1 kept |
-| [`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md) | Read **only if** round 12 goes to Codex to break what would otherwise be a **six**-round Opus run. A `/goahead` procedure, not an `/autoclaude` one: the dispatch, the collection, and what to do when Codex returns a limit rather than a review |
+| [`docs/reviews/phase-2d-4a-round-12.md`](docs/reviews/phase-2d-4a-round-12.md) | **What 2d-4a-H reviews the fix to.** Round 12's report — `ship-with-fixes`, 0 High — and the one-sentence diff its fix produced is round 13's whole scope. Read its *Cleared by derivation* section too: it is what round 13 need not redo |
+| [`docs/decisions/2d-4a-G-round-12-brief.md`](docs/decisions/2d-4a-G-round-12-brief.md) | **The shape round 13's brief should copy.** For the `autoclaude-reviewer`, not for Codex; note how it names the consecutive-Opus bound to the reviewer rather than hiding it, and how it tells the round which previously declined finding *not* to spend budget on |
+| [`docs/reviews/phase-2d-4a-round-11.md`](docs/reviews/phase-2d-4a-round-11.md) | Round 11's report — the High that four Opus rounds had read past, and the repair round 12 then cleared |
+| [`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md) | Read **only if** round 13 goes to Codex to break what would otherwise be a **seven**-round Opus run — longer than the six-round Codex run it replaced. A `/goahead` procedure, not an `/autoclaude` one: the dispatch, the collection, and what to do when Codex returns a limit rather than a review |
 | [`docs/decisions/2d-4a-round-7-brief.md`](docs/decisions/2d-4a-round-7-brief.md) | Round 7's brief, now spent — but **2d-4b's four inherited constraints are still live at its end** |
 | [`docs/decisions/2d-4-split-notes.md`](docs/decisions/2d-4-split-notes.md) | §2 is 2d-4b's whole spec; §3 says why the EN/ES JSON is in 4a and the accessors in 4b; §4 says what neither step does |
 | [`docs/reviews/phase-2d-4a-queue.md`](docs/reviews/phase-2d-4a-queue.md) | 2d-4a's work list — rounds 1–8 verbatim, newest last. **Round 9 is deliberately not in it**, and the file says why: the queue preserves replies that lived only in a transcript, and round 9's reviewer wrote its own file |
-| [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) | 2d-4a's record; **§20 is round 11** and ends with what round 12 inherits, §19 is round 10, §18 is round 9, §17 carries four round-9 correction blocks, §18.3 a round-10 block **and a round-11 one**, §19.1 a round-11 one, §15 is the round-6 fix, §9 the residues |
+| [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) | 2d-4a's record; **§21 is round 12** and ends with what round 13 inherits, §20 is round 11, §19 round 10, §18 round 9, §15 the round-6 fix, §9 the residues. The correction blocks: §17 carries four round-9 ones; §18.3 a round-10 one, a round-11 one and a round-12 one; §19.1 a round-11 one; §20.4 two round-12 ones |
 | [`docs/decisions/2d-4a-C-notes.md`](docs/decisions/2d-4a-C-notes.md) | The mechanism's record; §25 is round 9, §26 and Appendix A the reorganization, §24.7 the gate table |
 | [`docs/reviews/phase-2d-4a-C.md`](docs/reviews/phase-2d-4a-C.md) | Step 1 rounds 1–4 and step 2 rounds 1–9, each verbatim |
 | [`docs/decisions/2d-3-C-notes.md`](docs/decisions/2d-3-C-notes.md) | The precedent for ending a tail, and §4.4 is the proof-it-fails evidence standard |
@@ -471,11 +483,15 @@ and in `git log`._
 | **2d-4a-E — round 10 and its fix; round 11 OWED** | `22d1afb` | ✅ pushed to `origin/main` |
 | 2d-4a-E — the SHA and push record | `f7bbf6d` | ✅ pushed to `origin/main` |
 | **2d-4a-F — round 11 and its fix; round 12 OWED** | `b854de5` | ✅ pushed to `origin/main` |
+| 2d-4a-F — the SHA and push record | `4d90177` | ✅ pushed to `origin/main` |
+| **2d-4a-G — round 12 and its fix; round 13 OWED** | G_SHA | G_PUSH |
 
 **Each of those source commits is what makes the next round owed.** `125dfa8` changed five files
 under `src-tauri/src/` and made round 9 owed; `6572a29` changed two — the M1 doc paragraph in
 `reconciliation.rs` and one `reason` string in `retained_state_contract.rs`'s `INVENTORY` — and made
 round 10 owed; `22d1afb` changed **one**, two comment hunks in `reconciliation.rs`, and made round
-11 owed; this phase's commit changes **one**, a single sentence of the same doc comment (+4 / −3),
-and makes round **12** owed. **Every one of them is comment or inventory prose with no executable
-line changed**, and under §7.1 the unit is the file, so each still commissions a round. The tree is clean at `b854de5`.
+11 owed; `b854de5` changed **one**, a single sentence of the same doc comment (+4 / −3), and made
+round **12** owed; and this phase's commit changes **one**, the punctuation of that same sentence and
+one deleted clause (+3 / −4), and makes round **13** owed. **Every one of them is comment or
+inventory prose with no executable line changed**, and under §7.1 the unit is the file, so each still
+commissions a round.

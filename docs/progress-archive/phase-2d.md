@@ -3008,3 +3008,57 @@ rg tauri` empty; `npm run check` **431** files / 0 errors; `npm test` **2125** i
 build` **184** modules, server oracle absent, client oracle present with 2 matches. **The three
 frontend figures were re-measured rather than reasoned about**, although no `src/` file changed in
 either phase this iteration.
+
+
+---
+
+## Phase 2d-4a-F — round 11 (2026-08-29), verification block, verbatim
+
+Moved out of `PROGRESS.md` when 2d-4a-G replaced it as the live narrative. 2d-4a-F is
+**superseded, never complete**: its fix changed a source file, round 12 was owed, and round 12
+then cleared the repair while finding two record Mediums and two source Lows in it.
+
+### Phase 2d-4a-F — round 11 (2026-08-29, `/autoclaude-opus`, driven mode)
+
+**Reviews: 1/1 — the workflow's whole per-phase allowance. Verdict `do-not-ship`: 1 High, 1 Medium,
+1 Low.** Reviewer: a fresh `autoclaude-reviewer` on `model: "opus"`, briefed from
+[`docs/decisions/2d-4a-F-round-11-brief.md`](docs/decisions/2d-4a-F-round-11-brief.md), writing its
+own report to [`docs/reviews/phase-2d-4a-round-11.md`](docs/reviews/phase-2d-4a-round-11.md). Not
+reproduced into the queue, for the reason §18 gives. **The fifth consecutive Opus round, and the
+first of the five to find a High.**
+
+- **H1 (High, source)** — `reconciliation.rs:1503` said the eviction victim is *"**never** whichever
+  entry this assertion trips over"*, contradicting the **same sentence's condition** (*"when
+  `evictable_sequence` picks it"*), the **same paragraph's summary** (*"an overflow that selects this
+  entry"*) and the `INVENTORY` `reason` at `retained_state_contract.rs:1089` (*"an overflow evicting
+  **it**"*). `evictable_sequence` is blind to which entry tripped the assertion, so on the literal
+  reading escape 2 can never fire and the three-item list has two members. **Fixed by moving *never*
+  onto the reason** — clause 5 *"does not know this assertion exists"*, the entry *"goes when the rule
+  happens to name it, never because it is the entry that trips here."* **+4 / −3, every line `///`.**
+- **Medium (record)** — §19.1's closing check was run against M2 and not M1, and reported the `reason`
+  at `:1089` as *more nearly true than before* while M1 was busy denying its other half. Corrected by
+  a round-11 block under that paragraph.
+- **Low (record)** — §18.3's round-10 correction block says it states the figure *"of the paragraph as
+  it now stands"* and gives the figure of the **four targets the hunk added**. The paragraph holds
+  **six occurrences over five targets**; §19.3 is right. Corrected by a round-11 block.
+- **What round 11 cleared, all by its own derivation**: clause 5 states the victim rule whole with its
+  tie-break and matches `evictable_sequence`; clause 4 satisfies all three surviving claims about it;
+  the `retained_state.rs:55-61` header quotes are correct; **L2's declined argument holds**; `+9 / −9`
+  all-`///` and *`retained_state_contract.rs` unchanged* are true of `22d1afb`; and no phrase of
+  either family moved. What it does not cover, in its own words: no gate was run, and the prose guard
+  itself was not executed.
+- **§19.4 predicted the tail would end here and it did not.** §7.2's guarantee is the *shape*, not the
+  stopping point. **§20 makes no forecast**; the conditional is that if round 12 finds only record
+  defects its fix touches no source and the tail ends there.
+- **Round 12 is owed and cannot run here.** The round-11 fix changed one source file, so §7.1
+  commissions it; the one-invocation cap is spent; §7.4 makes the debt a corrective phase.
+  **2d-4a-F is superseded by 2d-4a-G, never complete.**
+
+**Gates on the tree this iteration produced**, measured by the orchestrator alone, each command
+issued separately and **redirected to a file rather than piped**, so every status reported is the
+tool's own: `cargo test --workspace` **1313** passed / 0 failed over **26** result lines all `ok`, exit 0; `clippy -D warnings` clean;
+`cargo fmt --check` clean; `cargo doc --workspace --no-deps` **73** warnings, all `private_intra_doc_links`, and **0 unresolved**, run after `touch`ing `reconciliation.rs`;
+`cargo tree -p espansoconfig-core | rg tauri` empty; `npm run check` **431** files / 0
+errors / 0 warnings; `npm test` **2125** over **56** files; `npm run build` **184** modules, server
+oracle absent and client oracle present with 2 matches. **The three frontend figures were re-measured
+at the start of this iteration rather than reasoned about**, although no `src/` file changed in it.

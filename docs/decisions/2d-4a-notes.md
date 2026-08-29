@@ -3216,6 +3216,17 @@ suite was run once, at the end, with nothing beside it.
   > only about what *"the paragraph"* names. Both numbers are re-derived here by listing every
   > `` [`…`] `` in the doc comment rather than by re-reading either claim.
 
+  > **Correction, round 12 (a Medium).** *"in the doc comment"* is wrong, and it is **the same
+  > defect this block exists to correct** — a figure derived over one span and labelled with
+  > another. What was listed is the **paragraph**, `reconciliation.rs:1481-1522`, which gives the
+  > six-over-five above. `address_of_minted`'s **doc comment** runs from `:1425` and gives **13
+  > occurrences over 10 targets**: the five above plus [`address_of`], [`ObservedDocument`],
+  > [`ObservedDocument::Named`] twice, [`ObservedDocument::Addressable`],
+  > [`ReconciliationQueue::drain`] and a **third** [`espansoconfig_core::watch::retained_state`].
+  > Six-over-five stands for the paragraph and is what §19.3 and the block above both mean; only the
+  > span's name was wrong. Both figures here are round 12's own count, re-derived by this fix round
+  > over both spans.
+
 **No inventoried count moved.** Both prose guards were re-derived by hand before the suite ran, with
 a Python replica of `prose_sweep::prose_units` and `prose_sweep::sweep` over both swept trees: 88
 retained-state phrases against 141 inventory entries and 61 liveness phrases against 86, every
@@ -3699,6 +3710,21 @@ a source file is a blocker that stops this step closing; none below is one.
   clause of an edited sentence is exactly where an Opus reviewer nods. *(recorded only — the brief
   did point the round at this sentence, and it is fair to say the finding was scoped for; what it
   derived rather than accepted is why the *never* is wrong, which the brief did not state.)*
+
+  > **Correction, round 12 (a Medium).** *"H1 is older than the fix that was under review"* is true
+  > of the **words** and misleading about the **defect**, and this item and §20.1's closing sentences
+  > both lean on it too hard. At `6572a29` the clause read *"the victim is the lowest pending
+  > sequence of the path holding the most, so it is that path's oldest pending entry that goes **and
+  > not** whichever one this assertion trips over"* — with a **concrete criterion stated beside it**,
+  > *and not* reads as a contrast between two selection criteria (*the rule is this, not that*),
+  > which is true. M1 then **deleted that criterion**, replaced it with the opaque *"whatever that
+  > rule names"*, and strengthened *not* into *never* — and it is that combination, not the surviving
+  > word, that turns a criterion contrast into a false identity claim about the victim. **So M1 is a
+  > contributing cause and not merely a preserver**, and rounds 9 and 10 read a sentence that did not
+  > yet say what round 11 found. What survives of the item is the narrower and still useful half:
+  > **a rewrite is not a review of what it preserves**, and a clause carried through an edit is where
+  > a reviewer nods. What does not survive is the implication that four rounds had already read the
+  > defect. Round 12 derived this from `6572a29` itself.
 - **Five consecutive rounds with no second provider.** Rounds 1–6 were Codex; 7 through 11 were
   adversarial Opus agents. **This round is the first of the five to find a High**, and it found one
   the four before it had read past — which is evidence that a cold Opus round is not worthless here,
@@ -3714,6 +3740,14 @@ a source file is a blocker that stops this step closing; none below is one.
   `lib.rs`. That count is this orchestrator's, taken while the round was in flight; **round 11 did not
   verify it**, and its report says only that §19.4's marks otherwise stand. Nothing here proposes a
   guard for it. *(recorded only — it names no defect, and no clause has in fact been renumbered.)*
+
+  > **Correction, round 12 (a Low).** **83 is a count of matching lines, not of citations.** `rg -c`
+  > answers lines, and a line carrying two citations is counted once; `rg -o 'clause [0-9]' | wc -l`
+  > over the same nine files answers **85**. The per-file breakdown above — 39, 18, 15, 4, 3, and one
+  > each in four more — is round 12's, and it is exact. **The nine files are right and the
+  > renumbering conclusion beside them is sound**; only the total was off by the difference between
+  > lines and occurrences, which is the same class of error as measuring one span and labelling
+  > another.
 - **The rewritten paragraph is still asserted by nothing.** No test poisons either lock, no test
   drives a watermark at or above an offending entry's sequence, and no test connects an overflow
   eviction to this assertion, though the capacity bound itself is exercised. The paragraph says so
@@ -3723,6 +3757,187 @@ a source file is a blocker that stops this step closing; none below is one.
   section states covers both rounds identically, so what is missing is a signpost and not a record.
   *(actionable — it names an absence in a file that exists and a fix of one paragraph; not a blocker,
   because the file it names is the record and not source.)*
+- **R9 remains open, unmeasured and unbounded**, and nothing in this round touched it: no count, no
+  cap, no eviction rule for the identity register. *(recorded only — no step of the 2d split owns
+  building a bound for it, which is itself the residue.)*
+
+## 21. Round 12 of the review, and the fix round that answered it
+
+Round 12 ran on 2026-08-29 under **`/autoclaude-opus`**, as the corrective phase **2d-4a-G** that
+§20.4's first item said the round-11 debt would become. Its reviewer was a fresh
+**`autoclaude-reviewer` on `model: "opus"`** that did not write the code, dispatched with
+`docs/decisions/2d-4a-G-round-12-brief.md`, which is kept so the round can be audited against what it
+was actually asked. **It is the sixth consecutive Opus round.** The brief said so in its own opening,
+and put round 11 on the record as evidence **for** the value of a cold Opus round rather than as a
+discharge of the bound: round 11 found a High that four rounds had read past, and that says nothing
+about what all six share. §21.4 restates the bound rather than closing it.
+
+**Its verdict: `ship-with-fixes` — 0 High, 2 Medium and 3 Low**, every finding against the round-11
+fix and nothing else. **Two Mediums live in the record, two Lows in source and one Low in the
+record.** The report is `docs/reviews/phase-2d-4a-round-12.md`, written by the reviewer itself, and it
+is **not reproduced into `docs/reviews/phase-2d-4a-queue.md`** for the reason §18, §19 and §20 all
+give.
+
+**What round 12 cleared is the repair itself, and it cleared it at the level round 11 attacked.**
+`evictable_sequence` (`:921-935`) is a pure function of `pending` over paths, counts and sequences —
+`min_by_key(|(count, lowest)| (Reverse(*count), *lowest))` — reading no `DocumentId` and no assertion
+state, **with no coupling direct or indirect** to which entry tripped the assertion. So *"never
+because it is the entry that trips here"*, *"when [`evictable_sequence`] picks it"*, *"an overflow
+that selects this entry"* and `retained_state_contract.rs:1089`'s *"an overflow evicting **it** inside
+the enqueue"* are **now all true together**, which is exactly the four-way consistency round 11 found
+broken. It also cleared four more things by its own derivation:
+
+- ***Point, do not restate* is honoured.** The added prose makes a negative claim about **this**
+  escape and reinstates none of M1's deleted paraphrase of clause 5 — the failure mode a fix written
+  to answer a *correctness* finding would most easily have walked into.
+- **The preserved clauses were checked rather than assumed**, which is what §20.4 asked for and the
+  reason round 11's High survived four rounds: `drain` (`:1185-1189`) raises `acknowledged`, retains
+  `*sequence > after_sequence` and then projects, so the watermark escape and the poisoning claim
+  both hold; `enqueue` evicts on `while guard.pending.len() > QUEUE_CAPACITY` (`:1098`); and `drain`,
+  `enqueue` and `begin_epoch` each take the lock through `PoisonError::into_inner` (`:1185`, `:1089`,
+  `:1030`).
+- **§20.2 verified in full** — `+4 / −3` by `--numstat`, every added and removed line beginning `///`,
+  the link set unchanged, the paragraph six over five.
+- **L2 stays declined on a third round's reading.** Round 10 raised it and declined it, round 11
+  agreed, and round 12 agrees: `:1005`'s *"the third way a stored entry leaves"* is clause 4's own
+  words, which is what the precedent claim at `:1089` asserts.
+
+### 21.1 Finding by finding
+
+Round 12's report numbers nothing; the labels below are this record's, in the report's own order.
+**All five are fixed.** Nothing was declined.
+
+- **M1 (Medium, record) — the round-11 L1 correction block names the wrong span for its own
+  derivation.** It closes *"Both numbers are re-derived here by listing every `` [`…`] `` in the **doc
+  comment**"*, and what was listed is the **paragraph**. `address_of_minted`'s doc comment runs from
+  `:1425` and holds **13 occurrences over 10 targets**; the paragraph, `:1481-1522`, holds the
+  six-over-five the block reports. **This is the same defect the block exists to correct** — a figure
+  measured over one span and labelled with another — one block below where it corrects it. **Agreed
+  and fixed** by a round-12 correction block giving both figures with their spans named, both
+  re-derived by this fix round over both spans rather than copied from the report. **Record only.**
+- **M2 (Medium, record) — *"H1 is older than the fix under review"* is true of the words and
+  misleading about the defect.** Textually the claim holds: at `6572a29` the clause read *"…and
+  **not** whichever one this assertion trips over."* But pre-M1 that *not* sat beside a **concrete
+  criterion** — *"the victim is the lowest pending sequence of the path holding the most, so it is
+  that path's oldest pending entry that goes"* — under which it reads as a contrast between two
+  **selection criteria**, and is true. M1 deleted that criterion, replaced it with the opaque
+  *"whatever that rule names"*, and strengthened *not* into *never*. **It is that combination and not
+  the surviving word that makes the claim false**, so M1 is a contributing cause rather than merely a
+  preserver, and §20.4's flat sentence over-distributes the blame to rounds 9 and 10. **Agreed and
+  fixed** by a round-12 correction block that keeps the half which survives — *a rewrite is not a
+  review of what it preserves* — and withdraws the implication that four rounds had already read this
+  defect. **Record only.**
+- **L1 (Low, source) — *"so this escape waits on a state it cannot bring about"* has three candidate
+  antecedents for *it***, is near-tautologous under the likeliest one, and partly duplicates the
+  paragraph's own summary four lines below (*"each waits on something outside this function"*,
+  `:1509-1510`). **Agreed, and the clause is deleted rather than disambiguated**: what it was reaching
+  for is already said, better, by the summary it duplicates.
+- **L2 (Low, source) — the new full stop broke a three-item list.** The paragraph enumerates the three
+  escapes as one sentence, *A; B; and C*. Round 11's repair put a full stop after *clause 5*, ending
+  item 2, so item 3's *"; and [`ReconciliationQueue::begin_epoch`]"* hung off a sentence whose subject
+  was item 2's rule. **Agreed and fixed**: the full stop becomes a comma and the appositive *"a rule
+  that does not know this assertion exists"* replaces the new sentence, so item 2 is one clause again
+  and the list reads *A; B; and C*. **Both Highs of this tail were enumeration miscounts in this
+  paragraph**, and the reviewer said so; that is why a punctuation finding is worth a source edit
+  here and would not be somewhere else.
+- **L3 (Low, record) — *"83 citations"* counts lines, not citations.** `rg -c` answers matching lines,
+  so a line carrying two citations counts once; `rg -o 'clause [0-9]' | wc -l` answers **85** over the
+  same nine files. **Agreed and fixed** by a round-12 correction block, which also records the exact
+  per-file breakdown (39/18/15/4/3/1/1/1/1) the reviewer confirmed. **The nine files and the
+  renumbering conclusion stand.** **Record only.**
+
+**Why the two source Lows were fixed rather than carried, since that decision is what commissions
+round 13.** §7.3 permits carrying an item that is not a correctness defect in source, and both of
+these qualify — neither makes the comment false. They were fixed anyway, on the merits and stated
+here so a later round can disagree. **L2 damages the structure of the very enumeration both Highs of
+this tail were about**, in the paragraph that has now produced two of them; a list that reads *A; B.
+X; and C* is the shape a later reader miscounts, and this file's history is that such shapes are
+found as Highs two rounds later, not never. **L1's clause was one round old, written by the previous
+fix round, ambiguous and duplicative** — the cheapest possible moment to remove it is before anything
+cites it. Both live in one sentence, so both are one edit. **Neither *it would end the tail* nor *it
+would commission a round* was an input**, exactly as §19.1 recorded for its own declined finding; §7.1
+reads the diff afterwards and this fix round does not get a vote.
+
+### 21.2 What this round changed, by file
+
+Listed in full, this record and the review files included, for the reason §15.2 exists:
+
+- `src-tauri/src/reconciliation.rs` — one edit inside `address_of_minted`'s doc comment, answering
+  **both** source Lows at once. **+3 / −4 by `git diff --numstat`, and every added and removed line
+  begins `///`.** No executable line changed. The link set is untouched, so the paragraph is still
+  **six occurrences over five targets** and the doc comment still **13 over 10**.
+- `src-tauri/src/retained_state_contract.rs` — **unchanged**; L2 of round 10 stays declined on a third
+  round's reading.
+- `docs/decisions/2d-4a-notes.md` — this section, plus **three** round-12 correction blocks: one under
+  the round-11 L1 block inside §18.3 (M1), one under §20.4's third item (M2) and one under §20.4's
+  ordinal-fragility item (L3).
+- `docs/reviews/phase-2d-4a-round-12.md` — new, written by the reviewer itself, **unmodified here**.
+- `docs/decisions/2d-4a-G-round-12-brief.md` — new at the dispatch, unmodified here.
+
+**No frontend file changed**, so no `npm` gate was re-run by this fix round; the three frontend
+figures in §21.3 are this iteration's own measurement.
+
+### 21.3 The gates after this round
+
+Measured by this fix round on the tree it produced, each Cargo command issued separately with nothing
+else running, and **redirected to a file rather than piped**, so every status is the tool's own.
+
+- `cargo test --workspace` — **1313** passed / 0 failed over **26** `test result: ok` lines, exit 0. Unchanged from §20.3, as it must be: this fix round added no test and removed none, and its only source change is punctuation and one deleted clause inside a doc comment. **This is what proves no inventoried count moved**, both prose guards running inside it.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean.
+- `cargo fmt --check` — clean.
+- `cargo doc --workspace --no-deps` — exit 0, **73** warnings and **0** unresolved, unchanged — all 73 are `private_intra_doc_links` from `espansoconfig-core`, counted as *links to private item* lines rather than read off the summary alone. `src-tauri/src/reconciliation.rs` was `touch`ed first so the paragraph's links were re-resolved rather than served from the previous build's cache. The link set did not change, so the paragraph is still **six occurrences over five targets** and the doc comment still **13 over 10**.
+- `cargo tree -p espansoconfig-core | rg tauri` — empty — the core crate still pulls in no `tauri` (D2x).
+
+**No inventoried count moved.** Checked **before** the edit was applied, the same way §20.3 describes
+and with the same stated narrowness: both phrase families extracted from their own contract modules —
+**88** retained-state and **61** liveness — and all 149 counted against the exact prose this edit
+removes and the exact prose it adds, lowercased with whitespace collapsed. **No phrase occurs in
+either**, so no `(file, phrase)` count can have moved. **Round 12 did not do this check** — it says so
+under `NOT-VERIFIED`, that its reading of the diff against the entries it read is weaker than the
+check the record describes — so this is the fix round's own evidence and `cargo test --workspace`
+above is what proves it.
+
+### 21.4 What this round did not do, and where it is thin
+
+Per `CLAUDE.md` §7.3 every item carries a mark. An **actionable** item naming a correctness defect in
+a source file is a blocker that stops this step closing; none below is one.
+
+- **Round 13 is commissioned by §7.1 and cannot run here, so 2d-4a-G is superseded by 2d-4a-H and is
+  never complete.** L1 and L2 were fixed in `src-tauri/src/reconciliation.rs`, and under §7.1 the unit
+  is the file and a comment-only change counts. 2d-4a-G spent its one invocation on round 12, so under
+  §7.4 the debt is **carried, not written off**. **Round 13's scope is one comment edit in one file**,
+  plus §21 and the three round-12 correction blocks. *(actionable — it names work in files that exist
+  and no defect in source; it is a workflow outcome, and `PROGRESS.md` carries it as the next
+  action.)*
+- **Measuring one span and labelling it another is now a named shape in this file, and round 12 found
+  it twice in one round.** M1 is a link count taken over the paragraph and labelled *doc comment*; L3
+  is a citation count taken over lines and labelled *citations*. The round-10 L1 it descends from was
+  a link count taken over a hunk and labelled *the paragraph*. **Three instances, three rounds, one
+  shape** — and each was found by re-deriving the figure rather than by re-reading the sentence.
+  Nothing enforces it; the only defence on file is that every figure a round cites is derived by that
+  round. *(recorded only — it names no defect now standing, all three being corrected.)*
+- **Six consecutive rounds with no second provider.** Rounds 1–6 were Codex; 7 through 12 were
+  adversarial Opus agents. Round 11 found a High four Opus rounds had read past, which is evidence
+  that a cold Opus round is not worthless here and **not** evidence that the bound is discharged — a
+  prior all six share is invisible to all six, and the run is now longer than the Codex one it
+  replaced. 2d-4a-H is the next opportunity to break it, and
+  `docs/decisions/codex-dispatch-procedure.md` is the route. *(recorded only — the substitution is
+  `/autoclaude-opus`'s prescribed behaviour, which names exactly one review mechanism.)*
+- **Round 12 did not walk the phrase families against the diff**, and says so plainly under
+  `NOT-VERIFIED`: what it offers is that the reviewed prose held no phrase it recognised from the
+  entries it read, which it calls weaker than the check the record describes. **So §21.3's phrase
+  check has one pair of eyes on it, not two**, as §20.3's did. *(recorded only — `cargo test
+  --workspace` is the check that binds, and it is green.)*
+- **The rewritten paragraph is still asserted by nothing.** No test poisons either lock, no test
+  drives a watermark at or above an offending entry's sequence, and no test connects an overflow
+  eviction to this assertion, though the capacity bound itself is exercised. The paragraph says so
+  about itself, as it has through every round of this tail. *(recorded only.)*
+- **`docs/reviews/phase-2d-4a-queue.md` still carries no section for rounds 10, 11 or 12.** §19.4 and
+  §20.4 both raised it and it is still unfixed; round 12 lists it under `NOT-VERIFIED`. The policy the
+  round-9 section states covers all three identically, so what is missing is a signpost and not a
+  record — but it has now been carried three times, which is worth noticing about the carrying rather
+  than about the file. *(actionable — it names an absence in a file that exists and a fix of one
+  paragraph; not a blocker, because the file it names is the record and not source.)*
 - **R9 remains open, unmeasured and unbounded**, and nothing in this round touched it: no count, no
   cap, no eviction rule for the identity register. *(recorded only — no step of the 2d split owns
   building a bound for it, which is itself the residue.)*

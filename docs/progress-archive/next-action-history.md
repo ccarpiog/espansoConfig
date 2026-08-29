@@ -9250,3 +9250,113 @@ wrapper, the `describe*` builders in `src/lib/i18n/codes.ts` with their reactive
 `index.ts`, the frontend tests, and the re-measured `npm run check` / `npm test` / `npm run build`
 baselines. Its four inherited constraints are listed at the end of the round-7 brief. By the standing
 rule since 2b-2c, a design consult comes before any line of it is written.
+
+
+---
+
+## Superseded next action — written at 2d-4a-F (round 11), spent by 2d-4a-G
+
+**History, never an instruction.** It named Phase 2d-4a-G as the next action. 2d-4a-G ran;
+round 12 returned `ship-with-fixes` with 0 High, and two of its Lows were fixed in source, so
+round 13 is owed. Kept verbatim below.
+
+## Next action
+
+### Round 11 RAN today and found a High in source. The next action is **Phase 2d-4a-G** — round 12's
+### review of the round-11 fix — then **Phase 2d-4b**.
+
+**🛑 Do not run a step-2 round 10 of 2d-4a-C.** That tail is closed by owner decision; reopening it
+needs a new owner ruling. **2d-4a's own tail is a different tail** and is the one that is live — it
+has now run *twelve* numbered positions, so a bare round number is ambiguous between the two. Check
+which tail before acting. The spent next-action blocks are in
+[`docs/progress-archive/next-action-history.md`](docs/progress-archive/next-action-history.md), which
+is **history and never an instruction**.
+
+#### What happened on 2026-08-29, under `/autoclaude-opus` in driven mode
+
+**Three corrective phases have now run to completion: 2d-4a-D (round 9), 2d-4a-E (round 10) and
+2d-4a-F (round 11).** Each was commissioned by `CLAUDE.md` §7.1 because the fix before it changed a
+source file, and each spent the workflow's single per-phase review invocation.
+
+| Round | Phase | Verdict | Findings | Report |
+|---|---|---|---|---|
+| 9 | 2d-4a-D | **do-not-ship** | **2 High**, 3 Medium | [`…round-9.md`](docs/reviews/phase-2d-4a-round-9.md) |
+| 10 | 2d-4a-E | ship-with-fixes | 0 High, 2 Medium, 2 Low | [`…round-10.md`](docs/reviews/phase-2d-4a-round-10.md) |
+| 11 | 2d-4a-F | **do-not-ship** | **1 High**, 1 Medium, 1 Low | [`…round-11.md`](docs/reviews/phase-2d-4a-round-11.md) |
+
+The record is [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) **§18** (round 9),
+**§19** (round 10) and **§20** (round 11); the briefs are
+`docs/decisions/2d-4a-{D-round-9,E-round-10,F-round-11}-brief.md`.
+
+#### 🔴 What round 11 found, and why it matters more than its count
+
+**§19.4 predicted this tail would end at round 11, and it did not.** The prediction was written as a
+prediction and not as a permission, and §7.2 is explicit that a round finding a real source defect is
+the mechanism working. **Take no forecast from §20 either** — the honest form is the conditional: if
+round 12 finds only record defects or nothing, its fix touches no source file and the tail ends there.
+
+**The High is a clause four rounds had read past.** `reconciliation.rs` said the eviction victim is
+*"never whichever entry this assertion trips over"* — while the **same sentence's own condition**
+says the entry loses its place *"when `evictable_sequence` picks it"*, the **same paragraph's
+summary** four lines below names what the escape waits on as *"an overflow that selects this
+entry"*, and the `INVENTORY` `reason` at `retained_state_contract.rs:1089` calls it *"an overflow
+evicting **it** inside the enqueue"*. On the literal reading the escape can never fire and the list
+closed at three has two members — **round 9's enumeration-wrong-by-one reached from the other side**.
+The fix moves *never* onto the **reason**, where it was always true: clause 5 *"does not know this
+assertion exists"*, and the entry *"goes when the rule happens to name it, never because it is the
+entry that trips here."* **The defect predates M1** — the pre-M1 text said *not* — so rounds 9 and 10
+both read it, and round 10 rewrote its neighbours while keeping it. **A rewrite is not a review of
+what it preserves.**
+
+**What round 11 cleared is again larger than what it found**, all by its own derivation: clause 5
+states the victim rule whole with its tie-break and matches `evictable_sequence`, so M1's pointer is
+accurate; clause 4 satisfies all three surviving claims made about it, so M2's deletion kept nothing
+local; the `retained_state.rs:55-61` header quotes are correct; **L2's declined argument holds on a
+second round's reading**; `+9 / −9` all-`///` and *`retained_state_contract.rs` unchanged* are true of
+`22d1afb`; and no phrase of either family moved. §20's opening lists all six.
+
+#### Step 1 — Phase 2d-4a-G, the fourth corrective phase (THE NEXT ACTION)
+
+**Why it exists.** The round-11 fix changed **one source file** — `src-tauri/src/reconciliation.rs`,
+comment-only, **+4 / −3**, one sentence — so §7.1 commissions **round 12**. `/autoclaude-opus` allows
+one review invocation per phase and 2d-4a-F spent it on round 11, so §7.4 carries the debt into the
+next corrective phase. **2d-4a-F is superseded by 2d-4a-G, never complete.**
+
+**Round 12's scope is one comment edit in one file**, plus §20 and the two round-11 correction blocks
+(one under §19.1's closing paragraph, one under §18.3's round-10 block). **Four things the round-12
+brief should carry**, all from 2d-4a-F:
+
+1. **The edit under review** at `reconciliation.rs` ~1500–1505. Ask the sharpest available question
+   about it: the repair keeps the word *never* and moves it from the **victim** to the **reason**
+   (*"never because it is the entry that trips here"*). Is that claim true of `evictable_sequence`,
+   and does the sentence now agree with the paragraph's summary at `:1509` and with the `reason` at
+   `retained_state_contract.rs:1089`? **A repair that relocates a word can relocate the defect.**
+2. **H1 was older than the fix that was under review**, so the round that reviews *its* fix should not
+   assume the surrounding sentences are clean merely because four rounds have read them. §20.4 marks
+   this *recorded only*, and it is the reason the tail keeps producing findings in one paragraph.
+3. **A pointer's target is checked for existence, not for content.** Both crates deny
+   `rustdoc::broken_intra_doc_links`, so deleting `retained_state` breaks the build — but *clause 4*
+   and *clause 5* are ordinals in a hand-numbered list, and **inserting a clause renumbers every
+   citation in the workspace with nothing failing**. §20.4 sizes that surface for the first time:
+   **nine Rust files, 83 citations**, that count being the orchestrator's and **not verified by round
+   11**. Round 12 may verify or break it.
+4. **L2 stays declined on two rounds' reading.** The precedent claim in
+   `retained_state_contract.rs:1089`'s `reason`; §19.1 has the argument in full and round 11 agreed
+   with it. Say so in the brief so round 12 does not spend its budget rediscovering it.
+
+Dispatch it as before: a fresh `autoclaude-reviewer` on `model: "opus"` that did not write the code,
+briefed from [`docs/decisions/2d-4a-F-round-11-brief.md`](docs/decisions/2d-4a-F-round-11-brief.md)'s
+shape, writing to `docs/reviews/phase-2d-4a-round-12.md`. **That would be the sixth consecutive Opus
+round.** To break the run instead,
+[`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md) is the
+Codex route — a `/goahead` procedure, not an `/autoclaude` one, and its known failure modes are worth
+reading before choosing it inside a driven single-shot session.
+
+#### Step 2 — Phase 2d-4b
+
+Spec: [`docs/decisions/2d-4-split-notes.md`](docs/decisions/2d-4-split-notes.md) §2 — the mirrored
+TypeScript types, the `BrowserCommands` wrapper for the drain, the **injectable** event-listener
+wrapper, the `describe*` builders in `src/lib/i18n/codes.ts` with their reactive `t*` wrappers in
+`index.ts`, the frontend tests, and the re-measured `npm run check` / `npm test` / `npm run build`
+baselines. Its four inherited constraints are listed at the end of the round-7 brief. By the standing
+rule since 2b-2c, a design consult comes before any line of it is written.
