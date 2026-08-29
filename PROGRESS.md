@@ -415,8 +415,10 @@ and in `git log`._
 | Checkpoint split — this file cut from 21,803 lines to under 400 | `3db0ff3` | ✅ pushed to `origin/main` |
 | M2 — the review-tail termination rule, after two review rounds | `93fb76b` | ✅ pushed to `origin/main` |
 | 2d-4a rounds 7 and 8, both fix rounds, and the `INVENTORY` judgement the guard forced | `125dfa8` | ✅ pushed to `origin/main` |
+| **2d-4a-D — round 9 and its fix; round 10 OWED** | `6572a29` | ✅ pushed to `origin/main` |
 
-**Source is modified again as of this commit, for the first time since `2efce7a`** — five files
-under `src-tauri/src/`, all comment or inventory changes and no executable line:
-`reconciliation.rs`, `commands.rs`, `prose_sweep.rs`, `liveness_contract.rs` and
-`retained_state_contract.rs`. That is what makes round 9 owed and 2d-4a-D real.
+**Source is modified by `6572a29` too** — two files under `src-tauri/src/`, both comment or inventory
+changes with no executable line: the M1 doc paragraph in `reconciliation.rs` (verified comment-only
+with `git diff -U0`) and one `reason` string in `retained_state_contract.rs`'s `INVENTORY`. **That is
+what makes round 10 owed and 2d-4a-E real**, exactly as `125dfa8`'s five files made round 9 owed and
+2d-4a-D real. The tree is clean at `6572a29`.
