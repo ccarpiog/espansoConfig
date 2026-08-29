@@ -508,3 +508,85 @@ Suggested remedy: Change “three gate tables” to “four gate tables.” Also
 ### Verdict rationale
 
 The code and the substantive own-family measurement hold, but the round-4 record introduces three new Low sentence defects: an overclaim about what count-based guards prove, unscoped historical `rg` counts, and another false table-count sentence. These are new defects in this fix round, not restatements of wording already corrected.
+
+## Step 2 — round 6 (against the round-5 fix: §21 in full, its three-step diff argument, §21.5's hand tallies, §21.4's enumeration, §21.8's deviation paragraph, the two step-1 tallies §21.9 item 6 left open, and the record-structure decision)
+
+NOT READY — 0 High, 0 Medium, 5 Low. Two findings are new defects in §21’s own prose, one is a wrong section enumeration repeated within §21, and two are the step-1 measurements §21.9 explicitly left open. These are not merely restatements of wording already fixed; no code defect was found.
+
+### Findings
+
+1. **Low — `docs/decisions/2d-4a-C-notes.md`, §21.5, lines 3398–3402 — the printed Sweep C command does not produce its claimed tally.**
+
+   > “`rg -n -i '\b(two|…|thirteen)\b[^.\n]{0,70}§'` over the record at `2695cbb` returns **30** lines, **21** from §13 on”
+
+   Run literally, the recorded regex returns **14** lines, **11** from §13 onward. The `…` is a literal alternative, not shorthand understood by `rg`. Expanding it to the numeral words `two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen` does reproduce **30 / 21**, so the underlying tally appears right but the command credited with establishing it is not.
+
+   The following **78 / 57** tally is also not independently reproducible from the record because it describes the search in prose without giving its regex, including how far “followed by” reaches and how Markdown punctuation is handled.
+
+   **Narrowest fix:** print the complete first alternation and the exact second regex. Do not present an abbreviated regex as the command that returned an exact count.
+
+2. **Low — `docs/decisions/2d-4a-C-notes.md`, §21.8, lines 3522–3528 — the deviation paragraph presents possible causes as a measured diagnosis.**
+
+   > “Two things had made it likelier and both are named rather than guessed at”
+
+   > “two copies … were competing”
+
+   > “333 s to 110 s for the same target, which is the contention showing up in the clock”
+
+   Only one rerun followed, after the orphan was removed and the build circumstances had also changed. That establishes correlation with the improved result, not that either circumstance made the failure likelier, that watcher contention occurred, or that contention caused the timing difference. §21.9 lines 3588–3593 correctly calls this an inference and says neither factor was separated; that disclaimer does not make the earlier diagnosis measured.
+
+   **Narrowest fix:** call the orphan and completed build observed circumstances that *may* have contributed, and say the timing change is *consistent with* contention rather than demonstrating it.
+
+3. **Low — `docs/decisions/2d-4a-C-notes.md`, §21.7 lines 3495–3497 and §21.9 item 1 lines 3540–3543 — both passages misidentify where the stacked correction blocks live.**
+
+   > “§19 and §20 both hold sentences with two correction blocks stacked beneath them”
+
+   The two stacked locations are **§18.6** at lines 2098 and 2116, and **§19.7** at lines 2473 and 2494. §20 has round-5 correction blocks, but not a sentence with two correction blocks stacked beneath it. §21.9 makes the mismatch especially visible by saying “§19 and §20” and immediately naming “§18.6’s and §19.7’s tails.”
+
+   **Narrowest fix:** change “§19 and §20” to “§18 and §19” in both places.
+
+4. **Low — `docs/decisions/2d-4a-C-notes.md`, §3 opening lines 4–5 and line 128 — the unbound 45-passage claim is no longer true.**
+
+   > “45 passages across eight files in the two source trees point at it”
+
+   > “45 passages now point, verified by `rg -n 'retained_state'` over both trees.”
+
+   The requested current command returns **99 matching lines across 13 files**. Restricting the reading to §3’s original eight files gives 48 matching lines; one is `main.rs`’s `mod retained_state_contract`, leaving **47 pointer occurrences**, not 45. The history explains the move: `34cd5af..57e8800` adds two new pointer passages while step 1’s review fixes are being applied. Thus the claim had already become stale by step 1’s READY commit, before step 2 greatly enlarged the raw search output.
+
+   **Narrowest fix:** bind 45 to the initial step-1 revision and describe it as the hand-judged passage inventory rather than the raw `rg` line count, then note that the step-1 fixes added two pointers. Alternatively, re-audit and state the current count.
+
+5. **Low — `docs/decisions/2d-4a-C-notes.md`, §12.2 lines 1205–1207 — the `decide(` search’s output is incompletely accounted for.**
+
+   > “`rg -n 'decide\(' src-tauri/src/ crates/ --type rust` returns **exactly three** call sites of this `decide` … plus its definition … The only other match is `syntax/ownership.rs`’s own unrelated `decide`”
+
+   The command currently returns **eight lines**, and it returned the same shape at the step-1 close: three calls to `ledger::decide`, its definition, its `End of function decide()` marker, and the unrelated ownership function’s call, definition, and end marker. The substantive conclusion—exactly three call sites of the ledger function—still holds, but “the only other match” does not describe the command’s output.
+
+   **Narrowest fix:** either account for all eight matches or use a call-specific command such as an anchored search over `ledger.rs` that returns only the three invocations.
+
+### Record-structure decision
+
+The record has passed the point where further stacking is better than consolidation. The second blocks make the final claims honest, but the document is no longer readable linearly: stopping after the first block at §18.6 or §19.7 leaves the reader with a superseded narrowing. At minimum, consolidate each of those two stacks into one current correction block that preserves both prior wordings and their chronology. A broader reorganization of §18–§20 into a current account plus a historical appendix would now improve reliability rather than merely aesthetics.
+
+### Checked and cleared
+
+- **§21.2’s “the guards contributed the premise of step 1 and nothing else” is accurate.** `complaints_against` compares counts keyed by `(file, phrase)`. A green guard therefore establishes that every found key is inventoried, which supplies step 1; it does not establish occurrence identity. The same-key substitution limit is correctly attributed to `retained_state_contract.rs:60–63` and `liveness_contract.rs:25–26`, while `prose_sweep.rs:46–52` deliberately defers inherited limitations to each guard.
+
+- **The three-step diff argument holds.** Both historical diffs list the three named Rust files; the inventories contain 140/86 entries over 29/20 files and name exactly one of those three files, `prose_sweep.rs` / `"one entry per"` at retained-state line 954. Neither diff contains that phrase, and its source occurrence is the non-comment assertion string at `prose_sweep.rs:374`; `prose_units` keeps a non-comment line as its own unit.
+
+- **§21.4’s enumeration reproduces:** §16 has 1 table and §§17, 18, and 19 have 4 each, for **1 + 4 + 4 + 4 = 13**.
+
+- **Sweep A reproduces:** 21 matched lines, four in the three corrected positions and 17 left. Its seven-kind arithmetic is **3 + 4 + 4 + 2 + 2 + 1 + 1 = 17**.
+
+- **Sweep B reproduces:** 43 lines total and 23 in §§17–20; its corrected-versus-left accounting is consistent.
+
+- **Sweep C’s intended expanded first search reproduces 30/21**, and the table-separator enumeration gives 21 tables in §§13–20. The literal-command defect is Finding 1.
+
+- The retained-state inventory has **140 entries and 224 hits**. Its seven reason classes reproduce as **29 / 3 / 1 / 2 / 61 / 39 / 5**, including exactly two mixed classes.
+
+- The seven new correction blocks and the replication note are present. Apart from the findings above, their commit bindings and arithmetic are consistent with the local history.
+
+- §21.6’s “strongest evidence this record holds” is acceptably bounded. It compares the two recorded independent replications with the single earlier replication, immediately says neither is a test, and names stronger mechanisms that do not exist.
+
+### Could not check
+
+The read-only workspace prevents responsibly rerunning Cargo gates because builds write artifacts; I did not attempt them. The two external in-memory replications also are not stored in the repository and therefore cannot be inspected or rerun. These limits do not affect the verdict: the findings above are established from the committed record, source, and Git history.
