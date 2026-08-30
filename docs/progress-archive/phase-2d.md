@@ -3062,3 +3062,49 @@ tool's own: `cargo test --workspace` **1313** passed / 0 failed over **26** resu
 errors / 0 warnings; `npm test` **2125** over **56** files; `npm run build` **184** modules, server
 oracle absent and client oracle present with 2 matches. **The three frontend figures were re-measured
 at the start of this iteration rather than reasoned about**, although no `src/` file changed in it.
+
+---
+
+### Phase 2d-4a-G — round 12 (2026-08-29, `/autoclaude-opus`, driven mode)
+
+**Reviews: 1/1 — the workflow's whole per-phase allowance. Verdict `ship-with-fixes`: 0 High, 2
+Medium, 3 Low — two Mediums in the record, two Lows in source, one Low in the record. All five
+fixed.** Reviewer: a fresh `autoclaude-reviewer` on `model: "opus"`, briefed from
+[`docs/decisions/2d-4a-G-round-12-brief.md`](docs/decisions/2d-4a-G-round-12-brief.md), writing its
+own report to [`docs/reviews/phase-2d-4a-round-12.md`](docs/reviews/phase-2d-4a-round-12.md). Not
+reproduced into the queue, for the reason §18 gives. **The sixth consecutive Opus round.**
+
+- **What it cleared is the substantive result.** `evictable_sequence` (`:921-935`) is a pure function
+  of `pending` over paths, counts and sequences, reading no assertion state, so round 11's repair is
+  true and **four statements that round 11 found in contradiction are now consistent**. It also
+  checked the **preserved** clauses rather than assuming them — `drain`'s two mutations, `enqueue`'s
+  `while … > QUEUE_CAPACITY`, all three `PoisonError::into_inner` sites — verified §20.2's figures,
+  and agreed for the **third** round that round 10's L2 stays declined.
+- **M1 + L3 (record)** — the same shape twice: the round-11 block said its link count listed *"the
+  doc comment"* when it listed the **paragraph** (13 over 10 vs six over five), and §20.4's *"83
+  citations"* was `rg -c`, which counts **lines** — `rg -o … | wc -l` gives **85** over the same nine
+  files. Both corrected by round-12 blocks, both figures re-derived over both spans.
+- **M2 (record)** — *"H1 is older than the fix under review"* is true of the words and misleading
+  about the defect: pre-M1 the *not* sat beside a **concrete criterion** and read as
+  criterion-versus-criterion. M1 deleted the criterion, substituted *"whatever that rule names"* and
+  strengthened *not* → *never*. **M1 is a contributing cause, not merely a preserver.** Corrected.
+- **L1 + L2 (source, one edit)** — *"so this escape waits on a state it cannot bring about"* had three
+  candidate antecedents and duplicated the summary at `:1509-1510`; and the full stop after *clause 5*
+  had broken the three-item list so item 3 hung off item 2's second sentence. **Fixed together**: the
+  full stop becomes a comma with an appositive, and the ambiguous clause is deleted. **+3 / −4, every
+  line `///`.**
+- **Why those two were fixed rather than carried** — §7.3 permitted carrying either. §21.1 records the
+  merits: L2 damaged the enumeration **both Highs of this tail were miscounts of**, and L1's clause
+  was one round old. **Neither *it would end the tail* nor *it would commission a round* was an
+  input.**
+- **Round 13 is owed and cannot run here.** §7.1 commissions it, the one-invocation cap is spent, and
+  §7.4 makes the debt a corrective phase. **2d-4a-G is superseded by 2d-4a-H, never complete.**
+
+**Gates on the tree this iteration produced**, measured by the orchestrator alone, each command
+issued separately and **redirected to a file rather than piped**, so every status is the tool's own:
+`cargo test --workspace` **1313** passed / 0 failed over **26** result lines all `ok`, exit 0; `clippy -D warnings` clean; `cargo fmt --check` clean;
+`cargo doc --workspace --no-deps` **73** warnings, all `private_intra_doc_links`, and **0 unresolved**, run after `touch`ing `reconciliation.rs`; `cargo tree -p espansoconfig-core | rg tauri` empty;
+`npm run check` **431** files / 0 errors / 0 warnings; `npm test` **2125** over **56** files; `npm run
+build` **184** modules, server oracle absent and client oracle present with 2 matches. **The three
+frontend figures were measured at the start of this iteration**, and no `src/` file changed in any of
+its phases.

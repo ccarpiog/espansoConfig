@@ -580,6 +580,18 @@ round.** Two tails ended the other way: **2d-3 ran 14 rounds** — round 14 chan
 Both were stopped by a human, because nothing in these conventions could say *stop*. The diagnosis,
 with its measurements, is `docs/decisions/review-tail-termination.md`.
 
+**A third tail has since ended the other way — by this rule — and it is the first.** Phase 2d-4a's
+tail ran **thirteen** rounds and closed at round 13 on 2026-08-30, because the fix answering that
+round changed **no source file**: three correction blocks in `docs/decisions/2d-4a-notes.md`, which is
+on the closed list below. No human said stop and no owner ruled; §7.1 simply commissioned nothing.
+`docs/decisions/2d-4a-notes.md` §22 is the record. **Two things that closure does not mean.** It is a
+fact about the *fix round's diff*, never about the round's thoroughness — so it discharges no coverage
+bound the tail was carrying, and 2d-4a's seven-consecutive-Opus-rounds bound survived its own tail's
+end. And it does not make the closing round a formality: round 13 returned two Mediums, both were
+**re-derived before being accepted**, and the one figure it reported as unverifiable was chased down
+rather than carried. **A tail that closes on a round nobody checked is the failure mode this rule
+invites**, and the defence is that the closing round is reviewed like any other.
+
 **§7 has exactly one mechanism that commissions a round, and closure is that mechanism's
 consequence rather than a rule of its own:**
 

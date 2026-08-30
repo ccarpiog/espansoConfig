@@ -9360,3 +9360,107 @@ wrapper, the `describe*` builders in `src/lib/i18n/codes.ts` with their reactive
 `index.ts`, the frontend tests, and the re-measured `npm run check` / `npm test` / `npm run build`
 baselines. Its four inherited constraints are listed at the end of the round-7 brief. By the standing
 rule since 2b-2c, a design consult comes before any line of it is written.
+
+---
+
+## Spent — the next action as it stood after round 12 (2026-08-29), carried out by Phase 2d-4a-H on 2026-08-30
+
+_History, never an instruction. Its step 1 ran as round 13 and closed 2d-4a's tail; its step 2 (Phase 2d-4b) became the live next action._
+
+### Next action (spent)
+
+### Rounds 11 and 12 both RAN today. The next action is **Phase 2d-4a-H** — round 13's review of the
+### round-12 fix — then **Phase 2d-4b**.
+
+**🛑 Do not run a step-2 round 10 of 2d-4a-C.** That tail is closed by owner decision; reopening it
+needs a new owner ruling. **2d-4a's own tail is a different tail** and is the one that is live — it
+has now run *thirteen* numbered positions, so a bare round number is ambiguous between the two. Check
+which tail before acting. The spent next-action blocks are in
+[`docs/progress-archive/next-action-history.md`](docs/progress-archive/next-action-history.md), which
+is **history and never an instruction**.
+
+#### What happened on 2026-08-29, under `/autoclaude-opus` in driven mode
+
+**Four corrective phases have now run to completion: 2d-4a-D, -E, -F and -G.** Each was commissioned
+by `CLAUDE.md` §7.1 because the fix before it changed a source file, and each spent the workflow's
+single per-phase review invocation.
+
+| Round | Phase | Verdict | Findings | Report |
+|---|---|---|---|---|
+| 9 | 2d-4a-D | **do-not-ship** | **2 High**, 3 Medium | [`…round-9.md`](docs/reviews/phase-2d-4a-round-9.md) |
+| 10 | 2d-4a-E | ship-with-fixes | 0 High, 2 Medium, 2 Low | [`…round-10.md`](docs/reviews/phase-2d-4a-round-10.md) |
+| 11 | 2d-4a-F | **do-not-ship** | **1 High**, 1 Medium, 1 Low | [`…round-11.md`](docs/reviews/phase-2d-4a-round-11.md) |
+| 12 | 2d-4a-G | ship-with-fixes | **0 High**, 2 Medium, 3 Low | [`…round-12.md`](docs/reviews/phase-2d-4a-round-12.md) |
+
+The record is [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) **§18** … **§21**, one
+section per round; the briefs are `docs/decisions/2d-4a-{D,E,F,G}-round-{9,10,11,12}-brief.md`.
+
+#### 🟢 What round 12 cleared, and the one shape it found twice
+
+**It cleared round 11's repair at the level round 11 attacked.** `evictable_sequence` (`:921-935`) is
+a pure function of `pending` over paths, counts and sequences, reading no `DocumentId` and no
+assertion state, **with no coupling direct or indirect** — so *"never because it is the entry that
+trips here"*, *"when `evictable_sequence` picks it"*, *"an overflow that selects this entry"* and
+`retained_state_contract.rs:1089`'s *"an overflow evicting **it**"* are now **all true together**. It
+also checked the **preserved** clauses rather than assuming them (`drain`'s two mutations, `enqueue`'s
+`while … > QUEUE_CAPACITY`, all three `PoisonError::into_inner` sites), confirmed §20.2's figures, and
+agreed for the **third** round that round 10's L2 stays declined.
+
+**Its two Mediums and one Low are one shape: a figure measured over one span and labelled with
+another.** The round-11 block said its link count listed *"the doc comment"* when it listed the
+**paragraph** (the doc comment gives 13 over 10; the paragraph gives the six over five it reports);
+§20.4's *"83 citations"* was `rg -c`, which counts **lines** — `rg -o … | wc -l` gives **85**; and the
+round-10 block it all descends from labelled a **hunk's** count as the paragraph's. **Three
+instances, three rounds, one shape**, each found by re-deriving the figure rather than re-reading the
+sentence. All three are corrected.
+
+**Its second Medium is the sharper one.** §20.4 said *"H1 is older than the fix under review"*, which
+is true of the words and misleading about the defect: pre-M1 the *not* sat beside a **concrete
+criterion**, under which it read as criterion-versus-criterion and was true. M1 deleted that
+criterion, substituted *"whatever that rule names"*, and strengthened *not* into *never*. **M1 is a
+contributing cause, not merely a preserver**, so the record no longer implies four rounds had read the
+defect.
+
+#### Step 1 — Phase 2d-4a-H, the fifth corrective phase (THE NEXT ACTION)
+
+**Why it exists.** Round 12's two source Lows were **fixed rather than carried** — §7.3 would have
+permitted carrying either, and §21.1 records the merits that decided otherwise: L2 broke the
+punctuation of the three-item list **both Highs of this tail were miscounts of**, and L1's ambiguous
+clause was one round old and duplicated the paragraph's own summary. That fix changed
+`src-tauri/src/reconciliation.rs` (**+3 / −4**, comment-only), so §7.1 commissions **round 13**, and
+§7.4 carries the debt into this phase. **2d-4a-G is superseded by 2d-4a-H, never complete.**
+
+**Four things the round-13 brief should carry**, all from 2d-4a-G:
+
+1. **The edit under review** at `reconciliation.rs` ~1498–1505. It does two things at once: it turns
+   the full stop after *clause 5* back into a comma with an appositive (*"a rule that does not know
+   this assertion exists"*), restoring the *A; B; and C* list, and it **deletes** the clause *"so this
+   escape waits on a state it cannot bring about"*. Ask whether the appositive's antecedent is any
+   clearer than the pronoun it replaced, and whether deleting the clause lost anything the summary at
+   `:1509-1510` does not already carry.
+2. **This paragraph has produced two Highs in twelve rounds, both enumeration miscounts**, and round
+   12's L2 was a punctuation change that damaged the same enumeration. **Count the list.** The
+   preserved clauses are in scope for the same reason: a rewrite is not a review of what it preserves.
+3. **"Measure one span, label another" is now a named shape** (§21.4), found three times in three
+   rounds. Every figure §21 cites — `+3 / −4`, *every line begins `///`*, *six over five*, *13 over
+   10*, the 88/61 phrase families — is the fix round's own derivation. **Re-derive them**, and check
+   each is labelled with the span it was taken over.
+4. **L2 of round 10 stays declined on three rounds' reading.** Say so in the brief so round 13 does
+   not spend budget rediscovering it.
+
+Dispatch it as before: a fresh `autoclaude-reviewer` on `model: "opus"` that did not write the code,
+briefed from [`docs/decisions/2d-4a-G-round-12-brief.md`](docs/decisions/2d-4a-G-round-12-brief.md)'s
+shape, writing to `docs/reviews/phase-2d-4a-round-13.md`. **That would be the seventh consecutive
+Opus round — now longer than the six-round Codex run it replaced.** To break it,
+[`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md) is the
+route: a `/goahead` procedure, not an `/autoclaude` one, and its known failure modes are worth reading
+before choosing it inside a driven single-shot session.
+
+#### Step 2 — Phase 2d-4b
+
+Spec: [`docs/decisions/2d-4-split-notes.md`](docs/decisions/2d-4-split-notes.md) §2 — the mirrored
+TypeScript types, the `BrowserCommands` wrapper for the drain, the **injectable** event-listener
+wrapper, the `describe*` builders in `src/lib/i18n/codes.ts` with their reactive `t*` wrappers in
+`index.ts`, the frontend tests, and the re-measured `npm run check` / `npm test` / `npm run build`
+baselines. Its four inherited constraints are listed at the end of the round-7 brief. By the standing
+rule since 2b-2c, a design consult comes before any line of it is written.

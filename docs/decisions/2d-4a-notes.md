@@ -3748,6 +3748,37 @@ a source file is a blocker that stops this step closing; none below is one.
   > renumbering conclusion beside them is sound**; only the total was off by the difference between
   > lines and occurrences, which is the same class of error as measuring one span and labelling
   > another.
+
+  > **Correction, round 13 (a Medium) — the correction above committed the shape it was written to
+  > correct.** It raised the total from 83 to **85**, which is right, and in the same breath called
+  > the per-file breakdown *"39, 18, 15, 4, 3, and one each in four more"* **exact**, which is not:
+  > that breakdown sums to **83**, because it is the `rg -c` **line** count — the very figure the
+  > block had just ruled superseded. A total measured in occurrences was left standing beside a
+  > breakdown measured in lines. **The occurrence breakdown**, re-derived by round 13's fix round with
+  > `rg -o 'clause [0-9]' -g '*.rs' . | sed 's/:clause [0-9]//' | sort | uniq -c`:
+  >
+  > | File | Occurrences | Lines |
+  > |---|---|---|
+  > | `src-tauri/src/retained_state_contract.rs` | **41** | 39 |
+  > | `src-tauri/src/reconciliation.rs` | 18 | 18 |
+  > | `src-tauri/src/ledger.rs` | 15 | 15 |
+  > | `crates/espansoconfig-core/src/watch/retained_state.rs` | 4 | 4 |
+  > | `src-tauri/src/commands.rs` | 3 | 3 |
+  > | `dispatch_check.rs`, `main.rs`, `watch_check.rs`, `lib.rs` | 1 each | 1 each |
+  > | **Total** | **85** | **83** |
+  >
+  > **Exactly one file moves**: `retained_state_contract.rs`, where two lines carry two citations
+  > each. Every other file's two counts coincide, which is why the error survived — eight of the nine
+  > rows are true under either reading.
+  >
+  > **The attribution is wrong too.** The breakdown is not *"round 12's"*: it is the bullet above,
+  > which says in its own words that the count *"is this orchestrator's, taken while the round was in
+  > flight"* — round 11's. Round 12 quoted it forward without re-deriving it, which is how a line
+  > count arrived inside a block about line counts.
+  >
+  > **What still stands, unchanged:** the nine files, and the renumbering conclusion — clause ordinals
+  > are hand-numbered prose, `rustdoc` checks the link and not the number, and inserting a clause
+  > renumbers all 85 with nothing failing.
 - **The rewritten paragraph is still asserted by nothing.** No test poisons either lock, no test
   drives a watermark at or above an offending entry's sequence, and no test connects an overflow
   eviction to this assertion, though the capacity bound itself is exercised. The paragraph says so
@@ -3846,6 +3877,12 @@ Round 12's report numbers nothing; the labels below are this record's, in the re
   per-file breakdown (39/18/15/4/3/1/1/1/1) the reviewer confirmed. **The nine files and the
   renumbering conclusion stand.** **Record only.**
 
+  > **Correction, round 13 (a Medium).** The breakdown quoted here is the **line** count and sums to
+  > **83**, not to the 85 the same bullet gives as the total; the occurrence breakdown is
+  > **41**/18/15/4/3/1/1/1/1, and it was round 11's orchestrator figure rather than round 12's. The
+  > full re-derivation, with both columns side by side, is the round-13 correction block under §18.3's
+  > ordinal-fragility item.
+
 **Why the two source Lows were fixed rather than carried, since that decision is what commissions
 round 13.** §7.3 permits carrying an item that is not a correctness defect in source, and both of
 these qualify — neither makes the comment false. They were fixed anyway, on the merits and stated
@@ -3874,6 +3911,23 @@ Listed in full, this record and the review files included, for the reason §15.2
 - `docs/reviews/phase-2d-4a-round-12.md` — new, written by the reviewer itself, **unmodified here**.
 - `docs/decisions/2d-4a-G-round-12-brief.md` — new at the dispatch, unmodified here.
 
+> **Correction, round 13 (a Medium) — this list said "in full" and was not.** `git show e334d5b
+> --numstat` gives **seven** files; the list above names four changed ones and one it records as
+> unchanged. The three it omits are all checkpoint mechanics, and naming them is the point of a list
+> that claims to be complete:
+>
+> - `PROGRESS.md` — **+150 / −134**, the round's checkpoint: the status row, the next action, the
+>   verification block and the git-state row.
+> - `docs/progress-archive/next-action-history.md` — **+110 / −0**, the spent round-11 next-action
+>   block moved out of `PROGRESS.md` verbatim.
+> - `docs/progress-archive/phase-2d.md` — **+54 / −0**, the spent round-11 verification block moved
+>   out of `PROGRESS.md` verbatim.
+>
+> **Neither omission changes a claim about the source change**, which remains the one comment edit
+> the first bullet describes. What it changes is what §15.2 exists for: a by-file list is the thing a
+> later round diffs against, and one that silently drops the archive moves makes an iteration's own
+> record maintenance invisible to it.
+
 **No frontend file changed**, so no `npm` gate was re-run by this fix round; the three frontend
 figures in §21.3 are this iteration's own measurement.
 
@@ -3896,6 +3950,28 @@ either**, so no `(file, phrase)` count can have moved. **Round 12 did not do thi
 under `NOT-VERIFIED`, that its reading of the diff against the entries it read is weaker than the
 check the record describes — so this is the fix round's own evidence and `cargo test --workspace`
 above is what proves it.
+
+> **Correction, round 13 — the figures are right and the word for them was wrong, which is why no
+> round could reproduce them.** Round 13 listed 88 / 61 / 149 under `NOT-VERIFIED`, saying no recipe
+> in the record reproduces them and none it tried did: counting `phrase:` fields gives **141** and
+> **86**, and distinct phrase literals give **68** and **35**. None of those is the figure. **What 88
+> and 61 count is the sweep's patterns, not the inventory's phrases** — `RETAINED_STATE_SHAPES`
+> (`src-tauri/src/retained_state_contract.rs:159-273`) holds **88** string literals and
+> `LIVENESS_SHAPES` (`src-tauri/src/liveness_contract.rs:98-181`) holds **61**, totalling **149**.
+> Both re-derived by round 13's fix round:
+>
+> ```sh
+> awk 'NR>159 && NR<273 && /^    "/{c++} END{print c}' src-tauri/src/retained_state_contract.rs  # 88
+> awk 'NR>98  && NR<181 && /^    "/{c++} END{print c}' src-tauri/src/liveness_contract.rs        # 61
+> ```
+>
+> **The check the figures describe is the right check**, and this correction does not disturb it: the
+> sweep matches a `SHAPE` against prose, so prose containing none of the 149 can move no
+> `(file, phrase)` count. **The defect is the label.** Both modules use `phrase` as the name of an
+> `INVENTORY` field holding something else, so *"88 retained-state and 61 liveness phrases"* names the
+> patterns with the word the code reserves for the judgements — a **name** collision rather than a
+> span one, and the nearest neighbour yet of the shape §21.4 names. Read it as *shapes* wherever this
+> record says *phrases* of a family, here and in §20.3.
 
 ### 21.4 What this round did not do, and where it is thin
 
@@ -3941,3 +4017,155 @@ a source file is a blocker that stops this step closing; none below is one.
 - **R9 remains open, unmeasured and unbounded**, and nothing in this round touched it: no count, no
   cap, no eviction rule for the identity register. *(recorded only — no step of the 2d split owns
   building a bound for it, which is itself the residue.)*
+
+---
+
+## 22. Round 13 of the review, and the fix round that answered it — **the round that ends the tail**
+
+Round 13 ran as **Phase 2d-4a-H**, the fifth corrective phase, on 2026-08-30 under `/autoclaude-opus`
+in driven mode. `CLAUDE.md` §7.1 commissioned it for one reason: round 12's fix changed one source
+file, `src-tauri/src/reconciliation.rs`, comment-only, **+3 / −4**. Reviewer: a fresh
+`autoclaude-reviewer` on `model: "opus"` that did not write the code, briefed from
+[`2d-4a-H-round-13-brief.md`](2d-4a-H-round-13-brief.md), writing its own report to
+[`../reviews/phase-2d-4a-round-13.md`](../reviews/phase-2d-4a-round-13.md). **The seventh consecutive
+Opus round**, now longer than the six-round Codex run it replaced.
+
+**Verdict `ship-with-fixes`: 0 High, 2 Medium, 0 Low — and both Mediums live in the record.** All
+findings fixed; both fixes are in `docs/decisions/2d-4a-notes.md` alone.
+
+**This is the verdict that closes Phase 2d-4a's tail, by rule and not by a ruling.** §7.1 commissions
+a round for exactly one thing — a fix round that changed at least one source file. Round 13's fix
+round changed **no source file**: three correction blocks in this file, which is under `docs/` and so
+on §7's closed list of *the record*. So **round 14 is not commissioned, and under §7.2 the step
+closes**. Nothing was softened to reach that: both Mediums were confirmed by re-derivation before
+being accepted, and the one thing round 13 could not verify was chased down rather than carried.
+2d-4a's tail is **thirteen rounds**, and it ended the way §7.2 says a tail ends — at the first fix
+that stops touching source.
+
+### 22.1 Finding by finding
+
+- **What it cleared is the substantive result, and it is the source change.** The reviewer counted the
+  enumeration this paragraph has twice been wrong about and found it **right**: three items separated
+  as *A; B; and C*, the colon at `:1503` opening a clause **inside** item 2 and the semicolon at
+  `:1505` closing it, so the appositive does not swallow item 3. The summary at `:1507-1510` matches
+  the three **in order**. The appositive's claim is true of `evictable_sequence` (`:921-935`), a pure
+  function of `pending` over paths, counts and sequences. **Round 12's repair holds at the level round
+  12 attacked it**, and the two questions the fix round left open — whether the appositive's antecedent
+  beats the pronoun it replaced, and whether deleting *"so this escape waits on a state it cannot
+  bring about"* lost anything the summary does not carry — were both answered against the fix's
+  favour being needed: neither produced a finding.
+- **M1 (Medium, record) — the correction block committed the shape it was written to correct.** §18.3's
+  round-12 block raised the citation total from 83 to **85** — right — and in the same breath called
+  the per-file breakdown *"39, 18, 15, 4, 3, and one each in four more"* **exact**. That breakdown sums
+  to **83**: it is the `rg -c` **line** count, the very figure the block had just ruled superseded. A
+  total in occurrences was left standing beside a breakdown in lines. **Exactly one file moves** —
+  `retained_state_contract.rs`, 41 occurrences over 39 lines — which is why it survived: eight of the
+  nine rows are true under either reading. Its attribution was wrong too: the breakdown is round 11's
+  orchestrator figure, quoted forward, not round 12's. **Agreed and fixed** by a round-13 correction
+  block under §18.3 carrying both columns, with a pointer from §21.1. **Record only.**
+- **M2 (Medium, record) — §21.2 said "listed in full" and was not.** `git show e334d5b --numstat`
+  gives **seven** files; §21.2 named four changed ones. The three omitted are `PROGRESS.md`
+  (+150 / −134), `docs/progress-archive/next-action-history.md` (+110 / −0) and
+  `docs/progress-archive/phase-2d.md` (+54 / −0) — all checkpoint mechanics, and all invisible to a
+  later round diffing against that list. **Agreed and fixed** by a round-13 correction block naming
+  the three with their numstats. **Record only.**
+- **The `NOT-VERIFIED` item was chased down rather than carried, and it was the sharpest thing in the
+  round.** Round 13 could not reproduce **88 / 61 / 149** and said so plainly, having tried the
+  obvious recipes: `phrase:` fields give 141 and 86, distinct phrase literals 68 and 35. **The figures
+  are right; the word for them is wrong.** They count `RETAINED_STATE_SHAPES` (88) and
+  `LIVENESS_SHAPES` (61), the sweep's **patterns** — while both modules use `phrase` as the name of an
+  `INVENTORY` field holding something else. So the record named the patterns with the word the code
+  reserves for the judgements. A **name** collision rather than a span one, and the nearest neighbour
+  yet of the shape §21.4 names. §21.3 now carries the derivation as two `awk` lines that reproduce 88
+  and 61 exactly. **The check itself was never in doubt** and is undisturbed: prose containing none of
+  the 149 shapes can move no `(file, phrase)` count.
+
+### 22.2 What this round changed, by file
+
+Listed in full — **seven changed files**, plus one recorded as unchanged because its absence is the
+point. This record, the review file and the checkpoint's archive moves are all included, which is the
+completeness M2 was raised about. Verified against `git status --short` and
+`git diff --stat` **after** the last edit rather than from memory, which is the only order that makes
+a claim of completeness worth anything.
+
+- `src-tauri/src/reconciliation.rs` — **unchanged.** No source file changed in this round, which is
+  the fact that closes the tail.
+- `CLAUDE.md` — §7's opening, which said in as many words that both tails on record were stopped by a
+  human *"because nothing in these conventions could say stop"*. That is now false, and a rule whose
+  own statement misreports its record is the defect class this project ranks worst. It gains a
+  paragraph naming this tail as the first to end by the rule, and naming the two things the closure
+  does **not** mean. **Record, not source** — it is on §7's own closed list.
+- `docs/decisions/2d-4a-notes.md` — this section (§22), plus **four** round-13 correction blocks: one
+  under §18.3's ordinal-fragility item (M1, with the two-column table), one under §21.1's L3 bullet
+  (M1's pointer), one under §21.2's file list (M2) and one under §21.3 (the phrase/shape derivation).
+- `docs/decisions/2d-4a-H-round-13-brief.md` — new at the dispatch, unmodified here.
+- `docs/reviews/phase-2d-4a-round-13.md` — new, written by the reviewer itself, **unmodified here**.
+- `PROGRESS.md` — the checkpoint: the status rows, the next action, the verification block and the
+  git-state row.
+- `docs/progress-archive/phase-2d.md` — the spent round-12 verification block, moved out of
+  `PROGRESS.md` verbatim at the head of the iteration.
+- `docs/progress-archive/next-action-history.md` — the spent round-12 next-action block, moved out of
+  `PROGRESS.md` verbatim.
+
+**No frontend file changed**, so no `npm` gate was re-run by this fix round.
+
+### 22.3 The gates after this round
+
+Measured by this iteration's orchestrator on the tree it produced, each Cargo command issued
+separately with nothing else running, and **redirected to a file rather than piped**, so every status
+is the tool's own. Orphaned bin targets were killed first, per the host scar.
+
+- `cargo test --workspace` — **1313** passed / 0 failed over **26** `test result: ok` lines, exit 0.
+  Unchanged, as it must be: this round changed no `.rs` file at all.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean.
+- `cargo fmt --check` — clean.
+- `cargo doc --workspace --no-deps` — exit 0, **73** warnings, all `private_intra_doc_links`, **0**
+  unresolved.
+- `cargo tree -p espansoconfig-core | rg tauri` — empty (D2x).
+- The three frontend figures are carried unchanged from §21.3 — **431** `npm run check` files,
+  **2125** `npm test`, **184** `npm run build` modules — and the ground is stronger than usual: **no
+  file outside `docs/` and `PROGRESS.md` changed in this iteration**, so no input to any of them moved.
+
+**No inventoried count moved, and this round needs no phrase check to say so**: the check exists to
+catch prose in a **Rust** file arriving into or leaving a swept tree, and no Rust file was touched.
+This is the first round of the tail able to say that from the diff alone rather than from a phrase
+sweep.
+
+### 22.4 What this round did not do, and where it is thin
+
+Per `CLAUDE.md` §7.3 every item carries a mark. An **actionable** item naming a correctness defect in
+a source file is a blocker that stops this step closing; **none below is one**, which is a condition
+of the closure recorded above and not an afterthought to it.
+
+- **The tail closes here and nothing carries it further.** Round 13's fix touched only this file, so
+  §7.1 commissions nothing and §7.2 closes the step. **2d-4a-H is complete, not superseded** — the
+  first phase of this chain that is. The five corrective phases D, E, F, G and H are each recorded as
+  superseded by their successor except this one. *(recorded only — it is the rule's output, not work.)*
+- **Seven consecutive rounds with no second provider, and the tail ended inside that run.** Rounds
+  1–6 were Codex; 7–13 were adversarial Opus agents. The bound is now **worse** than when §21.4
+  recorded it and it was never discharged — a prior all seven share is invisible to all seven, and the
+  tail closing is not evidence against it, because the closure is a fact about round 13's *diff* and
+  not about round 13's *thoroughness*. **Round 13 is the last opportunity this tail had, and it went
+  unspent.** `docs/decisions/codex-dispatch-procedure.md` remains the route if a later phase wants it.
+  *(recorded only — `/autoclaude-opus` names exactly one review mechanism, and choosing another is an
+  owner decision, not a rule these files evaluate.)*
+- **The rewritten paragraph is still asserted by nothing.** No test poisons either lock, no test drives
+  a watermark at or above an offending entry's sequence, and no test connects an overflow eviction to
+  this assertion. Thirteen rounds have improved the prose and moved this not at all; the paragraph
+  says so about itself. *(recorded only.)*
+- **"Measure one span, label another" now has a fourth instance and a variant.** M1 is the third span
+  instance — and it occurred **inside the correction block written to fix the second**, which is the
+  strongest available evidence that re-reading a sentence does not catch this shape and only
+  re-deriving the figure does. The phrase/shape collision is the **name** variant: same failure, a
+  label taken from the wrong vocabulary rather than the wrong span. *(recorded only — no instance now
+  stands uncorrected.)*
+- **`docs/reviews/phase-2d-4a-queue.md` still carries no section for rounds 10–13.** §19.4, §20.4 and
+  §21.4 each raised it and it is still unfixed, now for a fourth time. The round-9 policy covers all
+  four identically, so what is missing is a signpost and not a record. **Carried four times is worth
+  noticing about the carrying**, and the tail closing means no later round of this tail will pick it
+  up. *(actionable — it names an absence in a file that exists and a fix of one paragraph; **not a
+  blocker**, because the file it names is the record and not source, so §7.3 permits a later phase to
+  adopt it.)*
+- **R9 remains open, unmeasured and unbounded**, untouched by this round as by every round before it:
+  no count, no cap, no eviction rule for the identity register. *(recorded only — no step of the 2d
+  split owns building a bound for it, which is itself the residue.)*
