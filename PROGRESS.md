@@ -9,7 +9,7 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4b it is **420 lines and 59,800 bytes**, under 64 KiB by 5.7 KB. This
+triggers the move**. As of 2d-4b it is **420 lines and 59,822 bytes**, under 64 KiB by 5.7 KB. This
 iteration archived the spent 2d-4a closure block out of *Next action* and the five per-round
 verification narratives out of *Verification baseline*, each replaced by a pointer, and then spent
 almost exactly what it freed on 2d-4b's own blocks — which is what the archiving was for. **The next
@@ -407,7 +407,7 @@ commissioned a round.
 | **2d-4a-H (round 13 + its fix — the tail CLOSES here, and 2d-4a with it)** | **`811d180`** | ✅ pushed to `origin/main` |
 
 | 2d-4b design consult (Codex; the checkpoint archived first) | `da15079` | ✅ pushed to `origin/main` |
-| **2d-4b — the whole TypeScript half, its review and its fix; round 2 OWED** | `PENDING` | `PENDING` |
+| **2d-4b — the whole TypeScript half, its review and its fix; round 2 OWED** | **`be8d424`** | ✅ pushed to `origin/main` |
 
 **`da15079` changed no source file** — five files, every one of them `PROGRESS.md` or under `docs/` —
 **so the consult commissioned nothing.** The 2d-4b commit changes source in eighteen files and its
