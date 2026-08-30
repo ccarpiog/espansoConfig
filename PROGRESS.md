@@ -461,14 +461,21 @@ and in `git log`._
 | 2d-4a-F — the SHA and push record | `4d90177` | ✅ pushed to `origin/main` |
 | **2d-4a-G — round 12 and its fix; round 13 OWED** | `e334d5b` | ✅ pushed to `origin/main` |
 
-**Each of those source commits is what makes the next round owed.** `125dfa8` changed five files
-under `src-tauri/src/` and made round 9 owed; `6572a29` changed two — the M1 doc paragraph in
-`reconciliation.rs` and one `reason` string in `retained_state_contract.rs`'s `INVENTORY` — and made
-round 10 owed; `22d1afb` changed **one**, two comment hunks in `reconciliation.rs`, and made round
-11 owed; `b854de5` changed **one**, a single sentence of the same doc comment (+4 / −3), and made
-round **12** owed; and this phase's commit changes **one**, the punctuation of that same sentence and
-one deleted clause (+3 / −4), and makes round **13** owed. **Every one of them is comment or
-inventory prose with no executable line changed**, and under §7.1 the unit is the file, so each still
-commissions a round.
+**Each of those source commits is what made the next round owed — and the chain stops here.**
+`125dfa8` changed five files under `src-tauri/src/` and made round 9 owed; `6572a29` changed two and
+made round 10 owed; `22d1afb` changed **one**, two comment hunks in `reconciliation.rs`, and made
+round 11 owed; `b854de5` changed **one**, a single sentence of the same doc comment (+4 / −3), and
+made round **12** owed; `e334d5b` changed **one**, the punctuation of that same sentence and one
+deleted clause (+3 / −4), and made round **13** owed. **Every one of them is comment or inventory
+prose with no executable line changed**, and under §7.1 the unit is the file, so each still
+commissioned a round.
 
-**The tree is clean at `e334d5b`.**
+**`811d180` changed no source file at all** — seven files, every one of them `CLAUDE.md`,
+`PROGRESS.md` or under `docs/` — **so it commissions nothing, and that is what ends the tail.**
+
+| Phase | Commit | Push |
+|---|---|---|
+| 2d-4a-G (round 12 + its fix, NOT closed) | `e334d5b` | ✅ pushed to `origin/main` |
+| **2d-4a-H (round 13 + its fix — the tail CLOSES here, and 2d-4a with it)** | **`811d180`** | ✅ pushed to `origin/main` |
+
+**The tree is clean at `811d180`.**
