@@ -70,6 +70,10 @@ import type {
   BackupTarget,
   BackupTargetName,
   BatchSkipped,
+  AddedContent,
+  AddedContentName,
+  ChangedContent,
+  ChangedContentName,
   ContentKind,
   DecodeError,
   DecodeErrorName,
@@ -78,9 +82,12 @@ import type {
   DocumentShape,
   DraftError,
   DraftErrorName,
+  DuplicateSeam,
   EditError,
   EditErrorName,
   EntrySkipped,
+  ExternalObservation,
+  ExternalObservationName,
   FileKind,
   FindingClass,
   FindingCode,
@@ -117,6 +124,8 @@ import type {
   TriggerKind,
   UnknownReason,
   UnknownReasonName,
+  UnreadableReason,
+  UnreadableReasonName,
   ValueKind,
   VariableKind,
   VerificationFailure,
@@ -1488,3 +1497,297 @@ export function describeBackupReadError(locale: Locale, error: BackupReadError):
   const key = backupReadErrorKey(wireVariantName<BackupReadErrorName>(error));
   return translate(locale, key, scalarOperands(wireVariantOperands(error)));
 } // End of function describeBackupReadError()
+
+// ---------------------------------------------------------------------------
+// The duplicate's seams — a gap Phase 2d-4b's namespace check exposed
+// ---------------------------------------------------------------------------
+//
+// `DuplicateSeam` has had EN/ES keys and a TypeScript wire type since Phase
+// 2c-3c-1 and no key builder, so its three sentences were keys nothing could
+// lawfully render. That is exactly the hole
+// {@link CODE_NAMESPACE_KEY_BUILDERS} exists to close, and it was found by that
+// check rather than by a reader — which is the argument for writing the check
+// generally instead of only over this phase's own four namespaces. It is a
+// bounded correction and not a localization expansion: no key is added, no
+// sentence is changed, and the three that were already there become reachable.
+
+/**
+ * The dictionary key for one join a duplicate creates.
+ *
+ * {@link moveSeamKey}'s twin, minus the source close: a duplicate leaves its
+ * original exactly where it was, so the seam a move opens where the moved lines
+ * used to be does not exist here.
+ *
+ * @param seam - A `DuplicateSeam` as it crossed the boundary.
+ * @returns The key holding that seam's phrase.
+ */
+export function duplicateSeamKey(seam: DuplicateSeam): TranslationKey {
+  return `code.duplicateSeam.${uncapitalize(seam)}`;
+} // End of function duplicateSeamKey()
+
+/**
+ * The phrase one join created by a duplicate reads as.
+ *
+ * @param locale - The dictionary to read from.
+ * @param seam - A duplicate seam as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeDuplicateSeam(locale: Locale, seam: DuplicateSeam): string {
+  return translate(locale, duplicateSeamKey(seam));
+} // End of function describeDuplicateSeam()
+
+// ---------------------------------------------------------------------------
+// The external-change reconciliation codes — Phase 2d-4b
+// ---------------------------------------------------------------------------
+//
+// Four namespaces and fourteen sentences, landed as **keys only** by Phase
+// 2d-4a because `src-tauri/src/dictionary_contract.rs` forces the JSON into the
+// step that declares the Rust enum, and reachable only now: a key with no
+// accessor is a key nothing can render.
+//
+// `ObservedDocument` gets **no** accessor and owes no sentence. It is an address
+// rather than a code — every arm carries a display path and, for two of them, an
+// identity — and which arm it is is answered by what a screen draws rather than
+// by a sentence. `NOT_A_CODE` in `dictionary_contract.rs` names it with that
+// reason, in both directions, so it cannot quietly acquire a namespace either.
+
+/**
+ * The dictionary key for one kind of external change.
+ *
+ * @param name - The variant name of an `ExternalObservation`.
+ * @returns The key holding that change's sentence.
+ */
+export function externalObservationKey(name: ExternalObservationName): TranslationKey {
+  return `code.externalObservation.${uncapitalize(name)}`;
+} // End of function externalObservationKey()
+
+/**
+ * The dictionary key for one reason a file's text is not available.
+ *
+ * @param name - The variant name of an `UnreadableReason`.
+ * @returns The key holding that reason's sentence.
+ */
+export function unreadableReasonKey(name: UnreadableReasonName): TranslationKey {
+  return `code.unreadableReason.${uncapitalize(name)}`;
+} // End of function unreadableReasonKey()
+
+/**
+ * The dictionary key for what a newly seen file's bytes projected to.
+ *
+ * @param name - The variant name of an `AddedContent`.
+ * @returns The key holding that outcome's sentence.
+ */
+export function addedContentKey(name: AddedContentName): TranslationKey {
+  return `code.addedContent.${uncapitalize(name)}`;
+} // End of function addedContentKey()
+
+/**
+ * The dictionary key for what a changed file's new bytes projected to.
+ *
+ * @param name - The variant name of a `ChangedContent`.
+ * @returns The key holding that outcome's sentence.
+ */
+export function changedContentKey(name: ChangedContentName): TranslationKey {
+  return `code.changedContent.${uncapitalize(name)}`;
+} // End of function changedContentKey()
+
+/**
+ * The sentence one external change reads as.
+ *
+ * **Four sentences about what happened to a file, and not one of them says what
+ * this application is going to do about it.** None promises that anything has
+ * been reloaded, that a draft still applies, or that the file cannot change
+ * again before the reader finishes the sentence.
+ *
+ * The operands are passed through {@link scalarOperands} like every other
+ * describer's, so a sentence that later names one gets it. None of the four
+ * names one today: the sequence is arbitration data rather than something to
+ * read, and the document and the content are values a screen draws rather than
+ * interpolates.
+ *
+ * @param locale - The dictionary to read from.
+ * @param observation - An observation as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeExternalObservation(
+  locale: Locale,
+  observation: ExternalObservation
+): string {
+  const key = externalObservationKey(wireVariantName<ExternalObservationName>(observation));
+  return translate(locale, key, scalarOperands(wireVariantOperands(observation)));
+} // End of function describeExternalObservation()
+
+/**
+ * The sentence one reason a file's text is unavailable reads as.
+ *
+ * **Six sentences, and the first of them is not a failed read.** `NotUtf8` means
+ * the bytes arrived and are not text, which is why its sentence says this
+ * application will not guess rather than that it could not read the file. The
+ * other five are the operating system's own refusals, and `Other` is the arm for
+ * everything `std::io::ErrorKind` may grow: it carries no operand, because the
+ * kind's own spelling is untranslated developer prose.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - A reason as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeUnreadableReason(locale: Locale, reason: UnreadableReason): string {
+  const key = unreadableReasonKey(wireVariantName<UnreadableReasonName>(reason));
+  return translate(locale, key, scalarOperands(wireVariantOperands(reason)));
+} // End of function describeUnreadableReason()
+
+/**
+ * The sentence a newly seen file's content outcome reads as.
+ *
+ * A claim about **this application's reading** of the file and never about the
+ * file's correctness: `Projected` says the bytes were read and can be shown, not
+ * that what they hold is valid espanso configuration. What the projection found
+ * is its own findings' business.
+ *
+ * @param locale - The dictionary to read from.
+ * @param content - An addition's content as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeAddedContent(locale: Locale, content: AddedContent): string {
+  const key = addedContentKey(wireVariantName<AddedContentName>(content));
+  return translate(locale, key, scalarOperands(wireVariantOperands(content)));
+} // End of function describeAddedContent()
+
+/**
+ * The sentence a changed file's content outcome reads as.
+ *
+ * {@link describeAddedContent}'s twin, and a separate sentence set because the
+ * two answer separate questions: *this file is new to me* and *this file is one
+ * I had already read* are two facts, and one sentence for both would be untrue
+ * of one of them.
+ *
+ * @param locale - The dictionary to read from.
+ * @param content - A change's content as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeChangedContent(locale: Locale, content: ChangedContent): string {
+  const key = changedContentKey(wireVariantName<ChangedContentName>(content));
+  return translate(locale, key, scalarOperands(wireVariantOperands(content)));
+} // End of function describeChangedContent()
+
+// ---------------------------------------------------------------------------
+// Every `code.` namespace, and the builder that reaches it — Phase 2d-4b
+// ---------------------------------------------------------------------------
+
+/**
+ * The `code.<namespace>` a builder above produces keys for, per builder.
+ *
+ * **A registry of function references, never of namespace strings.** A manifest
+ * of strings could claim an accessor exists without naming callable code; each
+ * value below *is* the builder, so an entry cannot outlive the function it
+ * names — deleting the function is a compile error here.
+ *
+ * `codes.test.ts` compares this registry's key set against the complete set of
+ * `code.*` namespaces in `en.json`, **in both directions**, admitting only
+ * {@link CODE_NAMESPACES_WITHOUT_A_BUILDER}. That is what makes a namespace
+ * added later unable to land keys with no accessor: it fails until it acquires a
+ * builder or is deliberately entered into that small set. That set is *complete*
+ * because the same suite asserts that every `code.` key has exactly three parts;
+ * a four-part `code.<namespace>.<variant>.<operand>` key would name a namespace
+ * the comparison never sees, and would need no entry here.
+ *
+ * The same suite also **calls** every builder below, with one sample argument
+ * per namespace, and checks that the key it returns begins with
+ * `code.<the name it is registered under>.`. That probe is at run time because
+ * point 4 below is true.
+ *
+ * ## Four things it does not establish, stated because each is assumable
+ *
+ * 1. **It does not prove translation meaning.** It proves a key can be reached
+ *    through a typed builder. Whether the sentence says the right thing, and
+ *    whether the Spanish one is Spanish, is checked by nothing in this
+ *    repository.
+ * 2. **It does not prove anything renders these.** A builder with no caller
+ *    satisfies it — and that is deliberate, because a code with no string is
+ *    worse than a code with no caller.
+ * 3. **TypeScript does not force a builder to be registered here.** A new
+ *    builder that nobody adds to this object compiles; what fails is the
+ *    *namespace* half — a dictionary namespace with no entry here. So this
+ *    catches an unreachable key and not an unregistered function.
+ * 4. **TypeScript does not force a builder to be registered under its own
+ *    namespace either, and the `satisfies` below cannot.** Its parameter is
+ *    `never`, which every builder's parameter accepts, so it says each value is
+ *    *some* key builder and nothing about which namespace that builder emits —
+ *    a namespace that lives in the function's body and not in its signature.
+ *    `addedContent: changedContentKey` would type-check, match both key sets,
+ *    and make `code.addedContent.*` unreachable. The runtime probe named above
+ *    is the only thing that catches it.
+ */
+export const CODE_NAMESPACE_KEY_BUILDERS = {
+  addedContent: addedContentKey,
+  backupError: backupErrorKey,
+  backupReadError: backupReadErrorKey,
+  backupReadStep: backupReadStepKey,
+  backupRootState: backupRootStateKey,
+  backupStep: backupStepKey,
+  backupTarget: backupTargetKey,
+  batchSkipped: batchSkippedKey,
+  changedContent: changedContentKey,
+  commandError: commandErrorKey,
+  contentKind: contentKindKey,
+  decodeError: decodeErrorKey,
+  diagnosticCode: diagnosticCodeKey,
+  documentShape: documentShapeKey,
+  draftError: draftErrorKey,
+  duplicateSeam: duplicateSeamKey,
+  editError: editErrorKey,
+  entrySkipped: entrySkippedKey,
+  externalObservation: externalObservationKey,
+  fileKind: fileKindKey,
+  findingClass: findingClassKey,
+  findingCode: findingCodeKey,
+  hazardKind: hazardKindKey,
+  invariantViolation: invariantViolationKey,
+  lineEnding: lineEndingKey,
+  matchBadge: matchBadgeKey,
+  moveSeam: moveSeamKey,
+  nodeKind: nodeKindKey,
+  notReencodable: notReencodableKey,
+  pathError: pathErrorKey,
+  presentationNote: presentationNoteKey,
+  reapplyPlacement: reapplyPlacementKey,
+  reapplyRefusal: reapplyRefusalKey,
+  reapplyResolution: reapplyResolutionKey,
+  rotationOutcome: rotationOutcomeKey,
+  saveError: saveErrorKey,
+  saveResult: saveResultKey,
+  saveVerdict: saveVerdictKey,
+  scalarStyle: scalarStyleKey,
+  syntaxError: syntaxErrorKey,
+  targetDifference: targetDifferenceKey,
+  triggerKind: triggerKindKey,
+  unknownReason: unknownReasonKey,
+  unreadableReason: unreadableReasonKey,
+  valueKind: valueKindKey,
+  variableKind: variableKindKey,
+  verificationFailure: verificationFailureKey,
+  writeError: writeErrorKey,
+  writeStep: writeStepKey
+} as const satisfies Readonly<Record<string, (value: never) => TranslationKey>>;
+
+/**
+ * The `code.` namespaces that deliberately have no key builder.
+ *
+ * **Exactly three, and every one for the same stated reason**: `WorkspaceError`,
+ * `DiscoveryError` and `IdentityError` never cross the Tauri boundary in their
+ * own shape. `CommandError` flattens their conditions, so the frontend has no
+ * wire type whose variants a builder could take, and their sentences exist
+ * because a code with no string is worse than a code with no caller — the same
+ * ruling `src-tauri/src/dictionary_contract.rs` records for them.
+ *
+ * **Not a suppression list.** `codes.test.ts` asserts this set exactly, in both
+ * directions against the dictionary, so an entry that stops naming a real
+ * namespace fails just as loudly as a namespace that is neither built nor listed
+ * here. Adding a fourth entry is a claim that something else on this boundary
+ * cannot be rendered through a typed builder, and it has to be argued here.
+ */
+export const CODE_NAMESPACES_WITHOUT_A_BUILDER = [
+  'workspaceError',
+  'discoveryError',
+  'identityError'
+] as const;

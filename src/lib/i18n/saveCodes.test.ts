@@ -32,6 +32,7 @@ import {
   describeFindingClass,
   describeFindingCode,
   describeInvariantViolation,
+  describeDuplicateSeam,
   describeMoveSeam,
   describeNodeKind,
   describeNotReencodable,
@@ -94,6 +95,10 @@ function renderings(locale: Locale): readonly (readonly [string, string])[] {
     ['BackupStep', describeBackupStep(locale, 'PublishBackupFile')],
     ['RotationOutcome', describeRotationOutcome(locale, 'ScanFailed')],
     ['MoveSeam', describeMoveSeam(locale, 'CarriedRunsJoin')],
+    // `DuplicateSeam` has had its three sentences since Phase 2c-3c-1 and no
+    // accessor until Phase 2d-4b, when the general namespace-to-accessor check
+    // in `codes.test.ts` found them unreachable.
+    ['DuplicateSeam', describeDuplicateSeam(locale, 'CopiedRunsJoin')],
     [
       'FindingCode',
       describeFindingCode(locale, { VariableTypeNotRecognised: { declared: 'global' } })

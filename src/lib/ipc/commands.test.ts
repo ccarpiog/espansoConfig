@@ -1,5 +1,5 @@
 /**
- * The fifteen command wrappers, against a stubbed `invoke`.
+ * The sixteen command wrappers, against a stubbed `invoke`.
  *
  * What is under test here is the *boundary*, not the Rust behind it: which
  * command name each wrapper calls, which arguments it sends, and — the part
@@ -64,6 +64,7 @@ const {
   createMatch,
   deleteMatch,
   documentText,
+  drainExternalChanges,
   duplicateMatch,
   getDocument,
   getMatch,
@@ -148,7 +149,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the fifteen wire names, in order, and export no sixteenth wrapper', async () => {
+  it('call the sixteen wire names, in order, and export no seventeenth wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -171,11 +172,13 @@ describe('the command wrappers', () => {
     await listBackupBatches();
     await listBackupEntries(BATCH_ID);
     await readBackupText(ENTRY_ID, 1);
+    await drainExternalChanges(0);
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
       'createMatch',
       'deleteMatch',
       'documentText',
+      'drainExternalChanges',
       'duplicateMatch',
       'getDocument',
       'getMatch',
@@ -189,7 +192,7 @@ describe('the command wrappers', () => {
       'saveMatch',
       'saveRawDocument'
     ]);
-  }); // End of the "call the fifteen wire names" case
+  }); // End of the "call the sixteen wire names" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence
@@ -719,3 +722,87 @@ describe('the three read-only backup wrappers', () => {
     expect(answer.value.root).toBe('Missing');
   }); // End of the "missing folder is a value" case
 }); // End of the "three read-only backup wrappers" suite
+
+describe('the drain wrapper', () => {
+  it('sends the watermark under the wire name the argument really has', async () => {
+    // `drain_external_changes` takes `after_sequence` in Rust, and Tauri's
+    // argument codec converts a camelCase key on the way in — the same
+    // convention `baseRevision` already relies on. A key spelled `after_sequence`
+    // here would arrive as a *different* argument and the command would refuse
+    // to deserialize, which no type on this side would notice.
+    await drainExternalChanges(12);
+    expect(calls[0]?.command).toBe('drain_external_changes');
+    expect(calls[0]?.args).toEqual({ afterSequence: 12 });
+  }); // End of the "wire name of the argument" case
+
+  it('sends zero as a watermark like any other, rather than omitting it', async () => {
+    // Zero means *everything you have*, and it is a value rather than an
+    // absence. A wrapper that dropped a falsy watermark would send `{}` and
+    // leave the command to default it, which is the caller's decision arriving
+    // as a coincidence of JavaScript truthiness.
+    await drainExternalChanges(0);
+    expect(calls[0]?.args).toEqual({ afterSequence: 0 });
+  }); // End of the "zero is a value" case
+
+  it('hands the batch straight back, retaining nothing between two drains', async () => {
+    // The whole of this wrapper's contract: it owns no watermark, compares no
+    // epoch, and does not consume the batch it returns. Two calls with the same
+    // argument are two independent calls, and the second is not answered from
+    // anything the first kept.
+    const batch = {
+      epoch: 4,
+      newest_sequence: 9,
+      observations: [
+        {
+          Removed: {
+            sequence: 9,
+            document: { Addressable: { document: 2, relative_path: 'match/base.yml' } },
+            previous_revision: 'a'.repeat(64)
+          }
+        }
+      ],
+      discarded: 0
+    };
+    outcome = { resolve: batch };
+
+    const first = await drainExternalChanges(5);
+    const second = await drainExternalChanges(5);
+
+    expect(first.ok).toBe(true);
+    if (!first.ok) {
+      throw new Error('unreachable');
+    }
+    expect(first.value).toEqual(batch);
+    expect(second.ok).toBe(true);
+    if (!second.ok) {
+      throw new Error('unreachable');
+    }
+    expect(second.value).toEqual(batch);
+    expect(calls.map((call) => call.args)).toEqual([
+      { afterSequence: 5 },
+      { afterSequence: 5 }
+    ]);
+  }); // End of the "retains nothing" case
+
+  it('returns a typed failure rather than throwing', async () => {
+    outcome = { reject: { code: 'noWorkspaceOpen' } };
+    const answer = await drainExternalChanges(0);
+    expect(answer.ok).toBe(false);
+    if (answer.ok) {
+      throw new Error('unreachable');
+    }
+    expect(answer.failure.kind).toBe('command');
+    if (answer.failure.kind !== 'command') {
+      throw new Error('unreachable');
+    }
+    // The only failure this command has. A drain is a read, so there is no
+    // refusal, no conflict and no acknowledgement anywhere in its answer.
+    expect(answer.failure.error.code).toBe('noWorkspaceOpen');
+  }); // End of the "typed failure" case
+
+  it('sends nothing but the watermark, so no path and no text can leak through it', async () => {
+    await drainExternalChanges(3);
+    const json = JSON.stringify(calls[0]?.args);
+    expect(json).toBe('{"afterSequence":3}');
+  });
+}); // End of the "drain wrapper" suite

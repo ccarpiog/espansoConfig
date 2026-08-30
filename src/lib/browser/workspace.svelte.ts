@@ -45,6 +45,7 @@ import {
   createMatch,
   deleteMatch,
   documentText,
+  drainExternalChanges,
   duplicateMatch,
   getDocument,
   getMatch,
@@ -83,6 +84,7 @@ import type {
   MatchView,
   NewMatch,
   NewMatchPosition,
+  ReconciliationBatch,
   SaveResult,
   WorkspaceSummary
 } from '../ipc/types';
@@ -124,6 +126,14 @@ import { ALL_DOCUMENTS, buildSidebar, holdsMatches, sameSelection } from './side
  * a file on disk, and they are here for the same reason the others are: a test
  * that cannot run Tauri still has to be able to drive a refusal, a conflict and
  * a commit and watch what this state does about each.
+ *
+ * **Since Phase 2d-4b there is a thirteenth member that is neither**:
+ * {@link BrowserCommands.drainExternalChanges} reads what changed on disk
+ * underneath the window. It is required like every other member — an optional
+ * one would let an omission compile into *there is none*, which is the shape
+ * this repository refuses everywhere — and it is added here rather than on a
+ * second surface because this step is free to update every implementation of
+ * this interface, which the step that added {@link BackupCommands} was not.
  */
 export interface BrowserCommands {
   /**
@@ -279,6 +289,26 @@ export interface BrowserCommands {
     acknowledgement: Acknowledgement,
     reload: ReloadAfterRawSave
   ): Promise<RawSaveOutcome>;
+  /**
+   * Hands back everything this session observed on disk above `afterSequence`.
+   *
+   * **The one member that is neither a read of the projection nor a write.** It
+   * is the authoritative half of the reconciliation protocol, and it is here for
+   * the reason every other member is: a test that cannot run Tauri still has to
+   * be able to drive a changed file, an addition, a removal, a lost entry and a
+   * stale epoch, and watch what a coordinator does about each.
+   *
+   * **Nothing in this file calls it, and that is deliberate.** Phase 2d-4b puts
+   * the drain on this surface and stops; the watermark, the epoch comparison,
+   * the `discarded` response and the decision of *when* a drain fires are all
+   * Phase 2d-5's, and `BrowserState` gains no reconciliation state here.
+   *
+   * @param afterSequence - The highest sequence the caller has already accepted,
+   *   or `0` for everything. Required, because the only honest source for it is
+   *   the caller's own installed state.
+   * @returns The batch, or a failure.
+   */
+  drainExternalChanges(afterSequence: number): Promise<CommandResult<ReconciliationBatch>>;
 }
 
 /** The real boundary, for the running application. */
@@ -294,7 +324,8 @@ export const REAL_COMMANDS: BrowserCommands = {
   createMatch,
   deleteMatch,
   duplicateMatch,
-  saveRawDocument
+  saveRawDocument,
+  drainExternalChanges
 };
 
 /**

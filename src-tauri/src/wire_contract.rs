@@ -37,6 +37,10 @@
 //!   `MENU_COMMAND_NAMES` in both directions, plus an assertion that none of the
 //!   six forbidden mutating names appears in either. Seven commands are
 //!   registered as of Phase 1c-2b-2a, the newest being `commands::document_text`.
+//! - **The one event name.** `RECONCILIATION_EVENT_NAMES` in
+//!   `src/lib/ipc/events.ts` is compared with `crate::events::RECONCILIATION_READY`,
+//!   because a fake-driven frontend test and the Rust emitter's own test can
+//!   both pass while spelling two different names.
 //!
 //! What it still cannot check is the **type text of the read model's own
 //! properties**: `readonly byte_len: string` in `types.ts` would pass, because
@@ -62,7 +66,7 @@ use espansoconfig_core::emit::DecodeError;
 use espansoconfig_core::emit::NotReencodable;
 use espansoconfig_core::model::{
     ContentKind, Diagnostic, DiagnosticCode, DocumentContext, DocumentShape, DocumentView,
-    MatchBadge, TriggerKind, UnknownReason, ValueKind, ValueView, VariableKind,
+    MatchBadge, MatchId, TriggerKind, UnknownReason, ValueKind, ValueView, VariableKind,
 };
 use espansoconfig_core::patch::{
     DocumentPath, DuplicateSeam, EditError, MoveSeam, PathError, PathSegment, PresentationNote,
@@ -80,11 +84,17 @@ use espansoconfig_core::syntax::{
     HazardKind, InvariantViolation, NodeKind, OffsetOutOfDomain, ParseFailure, SyntaxError,
 };
 use espansoconfig_core::validate::{Finding, FindingClass, FindingCode};
+use espansoconfig_core::watch::correspond::{CorrespondenceEntry, CorrespondenceTable};
 use espansoconfig_core::wire::WirePath;
 use espansoconfig_core::workspace::{project_source, DocumentSummary, WorkspaceSummary};
 use espansoconfig_core::{ContentRevision, DocumentId, LineEnding, ScalarStyle};
 
 use crate::error::{every_command_error, CommandError};
+use crate::reconciliation::{
+    AddedContent, ChangedContent, ExternalObservation, ObservedDocument, ReconciliationBatch,
+    ReconciliationWake, UnreadableReason,
+};
+use crate::rust_source::declared_variants;
 
 /// A synthetic match file exercising every shape the wire types describe.
 ///
@@ -197,8 +207,15 @@ fn read_repository_file(relative: &str) -> String {
 /// Removes `/* … */` and `// …` from TypeScript source.
 ///
 /// Deliberately naive — it has no notion of a string literal — which is safe
-/// here because neither file contains a literal holding `//` or `/*`, and a
-/// future one that did would break this loudly rather than quietly.
+/// for the files it is applied to because none of them contains a literal
+/// holding `//` or `/*`, and a future one that did would break this loudly
+/// rather than quietly.
+///
+/// **`src/lib/ipc/events.ts` is the first file that does**, and it is therefore
+/// deliberately **not** read through this function: its one event name is
+/// `workspace://reconciliation-ready`, and stripping would eat that literal and
+/// the rest of its line. [`declared_event_names`] reads that file whole and says
+/// what makes doing so safe for the one question it asks.
 fn strip_comments(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let bytes: Vec<char> = source.chars().collect();
@@ -1430,13 +1447,23 @@ fn every_edit_error_variant_crosses_as_an_object() {
 ///
 /// Phase 2d-4a adds `drain_external_changes`, taking the **registered** surface
 /// to sixteen workspace commands and seventeen in all, and it writes nothing
-/// either. It is the first name ever registered in Rust before the frontend
-/// declares it, because `docs/decisions/2d-4-split-notes.md` cuts 2d-4 on the
+/// either. It was the first name ever registered in Rust before the frontend
+/// declared it, because `docs/decisions/2d-4-split-notes.md` cuts 2d-4 on the
 /// seam the consult's Q3 draws — Rust answers `Result<T, CommandError>` and the
 /// TypeScript wrapper turns it into a `CommandResult<T>` — and puts the wrapper
-/// in 2d-4b. [`AWAITING_FRONTEND_DECLARATION`] is that asymmetry written down
-/// where it fails rather than described in a record, and it is checked in both
-/// directions so that 2d-4b cannot add the name without deleting the entry.
+/// in 2d-4b.
+///
+/// **Phase 2d-4b closes that asymmetry, and the exception it needed is gone
+/// rather than emptied.** While it stood, a constant named the one pending name
+/// and this test checked it in *both* directions — registered in Rust, absent
+/// from `COMMAND_NAMES` — so declaring the wrapper without deleting the entry
+/// failed, and deleting the entry without declaring the wrapper failed too.
+/// That is why the two edits had to land together and why no intermediate state
+/// was ever committed. With the wrapper declared, the registered set and the
+/// declared set are simply equal, which is the strongest form this check has
+/// and the one it is meant to be in: **there is no exception list here now, and
+/// a later step that needs one re-adds it with its own reason rather than
+/// finding an empty one already in place.**
 #[test]
 fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
@@ -1447,9 +1474,13 @@ fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        15,
-        "the frontend declares nine read-only commands and six that write; the tenth reader is \
-         2d-4b's: {workspace:?}"
+        16,
+        "the frontend declares ten read-only commands and six that write: {workspace:?}"
+    );
+    assert!(
+        workspace.contains("drain_external_changes"),
+        "drain_external_changes is Phase 2d-4b's tenth reader and must be declared \
+         where the frontend can call it"
     );
     let writing = [
         "move_match",
@@ -1488,30 +1519,9 @@ fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
     assert_eq!(menu.len(), 1, "the menu declares one command: {menu:?}");
     let declared: BTreeSet<String> = workspace.union(&menu).cloned().collect();
     let registered = registered_commands();
-    // Both directions on the one deliberate gap, so neither side of it can rot:
-    // a name here that Rust does not register is a stale entry, and a name here
-    // that the frontend *does* declare is an entry 2d-4b forgot to delete.
-    for pending in AWAITING_FRONTEND_DECLARATION {
-        assert!(
-            registered.contains(*pending),
-            "{pending} is listed as awaiting a frontend declaration and is not registered at all"
-        );
-        assert!(
-            !declared.contains(*pending),
-            "{pending} is declared by the frontend now, so delete its \
-             AWAITING_FRONTEND_DECLARATION entry"
-        );
-    } // End of the loop over the names Rust registers ahead of the frontend
-    let reachable: BTreeSet<String> = declared
-        .union(
-            &AWAITING_FRONTEND_DECLARATION
-                .iter()
-                .map(|name| (*name).to_owned())
-                .collect(),
-        )
-        .cloned()
-        .collect();
-    assert_same_names("the registered commands", &registered, &reachable);
+    // No exception set between the two any more: every registered command is a
+    // command the frontend declares, and every declared command is registered.
+    assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
         17,
@@ -1524,22 +1534,6 @@ fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
         );
     }
 } // End of function the_registered_commands_are_the_workspace_sixteen_and_the_menu_command()
-
-/// The commands Rust registers that the frontend has not declared yet.
-///
-/// **A bounded, dated exception and never a suppression list.** Every entry is
-/// checked in both directions by the test above: it must be registered, and it
-/// must be absent from `COMMAND_NAMES`, so the step that declares it is forced
-/// to delete the entry in the same change. An empty list is the ordinary state
-/// and is what this list is expected to return to.
-///
-/// One entry today. `drain_external_changes` is registered by Phase 2d-4a and
-/// declared by 2d-4b, because `docs/decisions/2d-4-split-notes.md` cuts the step
-/// on the Rust/TypeScript seam and the wrapper is deliberately on the far side
-/// of it. What that costs, said plainly: between the two steps the command is
-/// dispatchable and **no frontend code can call it**, so nothing in the window
-/// reconciles anything.
-const AWAITING_FRONTEND_DECLARATION: &[&str] = &["drain_external_changes"];
 
 /// The names no read of the backup tree may so much as mention.
 ///
@@ -3593,3 +3587,541 @@ fn a_backup_identity_crosses_and_returns_unchanged() {
         "an identity that went out must come back naming the same entry"
     );
 } // End of function a_backup_identity_crosses_and_returns_unchanged()
+
+// ---------------------------------------------------------------------------
+// The external-change reconciliation wire — Phase 2d-4b
+// ---------------------------------------------------------------------------
+//
+// Phase 2d-4a put five enums and four structs on this wire and nothing read
+// them from the TypeScript side, so nothing could drift *visibly*. These are
+// the checks that make a Rust rename or a new variant fail `cargo test` rather
+// than reach a window as an `undefined`.
+//
+// The limit stated once, here, rather than implied by each test below: this
+// module compares **names** — property names, variant names and the operand
+// names inside a tagged variant — in both directions. It does not check the
+// TypeScript property *type text*, so `readonly sequence: string` would pass,
+// exactly as the header says of `byte_len`. And no check anywhere makes a
+// JavaScript `number` a lossless mirror of a Rust `u64`: an epoch and a
+// sequence are exact only inside the safe-integer range.
+
+/// The reconciliation module's own source, for the completeness checks.
+///
+/// All five enums are declared in one file, so one read answers every question
+/// about what Rust really declares. Read rather than listed for
+/// `every_save_transaction_sample_list_is_its_enums_declaration`'s reason: a
+/// list checked against itself is a list that cannot fail.
+fn reconciliation_source() -> String {
+    read_repository_file("src-tauri/src/reconciliation.rs")
+}
+
+/// A document identity for a sample that carries one.
+fn a_document() -> DocumentId {
+    DocumentId(2)
+}
+
+/// A relative path, rendered for display.
+fn a_relative_path() -> WirePath {
+    WirePath::from(PathBuf::from("match/base.yml"))
+}
+
+/// One value of every [`ObservedDocument`] variant.
+fn observed_document_samples() -> Vec<ObservedDocument> {
+    vec![
+        ObservedDocument::Addressable {
+            document: a_document(),
+            relative_path: a_relative_path(),
+        },
+        ObservedDocument::Named {
+            document: a_document(),
+            relative_path: a_relative_path(),
+        },
+        ObservedDocument::Unnamed {
+            relative_path: a_relative_path(),
+        },
+    ]
+} // End of function observed_document_samples()
+
+/// One value of every [`UnreadableReason`] variant.
+fn unreadable_reason_samples() -> Vec<UnreadableReason> {
+    vec![
+        UnreadableReason::NotUtf8 { offset: 12 },
+        UnreadableReason::PermissionDenied {},
+        UnreadableReason::InvalidData {},
+        UnreadableReason::TimedOut {},
+        UnreadableReason::Interrupted {},
+        UnreadableReason::Other {},
+    ]
+} // End of function unreadable_reason_samples()
+
+/// The projection an observation's content arm carries.
+fn a_disk_projection() -> Box<DocumentView> {
+    Box::new(project("match/base.yml", MATCH_FILE))
+}
+
+/// The correspondence evidence a projected change can carry.
+fn a_correspondence_table() -> CorrespondenceTable {
+    CorrespondenceTable {
+        base_revision: a_revision(),
+        disk_revision: ContentRevision::of_bytes(b"b"),
+        entries: vec![CorrespondenceEntry {
+            base: MatchId {
+                document: a_document(),
+                revision: a_revision(),
+                node: a_node(),
+            },
+            exact: ReapplyResolution::Refused {
+                reason: ReapplyRefusal::NoExactCorrespondence,
+            },
+            editor: ReapplyResolution::Targetless {},
+        }],
+    }
+} // End of function a_correspondence_table()
+
+/// One value of every [`AddedContent`] variant.
+fn added_content_samples() -> Vec<AddedContent> {
+    vec![
+        AddedContent::Projected {
+            disk: a_disk_projection(),
+            findings: vec![a_finding()],
+        },
+        AddedContent::Unreadable {
+            reason: UnreadableReason::NotUtf8 { offset: 12 },
+        },
+    ]
+} // End of function added_content_samples()
+
+/// One value of every [`ChangedContent`] variant.
+fn changed_content_samples() -> Vec<ChangedContent> {
+    vec![
+        ChangedContent::Projected {
+            disk_text: MATCH_FILE.to_owned(),
+            disk: a_disk_projection(),
+            findings: vec![a_finding()],
+            correspondences: Some(a_correspondence_table()),
+        },
+        ChangedContent::Unreadable {
+            reason: UnreadableReason::NotUtf8 { offset: 12 },
+        },
+    ]
+} // End of function changed_content_samples()
+
+/// The sidebar row an addition carries.
+fn an_added_summary() -> DocumentSummary {
+    DocumentSummary {
+        id: DocumentId(9),
+        path: WirePath::from(PathBuf::from("/nowhere/match/new.yml")),
+        relative_path: WirePath::from(PathBuf::from("match/new.yml")),
+        kind: FileKind::MatchFile,
+        disabled: false,
+        read_only: false,
+        loaded: false,
+    }
+} // End of function an_added_summary()
+
+/// One value of every [`ExternalObservation`] variant.
+///
+/// An operand check can only compare what a sample really writes, and
+/// [`every_reconciliation_placeholder_names_an_operand_serde_writes`] counts a
+/// payload field only when `serde` writes it as a string or a number. So a
+/// `None` writes `null` and contributes nothing, and a nested arm writes an
+/// object whose keys are never read either.
+///
+/// **These are not the fullest shape every arm admits, and what that costs runs
+/// in the safe direction.** `Changed` carries both revisions, so `{sequence}`,
+/// `{previous_revision}` and `{disk_revision}` are permitted for its sentence;
+/// its content arm is `Unreadable` and that changes nothing, because `Projected`
+/// is an object too and neither contributes an operand. `Removed` carries
+/// `previous_revision: None`, so `{previous_revision}` is **not** permitted for
+/// `code.externalObservation.removed` — a dictionary that named it fails this
+/// module rather than passing it. The mistake a narrow sample can produce is a
+/// refused sentence, never a brace that reaches a screen; widening one is the
+/// deliberate act, because it *permits* a placeholder and the emitter must
+/// really write that field for every value of the arm.
+fn external_observation_samples() -> Vec<ExternalObservation> {
+    vec![
+        ExternalObservation::Changed {
+            sequence: 4,
+            document: ObservedDocument::Addressable {
+                document: a_document(),
+                relative_path: a_relative_path(),
+            },
+            previous_revision: Some(a_revision()),
+            disk_revision: ContentRevision::of_bytes(b"b"),
+            content: ChangedContent::Unreadable {
+                reason: UnreadableReason::NotUtf8 { offset: 12 },
+            },
+        },
+        ExternalObservation::Added {
+            sequence: 5,
+            document_summary: an_added_summary(),
+            content: AddedContent::Unreadable {
+                reason: UnreadableReason::NotUtf8 { offset: 12 },
+            },
+        },
+        ExternalObservation::Removed {
+            sequence: 6,
+            document: ObservedDocument::Named {
+                document: DocumentId(9),
+                relative_path: WirePath::from(PathBuf::from("match/new.yml")),
+            },
+            previous_revision: None,
+        },
+        ExternalObservation::Unreadable {
+            sequence: 7,
+            document: ObservedDocument::Unnamed {
+                relative_path: WirePath::from(PathBuf::from("match/stranger.yml")),
+            },
+            reason: UnreadableReason::PermissionDenied {},
+        },
+    ]
+} // End of function external_observation_samples()
+
+/// Every reconciliation struct paired with the JSON `serde` really writes.
+///
+/// Struct literals rather than a projection, exactly as
+/// [`save_transaction_structs`] uses them and for the same guarantee: a field
+/// added to any of them makes this module fail to compile.
+fn reconciliation_structs() -> Vec<(&'static str, Value)> {
+    vec![
+        (
+            "ReconciliationWake",
+            json_of(&ReconciliationWake {
+                workspace_epoch: 3,
+                newest_sequence: 7,
+            }),
+        ),
+        (
+            "ReconciliationBatch",
+            json_of(&ReconciliationBatch {
+                epoch: 3,
+                newest_sequence: 7,
+                observations: external_observation_samples(),
+                discarded: 0,
+            }),
+        ),
+        ("CorrespondenceTable", json_of(&a_correspondence_table())),
+        (
+            "CorrespondenceEntry",
+            json_of(&a_correspondence_table().entries[0]),
+        ),
+    ]
+} // End of function reconciliation_structs()
+
+/// Every reconciliation enum, its declaration name, and the samples for it.
+///
+/// One table, so a sample list and the union it is compared against cannot name
+/// different enums. [`ObservedDocument`] is in it even though it owes no
+/// dictionary namespace: its **shape** is checked here exactly like the other
+/// four, and the placeholder check below is what treats it separately, by
+/// asserting it has no `code.` keys rather than by skipping it.
+fn reconciliation_enums() -> Vec<(&'static str, Vec<Value>)> {
+    vec![
+        (
+            "ObservedDocument",
+            observed_document_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "UnreadableReason",
+            unreadable_reason_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "AddedContent",
+            added_content_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "ChangedContent",
+            changed_content_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "ExternalObservation",
+            external_observation_samples().iter().map(json_of).collect(),
+        ),
+    ]
+} // End of function reconciliation_enums()
+
+/// Every reconciliation sample list is its enum's declaration.
+///
+/// **Read from `src-tauri/src/reconciliation.rs`, not from the list.** A list
+/// checked against itself cannot fail, and this is the same guard
+/// [`every_save_transaction_sample_list_is_its_enums_declaration`] gives the
+/// save transaction's eighteen enums. A variant added in Rust and forgotten here
+/// fails this test rather than reaching a screen with no shape behind it.
+#[test]
+fn every_reconciliation_sample_list_is_its_enums_declaration() {
+    let source = reconciliation_source();
+    let mut variants = 0usize;
+    for (name, samples) in reconciliation_enums() {
+        let declared = declared_variants(&source, name);
+        let enumerated: BTreeSet<String> = samples.iter().map(variant_name).collect();
+        assert_same_names(&format!("the {name} declaration"), &declared, &enumerated);
+        assert_eq!(
+            samples.len(),
+            enumerated.len(),
+            "the {name} sample list holds two instances of one variant"
+        );
+        variants += samples.len();
+    } // End of the loop over the reconciliation enums
+    assert_eq!(
+        variants, 17,
+        "Phase 2d-4a put seventeen reconciliation variants on this wire: \
+         ObservedDocument's three, UnreadableReason's six, AddedContent's two, \
+         ChangedContent's two and ExternalObservation's four; this list now \
+         holds {variants}"
+    );
+} // End of function every_reconciliation_sample_list_is_its_enums_declaration()
+
+/// Every reconciliation union declares exactly the Rust variants.
+///
+/// All five are all-object unions, so each is compared against its `…Name` twin
+/// — which is what [`name_union_of`] derives from the samples rather than being
+/// told.
+#[test]
+fn every_reconciliation_union_declares_exactly_the_rust_variants() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let mut checked = 0usize;
+    for (name, samples) in reconciliation_enums() {
+        let union = name_union_of(name, &samples);
+        assert_eq!(
+            union,
+            format!("{name}Name"),
+            "every arm of {name} is a struct variant, so it crosses as an object \
+             and its names live in a `…Name` union"
+        );
+        let rust: BTreeSet<String> = samples.iter().map(variant_name).collect();
+        let declared = union_members(&source, &union);
+        assert_same_names(&format!("type {union}"), &rust, &declared);
+        checked += 1;
+    } // End of the loop over the reconciliation enums
+    assert_eq!(checked, 5, "five unions, and this scan examined {checked}");
+} // End of function every_reconciliation_union_declares_exactly_the_rust_variants()
+
+/// Every reconciliation struct declares exactly the properties `serde` writes.
+#[test]
+fn every_reconciliation_struct_declares_exactly_the_properties_serde_writes() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let mut checked = 0usize;
+    for (name, value) in reconciliation_structs() {
+        let declared = interface_fields(&source, name);
+        let written = json_keys(&value);
+        assert_same_names(&format!("interface {name}"), &written, &declared);
+        checked += 1;
+    } // End of the loop over the reconciliation structs
+    assert_eq!(checked, 4, "four structs, and this scan examined {checked}");
+} // End of function every_reconciliation_struct_declares_exactly_the_properties_serde_writes()
+
+/// Every tagged reconciliation variant's operands are the keys `serde` writes.
+///
+/// The union check above compares variant *names*; this compares what is inside
+/// each variant, which is where a renamed `previous_revision` or a dropped
+/// `document_summary` would hide. Every arm of all five enums is a **struct**
+/// variant — empty payloads included — so the two counts below are pinned at
+/// zero, and an arm that became a bare string or a type reference is a failure
+/// rather than a silent skip.
+#[test]
+fn every_reconciliation_variant_declares_exactly_the_operands_serde_writes() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let mut checked = 0usize;
+    let mut nested = 0usize;
+    let mut unit = 0usize;
+    for (name, samples) in reconciliation_enums() {
+        let union = name_union_of(name, &samples);
+        for json in samples {
+            let Value::Object(map) = &json else {
+                unit += 1;
+                continue;
+            };
+            let variant = variant_name(&json);
+            let Some(payload) = map.get(&variant).and_then(Value::as_object) else {
+                nested += 1;
+                continue;
+            };
+            let Some(declared) = tagged_variant_fields(&source, name, &variant) else {
+                nested += 1;
+                continue;
+            };
+            let written: BTreeSet<String> = payload.keys().cloned().collect();
+            assert_same_names(
+                &format!("the {variant} payload of type {union}"),
+                &written,
+                &declared,
+            );
+            checked += 1;
+        } // End of the loop over one enum's samples
+    } // End of the loop over the reconciliation enums
+    assert_eq!(
+        (checked, nested, unit),
+        (17, 0, 0),
+        "all seventeen reconciliation variants are struct variants, so all \
+         seventeen carry a checked operand set; a variant that became a skip is \
+         a hole"
+    );
+} // End of function every_reconciliation_variant_declares_exactly_the_operands_serde_writes()
+
+/// The empty payloads really cross as objects, and not as bare names.
+///
+/// D5's rule at the one place it is easiest to get wrong: five of the seventeen
+/// variants carry no field, and a *unit* variant among them would make
+/// `{ readonly PermissionDenied: Record<string, never> }` false for exactly
+/// those. The premise is asserted from the core's own declaration rather than
+/// from the samples, so this cannot pass by reading a list that agrees with
+/// itself.
+#[test]
+fn every_empty_reconciliation_variant_crosses_as_an_object() {
+    let source = reconciliation_source();
+    let mut empty = 0usize;
+    for (name, samples) in reconciliation_enums() {
+        assert!(
+            crate::rust_source::unit_variants(&source, name).is_empty(),
+            "{name} declares a unit variant, so serde writes one arm as a bare \
+             string and this wire enum no longer has one shape"
+        );
+        for json in samples {
+            let Value::Object(map) = &json else {
+                panic!("{name} wrote a variant as something other than an object: {json}");
+            };
+            let variant = variant_name(&json);
+            let payload = map
+                .get(&variant)
+                .and_then(Value::as_object)
+                .unwrap_or_else(|| panic!("{name}::{variant} writes no payload object"));
+            if payload.is_empty() {
+                empty += 1;
+            }
+        } // End of the loop over one enum's samples
+    } // End of the loop over the reconciliation enums
+    assert_eq!(
+        empty, 5,
+        "UnreadableReason's five operand-free arms are the empty payloads on \
+         this wire; this scan found {empty}"
+    );
+} // End of function every_empty_reconciliation_variant_crosses_as_an_object()
+
+/// The enums on this wire that deliberately own no `code.` namespace.
+///
+/// One entry, with its reason. `ObservedDocument` is an **address** and not a
+/// code: every arm is rendered literally — a display path, and for two of them a
+/// number the caller hands back — and which arm it is shows in what a screen
+/// draws rather than in a sentence. `crate::dictionary_contract`'s
+/// `NOT_A_CODE` carries the same ruling for both derived directions; this
+/// constant is how the placeholder check below states it rather than skipping
+/// the enum silently.
+const RECONCILIATION_ENUMS_WITHOUT_A_NAMESPACE: &[&str] = &["ObservedDocument"];
+
+/// Every reconciliation message's placeholders name an operand `serde` writes.
+///
+/// [`every_save_transaction_placeholder_names_an_operand_serde_writes`]'s twin.
+/// `translate` leaves an unmatched `{placeholder}` in the output verbatim, so a
+/// message naming `{path}` for a variant that carries none reaches a screen with
+/// a brace in it, and neither the dictionary contract nor `dictionaries.test.ts`
+/// has the JSON to see it.
+///
+/// The address enum is **checked rather than skipped**: it is asserted to have no
+/// `code.` key at all, in either dictionary, which is the claim
+/// `NOT_A_CODE` makes about it.
+#[test]
+fn every_reconciliation_placeholder_names_an_operand_serde_writes() {
+    let english = crate::dictionary_contract::dictionary_values("src/lib/i18n/en.json");
+    let spanish = crate::dictionary_contract::dictionary_values("src/lib/i18n/es.json");
+    let mut checked = 0usize;
+    let mut addresses = 0usize;
+    for (name, samples) in reconciliation_enums() {
+        let is_address = RECONCILIATION_ENUMS_WITHOUT_A_NAMESPACE.contains(&name);
+        for json in samples {
+            let variant = variant_name(&json);
+            let key = crate::dictionary_contract::code_key(name, &variant);
+            if is_address {
+                for (locale, dictionary) in [("en", &english), ("es", &spanish)] {
+                    assert!(
+                        !dictionary.contains_key(&key),
+                        "{locale}.json declares {key}, but {name} is named in NOT_A_CODE \
+                         as an address rather than a code"
+                    );
+                } // End of the loop over the two dictionaries
+                addresses += 1;
+                continue;
+            }
+            let operands: BTreeSet<String> = json
+                .get(&variant)
+                .and_then(Value::as_object)
+                .map(|payload| {
+                    payload
+                        .iter()
+                        .filter(|(_, value)| value.is_string() || value.is_number())
+                        .map(|(operand, _)| operand.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            for (locale, dictionary) in [("en", &english), ("es", &spanish)] {
+                let sentence = dictionary
+                    .get(&key)
+                    .unwrap_or_else(|| panic!("{locale}.json has no {key}"));
+                let named = placeholders_of(sentence);
+                let unbacked: Vec<&String> = named.difference(&operands).collect();
+                assert!(
+                    unbacked.is_empty(),
+                    "{locale}.json's {key} names {unbacked:?}, which {name}::{variant} does \
+                     not write as a string or a number, so the brace would reach a screen"
+                );
+            } // End of the loop over the two dictionaries
+            checked += 1;
+        } // End of the loop over one enum's samples
+    } // End of the loop over the reconciliation enums
+    assert_eq!(
+        (checked, addresses),
+        (14, 3),
+        "fourteen keyed variants over four namespaces — ExternalObservation's \
+         four, UnreadableReason's six, AddedContent's two and ChangedContent's \
+         two — against ObservedDocument's three address arms"
+    );
+} // End of function every_reconciliation_placeholder_names_an_operand_serde_writes()
+
+/// The event names the frontend subscribes to, read from its own source.
+///
+/// **Read with comments, unlike every other frontend file this module reads.**
+/// [`strip_comments`] has no notion of a string literal and
+/// `'workspace://reconciliation-ready'` holds a `//`, so stripping would eat the
+/// literal and the rest of its line — taking the declaration with it. Reading
+/// the file whole is safe for the one question asked of it because
+/// [`const_array_members`] slices between the brackets of one declaration and
+/// `src/lib/ipc/events.ts` puts no comment inside them; a quoted word that
+/// appeared there would show up as a second event name and fail the assertion
+/// below rather than being silently absorbed.
+fn declared_event_names() -> BTreeSet<String> {
+    const_array_members(
+        &read_repository_file("src/lib/ipc/events.ts"),
+        "RECONCILIATION_EVENT_NAMES",
+    )
+} // End of function declared_event_names()
+
+/// The frontend subscribes to exactly the event name Rust emits.
+///
+/// **Without this, both halves can be green while spelling different names.** A
+/// fake-driven frontend test proves the wrapper registers whatever constant it
+/// is given, and `crate::events`'s own tests prove the emitter uses
+/// `RECONCILIATION_READY`; nothing else compares the two strings, and a
+/// mistyped one produces a window that is simply never woken.
+#[test]
+fn the_frontend_subscribes_to_exactly_the_event_rust_emits() {
+    let declared = declared_event_names();
+    let emitted: BTreeSet<String> = [crate::events::RECONCILIATION_READY.to_owned()]
+        .into_iter()
+        .collect();
+    assert_same_names("the reconciliation event names", &emitted, &declared);
+    assert_eq!(
+        declared.len(),
+        1,
+        "this application emits one event and the frontend subscribes to one: {declared:?}"
+    );
+    // The name is legal for Tauri, which admits alphanumerics, `-`, `/`, `:`
+    // and `_`. A name outside that set is refused at registration, which is a
+    // runtime failure in a window nobody has opened yet.
+    for name in &declared {
+        assert!(
+            name.chars()
+                .all(|character| character.is_ascii_alphanumeric()
+                    || matches!(character, '-' | '/' | ':' | '_')),
+            "{name} is not a legal Tauri event name"
+        );
+    }
+} // End of function the_frontend_subscribes_to_exactly_the_event_rust_emits()

@@ -26,11 +26,19 @@
 import { describe, expect, it } from 'vitest';
 import en from './en.json';
 import {
+  CODE_NAMESPACES_WITHOUT_A_BUILDER,
+  CODE_NAMESPACE_KEY_BUILDERS,
+  addedContentKey,
+  changedContentKey,
   commandErrorKey,
   contentKindKey,
+  describeAddedContent,
+  describeChangedContent,
   describeCommandError,
   describeContentKind,
   describeDiagnostic,
+  describeDuplicateSeam,
+  describeExternalObservation,
   describeFileKind,
   describeHazard,
   describeIpcFailure,
@@ -39,10 +47,12 @@ import {
   describeScalarStyle,
   describeTriggerKind,
   describeUnknownReason,
+  describeUnreadableReason,
   describeValueKind,
   describeVariableKind,
   diagnosticCodeKey,
   documentShapeKey,
+  externalObservationKey,
   fileKindKey,
   hazardKindKey,
   lineEndingKey,
@@ -50,19 +60,35 @@ import {
   scalarStyleKey,
   triggerKindKey,
   unknownReasonKey,
+  unreadableReasonKey,
   valueKindKey,
   variableKindKey
 } from './codes';
+import {
+  tAddedContent,
+  tChangedContent,
+  tDuplicateSeam,
+  tExternalObservation,
+  tUnreadableReason
+} from './index';
+import { locale } from '../stores/locale.svelte';
 import { translate, type TranslationKey } from './dictionaries';
 import type { ExpectNever, Missing } from './exhaustive';
-import { LOCALES } from './locale';
+import { LOCALES, type Locale } from './locale';
 import { COMMAND_ERROR_CODES, classifyFailure } from '../ipc/errors';
 import type { CommandError, CommandErrorCode } from '../ipc/errors';
 import type {
+  AddedContent,
+  AddedContentName,
+  ChangedContent,
+  ChangedContentName,
   ContentKind,
   DiagnosticCode,
   DiagnosticCodeName,
   DocumentShape,
+  DocumentView,
+  ExternalObservation,
+  ExternalObservationName,
   FileKind,
   HazardKind,
   LineEnding,
@@ -71,6 +97,8 @@ import type {
   TriggerKind,
   UnknownReason,
   UnknownReasonName,
+  UnreadableReason,
+  UnreadableReasonName,
   ValueKind,
   VariableKind
 } from '../ipc/types';
@@ -316,6 +344,131 @@ const COMMAND_ERRORS = [
   }
 ] as const satisfies readonly CommandError[];
 
+// ---------------------------------------------------------------------------
+// The external-change reconciliation codes — Phase 2d-4b
+// ---------------------------------------------------------------------------
+//
+// Four namespaces and fourteen sentences, whose keys Phase 2d-4a landed and
+// whose accessors this phase adds. Every table below is written by hand for the
+// R24 reason the header gives, and pinned to its `…Name` union, so a variant
+// added in Rust and mirrored in `types.ts` is an `npm run check` failure here.
+//
+// `ObservedDocument` has **no** table because it has no namespace: it is an
+// address rather than a code, and `dictionary_contract.rs` names it in
+// `NOT_A_CODE` with that reason.
+
+/** Every `ExternalObservation` variant name, in declaration order. */
+const EXTERNAL_OBSERVATION_NAMES = [
+  'Changed',
+  'Added',
+  'Removed',
+  'Unreadable'
+] as const satisfies readonly ExternalObservationName[];
+
+/** Every `UnreadableReason` variant name, in declaration order. */
+const UNREADABLE_REASON_NAMES = [
+  'NotUtf8',
+  'PermissionDenied',
+  'InvalidData',
+  'TimedOut',
+  'Interrupted',
+  'Other'
+] as const satisfies readonly UnreadableReasonName[];
+
+/** Every `AddedContent` variant name, in declaration order. */
+const ADDED_CONTENT_NAMES = [
+  'Projected',
+  'Unreadable'
+] as const satisfies readonly AddedContentName[];
+
+/** Every `ChangedContent` variant name, in declaration order. */
+const CHANGED_CONTENT_NAMES = [
+  'Projected',
+  'Unreadable'
+] as const satisfies readonly ChangedContentName[];
+
+/**
+ * A projection stand-in, for the two content samples that carry one.
+ *
+ * A `DocumentView` is nearly a hundred lines of shape and none of it reaches a
+ * sentence: no message in either dictionary names an operand of `Projected`, and
+ * `scalarOperands` drops every object anyway. The cast is what keeps this file
+ * about the *codes* rather than about re-declaring the read model, and it is
+ * safe for exactly that reason — the value is never read.
+ */
+const A_PROJECTION = { id: 2 } as unknown as DocumentView;
+
+/** One value of every `UnreadableReason` variant, as it crosses the wire. */
+const UNREADABLE_REASONS: readonly UnreadableReason[] = [
+  { NotUtf8: { offset: 12 } },
+  { PermissionDenied: {} },
+  { InvalidData: {} },
+  { TimedOut: {} },
+  { Interrupted: {} },
+  { Other: {} }
+];
+
+/** One value of every `AddedContent` variant, as it crosses the wire. */
+const ADDED_CONTENTS: readonly AddedContent[] = [
+  { Projected: { disk: A_PROJECTION, findings: [] } },
+  { Unreadable: { reason: { NotUtf8: { offset: 12 } } } }
+];
+
+/** One value of every `ChangedContent` variant, as it crosses the wire. */
+const CHANGED_CONTENTS: readonly ChangedContent[] = [
+  {
+    Projected: {
+      disk_text: 'matches: []\n',
+      disk: A_PROJECTION,
+      findings: [],
+      correspondences: null
+    }
+  },
+  { Unreadable: { reason: { NotUtf8: { offset: 12 } } } }
+];
+
+/** One value of every `ExternalObservation` variant, as it crosses the wire. */
+const EXTERNAL_OBSERVATIONS: readonly ExternalObservation[] = [
+  {
+    Changed: {
+      sequence: 4,
+      document: { Addressable: { document: 2, relative_path: 'match/base.yml' } },
+      previous_revision: 'a'.repeat(64),
+      disk_revision: 'b'.repeat(64),
+      content: { Unreadable: { reason: { NotUtf8: { offset: 12 } } } }
+    }
+  },
+  {
+    Added: {
+      sequence: 5,
+      document_summary: {
+        id: 9,
+        path: '/nowhere/match/new.yml',
+        relative_path: 'match/new.yml',
+        kind: 'MatchFile',
+        disabled: false,
+        read_only: false,
+        loaded: false
+      },
+      content: { Unreadable: { reason: { NotUtf8: { offset: 12 } } } }
+    }
+  },
+  {
+    Removed: {
+      sequence: 6,
+      document: { Named: { document: 9, relative_path: 'match/new.yml' } },
+      previous_revision: null
+    }
+  },
+  {
+    Unreadable: {
+      sequence: 7,
+      document: { Unnamed: { relative_path: 'match/stranger.yml' } },
+      reason: { PermissionDenied: {} }
+    }
+  }
+];
+
 // Each of the following is `never` when the table above it names every member of
 // its union, and the member's own name when it does not. A member added to a
 // wire union and forgotten here fails `npm run check` **in this file**, naming
@@ -339,6 +492,18 @@ export type _ContentKindsAreComplete = ExpectNever<Missing<ContentKind, typeof C
 export type _VariableKindsAreComplete = ExpectNever<Missing<VariableKind, typeof VARIABLE_KINDS>>;
 export type _CommandErrorsAreComplete = ExpectNever<
   Exclude<CommandErrorCode, (typeof COMMAND_ERRORS)[number]['code']>
+>;
+export type _ExternalObservationsAreComplete = ExpectNever<
+  Missing<ExternalObservationName, typeof EXTERNAL_OBSERVATION_NAMES>
+>;
+export type _UnreadableReasonsAreComplete = ExpectNever<
+  Missing<UnreadableReasonName, typeof UNREADABLE_REASON_NAMES>
+>;
+export type _AddedContentsAreComplete = ExpectNever<
+  Missing<AddedContentName, typeof ADDED_CONTENT_NAMES>
+>;
+export type _ChangedContentsAreComplete = ExpectNever<
+  Missing<ChangedContentName, typeof CHANGED_CONTENT_NAMES>
 >;
 
 /**
@@ -390,7 +555,11 @@ describe('the sample tables', () => {
       fileKinds: FILE_KINDS.length,
       triggerKinds: TRIGGER_KINDS.length,
       contentKinds: CONTENT_KINDS.length,
-      variableKinds: VARIABLE_KINDS.length
+      variableKinds: VARIABLE_KINDS.length,
+      externalObservations: EXTERNAL_OBSERVATION_NAMES.length,
+      unreadableReasons: UNREADABLE_REASON_NAMES.length,
+      addedContents: ADDED_CONTENT_NAMES.length,
+      changedContents: CHANGED_CONTENT_NAMES.length
     }).toEqual({
       diagnosticCodes: 23,
       unknownReasons: 4,
@@ -404,7 +573,13 @@ describe('the sample tables', () => {
       fileKinds: 3,
       triggerKinds: 5,
       contentKinds: 7,
-      variableKinds: 11
+      variableKinds: 11,
+      // Phase 2d-4a's four reconciliation namespaces, measured from the Rust
+      // declarations in `src-tauri/src/reconciliation.rs`.
+      externalObservations: 4,
+      unreadableReasons: 6,
+      addedContents: 2,
+      changedContents: 2
     });
   }); // End of the "variant counts" case
 
@@ -684,3 +859,414 @@ describe('the unexpected-failure arm', () => {
     );
   }); // End of the "routes a real command error" case
 }); // End of the "unexpected-failure arm" suite
+
+describe('the reconciliation key builders', () => {
+  it('name a real dictionary entry for every external observation', () => {
+    for (const name of EXTERNAL_OBSERVATION_NAMES) {
+      expectRenderable(externalObservationKey(name));
+    }
+  });
+
+  it('name a real dictionary entry for every unreadable reason', () => {
+    for (const name of UNREADABLE_REASON_NAMES) {
+      expectRenderable(unreadableReasonKey(name));
+    }
+  });
+
+  it('name a real dictionary entry for both content outcomes of both kinds', () => {
+    // Two namespaces with the same two variant names, deliberately kept apart:
+    // *this file is new to me* and *this file is one I had already read* are two
+    // facts, so `code.addedContent.projected` and `code.changedContent.projected`
+    // are two sentences and not one shared key.
+    for (const name of ADDED_CONTENT_NAMES) {
+      expectRenderable(addedContentKey(name));
+    }
+    for (const name of CHANGED_CONTENT_NAMES) {
+      expectRenderable(changedContentKey(name));
+    }
+    expect(addedContentKey('Projected')).not.toBe(changedContentKey('Projected'));
+  }); // End of the "both content outcomes" case
+
+  it('hold one sample per declared name, in the same order', () => {
+    const nameOfSample = (value: object): string => Object.keys(value)[0]!;
+    expect(EXTERNAL_OBSERVATIONS.map(nameOfSample)).toEqual([...EXTERNAL_OBSERVATION_NAMES]);
+    expect(UNREADABLE_REASONS.map(nameOfSample)).toEqual([...UNREADABLE_REASON_NAMES]);
+    expect(ADDED_CONTENTS.map(nameOfSample)).toEqual([...ADDED_CONTENT_NAMES]);
+    expect(CHANGED_CONTENTS.map(nameOfSample)).toEqual([...CHANGED_CONTENT_NAMES]);
+  }); // End of the "one sample per declared name" case
+}); // End of the "reconciliation key builders" suite
+
+describe('the reconciliation descriptions', () => {
+  it.each(LOCALES)('render every external observation in %s', (locale) => {
+    for (const observation of EXTERNAL_OBSERVATIONS) {
+      const label = `${locale}:${Object.keys(observation)[0]!}`;
+      const rendered = describeExternalObservation(locale, observation);
+      expect(rendered.trim(), label).not.toBe('');
+      expect(rendered, label).not.toContain('undefined');
+      expect(rendered, label).not.toMatch(/\{[A-Za-z]/);
+    }
+  }); // End of the "every external observation" case
+
+  it.each(LOCALES)('render every unreadable reason in %s', (locale) => {
+    for (const reason of UNREADABLE_REASONS) {
+      const label = `${locale}:${Object.keys(reason)[0]!}`;
+      const rendered = describeUnreadableReason(locale, reason);
+      expect(rendered.trim(), label).not.toBe('');
+      expect(rendered, label).not.toContain('undefined');
+      expect(rendered, label).not.toMatch(/\{[A-Za-z]/);
+    }
+  }); // End of the "every unreadable reason" case
+
+  it.each(LOCALES)('render both content outcomes of both kinds in %s', (locale) => {
+    const rendered = [
+      ...ADDED_CONTENTS.map((content) => describeAddedContent(locale, content)),
+      ...CHANGED_CONTENTS.map((content) => describeChangedContent(locale, content))
+    ];
+    expect(rendered).toHaveLength(4);
+    for (const text of rendered) {
+      expect(text.trim(), locale).not.toBe('');
+      expect(text, locale).not.toContain('undefined');
+      expect(text, locale).not.toMatch(/\{[A-Za-z]/);
+    }
+    // Four sentences, not two: the two namespaces answer different questions.
+    expect(new Set(rendered).size).toBe(4);
+  }); // End of the "both content outcomes" rendering case
+
+  it.each(LOCALES)('never render a wire operand where a sentence belongs in %s', (locale) => {
+    // A sequence is arbitration data, an offset is a byte position, and a
+    // display path is the owner's own file name. None of them is interpolated
+    // today, and this is what says so rather than leaving it to be inferred from
+    // the dictionary's current wording.
+    const rendered = describeExternalObservation(locale, EXTERNAL_OBSERVATIONS[0]!);
+    expect(rendered).not.toContain('4');
+    expect(rendered).not.toContain('match/base.yml');
+    expect(describeUnreadableReason(locale, UNREADABLE_REASONS[0]!)).not.toContain('12');
+  }); // End of the "never render a wire operand" case
+
+  it.each(LOCALES)('never render a Rust variant name in %s', (locale) => {
+    // The failure this closes is an English identifier in a Spanish sentence.
+    expect(describeUnreadableReason(locale, { PermissionDenied: {} })).not.toContain(
+      'PermissionDenied'
+    );
+    expect(describeExternalObservation(locale, EXTERNAL_OBSERVATIONS[2]!)).not.toContain('Removed');
+    expect(describeAddedContent(locale, ADDED_CONTENTS[0]!)).not.toContain('Projected');
+  }); // End of the "never render a Rust variant name" case
+}); // End of the "reconciliation descriptions" suite
+
+/**
+ * Every `code.<namespace>` the English dictionary declares.
+ *
+ * Derived from `en.json` rather than listed, because the question this asks is
+ * *which namespaces exist*, and a hand-written answer to that could not fail
+ * when a new one arrived. The listed side of the comparison is the registry in
+ * `codes.ts`, which is hand-written for the opposite reason.
+ *
+ * **This selects `code.<namespace>.<member>` and nothing else, so what it
+ * returns is the complete set of `code.` namespaces only while every `code.` key
+ * has exactly three parts.** That is not a property of the shape — 190 keys
+ * elsewhere in this dictionary have four — so it is asserted rather than assumed,
+ * by the "only three-part keys" case below. Without that case a four-part
+ * `code.<namespace>.<variant>.<operand>` key would register no namespace here, so
+ * its namespace would need no registry entry and would be exempt from the
+ * reachability check in silence.
+ *
+ * @returns The namespace names, deduplicated and sorted.
+ */
+function dictionaryCodeNamespaces(): readonly string[] {
+  const namespaces = new Set<string>();
+  for (const key of Object.keys(en)) {
+    const parts = key.split('.');
+    if (parts.length === 3 && parts[0] === 'code' && parts[1] !== undefined) {
+      namespaces.add(parts[1]);
+    }
+  } // End of the loop over the English dictionary's keys
+  return [...namespaces].sort();
+} // End of function dictionaryCodeNamespaces()
+
+/**
+ * One argument per registered key builder, of that builder's own parameter type.
+ *
+ * The probe below calls every entry of `CODE_NAMESPACE_KEY_BUILDERS` and checks
+ * the namespace it emits, and the builders do not share an argument shape: most
+ * take a `…Name` string union or a bare-string wire value, and `commandErrorKey`
+ * takes a whole `CommandError`. So one generic argument cannot exist, and this
+ * table is what supplies the missing one — reusing the sample and name tables at
+ * the top of this file wherever one already covers the namespace, so that a
+ * variant renamed in Rust breaks one table rather than two.
+ *
+ * The **shape** is derived from the registry and the **values** are hand-written,
+ * which is the split that makes both halves able to fail: a namespace added to
+ * the registry with no entry here is an `npm run check` error, and a sample of
+ * the wrong type for its builder is one too.
+ */
+const CODE_NAMESPACE_SAMPLES: {
+  readonly [K in keyof typeof CODE_NAMESPACE_KEY_BUILDERS]: Parameters<
+    (typeof CODE_NAMESPACE_KEY_BUILDERS)[K]
+  >[0];
+} = {
+  addedContent: ADDED_CONTENT_NAMES[0],
+  backupError: 'Io',
+  backupReadError: 'RootNotADirectory',
+  backupReadStep: 'InspectBackupRoot',
+  backupRootState: 'Missing',
+  backupStep: 'CreateBackupRoot',
+  backupTarget: 'InConfigRoot',
+  batchSkipped: 'ForeignName',
+  changedContent: CHANGED_CONTENT_NAMES[0],
+  commandError: COMMAND_ERRORS[0],
+  contentKind: CONTENT_KINDS[0],
+  decodeError: 'SpanOutsideSource',
+  diagnosticCode: DIAGNOSTIC_CODE_NAMES[0],
+  documentShape: DOCUMENT_SHAPES[0],
+  draftError: 'MatchHasNoPath',
+  duplicateSeam: 'ArrivalLands',
+  editError: 'SourceDoesNotParse',
+  entrySkipped: 'Marker',
+  externalObservation: EXTERNAL_OBSERVATION_NAMES[0],
+  fileKind: FILE_KINDS[0],
+  findingClass: 'EditorModelError',
+  findingCode: 'MatchHasNoContentField',
+  hazardKind: HAZARD_KINDS[0],
+  invariantViolation: 'InvertedSpan',
+  lineEnding: LINE_ENDINGS[0],
+  matchBadge: MATCH_BADGES[0],
+  moveSeam: 'SourceCloses',
+  nodeKind: 'Document',
+  notReencodable: 'FoldedStyle',
+  pathError: 'NoSuchDocument',
+  presentationNote: 'ScalarRestyled',
+  reapplyPlacement: 'NotAnchored',
+  reapplyRefusal: 'NoAnchorInBase',
+  reapplyResolution: 'Unsupported',
+  rotationOutcome: 'NotAttempted',
+  saveError: 'DocumentIsReadOnly',
+  saveResult: 'saved',
+  saveVerdict: 'Proceed',
+  scalarStyle: SCALAR_STYLES[0],
+  syntaxError: 'Parse',
+  targetDifference: 'Retargeted',
+  triggerKind: TRIGGER_KINDS[0],
+  unknownReason: UNKNOWN_REASON_NAMES[0],
+  unreadableReason: UNREADABLE_REASON_NAMES[0],
+  valueKind: VALUE_KINDS[0],
+  variableKind: VARIABLE_KINDS[0],
+  verificationFailure: 'DoesNotParse',
+  writeError: 'TargetMissing',
+  writeStep: 'ResolveTarget'
+};
+
+/**
+ * Calls one registered key builder with its own namespace's sample argument.
+ *
+ * The cast is what the registry's type makes unavoidable: read generically, the
+ * values are a union of builders with unrelated parameter types, and nothing can
+ * call a member of that union without erasing the parameter. It is confined to
+ * this one function, and the argument it erases was type-checked against exactly
+ * this builder's parameter where {@link CODE_NAMESPACE_SAMPLES} declares it.
+ *
+ * @param namespace - The registry key whose builder to call.
+ * @returns The key that builder produced for its sample argument.
+ */
+function keyFromSample(namespace: keyof typeof CODE_NAMESPACE_KEY_BUILDERS): TranslationKey {
+  const builder = CODE_NAMESPACE_KEY_BUILDERS[namespace] as (value: unknown) => TranslationKey;
+  return builder(CODE_NAMESPACE_SAMPLES[namespace]);
+} // End of function keyFromSample()
+
+describe('every code namespace has a typed accessor', () => {
+  // **The general form of this phase's own gap, and the reason it is written
+  // generally.** Before it, `src/lib/i18n/dictionaries.test.ts` checked key-set
+  // equality, value shape, the untranslated-value heuristic and placeholder
+  // agreement, and `src-tauri/src/dictionary_contract.rs` checked both
+  // dictionaries against the Rust enums — and *no* suite asserted that a key
+  // could be reached at all. A namespace could therefore land its keys with
+  // every gate green and render nowhere. `duplicateSeam` had been in exactly
+  // that state since Phase 2c-3c-1, and this check is what found it.
+
+  it('covers the dictionary in both directions, with three named exceptions', () => {
+    const registered = Object.keys(CODE_NAMESPACE_KEY_BUILDERS);
+    const reachable = [...registered, ...CODE_NAMESPACES_WITHOUT_A_BUILDER].sort();
+    expect(reachable).toEqual([...dictionaryCodeNamespaces()]);
+    // No duplicate between the two lists: a namespace that is both built and
+    // excused would make the comparison above pass while saying two things.
+    expect(new Set(reachable).size).toBe(reachable.length);
+  }); // End of the "both directions" case
+
+  it('admits exactly the three namespaces that never cross the wire in their own shape', () => {
+    // Not a suppression list. `CommandError` flattens all three conditions, so
+    // the frontend has no wire type whose variants a builder could take, and
+    // their sentences exist because a code with no string is worse than a code
+    // with no caller. A fourth entry is a claim about this boundary that has to
+    // be argued in `codes.ts`.
+    expect([...CODE_NAMESPACES_WITHOUT_A_BUILDER]).toEqual([
+      'workspaceError',
+      'discoveryError',
+      'identityError'
+    ]);
+  }); // End of the "three exceptions" case
+
+  it('registers callable functions, never namespace strings', () => {
+    // The registry's whole point, in two halves. A manifest of strings could
+    // claim an accessor exists without naming code, so every value is asserted
+    // to be a function; and a builder registered under the *wrong* key is still
+    // a function, so every value is also **called**, with
+    // `CODE_NAMESPACE_SAMPLES`'s argument for its namespace, and the key it
+    // returns is asserted to begin with `code.<the key it is registered under>.`
+    // and to be a key `en.json` really holds.
+    //
+    // **The second half is a runtime probe because nothing forces it at compile
+    // time.** `satisfies Readonly<Record<string, (value: never) =>
+    // TranslationKey>>` in `codes.ts` says each value is *some* key builder and
+    // no more: `never` is assignable to every parameter, so a mis-wired
+    // `addedContent: changedContentKey` satisfies it, passes the both-directions
+    // key-set comparison above, and leaves `code.addedContent.*` reachable
+    // through nothing — the exact unreachability this registry exists to stop.
+    // No type can close that, because the namespace a builder emits lives in its
+    // body rather than in its signature; only calling it can tell.
+    //
+    // What the probe does **not** force, stated so it is not read as more: one
+    // sample per namespace proves the *prefix*, never that every member of the
+    // union has a key. That is `dictionaries.test.ts`'s and
+    // `dictionary_contract.rs`'s, in both directions against both dictionaries.
+    const namespaces = Object.keys(
+      CODE_NAMESPACE_KEY_BUILDERS
+    ) as readonly (keyof typeof CODE_NAMESPACE_KEY_BUILDERS)[];
+    expect(namespaces.length).toBeGreaterThanOrEqual(49);
+    for (const namespace of namespaces) {
+      expect(typeof CODE_NAMESPACE_KEY_BUILDERS[namespace], namespace).toBe('function');
+      const produced = keyFromSample(namespace);
+      expect(produced.startsWith(`code.${namespace}.`), `${namespace} produced ${produced}`).toBe(
+        true
+      );
+      // Non-vacuity: a builder answering a prefix nobody translates would pass
+      // the line above while naming nothing.
+      expect(Object.hasOwn(en, produced), produced).toBe(true);
+    } // End of the loop over the registry's namespaces
+  }); // End of the "callable functions" case
+
+  it('has one sample per registered namespace, and none for anything else', () => {
+    // The probe above is only as complete as its table, and a table that
+    // covered 48 of 49 registry entries — or that kept a sample for a namespace
+    // the registry no longer has — would be this suite's own defect one level
+    // up. The mapped type on `CODE_NAMESPACE_SAMPLES` makes both a compile
+    // error, but **vitest strips types and never type-checks**, so inside this
+    // suite that type enforces nothing and only `npm run check` reads it.
+    //
+    // Of the two halves this case then covers, the second is the one nothing
+    // else would notice. A *missing* sample also fails the probe: every builder
+    // registered today reaches into its argument — through `uncapitalize`, or
+    // through `.code` — so `undefined` throws there, and one that only
+    // interpolated would answer `code.<namespace>.undefined` and fail the
+    // `Object.hasOwn` check instead. A *stale extra* sample fails nothing at
+    // all: the loop iterates the registry, so an entry this table alone still
+    // names is simply never read.
+    expect(Object.keys(CODE_NAMESPACE_SAMPLES).sort()).toEqual(
+      Object.keys(CODE_NAMESPACE_KEY_BUILDERS).sort()
+    );
+  }); // End of the "one sample per namespace" case
+
+  it('finds only three-part keys under `code.`, which is what makes that set complete', () => {
+    // `dictionaryCodeNamespaces` selects `code.<namespace>.<member>`, and both
+    // it and `codes.ts` call what it returns the complete set of `code.`
+    // namespaces. That is true of this dictionary rather than of the key shape:
+    // 190 keys outside `code.` already have four parts. A four-part
+    // `code.<namespace>.<variant>.<operand>` key would therefore register no
+    // namespace, so its namespace would need no registry entry, and it would be
+    // exempt from the reachability check above **in silence** — the failure the
+    // registry exists to stop, arriving through the shape of a key rather than
+    // through a missing entry. This is the assertion that makes "complete" true
+    // by construction instead of by luck.
+    //
+    // **Relaxing it means deciding what a four-part `code.` key's namespace is**
+    // and teaching `dictionaryCodeNamespaces` to return it, so the key still
+    // faces the registry. It never means widening the filter to let a shape
+    // through unregistered.
+    const notThreeParts = Object.keys(en).filter(
+      (key) => key.split('.')[0] === 'code' && key.split('.').length !== 3
+    );
+    expect(notThreeParts).toEqual([]);
+  }); // End of the "only three-part keys" case
+
+  it('is read from a dictionary that really was parsed', () => {
+    // The non-vacuity guard: a `dictionaryCodeNamespaces` that silently stopped
+    // recognising keys would return nothing, and an empty set compared against a
+    // non-empty registry already fails — but it would fail pointing at the
+    // registry. This fails first, and with a count.
+    const namespaces = dictionaryCodeNamespaces();
+    expect(namespaces.length).toBeGreaterThanOrEqual(52);
+    expect(namespaces).toContain('duplicateSeam');
+    expect(namespaces).toContain('externalObservation');
+  }); // End of the "really was parsed" case
+}); // End of the "every code namespace has a typed accessor" suite
+
+describe('the reactive reconciliation wrappers', () => {
+  // The `t*` wrappers are one-line delegations to the `describe*` functions
+  // above, with the showing locale supplied. What is asserted is exactly that:
+  // each renders the sentence its describer renders for the locale in force, and
+  // each follows an override rather than freezing a language. A wrapper wired to
+  // the wrong describer — the easiest mistake in a block of near-identical
+  // one-liners — renders another namespace's sentence and passes every check
+  // that only asks whether *a* sentence came out.
+
+  /**
+   * Runs `body` with the interface language overridden, and restores it after.
+   *
+   * The override is global state on a module-level store, so a case that set it
+   * and threw would leave the next case in another language.
+   *
+   * @param language - The locale to force.
+   * @param body - What to run under it.
+   */
+  function underLocale(language: Locale, body: () => void): void {
+    const before = locale.current;
+    locale.setOverride(language);
+    try {
+      body();
+    } finally {
+      locale.setOverride(before === language ? null : before);
+    }
+  } // End of function underLocale()
+
+  it.each(LOCALES)('render each namespace through its own describer in %s', (language) => {
+    underLocale(language, () => {
+      expect(tExternalObservation(EXTERNAL_OBSERVATIONS[0]!)).toBe(
+        describeExternalObservation(language, EXTERNAL_OBSERVATIONS[0]!)
+      );
+      expect(tUnreadableReason(UNREADABLE_REASONS[0]!)).toBe(
+        describeUnreadableReason(language, UNREADABLE_REASONS[0]!)
+      );
+      expect(tAddedContent(ADDED_CONTENTS[0]!)).toBe(
+        describeAddedContent(language, ADDED_CONTENTS[0]!)
+      );
+      expect(tChangedContent(CHANGED_CONTENTS[0]!)).toBe(
+        describeChangedContent(language, CHANGED_CONTENTS[0]!)
+      );
+      expect(tDuplicateSeam('CopiedRunsJoin')).toBe(
+        describeDuplicateSeam(language, 'CopiedRunsJoin')
+      );
+    });
+  }); // End of the "own describer" case
+
+  it('follows the language in force rather than freezing one', () => {
+    // Two namespaces whose two sentences must differ between the dictionaries.
+    // A wrapper that captured `locale.current` at module load would answer the
+    // same string under both overrides, and the assertion above — which reads
+    // the same store — could not tell.
+    const rendered = LOCALES.map((language) => {
+      let seen = '';
+      underLocale(language, () => {
+        seen = tChangedContent(CHANGED_CONTENTS[1]!);
+      });
+      return seen;
+    });
+    expect(new Set(rendered).size).toBe(LOCALES.length);
+  }); // End of the "follows the language in force" case
+
+  it('does not answer one namespace with another namespace’s sentence', () => {
+    // `addedContent` and `changedContent` have the same two variant names, which
+    // is exactly where a copied one-liner would go unnoticed.
+    underLocale('en', () => {
+      expect(tAddedContent(ADDED_CONTENTS[0]!)).not.toBe(tChangedContent(CHANGED_CONTENTS[0]!));
+      expect(tAddedContent(ADDED_CONTENTS[1]!)).not.toBe(tChangedContent(CHANGED_CONTENTS[1]!));
+    });
+  }); // End of the "one namespace's sentence" case
+}); // End of the "reactive reconciliation wrappers" suite

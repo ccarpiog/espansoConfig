@@ -428,6 +428,14 @@ interface Opened {
 }
 
 /**
+ * How many times any surface built by {@link mountRestore} has been drained.
+ *
+ * Module level rather than per-mount because the assertion is about the file:
+ * **no case in it may drain**. The `afterEach` below reads and resets it.
+ */
+let drains = 0;
+
+/**
  * Mounts the pane over a real `BrowserState` and a scripted boundary.
  *
  * @param answers - What each successive replacement answers, in order.
@@ -499,6 +507,15 @@ async function mountRestore(
             ? { kind: 'done' }
             : { kind: 'failed', failure: next.reloadFailure }
       };
+    },
+    // Phase 2d-4b puts the drain on this surface; a restore never calls it. The
+    // refusal is the answer no caller could proceed on, and `drains` is what
+    // makes an unexpected call *visible*: this stub is not even a `vi.fn`, so
+    // without the count a call would leave no trace at all. The `afterEach`
+    // below is the assertion.
+    drainExternalChanges: async () => {
+      drains += 1;
+      return refusal;
     }
   };
   const backup: BackupCommands = {
@@ -731,6 +748,12 @@ beforeEach(() => {
 
 afterEach(() => {
   locale.setOverride(null);
+  // The assertion `mountRestore()`'s refusal cannot make on its own, applied to
+  // every case in this file: a restore never drains at 2d-4b. Cleared before it
+  // is read, so one drain fails one case rather than every case after it.
+  const drained = drains;
+  drains = 0;
+  expect(drained).toBe(0);
 });
 
 describe('the mounted restore pane: the catalogue and the candidate', () => {

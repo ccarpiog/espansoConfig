@@ -1183,8 +1183,12 @@ fn every_typescript_wire_union_has_a_namespace() {
       // being an interface and became a tagged union with a `PresentationNoteName`
       // beside it. The value union is skipped for `DraftError`'s reason — every
       // member is a one-key object — and the `Name` union is the one counted here.
+      //
+      // Phase 2d-4b mirrors the reconciliation wire, whose five unions are all
+      // all-object and therefore all skipped by the guard above; what is counted
+      // is their five `…Name` twins, taking the floor to forty-nine.
     assert!(
-        checked >= 44,
+        checked >= 49,
         "only {checked} unions were examined, so this scan is not reading {WIRE_TYPES}"
     );
     assert_eq!(
@@ -1192,10 +1196,15 @@ fn every_typescript_wire_union_has_a_namespace() {
         vec![
             "MatchField".to_owned(),
             "SequenceField".to_owned(),
-            "VariableField".to_owned()
+            "VariableField".to_owned(),
+            "ObservedDocumentName".to_owned()
         ],
-        "the unions exempted by NOT_A_CODE changed. Every one of them is a field \
-         identifier that serializes as an espanso key; a new entry here is a claim \
-         that something else on this wire is not a code either"
+        "the unions exempted by NOT_A_CODE changed. The first three are field \
+         identifiers that serialize as espanso keys; the fourth is Phase 2d-4b's \
+         mirror of the one reconciliation enum this table already classifies as an \
+         address rather than a code, and it appears here — as the `…Name` twin \
+         rather than as the value union — because the value union has no \
+         single-quoted member and is skipped as a structural type. A further entry \
+         is a claim that something else on this wire is not a code either"
     );
 } // End of function every_typescript_wire_union_has_a_namespace()

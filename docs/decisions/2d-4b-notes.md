@@ -241,3 +241,157 @@ observation would catch it. One answer, chosen and defended, not a list of five.
 Keep the whole reply focused and decisive. Rulings first in each section, evidence after. Do not
 restate the brief back at me.
 ````
+
+---
+
+## 3. What 2d-4b built
+
+One worker, one coherent change, exactly as the consult's Q7 ruled. Two new files —
+`src/lib/ipc/events.ts` and its suite — and seventeen modified.
+
+- **Q1.** The seven reconciliation wire types plus `CorrespondenceEntry` / `CorrespondenceTable` and
+  five `…Name` unions in `src/lib/ipc/types.ts`, every arm a one-key object. Six new checks in
+  `src-tauri/src/wire_contract.rs`: samples, both-direction union / struct / tagged-payload
+  comparisons, a source-derived completeness check reading `reconciliation.rs`, an
+  empty-payload/no-unit-variant check, and a placeholder check that **asserts** `ObservedDocument`
+  owns no `code.` key rather than skipping it.
+- **Q2.** `drainExternalChanges(afterSequence)` in `src/lib/ipc/commands.ts` and a required
+  `BrowserCommands` member forwarded from `REAL_COMMANDS`. No watermark, no retained batch, no epoch
+  comparison, no new `BrowserState` state.
+- **Q3.** `events.ts`: `RECONCILIATION_EVENT_NAMES`, `ReconciliationEventSource`, a factory over the
+  raw `listen`, `REAL_RECONCILIATION_EVENTS`, and a Rust test comparing the frontend name with
+  `RECONCILIATION_READY`.
+- **Q4.** Four builders, four `describe*`, four `t*`; counts `4 / 6 / 2 / 2`; the general
+  function-reference registry `CODE_NAMESPACE_KEY_BUILDERS` with exactly the three named exceptions;
+  and `duplicateSeam` fixed rather than exempted.
+- **Q5.** No identity accessor and no brand. The narrowing limit is stated in the JSDoc and exercised
+  by a `never`-terminated walk.
+- **Q6.** `drain_external_changes` in `COMMAND_NAMES` and `AWAITING_FRONTEND_DECLARATION` **deleted
+  outright**, so registered == declared with no exception set at all.
+
+Two knock-on Rust edits the consult did not name and the tree forced: `dictionary_contract.rs`'s
+`exempted` assertion now lists `ObservedDocumentName` (its base is already in `NOT_A_CODE` with a
+reason) and its union floor moves 44 → 49. The orchestrator re-derived that floor: exactly five new
+`…Name` twins, the five value unions skipped as structural.
+
+**One implementation decision the consult did not anticipate.** `strip_comments` in
+`wire_contract.rs` has no notion of a string literal and would have eaten
+`'workspace://reconciliation-ready'`, so `declared_event_names()` reads `events.ts` **whole**. The
+reason is recorded at both ends, and `events.ts` carries a "no comment inside these brackets" rule —
+which is a **prose** rule, not an enforced one, and the review checked exactly that.
+
+## 4. The review — one round, `ship-with-fixes`
+
+A fresh `autoclaude-reviewer` on `model: "opus"`, 20-minute budget, report at
+[`../reviews/phase-2d-4b.md`](../reviews/phase-2d-4b.md). **Verdict `ship-with-fixes`: 0 blockers,
+4 should-fix.** The brief named this round's coverage bounds rather than hiding them — that it was
+the **eighth** consecutive Opus review round on this phase's work, and that the consult it was
+judging against had itself been reviewed by nobody.
+
+**All four findings were re-derived by the orchestrator before being accepted**, and the third was
+derived from `en.json` independently: 719 three-part, 190 four-part and 2 five-part keys overall,
+against 400 keys and 52 namespaces under `code.` — 49 builders plus 3 exceptions.
+
+1. **`codes.test.ts` claimed an assertion it did not make.** The comment said every registry value
+   *"is asserted to be a function that really produces this namespace's keys"*; the only assertion was
+   `typeof builder === 'function'`. `satisfies Readonly<Record<string, (value: never) => TranslationKey>>`
+   cannot close it either — `never` accepts every builder — so `addedContent: changedContentKey`
+   passed every gate while making `code.addedContent.*` unreachable. **A narrower instance of the
+   exact hole Q4 commissioned the registry to close, sitting inside the fix for it.**
+2. **`events.ts` named half of what its own lifetime contract needs.** It called
+   `core:event:allow-listen` *"the narrowest entry that grants it"*, true of registration and false of
+   disposal: the unlisten function `listen` returns invokes `plugin:event|unlisten`, gated by the
+   separate `core:event:allow-unlisten`. Both identifiers confirmed in
+   `src-tauri/gen/schemas/desktop-schema.json`, and the `_unlisten` body confirmed in
+   `node_modules/@tauri-apps/api/event.js`. A phase widening the capability by following that
+   sentence alone would get a listener it cannot dispose.
+3. **"The complete set of `code.*` namespaces" was a filtered set.** `dictionaryCodeNamespaces()`
+   selected on `parts.length === 3`, so a future four-part `code.` key would register no namespace and
+   be silently exempt from the reachability invariant — and four-part keys are already an established
+   shape in this dictionary, 190 of them.
+4. **The evidence was not yet recorded** in this file or in `PROGRESS.md`, which Q7 requires. That
+   one is the orchestrator's and is discharged by §6 below and by the checkpoint.
+
+## 5. The fix round, and the four narrower instances it found
+
+Findings 1-3 were fixed by **making the claim true**, never by weakening the sentence:
+
+- `CODE_NAMESPACE_SAMPLES` gives one argument per namespace, its shape derived from the registry via
+  `Parameters<>` so a missing or mistyped sample is an `npm run check` error, plus a runtime probe
+  calling all 49 builders and asserting the key starts with `code.<its own registry key>.` and exists
+  in `en.json`; a runtime key-set case guards the table, because a stale extra entry is otherwise
+  invisible. **Mutation-verified**: `addedContent: changedContentKey` now fails with
+  *"addedContent produced code.changedContent.projected"*.
+- `events.ts` now names **both** permissions and which half of the lifetime each one buys.
+- A new case asserts every `code.` key has exactly three parts, **mutation-verified** with a
+  temporary four-part key.
+
+The fix worker was told to sweep for the **shape** — *a comment claiming an assertion that is not
+made, or a set called complete that is filtered* — rather than for the words, and it returned **four
+narrower instances**:
+
+- `events.test.ts`'s *"is not widened to string"* checked nothing, since assigning the correct literal
+  compiles against `string` too. Replaced by a type-level
+  `ExpectNever<string extends ReconciliationEventName ? 'widened' : never>`.
+- `events.test.ts`'s *"keeps no copy of it"* is unobservable from outside the module; the case is
+  retitled and the residue stated.
+- *"a refusal keeps an unexpected call visible"* in `workspace.test.ts`, `DetailPane.test.ts` and
+  `RestorePane.test.ts` observed nothing. Each file now counts drains and asserts zero in
+  `afterEach` — verified by temporarily adding a fire-and-forget `drainExternalChanges` to `open()`,
+  which produced **254** failures where the suites had been silent, then reverted byte-identically.
+- `wire_contract.rs:3724` claimed the samples carry the *"fullest"* shape while `Changed` uses an
+  `Unreadable` content arm and `Removed` uses `previous_revision: None`. The **doc** was corrected
+  rather than the samples widened, because widening *permits* placeholders and would loosen the check.
+
+## 6. The gates
+
+Every command run by the orchestrator alone, unpiped, after the fix round, with orphaned bin targets
+killed first.
+
+| Gate | Exit | Figure | Anchor |
+|---|---|---|---|
+| `cargo test --workspace` | 0 | **1320** | 1313 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | clean | — |
+| `cargo fmt --check` | 0 | clean | — |
+| `cargo tree -p espansoconfig-core \| rg tauri` | — | no match | — |
+| `npm run check` | 0 | **434** files, 0 errors, 0 warnings | 431 |
+| `npm test` | 0 | **2175** over 57 files | 2125 |
+| `npm run build` | 0 | **184** modules | 184 |
+| server-only bundle oracle | — | **absent** | must be absent |
+| client-only bundle oracle | — | **2** | must be present |
+
+**The module count did not move, and that is the correct result rather than a suspicious one.**
+`events.ts` is not reachable from the application entry — the orchestrator confirmed independently
+that no non-test file under `src/` imports it — and every other change is inside an already-reachable
+module. `CLAUDE.md` §4's ladder costs one module per **reachable** new source module, so 184 is what
+it predicts. The `npm run check` file count moved by **three** for two new files, the third being
+`@tauri-apps/api/event.d.ts` newly entering the program; the review re-derived that
+`src/lib/ipc/events.ts` is its only importer.
+
+## 7. Where this phase is thin
+
+Marked per `CLAUDE.md` §7.3. **No item here is a blocker**, and that is a condition of the phase's
+state rather than an afterthought to it.
+
+1. **The capability is not widened, and the phase that first registers a listener must widen it —
+   *actionable*, and not a correctness defect in source today.** `src-tauri/capabilities/default.json`
+   is `"permissions": []`, and Tauri's `listen`/unlisten are *plugin* commands. Nothing in 2d-4b
+   registers a listener — no production module imports `events.ts` — so nothing is broken now. The
+   widening phase needs **both** `core:event:allow-listen` and `core:event:allow-unlisten`, and must
+   re-run `src-tauri/src/dispatch_check.rs` over the widened file.
+2. **The `events.ts` "no comment inside these brackets" rule is prose, not an enforced rule —
+   *recorded only*.** `declared_event_names()` reads the file whole because `strip_comments` has no
+   notion of a string literal. A comment placed inside those brackets would be parsed as an event
+   name; nothing fails first.
+3. **Q8's named failure is undischarged by construction — *recorded only*.** A production Tauri
+   listener adapter that never delivers a real wake, while its injected fake works, passes all four
+   gates. The consult assigns that probe to **2d-7**, and no test in this repository can establish it.
+4. **Eight consecutive Opus review rounds with no second provider — *recorded only*.**
+   `2d-4a-notes.md` §22.4 carried seven; this phase's review makes eight. The design consult was
+   Codex, which stops the streak lengthening through the *design* and not through the *review*.
+5. **The consult itself was reviewed by nobody — *recorded only*.** Its rulings are the acceptance
+   standard this phase was judged against. The review brief said so explicitly and invited a finding
+   against a ruling on its face; none was returned.
+6. **`u64` epochs and sequences cross as JavaScript `number`s — *recorded only*.** Exact only within
+   the safe-integer range, as §1.2 states. Nothing in this phase can widen that, and 2d-5's watermark
+   arithmetic inherits it.

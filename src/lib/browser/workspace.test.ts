@@ -11,7 +11,7 @@
  * `get_match` refuse and watch what happens next.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IpcFailure } from '../ipc/errors';
 import { classifyFailure } from '../ipc/errors';
 import type {
@@ -38,6 +38,7 @@ import type {
   NewMatch,
   NewMatchPosition,
   ReapplyResolution,
+  ReconciliationBatch,
   SaveResult,
   WorkspaceSummary
 } from '../ipc/types';
@@ -307,6 +308,15 @@ interface Script {
 }
 
 /**
+ * How many times any surface built by {@link scriptedCommands} has been drained.
+ *
+ * Module level rather than per-surface because the assertion is about the file:
+ * **no case in it may drain**, whichever surface it built and however many. The
+ * `afterEach` below reads and resets it.
+ */
+let drains = 0;
+
+/**
  * A command surface that answers from a script.
  *
  * @param script - What each command should answer.
@@ -430,7 +440,21 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
         }
         return { ok: true, value: answer.value, reload: { kind: 'done' } };
       }
-    ) // End of the scripted save_raw_document
+    ), // End of the scripted save_raw_document
+    // Nothing in `BrowserState` drains: Phase 2d-4b puts the member on the
+    // surface and Phase 2d-5 is what calls it. The refusal is the answer no
+    // caller could proceed on, and {@link drains} is what makes an unexpected
+    // call *visible* — a `vi.fn` records a call and asserts nothing about it, so
+    // a fire-and-forget drain that ignored this answer would pass every case in
+    // this file. The `afterEach` below is the assertion.
+    drainExternalChanges: vi.fn(async () => {
+      drains += 1;
+      const answer: CommandResult<ReconciliationBatch> = {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+      };
+      return answer;
+    })
   };
 } // End of function scriptedCommands()
 
@@ -453,6 +477,17 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
     resolve: (value: T) => settle?.(value)
   };
 } // End of function deferred()
+
+afterEach(() => {
+  // The assertion `scriptedCommands()`'s refusal cannot make on its own, applied
+  // to every case in this file: nothing in `BrowserState` drains at 2d-4b. The
+  // count is cleared before it is read, so one drain fails one case rather than
+  // every case after it, and the phase that starts draining changes this on
+  // purpose instead of discovering it.
+  const drained = drains;
+  drains = 0;
+  expect(drained).toBe(0);
+});
 
 describe('the load', () => {
   it('starts in the reading state before anything is asked', () => {

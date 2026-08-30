@@ -1,5 +1,5 @@
 /**
- * The fifteen workspace commands, typed.
+ * The sixteen workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -51,6 +51,14 @@
  * it is a whole-document replacement like any other, with the destination's own
  * base revision and the ordinary findings.
  *
+ * ## The sixteenth reads what changed on disk, and writes nothing
+ *
+ * {@link drainExternalChanges}, since Phase 2d-4b. It is the authoritative half
+ * of the reconciliation protocol — the event in `./events` is only a hint that
+ * says *ask* — and it owns no state: the watermark it takes is the caller's, and
+ * nothing here retains a batch, compares an epoch or decides what a batch means.
+ * Those are the Phase 2d-5 coordinator's.
+ *
  * ## What is deliberately absent
  *
  * `validate_match`. It has no phase yet, and a wrapper would be a standing
@@ -76,6 +84,7 @@ import type {
   MatchView,
   NewMatch,
   NewMatchPosition,
+  ReconciliationBatch,
   SaveResult,
   WorkspaceSummary
 } from './types';
@@ -108,7 +117,8 @@ export const COMMAND_NAMES = [
   'duplicate_match',
   'list_backup_batches',
   'list_backup_entries',
-  'read_backup_text'
+  'read_backup_text',
+  'drain_external_changes'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -871,3 +881,42 @@ export async function readBackupText(
 ): Promise<CommandResult<BackupTextResponse>> {
   return call<BackupTextResponse>('read_backup_text', { entry, document });
 } // End of function readBackupText()
+
+/**
+ * Hands back everything this session observed on disk above `afterSequence`.
+ *
+ * **The sixteenth command, and it writes nothing.** It is the authoritative half
+ * of the reconciliation protocol: `workspace://reconciliation-ready` is a hint
+ * that says *ask* (see `./events`), this is the answer, and an epoch mismatch on
+ * the answer makes the whole batch stale.
+ *
+ * ## The watermark is the caller's, and this wrapper owns none of it
+ *
+ * `afterSequence` is **required and has no default**, because there is no value
+ * this module could honestly supply: the highest sequence already accepted is a
+ * fact about the caller's own installed state. This function retains nothing
+ * between calls, compares no epoch, and hands the batch straight back — the
+ * watermark, the epoch comparison, the `discarded` response and the decision to
+ * accept or reject a batch are all the Phase 2d-5 coordinator's, exactly as the
+ * design consult for Phase 2d-4b rules.
+ *
+ * ## What draining twice costs, and the one case where it costs more
+ *
+ * `afterSequence` is an **acknowledgement watermark and not a cursor**: draining
+ * twice with the same value answers the same batch twice, as long as nothing was
+ * enqueued between the two calls and no replacement epoch was adopted between
+ * them. So a lost answer costs no more than the drain that repeats it — short of
+ * an overflow, which evicts an undrained entry unacknowledged, reports it in the
+ * batch's `discarded`, and is answered by a whole-workspace reload rather than
+ * by another drain.
+ *
+ * @param afterSequence - The highest sequence the caller has already accepted,
+ *   or `0` for everything. It crosses as a JavaScript `number` against a Rust
+ *   `u64`, so it is exact only within the safe-integer range.
+ * @returns The batch, or `noWorkspaceOpen` — the only failure this command has.
+ */
+export async function drainExternalChanges(
+  afterSequence: number
+): Promise<CommandResult<ReconciliationBatch>> {
+  return call<ReconciliationBatch>('drain_external_changes', { afterSequence });
+} // End of function drainExternalChanges()

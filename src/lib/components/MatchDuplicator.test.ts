@@ -1108,7 +1108,8 @@ describe('a duplicate panel over the real workspace state', () => {
       duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => {
         return { ok: false, failure: STALE_IDENTITY };
       }),
-      saveRawDocument: vi.fn(async () => refusal)
+      saveRawDocument: vi.fn(async () => refusal),
+      drainExternalChanges: vi.fn(async () => refusal)
     };
     const state: BrowserState = createBrowserState(commands, () => undefined);
     await state.open(null);

@@ -2,7 +2,7 @@
 
 **Reviewer: Codex (GPT-5 family), high effort, dispatched 2026-08-30 by `/autoclaude-opus` in driven
 mode via the companion CLI**, per `docs/decisions/codex-dispatch-procedure.md`. The brief is
-reproduced at the end of `docs/decisions/2d-4b-notes.md`. Codex ran read-only and wrote no file; its
+reproduced in §2 of `docs/decisions/2d-4b-notes.md`. Codex ran read-only and wrote no file; its
 final message is reproduced below verbatim, with only the two edits that procedure permits — the
 `Resume in Codex` trailer dropped, the session ID kept. It is the **second provider** to look at this
 phase's work since 2d-4a began, which is the coverage bound `docs/decisions/2d-4a-notes.md` §22.4

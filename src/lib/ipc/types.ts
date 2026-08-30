@@ -2699,6 +2699,418 @@ export type DraftError =
   | { readonly AmbiguousNestedKey: { readonly edit: number } };
 
 // ---------------------------------------------------------------------------
+// The external-change reconciliation wire — Phase 2d-4b
+// ---------------------------------------------------------------------------
+
+/**
+ * The mirror of everything `src-tauri/src/reconciliation.rs` puts on the wire.
+ *
+ * **Two halves, and only one of them is authoritative.**
+ * {@link ReconciliationWake} is the payload of the
+ * `workspace://reconciliation-ready` event and is a *hint*: it carries an epoch
+ * and a sequence, nothing is installed from it, and a listener that attached
+ * late has missed nothing. {@link ReconciliationBatch} is what
+ * `drain_external_changes` answers, and that value — never the wake — is what a
+ * caller acts on.
+ *
+ * ## Every enum here is a uniform one-key object
+ *
+ * Rust declares every arm of all five as a **struct** variant, empty payloads
+ * included, so `serde` writes `{"PermissionDenied":{}}` and never the bare
+ * string a unit variant would produce. That is D5's rule, and it is what lets a
+ * value be recognised without a special case per variant. `Record<string, never>`
+ * is the spelling of an empty payload here, exactly as it is for
+ * {@link ReapplyResolution}: `{}` in TypeScript means *any non-nullish value*,
+ * which is not the same claim.
+ *
+ * ## Two limits, stated beside what is enforced
+ *
+ * 1. **`src-tauri/src/wire_contract.rs` checks property and variant *names*, in
+ *    both directions, and does not check TypeScript property *type text***. It
+ *    fails when Rust renames or adds a field these declarations do not follow;
+ *    it would still pass if `sequence` below were declared `string`, exactly as
+ *    that module's own header says of `byte_len`.
+ * 2. **Every `u64` on this wire crosses as a JavaScript `number`**, so an epoch
+ *    and a sequence are exact only within the safe-integer range
+ *    (`Number.MAX_SAFE_INTEGER`, `2^53 - 1`). There is no mathematically exact
+ *    `u64` mirror here, and none of these numbers is bounded by the size of
+ *    something already in memory the way {@link DocumentView.byte_len} is — what
+ *    bounds them is the process's own allocation rate, which no type expresses.
+ */
+
+/**
+ * The payload of `workspace://reconciliation-ready` — a hint, and the whole of
+ * it.
+ *
+ * **Not a `CommandResult`**, because it reports no requested operation. It
+ * carries no observation and no document: everything a caller acts on comes back
+ * from the drain, and the only thing this value is good for is deciding to call
+ * it.
+ */
+export interface ReconciliationWake {
+  /**
+   * The workspace epoch the enqueued observation was produced under.
+   *
+   * What makes a wake from a replaced workspace visibly stale. Comparing it is
+   * the consumer's rule and is Phase 2d-5's; nothing in this module compares it.
+   */
+  readonly workspace_epoch: number;
+  /**
+   * The highest sequence the queue held undrained at that moment.
+   *
+   * **Not a count and not a promise of a batch size.** A later drain may return
+   * more than this or fewer; it describes one moment and promises nothing over
+   * time.
+   */
+  readonly newest_sequence: number;
+}
+
+/** The variant name of every {@link ObservedDocument} arm. */
+export type ObservedDocumentName = 'Addressable' | 'Named' | 'Unnamed';
+
+/**
+ * Which document an observation is about — and whether the **open** workspace
+ * resolves it.
+ *
+ * Three arms, because there are three different things this application can
+ * truthfully say about a watched path, and every arm carries the display path so
+ * no consumer is handed a number as its only handle on a file. `Addressable`
+ * says the open workspace resolves the path to that identity, so the number is
+ * an address every workspace command accepts today. `Named` says this process
+ * minted that identity and the open workspace does **not** hold it, so
+ * `document_context` refuses the number. `Unnamed` says no identity for the path
+ * has ever been minted anywhere, so the consumer holds nothing under one.
+ *
+ * ## No identity accessor exists here, deliberately
+ *
+ * There is no `documentId(document)`, no common-payload projection and no
+ * brand — the design consult for this phase rules all three out. An accessor
+ * answering *the identity, where there is one* would let a consumer treat
+ * `Addressable` and `Named` as one answer with a `?`, and the difference between
+ * them is this value's whole subject.
+ *
+ * **What TypeScript forces, and what it does not, in one sentence each.** It
+ * forces narrowing: `document.document` does not compile until the union has
+ * been discriminated, and an exhaustive `switch` with a `never` terminus makes a
+ * fourth arm added in Rust a compile error at every consumer written that way.
+ * It does **not** force `Addressable` and `Named` to be treated differently
+ * *after* narrowing — a consumer may deliberately route both branches into one
+ * function, and neither the union nor the `never` terminus prevents that
+ * collapse. Only Phase 2d-5's model logic and its tests establish that just
+ * `Addressable`'s identity reaches an open-workspace command.
+ *
+ * A brand would not help and would make things worse: both numbered arms carry
+ * the same serialized {@link DocumentId}, nothing decodes these values at
+ * runtime, and a frontend-only brand would turn a guarantee nothing establishes
+ * into a type assertion that looks like one.
+ */
+export type ObservedDocument =
+  | {
+      readonly Addressable: {
+        /** The identity, as the **open** workspace resolves this path. */
+        readonly document: DocumentId;
+        /** The path, for display. Lossy — see {@link DocumentView.path}. */
+        readonly relative_path: string;
+      };
+    }
+  | {
+      readonly Named: {
+        /** The identity this process minted, which the open workspace refuses. */
+        readonly document: DocumentId;
+        /** The path, for display. Lossy — see {@link DocumentView.path}. */
+        readonly relative_path: string;
+      };
+    }
+  | {
+      readonly Unnamed: {
+        /** The path, for display. Lossy — see {@link DocumentView.path}. */
+        readonly relative_path: string;
+      };
+    };
+
+/** The variant name of every {@link UnreadableReason} arm. */
+export type UnreadableReasonName =
+  | 'NotUtf8'
+  | 'PermissionDenied'
+  | 'InvalidData'
+  | 'TimedOut'
+  | 'Interrupted'
+  | 'Other';
+
+/**
+ * Why this application cannot show a file's text.
+ *
+ * One type across **three** wire positions, and the whole type at each of them:
+ * {@link ExternalObservation}'s `Unreadable` arm, {@link ChangedContent}'s and
+ * {@link AddedContent}'s. Only `NotUtf8` reaches the second and third today and
+ * only the io arms reach the first; narrowing any of the three fields would be
+ * the frontend deciding which failures the engine may report through which
+ * observation.
+ *
+ * The io arms are a **closed** set over an open one — `std::io::ErrorKind` is
+ * `#[non_exhaustive]` — so everything the list does not name arrives as `Other`,
+ * which carries no operand on purpose: the kind's own spelling is untranslated
+ * developer prose and this wire carries no prose.
+ */
+export type UnreadableReason =
+  | {
+      readonly NotUtf8: {
+        /** Byte offset of the first invalid sequence in the bytes on disk. */
+        readonly offset: number;
+      };
+    }
+  | { readonly PermissionDenied: Record<string, never> }
+  | { readonly InvalidData: Record<string, never> }
+  | { readonly TimedOut: Record<string, never> }
+  | { readonly Interrupted: Record<string, never> }
+  | { readonly Other: Record<string, never> };
+
+/**
+ * Where one base-snapshot match sits in the stabilized snapshot, at both
+ * confidence policies.
+ *
+ * `exact` is the only tier a destructive operation may act on, and it is also
+ * the tier a positional placement resolves at. `editor` is the match editor's
+ * flexible tier: where it answered below the exact one it is provisional
+ * correspondence, not proof the original item remains.
+ */
+export interface CorrespondenceEntry {
+  /**
+   * The match this row is about, as the **base** snapshot minted it.
+   *
+   * Stale by construction — after the change this identity resolves to nothing —
+   * which is exactly what lets an open surface holding it find its row.
+   */
+  readonly base: MatchId;
+  /** The exact-item answer. */
+  readonly exact: ReapplyResolution;
+  /** The match editor's answer. */
+  readonly editor: ReapplyResolution;
+}
+
+/**
+ * Every base-snapshot match's correspondence into one stabilized snapshot.
+ *
+ * **Snapshot-bound, and it says which two snapshots.** A consumer holding an
+ * observation with a different disk revision must treat this table as evidence
+ * about a state it was not shown. Nothing in TypeScript pairs a table with the
+ * observation it was built for; what that rests on is that one Rust function
+ * builds both.
+ */
+export interface CorrespondenceTable {
+  /** The revision the rows' identities were minted from. */
+  readonly base_revision: ContentRevision;
+  /** The revision every answer was resolved against. */
+  readonly disk_revision: ContentRevision;
+  /**
+   * One row per match of the base snapshot, in the base projection's own order.
+   *
+   * Empty when the base snapshot projected no matches — a failed parse included,
+   * because a projection that failed carries nothing to find again.
+   */
+  readonly entries: readonly CorrespondenceEntry[];
+}
+
+/** The variant name of every {@link AddedContent} arm. */
+export type AddedContentName = 'Projected' | 'Unreadable';
+
+/**
+ * What one addition's stabilized bytes projected to, or why they did not.
+ *
+ * A discriminated value rather than an optional field: an absence carries no
+ * reason, and the reason is the sentence a person reads. It also keeps the two
+ * operand sets apart — a projection always comes with its findings, and an
+ * unreadable state never has any.
+ *
+ * **Neither arm carries the stabilized bytes.** An addition this application
+ * cannot read as text is one it will not show as text, exactly as
+ * `documentText` refuses rather than decoding lossily.
+ */
+export type AddedContent =
+  | {
+      readonly Projected: {
+        /** The projection of the stabilized bytes. */
+        readonly disk: DocumentView;
+        /** The pure semantic report over that projection. */
+        readonly findings: readonly Finding[];
+      };
+    }
+  | {
+      readonly Unreadable: {
+        /** Why the text is not available. */
+        readonly reason: UnreadableReason;
+      };
+    };
+
+/** The variant name of every {@link ChangedContent} arm. */
+export type ChangedContentName = 'Projected' | 'Unreadable';
+
+/**
+ * What one change's stabilized bytes projected to, or why they did not.
+ *
+ * {@link AddedContent}'s twin and deliberately the same shape. Routing a
+ * non-UTF-8 change to {@link ExternalObservation}'s `Unreadable` arm instead
+ * would discard both revisions a change carries, since that arm holds neither —
+ * so the two operands a consumer needs would be destroyed by the routing rather
+ * than by anything about the bytes.
+ *
+ * **The unreadable arm carries no bytes.** What it does carry is on the
+ * observation above it: a hash of bytes is not a rendering of them.
+ */
+export type ChangedContent =
+  | {
+      readonly Projected: {
+        /** Those exact bytes, unchanged. The comparison side of a conflict. */
+        readonly disk_text: string;
+        /**
+         * The projection of those same bytes.
+         *
+         * Paired with `disk_text` by construction, since both come out of one
+         * snapshot — a fact about the Rust that builds them, which no type here
+         * expresses.
+         */
+        readonly disk: DocumentView;
+        /** The pure semantic report over that projection. */
+        readonly findings: readonly Finding[];
+        /**
+         * Correspondence evidence from the previously projected content into
+         * this one, or `null` where either side had no projection.
+         *
+         * **No reapply anchor crosses**: the anchor is the question, is captured
+         * and dropped inside the core, and a table holds answers only.
+         */
+        readonly correspondences: CorrespondenceTable | null;
+      };
+    }
+  | {
+      readonly Unreadable: {
+        /** Why the text is not available. */
+        readonly reason: UnreadableReason;
+      };
+    };
+
+/** The variant name of every {@link ExternalObservation} arm. */
+export type ExternalObservationName = 'Changed' | 'Added' | 'Removed' | 'Unreadable';
+
+/**
+ * One external change, as the frontend meets it.
+ *
+ * A discriminated value, never rendered prose and never a raw watcher event.
+ * **Every variant carries the sequence it was admitted under**, because *which
+ * of these is newest for this document* is the consumer's whole arbitration rule
+ * and it may not be recovered from a hash.
+ *
+ * `Changed` and `Added` answer a present-but-not-UTF-8 state with a
+ * discriminated content field rather than by changing arm, so both revisions of
+ * a change and the sidebar row of an addition survive. What remains on
+ * `Unreadable` is the one engine state that is not content: a path whose *read*
+ * stably fails, which has no bytes, no revision and no projection anything could
+ * have made.
+ */
+export type ExternalObservation =
+  | {
+      readonly Changed: {
+        /** The sequence this observation was admitted under. */
+        readonly sequence: number;
+        /** Which document, and whether the open workspace resolves it. */
+        readonly document: ObservedDocument;
+        /**
+         * The last stable revision the engine held, or `null` when it had none.
+         *
+         * **Not a claim that the caller ever saw that revision**, and not an
+         * order: it is what the engine tracked before this reading.
+         */
+        readonly previous_revision: ContentRevision | null;
+        /** The revision of the exact bytes now on disk, text or not. */
+        readonly disk_revision: ContentRevision;
+        /** The projection of those same bytes, or why there is none. */
+        readonly content: ChangedContent;
+      };
+    }
+  | {
+      readonly Added: {
+        /** The sequence this observation was admitted under. */
+        readonly sequence: number;
+        /**
+         * The row a sidebar draws, built from the discovered file and the
+         * identity for its path.
+         *
+         * **An identity, not an address the open workspace resolves**: an
+         * addition is by definition a file that workspace does not hold. Its
+         * `loaded` is `false`, and truthfully.
+         */
+        readonly document_summary: DocumentSummary;
+        /** The projection of the stabilized bytes, or why there is none. */
+        readonly content: AddedContent;
+      };
+    }
+  | {
+      readonly Removed: {
+        /** The sequence this observation was admitted under. */
+        readonly sequence: number;
+        /** Which document, and whether the open workspace resolves it. */
+        readonly document: ObservedDocument;
+        /** The last stable revision the engine held, or `null` when it had none. */
+        readonly previous_revision: ContentRevision | null;
+      };
+    }
+  | {
+      readonly Unreadable: {
+        /** The sequence this observation was admitted under. */
+        readonly sequence: number;
+        /** Which document, and whether the open workspace resolves it. */
+        readonly document: ObservedDocument;
+        /** Why the text is not available. */
+        readonly reason: UnreadableReason;
+      };
+    };
+
+/**
+ * What `drainExternalChanges` hands back — the authoritative half of the
+ * protocol.
+ *
+ * **A caller compares {@link ReconciliationBatch.epoch} against the workspace it
+ * is showing, and a mismatch makes the whole batch stale and installs nothing.**
+ * That comparison, the watermark it advances and what it does about `discarded`
+ * are all Phase 2d-5's; nothing in Phase 2d-4b arbitrates or retains any of it.
+ */
+export interface ReconciliationBatch {
+  /**
+   * The workspace epoch this queue is holding observations for.
+   *
+   * Zero — never a real epoch — when the session has adopted none, which means
+   * the open found the epoch space exhausted and started a lifecycle with no
+   * worker. Such a workspace is watched by nothing and its batch is always
+   * empty.
+   */
+  readonly epoch: number;
+  /**
+   * The highest sequence in {@link ReconciliationBatch.observations}, or — when
+   * the batch is empty — the highest watermark this epoch's queue has been
+   * drained with, which is **not** necessarily the `afterSequence` of this call.
+   *
+   * **Scoped to one epoch: within the epoch {@link ReconciliationBatch.epoch}
+   * names, this never falls**, so a caller showing that epoch may store it
+   * unconditionally. Across a replacement epoch it does fall, and that is not a
+   * walk-back — a batch whose epoch a caller is not showing installs nothing at
+   * all, whatever it holds.
+   */
+  readonly newest_sequence: number;
+  /** The observations above the caller's watermark, ordered by sequence. */
+  readonly observations: readonly ExternalObservation[];
+  /**
+   * How many admitted observations this epoch's queue dropped rather than held.
+   *
+   * **Cumulative within the epoch and monotonic**, so a non-zero value does not
+   * say the loss happened since the previous drain. What it does say is that
+   * this epoch's observation history has a hole in it, so a consumer must reload
+   * the workspace rather than reconcile from these values. Zero on every
+   * ordinary run.
+   */
+  readonly discarded: number;
+}
+
+// ---------------------------------------------------------------------------
 // Projections onto the name unions
 // ---------------------------------------------------------------------------
 

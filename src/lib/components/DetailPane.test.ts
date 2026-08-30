@@ -153,11 +153,22 @@ const SUMMARY: WorkspaceSummary = {
 };
 
 /**
+ * How many times any surface built by {@link scriptedCommands} has been drained.
+ *
+ * Module level rather than per-surface because the assertion is about the file:
+ * **no case in it may drain**. The `afterEach` below reads and resets it.
+ */
+let drains = 0;
+
+/**
  * A command surface that answers the two documents above.
  *
  * Only the commands this pane's path reaches are given real answers; the rest
  * refuse, which is what a state test would want anyway — a pane that started
- * calling one of them would be visible rather than silently satisfied.
+ * calling one of them would refuse wherever the case uses the answer, rather
+ * than being silently satisfied. **A call whose answer is discarded is a
+ * different matter**, and refusing does not make one visible: only counting the
+ * call does, which is what the drain below is given and the others are not.
  *
  * @returns The commands, with `vi.fn` wrappers so calls can be inspected.
  */
@@ -191,7 +202,16 @@ function scriptedCommands(): BrowserCommands {
     createMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     deleteMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
-    saveRawDocument: vi.fn(async () => refusal)
+    saveRawDocument: vi.fn(async () => refusal),
+    // Phase 2d-4b puts the drain on this surface; nothing this pane draws calls
+    // it. The refusal is the answer no caller could proceed on, and `drains` is
+    // what makes an unexpected call *visible* — a `vi.fn` records a call and
+    // asserts nothing about it, so a fire-and-forget drain that ignored this
+    // answer would pass every case here. The `afterEach` below is the assertion.
+    drainExternalChanges: vi.fn(async () => {
+      drains += 1;
+      return refusal;
+    })
   };
 } // End of function scriptedCommands()
 
@@ -310,6 +330,13 @@ beforeEach(() => {
 
 afterEach(() => {
   locale.setOverride(null);
+  // The assertion `scriptedCommands()`'s refusal cannot make on its own, applied
+  // to every case in this file: nothing this pane draws drains at 2d-4b. Cleared
+  // before it is read, so one drain fails one case rather than every case after
+  // it.
+  const drained = drains;
+  drains = 0;
+  expect(drained).toBe(0);
 });
 
 describe('the mounted detail pane', () => {

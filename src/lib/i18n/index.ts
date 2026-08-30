@@ -118,6 +118,7 @@ import {
 import { codePointLabel, invisibleKey, type InvisibleSegment } from '../browser/sourceText';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
+  AddedContent,
   BackupError,
   BackupReadError,
   BackupReadStep,
@@ -125,12 +126,15 @@ import type {
   BackupStep,
   BackupTarget,
   BatchSkipped,
+  ChangedContent,
   ContentKind,
   DecodeError,
   DiagnosticCode,
   DraftError,
+  DuplicateSeam,
   EditError,
   EntrySkipped,
+  ExternalObservation,
   FileKind,
   FindingClass,
   FindingCode,
@@ -155,6 +159,7 @@ import type {
   TargetDifference,
   TriggerKind,
   UnknownReason,
+  UnreadableReason,
   ValueKind,
   VariableKind,
   VerificationFailure,
@@ -164,6 +169,7 @@ import type {
 import { locale } from '../stores/locale.svelte';
 import type { Locale } from './locale';
 import {
+  describeAddedContent,
   describeBackupError,
   describeBackupReadError,
   describeBackupReadStep,
@@ -171,13 +177,16 @@ import {
   describeBackupStep,
   describeBackupTarget,
   describeBatchSkipped,
+  describeChangedContent,
   describeCommandError,
   describeContentKind,
   describeDecodeError,
   describeDiagnostic,
   describeDraftError,
+  describeDuplicateSeam,
   describeEditError,
   describeEntrySkipped,
+  describeExternalObservation,
   describeFileKind,
   describeFindingClass,
   describeFindingCode,
@@ -203,6 +212,7 @@ import {
   describeTargetDifference,
   describeTriggerKind,
   describeUnknownReason,
+  describeUnreadableReason,
   describeValueKind,
   describeVariableKind,
   describeVerificationFailure,
@@ -226,6 +236,7 @@ export type { TranslationKey, TranslationParams } from './dictionaries';
 export { DEFAULT_LOCALE, LOCALES, isLocale, matchLocaleTag, negotiateLocale } from './locale';
 export type { Locale } from './locale';
 export {
+  addedContentKey,
   backupErrorKey,
   backupReadErrorKey,
   backupReadStepKey,
@@ -233,9 +244,11 @@ export {
   backupStepKey,
   backupTargetKey,
   batchSkippedKey,
+  changedContentKey,
   commandErrorKey,
   contentKindKey,
   decodeErrorKey,
+  describeAddedContent,
   describeBackupError,
   describeBackupReadError,
   describeBackupReadStep,
@@ -243,13 +256,16 @@ export {
   describeBackupStep,
   describeBackupTarget,
   describeBatchSkipped,
+  describeChangedContent,
   describeCommandError,
   describeContentKind,
   describeDecodeError,
   describeDiagnostic,
   describeDraftError,
+  describeDuplicateSeam,
   describeEditError,
   describeEntrySkipped,
+  describeExternalObservation,
   describeFileKind,
   describeFindingClass,
   describeFindingCode,
@@ -275,6 +291,7 @@ export {
   describeTargetDifference,
   describeTriggerKind,
   describeUnknownReason,
+  describeUnreadableReason,
   describeValueKind,
   describeVariableKind,
   describeVerificationFailure,
@@ -283,8 +300,10 @@ export {
   diagnosticCodeKey,
   documentShapeKey,
   draftErrorKey,
+  duplicateSeamKey,
   editErrorKey,
   entrySkippedKey,
+  externalObservationKey,
   fileKindKey,
   findingClassKey,
   findingCodeKey,
@@ -309,6 +328,7 @@ export {
   targetDifferenceKey,
   triggerKindKey,
   unknownReasonKey,
+  unreadableReasonKey,
   valueKindKey,
   variableKindKey,
   verificationFailureKey,
@@ -1814,3 +1834,93 @@ export function tBackupTarget(target: BackupTarget): string {
 export function tBackupReadError(error: BackupReadError): string {
   return describeBackupReadError(locale.current, error);
 } // End of function tBackupReadError()
+
+// ---------------------------------------------------------------------------
+// The duplicate's seams — a gap Phase 2d-4b's namespace check exposed
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders one join created by a duplicate, in the current language.
+ *
+ * {@link tMoveSeam}'s twin. Its three phrases have had dictionary entries since
+ * Phase 2c-3c-1 and no accessor until now, which is exactly the state the
+ * namespace check in `codes.test.ts` exists to make impossible: a key nothing
+ * could lawfully render.
+ *
+ * @param seam - A duplicate seam as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tDuplicateSeam(seam: DuplicateSeam): string {
+  return describeDuplicateSeam(locale.current, seam);
+} // End of function tDuplicateSeam()
+
+// ---------------------------------------------------------------------------
+// The external-change reconciliation codes — Phase 2d-4b
+// ---------------------------------------------------------------------------
+//
+// Four accessors written before anything calls them, for the reason this file
+// already gives about the correspondence evidence: a code with no string is
+// worse than a code with no caller, and the only lawful way to reach a `code.`
+// key is an accessor whose return type makes a missing one a compile error.
+// Phase 2d-6 is what draws any of these; Phase 2d-4b draws nothing.
+//
+// **What no test in this repository holds about any of the fourteen sentences**
+// is that one of them says the right thing. The i18n suites check key parity,
+// placeholder agreement and that a sentence is not blank; nothing anywhere
+// establishes meaning, or that the Spanish value is Spanish.
+
+/**
+ * Renders what happened to a file underneath the window, in the current
+ * language.
+ *
+ * **A statement about the file, never about what this application will do.**
+ * None of the four says anything has been reloaded, that a draft still applies,
+ * or that the file cannot change again.
+ *
+ * @param observation - An observation as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tExternalObservation(observation: ExternalObservation): string {
+  return describeExternalObservation(locale.current, observation);
+} // End of function tExternalObservation()
+
+/**
+ * Renders why a file's text is not available, in the current language.
+ *
+ * **`NotUtf8` is not a failed read**: the bytes arrived and are not text, so its
+ * sentence says this application will not guess rather than that the file could
+ * not be read. The other five are the operating system's own refusals.
+ *
+ * @param reason - A reason as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tUnreadableReason(reason: UnreadableReason): string {
+  return describeUnreadableReason(locale.current, reason);
+} // End of function tUnreadableReason()
+
+/**
+ * Renders what a newly seen file's bytes projected to, in the current language.
+ *
+ * A claim about this application's **reading** of the file and never about
+ * whether what it holds is valid espanso configuration.
+ *
+ * @param content - An addition's content as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tAddedContent(content: AddedContent): string {
+  return describeAddedContent(locale.current, content);
+} // End of function tAddedContent()
+
+/**
+ * Renders what a changed file's new bytes projected to, in the current language.
+ *
+ * Separate from {@link tAddedContent} because the two answer separate questions:
+ * *this file is new to me* and *this file is one I had already read* are two
+ * facts, and one sentence for both would be untrue of one of them.
+ *
+ * @param content - A change's content as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tChangedContent(content: ChangedContent): string {
+  return describeChangedContent(locale.current, content);
+} // End of function tChangedContent()
