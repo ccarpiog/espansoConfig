@@ -10,7 +10,7 @@ standing rules, the open risks, the next action, the verification baseline, the 
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
 triggers the move**. As of 2d-4a-H it is **over the soft line bound and just inside the soft byte
-bound**: **483 lines and 63,390 bytes**, under 64 KiB by 2.3 KB, after this iteration archived one
+bound**: **483 lines and 63,390 bytes**, under 64 KiB by 2.1 KB, after this iteration archived one
 spent next-action block and one spent verification block, compacted four older verification blocks
 into one and dropped five superseded key-path rows. **The pressure that drove it here is gone** — the
 2d-4a tail is closed, so no further round adds a block, and 2d-4b is one phase rather than five — but
