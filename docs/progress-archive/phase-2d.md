@@ -3108,3 +3108,72 @@ issued separately and **redirected to a file rather than piped**, so every statu
 build` **184** modules, server oracle absent and client oracle present with 2 matches. **The three
 frontend figures were measured at the start of this iteration**, and no `src/` file changed in any of
 its phases.
+
+---
+
+## Phase 2d-4a-H and the four rounds before it — the verification narratives, archived 2026-08-30
+
+Moved out of `PROGRESS.md` at the start of Phase 2d-4b, because 2d-4a is closed and its rounds can no
+longer move a figure. The live checkpoint keeps only the baseline itself, the gate commands and the
+host scar.
+
+### Phase 2d-4a-H — round 13 (2026-08-30, `/autoclaude-opus`, driven mode) — **THE ROUND THAT CLOSED THE TAIL**
+
+**Reviews: 1/1 — the workflow's whole per-phase allowance. Verdict `ship-with-fixes`: 0 High, 2
+Medium, 0 Low, and both Mediums in the record.** Reviewer: a fresh `autoclaude-reviewer` on
+`model: "opus"`, briefed from
+[`docs/decisions/2d-4a-H-round-13-brief.md`](docs/decisions/2d-4a-H-round-13-brief.md), writing its own
+report to [`docs/reviews/phase-2d-4a-round-13.md`](docs/reviews/phase-2d-4a-round-13.md). **The seventh
+consecutive Opus round.** Record: [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) §22.
+
+- **The tail closes by §7.1's one mechanism.** The fix round changed **no source file** — `git status
+  --short` showed only `PROGRESS.md` and three paths under `docs/`, which is §7's closed list of *the
+  record* — so no round is commissioned and §7.2 closes the step. **2d-4a-H is complete, not
+  superseded**: the first phase of the D→E→F→G→H chain that is.
+- **Both Mediums were re-derived by the orchestrator before being accepted**, not taken on the
+  reviewer's word. M1: the round-12 correction block raised the citation total to **85** while calling
+  a breakdown summing to **83** *"exact"* — verified by running both counts, `rg -c` (lines) giving
+  39/18/15/4/3/1/1/1/1 = 83 and `rg -o … | uniq -c` (occurrences) giving **41**/18/15/4/3/1/1/1/1 = 85.
+  M2: `git show e334d5b --numstat` gives **seven** files against §21.2's four.
+- **The one `NOT-VERIFIED` item was closed, not carried.** **88 / 61 / 149** are
+  `RETAINED_STATE_SHAPES` (`retained_state_contract.rs:159-273`) and `LIVENESS_SHAPES`
+  (`liveness_contract.rs:98-181`) — the sweep's **patterns**, not the `phrase:` inventory fields
+  (141 / 86) or their distinct literals (68 / 35). §21.3 now carries two `awk` lines that reproduce
+  them. The figures were right; the **word** was wrong.
+- **No phrase check was needed and that is a first.** The check catches prose arriving into or leaving
+  a swept **Rust** file, and no Rust file was touched — so the diff alone proves no inventoried count
+  moved, where every previous round needed a sweep.
+
+**Gates on the tree this iteration produced**, measured by the orchestrator alone with orphaned bin
+targets killed first, each command issued separately and **redirected to a file rather than piped**, so
+every status is the tool's own: `cargo test --workspace` **1313** passed / 0 failed over **26** result
+lines all `ok`, exit 0; `clippy -D warnings` clean; `cargo fmt --check` clean; `cargo doc --workspace
+--no-deps` **73** warnings, all `private_intra_doc_links`, **0** unresolved; `cargo tree -p
+espansoconfig-core | rg tauri` empty over 85 tree lines; `npm run check` **431** files / 0 errors / 0
+warnings; `npm test` **2125** over **56** files; `npm run build` **184** modules, server oracle absent
+and client oracle present with 2 matches. **All eight re-measured in this iteration**, the three
+frontend ones included even though nothing outside `docs/` and `PROGRESS.md` changed.
+
+### Phases 2d-4a-G, -F, -E and -D — rounds 12, 11, 10 and 9 (2026-08-29, `/autoclaude-opus`, driven mode)
+
+**All four archived** at [`docs/progress-archive/phase-2d.md`](docs/progress-archive/phase-2d.md),
+verbatim, each superseded by its successor. In one line each, newest first — round 12 (§21,
+[report](docs/reviews/phase-2d-4a-round-12.md)): `ship-with-fixes`, 0 High, 2 Medium, 3 Low, all five
+fixed, two Mediums and one Low being one shape — *a figure measured over one span and labelled with
+another* — and the two source Lows being the comment edit round 13 then cleared. Round 11 (§20,
+[report](docs/reviews/phase-2d-4a-round-11.md)): **`do-not-ship`**, **1 High** — the eviction
+sentence's *never* denying the very state its own escape requires — plus 1 Medium and 1 Low. Round 10
+(§19, [report](docs/reviews/phase-2d-4a-round-10.md)): `ship-with-fixes`, 0 High, 2 Medium, 2 Low,
+three fixed and L2 declined with its argument recorded. Round 9 (§18,
+[report](docs/reviews/phase-2d-4a-round-9.md)): **`do-not-ship`**, 2 High and 3 Medium, every finding
+fixed.
+
+
+### Phase M2 — the review-tail termination rule (2026-08-29)
+
+**Closed**; narrative at [`docs/progress-archive/phase-m2.md`](docs/progress-archive/phase-m2.md),
+both rounds verbatim at
+[`docs/reviews/phase-M2-review-tail-termination.md`](docs/reviews/phase-M2-review-tail-termination.md).
+Two rounds, both `not-ready`, every finding fixed, and **no source file changed** — so the rule M2
+installed commissioned nothing on its own first application.
+

@@ -9464,3 +9464,90 @@ wrapper, the `describe*` builders in `src/lib/i18n/codes.ts` with their reactive
 `index.ts`, the frontend tests, and the re-measured `npm run check` / `npm test` / `npm run build`
 baselines. Its four inherited constraints are listed at the end of the round-7 brief. By the standing
 rule since 2b-2c, a design consult comes before any line of it is written.
+
+---
+
+## The next-action block that carried Phase 2d-4a to its closure — spent 2026-08-30
+
+Written by Phase 2d-4a-H when round 13 ended the tail, and spent by the iteration that ran 2d-4b's
+design consult. **History, never an instruction.** Its 🛑 about a round 14 was true when written and
+remains true: no round 14 of 2d-4a is commissioned.
+
+## Next action
+
+### Phase 2d-4a's review tail CLOSED at round 13. The next action is **Phase 2d-4b** — the TypeScript
+### half of the reconciliation wire — and it opens with a **design consult**.
+
+**🛑 Do not run a round 14 of 2d-4a.** It is not commissioned and running one would be a round nobody
+authorised (`CLAUDE.md` §7.2's last paragraph). Round 13's fix round changed **no source file** — three
+correction blocks in `docs/decisions/2d-4a-notes.md`, which is under `docs/` and so on §7's closed list
+of *the record* — so §7.1 commissions nothing and the step closes. **Neither is a step-2 round 10 of
+2d-4a-C available**: that is a different tail, closed by owner decision, and reopening it needs a new
+owner ruling. Thirteen numbered positions exist across the two, so a bare round number is ambiguous —
+check which tail before acting. The spent next-action blocks are in
+[`docs/progress-archive/next-action-history.md`](docs/progress-archive/next-action-history.md), which
+is **history and never an instruction**.
+
+#### What closed the tail, and why it is a rule's output rather than a judgement
+
+**Phase 2d-4a-H ran round 13 on 2026-08-30** — a fresh `autoclaude-reviewer` on `model: "opus"`,
+briefed from [`docs/decisions/2d-4a-H-round-13-brief.md`](docs/decisions/2d-4a-H-round-13-brief.md),
+reporting to [`docs/reviews/phase-2d-4a-round-13.md`](docs/reviews/phase-2d-4a-round-13.md). Verdict
+**`ship-with-fixes`: 0 High, 2 Medium, 0 Low, and both Mediums in the record.**
+
+| Round | Phase | Verdict | Findings |
+|---|---|---|---|
+| 9 | 2d-4a-D | **do-not-ship** | 2 High, 3 Medium |
+| 10 | 2d-4a-E | ship-with-fixes | 0 High, 2 Medium, 2 Low |
+| 11 | 2d-4a-F | **do-not-ship** | 1 High, 1 Medium, 1 Low |
+| 12 | 2d-4a-G | ship-with-fixes | 0 High, 2 Medium, 3 Low |
+| **13** | **2d-4a-H** | **ship-with-fixes** | **0 High, 2 Medium — both in the record** |
+
+**It cleared the source change.** The reviewer counted the enumeration this paragraph has twice been
+wrong about and found it right: three items as *A; B; and C*, the colon at `reconciliation.rs:1503`
+opening a clause **inside** item 2 and the semicolon at `:1505` closing it, the summary at `:1507-1510`
+matching all three in order, and the appositive true of `evictable_sequence` (`:921-935`). Round 12's
+repair holds.
+
+**Both Mediums were confirmed by re-derivation before being accepted, not taken on the report's word.**
+M1: §18.3's round-12 correction block raised the citation total to **85** and in the same breath called
+a breakdown summing to **83** *"exact"* — an occurrence total beside a line breakdown, **inside the
+block written to correct exactly that shape**. Only `retained_state_contract.rs` moves (41 over 39),
+which is why eight of nine rows hid it. M2: §21.2 said *"listed in full"* and named four of seven files.
+**And the one thing round 13 could not verify was chased down rather than carried**: the **88 / 61 /
+149** figures are right, but they count `RETAINED_STATE_SHAPES` and `LIVENESS_SHAPES` — the sweep's
+**patterns** — while both modules use `phrase` for an `INVENTORY` field holding something else. §21.3
+now carries two `awk` lines that reproduce 88 and 61. **A name collision rather than a span one**, and
+the nearest neighbour yet of the shape §21.4 names.
+
+**The record is [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) §22.** Its §22.4 marks
+every residue per §7.3; **none is a blocker**, which is a condition of the closure and not an
+afterthought to it. Two are worth carrying forward by name: `docs/reviews/phase-2d-4a-queue.md` still
+has no section for rounds 10–13 (*actionable*, record not source, so a later phase may adopt it), and
+**seven consecutive Opus rounds with no second provider** (*recorded only*) — a bound the closure does
+**not** discharge, because closure is a fact about round 13's diff and not about its thoroughness.
+
+#### Phase 2d-4b — the TypeScript half of the wire (THE NEXT ACTION)
+
+Spec: [`docs/decisions/2d-4-split-notes.md`](docs/decisions/2d-4-split-notes.md) §2 — the mirrored
+TypeScript types, the `BrowserCommands` wrapper for the drain, the **injectable** event-listener
+wrapper, the `describe*` builders in `src/lib/i18n/codes.ts` with their reactive `t*` wrappers in
+`index.ts`, and the frontend tests. §3 says why the EN/ES JSON is in 4a and the accessors in 4b; §4
+says what neither step does. Its four inherited constraints are listed at the end of
+[`docs/decisions/2d-4a-round-7-brief.md`](docs/decisions/2d-4a-round-7-brief.md).
+
+**Three things bind it before any line is written:**
+
+1. **A design consult comes first** — the standing rule since 2b-2c, and 2d's own consult
+   ([`docs/reviews/phase-2d-design.md`](docs/reviews/phase-2d-design.md)) changed the phase in four
+   places. 2d-4b is the first step of this phase to touch `src/`.
+2. **It is the first step since 2d-4a began that touches `src/`, so the three frontend figures must be
+   re-measured**, not carried: `npm run check` **431** files, `npm test` **2125**, `npm run build`
+   **184** modules are the pre-4b baseline. A count that moves by the number of new source modules
+   **plus one per new styled component** is new source; use the discriminating bundle oracle, never the
+   module number alone (`CLAUDE.md` §4).
+3. **A component renders a code by calling an accessor, never by building a key** — `codes.ts`'s
+   builders make a missing key a compile error in that file, and building a key by hand opts out of the
+   only check that catches it.
+
+

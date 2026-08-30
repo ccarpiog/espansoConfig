@@ -9,15 +9,13 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4a-H it is **over the soft line bound and just inside the soft byte
-bound**: **483 lines and 63,390 bytes**, under 64 KiB by 2.1 KB, after this iteration archived one
-spent next-action block and one spent verification block, compacted four older verification blocks
-into one and dropped five superseded key-path rows. **The pressure that drove it here is gone** — the
-2d-4a tail is closed, so no further round adds a block, and 2d-4b is one phase rather than five — but
-the margin is not, so **2d-4b's own verification and next-action blocks do not fit without archiving
-first**. Archive before writing them. **The next places to look for length are *Open risks and
-deviations* and the *Next action*'s narrative half, not the phase table**, and the four-blocks-in-one
-compaction under *Verification baseline* is the pattern to repeat.
+triggers the move**. As of 2d-4b's design consult it is **426 lines and 59,699 bytes**, under 64 KiB
+by 5.8 KB, after this iteration archived the spent 2d-4a closure block from *Next action* and the five
+per-round verification narratives, replacing each with a pointer. **That is the headroom 2d-4b's own
+verification and next-action blocks will spend**, and it is deliberately larger than the 2.1 KB
+2d-4a-H left. **The next places to look for length are *Open risks and deviations* and the *Next
+action*'s narrative half, not the phase table**, and archiving a closed phase's narrative to
+`docs/progress-archive/` is the pattern to repeat.
 
 - Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds the phase plan).
 - Rules that bind every session: [`CLAUDE.md`](CLAUDE.md).
@@ -60,7 +58,8 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-4a-H** | Fifth corrective phase: round 13's review of the round-12 fix — one comment edit in one file | ✅ **complete and CLOSED (2026-08-30)** — `ship-with-fixes`, **0 High**, 2 Medium, 0 Low, **both Mediums in the record** and both re-derived before being accepted; the round's `NOT-VERIFIED` figure was chased down rather than carried. **Its fix changed no source file, so §7.1 commissions nothing and 2d-4a's tail ends here.** The one phase of the D→E→F→G→H chain that is *not* superseded |
 | **2d-4a-C-1** | The scoped-lifetime contract, stated once, and its pointers | ✅ complete and **CLOSED** — four rounds, round 4 READY with 0 findings |
 | **2d-4a-C-2** | The check that keeps it — `src-tauri/src/prose_sweep.rs` and `src-tauri/src/retained_state_contract.rs` | ✅ implemented, every gate green, **CLOSED by owner decision 2026-08-29** after nine rounds |
-| **2d-4b** | The TypeScript half of the wire — spec `docs/decisions/2d-4-split-notes.md` §2 | ⬜️ not started — **this is the next action**, and it opens with a design consult. First step since 2d-4a began to touch `src/`, so the three frontend figures are re-measured, not carried |
+| **2d-4b design consult** | 2d-4b put to a design consult before any line of it was written, per the standing rule since 2b-2c | ✅ complete (2026-08-30) — [`docs/reviews/phase-2d-4b-design.md`](docs/reviews/phase-2d-4b-design.md), **Codex at high effort**, the **second provider** on this phase since 2d-4a began. Verdict *proceed as one coherent wire step*; it added a general key-without-accessor check and one bounded correction (`duplicateSeam`) that check exposes |
+| **2d-4b** | The TypeScript half of the wire — spec `docs/decisions/2d-4-split-notes.md` §2, as ruled by its consult | 🔶 **in progress — this is the next action**, and the consult is complete. One worker, no further cut. First step since 2d-4a began to touch `src/`, so the three frontend figures are re-measured, not carried |
 | **2d-5 … 2d-8** | The remaining four steps of the consult's eight | ⬜️ not started |
 | **2d** | External change reconciliation — plan §6.5 | 🔶 in progress |
 | **3–5** | Validation, packaging, hardening | ⬜️ not started |
@@ -205,82 +204,78 @@ decision that closed them — those decisions are in
 
 ## Next action
 
-### Phase 2d-4a's review tail CLOSED at round 13. The next action is **Phase 2d-4b** — the TypeScript
-### half of the reconciliation wire — and it opens with a **design consult**.
+### Phase 2d-4b's design consult is COMPLETE. The next action is **2d-4b's implementation** — one
+### worker, no further cut, and every ruling below is binding.
 
-**🛑 Do not run a round 14 of 2d-4a.** It is not commissioned and running one would be a round nobody
-authorised (`CLAUDE.md` §7.2's last paragraph). Round 13's fix round changed **no source file** — three
-correction blocks in `docs/decisions/2d-4a-notes.md`, which is under `docs/` and so on §7's closed list
-of *the record* — so §7.1 commissions nothing and the step closes. **Neither is a step-2 round 10 of
-2d-4a-C available**: that is a different tail, closed by owner decision, and reopening it needs a new
-owner ruling. Thirteen numbered positions exist across the two, so a bare round number is ambiguous —
-check which tail before acting. The spent next-action blocks are in
+The consult is [`docs/reviews/phase-2d-4b-design.md`](docs/reviews/phase-2d-4b-design.md) — **Codex at
+high effort, dispatched 2026-08-30** through the companion CLI per
+[`docs/decisions/codex-dispatch-procedure.md`](docs/decisions/codex-dispatch-procedure.md), collected
+in ~15 minutes by two chained bounded foreground waits. It is the **second provider** to look at this
+phase since 2d-4a began, which is the coverage bound `docs/decisions/2d-4a-notes.md` §22.4 carried
+forward. The spent 2d-4a closure block is in
 [`docs/progress-archive/next-action-history.md`](docs/progress-archive/next-action-history.md), which
-is **history and never an instruction**.
+is **history and never an instruction**; **no round 14 of 2d-4a is commissioned**, and a step-2 round
+10 of 2d-4a-C is a different, owner-closed tail.
 
-#### What closed the tail, and why it is a rule's output rather than a judgement
+#### What the consult ruled, in the order a worker needs it
 
-**Phase 2d-4a-H ran round 13 on 2026-08-30** — a fresh `autoclaude-reviewer` on `model: "opus"`,
-briefed from [`docs/decisions/2d-4a-H-round-13-brief.md`](docs/decisions/2d-4a-H-round-13-brief.md),
-reporting to [`docs/reviews/phase-2d-4a-round-13.md`](docs/reviews/phase-2d-4a-round-13.md). Verdict
-**`ship-with-fixes`: 0 High, 2 Medium, 0 Low, and both Mediums in the record.**
+**Verdict: PROCEED AS ONE COHERENT WIRE STEP.** 2d-4b adds only typed transport, injection,
+localization access and contract evidence. **All persistent reconciliation state and all drain
+orchestration belong to 2d-5** — including the watermark, the epoch comparison, `discarded` handling,
+and every one of the four "when does a drain fire" obligations (after registration, after `open()`,
+on foreground/resume, on a current-epoch wake). 2d-4b decides none of them.
 
-| Round | Phase | Verdict | Findings |
-|---|---|---|---|
-| 9 | 2d-4a-D | **do-not-ship** | 2 High, 3 Medium |
-| 10 | 2d-4a-E | ship-with-fixes | 0 High, 2 Medium, 2 Low |
-| 11 | 2d-4a-F | **do-not-ship** | 1 High, 1 Medium, 1 Low |
-| 12 | 2d-4a-G | ship-with-fixes | 0 High, 2 Medium, 3 Low |
-| **13** | **2d-4a-H** | **ship-with-fixes** | **0 High, 2 Medium — both in the record** |
+1. **Q1 — the mirror goes in `src/lib/ipc/types.ts`**, not a second module, and every arm is a
+   one-key object (`{ PermissionDenied: {} }` included) because Rust made every arm a struct variant.
+   `CorrespondenceEntry` and `CorrespondenceTable` mirror too — `ChangedContent::Projected.
+   correspondences` exposes them. **No mechanism today would fail for drift in these types**, so
+   2d-4b extends `wire_contract.rs` with serialized samples, both-direction property/union/payload
+   comparisons and source-derived completeness. Two limits to **state rather than imply**: the
+   contract still cannot check TypeScript property *type text*, and `u64` epochs and sequences are
+   JavaScript `number`s, exact only inside the safe-integer range.
+2. **Q2 — `drainExternalChanges(afterSequence)` in `src/lib/ipc/commands.ts`**, plus a required
+   member on `BrowserCommands` (which lives in `workspace.svelte.ts`) forwarded from `REAL_COMMANDS`.
+   **The wrapper owns no watermark, retains nothing and compares no epoch.** Adding reconciliation
+   state or a drain-response method to `BrowserState` **crosses into 2d-5**.
+3. **Q3 — a new `src/lib/ipc/events.ts`**: the event-name value (a one-element
+   `RECONCILIATION_EVENT_NAMES` array Rust can compare), a narrow `ReconciliationEventSource` with an
+   async `subscribe(handler)` returning an unlisten function, a **factory taking Tauri's raw `listen`**
+   — never a mutable module-level setter — and one real source. The wrapper **must not store its
+   unlisten function**, and a workspace replacement does **not** resubscribe. **Extend a Rust contract
+   test to compare the frontend event-name value with `RECONCILIATION_READY`**, or two green suites
+   can spell the name differently.
+4. **Q4 — four new namespaces, fourteen keys**: `externalObservation` (4), `unreadableReason` (6),
+   `addedContent` (2), `changedContent` (2). Four new key builders, four `describe*`, four reactive
+   `t*`; `codes.test.ts`'s count table takes `4 / 6 / 2 / 2`. **`ObservedDocument` is an address, not
+   a code, and gets no message accessor.** And **close the key-without-accessor hole generally**: a
+   registry in `codes.ts` of actual typed key-builder **function references** (never namespace
+   strings), compared both ways against the dictionary's `code.*` namespaces, with exactly three
+   exceptions — `workspaceError`, `discoveryError`, `identityError`. That check exposes one existing
+   gap, `duplicateSeam`, which 2d-4b **fixes rather than exempts**.
+5. **Q5 — expose no `ObservedDocument` identity accessor at all.** No `documentId()`, no common-payload
+   projection, no brand. Consumers narrow and switch with a `never` terminus. Say the guarantee
+   narrowly: narrowing is forced and a fourth arm breaks participating consumers, but **TypeScript
+   does not force `Addressable` and `Named` to be treated differently after narrowing** — 2d-5's model
+   logic and its tests are what enforce that only `Addressable.document` reaches a workspace command.
+6. **Q6 — add `drain_external_changes` to `COMMAND_NAMES` and delete its
+   `AWAITING_FRONTEND_DECLARATION` entry in the same commit**; the workspace count becomes sixteen,
+   the prose ten readers and six writers. A transient red while editing is fine; **a landed
+   intermediate commit is not**. If both gates cannot be green in one step, **stop and diagnose** —
+   never retain the exception, split the commits, weaken the comparison or add a suppression.
+7. **Q7 — do not cut the phase again**, and it owes **no mounted and no window evidence**. It owes the
+   Rust contract tests, the TypeScript wire/helper tests, the command-wrapper tests, the event-wrapper
+   tests, the i18n tests, the full gate set, and the **re-measured** three frontend figures.
+8. **Q8 — the sharpest green-suite failure is a production Tauri listener adapter that never delivers
+   a real wake even though its injected fake works**, leaving the whole push half of the protocol
+   inert. The probe that catches it is real-WKWebView and belongs to **2d-7**, not here — so this is a
+   **recorded** limit of 2d-4b's evidence, not a gate it can discharge.
 
-**It cleared the source change.** The reviewer counted the enumeration this paragraph has twice been
-wrong about and found it right: three items as *A; B; and C*, the colon at `reconciliation.rs:1503`
-opening a clause **inside** item 2 and the semicolon at `:1505` closing it, the summary at `:1507-1510`
-matching all three in order, and the appositive true of `evictable_sequence` (`:921-935`). Round 12's
-repair holds.
+#### The gates, and the one figure that is not a number
 
-**Both Mediums were confirmed by re-derivation before being accepted, not taken on the report's word.**
-M1: §18.3's round-12 correction block raised the citation total to **85** and in the same breath called
-a breakdown summing to **83** *"exact"* — an occurrence total beside a line breakdown, **inside the
-block written to correct exactly that shape**. Only `retained_state_contract.rs` moves (41 over 39),
-which is why eight of nine rows hid it. M2: §21.2 said *"listed in full"* and named four of seven files.
-**And the one thing round 13 could not verify was chased down rather than carried**: the **88 / 61 /
-149** figures are right, but they count `RETAINED_STATE_SHAPES` and `LIVENESS_SHAPES` — the sweep's
-**patterns** — while both modules use `phrase` for an `INVENTORY` field holding something else. §21.3
-now carries two `awk` lines that reproduce 88 and 61. **A name collision rather than a span one**, and
-the nearest neighbour yet of the shape §21.4 names.
-
-**The record is [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) §22.** Its §22.4 marks
-every residue per §7.3; **none is a blocker**, which is a condition of the closure and not an
-afterthought to it. Two are worth carrying forward by name: `docs/reviews/phase-2d-4a-queue.md` still
-has no section for rounds 10–13 (*actionable*, record not source, so a later phase may adopt it), and
-**seven consecutive Opus rounds with no second provider** (*recorded only*) — a bound the closure does
-**not** discharge, because closure is a fact about round 13's diff and not about its thoroughness.
-
-#### Phase 2d-4b — the TypeScript half of the wire (THE NEXT ACTION)
-
-Spec: [`docs/decisions/2d-4-split-notes.md`](docs/decisions/2d-4-split-notes.md) §2 — the mirrored
-TypeScript types, the `BrowserCommands` wrapper for the drain, the **injectable** event-listener
-wrapper, the `describe*` builders in `src/lib/i18n/codes.ts` with their reactive `t*` wrappers in
-`index.ts`, and the frontend tests. §3 says why the EN/ES JSON is in 4a and the accessors in 4b; §4
-says what neither step does. Its four inherited constraints are listed at the end of
-[`docs/decisions/2d-4a-round-7-brief.md`](docs/decisions/2d-4a-round-7-brief.md).
-
-**Three things bind it before any line is written:**
-
-1. **A design consult comes first** — the standing rule since 2b-2c, and 2d's own consult
-   ([`docs/reviews/phase-2d-design.md`](docs/reviews/phase-2d-design.md)) changed the phase in four
-   places. 2d-4b is the first step of this phase to touch `src/`.
-2. **It is the first step since 2d-4a began that touches `src/`, so the three frontend figures must be
-   re-measured**, not carried: `npm run check` **431** files, `npm test` **2125**, `npm run build`
-   **184** modules are the pre-4b baseline. A count that moves by the number of new source modules
-   **plus one per new styled component** is new source; use the discriminating bundle oracle, never the
-   module number alone (`CLAUDE.md` §4).
-3. **A component renders a code by calling an accessor, never by building a key** — `codes.ts`'s
-   builders make a missing key a compile error in that file, and building a key by hand opts out of the
-   only check that catches it.
-
-
+`431 / 2125 / 184` are **anchors, not predictions**. Judge the module movement against added
+*reachable* source modules and run **both** bundle-oracle lines from *Verification baseline* — the
+number alone proves nothing, and searching for `svelte/internal/server` is vacuous
+(`CLAUDE.md` §4).
 ## Verification baseline
 
 **`1313 / 431 / 2125 / 184`** — `cargo test --workspace` / `npm run check` files / `npm test` /
@@ -333,66 +328,13 @@ reports `tail`'s status, and it hid ten failures once.
 
 `npm install` (or `npm ci`) is required before any frontend command will run.
 
-### Phase 2d-4a-H — round 13 (2026-08-30, `/autoclaude-opus`, driven mode) — **THE ROUND THAT CLOSED THE TAIL**
+### Where the closed rounds' verification narratives went
 
-**Reviews: 1/1 — the workflow's whole per-phase allowance. Verdict `ship-with-fixes`: 0 High, 2
-Medium, 0 Low, and both Mediums in the record.** Reviewer: a fresh `autoclaude-reviewer` on
-`model: "opus"`, briefed from
-[`docs/decisions/2d-4a-H-round-13-brief.md`](docs/decisions/2d-4a-H-round-13-brief.md), writing its own
-report to [`docs/reviews/phase-2d-4a-round-13.md`](docs/reviews/phase-2d-4a-round-13.md). **The seventh
-consecutive Opus round.** Record: [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) §22.
-
-- **The tail closes by §7.1's one mechanism.** The fix round changed **no source file** — `git status
-  --short` showed only `PROGRESS.md` and three paths under `docs/`, which is §7's closed list of *the
-  record* — so no round is commissioned and §7.2 closes the step. **2d-4a-H is complete, not
-  superseded**: the first phase of the D→E→F→G→H chain that is.
-- **Both Mediums were re-derived by the orchestrator before being accepted**, not taken on the
-  reviewer's word. M1: the round-12 correction block raised the citation total to **85** while calling
-  a breakdown summing to **83** *"exact"* — verified by running both counts, `rg -c` (lines) giving
-  39/18/15/4/3/1/1/1/1 = 83 and `rg -o … | uniq -c` (occurrences) giving **41**/18/15/4/3/1/1/1/1 = 85.
-  M2: `git show e334d5b --numstat` gives **seven** files against §21.2's four.
-- **The one `NOT-VERIFIED` item was closed, not carried.** **88 / 61 / 149** are
-  `RETAINED_STATE_SHAPES` (`retained_state_contract.rs:159-273`) and `LIVENESS_SHAPES`
-  (`liveness_contract.rs:98-181`) — the sweep's **patterns**, not the `phrase:` inventory fields
-  (141 / 86) or their distinct literals (68 / 35). §21.3 now carries two `awk` lines that reproduce
-  them. The figures were right; the **word** was wrong.
-- **No phrase check was needed and that is a first.** The check catches prose arriving into or leaving
-  a swept **Rust** file, and no Rust file was touched — so the diff alone proves no inventoried count
-  moved, where every previous round needed a sweep.
-
-**Gates on the tree this iteration produced**, measured by the orchestrator alone with orphaned bin
-targets killed first, each command issued separately and **redirected to a file rather than piped**, so
-every status is the tool's own: `cargo test --workspace` **1313** passed / 0 failed over **26** result
-lines all `ok`, exit 0; `clippy -D warnings` clean; `cargo fmt --check` clean; `cargo doc --workspace
---no-deps` **73** warnings, all `private_intra_doc_links`, **0** unresolved; `cargo tree -p
-espansoconfig-core | rg tauri` empty over 85 tree lines; `npm run check` **431** files / 0 errors / 0
-warnings; `npm test` **2125** over **56** files; `npm run build` **184** modules, server oracle absent
-and client oracle present with 2 matches. **All eight re-measured in this iteration**, the three
-frontend ones included even though nothing outside `docs/` and `PROGRESS.md` changed.
-
-### Phases 2d-4a-G, -F, -E and -D — rounds 12, 11, 10 and 9 (2026-08-29, `/autoclaude-opus`, driven mode)
-
-**All four archived** at [`docs/progress-archive/phase-2d.md`](docs/progress-archive/phase-2d.md),
-verbatim, each superseded by its successor. In one line each, newest first — round 12 (§21,
-[report](docs/reviews/phase-2d-4a-round-12.md)): `ship-with-fixes`, 0 High, 2 Medium, 3 Low, all five
-fixed, two Mediums and one Low being one shape — *a figure measured over one span and labelled with
-another* — and the two source Lows being the comment edit round 13 then cleared. Round 11 (§20,
-[report](docs/reviews/phase-2d-4a-round-11.md)): **`do-not-ship`**, **1 High** — the eviction
-sentence's *never* denying the very state its own escape requires — plus 1 Medium and 1 Low. Round 10
-(§19, [report](docs/reviews/phase-2d-4a-round-10.md)): `ship-with-fixes`, 0 High, 2 Medium, 2 Low,
-three fixed and L2 declined with its argument recorded. Round 9 (§18,
-[report](docs/reviews/phase-2d-4a-round-9.md)): **`do-not-ship`**, 2 High and 3 Medium, every finding
-fixed.
-
-
-### Phase M2 — the review-tail termination rule (2026-08-29)
-
-**Closed**; narrative at [`docs/progress-archive/phase-m2.md`](docs/progress-archive/phase-m2.md),
-both rounds verbatim at
-[`docs/reviews/phase-M2-review-tail-termination.md`](docs/reviews/phase-M2-review-tail-termination.md).
-Two rounds, both `not-ready`, every finding fixed, and **no source file changed** — so the rule M2
-installed commissioned nothing on its own first application.
-
+Round 13's block and the four before it (rounds 9-12), and Phase M2's, are in
+[`docs/progress-archive/phase-2d.md`](docs/progress-archive/phase-2d.md) under *"the verification
+narratives, archived 2026-08-30"*. **No round of the 2d-4a tail moved a count and none can now** —
+the tail is closed. What the live checkpoint keeps is above: the baseline, the gate commands, the two
+bundle oracles and the host scar.
 ---
 
 ## Key paths
@@ -404,7 +346,8 @@ beside it. These are the ones the next phase needs.
 | Path | Why it matters next |
 |---|---|
 | [`docs/decisions/2d-4-split-notes.md`](docs/decisions/2d-4-split-notes.md) | **2d-4b's whole spec is §2.** §3 says why the EN/ES JSON landed in 4a and the accessors in 4b; §4 says what neither step does. Read this before the design consult, not after |
-| [`docs/reviews/phase-2d-design.md`](docs/reviews/phase-2d-design.md) | The consult that shaped Phase 2d into eight steps, and Q8's sharpest green-suite failure. **2d-4b owes its own consult** by the standing rule since 2b-2c |
+| [`docs/reviews/phase-2d-design.md`](docs/reviews/phase-2d-design.md) | The consult that shaped Phase 2d into eight steps, and Q8's sharpest green-suite failure. **2d-4b's own consult is now taken** and is the row below |
+| [`docs/reviews/phase-2d-4b-design.md`](docs/reviews/phase-2d-4b-design.md) · [`docs/decisions/2d-4b-notes.md`](docs/decisions/2d-4b-notes.md) | **2d-4b's binding rulings, and the brief that obtained them.** Read the consult before writing a line; *Next action* summarises it but the file is the authority |
 | [`src/lib/ipc/commands.ts`](src/lib/ipc/commands.ts) · [`src/lib/browser/workspace.svelte.ts`](src/lib/browser/workspace.svelte.ts) | **Where 2d-4b writes.** The TypeScript side of the wire, and the coordinator every write surface goes through — the `BrowserCommands` drain wrapper and the injectable event-listener wrapper belong here |
 | [`src/lib/i18n/codes.ts`](src/lib/i18n/codes.ts) · [`src/lib/i18n/index.ts`](src/lib/i18n/index.ts) | The twelve typed `describe*` builders and their reactive `t*` wrappers — **2d-4b adds to both files.** A component renders a code by calling an accessor, never by building a key |
 | [`docs/decisions/2d-4a-notes.md`](docs/decisions/2d-4a-notes.md) | 2d-4a's record, now **closed**. **§22 is round 13 and the closure**, §21 round 12, §20 round 11, §19 round 10, §18 round 9, §15 the round-6 fix, §9 the residues. §22.4 lists what the closed tail leaves behind, each marked per §7.3 |
