@@ -9,13 +9,15 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4a-H it is **over the soft line bound and comfortably inside the soft
-byte bound**: **460 lines and ~61 KB**, after this iteration archived one spent next-action block and
-one spent verification block and compacted four older verification blocks into one. **The pressure
-that drove it here is gone**: the 2d-4a tail is closed, so no further round adds a block, and 2d-4b is
-one phase rather than five. **The next places to look for length are *Open risks and deviations* and
-the *Next action*'s narrative half, not the phase table** — and the four-blocks-in-one compaction under
-*Verification baseline* is the pattern to repeat when 2d-4b's own block lands.
+triggers the move**. As of 2d-4a-H it is **over the soft line bound and just inside the soft byte
+bound**: **483 lines and 63,390 bytes**, under 64 KiB by 2.3 KB, after this iteration archived one
+spent next-action block and one spent verification block, compacted four older verification blocks
+into one and dropped five superseded key-path rows. **The pressure that drove it here is gone** — the
+2d-4a tail is closed, so no further round adds a block, and 2d-4b is one phase rather than five — but
+the margin is not, so **2d-4b's own verification and next-action blocks do not fit without archiving
+first**. Archive before writing them. **The next places to look for length are *Open risks and
+deviations* and the *Next action*'s narrative half, not the phase table**, and the four-blocks-in-one
+compaction under *Verification baseline* is the pattern to repeat.
 
 - Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds the phase plan).
 - Rules that bind every session: [`CLAUDE.md`](CLAUDE.md).
