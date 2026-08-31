@@ -9,7 +9,7 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4b-D it is **438 lines and 62,525 bytes**, under 64 KiB by 3.0 KB —
+triggers the move**. As of 2d-4b-D it is **438 lines and 62,518 bytes**, under 64 KiB by 3.0 KB —
 **and the figures are re-measured on the file that carries them**, because a header quoting the size
 of the file it replaced has already had to be corrected twice, and 2d-4b-D found the identical shape
 in a notes section's line citations. This session ran three phases and rewrote *Next action* in place
@@ -228,7 +228,7 @@ taken from the wrong version of the file. §10.7 item 3 records that nothing che
 
 #### What round 2d-4b-E is scoped to
 
-`git show <the 2d-4b-D sha> -- src/` — **one hunk**, the route paragraph inside the
+`git show 6dba9f7 -- src/` — **one hunk**, the route paragraph inside the
 `scriptedCommands()` drain stub in `src/lib/browser/workspace.test.ts`. Count the hunks before reading
 any sentence about how many there are; that instruction has now caught two defects in two rounds.
 
@@ -427,7 +427,7 @@ describes in as many words.
 |---|---|---|
 | **2d-4b-B — round 2 and its fix; round 3 OWED** | **`1c34579`** | ✅ pushed to `origin/main` |
 | **2d-4b-C — round 3 and its fix; round 4 OWED** | **`e510819`** | ✅ pushed to `origin/main` |
-| **2d-4b-D — round 4 and its fix; round 5 OWED** | **`SHA_PLACEHOLDER`** | PUSH_PLACEHOLDER |
+| **2d-4b-D — round 4 and its fix; round 5 OWED** | **`6dba9f7`** | ✅ pushed to `origin/main` |
 
 **Each of the three commissions the next round**, the unit being the file, and the source half of each
 is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
