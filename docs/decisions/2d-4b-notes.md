@@ -1208,7 +1208,8 @@ commissions a round, and it is corrective phase **2d-4b-H**. **Two of the four f
 and both fixes are prose inside a comment**, which changes nothing: §7.1 reads the diff and the unit is
 the file, not the line.
 
-**What round H is scoped to** is `git show <2d-4b-G's SHA> -- src/` — **two hunks expected**, the
+**What round H is scoped to** is `git show 07744ae -- src/` — **two hunks expected**, and two counted
+by the orchestrator on the pushed commit: the
 `drains` docblock at `:313` and the deferral sentence at `:461`. Count them before reading any sentence
 about how many there are. Three things are worth its budget:
 

@@ -9,7 +9,7 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4b-G it is **480 lines and 63,294 bytes** — **and the figures are
+triggers the move**. As of 2d-4b-G it is **481 lines and 63,324 bytes** — **and the figures are
 re-measured on the file that carries them**, because a header quoting the size of the file it replaced
 has already had to be corrected twice, and 2d-4b-D found the identical shape in a notes section's line
 citations. This session ran six phases and rewrote *Next action* in place each time. **2d-4b-E is
@@ -17,9 +17,9 @@ where the headroom last came back**: it had fallen to 727 bytes, and twelve Phas
 to `phase-0.md` under a pointer, exactly as 2d-4a's five closed corrective rows went to
 `status-table.md` before them.
 
-**Headroom against the 64 KiB soft bound is now 2,242 bytes, and a round of this chain costs about
+**Headroom against the 64 KiB soft bound is now 2,212 bytes, and a round of this chain costs about
 2,800 — so the session that resumes here crosses the bound and archives first.** That is arithmetic,
-not a guess: 2d-4b-G added 29 lines and 3,373 bytes, and 2d-4b-H is scoped to the same kind of work.
+not a guess: 2d-4b-G added 30 lines and 3,403 bytes, and 2d-4b-H is scoped to the same kind of work.
 **What the rule permits is the constraint**: a phase closing is what triggers a move, and **nothing of
 the 2d-4b chain is closed** — 2d-4b, B, C, D, E, F and G are all *superseded*, and the chain's live head
 is 2d-4b-H — so the six chain rows in the phase table may **not** go to `status-table.md` the way
@@ -247,7 +247,8 @@ to §13.4 are the four.
 
 #### What round 2d-4b-H is scoped to
 
-`git show <2d-4b-G's SHA> -- src/` — **two hunks expected**, both in
+`git show 07744ae -- src/` — **two hunks expected** and two counted by the orchestrator after the
+commit, both in
 `src/lib/browser/workspace.test.ts`: the `drains` docblock at `:313` and the deferral sentence at
 `:461`. **Count the hunks before reading any sentence about how many there are**; that instruction has
 caught defects in four rounds. The source diff is `+9 / −8`, every line a comment.
@@ -455,7 +456,7 @@ describes in as many words.
 | **2d-4b-D — round 4 and its fix; round 5 OWED** | **`6dba9f7`** | ✅ pushed to `origin/main` |
 | **2d-4b-E — round 5 and its fix; round 6 OWED** | **`081ea14`** | ✅ pushed to `origin/main` |
 | **2d-4b-F — round 6 and its restructure; round 7 OWED** | **`54ef596`** | ✅ pushed to `origin/main` |
-| **2d-4b-G — round 7 and its fix; round 8 OWED** | _pending — recorded in the follow-up commit_ | _pending_ |
+| **2d-4b-G — round 7 and its fix; round 8 OWED** | **`07744ae`** | ✅ pushed to `origin/main` |
 
 **Each of the six commissions the next round**, the unit being the file, and the source half of each
 is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
