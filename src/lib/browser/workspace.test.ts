@@ -313,8 +313,8 @@ interface Script {
  * Module level rather than per-surface because the assertion is about the file:
  * **no case in it may drain through an injected surface**, whichever surface it
  * built and however many. The bound is the injection and it is not decorative:
- * this file's subject module holds a route around it, stated in full where the
- * count is incremented. The `afterEach` below reads and resets it.
+ * this file's subject module holds a route around it, stated where the count is
+ * incremented. The `afterEach` below reads and resets it.
  */
 let drains = 0;
 
@@ -459,14 +459,15 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     // the phase that starts draining owns closing the route instead of trusting
     // this comment.
     //
-    // The measurements behind that claim — which phase probed which route and what
-    // each cost, why a drain is swallowed rather than recorded in this file, and
-    // what the two component suites do and do not trap — are
-    // `docs/decisions/2d-4b-notes.md` §11, with their derivations. **They are not
-    // repeated here on purpose.** They are counts and line ranges in files other
-    // than this one, nothing in this repository checks a comment, and six review
-    // rounds went to keeping such sentences true in a place where only reading
-    // catches them going stale.
+    // The measurements behind that paragraph — how many wrappers the module binds
+    // and to which surfaces, which phase probed which route and what each cost,
+    // why a drain is swallowed rather than recorded in this file, and what the two
+    // component suites do and do not trap — are
+    // `docs/decisions/2d-4b-notes.md` §11.8, which exists to be what this pointer
+    // finds. **They are not repeated here on purpose.** They are counts and line
+    // ranges in files other than this one, nothing in this repository checks a
+    // comment, and six review rounds went to keeping such sentences true in a
+    // place where only reading catches them going stale.
     drainExternalChanges: vi.fn(async () => {
       drains += 1;
       const answer: CommandResult<ReconciliationBatch> = {

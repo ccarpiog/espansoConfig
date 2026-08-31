@@ -942,9 +942,12 @@ Marked per `CLAUDE.md` §7.3.
 ### 11.8 What `workspace.test.ts`'s drain comment defers to this section
 
 **Phase 2d-4b-F moved the detail out of that comment and left a pointer here, so this subsection is
-what the pointer must find.** It consolidates the four claims the comment used to carry in full. Every
-figure is re-derived below rather than copied from the section that first recorded it, and the reason
-for the move is §12.1.
+what the pointer must find.** It consolidates the four claims the comment used to carry in full, and the
+reason for the move is §12.1. **Each figure below says how far it has been checked, because they have
+not been checked equally**: the 186 is re-derived live, the sixteen/thirteen/three has been confirmed
+by four consecutive rounds reading the module, and the 254 is carried forward from the phase that
+recorded it and has never been broken down per file. An earlier draft of this sentence claimed every
+figure was re-derived here, which claim 2 and §11.7 item 2 contradict in this section's own words.
 
 **1. Sixteen wrappers, two injected surfaces.** `src/lib/browser/workspace.svelte.ts` imports **sixteen**
 command wrappers at module level — **thirteen** to build `REAL_COMMANDS` and **three** to build
@@ -1103,3 +1106,144 @@ Marked per `CLAUDE.md` §7.3.
    one round, not a trend — *recorded only*.** Rounds 2-5 each found one the previous round had missed,
    and round 5 found two repeats of shapes already on file. What F changed is the paragraph's exposure,
    not the process that kept missing things in it.
+
+## 13. Phase 2d-4b-G — the review of 2d-4b-F's fix (2026-08-31)
+
+**Why it exists.** §12's fix changed one source file — `src/lib/browser/workspace.test.ts`, the same
+comment block, no executable line — so `CLAUDE.md` §7.1 commissioned a round scoped to it.
+**2d-4b-F is superseded by 2d-4b-G.**
+
+**The round.** A fresh `autoclaude-reviewer` on `model: "opus"`, 15-minute budget, report at
+[`../reviews/phase-2d-4b-G.md`](../reviews/phase-2d-4b-G.md). Verdict **`ship-with-fixes`: 0 blockers,
+3 should-fix and 1 Low** — all four fixed. It re-derived the diff's extent before reading any sentence
+about it (`git show 54ef596 -- src/` → **1** hunk, **0** non-comment changed lines; the orchestrator had
+measured both independently before writing the brief) and re-derived §11.8's four claims against the
+code, including a live `npx vitest run src/lib/browser/workspace.test.ts` at **186 passed**.
+
+**The round that removed the tail's fuel left the pointer aimed at the wrong section, and that is the
+whole story of round G.** §12.5 item 2 had predicted the class — *the pointer is load-bearing and
+nothing checks it* — and named the failure it expected: §11.8 renumbered, moved or trimmed. What
+actually happened is one step earlier and was not predicted: **the comment never cited §11.8 at all.**
+
+### 13.1 M1 (should-fix, source) — a pointer to the section the restructure existed to avoid
+
+`workspace.test.ts:468` cited `docs/decisions/2d-4b-notes.md` **§11**, while §11.8's own heading
+(*"What `workspace.test.ts`'s drain comment defers to this section"*), §12.5 item 2 and `PROGRESS.md`
+in two places all say the comment defers to **§11.8**. One of the two texts had to be wrong, and it was
+the comment.
+
+**The reference resolved, which is exactly why nothing caught it.** §11 exists; a reader following it
+lands at line 786 and reaches §11.1 sixteen lines later — and §11.1 still carries
+`DetailPane.test.ts:164-168`, `RestorePane.test.ts:439-443` and eight more line citations. Those are
+**the citations the restructure removed from the comment because nothing keeps them true**, deliberately
+archived in §11.1 by §11.8's own closing paragraph. So the shortened comment sent its reader 156 lines
+short of the section written to be found, into the stale-citation text it was shortened to stop relying
+on. A pointer that resolves to the wrong thing is worse than one that dangles: the second is visible.
+
+The fix cites **§11.8** and says why — *"which exists to be what this pointer finds"* — so a future
+renumbering breaks a sentence that names its own contract rather than one that merely gives a number.
+
+### 13.2 M2 (should-fix, source) — a docblock promising completeness at a site that now forwards
+
+`workspace.test.ts:316-317` said the escaping route is *"stated **in full** where the count is
+incremented."* That was true at `081ea14` and false at `54ef596`: round F's whole purpose was to move
+the detail out, and the increment site now says *"They are not repeated here on purpose."* The docblock
+survived the change byte-identically — verified by diffing it against `081ea14`, where it is the same
+two lines — because the fix was scoped to one hunk and this text is 140 lines above it.
+
+**This is the restructure's own residue, and it is the shape rounds C and E each found once**: a fix
+that changes one site and leaves a second site's sentence describing the first. The fix drops *in full*,
+which also makes the docblock agree with the `afterEach` at `:503-505` — *"are stated where {@link
+drains} is incremented"*, never *in full*. **That sentence was already correct and was deliberately not
+touched**; the round said so in its finding, and the bound and the route genuinely are stated at the
+increment site. Only completeness was the overclaim.
+
+### 13.3 M3 (should-fix, record) — the pointer's target claiming more than it delivers
+
+§11.8's preamble said *"Every figure is re-derived below rather than copied from the section that first
+recorded it."* Its own claim 2 says the **254 has never been broken down per file**, §11.7 item 2 says
+*none has re-derived it*, and claim 1's sixteen/thirteen/three rests on *"Confirmed at rounds C, D, E
+and F"* — a citation, not a derivation performed here. Only the 186 was re-derived live.
+
+**A record claiming a guarantee it does not give is this project's worst defect class**, and this
+instance is the sharpest placement it could have had: the sentence sits in the section a source comment
+now points at *for its derivations*, so the overclaim was load-bearing on the credibility the
+restructure had just transferred there. The fix states how far each figure has actually been checked,
+one clause each, and names the sentence it replaces so the correction is legible rather than silent.
+
+### 13.4 L1 (Low, source) — an enumeration short of what it defers
+
+The comment listed three of §11.8's four claims and omitted the **16/13/3/2 wrapper split** — the claim
+that establishes the escaping route is uniform across all sixteen bindings and never special to the
+drain member, which is the most direct support for the paragraph above it. It also attributed *"which
+phase probed which route and what each cost"* to *that claim*, the file-wide-closure claim, when the
+254/186 figures are evidence about the **two routes**. The fix names all four and says *that paragraph*.
+
+### 13.5 The gates, re-run after the fix
+
+Every gate, unpiped, exit status read from the tool and never from a pipeline, orphaned bin targets
+killed first:
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1320 passed, 0 failed**, summed across **26** binaries |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | finds nothing |
+| `npm run check` | **434** files, 0 errors, 0 warnings |
+| `npm test` | **2175 passed**, 57 files |
+| `npm run build` | **184** modules |
+| server-only bundle oracle | **absent** |
+| client-only bundle oracle | **present**, 2 matches |
+
+**`1320 / 434 / 2175 / 184` — no figure has moved since 2d-4b**, which is the prediction rather than a
+result worth celebrating: all six corrective phases have changed comment text in test files plus the
+record, and no test case, no production module and no Rust line. The source diff is **+9 / −8**, every
+line a comment.
+
+### 13.6 What happens next, by rule
+
+The fix changed **one** source file — `src/lib/browser/workspace.test.ts`, two comment blocks — so §7.1
+commissions a round, and it is corrective phase **2d-4b-H**. **Two of the four findings were in source
+and both fixes are prose inside a comment**, which changes nothing: §7.1 reads the diff and the unit is
+the file, not the line.
+
+**What round H is scoped to** is `git show <2d-4b-G's SHA> -- src/` — **two hunks expected**, the
+`drains` docblock at `:313` and the deferral sentence at `:461`. Count them before reading any sentence
+about how many there are. Three things are worth its budget:
+
+1. **Does `:468` now find §11.8, and does §11.8 still hold all four claims?** Round G fixed the
+   reference and narrowed the target's preamble in the same fix round, so the pointer and its target
+   have both moved and neither has been read since by anyone but the fixer.
+2. **Is the docblock at `:316` now true of the increment site, and is it still true of the
+   `afterEach`?** Three sentences in this file describe the same fact and round G changed one of them.
+   §13.2 is the record of what happens when one moves and the others do not.
+3. **Does §11.8's new preamble overclaim in the other direction?** It now says the 254 *"has never been
+   broken down per file"* in the preamble as well as in claim 2 — a repetition, and repetition is where
+   two statements of one fact drift apart.
+
+### 13.7 Where this phase is thin
+
+Marked per `CLAUDE.md` §7.3. **The four items the round returned are carried verbatim in kind**, and
+none of them is actionable-with-a-source-correctness-defect, so the step closes without them.
+
+1. **"Closes that route" is undefined at the site — *recorded only*.** The comment says no suite
+   *closes* the binding route file-wide, and what closing would consist of now lives only in the notes.
+2. **"Six review rounds" at `:468` is not derived from the ranges it justifies — *recorded only*.** The
+   cross-file line ranges entered at `e510819`, so three rounds carried them, not six; the sentence is
+   read as the chain's length rather than as a count of rounds that carried those ranges.
+   **The round marked this *recorded only* and the fix round deliberately did not touch it** — applying
+   a change the round declined to file would put an unreviewed edit into the same file, which is how
+   three of 2c-3a-1's ten findings were created. Round H may take it.
+3. **Fourteen consecutive Opus review rounds with no second provider — *recorded only*.** §12.5 item 5
+   carried thirteen. The last second provider on this chain was 2d-4b's own design consult (Codex, high
+   effort).
+4. **Nothing ties a comment to the text it describes, and M1 and M2 are both instances — *recorded
+   only*.** This is §12.5 item 2 generalized by what round G actually found: the failure was not the
+   target moving but the reference never having been right, and no gate in this repository can see
+   either. Unbounded by construction; 2d-5 does not inherit it as work.
+5. **The escaping route is still stated, not closed — *actionable*, not a correctness defect in
+   source.** Unchanged inheritance from §9.5, §10.7 item 1, §11.7 item 1 and §12.5 item 1. 2d-5 owes a
+   closure to **three** files. The step closes without it.
+6. **The 254 figure has never been broken down per file — *recorded only*.** Unchanged from §12.5
+   item 3, and now said in §11.8's preamble as well as its claim 2.
