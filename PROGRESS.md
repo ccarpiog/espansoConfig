@@ -9,7 +9,7 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4b-E it is **456 lines and 59,165 bytes** — **and the figures are
+triggers the move**. As of 2d-4b-F it is **451 lines and 59,921 bytes** — **and the figures are
 re-measured on the file that carries them**, because a header quoting the size of the file it replaced
 has already had to be corrected twice, and 2d-4b-D found the identical shape in a notes section's line
 citations. This session ran five phases and rewrote *Next action* in place each time. **2d-4b-E is
@@ -229,7 +229,7 @@ forcing it. What changed is the next round's odds.
 
 #### What round 2d-4b-G is scoped to
 
-`git show <this phase's SHA> -- src/` — **one hunk expected**, the shortened comment above the
+`git show 54ef596 -- src/` — **one hunk expected**, the shortened comment above the
 `scriptedCommands()` drain stub in `src/lib/browser/workspace.test.ts`. **Count the hunks before
 reading any sentence about how many there are**; that instruction has caught defects in three rounds.
 
@@ -433,7 +433,7 @@ describes in as many words.
 | **2d-4b-C — round 3 and its fix; round 4 OWED** | **`e510819`** | ✅ pushed to `origin/main` |
 | **2d-4b-D — round 4 and its fix; round 5 OWED** | **`6dba9f7`** | ✅ pushed to `origin/main` |
 | **2d-4b-E — round 5 and its fix; round 6 OWED** | **`081ea14`** | ✅ pushed to `origin/main` |
-| **2d-4b-F — round 6 and its restructure; round 7 OWED** | **`PENDING`** | see below |
+| **2d-4b-F — round 6 and its restructure; round 7 OWED** | **`54ef596`** | ✅ pushed to `origin/main` |
 
 **Each of the five commissions the next round**, the unit being the file, and the source half of each
 is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
