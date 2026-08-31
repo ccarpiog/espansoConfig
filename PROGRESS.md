@@ -9,7 +9,7 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4b-E it is **449 lines and 58,665 bytes** — **and the figures are
+triggers the move**. As of 2d-4b-E it is **456 lines and 59,165 bytes** — **and the figures are
 re-measured on the file that carries them**, because a header quoting the size of the file it replaced
 has already had to be corrected twice, and 2d-4b-D found the identical shape in a notes section's line
 citations. This session ran four phases and rewrote *Next action* in place each time. **2d-4b-E is
@@ -439,11 +439,18 @@ describes in as many words.
 | **2d-4b-B — round 2 and its fix; round 3 OWED** | **`1c34579`** | ✅ pushed to `origin/main` |
 | **2d-4b-C — round 3 and its fix; round 4 OWED** | **`e510819`** | ✅ pushed to `origin/main` |
 | **2d-4b-D — round 4 and its fix; round 5 OWED** | **`6dba9f7`** | ✅ pushed to `origin/main` |
+| **2d-4b-E — round 5 and its fix; round 6 OWED** | **`081ea14`** | ✅ pushed to `origin/main` |
 
-**Each of the three commissions the next round**, the unit being the file, and the source half of each
+**Each of the four commissions the next round**, the unit being the file, and the source half of each
 is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
-blocks in three files, and its successor **one block in one file**. Everything else they touch is
-`PROGRESS.md`, `docs/decisions/2d-4b-notes.md` §8–§10, `docs/progress-archive/status-table.md` and the
-three new review files, all on §7's closed list.
+blocks in three files, `6dba9f7` **one block in one file**, and `081ea14` the **same** block again.
+Everything else they touch is `PROGRESS.md`, `docs/decisions/2d-4b-notes.md` §8–§11,
+`docs/progress-archive/status-table.md`, `docs/progress-archive/phase-0.md` and the four new review
+files, all on §7's closed list.
 
-**The tree is clean at the 2d-4b-D commit.**
+**`081ea14` also carries this session's checkpoint maintenance** — twelve Phase 0 risk rows moved to
+`phase-0.md` — which is a change to two files on the closed list and commissions nothing of its own.
+What commissions **2d-4b-F** is the one comment block in `src/lib/browser/workspace.test.ts`, and
+nothing else in that commit.
+
+**The tree is clean at the 2d-4b-E commit.**
