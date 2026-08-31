@@ -943,11 +943,15 @@ Marked per `CLAUDE.md` §7.3.
 
 **Phase 2d-4b-F moved the detail out of that comment and left a pointer here, so this subsection is
 what the pointer must find.** It consolidates the four claims the comment used to carry in full, and the
-reason for the move is §12.1. **Each figure below says how far it has been checked, because they have
-not been checked equally**: the 186 is re-derived live, the sixteen/thirteen/three has been confirmed
-by four consecutive rounds reading the module, and the 254 is carried forward from the phase that
-recorded it and has never been broken down per file. An earlier draft of this sentence claimed every
-figure was re-derived here, which claim 2 and §11.7 item 2 contradict in this section's own words.
+reason for the move is §12.1. **The figures below have not been checked equally, and three of
+them say so here rather than in the claim that carries them**: the 186 is re-derived live, the
+sixteen/thirteen/three has been confirmed by four consecutive rounds reading the module, and the 254 is
+carried forward from the phase that recorded it and has never been broken down per file. **Claims 3 and
+4 state no check status for their own figures** — the `core.js:202` line and the 1 + 5 spy counts are
+re-derivable by reading the files they name, and each round has re-derived them, but the claims do not
+say so. Two drafts of this sentence have now overclaimed: the first said every figure was re-derived
+here, and the second said each figure below says how far it has been checked, which was false of claims
+3 and 4. **The correction for an overclaim is where this subsection has twice produced its next one.**
 
 **1. Sixteen wrappers, two injected surfaces.** `src/lib/browser/workspace.svelte.ts` imports **sixteen**
 command wrappers at module level — **thirteen** to build `REAL_COMMANDS` and **three** to build
@@ -983,10 +987,20 @@ zero. Both suites state this limit in their own comments. So the other two trap 
 **six named cases and nowhere else**, this one traps it nowhere, and **2d-5 owes a closure to all
 three** rather than to the one without a spy.
 
-**Line citations are deliberately absent from this subsection's four claims.** Naming a file and a
-symbol survives an edit to that file; naming a line range does not, and §10.3 is this chain's record of
-what happens when it does not. The ranges as they stood at round F, for a reader who wants them, are in
-§11.1 — and they are the reason the comment no longer carries any.
+**Line citations into this repository are deliberately absent from this subsection's four claims, and
+the one citation that remains points outside it.** Naming a file and a symbol survives an edit to that
+file; naming a line range does not, and §10.3 is this chain's record of what happens when it does not.
+The ranges as they stood at round F, for a reader who wants them, are in §11.1 — and they are the reason
+the comment no longer carries any.
+
+**The exception is claim 3's `node_modules/@tauri-apps/api/core.js:202`, and it is worse than the ones
+that were removed, not better.** It is correct today and it is version-pinned: a dependency bump moves
+it, no gate in this repository would notice, and the file is not even tracked, so `git log` cannot show
+the change that falsified it. An earlier draft of this paragraph said line citations were absent from
+all four claims while claim 3 carried that one — the *"deliberately absent"* being read as a property of
+the subsection when it was only ever true of citations into tracked files. What the line buys is a
+reader's ability to check the throwing expression in seconds; what it costs is stated here so the next
+round does not have to rediscover it.
 
 ## 12. Phase 2d-4b-F — the review of 2d-4b-E's fix (2026-08-31)
 
@@ -1153,8 +1167,8 @@ two lines — because the fix was scoped to one hunk and this text is 140 lines 
 
 **This is the restructure's own residue, and it is the shape rounds C and E each found once**: a fix
 that changes one site and leaves a second site's sentence describing the first. The fix drops *in full*,
-which also makes the docblock agree with the `afterEach` at `:503-505` — *"are stated where {@link
-drains} is incremented"*, never *in full*. **That sentence was already correct and was deliberately not
+which also makes the docblock agree with the `afterEach` — *"are stated where {@link drains} is
+incremented"*, never *in full*. **That sentence was already correct and was deliberately not
 touched**; the round said so in its finding, and the bound and the route genuinely are stated at the
 increment site. Only completeness was the overclaim.
 
@@ -1198,8 +1212,15 @@ killed first:
 
 **`1320 / 434 / 2175 / 184` — no figure has moved since 2d-4b**, which is the prediction rather than a
 result worth celebrating: all six corrective phases have changed comment text in test files plus the
-record, and no test case, no production module and no Rust line. The source diff is **+9 / −8**, every
-line a comment.
+record, and no test case, no production module and no Rust line. The source diff is **+11 / −10** —
+`git show 07744ae --numstat -- src/` gives `11 10` — every line a comment.
+
+**That figure was first recorded as `+9 / −8`, which is hunk 2 alone**, and round H caught it in four
+places including this one. It is the chain's own shape one more time: the fix for M2 *is* the first
+hunk, so the figure that was supposed to evidence the whole fix silently omitted half of it, and the
+number was written from a `git diff --stat` taken **before** the comment was rewrapped rather than
+measured on the commit. `07744ae`'s commit message carries the wrong figure permanently and cannot be
+corrected; this is the correction.
 
 ### 13.6 What happens next, by rule
 
@@ -1248,3 +1269,159 @@ none of them is actionable-with-a-source-correctness-defect, so the step closes 
    closure to **three** files. The step closes without it.
 6. **The 254 figure has never been broken down per file — *recorded only*.** Unchanged from §12.5
    item 3, and now said in §11.8's preamble as well as its claim 2.
+
+## 14. Phase 2d-4b-H — the review of 2d-4b-G's fix, and the tail's end (2026-08-31)
+
+**Why it exists.** §13's fix changed one source file — `src/lib/browser/workspace.test.ts`, two comment
+blocks, no executable line — so `CLAUDE.md` §7.1 commissioned a round scoped to it. **2d-4b-G is
+superseded by 2d-4b-H.**
+
+**The round.** A fresh `autoclaude-reviewer` on `model: "opus"`, 15-minute budget, report at
+[`../reviews/phase-2d-4b-H.md`](../reviews/phase-2d-4b-H.md). Verdict **`ship-with-fixes`: 0 blockers,
+3 should-fix and 1 Low** — all four fixed. Its brief widened the scope deliberately to include §11.8's
+preamble, because the pointer and its target had both moved in the same fix round and neither had been
+read since by anyone but the fixer.
+
+### 14.1 The finding that is not a finding: both source hunks are correct
+
+**Round H found no defect in either source hunk, and that is the round's principal result.** It
+re-derived, against the code rather than against §13: `:466` now resolves to §11.8; the enumeration at
+`:462-465` matches §11.8's four claims **in both directions** — nothing promised and missing, nothing
+carried and unpromised; and the docblock at `:316-317`, the increment site at `:453-459` and the
+`afterEach` at `:505-506` agree with each other and with what the increment site actually states. That
+last one is the check §13.6 item 2 asked for by name, and it is the one round G could most easily have
+got wrong, having moved one of three sentences about a single fact.
+
+**All four of its findings are in record files** — `docs/decisions/2d-4b-notes.md` and `PROGRESS.md`,
+both on §7's closed list.
+
+### 14.2 H-M1 (should-fix, record) — the correction for an overclaim overclaiming
+
+§11.8's preamble, as round G rewrote it, said *"Each figure below says how far it has been checked."*
+It is false below. Claim 2 gives the 254 a **granularity** limit — *"never been broken down per file"* —
+which is not a check status, and its actual check status lives in §11.7 item 2, a different subsection
+higher up. **Claims 3 and 4 state no check status for any of their figures.**
+
+**This is the second draft of the same sentence to overclaim, in the position of the overclaim it was
+written to correct**, and the pair is worth keeping visible: draft one said every figure was re-derived
+here; draft two said each figure says how far it has been checked. Both were written *as fixes for the
+previous one*. The replacement says which three figures carry a check status here, says plainly that
+claims 3 and 4 do not, and records that this position has now produced two overclaims — which is a
+claim about this subsection's history and can be checked against it.
+
+### 14.3 H-M2 (should-fix, record) — "no line citations" beside a line citation
+
+§11.8's closing paragraph said *"Line citations are deliberately absent from this subsection's four
+claims"* while **claim 3 cites `node_modules/@tauri-apps/api/core.js:202`**. The citation is correct
+today — round H verified it — and it is the worst kind this subsection could hold: **version-pinned,
+untracked, and invisible to every gate.** A dependency bump moves that line, nothing fails, and
+`git log` cannot even show the change, because the file is not in the repository.
+
+The fix narrows the claim to line citations **into this repository**, then states the exception and its
+cost explicitly rather than letting the sweep-for-absence sentence keep hiding it. *"Deliberately
+absent"* had been read as a property of the subsection when it was only ever true of tracked files.
+
+### 14.4 H-M3 (should-fix, record) — a source diff figure measured before the fix was finished
+
+§13.5 and `PROGRESS.md` in three places recorded 2d-4b-G's source diff as **`+9 / −8`**.
+`git show 07744ae --numstat -- src/` gives **`11 10`**. The recorded figure is **hunk 2 alone**: hunk 1
+is `+2 / −2` and is the whole of M2's fix, so **the number offered as evidence for the fix omitted half
+of it** — including, precisely, the hunk that round G had to reach 140 lines outside its own scope to
+find.
+
+**The mechanical cause is worth recording because it is not a slip of arithmetic.** The figure was taken
+from a `git diff --stat` run *before* the comment was rewrapped, and never re-measured on the commit —
+the same shape as the header of `PROGRESS.md` quoting the size of the file it replaced, which that file
+says has had to be corrected twice, and as §11.7 item 6's off-by-one that round F caught. **A figure
+about a commit is measured on the commit.** `07744ae`'s message carries `+9 / −8` permanently and cannot
+be amended; §13.5 now carries the correction and says so.
+
+### 14.5 H-L1 (Low, record) — a line citation stale by one, in the paragraph about stale line citations
+
+§13.2 cited the `afterEach` as `:503-505` and quoted a sentence that is at `:506`. The quoted words are
+correct and the citation is off by one line. **The paragraph is §13.2** — the record of a sentence going
+stale because a fix moved what it described — and its own line citation was stale on the day it was
+written. The fix removes the range and keeps the quotation, which is what §11.8's closing paragraph says
+to do: naming a file and a symbol survives an edit; naming a line range does not.
+
+### 14.6 The gates, re-run after the fix
+
+Every gate, unpiped, exit status read from the tool, orphaned bin targets killed first. **The source
+tree is byte-identical to `07744ae`** — proved, not asserted:
+`git diff --stat 07744ae -- src/ src-tauri/ crates/ scripts/ vite.config.ts svelte.config.js
+tsconfig.json package.json Cargo.toml` is empty — and every gate was re-run regardless, because this is
+the round that closes the tail.
+
+| Gate | Result |
+|---|---|
+| `cargo test --workspace` | **1320 passed, 0 failed**, exit 0, summed across **26** binaries |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --check` | clean |
+| `cargo tree -p espansoconfig-core \| rg tauri` | finds nothing |
+| `npm run check` | **434** files, 0 errors, 0 warnings |
+| `npm test` | **2175 passed**, 57 files |
+| `npm run build` | **184** modules |
+| server-only bundle oracle | **absent** |
+| client-only bundle oracle | **present**, 2 matches |
+
+**`1320 / 434 / 2175 / 184` — no figure has moved since 2d-4b**, across all seven corrective phases.
+
+### 14.7 The tail ends here, by rule — and what that does and does not mean
+
+**Round H's fix changed no source file.** It touched `docs/decisions/2d-4b-notes.md` and `PROGRESS.md`,
+and created `docs/reviews/phase-2d-4b-H.md` — three files, all on §7's closed list. Under §7.1 that
+commissions nothing, and under §7.2 **the step closes**. No human said stop and no owner ruled.
+
+**This is the second tail this project has ended by rule**, after 2d-4a's at round 13 (§22 of
+`2d-4a-notes.md`). Eight rounds: 2d-4b → B → C → D → E → F → G → H.
+
+**Three things this closure does not mean**, each stated because `CLAUDE.md` §7.2 warns about exactly
+this reading:
+
+1. **It is a fact about the fix round's diff, not about the round's thoroughness.** It discharges no
+   coverage bound the tail was carrying — §14.8 item 1 in particular, the escaping route, is still
+   stated and not closed, and 2d-5 owes a closure to three files.
+2. **It is not the closing round being a formality.** Round H returned four findings, every one of them
+   re-derived by the orchestrator before being accepted, including the `11 10` numstat that contradicted
+   a figure this record had already published in four places. **A tail that closes on a round nobody
+   checked is the failure mode this rule invites.**
+3. **It is not the tail having been steered to an end.** Round F removed the tail's fuel and §12.4 said
+   in as many words that this changes the next round's odds and not its obligation — and round G then
+   found three defects, two of them *created by that very restructure*. What ended the tail is that
+   round H's findings all landed in files §7 calls the record.
+
+**The convergence worth recording**: rounds B-E each found a defect in the sentences reviewed; round F
+found none in the sentences and restructured instead; round G found none in F's *sentences* either but
+three in what F's restructure had left behind; round H found none in source at all. The last three
+rounds found **zero** defects in the source text under review. The chain's residue moved steadily out
+of `workspace.test.ts` and into the record, which is where §12.1 argued it belonged.
+
+### 14.8 Where this phase is thin
+
+Marked per `CLAUDE.md` §7.3. **The step closes, so nothing here is work anyone owes** — items 1 and 3
+are the two a later phase may adopt deliberately.
+
+1. **The escaping route is still stated, not closed — *actionable*, not a correctness defect in
+   source.** Unchanged inheritance from §9.5, §10.7 item 1, §11.7 item 1, §12.5 item 1 and §13.7 item 5.
+   `workspace.svelte.ts` imports its command wrappers at module level; **no suite in this repository
+   traps that route file-wide**, and the two with an `invoked` spy catch it in six named cases and
+   nowhere else. **2d-5 owes a closure to all three files.** This is the item that survives the tail.
+2. **`07744ae`'s commit message states the wrong source-diff figure permanently — *recorded only*.**
+   `+9 / −8` against a real `11 10`. It cannot be amended without rewriting pushed history, which this
+   project does not do. §14.4 and §13.5 are the correction, and anyone reading the log needs them.
+3. **Claim 3's `node_modules/@tauri-apps/api/core.js:202` is version-pinned and untracked —
+   *actionable*, not a correctness defect in source.** A dependency bump falsifies it silently. §14.3
+   states the cost; a later phase may replace the line number with a symbol, or drop it.
+4. **The 254 figure has never been broken down per file — *recorded only*.** Unchanged from §12.5
+   item 3 and §13.7 item 6, and now stated in §11.8's preamble as well as its claim 2.
+5. **2d-4b-B's binding probe was measured on `workspace.test.ts` alone — *recorded only*.** What it did
+   to the two component suites is recorded nowhere, and eight rounds have not changed that.
+6. **Fifteen consecutive Opus review rounds with no second provider — *recorded only*.** §13.7 item 3
+   carried fourteen. The last second provider on this chain was 2d-4b's own design consult (Codex, high
+   effort). **2d-5 opens with its own design consult**, which is the standing rule since 2b-2c and is
+   also where a second provider next gets a look at this material.
+7. **"Six review rounds" at `workspace.test.ts:468` is still imprecise — *recorded only*.** The
+   cross-file line ranges entered at `e510819`, so three rounds carried them. §13.7 item 2 marked it
+   recorded only and left it standing; round H was told it could take it, **agreed with the mark**, and
+   left it standing too. It survives the tail as a known, deliberate imprecision in a source comment,
+   and it is not a correctness defect.
