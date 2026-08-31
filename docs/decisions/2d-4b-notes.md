@@ -922,11 +922,184 @@ Marked per `CLAUDE.md` §7.3.
    figure from the wrong version of the file (§10.3). **Nothing checks any of them**, and the repeat is
    the evidence that reading once per round does not converge on its own — each round has still found
    the previous round's.
-6. **The comment run above the stub is now 43 lines and the stub is 9 — *recorded only*.** Measured
-   after the fix, not estimated: lines 446-488 of `src/lib/browser/workspace.test.ts` are comment and
-   489-497 are `drainExternalChanges`, of which the route paragraph the chain has been repairing is
-   453-488, **36 lines**. (The first figure written here was *"26 lines above a four-line stub"*,
-   estimated rather than counted, and it was wrong in both halves — §11.4's shape, a third time, inside
-   the section recording it.) That length is what has made this paragraph the chain's sole subject for
-   five rounds, and no round has yet asked whether it should be shortened, or moved into the record and
-   pointed at from the file, instead of repaired in place.
+6. **The comment run above the stub is 43 lines and the stub is 8 — *recorded only*, and ANSWERED by
+   round F.** At round E: lines 446-488 of `src/lib/browser/workspace.test.ts` were comment and
+   **489-496** were `drainExternalChanges`, of which the route paragraph the chain had been repairing
+   was 453-488, **36 lines**. That length is what made this paragraph the chain's sole subject for five
+   rounds, and this item asked whether it should be shortened, or moved into the record and pointed at
+   from the file, instead of repaired in place. **§12.1 is round F's answer: it was moved.** The run is
+   now **24** lines (446-469) over an unchanged 8-line stub (470-477), and it cites no line number in
+   any file.
+
+   **Two corrections this item has needed, and they are the same shape twice.** The figure first
+   written here was *"26 lines above a four-line stub"*, estimated rather than counted and wrong in both
+   halves — §11.4's shape, inside the section recording it. Its replacement, labelled *"Measured after
+   the fix, not estimated"*, said **9** and named `489-497`, and was **off by one**: `:497` is the `};`
+   closing the object literal `scriptedCommands()` returns, not part of the stub. Round F found it.
+   §12.2 is the record. Three of the four figures were measured and the fourth was not, which is why
+   *"measured"* on a line of figures is a claim about each one and not about the line.
+
+### 11.8 What `workspace.test.ts`'s drain comment defers to this section
+
+**Phase 2d-4b-F moved the detail out of that comment and left a pointer here, so this subsection is
+what the pointer must find.** It consolidates the four claims the comment used to carry in full. Every
+figure is re-derived below rather than copied from the section that first recorded it, and the reason
+for the move is §12.1.
+
+**1. Sixteen wrappers, two injected surfaces.** `src/lib/browser/workspace.svelte.ts` imports **sixteen**
+command wrappers at module level — **thirteen** to build `REAL_COMMANDS` and **three** to build
+`REAL_BACKUP_COMMANDS`. Every one of those bindings, `drainExternalChanges` among them, is in scope
+inside every closure `createBrowserState` returns, so the escaping route is uniform across all sixteen
+and both injected surfaces and is **never special to the drain member**. Confirmed at rounds C, D, E
+and F.
+
+**2. Two phases probed two routes, and the figures belong to different ones.** Phase 2d-4b probed the
+**injected** surface and got **254** failures across the three suites that count. Phase 2d-4b-B probed
+the **binding**, with a fire-and-forget drain at the head of `open()`, and `workspace.test.ts` stayed
+at **186 passed, 0 failed** — 186 re-derived live at round F by `npx vitest run
+src/lib/browser/workspace.test.ts`. **The 254 has never been broken down per file** (§11.7 item 2) and
+**the 186 bounds one file only** (§11.7 item 3): what 2d-4b-B's binding probe did to the two component
+suites is recorded nowhere.
+
+**3. A drain is swallowed in all three files, and the asymmetry is recording rather than rejecting.**
+`workspace.test.ts` mocks no `@tauri-apps/api/core` and carries no `@vitest-environment` docblock, so it
+runs under `vite.config.ts`'s `environment: 'node'` — where there are no `setupFiles` and no
+`globalSetup`, and `globalThis.window` is `undefined`. The real `invoke`
+(`node_modules/@tauri-apps/api/core.js:202`) therefore throws `ReferenceError: window is not defined`
+**evaluating the identifier**, not by dereferencing a present `window` — that second mechanism is
+jsdom's, and it is what §11.2 corrected. `call()` in `src/lib/ipc/commands.ts` catches it exactly as it
+catches the component suites' rejecting mock, and `classifyFailure` never rethrows, so a
+fire-and-forget drain is swallowed in **all three** files.
+
+**4. The `invoked` spy is a partial trap, so no suite closes the binding route file-wide.** The two
+component suites have a `vi.hoisted` `invoked` spy that *records* a call on its way to rejecting;
+`workspace.test.ts` has none. But `expect(invoked).not.toHaveBeenCalled()` is asserted **once** in
+`DetailPane.test.ts` and **five** times in `RestorePane.test.ts`, across six distinct `it` blocks, and
+**never in either `afterEach`** — both of those read `drains`, the injected count, and assert it is
+zero. Both suites state this limit in their own comments. So the other two trap the binding route in
+**six named cases and nowhere else**, this one traps it nowhere, and **2d-5 owes a closure to all
+three** rather than to the one without a spy.
+
+**Line citations are deliberately absent from this subsection's four claims.** Naming a file and a
+symbol survives an edit to that file; naming a line range does not, and §10.3 is this chain's record of
+what happens when it does not. The ranges as they stood at round F, for a reader who wants them, are in
+§11.1 — and they are the reason the comment no longer carries any.
+
+## 12. Phase 2d-4b-F — the review of 2d-4b-E's fix (2026-08-31)
+
+**Why it exists.** §11's fix changed one source file — the same comment block in
+`src/lib/browser/workspace.test.ts` — so `CLAUDE.md` §7.1 commissioned a round scoped to it.
+**2d-4b-E is superseded by 2d-4b-F.**
+
+**The round.** A fresh `autoclaude-reviewer` on `model: "opus"`, 25-minute budget, report at
+[`../reviews/phase-2d-4b-F.md`](../reviews/phase-2d-4b-F.md). Verdict **`ship-with-fixes`: 0 High,
+0 Medium, 2 should-fix** — the first round of this chain to find **no defect in the reviewed
+sentences**. It re-derived every clause of the hunk independently and reported all of them correct:
+the `core.js:202` citation, the docblock's absence and `vite.config.ts`'s environment with no
+`setupFiles` or `globalSetup`, `call()` catching and `classifyFailure` never rethrowing, the 1 + 5
+`expect(invoked).not.toHaveBeenCalled()` assertions across six distinct `it` blocks, both `afterEach`
+blocks reading `drains` rather than the spy, the two cited limits, the sixteen/thirteen/three/two
+split, and a live `npx vitest run src/lib/browser/workspace.test.ts` at **186 passed**. One hunk,
+counted before any sentence about it was read.
+
+**Its two findings are of a different kind from the previous four rounds'**: one is a figure in the
+record, and one is a proposal about **where the paragraph should live** rather than about what it says.
+§12.1 and §12.2 are those two.
+
+### 12.1 Why the comment was restructured rather than repaired a sixth time
+
+**Round F answered §11.7 item 6's open question, which the brief put to it as a legitimate finding and
+not as a way of forcing the tail to end.** Its reason is structural rather than aesthetic, and it is the
+reason recorded here:
+
+> Four of the paragraph's sentences were cross-file line-range citations, plus one into `node_modules`
+> and eleven counts, and **nothing in this repository checks any of them**. `cargo clippy`, `npm run
+> check`, `npm test` and the markup scan are all blind to a comment. An edit to either component suite
+> silently falsified four line ranges in a third file, and only reading caught it.
+
+**And the asymmetry that makes this worth doing:** identical staleness is a **record** defect when it
+sits in `docs/` and a **source** defect when it sits in a comment. Under `CLAUDE.md` §7.1 the first
+commissions nothing and the second commissions a whole review round. Six rounds of this chain went to
+keeping cross-file citations true in the one place where being wrong is expensive. **Moving them is not
+forcing the tail's end** — round F's own fix changed source, so §7.1 commissions round G exactly as
+before. It removes the tail's *fuel*, which is a different thing and a slower one.
+
+**What the comment kept** is what a reader at that line needs and what this file can check on its own:
+that `BrowserState` does not drain through this surface at 2d-4b, that `drains` makes such a call
+visible and the `afterEach` is the assertion, that the subject module holds a route around the injection
+which **no suite closes file-wide**, and that the phase which starts draining owns closing it. The
+comment run went from **43** lines to **24** (`src/lib/browser/workspace.test.ts:446-469`), and it now
+cites no line number in any file.
+
+### 12.2 Round F's other finding, and the fourth instance of §11.7 item 6's own shape
+
+**F's first should-fix is a figure in §11.7 item 6 itself.** That item said *"the stub is 9"* and named
+`489-497`. The stub is `src/lib/browser/workspace.test.ts:489-496`, **eight** lines: `:497` is the `};`
+that closes the object literal `scriptedCommands()` returns, and `:498` is the function's own brace.
+
+**The item that recorded a wrong estimate got its replacement wrong too.** Its parenthetical says the
+first figure was *"estimated rather than counted, and it was wrong in both halves"*; the correction,
+labelled *"Measured after the fix, not estimated"*, was measured for three of its four figures and
+**off by one on the fourth** — the boundary between the stub and its enclosing literal was read as the
+stub's. That is a **fourth** instance of the shape §11.7 item 6 exists to record, and the third to
+appear *inside the writing that records it*. It is prose in a file on §7's closed list, so it
+commissions nothing; it is corrected in §11.7 below.
+
+### 12.3 The gates, re-run after the fix
+
+| Gate | Exit | Figure | Anchor |
+|---|---|---|---|
+| `cargo test --workspace` | 0 | **1320** over 26 binaries, 0 failed | 1320 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | clean | — |
+| `cargo fmt --check` | 0 | clean | — |
+| `cargo tree -p espansoconfig-core \| rg tauri` | — | no match | — |
+| `npm run check` | 0 | **434** files, 0 errors, 0 warnings | 434 |
+| `npm test` | 0 | **2175** over 57 files | 2175 |
+| `npm run build` | 0 | **184** modules | 184 |
+| server-only bundle oracle | — | **absent** | must be absent |
+| client-only bundle oracle | — | **2** | must be present |
+
+Nothing moved, and nothing could: the phase's whole source diff is **+15 / −34** in one test file, every
+line of it a comment — `git diff --numstat`, re-derived rather than described, after a first draft of
+this sentence said *"deleted 19 and wrote 8"* from the net. **Net −19 is the run shrinking from 43 lines
+to 24; it is not the diff**, and stating one as the other is §12.2's shape a fifth time. Each command was
+run unpiped and its exit status read from the tool rather than from a pipeline.
+
+### 12.4 What happens next, by rule
+
+The fix changed **one** source file — `src/lib/browser/workspace.test.ts` — so §7.1 commissions a round,
+and the cap makes it corrective phase **2d-4b-G**. **This is true although the fix's purpose was to
+remove the tail's fuel**, and it is worth saying plainly: §7.1 reads the diff, never the intent, so a
+restructure that deletes nineteen unchecked cross-file citations is owed exactly the same round as a
+sentence that added one. What it changes is the *next* round's odds, not this one's obligation.
+
+**What round G is scoped to** is small and different in kind from its five predecessors: an 8-line
+comment that cites no line number in any file, and a pointer to §11.8. The two things worth checking are
+whether that pointer **finds what it claims** — §11.8 must carry all four claims the comment stopped
+carrying — and whether the shortened comment now says anything **wider than its predicate**, which is the
+shape this chain has produced three times.
+
+### 12.5 Where this phase is thin
+
+Marked per `CLAUDE.md` §7.3.
+
+1. **The escaping route is still stated, not closed — *actionable*, not a correctness defect in
+   source.** Unchanged inheritance from §9.5, §10.7 item 1 and §11.7 item 1. 2d-5 owes a closure to
+   **three** files. The step closes without it.
+2. **The pointer is now load-bearing and nothing checks it — *recorded only*, and it is what the
+   restructure bought and cost.** The comment defers to `docs/decisions/2d-4b-notes.md` §11.8. If §11.8
+   is renumbered, moved or trimmed, the comment silently points at nothing, and no gate in this
+   repository would notice — the same blindness that motivated the move, relocated from four cross-file
+   line ranges to one section reference. The trade is deliberate: **one reference that changes when
+   somebody edits this file, instead of four that changed when somebody edited two others.**
+3. **The 254 figure has never been broken down per file — *recorded only*.** Five rounds have cited it,
+   none has re-derived it. Unchanged from §11.7 item 2.
+4. **2d-4b-B's binding probe was measured on `workspace.test.ts` alone — *recorded only*.** Unchanged
+   from §11.7 item 3, and now recorded in §11.8 claim 2 where the comment used to imply otherwise.
+5. **Thirteen consecutive Opus review rounds with no second provider — *recorded only*.** §11.7 item 4
+   carried twelve. This chain has never had a second provider on it; the last one was 2d-4b's own design
+   consult (Codex, high effort).
+6. **Round F is the first round of this chain to find no defect in the reviewed sentences, and that is
+   one round, not a trend — *recorded only*.** Rounds 2-5 each found one the previous round had missed,
+   and round 5 found two repeats of shapes already on file. What F changed is the paragraph's exposure,
+   not the process that kept missing things in it.

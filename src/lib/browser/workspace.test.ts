@@ -451,41 +451,22 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     // case in this file. The `afterEach` below is the assertion.
     //
     // **The bound is the injection, and it is stated because this file's subject
-    // module holds a route around it.** `workspace.svelte.ts:44-60` imports
-    // **sixteen** command wrappers at module level — thirteen to build
-    // `REAL_COMMANDS` and three to build `REAL_BACKUP_COMMANDS` — so every one of
-    // those bindings, `drainExternalChanges` among them, is in scope inside every
-    // closure `createBrowserState` returns, and a call made through a binding
-    // rather than through an injected parameter increments nothing here. The
-    // route is uniform across sixteen wrappers and **two** injected surfaces,
-    // never special to this member. **Two phases measured the two routes, and the
-    // figures belong to different ones.** Phase 2d-4b probed the *injected*
-    // surface and got 254 failures across the three suites that count; Phase
-    // 2d-4b-B probed the *binding*, with a fire-and-forget drain at the head of
-    // `open()`, and this suite stayed at 186 passed, 0 failed.
+    // module holds a route around it.** `workspace.svelte.ts` imports its command
+    // wrappers at module level, so a call made through one of those bindings rather
+    // than through an injected parameter increments nothing here — and **no suite
+    // in this repository closes that route file-wide**, this one included. The
+    // count is evidence about the injected boundary and never about the module, and
+    // the phase that starts draining owns closing the route instead of trusting
+    // this comment.
     //
-    // This file mocks no `@tauri-apps/api/core`, and the asymmetry that creates is
-    // **recording, not rejecting**. It carries no `@vitest-environment` docblock,
-    // so it runs in node, where `globalThis.window` is `undefined` and the real
-    // `invoke` (`@tauri-apps/api/core.js:202`) throws
-    // `ReferenceError: window is not defined` evaluating the identifier — measured
-    // under vitest, and *not* the jsdom mechanism of a present `window` missing the
-    // property. `call()` in `../ipc/commands.ts` catches it exactly as it catches
-    // the component suites' rejecting mock, so a fire-and-forget drain is swallowed
-    // in all three files.
-    //
-    // What those two files have and this one does not is the `vi.hoisted` `invoked`
-    // spy, which *records* the call on its way to rejecting — **and that spy is a
-    // partial trap, so it is not the file-wide closure this file is missing.** Both
-    // suites say so themselves (`DetailPane.test.ts:164-168`,
-    // `RestorePane.test.ts:439-443`): `invoked` is asserted case by case — once in
-    // `DetailPane.test.ts`, five times in `RestorePane.test.ts` — and **never** in
-    // either `afterEach`, both of which read `drains`, the injected count, and not
-    // the spy. So **no file closes the binding route file-wide**: the other two
-    // catch it in the six cases that assert `invoked` and nowhere else, and 2d-5
-    // owes a closure to all three. The count is evidence about the injected
-    // boundary and never about the module, and the phase that starts draining owns
-    // closing the route instead of trusting this comment.
+    // The measurements behind that claim — which phase probed which route and what
+    // each cost, why a drain is swallowed rather than recorded in this file, and
+    // what the two component suites do and do not trap — are
+    // `docs/decisions/2d-4b-notes.md` §11, with their derivations. **They are not
+    // repeated here on purpose.** They are counts and line ranges in files other
+    // than this one, nothing in this repository checks a comment, and six review
+    // rounds went to keeping such sentences true in a place where only reading
+    // catches them going stale.
     drainExternalChanges: vi.fn(async () => {
       drains += 1;
       const answer: CommandResult<ReconciliationBatch> = {
