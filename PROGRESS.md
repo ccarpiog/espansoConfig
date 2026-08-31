@@ -9,7 +9,7 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4b-H it is **488 lines and 58,451 bytes** — **and the
+triggers the move**. As of 2d-4b-H it is **488 lines and 58,436 bytes** — **and the
 figures are re-measured on the file that carries them**, because a header quoting the size of the file
 it replaced has already had to be corrected twice, and 2d-4b-D found the identical shape in a notes
 section's line citations. This session ran seven phases and rewrote *Next action* in place each time.
@@ -452,7 +452,7 @@ describes in as many words.
 | **2d-4b-F — round 6 and its restructure; round 7 OWED** | **`54ef596`** | ✅ pushed to `origin/main` |
 | **2d-4b-G — round 7 and its fix; round 8 OWED** | **`07744ae`** | ✅ pushed to `origin/main` |
 | 2d-4b-G — the SHA and push record | `8267e03` | ✅ pushed to `origin/main` |
-| **2d-4b-H (round 8 + its fix — the tail CLOSES here, and 2d-4b with it)** | _pending — recorded in the follow-up commit_ | _pending_ |
+| **2d-4b-H (round 8 + its fix — the tail CLOSES here, and 2d-4b with it)** | **`21cbef8`** | ✅ pushed to `origin/main` |
 
 **Each of the six commissions the next round**, the unit being the file, and the source half of each
 is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
