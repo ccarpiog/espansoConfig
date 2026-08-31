@@ -9,7 +9,7 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4b-B it is **431 lines and 61,598 bytes**, under 64 KiB by 3.9 KB —
+triggers the move**. As of 2d-4b-B it is **431 lines and 61,601 bytes**, under 64 KiB by 3.9 KB —
 **and the figures are re-measured on the file that carries them**, because a header quoting the size
 of the file it replaced has already had to be corrected twice. This iteration rewrote *Next action* in
 place, 2d-4b's handoff out and 2d-4b-B's in, and added one git-state row. **The next places to look
@@ -421,7 +421,7 @@ describes in as many words.
 
 | Phase | Commit | Push |
 |---|---|---|
-| **2d-4b-B — round 2 and its fix; round 3 OWED** | **`SHA_PLACEHOLDER`** | PUSH_PLACEHOLDER |
+| **2d-4b-B — round 2 and its fix; round 3 OWED** | **`1c34579`** | ✅ pushed to `origin/main` |
 
 **That commit changes three source files** — `workspace.test.ts`, `DetailPane.test.ts` and
 `RestorePane.test.ts`, six comment blocks between them and not one executable line — **so under §7.1 it
