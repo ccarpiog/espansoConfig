@@ -441,12 +441,25 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
         return { ok: true, value: answer.value, reload: { kind: 'done' } };
       }
     ), // End of the scripted save_raw_document
-    // Nothing in `BrowserState` drains: Phase 2d-4b puts the member on the
-    // surface and Phase 2d-5 is what calls it. The refusal is the answer no
-    // caller could proceed on, and {@link drains} is what makes an unexpected
-    // call *visible* — a `vi.fn` records a call and asserts nothing about it, so
-    // a fire-and-forget drain that ignored this answer would pass every case in
-    // this file. The `afterEach` below is the assertion.
+    // Nothing in `BrowserState` drains *through this surface*: Phase 2d-4b puts
+    // the member on the boundary and Phase 2d-5 is what calls it. The refusal is
+    // the answer no caller could proceed on, and {@link drains} is what makes
+    // such a call *visible* — a `vi.fn` records a call and asserts nothing about
+    // it, so a fire-and-forget drain that ignored this answer would pass every
+    // case in this file. The `afterEach` below is the assertion.
+    //
+    // **The bound is the injection, and it is stated because this file's subject
+    // is the one module that can escape it.** `workspace.svelte.ts` imports every
+    // command wrapper at module level to build `REAL_COMMANDS`, so each of those
+    // bindings — `drainExternalChanges` among them — is in scope inside every
+    // closure `createBrowserState` returns, and a call made through the binding
+    // rather than through the injected `commands` parameter increments nothing
+    // here. Phase 2d-4b-B measured it: a fire-and-forget drain inserted at the
+    // head of `open()` leaves this suite at 186 passed, 0 failed. So the count is
+    // evidence about the injected boundary and never about the module, the route
+    // is uniform across all thirteen members rather than special to this one, and
+    // the phase that starts draining owns closing it instead of trusting this
+    // comment.
     drainExternalChanges: vi.fn(async () => {
       drains += 1;
       const answer: CommandResult<ReconciliationBatch> = {
@@ -480,10 +493,12 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 afterEach(() => {
   // The assertion `scriptedCommands()`'s refusal cannot make on its own, applied
-  // to every case in this file: nothing in `BrowserState` drains at 2d-4b. The
-  // count is cleared before it is read, so one drain fails one case rather than
-  // every case after it, and the phase that starts draining changes this on
-  // purpose instead of discovering it.
+  // to every case in this file: nothing in `BrowserState` drains *through the
+  // injected surface* at 2d-4b — the bound, and the one route that escapes it,
+  // are stated where {@link drains} is incremented. The count is read, then
+  // cleared, then asserted, so one drain fails one case rather than every case
+  // after it, and the phase that starts draining changes this on purpose instead
+  // of discovering it.
   const drained = drains;
   drains = 0;
   expect(drained).toBe(0);

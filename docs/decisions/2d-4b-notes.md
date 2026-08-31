@@ -337,8 +337,11 @@ narrower instances**:
   retitled and the residue stated.
 - *"a refusal keeps an unexpected call visible"* in `workspace.test.ts`, `DetailPane.test.ts` and
   `RestorePane.test.ts` observed nothing. Each file now counts drains and asserts zero in
-  `afterEach` — verified by temporarily adding a fire-and-forget `drainExternalChanges` to `open()`,
-  which produced **254** failures where the suites had been silent, then reverted byte-identically.
+  `afterEach` — verified by temporarily adding a fire-and-forget `drainExternalChanges` to `open()`
+  **through the injected `commands` surface**, which produced **254** failures where the suites had
+  been silent, then reverted byte-identically. *(Corrected at 2d-4b-B, finding L2: the route matters
+  and this sentence did not name it. The same probe written against the module-level import binding
+  instead produces **0** failures, which is 2d-4b-B's M1 — see §8.)*
 - `wire_contract.rs:3724` claimed the samples carry the *"fullest"* shape while `Changed` uses an
   `Unreadable` content arm and `Removed` uses `previous_revision: None`. The **doc** was corrected
   rather than the samples widened, because widening *permits* placeholders and would loosen the check.
@@ -395,3 +398,145 @@ state rather than an afterthought to it.
 6. **`u64` epochs and sequences cross as JavaScript `number`s — *recorded only*.** Exact only within
    the safe-integer range, as §1.2 states. Nothing in this phase can widen that, and 2d-5's watermark
    arithmetic inherits it.
+
+---
+
+## 8. Phase 2d-4b-B — the review of the fix round (2026-08-31)
+
+**Why it exists.** §5's fix round changed eight source files, so `CLAUDE.md` §7.1 commissioned a round
+scoped to it. Under `/autoclaude`'s one-review-per-phase cap that round is a corrective phase — the
+same shape as 2d-4a's D → E → F → G → H chain, and the case §7.4 describes in as many words. **2d-4b
+is superseded by 2d-4b-B, never recorded as complete.**
+
+**The round.** A fresh `autoclaude-reviewer` on `model: "opus"`, 25-minute budget, report at
+[`../reviews/phase-2d-4b-B.md`](../reviews/phase-2d-4b-B.md). Verdict **`ship-with-fixes`: 0 High,
+1 Medium, 2 Low.** The scope could not be a `git diff` — the fix round was folded into `be8d424`
+alongside the implementation it fixed, so there is no pre-fix tree — and the brief therefore named the
+eight files by the **construct** the fix put in each. It also named the six residues of §7 as
+already-recorded and out of scope, and stated this round's own coverage bound: the **ninth**
+consecutive Opus round on this phase's work, judged against a consult nobody reviewed.
+
+The reviewer mutated three files to measure claims and reverted all three with `git checkout --`; the
+orchestrator confirmed the tree independently afterwards.
+
+### 8.1 What the round re-derived rather than accepted
+
+The brief demanded three claims be re-derived, because each is a claim that *a test proves something*.
+All three held:
+
+- **49 builders, 3 exceptions, 52 namespaces.** The runtime probe calls every entry, the emitted key
+  starts with `code.<its own registry key>.`, and `Object.hasOwn(en, produced)` holds. The mis-wiring
+  mutation `addedContent: changedContentKey` fails with the message §5 reports, and a **missing**
+  sample is `TS2741` at `npm run check` — so the `Parameters<>` mapped type really is the compile-time
+  half. The `as (value: unknown) => TranslationKey` cast at `codes.test.ts:1071` reopens nothing: it
+  narrows the call, not the table.
+- **`wire_contract.rs:3724` is true of the samples as they stand.** `ContentRevision` serialises as a
+  string, `Changed`'s content arm is `Unreadable`, `Removed` carries `previous_revision: None`, and
+  the sentence's account of which placeholders are permitted matches what
+  `every_reconciliation_placeholder_names_an_operand_serde_writes` computes. The samples were not
+  widened, deliberately.
+- **`ExpectNever` fails on widening**, and both `core:event:allow-listen` and
+  `core:event:allow-unlisten` exist with the lifetime halves `events.ts` now attributes to them.
+
+The one claim that did **not** hold whole is the drain guard's, and that is M1.
+
+### 8.2 M1 (Medium, source) — an assertion's sentence claiming more than the assertion measures
+
+`workspace.test.ts` said *"nothing in `BrowserState` drains"* and that the count *"is what makes an
+unexpected call visible"*. The count makes visible a call routed through the **injected**
+`BrowserCommands` surface, and nothing else. `workspace.svelte.ts:44-60` imports all thirteen command
+wrappers at module level to build `REAL_COMMANDS`, so every one of those bindings —
+`drainExternalChanges` among them — is in scope inside every closure `createBrowserState` returns, and
+a call made through the binding rather than through the injected `commands` parameter increments
+nothing. **Measured, not argued**: a fire-and-forget drain inserted at the head of `open()` against the
+module binding leaves the suite at **186 passed, 0 failed** — the exact silence the fix round was
+commissioned to end, through a route the file already had open. The probe §5 actually ran went through
+the injected surface and produced 254 failures; the two routes give 254 and 0, and §5 named neither.
+
+**This is `CLAUDE.md`'s standing rule about refusals, applied to an assertion.** *A refusal's sentence
+must be true of its predicate, not of its name* — `documentHasUnsavedDraft` is the precedent. The fix
+bounds all six sentences (two in `workspace.test.ts`, two in `DetailPane.test.ts`, two in
+`RestorePane.test.ts`) to the injected surface, and states the escaping route **where the count is
+incremented** rather than in a distant paragraph, including that the route is uniform across all
+thirteen members rather than special to this one. The two component suites have no such route today —
+no component imports the wrapper — and their comments say that rather than implying it.
+
+**Two stronger closures were considered and declined, and the reasons are here so a later phase can
+overrule them deliberately:**
+
+1. **`vi.mock('$lib/ipc/commands')` with `vi.hoisted`**, so the module binding *is* the counted fake.
+   This would make the unbounded sentence true rather than bounding it, which is normally this
+   project's preferred direction. Declined here because it introduces module mocking into a 186-case
+   suite that uses none today, to close a route no production code takes, inside a fix round scoped to
+   one Medium about a comment.
+2. **A source-text check** asserting `drainExternalChanges(` occurs in `workspace.svelte.ts` only
+   inside the `REAL_COMMANDS` literal. Declined because it is the *"a set called complete that is
+   filtered"* shape this phase has already been bitten by twice, and because §7 item 2 already records
+   that this repository's one file-text rule (`declared_event_names()`) has no notion of a string
+   literal.
+
+Either is 2d-5's to adopt: 2d-5 is the phase that starts draining, and it owns the guard that must
+then catch a drain it did not intend.
+
+### 8.3 L1 (Low, source) — an ordering sentence that inverted its own code
+
+*"The count is cleared before it is read"* is the inverse of `const drained = drains; drains = 0;
+expect(drained).toBe(0);` — read, then cleared, then asserted. The isolation property the sentence
+argues for is real, because the reset precedes the throw; the sentence describing it was not. All
+three suites now say *read, then cleared, then asserted*.
+
+### 8.4 L2 (Low, record) — a verification figure that did not name its route
+
+§5's *"254 failures … then reverted byte-identically"* did not say which route the probe used, and the
+two routes give 254 and 0. §5 now names the injected surface and points here, so the figure cannot be
+read as evidence that any drain in `open()` is caught.
+
+### 8.5 The gates, re-run after the fix
+
+Every command run by the orchestrator alone, unpiped, with orphaned bin targets killed first.
+
+| Gate | Exit | Figure | Anchor |
+|---|---|---|---|
+| `cargo test --workspace` | 0 | **1320** | 1320 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | clean | — |
+| `cargo fmt --check` | 0 | clean | — |
+| `cargo tree -p espansoconfig-core \| rg tauri` | — | no match | — |
+| `npm run check` | 0 | **434** files, 0 errors, 0 warnings | 434 |
+| `npm test` | 0 | **2175** over 57 files | 2175 |
+| `npm run build` | 0 | **184** modules | 184 |
+| server-only bundle oracle | — | **absent** | must be absent |
+| client-only bundle oracle | — | **2** | must be present |
+
+**No figure moved, and that is the prediction rather than a suspicious result**: this phase changed
+comment text in three test files and one record file, and no test case, no production module and no
+Rust line. The two bundle oracles were still read, because the module count alone decides nothing.
+
+### 8.6 What happens next, by rule
+
+The fix changed **three source files** — `src/lib/browser/workspace.test.ts`,
+`src/lib/components/DetailPane.test.ts` and `src/lib/components/RestorePane.test.ts`. Under §7.1 the
+unit is the file and a comment-only change counts, so a round is commissioned, scoped to that fix; the
+cap makes it corrective phase **2d-4b-C**. `docs/decisions/2d-4b-notes.md` and this section are on
+§7's closed list and commission nothing.
+
+### 8.7 Where this phase is thin
+
+Marked per `CLAUDE.md` §7.3.
+
+1. **The escaping route is now *stated* rather than *closed* — *actionable*, and not a correctness
+   defect in source.** After the fix the comments are true of what the counter measures, so nothing in
+   source is wrong; what remains is a coverage gap a later phase may close by §8.2's option 1 or
+   option 2. 2d-5 is the natural owner. The step closes without it.
+2. **The bypass was measured only for `workspace.svelte.ts` — *recorded only*.** The review did not
+   enumerate every module that could acquire a direct import of a command wrapper later. The two
+   component suites are clean today by inspection, not by a check.
+3. **The review ran no Rust gate and no `svelte-check` — *recorded only*.** Its `wire_contract.rs`
+   derivation is by reading `ContentRevision`'s serialisation and the operand filter, and its
+   compile-time claims were checked with `npx tsc` rather than `npm run check`. The orchestrator ran
+   every gate afterwards; the figures are §8.5.
+4. **Ninth consecutive Opus review round with no second provider — *recorded only*.** §7 item 4
+   carried eight. The 2d-4b design consult was Codex, which stops the streak lengthening through the
+   design and not through the review.
+5. **`CODE_NAMESPACE_SAMPLES` proves one member per namespace, not per-variant coverage — *recorded
+   only*.** The suite says so; `dictionary_contract.rs` owns the per-variant half on the Rust side,
+   and nothing here re-derives it.
