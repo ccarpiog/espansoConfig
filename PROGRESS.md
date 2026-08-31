@@ -9,7 +9,7 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of the 2d-5 design consult it is **520 lines and 62,662 bytes** — **and the
+triggers the move**. As of the 2d-5 design consult it is **520 lines and 62,684 bytes** — **and the
 figures are re-measured on the file that carries them**, because a header quoting the size of the file
 it replaced has already had to be corrected twice, and 2d-4b-D found the identical shape in a notes
 section's line citations. **That failure recurred at the 2d-5 consult in a new place**: a citation
@@ -483,7 +483,7 @@ describes in as many words.
 | 2d-4b-G — the SHA and push record | `8267e03` | ✅ pushed to `origin/main` |
 | **2d-4b-H (round 8 + its fix — the tail CLOSES here, and 2d-4b with it)** | **`21cbef8`** | ✅ pushed to `origin/main` |
 | 2d-4b-H — the SHA and push record | `998e346` | ✅ pushed to `origin/main` |
-| **2d-5 design consult (brief, Codex consult, record, review — four new files, all under `docs/`, no source touched)** | **PENDING** | PENDING |
+| **2d-5 design consult (brief, Codex consult, record, review — four new files, all under `docs/`, no source touched)** | **`5787e87`** | ✅ pushed to `origin/main` |
 
 **Each of the six commissions the next round**, the unit being the file, and the source half of each
 is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
