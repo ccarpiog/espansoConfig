@@ -9,7 +9,7 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4b-C it is **436 lines and 61,742 bytes**, under 64 KiB by 3.8 KB —
+triggers the move**. As of 2d-4b-C it is **436 lines and 61,735 bytes**, under 64 KiB by 3.8 KB —
 **and the figures are re-measured on the file that carries them**, because a header quoting the size
 of the file it replaced has already had to be corrected twice. This iteration rewrote *Next action* in
 place, 2d-4b-B's handoff out and 2d-4b-C's in, added one git-state row, and **archived 2d-4a's five
@@ -227,7 +227,7 @@ extent matches its own diff (§9.8 item 3). **When reviewing 2d-4b-D, count the 
 
 #### What round 2d-4b-D is scoped to
 
-`git show <the 2d-4b-C sha> -- src/` — four comment blocks in the same three files, no executable line:
+`git show e510819 -- src/` — four comment blocks in the same three files, no executable line:
 `src/lib/browser/workspace.test.ts` (the `drains` doc comment, newly bounded; and the route paragraph
 in the `scriptedCommands()` stub, rewritten), `src/lib/components/DetailPane.test.ts` and
 `src/lib/components/RestorePane.test.ts` (the `drains` doc comment in each).
@@ -425,7 +425,7 @@ describes in as many words.
 | Phase | Commit | Push |
 |---|---|---|
 | **2d-4b-B — round 2 and its fix; round 3 OWED** | **`1c34579`** | ✅ pushed to `origin/main` |
-| **2d-4b-C — round 3 and its fix; round 4 OWED** | **`SHA_PLACEHOLDER`** | PUSH_PLACEHOLDER |
+| **2d-4b-C — round 3 and its fix; round 4 OWED** | **`e510819`** | ✅ pushed to `origin/main` |
 
 **Both commits change three source files** — `workspace.test.ts`, `DetailPane.test.ts` and
 `RestorePane.test.ts`, six comment blocks in `1c34579` and four in its successor, not one executable
