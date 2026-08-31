@@ -382,3 +382,17 @@ scoped to that (see D2r).
 
 ---
 
+
+---
+
+## The 2d-4a corrective chain, archived 2026-08-31
+
+_Moved verbatim out of `PROGRESS.md` when 2d-4b-C closed it to 2.8 KB of headroom. 2d-4a closed at 2d-4a-H on 2026-08-30, and a phase closing is what triggers the move; the live file keeps one row and this pointer._
+
+| Phase | Scope | State |
+|---|---|---|
+| **2d-4a-D** | First corrective phase: round 9's review of the round-8 fix | 🔶 **ran in full, every gate green, NOT closed** — **`do-not-ship`**, 2 High + 3 Medium, all fixed; **superseded by 2d-4a-E** |
+| **2d-4a-E** | Second corrective phase: round 10's review of the round-9 fix | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 2 Medium + 2 Low, three fixed and one declined with a recorded reason; **it cleared round 9's two Highs by its own derivation**; **superseded by 2d-4a-F** |
+| **2d-4a-F** | Third corrective phase: round 11's review of the round-10 fix — two comment edits in one file | 🔶 **ran in full, every gate green, NOT closed** — **`do-not-ship`**, **1 High** + 1 Medium + 1 Low, all three fixed; the High is a clause **older than the fix under review** that four rounds had read past; **superseded by 2d-4a-G** |
+| **2d-4a-G** | Fourth corrective phase: round 12's review of the round-11 fix — one comment edit in one file | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 2 Medium + 3 Low, **all five fixed**; **it cleared round 11's repair by deriving `evictable_sequence`'s independence from the assertion**; **superseded by 2d-4a-H** |
+| **2d-4a-H** | Fifth corrective phase: round 13's review of the round-12 fix — one comment edit in one file | ✅ **complete and CLOSED (2026-08-30)** — `ship-with-fixes`, **0 High**, 2 Medium, 0 Low, **both Mediums in the record** and both re-derived before being accepted; the round's `NOT-VERIFIED` figure was chased down rather than carried. **Its fix changed no source file, so §7.1 commissions nothing and 2d-4a's tail ends here.** The one phase of the D→E→F→G→H chain that is *not* superseded |

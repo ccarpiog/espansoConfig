@@ -157,9 +157,15 @@ const SUMMARY: WorkspaceSummary = {
  *
  * Module level rather than per-surface because the assertion is about the file:
  * **no case in it may drain through the injected surface**. That bound is the
- * whole claim: a drain reaching the wrapper by any other route — a module-level
- * import of `drainExternalChanges`, which no component has today — increments
- * nothing here. The `afterEach` below reads and resets it.
+ * whole claim, and the other route is live here rather than hypothetical: these
+ * cases mount over a **real** `BrowserState`, and `workspace.svelte.ts` holds a
+ * module-level `drainExternalChanges` binding that increments nothing in this
+ * count. *No component imports the wrapper* is true and is narrower than what
+ * this file executes, so it is not the bound. What this file does have, and the
+ * count is not, is a partial trap: the `invoke` mock at the top of the file
+ * rejects, so a drain taking that route would record on `invoked` — but `invoked`
+ * is asserted case by case and never in the `afterEach`, so it catches nothing
+ * file-wide. The `afterEach` below reads and resets the count.
  */
 let drains = 0;
 

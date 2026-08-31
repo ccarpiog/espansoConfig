@@ -455,11 +455,18 @@ the injected surface and produced 254 failures; the two routes give 254 and 0, a
 
 **This is `CLAUDE.md`'s standing rule about refusals, applied to an assertion.** *A refusal's sentence
 must be true of its predicate, not of its name* — `documentHasUnsavedDraft` is the precedent. The fix
-bounds all six sentences (two in `workspace.test.ts`, two in `DetailPane.test.ts`, two in
-`RestorePane.test.ts`) to the injected surface, and states the escaping route **where the count is
-incremented** rather than in a distant paragraph, including that the route is uniform across all
-thirteen members rather than special to this one. The two component suites have no such route today —
-no component imports the wrapper — and their comments say that rather than implying it.
+bounds the sentences to the injected surface and states the escaping route **where the count is
+incremented** rather than in a distant paragraph.
+
+> **Corrected at 2d-4b-C.** This paragraph said the fix bounded *"all six sentences (two in each
+> file)"*. The diff bounded **eight** comment blocks — two in `workspace.test.ts`, three in
+> `DetailPane.test.ts`, three in `RestorePane.test.ts` — and the miscount is not cosmetic: **the
+> seventh block, `workspace.test.ts`'s own `drains` doc comment, was never bounded at all**, and
+> counting to six is what hid it. 2d-4b-C found it as its M1, in the one file whose subject module is
+> the escaping route. Two further sentences of this paragraph were also wrong and are corrected in
+> §9: the route is uniform across **sixteen** wrappers and **two** injected surfaces rather than
+> across thirteen members of one, and *"the two component suites have no such route today"* was false —
+> both mount a real `BrowserState`, so both execute the module that holds the binding.
 
 **Two stronger closures were considered and declined, and the reasons are here so a later phase can
 overrule them deliberately:**
@@ -540,3 +547,125 @@ Marked per `CLAUDE.md` §7.3.
 5. **`CODE_NAMESPACE_SAMPLES` proves one member per namespace, not per-variant coverage — *recorded
    only*.** The suite says so; `dictionary_contract.rs` owns the per-variant half on the Rust side,
    and nothing here re-derives it.
+
+---
+
+## 9. Phase 2d-4b-C — the review of 2d-4b-B's fix (2026-08-31)
+
+**Why it exists.** §8's fix changed three source files — six comment blocks, no executable line — so
+`CLAUDE.md` §7.1 commissioned a round scoped to it, and the one-review-per-phase cap made that round a
+corrective phase. **2d-4b-B is superseded by 2d-4b-C, never recorded as complete.**
+
+**The round.** A fresh `autoclaude-reviewer` on `model: "opus"`, 25-minute budget, report at
+[`../reviews/phase-2d-4b-C.md`](../reviews/phase-2d-4b-C.md). Verdict **`ship-with-fixes`: 0 High,
+2 Medium, 2 Low.** Unlike 2d-4b-B's, this scope **was** a real diff — `git show 1c34579 -- src/` — and
+the brief said so. The reviewer mutated nothing; the orchestrator confirmed the tree independently.
+
+It confirmed four things by checking rather than by reading: the thirteen-member uniformity claim, the
+*186 passed, 0 failed* figure (a live single-file run gives 186) together with its attribution to
+2d-4b-B, that no `.svelte` component imports the wrapper, and that both `afterEach` indirections
+resolve to the doc comments they point at.
+
+### 9.1 M1 (Medium, source) — the narrower instance the previous fix left standing
+
+`workspace.test.ts:313-314`, the `drains` doc comment, still read **"no case in it may drain,
+whichever surface it built and however many"** — the unbounded claim 2d-4b-B was commissioned to
+remove, **surviving in the one file whose subject module is the escaping route**. The fix bounded that
+file's stub comment and its `afterEach`, and bounded the *equivalent doc comment in both component
+suites*, and skipped this one.
+
+**This is the third consecutive round on this phase to close a finding and leave a narrower instance
+of it standing**, and `CLAUDE.md` says the mechanism in as many words: *sweep for what the type now
+says, not for the words the old type used*. Here the mechanism was arithmetic — §8.2 counted "all six
+sentences, two in each file", the diff actually touched eight blocks in a 2/3/3 split, and **counting
+to six is what hid the seventh**. The miscount was 2d-4b-C's L2 and the survivor was its M1; they are
+one defect seen twice. §8.2 now carries a correction block saying so.
+
+### 9.2 M2 (Medium, source) — a route named absent while it was live
+
+Both component doc comments said the other route was *"a module-level import of
+`drainExternalChanges`, which no component has today"*. True of components and false of what those
+files execute: `DetailPane.test.ts:279` and `RestorePane.test.ts:538` both build a **real**
+`BrowserState` through `createBrowserState`, so both run `workspace.svelte.ts`, which holds exactly
+that binding. The clause named the wrong subject — *component* where *the module under the component*
+was meant — and so reported a live route as absent.
+
+Both comments now say the route is live, keep *no component imports the wrapper* as the narrower true
+statement it is, and name the **partial trap those two files do have and the count is not**: the
+`vi.hoisted` `invoke` mock at the head of each file rejects, so a drain taking the module route would
+record on `invoked` — but `invoked` is asserted case by case (`DetailPane.test.ts:528`,
+`RestorePane.test.ts:802`, `:905`, `:935`, `:962`, `:1078`) and never in the `afterEach`, so it
+catches nothing file-wide. `workspace.test.ts` mocks `@tauri-apps/api/core` not at all, which is why
+that file is the exposed one; its comment now says that too.
+
+### 9.3 L1 (Low, source) — "every command wrapper, to build `REAL_COMMANDS`"
+
+`workspace.svelte.ts:44-60` imports **sixteen** wrappers, and three of them
+(`listBackupBatches`, `listBackupEntries`, `readBackupText`) build `REAL_BACKUP_COMMANDS` at `:387-391`
+rather than `REAL_COMMANDS`. So the route is uniform across **sixteen** bindings and **two** injected
+surfaces — `BrowserCommands` and `BackupCommands` — and the comment said thirteen members of one.
+Corrected where the count is incremented.
+
+### 9.4 L2 (Low, record) — the miscount that hid M1
+
+Covered by §9.1 and by the correction block now standing in §8.2.
+
+### 9.5 The closure that was *not* taken, and what 2d-5 inherits
+
+§8.2 declined two closures and assigned them to 2d-5. 2d-4b-C's M2 sharpens that inheritance rather
+than changing it, and the asymmetry is the point:
+
+- In **`DetailPane.test.ts` and `RestorePane.test.ts`** the closure is nearly free — one
+  `expect(invoked).not.toHaveBeenCalled()` in each `afterEach` would make the trap file-wide, since
+  `invoked` is only ever asserted *not* called in either file.
+- In **`workspace.test.ts`** it is not free at all: that suite has no `@tauri-apps/api/core` mock, so
+  closing the route there means §8.2's option 1 (`vi.mock` on `$lib/ipc/commands` with `vi.hoisted`)
+  inside a 186-case suite that uses no module mocking today.
+
+Taking only the cheap half would leave the exposed file exposed while making the other two look
+guarded, which is worse than a uniformly stated bound — so neither half was taken here, and both are
+recorded for 2d-5 to decide together. 2d-5 is the phase that starts draining and therefore the phase
+that needs the guard to catch a drain it did not intend.
+
+### 9.6 The gates, re-run after the fix
+
+| Gate | Exit | Figure | Anchor |
+|---|---|---|---|
+| `cargo test --workspace` | 0 | **1320** | 1320 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | clean | — |
+| `cargo fmt --check` | 0 | clean | — |
+| `cargo tree -p espansoconfig-core \| rg tauri` | — | no match | — |
+| `npm run check` | 0 | **434** files, 0 errors, 0 warnings | 434 |
+| `npm test` | 0 | **2175** over 57 files | 2175 |
+| `npm run build` | 0 | **184** modules | 184 |
+| server-only bundle oracle | — | **absent** | must be absent |
+| client-only bundle oracle | — | **2** | must be present |
+
+No figure moved. This phase, like 2d-4b-B, changed comment text and nothing executable.
+
+### 9.7 What happens next, by rule
+
+The fix changed **three source files** — the same three. §7.1 commissions a round scoped to it, and
+the cap makes it corrective phase **2d-4b-D**. This section and §8.2's correction block are on §7's
+closed list and commission nothing on their own.
+
+### 9.8 Where this phase is thin
+
+Marked per `CLAUDE.md` §7.3.
+
+1. **The escaping route is stated, not closed, and now in a second form — *actionable*, not a
+   correctness defect in source.** §9.5 is the inheritance. The comments are true as they stand; what
+   remains is coverage a later phase may add. The step closes without it.
+2. **`invoked` is described as a per-case trap by inspection of six call sites — *recorded only*.**
+   Nothing checks that a seventh assertion site does not appear, or that a future case does not
+   legitimately invoke and make a file-wide assertion wrong.
+3. **Three consecutive rounds have each left a narrower instance of their own finding standing —
+   *recorded only*, and the sharpest thing this phase has produced.** §9.1 names the mechanism for
+   this one (an arithmetic miscount in the record hiding a block in the diff). What is *not* recorded
+   anywhere is a check that a fix's own claimed extent matches its diff; that is a shape, not a
+   defect in a file, so it is recorded rather than actionable.
+4. **Tenth consecutive Opus review round with no second provider — *recorded only*.** §8.7 item 4
+   carried nine.
+5. **The two `afterEach` indirections were confirmed to resolve, at their current wording —
+   *recorded only*.** *"bounded as the count's own doc comment states"* is a pointer, and a pointer is
+   only as true as its target; nothing fails if a later edit changes the target and not the pointer.

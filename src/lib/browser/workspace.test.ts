@@ -311,8 +311,10 @@ interface Script {
  * How many times any surface built by {@link scriptedCommands} has been drained.
  *
  * Module level rather than per-surface because the assertion is about the file:
- * **no case in it may drain**, whichever surface it built and however many. The
- * `afterEach` below reads and resets it.
+ * **no case in it may drain through an injected surface**, whichever surface it
+ * built and however many. The bound is the injection and it is not decorative:
+ * this file's subject module holds a route around it, stated in full where the
+ * count is incremented. The `afterEach` below reads and resets it.
  */
 let drains = 0;
 
@@ -449,17 +451,22 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     // case in this file. The `afterEach` below is the assertion.
     //
     // **The bound is the injection, and it is stated because this file's subject
-    // is the one module that can escape it.** `workspace.svelte.ts` imports every
-    // command wrapper at module level to build `REAL_COMMANDS`, so each of those
-    // bindings — `drainExternalChanges` among them — is in scope inside every
-    // closure `createBrowserState` returns, and a call made through the binding
-    // rather than through the injected `commands` parameter increments nothing
-    // here. Phase 2d-4b-B measured it: a fire-and-forget drain inserted at the
-    // head of `open()` leaves this suite at 186 passed, 0 failed. So the count is
-    // evidence about the injected boundary and never about the module, the route
-    // is uniform across all thirteen members rather than special to this one, and
-    // the phase that starts draining owns closing it instead of trusting this
-    // comment.
+    // module holds a route around it.** `workspace.svelte.ts:44-60` imports
+    // **sixteen** command wrappers at module level — thirteen to build
+    // `REAL_COMMANDS` and three to build `REAL_BACKUP_COMMANDS` — so every one of
+    // those bindings, `drainExternalChanges` among them, is in scope inside every
+    // closure `createBrowserState` returns, and a call made through a binding
+    // rather than through an injected parameter increments nothing here. The
+    // route is uniform across sixteen wrappers and **two** injected surfaces,
+    // never special to this member. Phase 2d-4b-B measured what it costs: a
+    // fire-and-forget drain at the head of `open()` written against the binding
+    // left this suite at 186 passed, 0 failed, where the same probe through the
+    // injected surface gave 254 failures across the three suites that count. This
+    // file mocks no `@tauri-apps/api/core`, so nothing else in it notices such a
+    // call either — unlike the two component suites, which reject at `invoke`.
+    // The count is evidence about the injected boundary and never about the
+    // module, and the phase that starts draining owns closing the route instead
+    // of trusting this comment.
     drainExternalChanges: vi.fn(async () => {
       drains += 1;
       const answer: CommandResult<ReconciliationBatch> = {
