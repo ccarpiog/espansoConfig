@@ -9,15 +9,16 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4b-D it is **438 lines and 62,518 bytes**, under 64 KiB by 3.0 KB —
-**and the figures are re-measured on the file that carries them**, because a header quoting the size
-of the file it replaced has already had to be corrected twice, and 2d-4b-D found the identical shape
-in a notes section's line citations. This session ran three phases and rewrote *Next action* in place
-each time; it also **archived 2d-4a's five closed corrective rows** to `status-table.md`, leaving one
-row and a pointer, which is what has kept the headroom. **The next places to look for length are *Open
-risks and deviations* and the *Next action*'s narrative half, not the phase table.** **Nothing of the
-2d-4b chain is archivable yet**: 2d-4b, B, C and D are all superseded rather than closed, and the
-chain's live head is 2d-4b-E.
+triggers the move**. As of 2d-4b-E it is **449 lines and 58,665 bytes** — **and the figures are
+re-measured on the file that carries them**, because a header quoting the size of the file it replaced
+has already had to be corrected twice, and 2d-4b-D found the identical shape in a notes section's line
+citations. This session ran four phases and rewrote *Next action* in place each time. **2d-4b-E is
+where the headroom came back**: it had fallen to 727 bytes, and twelve Phase 0 substrate rows went to
+`phase-0.md` under a pointer, exactly as 2d-4a's five closed corrective rows went to `status-table.md`
+before them. **The next places to look for length are the *Next action*'s narrative half and the four
+superseded 2d-4b chain rows in the phase table**, whose full detail is already in
+`docs/decisions/2d-4b-notes.md` §8–§11. **Nothing of the 2d-4b chain is archivable yet**: 2d-4b, B, C,
+D and E are all superseded rather than closed, and the chain's live head is 2d-4b-F.
 
 - Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds the phase plan).
 - Rules that bind every session: [`CLAUDE.md`](CLAUDE.md).
@@ -61,7 +62,8 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-4b-B** | First corrective phase: the review of 2d-4b's fix round, scoped to eight files across `codes.{ts,test.ts}`, `events.{ts,test.ts}`, three suites and `wire_contract.rs` | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 1 Medium + 2 Low, **all three fixed**. The Medium is an assertion claiming more than it measures: the drain counter sees only the **injected** surface, and `workspace.svelte.ts`'s module-level import is a route around it — measured at **186 passed, 0 failed**. It also **re-derived and confirmed** the three claims the brief put to it (the 49 builders, the `wire_contract.rs:3724` doc, the `ExpectNever` widening guard). **Its fix changed three source files, so §7.1 commissions a round; superseded by 2d-4b-C** |
 | **2d-4b-C** | Second corrective phase: the review of 2d-4b-B's fix — six bounded comments in three test suites | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 2 Medium + 2 Low, **all four fixed**. Both Mediums are the previous fix's own residue: **the doc comment it skipped** still carried the unbounded claim, in the one file whose subject module is the escaping route, and both component suites named that route *absent* while mounting a real `BrowserState` that holds it. The miscount that hid the first is the round's L2 — *"all six sentences"* against a diff of eight blocks. **Its fix changed the same three source files, so §7.1 commissions a round; superseded by 2d-4b-D** |
 | **2d-4b-D** | Third corrective phase: the review of 2d-4b-C's fix — four corrected comment blocks in the same three suites | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 1 Medium + 2 Low, **all three fixed**. It **verified the diff's extent before reading any claim about it** (4 hunks, every changed line a comment), which is what §9.8 asked of it, and confirmed no unbounded sentence survives anywhere. The Medium is a comment true of its conclusion and false about its reason — *"unlike the two component suites, which reject at `invoke`"*, when all three suites reject and only two **record**. **Its fix changed one source file, so §7.1 commissions a round; superseded by 2d-4b-E** |
-| **2d-4b-E** | Fourth corrective phase: the review of 2d-4b-D's fix — one comment block in `workspace.test.ts` | ⬜️ **not started — this is the next action** |
+| **2d-4b-E** | Fourth corrective phase: the review of 2d-4b-D's fix — one comment block in `workspace.test.ts` | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 1 Medium + 1 Low, **both fixed**, both in that one block. The Medium is §8.2's shape returning: the `invoked` spy named as the asymmetry **without its limit**, when both component suites say in their own comments that it is a *partial trap* — asserted 1 + 5 times case by case, **never** in either `afterEach`, which read the injected count instead. So **no file traps the binding route file-wide** and 2d-5 owes a closure to three files, not one. The Low is §10.1's shape returning: under node `window` is undeclared, so the real `invoke` throws `ReferenceError` evaluating the **identifier** — a *dereference* is jsdom's mechanism, which that sentence's own premise excludes. **Its fix changed one source file, so §7.1 commissions a round; superseded by 2d-4b-F** |
+| **2d-4b-F** | Fifth corrective phase: the review of 2d-4b-E's fix — the same one comment block in `workspace.test.ts` | ⬜️ **not started — this is the next action** |
 | **2d-5 … 2d-8** | The remaining four steps of the consult's eight | ⬜️ not started |
 | **2d** | External change reconciliation — plan §6.5 | 🔶 in progress |
 | **3–5** | Validation, packaging, hardening | ⬜️ not started |
@@ -155,23 +157,20 @@ Live risks in full, then the ones that are demonstrably closed, compacted to one
 decision that closed them — those decisions are in
 [`docs/progress-archive/decisions.md`](docs/progress-archive/decisions.md).
 
+**Twelve Phase 0 substrate rows moved to the archive at 2d-4b-E** — R1, R2, R5, R9, R10, R11, R13,
+R15, R18, R22, R23 and R26, verbatim and unedited, in
+[`docs/progress-archive/phase-0.md`](docs/progress-archive/phase-0.md) under *"The Phase 0 substrate
+risk rows"*. **None is withdrawn or downgraded**; they are open risks recorded outside the live head,
+which had 727 bytes of headroom under its 64 KiB soft bound. Three Phase 0-era rows deliberately
+**stayed**, because a later phase reads them here rather than in the archive: **R12**, **R16** (its
+open half is what D2u constrains) and **R25** (named in *Standing rules*). A session touching the
+Phase 0 substrate reads the archive section as part of this table.
+
 | # | Risk | Mitigation / state |
 |---|---|---|
-| R1 | `saphyr-parser` is **pre-1.0 (0.0.11)**; the API can break between patch releases | Confined to `crate::syntax` — no other module imports it. 31 pinned tests fail loudly on any behaviour change. Deliberately **not** vendored: vendoring creates ownership without removing upgrade risk. |
-| R2 | If a future saphyr release "fixes" `index()` to genuinely return bytes, the `CharToByte` adapter silently becomes wrong | Desired failure mode already wired: `all_three_crates_report_character_offsets_not_byte_offsets` and `saphyr_offsets_count_unicode_scalar_values_not_bytes_utf16_units_or_graphemes` both fail immediately. |
-| R5 | An empty block scalar (`replace: \|` mid-keystroke) reports a span that **includes** its header — the one exception to "the header is outside the span" | Phase 0b: the backwards header lexer must refuse to run when the span itself starts with `\|` or `>`. Pinned by `a_truncated_block_scalar_header_produces_a_span_that_swallows_the_header`. The content span now starts past the header *line*, never past the indicator alone, so rewriting it cannot splice a value onto the header line. |
 | R12 | **Refusal for anchors, aliases, tags, merge keys, duplicate keys and multi-document streams is broad, and was previously recorded here as *total*.** A file using any of them is largely, but not entirely, non-editable in the visual UI | Accepted, and it is the specified behaviour: plan §7 rows 7–8 say *detect and refuse*, and §13 defers visual editing of anchors, aliases, tags and merge keys out of v1. **"Total" was wrong, and 0c-2b measured it.** The gate refuses the flagged node, its ancestors and its descendants, so a **sibling** stays editable: `anchors-aliases-tags-merge.yml` refuses 12 addressable scalars and **applies 5** — `matches[2].trigger` is editable although the explicit-tag hazard sits on the `replace` beside it — and `duplicate-keys.yml` is 2 refused / 8 applied. Only a hazard on a **document** node reaches everything, which is why `multi-document.yml` really is total. The gate's behaviour is unchanged and safe; only this prose needed narrowing. Pinned by `the_hazard_gate_refuses_by_scope_and_not_by_file`. R12's other claim is confirmed: **2 004 of 2 004** attempted real-corpus edits applied, zero refusals, so the breadth costs this corpus nothing today. If a future corpus does trip it, the escape hatch is a *narrower* hazard scope, not a weaker gate. |
-| R13 | **Duplicate-key detection compares decoded scalar values only.** A non-scalar key — an alias or a collection used as a mapping key — is skipped by the duplicate check | Accepted: every such key already raises `AliasReference` or sits inside a refused construct, so the mapping is refused anyway. Revisit only if a case appears where a non-scalar key exists without any other hazard. |
-| R9 | The missing evaluation criterion is **replacement-envelope correctness**, not endpoint accuracy | Phase 0c. Mutate real documents and assert: the span matches the requested structural path despite duplicate keys, nested sequence mappings, merge keys, aliases, explicit keys and empty values; the replacement reparses to the intended value and stays valid YAML; every byte outside the envelope is identical (CRLF/LF, BOM, missing final newline, trailing spaces, comments, block-scalar terminal newlines). This is the Phase 0 gate's round-trip property test. |
-| R15 | **`NonCanonicalEscaping` is deliberately over-broad**: it refuses every double-quoted source containing any backslash, including already-canonical `\\`, `\"`, `\n`, `\t` | Accepted for now, and safe — it only costs the ability to re-encode such a scalar byte-identically, never correctness. Carries a `TODO(0c-2)` in its doc comment. Narrow it only if 0c-2 finds real files where editing an escaped double-quoted value matters. |
 | R16 | **The round-trip oracle parses with saphyr (YAML 1.2), but espanso consumes with a YAML 1.1-ish stack.** Agreement with saphyr does not prove the file means the same thing to espanso | **Partly closed in 0c-3b-2b (D2s), and the open half is stated so it cannot be mistaken for mitigated.** *R16 stays open: byte preservation and conservative emission prevent edits from changing untouched bytes or introducing known YAML 1.1-ambiguous plain scalars, but the UI projection of pre-existing plain scalars is not yet proven to match espanso's resolver.* **Closed half:** an in-house 1.1/1.2-core tag table in the library, consulted by the emitter and asserted in `verify()` as a differential property, so an edit can neither introduce a new ambiguity nor change an existing classification. Building it found D2h's predicate writing **34 distinct 1.1-ambiguous values plain** — a real corruption path, now fixed. **Open half:** the *projection*. 31 synthetic and 65 real plain scalars resolve non-`str` under 1.1 today; the app would display them as strings. **The UI consequence is settled by D2u — the browser shows source text, never an inferred type — so the open half costs display richness, not correctness.** R16 closes only when the projection is proven against espanso's actual resolver, which is also what would unlock type-aware rendering. **Residual risk:** a pre-existing or explicitly tagged scalar may be displayed or used by the typed projection with a different type/value than espanso assigns, and an incomplete hand-maintained resolver table or an espanso-specific schema change could leave that disagreement undetected. **Two named weaknesses:** explicit tags are outside the table entirely, and the **1.2-core half has no second implementation** (the 1.1 half has one, differentially swept over 500 000 values with zero disagreements). Deliberately **no second parser crate** — see D2s for why, and do not add one without re-reading it. |
-| R18 | **A node in key position cannot be verified by the path that found it.** Renaming the `replace` of `replace: old` makes the path `replace` resolve to `NoSuchKey` in the reparsed document, so the verify step fails on a *correct* edit | Accepted and bounded. A scalar edit targets `Resolved::value` only; `resolve_key` exists for the **spans** a structural edit needs (where an entry begins, so removing it takes its key too), not as an edit target. Documented on `resolve_key` itself. A key-rename operation needs its own protocol — verify against the **intended new** path, not the old one — and is 0c-3's problem if it is wanted at all. Editing an ordinary value that merely equals some other entry's key string is harmless. |
-| R10 | A block scalar whose header cannot be located has **no correct span**: the reported one runs into trailing blank lines and the next node's indentation | The index is **rejected** with `InvariantViolation::BlockHeaderNotFound` rather than publishing the known-bad span. There is deliberately no fallback. From the Phase 0b-1 review, ranked failure mode 3. |
-| R11 | **Terminal spaces or tabs at end-of-source** are scalar content, not the next token's indentation — there is no next token | `block::content_len` takes `at_end_of_source` and keeps a trailing run that sits on a content line. Pinned by `terminal_spaces_at_end_of_source_stay_inside_the_block_scalar` and the `block-scalar-terminal-spaces.yml` fixture. |
-| R23 | **A comment a removal *keeps* can be absorbed by a block scalar above it**, changing that block's decoded value although nothing about it was edited — the shape neither D2o nor the 0c-3a review named | Accepted and refused by name (`EditError::RemovalWouldExtendABlockScalar`), the twin of `RemovalWouldExtendAKeptBlock`. **Narrowed by the 0c-3b-1 review's finding 2, which found the first form over-broad.** It now fires on three clauses, not two: the removal has something to preserve, *and* some block scalar's content ends at or before the envelope's first run with nothing but blank lines in between, *and* **the first non-blank line the removal preserves sits at that block's own body column or deeper**. A shallower line ends the block instead of extending it, exactly as the removed entry's key already did, so the reviewer's `>` block above a column-zero comment is a legal removal and is pinned byte-exactly. The body column is `ScalarPresentation::indent`, **read off the span layer and never re-lexed** (D2/D2d); the earlier "only reconstructible" objection was about a block's *end*, not its body column. One case still refuses unconditionally: a block whose content span is **empty** (`replace: \|` with the next sibling under it, the R5 shape), where `indent` holds the header's column rather than any observed body's. Costs the synthetic corpus **1** attempt, in `run-based-removal-envelope.yml`, and the real corpus **0** — unchanged by the narrowing, which let one attempt through and turned none away. `run-based-removal-boundaries.yml` pins the safe side. |
-| R22 | **`InconsistentEntryIndentation` is pinned at 0 and is argued to be *unreachable*, not merely unreached** — a coverage hole and a proof look identical in a count | Accepted, with the argument recorded in `docs/decisions/0c-3a-notes.md` §3: a valid block mapping cannot have its keys at two columns, and the two shapes that can are refused earlier by other variants. No fixture was invented to reach it, because an impossible fixture would prove nothing. This is the one refusal family whose pinned zero rests on an argument rather than on a construction — treat it as the weakest pin in the table, and revisit if a real file ever trips it. |
 | R25 | **Move verification is not compositional** — `MoveMustBeTheOnlyEditInItsBatch` refuses a batch pairing a move with any other edit, including the safe and obvious "move this match and change its `replace`" | Accepted as a **deliberate phase-scope limit, not an invariant**, and relabelled as such after the 0c-3b-2a review found the original circularity argument unconvincing. It conceals no demonstrated splice-order bug — a single move still exercises descending application of its own runs. Two costs, both recorded: the safe combined request above is refused, and **`OverlappingEdits` is consequently never tested against a move-versus-edit conflict**, because the restriction rejects such batches before overlap analysis runs. Closing it means applying the permutation to a combined expectation and exempting precisely the independently verified rewritten node, which is how field batching already works. Revisit when the UI needs it or when cross-file move lands. |
-| R26 | **`shares_a_line` and the move sweep's second derivation of `comment_ownership_survives` are pinned or covered more weakly than the rest** | Accepted and named rather than papered over. `shares_a_line` is **reachable** — via a compact nested sequence such as `outer[0][1]` in `- - first` — and is driven by a hand-written unit test rather than a corpus fixture, because neither corpus holds that shape; it is weaker than corpus coverage and R20's rule would prefer a fixture. `comment_ownership_survives` has a production derivation but **no independent second derivation in the sweep**, deferred on R19 cost grounds (`docs/decisions/0c-3b-2a-notes.md` §3.4). Both are the weakest pins added by 0c-3b-2a; R22 remains the weakest in the table overall. |
 | R27 | **A held identity goes stale on every reparse, and the UI is what holds identities.** `MatchId` is refused across a revision change (D2v), which is correct and is not free: a selection, a scroll position or an open editor pane held across an external file change now meets `IdentityError::StaleRevision` | Accepted, and it is the specified behaviour — refusing beats resolving to the wrong match, which is what the code did before the Phase 1a review. **The cost lands squarely on Phase 1b/1c**: every lookup that can cross a `refresh()` must handle the error rather than unwrap it, and the UI needs a re-selection policy (most likely: re-resolve by `DocumentPath`, which is the thing designed to survive a reparse, then fall back to clearing the selection). Plan §6.5's reconciliation already requires that conversation, so this adds a case to it rather than a new mechanism. Pinned in both directions by `an_identity_from_before_a_reordering_is_refused_rather_than_resolved`, which also asserts that reprojecting *identical* bytes mints the *same* identity. |
 | R28 | **`Deserialize` on `ByteSpan` bypasses `ByteSpan::new`'s inverted-span assertion.** A frontend-supplied span is currently only ever echoed back, but nothing in the type system says so | Accepted **for a read-only phase, and dangerous the moment a mutation trusts a span that crossed the IPC boundary.** `serde` is `Serialize`-only except for a named list — `DocumentId`, `NodeId`, `DocumentPath`, `PathSegment`, `ByteSpan`, `MatchId` — which are exactly plan §6.4's command *arguments*. `ContentRevision`'s hand-written `Deserialize` accepts only the 64-character hex string its `Serialize` writes, so a malformed concurrency token is a typed rejection rather than a digest that quietly matches nothing. **Phase 2 must not let a deserialized `ByteSpan` reach the patch engine without revalidating it**, and must not widen the `Deserialize` list without re-reading `docs/decisions/1a-notes.md` §9 hole 6. |
 | R29 | **An unmodelled subtree is accounted for by span, not by name** (D2w): a key nested under an unrecognised option is proven present but is not addressable, searchable or displayable | Accepted as the deliberate trade, and recorded as a hole rather than folded into the "no key is dropped" claim — which is how the Phase 1a review found it. Measured cost: **28 of 546 synthetic keys** are span-accounted rather than named, and **0 of 566 real ones**, so the live config loses nothing today. Two second-order weaknesses named with it: accounting is by *containment*, so an over-wide recorded span would over-account (unreachable today, since every span comes from a published node), and two `UnknownEntry` reasons carry no path by construction — `NonScalarKey` (no `PathSegment` can spell such a key) and `RepeatedKey` (a path would name the *first* entry, not this one). A later phase that wants to render such a subtree must decide how, not assume the projection already did. |
@@ -206,48 +205,58 @@ decision that closed them — those decisions are in
 
 ## Next action
 
-### Phase 2d-4b-D RAN IN FULL and is **NOT closed**. The next action is **Phase 2d-4b-E** — the review
-### of 2d-4b-D's fix, commissioned by §7.1 because that fix changed one source file.
+### Phase 2d-4b-E RAN IN FULL and is **NOT closed**. The next action is **Phase 2d-4b-F** — the review
+### of 2d-4b-E's fix, commissioned by §7.1 because that fix changed one source file.
 
-The 2d-4b chain now runs 2d-4b → B → C → D → **E**, each phase the review of its predecessor's fix,
+The 2d-4b chain now runs 2d-4b → B → C → D → E → **F**, each phase the review of its predecessor's fix,
 each superseded by its successor and **none of them closed**. The records are
-[`docs/decisions/2d-4b-notes.md`](docs/decisions/2d-4b-notes.md) §8 (B), §9 (C) and **§10 (D)**; the
-reports are `docs/reviews/phase-2d-4b-{B,C,D}.md`.
+[`docs/decisions/2d-4b-notes.md`](docs/decisions/2d-4b-notes.md) §8 (B), §9 (C), §10 (D) and **§11 (E)**;
+the reports are `docs/reviews/phase-2d-4b-{B,C,D,E}.md`.
 
-**The chain is narrowing, and that is the thing to read before deciding anything.** 2d-4b's fix
-touched eight comment blocks in three files; C's touched four in three; D's touched **one block in one
-file**. Verdicts went 1 Medium + 2 Low → 2 Medium + 2 Low → 1 Medium + 2 Low, no High at any point, and
-every finding has been in a comment rather than in behaviour. §7.2's ending is one fix round that
-touches no source file, and nothing licenses forcing it: `CLAUDE.md` §7.2 says in as many words that a
-tail finding real defects is a tail doing its job, and each of these rounds has found a real one that
-the orchestrator re-derived before accepting.
+**The chain stopped narrowing at E, and the shapes started repeating — read this before deciding
+anything.** 2d-4b's fix touched eight comment blocks in three files; C's four in three; D's **one block
+in one file**; E's the **same** one block. Verdicts: 1M+2L → 2M+2L → 1M+2L → **1M+1L**, no High at any
+point, every finding in a comment and **not one executable line changed in the whole chain**. Rounds 2,
+3 and 4 each produced a *new* defect shape; **round 5 produced two repeats** — §8.2's *claim wider than
+its predicate* and §10.1's *reason false while the conclusion holds*, and a third instance of the first
+appeared inside E's own repair (§11.4) and a fourth inside the section recording it (§11.7 item 6).
+§7.2 is explicit that a tail finding real defects is a tail doing its job and that **nothing licenses
+forcing its end**; both of E's findings were re-derived before being accepted, and one was measured
+further than a read-only round could reach.
 
-**Four rounds have now produced four distinct defect shapes in the same paragraph** — a claim wider
-than its predicate, a subject named wrongly, a reason false while the conclusion held, and figures
-taken from the wrong version of the file. §10.7 item 3 records that nothing checks any of them.
+**§11.7 item 6 is the thing round F should weigh first, and no round has yet asked it.** The comment run
+above the stub is **43 lines** (`src/lib/browser/workspace.test.ts:446-488`) over a **9-line** stub
+(489-497), of which the paragraph this chain has repaired five times is **36 lines** (453-488). Its
+length is why it is the sole subject. Whether it should be *shortened, or moved into the record and
+pointed at from the file*, rather than repaired in place a sixth time, is a question the tail has never
+put — and it is a legitimate answer for F to reach, not a way of forcing an end.
 
-#### What round 2d-4b-E is scoped to
+#### What round 2d-4b-F is scoped to
 
-`git show 6dba9f7 -- src/` — **one hunk**, the route paragraph inside the
-`scriptedCommands()` drain stub in `src/lib/browser/workspace.test.ts`. Count the hunks before reading
-any sentence about how many there are; that instruction has now caught two defects in two rounds.
+`git show <this phase's SHA> -- src/` — **one hunk expected**, the same route paragraph inside the
+`scriptedCommands()` drain stub. **Count the hunks before reading any sentence about how many there
+are**; that instruction has now caught defects in three consecutive rounds.
 
-Three claims that paragraph now makes:
+What E's fix put there, all of it checkable:
 
-1. **Two phases, two routes, two figures.** It says Phase 2d-4b measured the *injected* surface and got
-   254 failures across three suites, and Phase 2d-4b-B measured the *binding* and left this suite at
-   186 passed, 0 failed. Check both attributions against §5 and §8.2. **The 254 has never been broken
-   down per file** (§10.7 item 2) and re-deriving it means mutating source.
-2. **Recording, not rejecting.** It says this file has no `@vitest-environment` docblock so it runs in
-   node; that the real `invoke` dereferences `window.__TAURI_INTERNALS__` and throws; that `call()` in
-   `src/lib/ipc/commands.ts` catches that exactly as it catches the component suites' rejecting mock,
-   so a fire-and-forget drain is swallowed in all three files; and that the only asymmetry is the
-   `vi.hoisted` `invoked` spy the other two have. Every clause is checkable.
-3. **Sixteen wrappers, two injected surfaces**, unchanged from C and confirmed by D — worth one
-   re-derivation rather than a re-review.
+1. **The partial trap, with its limit.** The `invoked` spy is named as the asymmetry *and* as a partial
+   trap: asserted **once** in `DetailPane.test.ts` (534) and **five** times in `RestorePane.test.ts`
+   (808, 911, 941, 968, 1084), **never** in either `afterEach` — both of which read `drains`, the
+   injected count (`DetailPane.test.ts:341-350`, `RestorePane.test.ts:759-768`). Conclusion drawn: **no
+   file traps the binding route file-wide**, and 2d-5 owes a closure to three files. Both suites state
+   the same limit themselves at `DetailPane.test.ts:164-168` and `RestorePane.test.ts:439-443`.
+2. **The node throw, measured.** `globalThis.window` is `undefined` under this file's environment, so
+   `@tauri-apps/api/core.js:202` throws `ReferenceError: window is not defined` evaluating the
+   identifier — explicitly **not** jsdom's present-`window`-missing-property `TypeError`. §11.2 records
+   how it was measured (a throwaway vitest probe, deleted, tree confirmed clean); re-deriving it costs
+   one probe if F wants its own.
+3. **Two phases, two routes, two figures** (254 injected / 186 binding) and **sixteen wrappers, two
+   injected surfaces** — both unchanged since D and each worth one re-derivation, not a re-review.
 
-**Do not re-file what §10.7 already records**, five items; item 1 is *actionable* and explicitly **not**
-a correctness defect in source, so the step closes without it.
+**Do not re-file what §11.7 already records**, six items; item 1 is *actionable* and explicitly **not**
+a correctness defect in source, so the step closes without it. Item 3 is new: **2d-4b-B's binding probe
+was measured on `workspace.test.ts` alone**, so *"186 passed, 0 failed"* bounds one file and the record
+has never said what the other two suites did under it.
 
 #### After the chain closes
 
@@ -255,21 +264,23 @@ a correctness defect in source, so the step closes without it.
 lands there: the watermark, the epoch comparison, `discarded` handling, all four drain-firing orders,
 disposal racing registration, and the capability widening (**both** `core:event:allow-listen` and
 `core:event:allow-unlisten`) with a re-run of `dispatch_check.rs`. It also inherits **§9.5 as sharpened
-by §10.1**: the drain guard's escaping route is stated, not closed, no suite records such a call except
-through a spy two of the three files happen to have, and the closure is cheap in those two and
-expensive in `workspace.test.ts`. `docs/reviews/phase-2d-design.md` Q8 names an incomplete registry as
-this whole phase's sharpest failure mode, and by the standing rule since 2b-2c **2d-5 opens with its
-own design consult**.
+by §10.1 and again by §11.1**: the drain guard's escaping route is stated, not closed, and **no suite
+traps it file-wide** — the two with a spy catch it in six named cases and nowhere else, so the closure
+is owed to all three files rather than to the one without a spy.
+`docs/reviews/phase-2d-design.md` Q8 names an incomplete registry as this whole phase's sharpest failure
+mode, and by the standing rule since 2b-2c **2d-5 opens with its own design consult**.
 
 ## Verification baseline
 
 **`1320 / 434 / 2175 / 184`** — `cargo test --workspace` / `npm run check` files / `npm test` /
 `npm run build` modules. **All four re-measured by the orchestrator alone on 2026-08-31**, each
-command unpiped, on the tree Phase 2d-4b-D's fix produced, with orphaned bin targets killed first —
-and re-measured on 2d-4b-B's and 2d-4b-C's before that, making **three** full runs of every gate in
-one session. **No figure has moved since 2d-4b**, which is the prediction: all three corrective phases
-changed comment text in test files plus the record, and no test case, no production module and no Rust
-line. The baseline before 2d-4b was `1313 / 431 / 2125 / 184`.
+command unpiped, on the tree Phase 2d-4b-E's fix produced, with orphaned bin targets killed first —
+and re-measured on 2d-4b-B's, 2d-4b-C's and 2d-4b-D's before that, making **four** full runs of every
+gate in one session. The Rust figure is the sum of 26 binaries' `test result: ok` lines, 0 failed;
+the three frontend gates were re-run a second time after E's closing comment reflow and did not move.
+**No figure has moved since 2d-4b**, which is the prediction: all four corrective phases changed
+comment text in test files plus the record, and no test case, no production module and no Rust line.
+The baseline before 2d-4b was `1313 / 431 / 2125 / 184`.
 
 **The module count did not move at 2d-4b either, and that is the ladder's prediction rather than a
 suspicious result.** `CLAUDE.md` §4 costs one module per **reachable** new source module, and

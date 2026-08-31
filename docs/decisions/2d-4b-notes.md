@@ -782,3 +782,151 @@ Marked per `CLAUDE.md` §7.3.
 5. **`workspace.test.ts` runs in node by omission, not by declaration — *recorded only*.** 10.1's
    derivation depends on it, and nothing in the file says so; a later `@vitest-environment jsdom`
    docblock would make that paragraph's reasoning stale without failing anything.
+
+## 11. Phase 2d-4b-E — the review of 2d-4b-D's fix (2026-08-31)
+
+**Why it exists.** §10's fix changed one source file — `src/lib/browser/workspace.test.ts`, one
+comment block, no executable line — so `CLAUDE.md` §7.1 commissioned a round scoped to it.
+**2d-4b-D is superseded by 2d-4b-E.**
+
+**The round.** A fresh `autoclaude-reviewer` on `model: "opus"`, 25-minute budget, report at
+[`../reviews/phase-2d-4b-E.md`](../reviews/phase-2d-4b-E.md). Verdict **`ship-with-fixes`: 0 High,
+1 Medium, 1 Low** — both in source, both in the same paragraph, both fixed. The brief said in as many
+words that `ship` was legitimate and named the four residues it was not to re-file; it returned two
+findings and re-filed none of them.
+
+**It verified the diff's extent before reading any sentence about it**, as §9.8 item 3 asked and as
+every round since has done: `git show 6dba9f7 -- src/ | grep -c '^@@'` gives **1**, every changed line
+a comment. The orchestrator re-derived that count independently.
+
+### 11.1 M1 (Medium, source) — an asymmetry named without its limit
+
+§10.1 replaced *rejecting* with *recording* as the real asymmetry between this suite and the two
+component suites, and that replacement was correct. What it did not carry is the limit **both component
+suites state in their own comments**: the `invoked` spy is *"a partial trap … asserted case by case and
+never in the `afterEach`, so it catches nothing file-wide"* (`DetailPane.test.ts:164-168`,
+`RestorePane.test.ts:439-443`).
+
+Re-derived by the orchestrator rather than accepted: `expect(invoked).not.toHaveBeenCalled()` appears
+**once** in `DetailPane.test.ts` (line 534) and **five** times in `RestorePane.test.ts` (808, 911, 941,
+968, 1084) — six in total — and **neither `afterEach` reads it**. Both read `drains`, the *injected*
+count, and assert it is zero (`DetailPane.test.ts:341-350`, `RestorePane.test.ts:759-768`).
+
+**The wrong conclusion it invited is a Phase 2d-5 one.** A reader of this paragraph alone concludes the
+binding route is already trapped file-wide in the other two suites and that only `workspace.test.ts`
+needs a closure. It is not, and 2d-5 owes a closure to **all three**. §9.5 and §10.7 item 1 say the
+route is open; this comment was the one place that implied it was two-thirds closed.
+
+**This is the fourth distinct shape and the first repeat: a claim wider than its predicate**, which is
+§8.2's shape exactly, one generation later and about a different subject. The fix names the limit, cites
+where both suites state it, gives the 1/5 split and says what the `afterEach` reads instead.
+
+### 11.2 L1 (Low, source) — a mechanism borrowed from the environment the sentence excludes
+
+The paragraph said the real `invoke` *"dereferences `window.__TAURI_INTERNALS__` and throws"*. Under
+node there is no dereference: `window` is undeclared, so evaluating the **identifier** throws
+`ReferenceError: window is not defined` before any property access. The mechanism described — a present
+`window` whose property is missing, giving a `TypeError` — is **jsdom's**, and jsdom is what the
+sentence's own premise (*"it runs in node"*) excludes.
+
+**Measured, not reasoned, and measured one step further than the round could.** The reviewer is
+read-only and recorded under NOT-VERIFIED that it had inferred node's `window` from `vite.config.ts:65`
+(`environment: 'node'`, and there are **no** `setupFiles` or `globalSetup` in that config) plus
+bare-node behaviour. The orchestrator wrote a throwaway probe under `src/lib/browser/`, ran it through
+`npx vitest run`, and read the values back through a forced assertion:
+`typeof globalThis.window === 'undefined'`, and the expression throws
+`ReferenceError: window is not defined`. The probe was deleted and `git status --short` confirmed it
+left nothing behind. **So this is measured inside vitest, not in bare node**, and §10.7 item 5 —
+*runs in node by omission* — is now what the comment itself says out loud.
+
+The conclusion was never wrong: it throws, `call()` (`../ipc/commands.ts:249-254`) catches it exactly
+as it catches the component suites' rejecting mock, and a fire-and-forget drain is swallowed in all
+three files. **A reason false while its conclusion holds** is §10.1's shape, so this chain has now
+repeated both of its two previous shapes rather than producing a fifth.
+
+`core.js:202` was re-derived after the edit (`rg -n 'window.__TAURI_INTERNALS__.invoke\(cmd'`), as were
+all four citations the new paragraph carries — §10.3's rule, applied to this section too.
+
+### 11.3 What the round could not verify
+
+Stated because it stated it, and none of it is new:
+
+- **The 254 figure**, taken on trust from §5. Re-deriving it means mutating source and re-running three
+  suites; §10.7 item 2 already carries it.
+- **That `window` is absent under vitest's node environment** — reasoned by the round, and **closed by
+  the orchestrator's measurement** in §11.2 above.
+- **Whether 2d-4b-B's binding-route probe failed anything in the two component suites.** Recorded
+  nowhere and not measured; §8.2's *"186 passed, 0 failed"* is stated of `workspace.test.ts` alone.
+  M1 does not depend on it. **This is new, and it is the sharpest thing the round noticed about the
+  record** — the binding probe's blast radius outside this one file has never been written down.
+- The workspace-wide gates, reserved to the orchestrator and run in full below.
+
+Re-derived by the round rather than trusted: the hunk count, a live 186-passed run of this suite, the
+sixteen/thirteen/three/two split, the docblock's absence, the absence of any `vi.mock(` in the file, the
+`core.js:201-203` and `commands.ts:249-254` citations, and that `classifyFailure` never rethrows.
+
+### 11.4 One correction the fix made that the round did not ask for
+
+The first draft of the M1 fix said *"all three files are open on the binding route"*, which is **wider
+than its predicate** — the very defect being fixed. The other two are open *file-wide*, but the six
+cases that assert `invoked` do catch a binding-route drain. The shipped sentence is
+*"no file closes the binding route file-wide: the other two catch it in the six cases that assert
+`invoked` and nowhere else"*. Recorded because the shape reappeared inside its own repair.
+
+### 11.5 The gates, re-run after the fix
+
+| Gate | Exit | Figure | Anchor |
+|---|---|---|---|
+| `cargo test --workspace` | 0 | **1320** over 26 binaries, 0 failed | 1320 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | clean | — |
+| `cargo fmt --check` | 0 | clean | — |
+| `cargo tree -p espansoconfig-core \| rg tauri` | — | no match | — |
+| `npm run check` | 0 | **434** files, 0 errors, 0 warnings | 434 |
+| `npm test` | 0 | **2175** over 57 files | 2175 |
+| `npm run build` | 0 | **184** modules | 184 |
+| server-only bundle oracle | — | **absent** | must be absent |
+| client-only bundle oracle | — | **2** | must be present |
+
+No figure moved, which is the prediction: the phase changed comment text in one test file and nothing
+else. Each command was run unpiped and its exit status read from the tool, not from a pipeline.
+
+### 11.6 What happens next, by rule
+
+The fix changed **one** source file — `src/lib/browser/workspace.test.ts`, the same comment block — so
+§7.1 commissions a round, and the cap makes it corrective phase **2d-4b-F**. The tail has not narrowed
+further this round: it was one file and one block before, and it is one file and one block now. What
+did change is the **shape** of what is being found — rounds 2, 3 and 4 each produced a new defect shape,
+and round 5 produced two **repeats** of shapes already on file (§8.2's and §10.1's). §7.2 is explicit
+that a tail finding real defects is a tail doing its job and that nothing licenses forcing its end; both
+findings here were re-derived before being accepted, and one was measured further than the round could
+reach.
+
+### 11.7 Where this phase is thin
+
+Marked per `CLAUDE.md` §7.3.
+
+1. **The escaping route is still stated, not closed — *actionable*, not a correctness defect in
+   source.** Unchanged inheritance from §9.5 and §10.7 item 1, now sharpened again: **no file traps it
+   file-wide**, and the two that trap it at all do so in six named cases. 2d-5 owes a closure to three
+   files, not one. The step closes without it.
+2. **The 254 figure has never been broken down per file — *recorded only*.** Four rounds have cited it
+   and none has re-derived it. Unchanged from §10.7 item 2.
+3. **2d-4b-B's binding probe was measured on `workspace.test.ts` alone — *recorded only*.** Whether it
+   failed anything in the two component suites is written down nowhere, so *"186 passed, 0 failed"*
+   bounds one file and the record has never said what the other two did. New this round.
+4. **Twelfth consecutive Opus review round with no second provider — *recorded only*.** §10.7 item 4
+   carried eleven.
+5. **Five rounds, four shapes, and the last round repeated two of them — *recorded only*.** A claim
+   wider than its predicate (§8.2, and again in §11.1 and once inside §11.1's own repair), a subject
+   named wrongly (§9.2), a reason false while the conclusion held (§10.1, and again in §11.2), and a
+   figure from the wrong version of the file (§10.3). **Nothing checks any of them**, and the repeat is
+   the evidence that reading once per round does not converge on its own — each round has still found
+   the previous round's.
+6. **The comment run above the stub is now 43 lines and the stub is 9 — *recorded only*.** Measured
+   after the fix, not estimated: lines 446-488 of `src/lib/browser/workspace.test.ts` are comment and
+   489-497 are `drainExternalChanges`, of which the route paragraph the chain has been repairing is
+   453-488, **36 lines**. (The first figure written here was *"26 lines above a four-line stub"*,
+   estimated rather than counted, and it was wrong in both halves — §11.4's shape, a third time, inside
+   the section recording it.) That length is what has made this paragraph the chain's sole subject for
+   five rounds, and no round has yet asked whether it should be shortened, or moved into the record and
+   pointed at from the file, instead of repaired in place.

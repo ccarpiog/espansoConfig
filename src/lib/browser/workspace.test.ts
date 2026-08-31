@@ -466,12 +466,24 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     //
     // This file mocks no `@tauri-apps/api/core`, and the asymmetry that creates is
     // **recording, not rejecting**. It carries no `@vitest-environment` docblock,
-    // so it runs in node, where the real `invoke` dereferences
-    // `window.__TAURI_INTERNALS__` and throws, and `call()` in `../ipc/commands.ts`
-    // catches that exactly as it catches the component suites' rejecting mock — a
-    // fire-and-forget drain is swallowed in all three. What those two files have
-    // and this one does not is the `vi.hoisted` `invoked` spy, which *records* the
-    // call on its way to rejecting. The count is evidence about the injected
+    // so it runs in node, where `globalThis.window` is `undefined` and the real
+    // `invoke` (`@tauri-apps/api/core.js:202`) throws
+    // `ReferenceError: window is not defined` evaluating the identifier — measured
+    // under vitest, and *not* the jsdom mechanism of a present `window` missing the
+    // property. `call()` in `../ipc/commands.ts` catches it exactly as it catches
+    // the component suites' rejecting mock, so a fire-and-forget drain is swallowed
+    // in all three files.
+    //
+    // What those two files have and this one does not is the `vi.hoisted` `invoked`
+    // spy, which *records* the call on its way to rejecting — **and that spy is a
+    // partial trap, so it is not the file-wide closure this file is missing.** Both
+    // suites say so themselves (`DetailPane.test.ts:164-168`,
+    // `RestorePane.test.ts:439-443`): `invoked` is asserted case by case — once in
+    // `DetailPane.test.ts`, five times in `RestorePane.test.ts` — and **never** in
+    // either `afterEach`, both of which read `drains`, the injected count, and not
+    // the spy. So **no file closes the binding route file-wide**: the other two
+    // catch it in the six cases that assert `invoked` and nowhere else, and 2d-5
+    // owes a closure to all three. The count is evidence about the injected
     // boundary and never about the module, and the phase that starts draining owns
     // closing the route instead of trusting this comment.
     drainExternalChanges: vi.fn(async () => {
