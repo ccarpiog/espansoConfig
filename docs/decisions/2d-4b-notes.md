@@ -585,7 +585,7 @@ one defect seen twice. §8.2 now carries a correction block saying so.
 
 Both component doc comments said the other route was *"a module-level import of
 `drainExternalChanges`, which no component has today"*. True of components and false of what those
-files execute: `DetailPane.test.ts:279` and `RestorePane.test.ts:538` both build a **real**
+files execute: `DetailPane.test.ts:285` and `RestorePane.test.ts:544` both build a **real**
 `BrowserState` through `createBrowserState`, so both run `workspace.svelte.ts`, which holds exactly
 that binding. The clause named the wrong subject — *component* where *the module under the component*
 was meant — and so reported a live route as absent.
@@ -593,10 +593,19 @@ was meant — and so reported a live route as absent.
 Both comments now say the route is live, keep *no component imports the wrapper* as the narrower true
 statement it is, and name the **partial trap those two files do have and the count is not**: the
 `vi.hoisted` `invoke` mock at the head of each file rejects, so a drain taking the module route would
-record on `invoked` — but `invoked` is asserted case by case (`DetailPane.test.ts:528`,
-`RestorePane.test.ts:802`, `:905`, `:935`, `:962`, `:1078`) and never in the `afterEach`, so it
+record on `invoked` — but `invoked` is asserted case by case (`DetailPane.test.ts:534`,
+`RestorePane.test.ts:808`, `:911`, `:941`, `:968`, `:1084`) and never in the `afterEach`, so it
 catches nothing file-wide. `workspace.test.ts` mocks `@tauri-apps/api/core` not at all, which is why
 that file is the exposed one; its comment now says that too.
+
+> **Corrected at 2d-4b-D.** Every line citation in this section was written against the file as it
+> stood **before** this section's own fix, and so was stale by exactly **+6** — the fix's net delta in
+> each component suite (+9/−3). The eight numbers above are the corrected ones, re-derived on the
+> committed tree; the originals were 279, 538, 528, 802, 905, 935, 962 and 1078, of which
+> `RestorePane.test.ts:802` had come to point at a fixture string. **A line citation written during a
+> fix measures the file the fix replaced**, which is the same shape as the header-size defect
+> `PROGRESS.md` has had to correct twice, and it is why §10 re-derives its own citations after the
+> edit rather than before it.
 
 ### 9.3 L1 (Low, source) — "every command wrapper, to build `REAL_COMMANDS`"
 
@@ -669,3 +678,107 @@ Marked per `CLAUDE.md` §7.3.
 5. **The two `afterEach` indirections were confirmed to resolve, at their current wording —
    *recorded only*.** *"bounded as the count's own doc comment states"* is a pointer, and a pointer is
    only as true as its target; nothing fails if a later edit changes the target and not the pointer.
+
+---
+
+## 10. Phase 2d-4b-D — the review of 2d-4b-C's fix (2026-08-31)
+
+**Why it exists.** §9's fix changed three source files — four comment blocks, no executable line — so
+`CLAUDE.md` §7.1 commissioned a round scoped to it. **2d-4b-C is superseded by 2d-4b-D.**
+
+**The round.** A fresh `autoclaude-reviewer` on `model: "opus"`, 25-minute budget, report at
+[`../reviews/phase-2d-4b-D.md`](../reviews/phase-2d-4b-D.md). Verdict **`ship-with-fixes`: 0 High,
+1 Medium, 2 Low.** The brief told it in as many words that `ready` was a legitimate verdict and that a
+tail is not prolonged by manufacturing a finding; it returned three anyway, and all three were
+re-derived by the orchestrator before being accepted.
+
+**It verified the diff's extent before reading any sentence about it**, which is what §9.8 item 3
+asked the next round to do: `git show e510819 -- src/ | grep -c '^@@'` gives **4**, every changed line
+a comment. It also confirmed the sixteen/thirteen/three/two split, the partial trap, and — the thing
+three rounds running had failed at — that **no unbounded sentence survives** anywhere in the three
+files.
+
+### 10.1 M1 (Medium, source) — a discriminator that does not discriminate
+
+The route paragraph ended *"This file mocks no `@tauri-apps/api/core`, so nothing else in it notices
+such a call either — **unlike the two component suites, which reject at `invoke`**"*. The contrast is
+false. `workspace.test.ts` carries no `@vitest-environment` docblock, so it runs in **node**, where the
+real `invoke` (`node_modules/@tauri-apps/api/core.js:201-203`) dereferences
+`window.__TAURI_INTERNALS__` and throws; `call()` (`src/lib/ipc/commands.ts:249-254`) catches that in
+exactly the way it catches the component suites' rejecting mock. **A fire-and-forget drain is swallowed
+in all three files**, so rejection is not the asymmetry.
+
+The real asymmetry is **recording**: the component suites' `vi.hoisted` `invoked` spy records the call
+on its way to rejecting, and this file has no spy at all. The comment now says that, and says the
+mechanism rather than asserting the conclusion.
+
+**This is a comment that was true of the conclusion and false about the reason** — the third distinct
+shape this chain has produced, after *a claim wider than its predicate* (§8.2) and *a subject named
+wrongly* (§9.2).
+
+### 10.2 L1 (Low, source) — two figures, two phases, one attribution
+
+The paragraph attributed both measurements to Phase 2d-4b-B. **254 is 2d-4b's**, from the probe §5
+records through the injected surface; **186 is 2d-4b-B's**, from the probe through the binding. §8.2
+already said so, so the comment contradicted the record it was derived from. Both figures now name
+their own phase and their own route.
+
+### 10.3 L2 (Low, record) — eight line citations stale by exactly the fix's own delta
+
+Every line number in §9.2 was written against the file as it stood **before §9.2's own fix**, and so
+was stale by **+6**, the net delta of `+9/−3` in each component suite. `RestorePane.test.ts:802` had
+come to point at a fixture string. The correction block in §9.2 carries the corrected eight and the
+originals.
+
+**A line citation written during a fix measures the file the fix replaced.** That is the same shape as
+the `PROGRESS.md` header-size defect this project has corrected twice, and the same shape as §9.1's
+miscount — a figure taken from the wrong version of the thing it describes. This section's own
+citations were re-derived **after** its edits landed, not before.
+
+### 10.4 What the round could not verify
+
+Stated because it stated it. The *"254 failures across the three suites that count"* breakdown was
+**not** re-verified: re-running that probe means mutating source, which the brief forbade, and the
+record has never broken 254 down per file. The workspace-wide gates were reserved to the orchestrator
+and are §10.5.
+
+### 10.5 The gates, re-run after the fix
+
+| Gate | Exit | Figure | Anchor |
+|---|---|---|---|
+| `cargo test --workspace` | 0 | **1320** | 1320 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | clean | — |
+| `cargo fmt --check` | 0 | clean | — |
+| `cargo tree -p espansoconfig-core \| rg tauri` | — | no match | — |
+| `npm run check` | 0 | **434** files, 0 errors, 0 warnings | 434 |
+| `npm test` | 0 | **2175** over 57 files | 2175 |
+| `npm run build` | 0 | **184** modules | 184 |
+| server-only bundle oracle | — | **absent** | must be absent |
+| client-only bundle oracle | — | **2** | must be present |
+
+### 10.6 What happens next, by rule
+
+The fix changed **one** source file — `src/lib/browser/workspace.test.ts`, one comment block — so
+§7.1 commissions a round, and the cap makes it corrective phase **2d-4b-E**. The other two files were
+untouched this round, and the tail has narrowed from three files to one.
+
+### 10.7 Where this phase is thin
+
+Marked per `CLAUDE.md` §7.3.
+
+1. **The escaping route is still stated, not closed — *actionable*, not a correctness defect in
+   source.** §9.5 is the unchanged inheritance, and 10.1 sharpens what it costs: no suite records such
+   a call except through a spy two of the three files happen to have. 2d-5 owns it. The step closes
+   without it.
+2. **The 254 figure has never been broken down per file — *recorded only*.** Three rounds have now
+   cited it and none has re-derived it; re-deriving it means mutating source and re-running the suites.
+3. **Four consecutive rounds, four distinct defect shapes in the same paragraph — *recorded only*, and
+   the sharpest thing this chain has produced.** A claim wider than its predicate, a subject named
+   wrongly, a reason that was false while the conclusion held, and a figure taken from the wrong
+   version. Nothing checks any of these; they are found by reading, once per round, and each round has
+   found the previous round's.
+4. **Eleventh consecutive Opus review round with no second provider — *recorded only*.** §9.8 item 4
+   carried ten.
+5. **`workspace.test.ts` runs in node by omission, not by declaration — *recorded only*.** 10.1's
+   derivation depends on it, and nothing in the file says so; a later `@vitest-environment jsdom`
+   docblock would make that paragraph's reasoning stale without failing anything.

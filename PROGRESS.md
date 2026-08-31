@@ -9,16 +9,15 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of 2d-4b-C it is **436 lines and 61,735 bytes**, under 64 KiB by 3.8 KB —
+triggers the move**. As of 2d-4b-D it is **438 lines and 62,525 bytes**, under 64 KiB by 3.0 KB —
 **and the figures are re-measured on the file that carries them**, because a header quoting the size
-of the file it replaced has already had to be corrected twice. This iteration rewrote *Next action* in
-place, 2d-4b-B's handoff out and 2d-4b-C's in, added one git-state row, and **archived 2d-4a's five
-closed corrective rows** to `status-table.md`, leaving one row and a pointer — which is what bought
-the headroom back after the rewrite had cut it to 2.8 KB. **The next places to look
-for length are *Open risks and deviations* and the *Next action*'s narrative half, not the phase
-table**, and archiving a closed phase's narrative to `docs/progress-archive/` is the pattern to
-repeat. **Nothing of the 2d-4b chain is archivable yet**: 2d-4b, 2d-4b-B and 2d-4b-C are all
-superseded rather than closed, and the chain's live head is 2d-4b-D.
+of the file it replaced has already had to be corrected twice, and 2d-4b-D found the identical shape
+in a notes section's line citations. This session ran three phases and rewrote *Next action* in place
+each time; it also **archived 2d-4a's five closed corrective rows** to `status-table.md`, leaving one
+row and a pointer, which is what has kept the headroom. **The next places to look for length are *Open
+risks and deviations* and the *Next action*'s narrative half, not the phase table.** **Nothing of the
+2d-4b chain is archivable yet**: 2d-4b, B, C and D are all superseded rather than closed, and the
+chain's live head is 2d-4b-E.
 
 - Plan of record: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (§12 holds the phase plan).
 - Rules that bind every session: [`CLAUDE.md`](CLAUDE.md).
@@ -61,7 +60,8 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-4b** | The TypeScript half of the wire — the mirror, the drain wrapper, the injectable event source, the i18n accessors, and the deletion of `AWAITING_FRONTEND_DECLARATION` | 🔶 **ran in full, every gate green, NOT closed** — one review round, `ship-with-fixes`, **0 blockers**, 4 should-fix, **all four fixed**, and the fix found **four narrower instances** of the same shape. **Its fix round changed source, so §7.1 commissions a round; superseded by 2d-4b-B** |
 | **2d-4b-B** | First corrective phase: the review of 2d-4b's fix round, scoped to eight files across `codes.{ts,test.ts}`, `events.{ts,test.ts}`, three suites and `wire_contract.rs` | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 1 Medium + 2 Low, **all three fixed**. The Medium is an assertion claiming more than it measures: the drain counter sees only the **injected** surface, and `workspace.svelte.ts`'s module-level import is a route around it — measured at **186 passed, 0 failed**. It also **re-derived and confirmed** the three claims the brief put to it (the 49 builders, the `wire_contract.rs:3724` doc, the `ExpectNever` widening guard). **Its fix changed three source files, so §7.1 commissions a round; superseded by 2d-4b-C** |
 | **2d-4b-C** | Second corrective phase: the review of 2d-4b-B's fix — six bounded comments in three test suites | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 2 Medium + 2 Low, **all four fixed**. Both Mediums are the previous fix's own residue: **the doc comment it skipped** still carried the unbounded claim, in the one file whose subject module is the escaping route, and both component suites named that route *absent* while mounting a real `BrowserState` that holds it. The miscount that hid the first is the round's L2 — *"all six sentences"* against a diff of eight blocks. **Its fix changed the same three source files, so §7.1 commissions a round; superseded by 2d-4b-D** |
-| **2d-4b-D** | Third corrective phase: the review of 2d-4b-C's fix — four corrected comment blocks in the same three suites | ⬜️ **not started — this is the next action** |
+| **2d-4b-D** | Third corrective phase: the review of 2d-4b-C's fix — four corrected comment blocks in the same three suites | 🔶 **ran in full, every gate green, NOT closed** — `ship-with-fixes`, **0 High**, 1 Medium + 2 Low, **all three fixed**. It **verified the diff's extent before reading any claim about it** (4 hunks, every changed line a comment), which is what §9.8 asked of it, and confirmed no unbounded sentence survives anywhere. The Medium is a comment true of its conclusion and false about its reason — *"unlike the two component suites, which reject at `invoke`"*, when all three suites reject and only two **record**. **Its fix changed one source file, so §7.1 commissions a round; superseded by 2d-4b-E** |
+| **2d-4b-E** | Fourth corrective phase: the review of 2d-4b-D's fix — one comment block in `workspace.test.ts` | ⬜️ **not started — this is the next action** |
 | **2d-5 … 2d-8** | The remaining four steps of the consult's eight | ⬜️ not started |
 | **2d** | External change reconciliation — plan §6.5 | 🔶 in progress |
 | **3–5** | Validation, packaging, hardening | ⬜️ not started |
@@ -206,69 +206,70 @@ decision that closed them — those decisions are in
 
 ## Next action
 
-### Phase 2d-4b-C RAN IN FULL and is **NOT closed**. The next action is **Phase 2d-4b-D** — the review
-### of 2d-4b-C's fix, commissioned by §7.1 because that fix changed three source files.
+### Phase 2d-4b-D RAN IN FULL and is **NOT closed**. The next action is **Phase 2d-4b-E** — the review
+### of 2d-4b-D's fix, commissioned by §7.1 because that fix changed one source file.
 
-2d-4b-C was the review of 2d-4b-B's fix. Verdict `ship-with-fixes`: **0 High, 2 Medium, 2 Low**, all
-four fixed. Its record is [`docs/decisions/2d-4b-notes.md`](docs/decisions/2d-4b-notes.md) **§9** —
-§9.1 and §9.2 the Mediums, §9.3 and §9.4 the Lows, §9.5 what 2d-5 inherits, §9.6 the gates, §9.7 what
-happens next, §9.8 where it is thin. The report is
-[`docs/reviews/phase-2d-4b-C.md`](docs/reviews/phase-2d-4b-C.md); 2d-4b-B's is
-[`phase-2d-4b-B.md`](docs/reviews/phase-2d-4b-B.md) and its record is §8.
+The 2d-4b chain now runs 2d-4b → B → C → D → **E**, each phase the review of its predecessor's fix,
+each superseded by its successor and **none of them closed**. The records are
+[`docs/decisions/2d-4b-notes.md`](docs/decisions/2d-4b-notes.md) §8 (B), §9 (C) and **§10 (D)**; the
+reports are `docs/reviews/phase-2d-4b-{B,C,D}.md`.
 
-**The one thing worth carrying forward in full.** This is the **third consecutive round on this phase
-to close a finding and leave a narrower instance of it standing**. 2d-4b's fix left four; 2d-4b-B's
-left the `drains` doc comment in `workspace.test.ts` unbounded while bounding the same comment in both
-component suites; and the mechanism this time was **arithmetic in the record** — §8.2 said the fix
-bounded *"all six sentences, two in each file"*, the diff touched **eight** blocks in a 2/3/3 split,
-and counting to six is exactly what hid the seventh. There is no check anywhere that a fix's claimed
-extent matches its own diff (§9.8 item 3). **When reviewing 2d-4b-D, count the blocks in
-`git show <sha> -- src/` before reading any sentence about how many were changed.**
+**The chain is narrowing, and that is the thing to read before deciding anything.** 2d-4b's fix
+touched eight comment blocks in three files; C's touched four in three; D's touched **one block in one
+file**. Verdicts went 1 Medium + 2 Low → 2 Medium + 2 Low → 1 Medium + 2 Low, no High at any point, and
+every finding has been in a comment rather than in behaviour. §7.2's ending is one fix round that
+touches no source file, and nothing licenses forcing it: `CLAUDE.md` §7.2 says in as many words that a
+tail finding real defects is a tail doing its job, and each of these rounds has found a real one that
+the orchestrator re-derived before accepting.
 
-#### What round 2d-4b-D is scoped to
+**Four rounds have now produced four distinct defect shapes in the same paragraph** — a claim wider
+than its predicate, a subject named wrongly, a reason false while the conclusion held, and figures
+taken from the wrong version of the file. §10.7 item 3 records that nothing checks any of them.
 
-`git show e510819 -- src/` — four comment blocks in the same three files, no executable line:
-`src/lib/browser/workspace.test.ts` (the `drains` doc comment, newly bounded; and the route paragraph
-in the `scriptedCommands()` stub, rewritten), `src/lib/components/DetailPane.test.ts` and
-`src/lib/components/RestorePane.test.ts` (the `drains` doc comment in each).
+#### What round 2d-4b-E is scoped to
 
-Three claims that fix now makes, to check rather than take on their word:
+`git show <the 2d-4b-D sha> -- src/` — **one hunk**, the route paragraph inside the
+`scriptedCommands()` drain stub in `src/lib/browser/workspace.test.ts`. Count the hunks before reading
+any sentence about how many there are; that instruction has now caught two defects in two rounds.
 
-1. **Sixteen wrappers, two injected surfaces.** The route paragraph now says `workspace.svelte.ts:44-60`
-   imports sixteen command wrappers, thirteen building `REAL_COMMANDS` and three building
-   `REAL_BACKUP_COMMANDS` at `:387-391`, so the escape is uniform across sixteen bindings and **two**
-   injected surfaces. Re-derive the counts and the split.
-2. **The partial trap, and its asymmetry.** Both component comments now claim the `vi.hoisted` `invoke`
-   mock would record a drain taking the module route on `invoked`, that `invoked` is asserted case by
-   case and never in the `afterEach`, and that `workspace.test.ts` mocks `@tauri-apps/api/core` not at
-   all. All four halves are checkable.
-3. **That nothing unbounded survives a third time.** Sweep all three files for any remaining sentence
-   claiming the count observes more than the injected surface — by what the comments now say, not by
-   the words of M1.
+Three claims that paragraph now makes:
 
-**Do not re-file what §9.8 already records.** Five items are marked there; item 1 is *actionable* and
-explicitly **not** a correctness defect in source, so the step closes without it.
+1. **Two phases, two routes, two figures.** It says Phase 2d-4b measured the *injected* surface and got
+   254 failures across three suites, and Phase 2d-4b-B measured the *binding* and left this suite at
+   186 passed, 0 failed. Check both attributions against §5 and §8.2. **The 254 has never been broken
+   down per file** (§10.7 item 2) and re-deriving it means mutating source.
+2. **Recording, not rejecting.** It says this file has no `@vitest-environment` docblock so it runs in
+   node; that the real `invoke` dereferences `window.__TAURI_INTERNALS__` and throws; that `call()` in
+   `src/lib/ipc/commands.ts` catches that exactly as it catches the component suites' rejecting mock,
+   so a fire-and-forget drain is swallowed in all three files; and that the only asymmetry is the
+   `vi.hoisted` `invoked` spy the other two have. Every clause is checkable.
+3. **Sixteen wrappers, two injected surfaces**, unchanged from C and confirmed by D — worth one
+   re-derivation rather than a re-review.
 
-#### After 2d-4b-D closes
+**Do not re-file what §10.7 already records**, five items; item 1 is *actionable* and explicitly **not**
+a correctness defect in source, so the step closes without it.
 
-**2d-5** — the open-surface registry and the reconciliation coordinator. Every obligation 2d-4b
-refused lands there: the watermark, the epoch comparison, `discarded` handling, all four drain-firing
-orders, disposal racing registration, and the capability widening (**both** `core:event:allow-listen`
-and `core:event:allow-unlisten`) with a re-run of `dispatch_check.rs`. It also inherits **§9.5**: the
-drain guard's escaping route is stated, not closed, and the closure is nearly free in the two
-component suites and expensive in `workspace.test.ts`, which is why neither half was taken.
-`docs/reviews/phase-2d-design.md` Q8 names an incomplete registry as this whole phase's sharpest
-failure mode, and by the standing rule since 2b-2c **2d-5 opens with its own design consult**.
+#### After the chain closes
+
+**2d-5** — the open-surface registry and the reconciliation coordinator. Every obligation 2d-4b refused
+lands there: the watermark, the epoch comparison, `discarded` handling, all four drain-firing orders,
+disposal racing registration, and the capability widening (**both** `core:event:allow-listen` and
+`core:event:allow-unlisten`) with a re-run of `dispatch_check.rs`. It also inherits **§9.5 as sharpened
+by §10.1**: the drain guard's escaping route is stated, not closed, no suite records such a call except
+through a spy two of the three files happen to have, and the closure is cheap in those two and
+expensive in `workspace.test.ts`. `docs/reviews/phase-2d-design.md` Q8 names an incomplete registry as
+this whole phase's sharpest failure mode, and by the standing rule since 2b-2c **2d-5 opens with its
+own design consult**.
 
 ## Verification baseline
 
 **`1320 / 434 / 2175 / 184`** — `cargo test --workspace` / `npm run check` files / `npm test` /
 `npm run build` modules. **All four re-measured by the orchestrator alone on 2026-08-31**, each
-command unpiped, on the tree Phase 2d-4b-C's fix produced, with orphaned bin targets killed first —
-and re-measured once more before that, on 2d-4b-B's. **No figure has moved since 2d-4b**, which is the
-prediction: both corrective phases changed comment text in the same three test files plus the record,
-and no test case, no production module and no Rust line. The baseline before 2d-4b was
-`1313 / 431 / 2125 / 184`.
+command unpiped, on the tree Phase 2d-4b-D's fix produced, with orphaned bin targets killed first —
+and re-measured on 2d-4b-B's and 2d-4b-C's before that, making **three** full runs of every gate in
+one session. **No figure has moved since 2d-4b**, which is the prediction: all three corrective phases
+changed comment text in test files plus the record, and no test case, no production module and no Rust
+line. The baseline before 2d-4b was `1313 / 431 / 2125 / 184`.
 
 **The module count did not move at 2d-4b either, and that is the ladder's prediction rather than a
 suspicious result.** `CLAUDE.md` §4 costs one module per **reachable** new source module, and
@@ -426,11 +427,12 @@ describes in as many words.
 |---|---|---|
 | **2d-4b-B — round 2 and its fix; round 3 OWED** | **`1c34579`** | ✅ pushed to `origin/main` |
 | **2d-4b-C — round 3 and its fix; round 4 OWED** | **`e510819`** | ✅ pushed to `origin/main` |
+| **2d-4b-D — round 4 and its fix; round 5 OWED** | **`SHA_PLACEHOLDER`** | PUSH_PLACEHOLDER |
 
-**Both commits change three source files** — `workspace.test.ts`, `DetailPane.test.ts` and
-`RestorePane.test.ts`, six comment blocks in `1c34579` and four in its successor, not one executable
-line in either — **so under §7.1 each commissions the next round**, the unit being the file. Everything
-else they touch is `PROGRESS.md`, `docs/decisions/2d-4b-notes.md` §8 and §9, and the two new review
-files, all on §7's closed list.
+**Each of the three commissions the next round**, the unit being the file, and the source half of each
+is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
+blocks in three files, and its successor **one block in one file**. Everything else they touch is
+`PROGRESS.md`, `docs/decisions/2d-4b-notes.md` §8–§10, `docs/progress-archive/status-table.md` and the
+three new review files, all on §7's closed list.
 
-**The tree is clean at the 2d-4b-C commit.**
+**The tree is clean at the 2d-4b-D commit.**

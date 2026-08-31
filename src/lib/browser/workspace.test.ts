@@ -458,15 +458,22 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     // closure `createBrowserState` returns, and a call made through a binding
     // rather than through an injected parameter increments nothing here. The
     // route is uniform across sixteen wrappers and **two** injected surfaces,
-    // never special to this member. Phase 2d-4b-B measured what it costs: a
-    // fire-and-forget drain at the head of `open()` written against the binding
-    // left this suite at 186 passed, 0 failed, where the same probe through the
-    // injected surface gave 254 failures across the three suites that count. This
-    // file mocks no `@tauri-apps/api/core`, so nothing else in it notices such a
-    // call either — unlike the two component suites, which reject at `invoke`.
-    // The count is evidence about the injected boundary and never about the
-    // module, and the phase that starts draining owns closing the route instead
-    // of trusting this comment.
+    // never special to this member. **Two phases measured the two routes, and the
+    // figures belong to different ones.** Phase 2d-4b probed the *injected*
+    // surface and got 254 failures across the three suites that count; Phase
+    // 2d-4b-B probed the *binding*, with a fire-and-forget drain at the head of
+    // `open()`, and this suite stayed at 186 passed, 0 failed.
+    //
+    // This file mocks no `@tauri-apps/api/core`, and the asymmetry that creates is
+    // **recording, not rejecting**. It carries no `@vitest-environment` docblock,
+    // so it runs in node, where the real `invoke` dereferences
+    // `window.__TAURI_INTERNALS__` and throws, and `call()` in `../ipc/commands.ts`
+    // catches that exactly as it catches the component suites' rejecting mock — a
+    // fire-and-forget drain is swallowed in all three. What those two files have
+    // and this one does not is the `vi.hoisted` `invoked` spy, which *records* the
+    // call on its way to rejecting. The count is evidence about the injected
+    // boundary and never about the module, and the phase that starts draining owns
+    // closing the route instead of trusting this comment.
     drainExternalChanges: vi.fn(async () => {
       drains += 1;
       const answer: CommandResult<ReconciliationBatch> = {
