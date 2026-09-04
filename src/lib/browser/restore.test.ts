@@ -504,11 +504,59 @@ function sender(result: SaveResult = saved(), issuer: RawSaveReload = { kind: 'd
 } // End of function sender()
 
 /**
+ * Whether the pane that discharges an invalidation would close one surface.
+ *
+ * **This models `invalidateEverySurface` in `src/lib/components/DetailPane.svelte`,
+ * and the `matchCreator` arm is the whole reason it is a function.** That function's
+ * comment at `:529-535` says it: the new-snippet form is closed **whatever file it
+ * names**, including when it names none, because that pane cannot learn which
+ * destination the form chose and a form left open over a replaced file holds a
+ * position anchor that names nothing. The restore pane itself is **not** closed
+ * (`:525-527`) — it is where the outcome of the write is drawn. Every other kind
+ * closes on an exact match of the replaced file, which is the five identity
+ * comparisons that function makes.
+ *
+ * **The recorder this replaces disagreed with production on the `unknown` arm**,
+ * keeping a destination-less creator open on the ground that a form naming no file
+ * is not over the replaced one. That ground is real and production overrules it
+ * deliberately, in the conservative direction; a helper that asserted the opposite
+ * was a trap set for 2d-5-2, the step that starts constructing such surfaces. The
+ * decision taken here is that **the helper models production**, so a case written
+ * against it is written against what a window does.
+ *
+ * **What nothing enforces, in the same sentence as what this does.** This is a
+ * *model* of that function and no type, test or lint relates the two, so production
+ * changing its rule leaves this silently stale. **Nor is production itself pinned**,
+ * and the sentence this replaces said the opposite: it claimed the mounted
+ * `DetailPane.test.ts` suite holds production to its own behaviour, and that suite
+ * reaches `invalidateEverySurface` in no case at all — deleting `creating = false`
+ * from it breaks nothing. So the rule is unpinned on **both** sides, and what this
+ * helper buys is one honest model rather than half of an agreement. It also models
+ * the rule and never the surrounding facts — production's `busy` makes a creator and
+ * a restore mutually exclusive today, so the two arms this function is most careful
+ * about cannot both arise in that window yet.
+ *
+ * @param surface - One surface this window has open.
+ * @param replaced - The file whose whole text was just replaced.
+ * @returns Whether that pane would close it.
+ */
+function closedByReplacementOf(surface: OpenWriteSurface, replaced: DocumentId): boolean {
+  if (surface.kind === 'matchCreator') {
+    return true;
+  }
+  if (surface.kind === 'restore') {
+    return false;
+  }
+  return surface.target.document === replaced;
+} // End of function closedByReplacementOf()
+
+/**
  * What a coordinator does about every write surface over a replaced file.
  *
  * **A recorder rather than a stub**, because consult Q4's post-commit obligation is
  * that a committed replacement really closes the surfaces this window has open. The
- * list it holds is the window's; `close` is what {@link applyRestore} is handed.
+ * list it holds is the window's; `close` is what {@link applyRestore} is handed, and
+ * {@link closedByReplacementOf} is the production rule it applies.
  *
  * @param surfaces - The surfaces this window has open when the answer lands.
  * @returns The list, the callback, and what the callback was handed.
@@ -520,17 +568,14 @@ function coordinator(surfaces: readonly OpenWriteSurface[] = []) {
     open,
     closed,
     /**
-     * Closes every surface over the replaced file, and records the invalidation.
+     * Closes every surface the replacement takes with it, and records it.
      *
      * @param invalidation - The file that was replaced and what it holds now.
      */
     close(invalidation: RawSaveInvalidation): void {
       closed.push(invalidation);
-      // **The unknown-target creator stays open**, because it is not over the replaced
-      // file: it is over no file at all until it reports a destination upward.
       const kept = open.filter(
-        (surface) =>
-          surface.target.kind !== 'document' || surface.target.document !== invalidation.document
+        (surface) => !closedByReplacementOf(surface, invalidation.document)
       );
       open.length = 0;
       open.push(...kept);
@@ -917,16 +962,54 @@ describe('the watcher-targeting predicate, which answers the unknown arm the oth
     expect(targetingSurfaceFor(TARGET, elsewhere, 'notCreatorEligible')).toBeNull();
   }); // End of the "ignores another file" case
 
-  it('answers the first surface of the list, and nothing at all for an empty one', () => {
+  it('prefers a surface that names the file to an earlier creator that names none', () => {
+    // **The pin for the ordering, and it fails on a return to first-match.** The
+    // first list is the shadowing shape exactly: an eligible unknown creator sits
+    // ahead of an exact match, and answering in array order would name the creator
+    // when a specific surface is the better answer. The `kind` is what a 2d-5-4
+    // sentence would put on screen, which is why the more specific one wins.
+    const named: OpenWriteSurface = {
+      kind: 'rawEditor',
+      target: { kind: 'document', document: TARGET }
+    };
+    expect(targetingSurfaceFor(TARGET, [UNKNOWN_CREATOR, named], 'creatorEligible')).toBe(
+      'rawEditor'
+    );
+    expect(targetingSurfaceFor(TARGET, [named, UNKNOWN_CREATOR], 'creatorEligible')).toBe(
+      'rawEditor'
+    );
     expect(targetingSurfaceFor(TARGET, [], 'creatorEligible')).toBeNull();
+  }); // End of the "prefers a surface that names the file" case
+
+  it('keeps array order among exact matches, and answers the same yes or no as before', () => {
+    // **What the preference does not do**, driven rather than asserted in prose. It
+    // does not make the answer canonical: two surfaces naming the file are still
+    // separated by array order alone, and this function ranks no named kind above
+    // another. And it moves no yes/no answer — the unknown creator still answers on
+    // its own when nothing names the file, and still answers nothing for a file that
+    // is not creator-eligible, whatever else the list holds.
+    const editor: OpenWriteSurface = {
+      kind: 'matchEditor',
+      target: { kind: 'document', document: TARGET }
+    };
+    const raw: OpenWriteSurface = {
+      kind: 'rawEditor',
+      target: { kind: 'document', document: TARGET }
+    };
+    expect(targetingSurfaceFor(TARGET, [editor, raw], 'creatorEligible')).toBe('matchEditor');
+    expect(targetingSurfaceFor(TARGET, [raw, editor], 'creatorEligible')).toBe('rawEditor');
+
+    const elsewhere: OpenWriteSurface = {
+      kind: 'matchEditor',
+      target: { kind: 'document', document: 99 }
+    };
+    expect(targetingSurfaceFor(TARGET, [UNKNOWN_CREATOR, elsewhere], 'creatorEligible')).toBe(
+      'matchCreator'
+    );
     expect(
-      targetingSurfaceFor(
-        TARGET,
-        [UNKNOWN_CREATOR, { kind: 'rawEditor', target: { kind: 'document', document: TARGET } }],
-        'creatorEligible'
-      )
-    ).toBe('matchCreator');
-  }); // End of the "first surface of the list" case
+      targetingSurfaceFor(TARGET, [UNKNOWN_CREATOR, elsewhere], 'notCreatorEligible')
+    ).toBeNull();
+  }); // End of the "array order among exact matches" case
 }); // End of the "watcher-targeting predicate" suite
 
 describe('what a creator-eligible match document is', () => {
@@ -2392,6 +2475,48 @@ describe('the answer', () => {
     expect(answered.restored).toBe(true);
     expect(answered.extraMessages).toEqual([]);
   }); // End of the "closes every surface" case
+
+  it('closes a new-snippet form that has named no file, because that pane does', () => {
+    // **The case that drives the `unknown` arm through an invalidation**, which no
+    // case did before: without it the recorder's rule for that arm is unobservable,
+    // and 2d-5-2 is the step that starts constructing such a surface. The rule is
+    // production's — `invalidateEverySurface` in `DetailPane.svelte` sets
+    // `creating = false` unconditionally, and its comment at `:529-535` says why: it
+    // cannot learn which destination the form chose, so it closes the form over every
+    // file, which over-broadly includes the file it names nothing about.
+    const started = confirmRestore(pending(), at(BASE, []))!;
+    const surfaces = coordinator([
+      { kind: 'matchCreator', target: { kind: 'unknown' } },
+      { kind: 'matchCreator', target: { kind: 'document', document: 99 } },
+      { kind: 'matchEditor', target: { kind: 'document', document: 99 } }
+    ]);
+    const answered = applyRestore(started.session, sealed(saved()), surfaces.close);
+    // Both creators go, whatever file they name; the editor over another file stays,
+    // because the write did not touch it.
+    expect(surfaces.open).toEqual([
+      { kind: 'matchEditor', target: { kind: 'document', document: 99 } }
+    ]);
+    expect(surfaces.closed).toEqual([{ document: TARGET, revision: AFTER }]);
+    expect(answered.restored).toBe(true);
+  }); // End of the "new-snippet form that named no file" case
+
+  it('leaves the restore surface itself open, which is the other half of that rule', () => {
+    // The pane deliberately does not close the restore (`DetailPane.svelte:525-527`):
+    // it is where the outcome of this very write is drawn, and `RestoreSession`'s own
+    // `restored` is what stops it offering to replace anything again.
+    const started = confirmRestore(pending(), at(BASE, []))!;
+    const restoring: OpenWriteSurface = {
+      kind: 'restore',
+      target: { kind: 'document', document: TARGET }
+    };
+    const surfaces = coordinator([
+      restoring,
+      { kind: 'rawEditor', target: { kind: 'document', document: TARGET } }
+    ]);
+    const answered = applyRestore(started.session, sealed(saved()), surfaces.close);
+    expect(surfaces.open).toEqual([restoring]);
+    expect(answered.restored).toBe(true);
+  }); // End of the "restore surface itself" case
 
   it.each([
     ['a conflict', conflictResult()],

@@ -549,7 +549,7 @@ export function creatorEligibilityOf(
 } // End of function creatorEligibilityOf()
 
 /**
- * The first open write surface that may be about one file, or `null`.
+ * One open write surface that may be about one file, or `null`.
  *
  * **The watcher half of consult Q1's two predicates, and it answers the `unknown`
  * arm the other way round on purpose.** {@link competingSurfaceFor} treats a
@@ -576,22 +576,45 @@ export function creatorEligibilityOf(
  * an answer here means *a surface capable of writing this file is open*, never
  * *there are unsaved edits*.
  *
+ * **A surface that names this file is preferred to a creator that names none, and
+ * what that ordering guarantees is narrow.** It guarantees only that the *kind*
+ * answered is the most specific one available: a surface whose target is exactly
+ * this document, if the list holds any, and otherwise the first destination-less
+ * creator the list holds **while `eligibility` is `creatorEligible`** — an unknown
+ * creator is not a fallback at all when it is not, and the answer is then `null`
+ * however many such creators the list holds. It does **not** make the answer
+ * canonical — this is still one answer out of possibly several exact matches, and
+ * **array order still decides among those**, so two match editors over one file
+ * answer whichever the caller listed first. It does not rank the **seven** members
+ * of {@link OpenWriteSurfaceKind} against each other in any way — all seven,
+ * `restore` included, since this predicate counts the kind
+ * {@link CompetingWriteSurfaceKind} excludes. And it changes **no yes/no answer at
+ * all**: an exact match and an eligible unknown creator each make the answer
+ * non-null on their own, so the set of `(document, surfaces, eligibility)` triples
+ * this function answers `null` for is exactly what it was when the first match in
+ * array order won.
+ *
  * @param document - The file an observation is about.
  * @param surfaces - Every write surface this window has open, in any order.
  * @param eligibility - Whether that file is a creator-eligible match document.
- * @returns The kind of the first surface that may be about it, or `null`.
+ * @returns The kind of a surface that may be about it, preferring one that names
+ *   it, or `null`.
  */
 export function targetingSurfaceFor(
   document: DocumentId,
   surfaces: readonly OpenWriteSurface[],
   eligibility: CreatorEligibility
 ): OpenWriteSurfaceKind | null {
+  // The first destination-less creator the list holds, kept as the answer to give
+  // when nothing in the list names this file. It is read only after the whole list
+  // has failed to produce an exact match, which is the preference in one variable.
+  let unnamedCreator: OpenWriteSurfaceKind | null = null;
   for (const surface of surfaces) {
     const target = surface.target;
     switch (target.kind) {
       case 'unknown':
-        if (eligibility === 'creatorEligible') {
-          return surface.kind;
+        if (eligibility === 'creatorEligible' && unnamedCreator === null) {
+          unnamedCreator = surface.kind;
         }
         break;
       case 'document':
@@ -605,7 +628,7 @@ export function targetingSurfaceFor(
       }
     } // End of the switch over the target's discriminant
   } // End of the loop over every open write surface
-  return null;
+  return unnamedCreator;
 } // End of function targetingSurfaceFor()
 
 /**
