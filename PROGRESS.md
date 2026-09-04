@@ -545,7 +545,7 @@ all of it is in `git log`._
 | **2d-5-1-C — round C (`ship`, 0 findings) and the chain archived; the 2d-5-1 tail CLOSES here, and 2d-5-1 with it** | **`61aaaba`** | ✅ pushed to `origin/main` |
 | _2d-5-1-C — the SHA and push record_ | `2b3fb03` | ✅ pushed to `origin/main` |
 | **2d-5-2a — the keyed write-surface registry, its suite and its record, plus the checkpoint archiving five things out of the live head; review 1 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-A OWED** | **`15ada19`** | ✅ pushed to `origin/main` |
-| **2d-5-2a-A — round 1's three fixes (the stored surface is now a frozen copy the registry builds), plus 2d-5-2a's SHA record; review 2 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-B OWED** | **PENDING_SHA** | PENDING_PUSH |
+| **2d-5-2a-A — round 1's three fixes (the stored surface is now a frozen copy the registry builds), plus 2d-5-2a's SHA record; review 2 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-B OWED** | **`9f32cc5`** | ✅ pushed to `origin/main` |
 
 **What commissioned each round of this tail, and what ended it.** `1ff4f34`'s source half — three
 comment corrections in two files — commissioned **2d-5-1-B**, which found all three true. `1d623dc`'s
