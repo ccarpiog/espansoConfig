@@ -43,7 +43,18 @@ to [`status-table.md`](docs/progress-archive/status-table.md), leaving one summa
 superseded 2d-5-1/2d-5-2a **verification narratives** went to
 [`phase-2d.md`](docs/progress-archive/phase-2d.md), because 2d-5-2b re-measured every figure on its own
 tree. The live head still grew — it carries a new chain's record — and **that is the rule working, not
-failing**: 2d-5-2b's own rows stay because the chain is live — 2d-5-2b-A has since closed and 2d-5-2b-B is owed.
+failing**: 2d-5-2b's own rows stay because the chain is live — 2d-5-2b-A and 2d-5-2b-B have since
+closed and 2d-5-2b-C is owed. **2d-5-2b-B archived 268 further lines** — the detailed Next-action
+prose of 2d-5-2b and 2d-5-2b-A — into `next-action-history.md`, without losing a measurement: the
+archive is cited from the live head and from `2d-5-2b-notes.md`.
+
+**That did not bring this file under the soft budget, and the figure is stated rather than rounded.**
+728 lines before, **684** after (~80 KiB): the archive removed 268 lines and this phase's own record
+added back most of them. The budget is **400 lines / 64 KiB soft, 800 / 128 hard**, so the file is
+over the soft threshold and comfortably under the hard one — no split is forced, and none was done
+beyond the archive above. **A later phase resuming onto this file should expect to archive again**,
+and the cheapest target is the same one: the Next-action section is ~180 of the 684 lines, and its
+closed-phase narrative is what compacts without loss.
 
 Six things left the live head across 2d-5-2a
 and 2d-5-2a-A and the two steps' records still cost more than they saved. What moved, so nobody
@@ -105,9 +116,10 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-5 design consult** | 2d-5 put to a design consult before any line of it was written, per the standing rule since 2b-2c | ✅ complete (2026-08-31) — [`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md), **Codex at high effort**, the **second provider** to see this material since 2d-4a began. Verdict: cut 2d-5 into **seven** dependency-ordered steps; it overrides `phase-2d-design.md` in two places. The record is [`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) — 35 binding rulings and a 67-row citation audit — and its own review was `ship-with-fixes`, 0 blockers, 5 SHOULD-FIX, all five fixed in the record |
 | **2d-5** | The browser coordinator and the open-write-surface registry — seven steps, of which two touch components | 🔶 in progress — **step 1 of 7 is complete and CLOSED**, tail and all; **step 2 is under way, split three ways, and 2d-5-2a is complete** |
 | **2d-5-1** and its three corrective phases (**A, B, C**) | The surface and conflict vocabulary — the widened `OpenWriteSurface` union, the two predicates, `ConflictSource`, the memos, the EN/ES origin lines — then three review rounds over it, of which B and C were about comment text | ✅ **complete and CLOSED at 2d-5-1-C (2026-09-04)**, after a **four**-phase tail — the **third** this project has ended **by rule** rather than by an owner ruling (`CLAUDE.md` §7.2). Round C found nothing, so its fix changed no source file and §7.1 commissioned nothing. Per-phase scopes, verdicts and dispositions are in [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"The 2d-5-1 corrective chain"*; the notes are `docs/decisions/2d-5-1{,-A,-B,-C}-notes.md` |
-| **2d-5-2** | The exhaustive live registry — **split three ways by the orchestrator on 2026-09-04** (2c-5-4a/4b's precedent): **a** the registry as a value, **b** the `DetailPane` assembly with `MatchCreator` reporting upward and all the mounted evidence, **c** the narrow window regression reading | 🔶 in progress — **step a is complete and CLOSED**, tail and all; **step b is complete and its review is taken**, with **2d-5-2b-A OWED** under §7.1; **2d-5-2c is not started** |
+| **2d-5-2** | The exhaustive live registry — **split three ways by the orchestrator on 2026-09-04** (2c-5-4a/4b's precedent): **a** the registry as a value, **b** the `DetailPane` assembly with `MatchCreator` reporting upward and all the mounted evidence, **c** the narrow window regression reading | 🔶 in progress — **step a is complete and CLOSED**, tail and all; **step b is complete and is on its second corrective phase**, with **2d-5-2b-C OWED** under §7.1; **2d-5-2c is not started** |
 | **2d-5-2a** and its three corrective phases (**A, B, C**) | The coordinator-owned keyed write-surface registry — `src/lib/browser/writeSurfaceRegistry.ts` and its `BrowserState` wiring — then four review rounds over it, of which B and C changed **only comments and records**. **Components: none, in all four** | ✅ **complete and CLOSED at 2d-5-2a-C (2026-09-04)**, after a **four**-phase tail — the **fourth** this project has ended **by rule** rather than by an owner ruling (`CLAUDE.md` §7.2). Round 4's two findings were **both record-only**, so its fix changed no source file and §7.1 commissioned nothing. **Every phase of this chain created a new instance of one defect while fixing an old one** — *a sentence true of a narrow case written as though true of the module* — four generations in four phases, and the fourth landed **inside the record written to fix the third**. Per-phase scopes, verdicts and the argument for why that closed rather than `BLOCKED` are in [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"The 2d-5-2a corrective chain"*; the notes are `docs/decisions/2d-5-2a{,-A,-B,-C}-notes.md` |
-| **2d-5-2b** | The exhaustive live registry made **live** — the `satisfies Record<OpenWriteSurfaceKind, …>` assembly in `DetailPane`, all seven kinds registering through leases, `MatchCreator` reporting its destination upward, and the pane's own competing producer deleted. **Components: yes** — the first phase of this chain that touches one | ✅ implemented, every gate green, review 1 `ship-with-fixes` (**0 blockers**, 4 SHOULD-FIX, **all four fixed in this same commit**). 🔶 **2d-5-2b-A is OWED**: the fix round changed source, so `CLAUDE.md` §7.1 commissions a round and §7.4 carries it as a corrective phase. The notes are `docs/decisions/2d-5-2b-notes.md`; the review is `docs/reviews/phase-2d-5-2b.md` |
+| **2d-5-2b** | The exhaustive live registry made **live** — the `satisfies Record<OpenWriteSurfaceKind, …>` assembly in `DetailPane`, all seven kinds registering through leases, `MatchCreator` reporting its destination upward, and the pane's own competing producer deleted. **Components: yes** — the first phase of this chain that touches one | ✅ implemented, every gate green, review 1 `ship-with-fixes` (**0 blockers**, 4 SHOULD-FIX, **all four fixed in this same commit**). **Superseded by its corrective chain, never recorded as complete on its own.** The notes are `docs/decisions/2d-5-2b-notes.md`; the review is `docs/reviews/phase-2d-5-2b.md` |
+| **2d-5-2b-A** and **2d-5-2b-B** | The two review rounds §7.1 has so far commissioned over 2d-5-2b's fix. **A** made `writeSurfaceGeneration()` answer the registry rather than the mirror, gave the three `noticeWriteSurfaces()` sites reactive coverage proven by mutation, and corrected two over-wide sentences. **B** named `competingSurfaceFor`'s **second** production reader, dropped *"on every open restore"*, narrowed *"the invalidation and not the value"* to the caller it is true of, and labelled the new case's negative control. **Components: comments only, in both** | ✅ both complete, every gate green in both, review 1 `ship-with-fixes` in both (**0 blockers**; 4 SHOULD-FIX in A, 3 in B, **all fixed in each phase's own commit**). 🔶 **2d-5-2b-C is OWED**: B's fix round changed three source files, so `CLAUDE.md` §7.1 commissions a round and §7.4 carries it as a corrective phase. **Findings 1 and 2 of B are the chain's seventh and eighth instances of one defect** — *a sentence wider than its code* — and finding 1's sat **inside the sentence written to fix the sixth**. The notes are `docs/decisions/2d-5-2b-notes.md` §13 and §14; the reviews are `docs/reviews/phase-2d-5-2b-{A,B}.md` |
 | **2d-6 … 2d-8** | The remaining three steps of the 2d consult's eight | ⬜️ not started |
 | **2d** | External change reconciliation — plan §6.5 | 🔶 in progress |
 | **3–5** | Validation, packaging, hardening | ⬜️ not started |
@@ -238,231 +250,125 @@ any of them anything.
 ---
 ## Next action
 
-### Phase 2d-5-2b-A is complete: the round §7.1 commissioned for 2d-5-2b's fix has run, and its own fix changed source.
-### The next action is **Phase 2d-5-2b-B — the review round §7.1 commissions for 2d-5-2b-A's fix**.
+
+### Phase 2d-5-2b-B is complete: the round §7.1 commissioned for 2d-5-2b-A's fix has run, and its own fix changed source.
+### The next action is **Phase 2d-5-2b-C — the review round §7.1 commissions for 2d-5-2b-B's fix**.
 
 #### Why a round is owed, so nobody has to decide it
 
-2d-5-2b-A's one review ([`docs/reviews/phase-2d-5-2b-A.md`](docs/reviews/phase-2d-5-2b-A.md))
-returned `ship-with-fixes`, **0 blockers** and **four SHOULD-FIX** findings, and all four were fixed
-in this phase's own commit. That fix round changed **source** —
-`src/lib/browser/workspace.svelte.ts` substantively, `src/lib/components/MatchCreator.svelte`
-(comment) and `src/lib/components/DetailPane.test.ts` (one new case) — so `CLAUDE.md` §7.1
-commissions a round, scoped to that fix. §7.4 carries the debt as a corrective phase rather than
-writing it off, exactly as the 2d-5-2a chain did four times: that phase is **2d-5-2b-B**.
+2d-5-2b-B's one review ([`docs/reviews/phase-2d-5-2b-B.md`](docs/reviews/phase-2d-5-2b-B.md))
+returned `ship-with-fixes`, **0 blockers** and **three SHOULD-FIX** findings (one a Low with two
+parts), and all three were fixed in this phase's own commit. That fix round changed **three source
+files** — `src/lib/browser/workspace.svelte.ts`, `src/lib/components/MatchCreator.svelte` and
+`src/lib/components/DetailPane.test.ts` — so `CLAUDE.md` §7.1 commissions a round, scoped to that
+fix. Every change but one is a comment, and **the unit is the file**, so the size of the diff decides
+nothing. §7.4 carries the debt as a corrective phase rather than writing it off: that phase is
+**2d-5-2b-C**.
 
-**Scope it to the fix, not to the phase.** The four findings and what answered them are
-[`docs/decisions/2d-5-2b-notes.md`](docs/decisions/2d-5-2b-notes.md) **§13**.
+**Scope it to the fix, not to the phase.** The three findings and what answered them are
+[`docs/decisions/2d-5-2b-notes.md`](docs/decisions/2d-5-2b-notes.md) **§14**.
 
-#### What 2d-5-2b-A changed
+#### What 2d-5-2b-B changed, and the one thing it measured that was not asked for
 
-**Finding 1 was the substantive one, and it moved the guard off the mirror.**
-`writeSurfaceGeneration()` used to *return* the mirror; it now does
-`void surfaceGeneration; return writeSurfaces.generation();` — the read is the dependency, the
-registry is the answer. **The direction is the whole reason**: returning the mirror would make the
-door **under-report** (*"nothing changed"*) if a later method ever moved the registry without
-calling `noticeWriteSurfaces()`, while `openWriteSurfaces()` answered the new set in the same
-block — and the Q5 guard 2d-5-4 captures across an `await` is exactly the caller that would believe
-it. Both doors now read the registry, so *"the two doors cannot report different numbers"* is true
-**by construction** rather than by the mirror happening to be in step. **What the mirror still owns
-is the invalidation and not the value**, nothing in TypeScript enforces that, and the doc block says
-so in the same sentence.
+**Findings 1 and 2 are the recurring defect's seventh and eighth instances** — *a sentence whose
+scope is wider than its code*. Finding 1's sits **inside the sentence written to fix the sixth**,
+which is the same shape as the fourth instance (one inside the correction block that closed the
+third). The class has now survived six attempts to kill it. What caught it again is what has caught
+every one: **re-deriving a sentence's scope against the code**, never re-reading the sentence.
 
-**Finding 2 is why that fix is not free.** Making the door authoritative removed the only oracle the
-three `noticeWriteSurfaces()` call sites had: every generation assertion in `DetailPane.test.ts`
-used to read the mirror **against itself**, so no test could have failed if mirror and registry
-drifted. The replacement is **reactive** — after the fix, the mirror's only externally visible
-consequence is that a `$derived` reading `browser.openWriteSurfaces()` re-runs — and one new case
-carries it, *shows the restore a surface that was re-targeted onto its file*.
+- **Finding 1** — `MatchCreator.svelte` said `competingSurfaceFor` is read in production *"by
+  `RestorePane.svelte`'s `current` on every open restore"*. There are **two** production readers:
+  `restore.ts:1993` in `restoreRefusal`, which `current` reaches, and `restore.ts:2581` in
+  `permitHolds`, called by `sendRestore` at `:2663` — and **the second is the read that decides
+  whether the restore is written**, reached not through `current` at all. Nor is it *every* open
+  restore: `restoreRefusal` returns one of **six** earlier reasons first (`restore.ts:1975-1992`), so
+  an open restore with no candidate never reaches the call. **Both figures were counted off the file
+  by the orchestrator, not taken from the review.**
+- **Finding 2** — two sites in `workspace.svelte.ts` said a future unmirrored path would cost *"the
+  invalidation and not the value"*. **That is true only of a caller that calls.** A `$derived` over
+  either door memoizes, so with no invalidation it keeps rendering its cached number until some
+  *other* dependency moves — a **stale screen**, for the exact audience the mirror exists for. Both
+  sentences now name the two audiences separately.
+- **Finding 3 (Low)** — the new `DetailPane.test.ts` case's first half is a **negative control**, not
+  an oracle: its `not.toContain` held before the registration too, so it passes whether or not the
+  mirror moved. The comment said *"what makes the two halves different"* and invited the stronger
+  reading; it now says the evidence starts below the `replaceTarget`. The manually taken lease is
+  also now released before `pane.stop()`, as its sibling case does.
 
-**All three sites were proven by mutation, and the orchestrator re-ran two of the three itself**
-rather than accepting the worker's table. Commenting out `replaceTarget`'s `noticeWriteSurfaces()`
-fails *shows the restore a surface that was re-targeted onto its file* **alone** (1 failed / 23
-passed); commenting out the unregister's fails *shows the restore a surface that opened after its
-derived had run* **alone** (1 / 23). The registration site fails two cases. Restored, 24 pass. This
-also discharges the *"mutation testing of the three call sites"* item the review listed as
-NOT-VERIFIED, which it could not run under its read-only constraint.
+**The orchestrator settled the review's own NOT-VERIFIED item by measuring it.** Whether the Svelte
+compiler emits a *tracked* read for `void surfaceGeneration` in a `.svelte.ts` module was believed by
+analogy with `openWriteSurfaces()`. Compiled through `svelte/compiler`'s `compileModule` (v5.56.8,
+client), `void surfaceGeneration` becomes **`void $.get(surfaceGeneration)`** — `$.get` is the
+tracked read, so the statement **is** a subscription. Settled favourably.
 
-**Findings 3 and 4 were two more instances of this chain's recurring defect** — a sentence whose
-scope is wider than its code, and they are its **fifth** and **sixth**. `workspace.svelte.ts`'s
-*"Nothing calls it yet"* is now *"no caller **in production** captures it yet"*, and
-`MatchCreator.svelte`'s *"Nothing reads either answer in production"* now says that
-`competingSurfaceFor` **is** read in production and that `targetingSurfaceFor` is the one that is
-not. **Both replacements were re-derived by the orchestrator against the code rather than
-accepted**: `writeSurfaceGeneration` has **five** call sites across **three** cases and **zero** in
-production; `competingSurfaceFor` is called at `restore.ts:1993` and `:2581`, reached from
-`RestorePane.svelte`'s `current` through `restoreView` → `restoreRefusal`; and
-`targetingSurfaceFor`, outside its own definition, appears **only in comments**.
+**That probe found a hazard nobody had recorded, and it is the sharpest thing for 2d-5-2b-C to
+weigh.** With **no writer** to `surfaceGeneration` the same compiler emits a plain `let … = 0` and
+**optimises the signal away entirely** — the read is then tracked by nothing. So this door's
+reactivity is contingent on `noticeWriteSurfaces()` continuing to *assign*, and a change that removed
+every write would make both doors silently non-reactive with no type error, no failing test and no
+visible difference in either door's source. It is a **second** failure mechanism for the hand-kept
+mirror, independent of item 9's *"a fourth path forgets to mirror"*, and it is `2d-5-2b-notes.md`
+§14.6 item 1, *recorded only* — no source is wrong today, because three sites assign.
 
-**The review's own count was wrong and the fix did not copy it.** It said `DetailPane.test.ts` calls
-that door *"four times"*; it is **five, across three cases**. The corrected comment pins no number
-at all. That is this chain's discipline working in the direction it usually fails — a figure
-re-derived instead of inherited.
+**Also worth the budget**: §14.6 item 3 — **all three reactive cases still observe one consumer**.
+`RestorePane.svelte`'s `$derived.by` is still the only reactive reader of this door in the
+application, so *"the mirror moved"* and *"the restore's refusal redrew"* remain indistinguishable in
+this suite. This round narrowed what the cases **claim**; it did not widen what they **observe**.
 
-**The sharpest thing for 2d-5-2b-B to attack**: **all three reactive cases observe one consumer.**
-`RestorePane.svelte`'s `$derived.by` drawing a refusal sentence is the only reactive reader of this
-door in the application, so *"the mirror moved"* and *"the restore's refusal redrew"* are
-**indistinguishable in this suite** (`2d-5-2b-notes.md` §13.5 item 2) — every one of the three
-mutations above is caught through that single path. Also worth the budget: §13.5 item 1 — the mirror
-is **still** kept by hand, now narrower (an unmirrored fourth path loses the invalidation, not the
-value) — and note that the check named there, `rg -n 'writeSurfaces\.' src/lib/browser/workspace.svelte.ts`,
-**does not show the two mutations the lease performs**, so the check is weaker than the item it
-serves.
+**One live pointer in this file was wrong and is fixed here.** It said `competingSurfaceFor` is
+called at `restore.ts:1993` and `:2581` *"reached from `RestorePane.svelte`'s `current` through
+`restoreView` → `restoreRefusal`"* — true of the first, false of the second. `92fe0f4`'s commit
+message carries the identical mis-attribution and is **left as written**: a commit message is a
+historical snapshot, and only live pointers are maintained.
 
 #### Where 2d-5-2 stands
 
 `docs/decisions/2d-5-split-notes.md` and `docs/reviews/phase-2d-5-design.md` both describe 2d-5-2 as
 one step. **The orchestrator split it three ways on 2026-09-04**, before any line of it was written,
-following this project's own 2c-5-4a/4b precedent — *"the coordinator wiring, with nothing drawn"*,
-then *"the screen and the phase's whole mounted evidence"*:
+following this project's own 2c-5-4a/4b precedent:
 
 - **2d-5-2a** — the coordinator-owned keyed registry as a value. **Components: none.** ✅ **complete
-  and CLOSED** (`15ada19`, `9f32cc5`, `52ff829`, and 2d-5-2a-C's commit below), after a four-phase
-  review tail that ended **by rule**.
-- **2d-5-2b** — the exact `satisfies Record<OpenWriteSurfaceKind, …>` assembly in `DetailPane`,
-  `MatchCreator` reporting its chosen destination upward, and **the phase's whole mounted evidence**:
-  all seven kinds, the creator's unknown→known transition, restore's unchanged behaviour, and the
-  `invalidateEverySurface` coverage gap. **Components: yes.** ✅ **implemented, reviewed and
-  committed**. Its fix round commissioned **2d-5-2b-A**, which is ✅ **complete** — one review,
-  `ship-with-fixes`, 0 blockers, four SHOULD-FIX all fixed — and whose own fix round changed source,
-  so **2d-5-2b-B is owed**. See the top of this section.
+  and CLOSED** (`15ada19`, `9f32cc5`, `52ff829`, `0f1ad8b`), after a four-phase review tail that ended
+  **by rule**.
+- **2d-5-2b** — the `satisfies Record<OpenWriteSurfaceKind, …>` assembly in `DetailPane`,
+  `MatchCreator` reporting its destination upward, and the phase's whole mounted evidence.
+  **Components: yes.** ✅ committed (`505caf6`). Its fix commissioned **2d-5-2b-A** ✅ (`92fe0f4`),
+  whose fix commissioned **2d-5-2b-B** ✅ (this phase), whose fix commissions **2d-5-2b-C**.
 - **2d-5-2c** — the narrow window regression reading, which **may not claim real watcher delivery**
   (`2d-5-split-notes.md` §7 item 7). ⬜️ not started. **It is a separate step because the instrument
-  no longer exists**: every prior reading ran out of `/private/tmp/espansoconfig-harness-2c-5/`,
-  which 2c-5-7 removed and which is not on disk today (checked at 2d-5-2a). Rebuilding it was a whole
-  sub-phase twice already (2c-5-5a, 2c-5-5b). **A window reading is still owed and is not
-  discharged.**
+  no longer exists**: every prior reading ran out of `/private/tmp/espansoconfig-harness-2c-5/`, which
+  2c-5-7 removed and which is not on disk today. Rebuilding it was a whole sub-phase twice already
+  (2c-5-5a, 2c-5-5b). **A window reading is still owed and is not discharged.**
 
-Nothing about the split changes what 2d-5-2 delivers. The consult still binds; the three steps'
-deliverables union to exactly the one step it specified.
-#### What `writeSurfaceRegistry.ts` is now, after all four phases
+Nothing about the split changes what 2d-5-2 delivers; the three steps' deliverables union to exactly
+the one step the consult specified.
+
+#### What `writeSurfaceRegistry.ts` is, after five phases
 
 `src/lib/browser/writeSurfaceRegistry.ts` is **plain TypeScript, no Svelte runes**, beside
-`workspace.svelte.ts` rather than inside it — which settles `2d-5-split-notes.md` §6 item 2
-(*"the consult does not say where the coordinator lives"*) for this step, because that file is
-already 3 588 lines and 2d-5-3, 2d-5-4 and 2d-5-5 each add more coordinator machinery to it.
+`workspace.svelte.ts` rather than inside it — `workspace.svelte.ts` is already ~3 600 lines and
+2d-5-3, 2d-5-4 and 2d-5-5 each add more coordinator machinery to it.
 
 It holds one live entry per `OpenWriteSurfaceKind` in a `Map`. `registerWriteSurface(surface,
-transition)` answers the consult's `UnregisterWriteSurface` as a **callable lease** carrying
-`replaceTarget(WriteSurfaceDocumentTarget) → 'replaced' | 'staleLease'`. Unregister is idempotent and
-**inert once displaced**; `openWriteSurfaces()` snapshots in registration order and a displacing
-registration keeps its predecessor's position; `generation()` moves for all three mutators and for no
-no-op; `transitionFor(kind)` is the only reader of the stored transition, **which nothing invokes** —
-2d-5-4/2d-5-5 give it a caller. `BrowserState` owns one instance and exposes `registerWriteSurface`,
-`openWriteSurfaces()` and `writeSurfaceGeneration()`.
+transition)` answers a **callable lease** carrying `replaceTarget(WriteSurfaceDocumentTarget) →
+'replaced' | 'staleLease'`. Unregister is idempotent and **inert once displaced**;
+`openWriteSurfaces()` snapshots in registration order and a displacing registration keeps its
+predecessor's position; `transitionFor(kind)` is the only reader of the stored transition, **which
+nothing invokes** — 2d-5-4/2d-5-5 give it a caller.
 
-**2d-5-2a-A changed how a surface is stored, and that is the substantive change of the pair.** The
-registry now reads the caller's object once per property in a stated order — `kind`, then `target`,
-then `target.kind`, then `target.document` — **all before the serial is taken**, and stores a copy it
-builds itself, **frozen at both levels** because `Object.freeze` is shallow. So a host that retains
-its registered surface and mutates it cannot change what `openWriteSurfaces()` answers, which is what
-makes the generation's documented guarantee **true rather than weakened** — the fix the review asked
-for. `withTarget` is gone; `replaceTarget` builds through `ownedDocumentSurface(kind, …)` with the
-**captured** kind.
+**The generation moves at exactly three places** — `writeSurfaceRegistry.ts:528` (register), `:546`
+(unregister), `:602` (replaceTarget) — and `workspace.svelte.ts` reaches all three through only two
+doors: `registerWriteSurface` (`:3374`) and `mirroringLease` (`:1857`, `:1870`). Each is followed by
+`noticeWriteSurfaces()`. **The `rg -n 'writeSurfaces\.' src/lib/browser/workspace.svelte.ts` check
+named in `2d-5-2b-notes.md` §11 item 9 does not show the lease's two mutations and is weaker than the
+item it serves**; the enumeration above is the check that discriminates, and 2d-5-2b-B's review
+re-derived it independently.
 
-**An unrepresentable pairing throws a `TypeError`** — a non-`matchCreator` kind read together with
-`target.kind === 'unknown'`, or a discriminant that is neither arm. The throw happens before the
-serial is taken. The argument is that reaching it takes a caller who defeated the compiler, and that
-inventing a document, storing an unnarrowable value, or dropping the registration silently are each
-worse — the last being fail-**unsafe**, since an invisible surface is the answer that permits a
-silent reload. **This was the worker's judgement call, not the review's**, and
-`2d-5-2a-A-notes.md` §2.4 argues it.
-
-**Two things both phases deliberately did not do**, because the caller that would change is a
-component: `restoreDocument` is **not** rerouted through the registry, and `open()` does **not** clear
-it. Both are 2d-5-2b's. And **no `satisfies Record<OpenWriteSurfaceKind, …>` assembly exists
-anywhere** — the consult puts exhaustiveness in the composition file, and the composition file is a
-component.
-
-#### The three open questions 2d-5-2b answered, so a later step does not re-ask them
-
-1. **The frozen surface is safe under Svelte 5.** 2d-5-2a-A made every stored surface a copy the
-   registry freezes at both levels, and no component had ever consumed it. Probed under `$state.raw`,
-   a proxied `$state`, `$derived`, `$state.snapshot` and array spread: all safe. A cast-away write
-   throws `TypeError: Cannot assign to read only property 'kind'` **from the frozen target, not from
-   Svelte**, leaving the registry unchanged. **No source finding against `writeSurfaceRegistry.ts`.**
-2. **`open()` still does not clear the registry**, and now on evidence rather than on the argument
-   2d-5-2a-A's correction block left standing. A registration really does survive an `open()` when its
-   host does (a permanent test); `open()` has exactly two production callers, both in
-   `AppShell.svelte`, neither reachable with a surface open; and `open()` sets `status = 'loading'`
-   synchronously, so `AppShell`'s guard unmounts the pane and the leases come back at the next flush.
-   Clearing would be the **unsafe** direction, since an invisible surface is what permits a silent
-   reload. **What is thin here is named**: the last link was measured with a throwaway component
-   reproducing the guard's shape rather than with `AppShell` itself, and `2d-5-2b-notes.md` §11 item 5
-   marks it *actionable* for whichever step mounts `AppShell` (2d-5-7 touches it).
-3. **The mount-path `TypeError` is unreachable *by construction* from this pane**, which is what makes
-   R32's blank-pane hazard falsifiable at last: every surface comes from compiler-checked object
-   literals with no cast and no assertion, and all seven sources are `$state.raw` or a boolean, so no
-   proxy and no accessor can run inside the registry's property reads. **It is not unreachable in
-   general** — a caller that takes a kind and a target apart and reconciles them with a cast still
-   reaches it, which is the caller the registry's own `@throws` describes.
-
-#### What review 4 did not verify, so 2d-5-2b does not assume it did
-
-Review 4 re-derived the chain's one source change against `git show 15ada19:…` and confirmed both its
-cases, and it hunted the chain's recurring shape and **found a fourth instance** (below). It did
-**not** re-run the four gates or either bundle oracle — the diff was comment-only and the
-orchestrator's own runs are the record below — and it did not reproduce the out-of-repo harness the
-behaviour tables rest on.
-
-**It also raised, and did not settle, whether `docs/reviews/phase-2d-5-2a-B.md:17,34` are stale.**
-They cite `:555-557`, which 2d-5-2a-C's `+8` lines moved. **The orchestrator's ruling: they are not
-stale and must not be "fixed".** A review file records what a reviewer said about the tree as it stood
-at `5ec011e`; rewriting its citations to match a later tree would falsify the record rather than
-correct it. **The live pointers were updated instead** — this file now cites `:555-568`. The rule
-generalizes: **a citation in a review file is a historical snapshot; a citation in `PROGRESS.md` or in
-a notes file's live prose is a pointer and is maintained.**
-
-#### The fourth-generation instance, and why the chain closed rather than blocking
-
-**This is the most useful thing the chain measured, so it is kept in the live head.** Before review 4
-ran, this file recorded that a **fourth** instance of the chain's recurring defect would mean
-`BLOCKED` work under §7.2 rather than a round to keep spending. Review 4 found one:
-`2d-5-2a-C-notes.md:271` said *"the shipped module has no `kind` route at all"*, which is false —
-`registerWriteSurface` reads `surface.kind` at `writeSurfaceRegistry.ts:503`. **It sat inside the
-record written to fix the third instance.**
-
-**It did not block, and the reasoning is on the record because the letter of the warning was met.**
-`CLAUDE.md` §7.3 reserves blocking for an **actionable item naming a correctness defect in a source
-file**; this instance is in a record. Review 4 verified the chain's one source change as correct. And
-the fix was prose, so §7.1 commissioned nothing and the tail **terminated** — which is exactly what
-the warning was written to detect the absence of. **The clause fired in letter and not in effect.**
-
-**What a later phase should take from this, since the shape has now survived four attempts to kill
-it:** it is not fixed by care, and it is not fixed by being told about it — 2d-5-2a-C was briefed on
-this exact hazard, in these exact words, and still produced an instance. What *did* catch it every
-time was **a reader re-deriving a sentence's scope against the code**, and what never caught it was
-re-reading the sentence. Treat *"true of the module?"* as a question to be answered against a file,
-never as a stylistic preference.
-#### What became of the two items 2d-5-2b inherited
-
-1. **`invalidateEverySurface` is now executed by a test, and its *effect* is still unobservable.**
-   The body runs — the coverage gap 2d-5-1-B measured is closed in that narrow sense — but what it
-   closes cannot be seen from this pane while `busy` keeps the seven surfaces mutually exclusive.
-   **2d-5-1-B's measurement is not superseded** and must not be read as if it were: deleting a line
-   from that function still breaks no test in this repository. It stays a coverage bound rather than a
-   correctness defect, so §7.3 holds no step open for it. `2d-5-2b-notes.md` §9.1 and §11 item 6 are
-   the record; `2d-5-1-A-notes.md` §5 item 1 and `2d-5-1-B-notes.md` §2 are the older one.
-   The function also now ends in `stopCreating()` rather than a bare `creating = false`, so the
-   creator's reported destination cannot outlive the form.
-2. **The five unexecutable literals are gone, because the producer is gone.** 2d-5-1-C's measurement
-   said five of `openWriteSurfaces()`'s six entries could not execute at all — its one caller sat
-   inside the `{:else if restoring !== null}` arm, so `busy` had already made the other five null.
-   2d-5-2b **deleted that producer**; the assembly that replaced it is conditioned on no arm, so all
-   seven of its entries are live. What `busy` still means is that **at most one is non-null at a
-   time**, so the registry holds at most one entry from this pane and its documented array order
-   decides nothing here — which is `2d-5-2b-notes.md` §11 item 2, *recorded only*: the multi-surface
-   behaviour of both predicates is driven by model tests over hand-built arrays and by no mounted case
-   at all.
-
-#### One property of `targetingSurfaceFor` a later step could make live
-
-Its first-wins guard (`restore.ts:623`) is **behaviourally inert today**: only the `matchCreator` arm
-of `OpenWriteSurface` carries a `WriteSurfaceTarget`, so a destination-less surface is always a
-`matchCreator` and the variable can only ever hold that one string. The comment there claims only
-what is true and was deliberately **not** rewritten to say more. **Give a second kind a
-`WriteSurfaceTarget` and the guard stops being inert on its own.** `2d-5-1-C-notes.md` §3 is the
-record.
+**`writeSurfaceGeneration()` and `openWriteSurfaces()` both read the registry and touch the mirror.**
+The read is the reactivity dependency; the registry is the answer. The direction is the whole reason:
+returning the mirror would let the door **under-report** *"nothing changed"* while `openWriteSurfaces()`
+answered the new set in the same block, and the Q5 guard 2d-5-4 captures across an `await` is exactly
+the caller that would believe it.
 
 #### The rest of the split, so a step is not invented
 
@@ -489,37 +395,61 @@ counter in nothing. The route is caught in **six** named cases — one `expect(i
 `2d-4b-notes.md` §14.8 item 1 (re-derived by `2d-5-split-notes.md` §7), which 2d-4b's closure
 explicitly did not discharge.
 
+#### Two properties a later step could make live
+
+1. **`targetingSurfaceFor`'s first-wins guard (`restore.ts:623`) is behaviourally inert today**: only
+   the `matchCreator` arm of `OpenWriteSurface` carries a `WriteSurfaceTarget`, so a destination-less
+   surface is always a `matchCreator` and the variable can only hold that one string. The comment
+   there claims only what is true and was deliberately **not** widened. Give a second kind a
+   `WriteSurfaceTarget` and the guard stops being inert on its own. `2d-5-1-C-notes.md` §3 is the record.
+2. **`invalidateEverySurface`'s body is executed by a test and its *effect* is still unobservable**
+   while `busy` keeps the seven surfaces mutually exclusive. **2d-5-1-B's measurement is not
+   superseded** — deleting a line from that function still breaks no test in this repository. It stays
+   a coverage bound rather than a correctness defect, so §7.3 holds no step open for it.
+   `2d-5-2b-notes.md` §9.1 and §11 item 6 are the record.
+
 #### Residues that are recorded, not work
 
 None is a correctness defect in source. Named so a later step does not spend a round rediscovering them.
 
-1. **Three 2d-4b residues — a commit message's own diff figure, a `node_modules` line citation and a
-   "six review rounds" count in `workspace.test.ts:468` — are in
-   [`docs/progress-archive/phase-2d.md`](docs/progress-archive/phase-2d.md).** Archived at 2d-5-2a; no
-   2d-5 step reads any of them, and all three are still true.
+1. **Three 2d-4b residues** — a commit message's own diff figure, a `node_modules` line citation and a
+   *"six review rounds"* count in `workspace.test.ts:468` — are in
+   [`docs/progress-archive/phase-2d.md`](docs/progress-archive/phase-2d.md). All three are still true.
 2. **`scripts/lint/ipc-detail.test.ts` generates its cases from `scannableFiles()`**, so its count moves
    when a file is *added* under the scanned roots and no author touches it. 2d-5-2a moved it by **+2**
-   without an author touching it, which is the fourth recorded instance. **Re-derive a test count per
-   file, on a pristine tree, never from the total.**
-3. **`docs/decisions/2d-5-2a-notes.md` §7 has seven items, six *recorded only* and one *actionable*.**
-   The actionable one — that `DetailPane`'s own array and the registry answer one question and will
-   disagree until 2d-5-2b routes the pane — **names no correctness defect in source**, so §7.3 does
-   not hold the step open for it. It is 2d-5-2b's acceptance criterion.
+   without an author touching it — the fourth recorded instance. **Re-derive a test count per file, on
+   a pristine tree, never from the total.**
+3. **The mirror's reactivity depends on a writer existing** — `2d-5-2b-notes.md` §14.6 item 1, new at
+   2d-5-2b-B and described above. *Recorded only*; three sites assign today.
+4. **The detailed Next-action prose of 2d-5-2b and 2d-5-2b-A** — the three open questions 2d-5-2b
+   answered, the mutation results, the fourth-generation instance and what review 4 did not verify —
+   is archived in
+   [`docs/progress-archive/next-action-history.md`](docs/progress-archive/next-action-history.md)
+   under *"archived 2026-09-05 at Phase 2d-5-2b-B"*. `2d-5-2b-notes.md` cites it; no 2d-5 step needs
+   it inline.
+
+---
 
 ## Verification baseline
 
 **`1320 / 438 / 2254 / 186`** — `cargo test --workspace` / `npm run check` files / `npm test` /
 `npm run build` modules. **Measured in full by the orchestrator alone on 2026-09-05 at Phase
-2d-5-2b-A**, each command run on its own. `npm run check` → **438 files, 0 errors, 0 warnings**;
-`npm test` → **59 files, 2254 passed**; `npm run build` → **186 modules**; `cargo test --workspace`
+2d-5-2b-B, and measured *twice*** — once on the tree as inherited and once after the phase's fixes —
+each command run on its own. `npm run check` → **438 files, 0 errors, 0 warnings**; `npm test` → **59
+files, 2254 passed**; `npm run build` → **186 modules**; `cargo test --workspace -- --test-threads=1`
 → **1320**, summed over **26** binaries *and* checked by the complementary question — **no `test
 result` line lacking `0 failed`** — because a sum can be right while a binary is silent. Clippy,
 `cargo fmt --check` and `cargo tree -p espansoconfig-core | rg tauri` (finds nothing) were all clean.
 **Both bundle oracles were read and both lines are reported**, the second because it proves the
 search can match at all: server-only markers **absent**, client-only markers **present (2)**.
-**The Rust half was proven untouched** — `git diff --stat` over the phase's four files shows no path
-under `crates/` or `src-tauri/` — so the Rust figure was measured once, before the fix, and the fix
-could not move it.
+**The Rust half was proven untouched** — `git diff --stat` over the phase's fix shows no path under
+`crates/` or `src-tauri/` — so the Rust figure was measured before the fix and the fix could not move
+it.
+
+**No count moved this phase, and that is the expected result.** The fix changed three comments and
+added one `lease()` call inside an existing case: no file entered or left the program, no new
+reachable module, no new component, no new case. The previous baseline was the same
+`1320 / 438 / 2254 / 186`, measured at Phase 2d-5-2b-A on 2026-09-05.
 
 ### The `cargo test --workspace` gate is flaky on this host **alone**, and that is new
 
@@ -546,33 +476,34 @@ parallel **real filesystem watchers** inside one binary, not two cargo processes
    `watch_check`**.
 2. **`--test-threads=1` is the authoritative form of the gate here**, and it is what produced the
    1320 above. It costs wall clock and buys a figure that does not move under scheduling luck.
-3. **Never read a cargo exit status through a pipe.** The first run of this phase reported
+3. **Never read a cargo exit status through a pipe.** At 2d-5-2b-A the first run reported
    `exited with code 0` while 9 tests failed, because the command ended in `| tail -60` and the
    pipeline's status is `tail`'s. Redirect to a file and grep it; the exit code is then cargo's.
-   This cost one wrong reading before it was caught.
+   That cost one wrong reading before it was caught. **2d-5-2b-B followed all three consequences** —
+   serial form, redirected to a file, and the complementary `0 failed` question asked of every one of
+   the 26 `test result` lines — and the gate was clean on both of its runs.
 
-### What moved this phase, derived per file on a pristine tree
+### What moved this phase, and how the ladder now reads
 
-**`npm test` moved by exactly +1 and nothing else moved at all.** Against `git archive HEAD`
-(`505caf6`), built into a throwaway directory with `node_modules` symlinked:
-`DetailPane.test.ts` **23 → 24 (+1)**, and 2253 + 1 = **2254**, so the whole move is accounted for
-by one file. `npm run check` (438) and `npm run build` (186) did not move, which is what an unmoved
-count should be: no file entered or left the program, no new reachable `.ts` module and no new
-`.svelte` component. The two-per-styled-component rung does not apply.
+**Nothing moved.** All four figures are identical to 2d-5-2b-A's, which is what an unmoved count
+should look like for a fix that is three comments and one `lease()` call: no file entered or left the
+program, no new reachable `.ts` module and no new `.svelte` component, so neither the one-per-module
+rung nor the two-per-styled-component rung applies. **No pristine-tree rebuild was needed to say so**
+— a rebuild is what distinguishes *"the count did not move"* from *"a file moved it and another moved
+it back"*, and no file was added or removed at all here.
 
-**The one new assertion was proven non-vacuous by mutation, twice over by the orchestrator itself.**
-Commenting out `noticeWriteSurfaces()` at `replaceTarget` fails the new case **alone** (1 failed /
-23 passed); at the unregister it fails *shows the restore a surface that opened after its derived
-had run* **alone** (1 / 23); at the registration it fails two cases. All three restored → 24 passed.
-
-**The previous baseline was `1320 / 438 / 2253 / 186`**, measured at Phase 2d-5-2b on 2026-09-04.
-Before it, `1320 / 438 / 2235 / 186` at 2d-5-2a-C, shared by 2d-5-2a-A and -B; then
-`1320 / 438 / 2229 / 186` at 2d-5-2a; then `1320 / 436 / 2205 / 185` at 2d-5-1-B, unmoved by
-2d-5-1-C. In every case the orchestrator's own run is the record, never the worker's claim.
+**The ladder, so a later phase can check rather than accept**: `1320 / 438 / 2254 / 186` at 2d-5-2b-B
+(this phase) and at 2d-5-2b-A; `1320 / 438 / 2253 / 186` at 2d-5-2b (2026-09-04);
+`1320 / 438 / 2235 / 186` at 2d-5-2a-C, shared by 2d-5-2a-A and -B; `1320 / 438 / 2229 / 186` at
+2d-5-2a; `1320 / 436 / 2205 / 185` at 2d-5-1-B, unmoved by 2d-5-1-C. In every case the orchestrator's
+own run is the record, never the worker's or the reviewer's claim.
 
 **When 2d-5-7 first imports `events.ts` from production the module count moves by one, and that is
-the expected step.** A larger jump is the regression the oracles exist for. 2d-5-1 did **not**
-import it, by design.
+the expected step.** A larger jump is the regression the two bundle oracles exist for. 2d-5-1 did
+**not** import it, by design.
+
+**Rebaseline by building a pristine `git archive HEAD` copy and subtracting; never by editing the
+condition in `vite.config.ts`.**
 
 ### Where the closed rounds' verification narratives went
 
@@ -646,6 +577,8 @@ all of it is in `git log`._
 | _2d-5-1 through 2d-5-1-C, and 2d-5-2a through 2d-5-2a-C — **both chains closed**, 14 rows including one checkpoint-maintenance commit_ | `16a122b` … `0f1ad8b` | ✅ all pushed; **archived 2026-09-04 at 2d-5-2b** |
 | **2d-5-2b — the registry made live: the `DetailPane` assembly, seven registrations, the creator's report, the deleted producer, and the review's four fixes including the `BrowserState` reactive mirror; review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed in this commit**; **2d-5-2b-A TAKEN**, see the row below | **`505caf6`** | ✅ pushed to `origin/main` |
 | **2d-5-2b-A — the round §7.1 commissioned for 2d-5-2b's fix: `writeSurfaceGeneration()` made authoritative, the three mirror sites given reactive coverage proven by mutation, and two over-wide sentences corrected; review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed in this commit**; **2d-5-2b-B OWED** | **`92fe0f4`** | ✅ pushed to `origin/main` |
+| 2d-5-2b-A — the SHA and push record | `d3dbd5f` | ✅ pushed to `origin/main` |
+| **2d-5-2b-B — the round §7.1 commissioned for 2d-5-2b-A's fix: `competingSurfaceFor`'s second production reader named and "every open restore" dropped, "the invalidation and not the value" narrowed to the caller it is true of, the new case's negative control labelled and its lease released; review 1 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX **all fixed in this commit**; also archived 268 lines of closed Next-action prose; **2d-5-2b-C OWED** | **`PENDING`** | pending |
 
 **What commissioned each round of this tail, and what ended it.** `1ff4f34`'s source half — three
 comment corrections in two files — commissioned **2d-5-1-B**, which found all three true. `1d623dc`'s
@@ -716,13 +649,43 @@ phase's diff coincide. That diff changed **three source files** —
 (one new case and amended assertions) — plus `docs/decisions/2d-5-2b-notes.md`, which is on §7's
 closed list and therefore does not count. **So a round is owed and it is 2d-5-2b-B's.**
 
-**This chain has now spent five phases and shows no sign of the ending 2d-5-1's and 2d-5-2a's
+**What 2d-5-2b-B commissions, read the same way.** Its one review returned three SHOULD-FIX findings
+and **all three were fixed in this phase's own commit**, so for the third phase running the fix
+round's diff and the phase's diff coincide. That diff changed **three source files** —
+`src/lib/browser/workspace.svelte.ts` and `src/lib/components/MatchCreator.svelte` (comments) and
+`src/lib/components/DetailPane.test.ts` (a comment and one added `lease()` call) — plus
+`docs/decisions/2d-5-2b-notes.md`, `docs/reviews/phase-2d-5-2b-B.md`,
+`docs/progress-archive/next-action-history.md` and this file, every one of them on §7's closed list
+and therefore not counted. **So a round is owed and it is 2d-5-2b-C's.**
+
+**Every change but one is a comment, and that changes nothing.** §7.1's unit is the **file**, and a
+comment-only change to a source file counts — the rule says so in as many words, because a comment is
+where this project keeps several of its contracts. Two of the three fixes here are precisely that: a
+contract sentence that was wider than its code.
+
+**This chain has now spent six phases and shows no sign of the ending 2d-5-1's and 2d-5-2a's
 found.** Both of those closed the first time a fix round changed no source file. Every fix round of
 this one has changed source, so every one has commissioned the next, and §7.2 says in as many words
 that this is the mechanism working rather than failing — *a tail that keeps finding real defects in
 source is a tail doing its job*. **The escape hatch is `BLOCKED` under §7.2 and is never a shortened
-round.** It is not reached: 2d-5-2b-A's review returned **0 blockers**, its four findings were real
-and independent rather than instances of one defect surviving its fix, and `2d-5-2b-notes.md` §13.5
-names **no correctness defect in a source file**. What would change that verdict is a round whose
-finding is the previous round's fix reintroducing what it closed — and 2d-5-2b-B is the round that
-would see it, because finding 1's fix is exactly the kind of change that could.
+round.** It is not reached: 2d-5-2b-B's review returned **0 blockers**, its three findings were real
+and independent rather than instances of one defect surviving its fix, and `2d-5-2b-notes.md` §14.6
+names **no correctness defect in a source file** — its one *actionable* mark is on a cross-module
+figure that is currently true, which §7.3 does not blocking-qualify.
+
+**The round that was positioned to catch a self-undoing fix ran, and it did not find one.** The
+previous checkpoint predicted that 2d-5-2b-B would be the round to see finding 1's fix reintroduce
+what it closed, *"because finding 1's fix is exactly the kind of change that could"*. It did not: the
+review's own *"not a finding"* section re-derived the three generation-moving sites
+(`writeSurfaceRegistry.ts:528`, `:546`, `:602`) against the two doors that reach them
+(`workspace.svelte.ts:3374`, `:1857`, `:1870`) and found **no fourth unmirrored path**, and the
+orchestrator re-derived that enumeration independently. **The prediction is recorded as not borne
+out rather than quietly dropped**, which is this file's own standing correction of the habit that
+produced a confident wrong call at 2d-5-2a-C.
+
+**What the two findings that *were* returned have in common is worth naming for 2d-5-2b-C.** Neither
+is a regression in the guard; both are sentences that outran their code, and one of them sat inside
+the sentence written to fix the previous instance. That is the chain's recurring class, not its
+correctness converging badly — the source change 2d-5-2b-A made is the same change it was before, and
+two rounds have now examined it. What would change the verdict is a round finding the *code* wrong,
+and none has.

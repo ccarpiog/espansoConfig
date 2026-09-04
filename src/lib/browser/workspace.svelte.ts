@@ -1601,11 +1601,17 @@ export interface BrowserState {
    * `writeSurfaceRegistry`'s own, so the two doors describe the same registry state
    * *by construction* rather than by the mirror happening to be in step; the mirror
    * read is what makes a caller inside a reactive context re-run when either would
-   * have moved. **What the mirror owns is the invalidation and not the value**: a
-   * later method that moved the registry without calling `noticeWriteSurfaces()`
-   * would leave both doors truthful and neither reactive, and nothing in TypeScript
-   * prevents that. A coordinator capturing this across an `await` is not in a
-   * reactive context and is unaffected either way.
+   * have moved. **What the mirror owns is the invalidation — and for a reactive
+   * caller the invalidation *is* the value.** Phase 2d-5-2b-B's finding 2 narrowed
+   * this sentence, which used to say the two could be separated. A later method that
+   * moved the registry without calling `noticeWriteSurfaces()` would leave both
+   * doors truthful *to a caller that calls them*, and nothing in TypeScript prevents
+   * such a path; but a `$derived` over either door memoizes, so it would go on
+   * showing the number it had already cached until some **other** dependency of that
+   * derived invalidated it. A stale screen is the cost, not merely a missed re-run.
+   * A coordinator capturing this across an `await` is not in a reactive context, and
+   * is the one caller for which "the invalidation and not the value" is the whole
+   * truth.
    *
    * @returns The current generation; zero for a state nothing has registered with.
    */
@@ -3401,9 +3407,17 @@ export function createBrowserState(
       // "nothing changed" while `openWriteSurfaces()`, which reads the registry,
       // answered the new set in the same block — and the Q5 guard 2d-5-4 captures
       // across an await is precisely the caller that would believe it. Reading the
-      // registry cannot fail that way. What such a path would still cost is the
-      // *invalidation* rather than the *value*, and nothing in TypeScript prevents
-      // it; that is item 9 of this step's "where it is thin", not a claim made here.
+      // registry cannot fail *that* way: this door's answer is never behind the
+      // registry, whoever asks.
+      //
+      // **What such a path would still cost depends on who is asking, and Phase
+      // 2d-5-2b-B's finding 2 is that the old sentence here named only half of
+      // them.** For an imperative caller the cost is the *invalidation* alone — it
+      // calls, so it gets today's number regardless. For a `$derived` the cost is
+      // the *value* as well, because a derived that is never invalidated keeps the
+      // number it cached until some other dependency moves it, and what is on
+      // screen is that cached number. Nothing in TypeScript prevents the path;
+      // that is item 9 of this step's "where it is thin", not a claim made here.
       void surfaceGeneration;
       return writeSurfaces.generation();
     } // End of function writeSurfaceGeneration()

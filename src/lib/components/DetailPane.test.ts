@@ -1136,6 +1136,15 @@ describe('the pane as a write-surface host', () => {
     // `$derived.by`, so the sentence appearing is the observation and not a
     // coincidence of re-rendering.
     //
+    // **Only the second half is an oracle, and Phase 2d-5-2b-B's finding 3 is that
+    // saying "different" invited the other reading.** The first half's
+    // `not.toContain` held before the registration too, so it passes identically
+    // whether the mirror moved or the child's `$derived.by` never re-ran at all: it
+    // is a **negative control** establishing the starting screen, and it can fail
+    // only if registering an unknown-target creator wrongly *draws* a refusal.
+    // Everything that makes this case evidence for the third `noticeWriteSurfaces()`
+    // site is below the `replaceTarget`.
+    //
     // **The registration is a second host's, exactly as above.** This pane keeps
     // its seven surfaces mutually exclusive through `busy`, so it can never draw a
     // creator beside an open restore itself.
@@ -1170,6 +1179,11 @@ describe('the pane as a write-surface host', () => {
       WALKS.restore.expected,
       { kind: 'matchCreator', target: { kind: 'document', document: 1 } }
     ]);
+
+    // Released before the pane stops, as the sibling case above does. This lease is
+    // this block's own — no host owns it — so leaving it held would end the case
+    // with a registration nothing can reach.
+    lease();
     pane.stop();
   }); // End of the "a re-targeted surface reaches the restore" case
 

@@ -904,3 +904,162 @@ a source file.
 4. **No window has been opened on any of this — *recorded only*.** 2d-5-2c is still the reading that
    is owed, and it now covers a door whose answer changed. A mounted test proves a handler fires; it
    does not prove a window draws.
+
+## 14. Phase 2d-5-2b-B — the review of 2d-5-2b-A's own fix round
+
+`CLAUDE.md` §7.1 commissioned this round: 2d-5-2b-A's fix changed three source files
+(`src/lib/browser/workspace.svelte.ts`, `src/lib/components/MatchCreator.svelte`,
+`src/lib/components/DetailPane.test.ts`), so a round was owed, scoped to that fix.
+
+One review invocation, `ship-with-fixes`, **0 blockers**, **three SHOULD-FIX** (one of them a Low
+with two parts). Report: [`docs/reviews/phase-2d-5-2b-B.md`](../reviews/phase-2d-5-2b-B.md). **All
+three were fixed in this phase's commit**, and every figure the review reported was re-derived by the
+orchestrator before it was accepted.
+
+### 14.1 Findings 1 and 2 are the recurring defect's seventh and eighth instances
+
+Both are *a sentence whose scope is wider than its code*, and the chain's own record predicted
+exactly this: the class *"is not fixed by care, and it is not fixed by being told about it"*. Finding
+1's instance is the sharper evidence — **it sits inside the sentence written to fix the sixth
+instance**, which is the same shape as the fourth (an instance inside the correction block that
+closed the third). What caught both again is what has caught every one of them: a reader re-deriving
+a sentence's scope against the code.
+
+### 14.2 Finding 1 — `competingSurfaceFor`'s two production readers, one of them named
+
+`MatchCreator.svelte` claimed `competingSurfaceFor` *is* read in production **"by
+`RestorePane.svelte`'s `current` on every open restore"**. Both halves are wider than the code, and
+the orchestrator re-derived both:
+
+- **Two production readers, not one.** `restore.ts:1993` inside `restoreRefusal`, which `current`
+  reaches; and `restore.ts:2581` inside `permitHolds`, which `sendRestore` calls at `:2663`. **The
+  second is the read that decides whether the restore is written**, and it is not reached through
+  `current` at all — so the shipped sentence described the *displayed refusal* and said nothing about
+  the *spend*. `rg -n 'competingSurfaceFor' src/lib/browser/restore.ts` returns both.
+- **Not "every" open restore.** `restoreRefusal` returns one of **six** earlier reasons before the
+  call — `alreadyRestored`, `readOnly`, `inFlight`, `conflictShowing`, `noCandidate`, `targetMoved`
+  (`restore.ts:1975-1992`). An open restore with no candidate never reaches it. Six was counted off
+  the file, not taken from the review.
+
+**A correction to how the previous phase recorded this, since the same error is in two places.**
+`92fe0f4`'s commit message says the two sites are reached *"by way of RestorePane's current"* — true
+of `:1993`, false of `:2581`. `PROGRESS.md` carried the identical mis-attribution as a **live
+pointer** and it is fixed there. The commit message is history and is left as written, per this
+chain's own rule that a historical record is a snapshot and only live pointers are maintained.
+
+### 14.3 Finding 2 — "the invalidation and not the value" is false for the caller it is written for
+
+Two sites in `workspace.svelte.ts` (the interface doc block and the implementation comment) said a
+future path that moved the registry without calling `noticeWriteSurfaces()` would cost the
+*invalidation* and not the *value*, leaving both doors "truthful and neither reactive".
+
+**That is true only of a caller that calls.** A `$derived` over either door **memoizes**: with no
+invalidation it never recomputes, so it goes on rendering the number it cached until some *other*
+dependency of that derived moves. For the reactive caller — the entire audience the mirror exists
+for — a lost invalidation is a **stale screen**, not merely a missed re-run. Both sentences now name
+the two audiences separately, and the coordinator capturing the door across an `await` is identified
+as the one caller for which the old sentence was the whole truth.
+
+The qualification *"until some other dependency of that derived invalidated it"* is deliberate and is
+the narrow claim. Writing a flat *"the value is lost"* would have been the ninth instance of the very
+class being fixed.
+
+### 14.4 Finding 3 (Low) — a negative control described as half of an oracle
+
+Two parts in `DetailPane.test.ts`, both confirmed:
+
+- The new case's first half asserts `not.toContain(creatorOpen)` after registering a
+  `{ kind: 'unknown' }` creator. That held **before** the registration too, so it passes identically
+  whether the mirror moved or the child's `$derived.by` never re-ran — it is a **negative control**,
+  not an oracle, and can fail only if an unknown-target creator wrongly *draws* a refusal. The
+  comment's *"what makes the two halves of this case different"* invited the stronger reading. The
+  comment now says where the evidence starts: below the `replaceTarget`.
+- The manually taken lease was never released before `pane.stop()`, unlike the sibling case. It is
+  now released after the final assertions.
+
+### 14.5 The NOT-VERIFIED item the orchestrator settled by measuring
+
+The review could not confirm that the Svelte compiler emits a **tracked** read for
+`void surfaceGeneration` in a `.svelte.ts` module, and inherited the belief from `openWriteSurfaces()`.
+The orchestrator compiled a probe through `svelte/compiler`'s `compileModule` (v5.56.8, `generate:
+'client'`, thrown away afterwards) rather than reasoning about it:
+
+```
+void surfaceGeneration;   →   void $.get(surfaceGeneration);
+```
+
+`$.get` is the tracked read, so the `void` statement **is** a subscription. The item is settled in the
+favourable direction, and `writeSurfaceGeneration()`'s reactivity no longer rests on analogy.
+
+**The probe also found something not previously on file, and it is a real hazard rather than a
+curiosity.** With **no writer** to `surfaceGeneration`, the same compiler emits a plain
+`let surfaceGeneration = 0` and the read is not tracked at all — the signal is optimised away
+entirely. So this door's reactivity is contingent on `noticeWriteSurfaces()` continuing to *assign*.
+A future change that removed every write would silently make both doors non-reactive, with no type
+error, no test failure and no visible difference in the source of either door. That is a **second**
+mechanism by which the hand-kept mirror can fail, independent of item 9's "a fourth path forgets to
+mirror", and it is §14.6 item 1.
+
+### 14.6 Where it is thin
+
+1. **The mirror's reactivity depends on a writer existing, and nothing checks that — *recorded
+   only*.** §14.5 measured it: strip the assignments and the compiler drops the signal, so `void
+   surfaceGeneration` becomes a no-op read of a plain number. No test in this repository would fail.
+   It names no defect in source today — `noticeWriteSurfaces()` assigns at three sites — so it is a
+   residual risk and not a blocker, but it belongs beside item 9 rather than inside it: item 9 is
+   about a path that forgets to mirror, this is about there being nothing left to mirror *with*.
+2. **`writeSurfaceGeneration()` still has no production caller, so its reactivity is unobserved by
+   any mounted case — *recorded only*.** Five call sites across three cases, all in
+   `DetailPane.test.ts`. §14.5 settles the compiler question, but the *end-to-end* claim — that a
+   `$derived` over this door re-runs on screen — is carried by `openWriteSurfaces()`'s cases and by
+   analogy, exactly as before. 2d-5-4 gives it its first production caller and is where that becomes
+   observable.
+3. **All three reactive cases still observe one consumer — *recorded only*, and unchanged by this
+   round.** `RestorePane.svelte`'s `$derived.by` remains the only reactive reader of this door in the
+   application, so *"the mirror moved"* and *"the restore's refusal redrew"* stay indistinguishable
+   in this suite. This round narrowed what the cases *claim*; it did not widen what they *observe*.
+4. **Finding 1's correction is itself a sentence about another module's control flow — *actionable*,
+   and it names no defect in source.** `MatchCreator.svelte` now asserts six early returns in
+   `restoreRefusal` and a call site at `restore.ts:2663`. Those are true today and were counted off
+   the file; they are also exactly the kind of cross-module figure this chain has repeatedly seen go
+   stale. A step that edits `restoreRefusal`'s guard list or moves `sendRestore` should re-derive
+   them. Adopting this is a later step's choice; nothing here holds a step open.
+5. **No window has been opened on any of this — *recorded only*.** Unchanged from §13.5: 2d-5-2c is
+   still the reading that is owed, and this round changed only comments and one test-local
+   `lease()` call, so it does not move what that reading must cover.
+
+### 14.7 The gates, measured
+
+**`1320 / 438 / 2254 / 186`**, each command run by the orchestrator on its own, and **run twice** —
+once on the tree as inherited and once after the fixes.
+
+- `cargo test --workspace -- --test-threads=1` → **1320** passed over **26** binaries, exit 0, and
+  the complementary question answered: **no `test result` line lacking `0 failed`**. Run in the
+  authoritative serial form per the recorded host scar, and redirected to a file rather than piped,
+  per the same scar's third consequence.
+- `cargo clippy --workspace --all-targets -- -D warnings` → clean. `cargo fmt --check` → clean.
+  `cargo tree -p espansoconfig-core | rg tauri` → finds nothing.
+- `npm run check` → **438** files, 0 errors, 0 warnings. `npm test` → 59 files, **2254** passed.
+  `npm run build` → **186** modules.
+- **Both bundle oracles read, both lines reported**: server-only markers `$$payload|head_payload|
+  push_element` **absent**; client-only markers `window.__svelte|svelte-trusted-html` **present (2)**.
+
+**No count moved, and that is the expected result.** The fix changed three comments and added one
+`lease()` call inside an existing case — no file entered or left the program, no new module, no new
+case. **The Rust half was proven untouched** rather than assumed: `git diff --stat` over the fix
+shows no path under `crates/` or `src-tauri/`, so the figure measured before the fix could not move.
+
+### 14.8 What this round commissions
+
+**The fix round changed three source files** — `workspace.svelte.ts`, `MatchCreator.svelte` and
+`DetailPane.test.ts`, all comments except the one added `lease()` call. Under §7.1 the unit is the
+file and a comment-only change to a source file counts, so **a round is owed and it is 2d-5-2b-C's**.
+`PROGRESS.md` and this notes file are on §7's closed list and do not count.
+
+**The chain is six phases deep and has not reached the ending 2d-5-1's and 2d-5-2a's found.** §7.2
+says in as many words that this is the mechanism working rather than failing. The escape hatch is
+`BLOCKED` under §7.2 and it is **not** reached: this round returned 0 blockers, its three findings
+were independent rather than one defect surviving its own fix, and §14.6 names **no correctness
+defect in a source file** — item 4's *actionable* mark is on a cross-module figure that is currently
+true, which §7.3 does not blocking-qualify. What *would* reach the hatch is a round whose finding is
+this fix reintroducing what it closed, and 2d-5-2b-C is the round positioned to see it.
