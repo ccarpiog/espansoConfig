@@ -97,6 +97,27 @@ different route, and an `if`/`else` written against one arm alone would coerce i
 untyped `'whatever'` becoming a destination-less creator, silently. `ownedSurface` asks for each
 representable pairing and throws on everything else, and the suite drives both routes.
 
+> **Correction — Phase 2d-5-2a-B, 2026-09-04, review 2 finding 3.** *"A refused registration leaves the
+> registry exactly as it was and moves no generation"* is false on one of the two routes this section
+> itself names, and the same sentence stood in three places in `src/lib/browser/writeSurfaceRegistry.ts`
+> — the interface doc comment, `ownedSurface`'s doc comment, and the inline comment in
+> `registerWriteSurface`'s body. All three now say what is true; this block says it for the record.
+>
+> **What is true is a claim about the call, not about the registry.** The throw happens before the
+> serial is taken and before the map is touched, so the refused call takes no serial, stores no entry
+> under the kind it read and moves no generation *of its own*. It does not follow that the registry is
+> unchanged. The second route to the throw is an accessor whose answer differs from its declared type,
+> and such an accessor can call `registerWriteSurface` before answering: measured, a surface whose
+> `target` getter registers a `matchCreator` and then answers `{ kind: 'unknown' }` for a `matchEditor`
+> throws the `TypeError` **and leaves that `matchCreator` live with the generation moved by one**.
+>
+> **The two cases separate cleanly, and the difference is the caller's own re-entry rather than
+> anything the registry does.** On the cast route — a plain object typed through `as unknown as` — the
+> claim holds exactly as written, which is why the case at `writeSurfaceRegistry.test.ts:427-449` is
+> sound and is left alone: it drives both cast routes with plain data objects and asserts the kinds,
+> the generation and both transitions unmoved. §2.5's and §6's descriptions of that case are therefore
+> still true of the case. It is the general sentence above that was not true of the routes.
+
 ### 2.5 The cases, and that they discriminate
 
 Four new cases in a new `describe('the copy the registry keeps')` — a host's retained object is mutated
@@ -144,6 +165,27 @@ therefore names a `DocumentId` that now denotes a **different file**: `competing
 restore of a file nobody has open, and `targetingSurfaceFor` attributes that file to a surface that is
 not about it. `2d-5-2a-notes.md` §3.8 named neither.
 
+> **Correction — Phase 2d-5-2a-B, 2026-09-04, review 2 finding 3.** **Both line numbers in the
+> paragraph above are history**, and one of them was wrong the day it was written. Each was checked
+> against the commit it belongs to rather than reasoned about:
+>
+> - **`:2269` is wrong for *"Their identities are reallocated by the load below"*, and this record's own
+>   phase is what made it wrong.** `:2269` is where that sentence sits at `15ada19`; 2d-5-2a-A's
+>   replacement for the `open()` comment is seventeen lines longer than what it replaced, so at
+>   `9f32cc5` — the commit this record describes — the sentence is at `:2286`. On the tree Phase
+>   2d-5-2a-B leaves, twenty further lines of doc comment on `BrowserState.registerWriteSurface` move it
+>   again: it is at **`src/lib/browser/workspace.svelte.ts:2306`**, in the comment block at
+>   `:2305-2309`, above the `projectionGenerations.clear()` it explains at **`:2310`**.
+> - **`:1683` is a deliberate citation of pre-fix text and is left exactly as it is**, because this
+>   section is *"What it was"*: at `15ada19` that line is *"the safe one costs nothing, because a
+>   workspace that has really been replaced"*, which is the sentence §3.2 says the fix removed. It names
+>   nothing on this tree, where the quoted phrase exists nowhere under `src/` and the replacement
+>   comment block runs **`:1690-1721`** with *"the direction taken here is the safe one"* at **`:1703`**.
+>
+> **The claims are unaffected; only the pointers were wrong.** A line number derived from a file the
+> same phase is editing is exactly the shape this finding names, and the defence is the quoted text
+> beside the number rather than a promise to keep the number fresh.
+
 ### 3.2 What changed, and what deliberately did not
 
 **No behaviour.** `open()` still does not clear the registry: the decision stands, and the caller that
@@ -179,6 +221,52 @@ check and the spend are one synchronous block with nothing caller-supplied betwe
 shape `CLAUDE.md` asks for rather than a second check after one. A re-entry during that read is already
 done when the check runs, so the answer is the same `staleLease` the old ordering produced. **Keeping
 the second check would have been a guard nothing could fire, documented as if it could.**
+
+> **Correction — Phase 2d-5-2a-B, 2026-09-04, review 2 finding 1.** *"The answer is the same
+> `staleLease` the old ordering produced"* is false, and it is false in both directions. This block was
+> written from the two modules **run against each other** rather than from the finding: `15ada19`'s file
+> and the shipped one, transpiled and driven from a throwaway harness outside the repository.
+>
+> **The old ordering never read `target.document` at all.** `withTarget` returned `{ kind, target }` —
+> the caller's target object, kept by reference — so the substring `.document` does not occur anywhere
+> in `15ada19:src/lib/browser/writeSurfaceRegistry.ts`. The one caller-supplied read the old
+> `replaceTarget` took was `held.surface.kind`, off the registered object the registry also kept by
+> reference. **The two orderings therefore share no re-entrancy route**, and the sentence above compares
+> an outcome on the new route against an outcome produced on the old one.
+>
+> Measured, one row per route:
+>
+> | The re-entry, and what drives it | Old (`15ada19`) | New (shipped) |
+> |---|---|---|
+> | A registration of this kind, from the reported `target.document` | outer `'replaced'` — the accessor does not run during the call at all, so it fires later, inside whatever consumer first reads `.document` off `openWriteSurfaces()` | outer `'staleLease'`, generation +1, the inner registration live |
+> | `replaceTarget` on the same lease, from the reported `target.document` | outer `'replaced'`; the inner call does not run during the call either | outer **and** inner both `'replaced'`, generation +2, **the outer's target installed** |
+> | `replaceTarget` on the same lease, from the registered surface's `kind` accessor | outer `'staleLease'`, generation +1, **the inner's target installed** | the route does not exist — the stored surface is this module's frozen copy, so `kind` is a data property |
+>
+> **So the new ordering is stricter on the route the suite pins and looser on the other one.** Row 1 is
+> the case at `writeSurfaceRegistry.test.ts:520-544`, the one §4 of `2d-5-2a-notes.md` says "still pins
+> it": on it the old ordering answered `'replaced'`, so that case is one the new module passes and the
+> old fails — which the fix round's own *7 of 28 fail* count already implied and this sentence
+> contradicted. Row 2 is the case the sentence is actually wrong about.
+>
+> **Row 2's outcome is the right one; what was wrong was calling it `'staleLease'`.** Both calls hold
+> the same live lease, neither is stale, and this module's registration rule is already that the call
+> which finishes last wins. The old ordering's row-3 answer, by contrast, was `'staleLease'` for a lease
+> that was live — a refusal wearing the name of a stale lease. Under the new ordering `'staleLease'` is
+> returned only when `heldBy` fails, which is exactly when the lease no longer names the live entry, so
+> `WriteSurfaceTargetReplacement`'s own doc comment became true rather than needing to be weakened.
+>
+> **Where the review's own wording is imprecise**, since this block is written against the code and not
+> against the finding. It attributes the old refusal to "a `target.document` getter that calls
+> `lease.replaceTarget(t2)`"; that getter cannot run inside the old `replaceTarget`, so on that route
+> the old code answers `'replaced'` too. Its conclusion — not outcome-preserving, and both records say
+> it is — stands unaltered. Its citation does not: `heldBy(...) !== held` is
+> `15ada19:src/lib/browser/writeSurfaceRegistry.ts:411`; `:404` is a line of the comment above it, and
+> `git show HEAD:…` no longer names the pre-fix file now that 2d-5-2a-A is committed.
+>
+> **No behaviour changed for this.** The ordering shipped at 2d-5-2a-A stays and is right. What changed
+> is this sentence, the same sentence in `2d-5-2a-notes.md` §4's correction, and the inline comment in
+> `replaceTarget` that said the check "sees the newer registration and this call refuses" — true of a
+> re-entrant registration, false of a re-entrant same-lease `replaceTarget`.
 
 **The coverage the finding named is now taken, on the path the old suite could not reach.** The review
 noted that the accessor case at `writeSurfaceRegistry.test.ts:359` exercised only one read because the

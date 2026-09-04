@@ -246,6 +246,25 @@ mounted evidence is where disposal is established.
 > where nothing registers and the registry is empty across an `open()` by construction, and **live at
 > 2d-5-2b**, where hosts register.
 
+> **Correction on the block above — Phase 2d-5-2a-B, 2026-09-04, review 2 finding 3.** Its citation
+> `workspace.svelte.ts:2269` **was already wrong when the block was committed**, and by the block's own
+> doing: `:2269` is where the sentence sat at `15ada19`, and 2d-5-2a-A's replacement for the `open()`
+> comment is seventeen lines longer than what it replaced, so the same commit that wrote this citation
+> moved the line to `:2286`. Both numbers were checked against the two commits rather than reasoned
+> about.
+>
+> Re-derived on the tree Phase 2d-5-2a-B leaves, where a further twenty lines of doc comment on
+> `BrowserState.registerWriteSurface` have moved it again: *"Their identities are reallocated by the
+> load below"* is at **`src/lib/browser/workspace.svelte.ts:2306`**, in the comment block at
+> `:2305-2309`, above the `projectionGenerations.clear()` it explains at **`:2310`**. The quoted text is
+> what makes that recoverable when the number moves next; the number alone is not.
+>
+> The block's own "586 lines further down" is **dropped rather than re-derived**. It is a subtraction of
+> two line numbers in a file every later step of 2d-5 edits, so it goes stale for reasons that have
+> nothing to do with what it claims — which is the shape of the finding this correction answers.
+>
+> **The claim itself is unaffected and stands.** Only the pointer was wrong.
+
 ---
 
 ## 4. Two re-entrancy guards nothing asked for, and why they are in
@@ -291,6 +310,30 @@ answers about it, and nothing in this module can see that.
 > **The last paragraph is false as written.** A registered surface is now the registry's own frozen
 > copy, so a caller that mutates what it registered changes nothing a reader sees. What is still true is
 > the narrower sentence in §7 item 4's correction.
+
+> **Correction on the block above — Phase 2d-5-2a-B, 2026-09-04, review 2 finding 1.** *"The outcome is
+> the same `staleLease` the old ordering produced, and the suite's case still pins it"* is false as
+> stated, and it is the same defect class the block it sits in was written to close. Two things are
+> wrong with it.
+>
+> **The suite's case is not evidence that the outcomes agree; it is evidence that they differ.** The
+> case at `writeSurfaceRegistry.test.ts:520-544` drives a re-entrant **registration** from the reported
+> target's accessor. The old ordering never read `target.document` — `withTarget` stored the caller's
+> target object by reference — so against `15ada19`'s module that accessor never fires inside the call
+> and the outer answer is `'replaced'`. The case is one of the seven the fix round measured as failing
+> against the pre-fix module, not one it "still pins".
+>
+> **And on a re-entrant same-lease `replaceTarget`, the new ordering answers `'replaced'` twice.** The
+> serial is unchanged by a target replacement, so the outer call's `heldBy` matches, the outer writes
+> its own target over the inner one and both calls report success. The old ordering's own route — a
+> `kind` accessor on the retained registered surface — refused the outer call instead and left the
+> inner target installed. The outcomes are different; the new one is right, and last-finisher-wins is
+> this module's registration rule seen through a lease.
+>
+> The derivation, measured by running both modules rather than by reading them, is
+> `docs/decisions/2d-5-2a-A-notes.md` §4's own correction block and
+> `docs/decisions/2d-5-2a-B-notes.md` §2. **No behaviour changed for this**: the ordering shipped at
+> 2d-5-2a-A stays.
 
 ---
 

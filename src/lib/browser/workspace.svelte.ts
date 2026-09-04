@@ -1499,10 +1499,30 @@ export interface BrowserState {
    * its surfaces as an argument. Routing that call through this registry is
    * 2d-5-2b's, because the caller that would change is a component.
    *
+   * **It can throw, and a host that calls it on mount is the caller that has to know
+   * that.** This method is straight through, so the registry's refusal of a
+   * `kind`/`target` pairing `OpenWriteSurface` cannot represent — a `TypeError`,
+   * rather than a coerced value or a silently dropped registration — arrives here
+   * unchanged. It is not reachable from a well-typed literal: `OpenWriteSurface`
+   * correlates the two, so the compiler already rejects a non-`matchCreator` kind
+   * over a target that names no file. It becomes reachable when a caller takes the
+   * two apart — a widened `kind` variable paired with a separately built target and
+   * reconciled by a cast or an assertion — or when a property read answers something
+   * other than its declared type, since the registry reads `kind` and `target` here
+   * rather than where they were written. **Uncaught inside a mount effect that is a
+   * blank pane, not a refused registration**, so a host that cannot hand over a
+   * correlated literal is the host that has to catch.
+   *
    * @param surface - The surface, exactly as a consumer will see it.
    * @param transition - What that surface is told about an external observation of
    *   its file. Stored and never called at 2d-5-2a.
    * @returns The lease: call it to unregister, or report a file through it.
+   * @throws TypeError - When the `kind` read from `surface` and the arm read from
+   *   `surface.target` are not a representable pairing: any kind other than
+   *   `matchCreator` over a target that names no file, or a target whose
+   *   discriminant is neither `'document'` nor `'unknown'`. Nothing this call would
+   *   have written is written — no lease, no entry, no moved generation — but a
+   *   registration the caller's own reads performed on the way in stands.
    */
   registerWriteSurface(
     surface: OpenWriteSurface,

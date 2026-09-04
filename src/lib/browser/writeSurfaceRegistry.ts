@@ -238,8 +238,14 @@ export interface WriteSurfaceRegistry {
    * document, storing something no consumer can narrow, and dropping the
    * registration silently are each worse than a throw, and the last is the
    * fail-unsafe one, since an invisible surface is exactly the answer that permits a
-   * silent reload. The throw happens before the serial is taken, so a refused
-   * registration leaves the registry exactly as it was and moves no generation. The
+   * silent reload. The throw happens before the serial is taken and before the map
+   * is touched, so **this call** writes nothing: no serial, no entry under the kind
+   * it read, no generation moved. That is a claim about this call and not about the
+   * registry, and the two differ on one of the routes above — an accessor that
+   * answers an unrepresentable value can register a surface of its own before
+   * answering, so the registry a refused call returns to may hold an entry it did
+   * not hold on the way in, with the generation moved to match. What is refused is
+   * this registration; what the caller's own reads did on the way in stands. The
    * message is a programmer's and nothing renders it, so it is not a string the
    * i18n rule is about.
    *
@@ -249,6 +255,9 @@ export interface WriteSurfaceRegistry {
    *   its file. Stored and never called at 2d-5-2a; see
    *   {@link WriteSurfaceTransition}.
    * @returns The lease: call it to unregister, or report a file through it.
+   * @throws TypeError - When the `kind` read from the surface and the arm read from
+   *   its target are not a representable pairing; see the paragraph above for what
+   *   that is and for what a refusal does and does not leave behind.
    */
   registerWriteSurface(
     surface: OpenWriteSurface,
@@ -401,7 +410,10 @@ function ownedDocumentSurface(kind: OpenWriteSurfaceKind, document: DocumentId):
  * route — both are tested for positively, so neither is coerced into the arm it looks
  * closest to. {@link WriteSurfaceRegistry.registerWriteSurface} carries the argument
  * for throwing rather than dropping. Every caller builds before it mutates anything,
- * so a throw here leaves the registry exactly as it was.
+ * so a throw here means the **calling operation** wrote nothing — no serial taken,
+ * no entry stored, no generation moved by it. It is not a claim that the registry is
+ * unchanged: the two reads this function takes are the caller's, and either can
+ * register a surface before answering the value that is then refused.
  *
  * @param kind - The kind, already read once by the caller.
  * @param target - The caller's target, read here and not retained.
@@ -481,8 +493,13 @@ export function createWriteSurfaceRegistry(): WriteSurfaceRegistry {
       // path, so no accessor can run between the serial and the `live.set`.
       //
       // `ownedSurface` throws on a pairing the union cannot represent, and it does
-      // so here — before the serial and before the map is touched — so a refused
-      // registration changes nothing at all.
+      // so here — before the serial and before the map is touched — so *this*
+      // registration writes nothing when it is refused. What that does not say is
+      // that the registry is unchanged: the reads on the two lines below are the
+      // caller's, and one of them can register a surface of its own before answering
+      // the value that gets refused, in which case the throw leaves that
+      // registration standing and the generation moved. Refusing this call is the
+      // whole of what happens here.
       const kind = surface.kind;
       const owned = ownedSurface(kind, surface.target);
       serials += 1;
@@ -523,9 +540,24 @@ export function createWriteSurfaceRegistry(): WriteSurfaceRegistry {
         // may be an accessor running arbitrary code — this project has shipped a
         // check and a spend separated by exactly such a read twice — and anything
         // it re-enters and does is therefore *already done* when `heldBy` runs. If
-        // it displaced this kind's entry, the check that follows sees the newer
-        // registration and this call refuses; if it did not, nothing between the
-        // check and the `live.set` can run at all.
+        // it did not re-enter at all, nothing between the check and the `live.set`
+        // can run either.
+        //
+        // **What the check answers when it did re-enter depends on what it did, and
+        // the two cases are not one.** A re-entrant *registration* of this kind
+        // takes a new serial, so `heldBy` finds a serial that is not this lease's
+        // and this call answers `staleLease` having written nothing. A re-entrant
+        // `replaceTarget` on *this* lease keeps the serial, so `heldBy` matches, and
+        // this call — which finished last — writes its own target over the inner
+        // one: **both calls answer `replaced` and the outer target is the one
+        // installed.** That is this module's registration rule seen through a lease,
+        // last finisher wins, and it is the one place this ordering differs in
+        // outcome from the two-check ordering it replaced. That one had no read of
+        // `target.document` at all; its own re-entry route was a `kind` accessor on
+        // the caller's retained surface — gone, now that the stored surface is this
+        // module's frozen copy — and on that route it answered `staleLease` for a
+        // lease that was live. `docs/decisions/2d-5-2a-B-notes.md` section 2 carries
+        // both derivations.
         //
         // **The kind is the captured one, and no surface's `kind` is re-read.** The
         // entry keeps the key its lease was minted for, so the key and the stored
