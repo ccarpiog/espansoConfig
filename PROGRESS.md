@@ -9,23 +9,21 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of Phase 2d-5-1-A it is **531 lines and 65,472 bytes**, past the 400-line soft bound and 64 bytes
-under the 64 KiB one, so **2d-5-1-B archives the closed 2d-4a and 2d-4b git-state rows before it
-does anything else** — **and the
-figures are re-measured on the file that carries them**, because a header quoting the size of the file
+triggers the move**. **Phase 2d-5-1-B took that instruction and discharged it**: the 37 closed git-state
+rows of the 2d-4a and 2d-4b chains, and the prose arguing them, are now one summary row plus a pointer
+into [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md). **The figures below are
+re-measured on the file that carries them**, because a header quoting the size of the file
 it replaced has already had to be corrected twice, and 2d-4b-D found the identical shape in a notes
 section's line citations. **That failure recurred at the 2d-5 consult in a new place**: a citation
 column derived from `docs/reviews/phase-2d-5-design.md` was left behind by two later edits to that
 file's header, and only a reviewer re-deriving it noticed. A derived figure outlives the thing it was
 derived from unless something re-derives it.
 
-**2d-4b-H is where the headroom came back, and the 2d-5 consult has spent most of it.** Round H closed
-the whole eight-row 2d-4b chain, so those rows became archivable in the same breath and are now one
-summary row plus a pointer in
-[`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"The 2d-4b
-corrective chain"*, exactly as 2d-4a's five closed rows went there before them — about 5.2 KiB freed.
-This consult has taken roughly 4.4 KiB of it back, leaving **about 2.8 KiB under the 64 KiB soft
-bound**. **The next session that closes a 2d-5 step should archive that step's narrative as it goes**
+**Where the headroom stands, measured after the move rather than predicted before it:**
+**447 lines and 58,943 bytes** — 6.4 KiB under the 64 KiB soft bound, still past the 400-line one. 2d-4b-H
+closed the eight-row 2d-4b chain and its status rows went to the archive on 2026-08-31; its **git-state**
+rows stayed in the live head another four days, and 2d-5-1-B is what took them, together with 2d-4a's.
+**The next session that closes a 2d-5 step should archive that step's narrative as it goes**
 rather than at the bound, and the precedent that matters is the *refusal* rather than the move: 2d-4b-G
 wanted the chain's rows badly, they were the longest thing in the table, and it did not take them,
 because *superseded* is not *closed*. Archiving on length rather than on state is how a live chain
@@ -421,111 +419,29 @@ beside it. These are the ones the next phase needs.
 
 ## Git state
 
-_Updated at each phase boundary. Only the most recent rows are kept here; the full table is in the
-archive under [`docs/progress-archive/next-action-history.md`](docs/progress-archive/next-action-history.md)
-and in `git log`._
+_Updated at each phase boundary. Only the rows of the **live** chain are kept here. Every closed
+chain's rows and the prose that argued them are in
+[`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"The
+git-state rows of the closed 2d-4a and 2d-4b chains"*; older still is
+[`docs/progress-archive/next-action-history.md`](docs/progress-archive/next-action-history.md), and
+all of it is in `git log`._
 
 | Phase | Commit | Push |
 |---|---|---|
-| 2d-4a (round 5 + its fix, NOT closed) | `eced554` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 1 (round 3 + its fix, NOT closed) | `4ab5e2e` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 1 (round 4 — READY; the step CLOSES here) | `57e8800` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (the check; implemented and green, review OWED) | `65a0138` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (round 1 + its fix) | `bca13e2` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (round 2 + its fix) | `e75ec2b` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (round 3 + its fix) | `2bd7bd5` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (round 4 + its fix) | `2695cbb` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (round 5 + its fix) | `5593a90` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (round 6 + its fix) | `d4bf905` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (round 7 + its fix) | `1c5a9bb` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (round 8 + its fix; round 9 OWED) | `2efce7a` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (round 9 DISPATCHED AND ABORTED — no reply) | `2a39b3c` | ✅ pushed to `origin/main` |
-| 2d-4a-C step 2 (round 9 ran; the phase CLOSES here) | `dced09a` | see below |
-| Checkpoint split — this file cut from 21,803 lines to under 400 | `3db0ff3` | ✅ pushed to `origin/main` |
-| M2 — the review-tail termination rule, after two review rounds | `93fb76b` | ✅ pushed to `origin/main` |
-| 2d-4a rounds 7 and 8, both fix rounds, and the `INVENTORY` judgement the guard forced | `125dfa8` | ✅ pushed to `origin/main` |
-| **2d-4a-D — round 9 and its fix; round 10 OWED** | `6572a29` | ✅ pushed to `origin/main` |
-| 2d-4a-D — the SHA and push record | `d264012` | ✅ pushed to `origin/main` |
-| **2d-4a-E — round 10 and its fix; round 11 OWED** | `22d1afb` | ✅ pushed to `origin/main` |
-| 2d-4a-E — the SHA and push record | `f7bbf6d` | ✅ pushed to `origin/main` |
-| **2d-4a-F — round 11 and its fix; round 12 OWED** | `b854de5` | ✅ pushed to `origin/main` |
-| 2d-4a-F — the SHA and push record | `4d90177` | ✅ pushed to `origin/main` |
-| **2d-4a-G — round 12 and its fix; round 13 OWED** | `e334d5b` | ✅ pushed to `origin/main` |
-
-**Each of those source commits is what made the next round owed — and the chain stops here.**
-`125dfa8` changed five files under `src-tauri/src/` and made round 9 owed; `6572a29` changed two and
-made round 10 owed; `22d1afb` changed **one**, two comment hunks in `reconciliation.rs`, and made
-round 11 owed; `b854de5` changed **one**, a single sentence of the same doc comment (+4 / −3), and
-made round **12** owed; `e334d5b` changed **one**, the punctuation of that same sentence and one
-deleted clause (+3 / −4), and made round **13** owed. **Every one of them is comment or inventory
-prose with no executable line changed**, and under §7.1 the unit is the file, so each still
-commissioned a round.
-
-**`811d180` changed no source file at all** — seven files, every one of them `CLAUDE.md`,
-`PROGRESS.md` or under `docs/` — **so it commissions nothing, and that is what ends the tail.**
-
-| Phase | Commit | Push |
-|---|---|---|
-| 2d-4a-G (round 12 + its fix, NOT closed) | `e334d5b` | ✅ pushed to `origin/main` |
-| **2d-4a-H (round 13 + its fix — the tail CLOSES here, and 2d-4a with it)** | **`811d180`** | ✅ pushed to `origin/main` |
-
-| 2d-4b design consult (Codex; the checkpoint archived first) | `da15079` | ✅ pushed to `origin/main` |
-| **2d-4b — the whole TypeScript half, its review and its fix; round 2 OWED** | **`be8d424`** | ✅ pushed to `origin/main` |
-
-**`da15079` changed no source file** — five files, every one of them `PROGRESS.md` or under `docs/` —
-**so the consult commissioned nothing.** The 2d-4b commit changes source in eighteen files and its
-review has already run; what commissions **2d-4b-B** is not that commit but the **fix round inside
-it**, which changed eight source files after the review returned. Under `/autoclaude`'s
-one-review-per-phase cap there is no second invocation in this phase, so that round becomes the
-corrective phase — the same shape as 2d-4a's D → E → F → G → H chain, and the case `CLAUDE.md` §7.4
-describes in as many words.
-
-| Phase | Commit | Push |
-|---|---|---|
-| **2d-4b-B — round 2 and its fix; round 3 OWED** | **`1c34579`** | ✅ pushed to `origin/main` |
-| **2d-4b-C — round 3 and its fix; round 4 OWED** | **`e510819`** | ✅ pushed to `origin/main` |
-| **2d-4b-D — round 4 and its fix; round 5 OWED** | **`6dba9f7`** | ✅ pushed to `origin/main` |
-| **2d-4b-E — round 5 and its fix; round 6 OWED** | **`081ea14`** | ✅ pushed to `origin/main` |
-| **2d-4b-F — round 6 and its restructure; round 7 OWED** | **`54ef596`** | ✅ pushed to `origin/main` |
-| **2d-4b-G — round 7 and its fix; round 8 OWED** | **`07744ae`** | ✅ pushed to `origin/main` |
-| 2d-4b-G — the SHA and push record | `8267e03` | ✅ pushed to `origin/main` |
-| **2d-4b-H (round 8 + its fix — the tail CLOSES here, and 2d-4b with it)** | **`21cbef8`** | ✅ pushed to `origin/main` |
-| 2d-4b-H — the SHA and push record | `998e346` | ✅ pushed to `origin/main` |
+| _2d-4a through 2d-4a-H, and 2d-4b through 2d-4b-H — **both chains closed**, 37 rows_ | `eced554` … `998e346` | ✅ all pushed; **archived 2026-09-04** |
 | **2d-5 design consult (brief, Codex consult, record, review — four new files, all under `docs/`, no source touched)** | **`5787e87`** | ✅ pushed to `origin/main` |
 | 2d-5 design consult — the SHA and push record | `32ffcfc` | ✅ pushed to `origin/main` |
 | **2d-5-1 — the surface and conflict vocabulary; review `ship-with-fixes`, 2 of 4 findings carried to 2d-5-1-A** | **`16a122b`** | ✅ pushed to `origin/main` |
 | 2d-5-1 — the SHA and push record | `ae15127` | ✅ pushed to `origin/main` |
 | **2d-5-1-A — the two source fixes, plus the three comment corrections its review found; 2d-5-1-B OWED** | **`1ff4f34`** | ✅ pushed to `origin/main` |
 
-**Each of the six commissions the next round**, the unit being the file, and the source half of each
-is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
-blocks in three files, `6dba9f7` **one block in one file**, `081ea14` the **same** block again,
-2d-4b-F's commit that block **shortened from 43 lines to 24** (`+15 / −34`), and 2d-4b-G's **two** blocks
-in that same file — the `drains` docblock at `:313` and the deferral sentence at `:461` (`+11 / −10`).
-Everything else they touch is `PROGRESS.md`, `docs/decisions/2d-4b-notes.md` §8–§13,
-`docs/progress-archive/status-table.md`, `docs/progress-archive/phase-0.md` and the six new review
-files, all on §7's closed list.
+**What commissions 2d-5-1-B is the source half of `1ff4f34`, and it is three comment corrections in
+two files** — `src/lib/browser/restore.ts` and `src/lib/browser/restore.test.ts`. Under `CLAUDE.md`
+§7.1 the unit is the file and a comment-only change to a source file counts, so the round is owed
+however small the diff. The other three files that commit touches — `PROGRESS.md`,
+`docs/decisions/2d-5-1-A-notes.md` and `docs/reviews/phase-2d-5-1-A.md` — are all on §7's closed
+list and commission nothing.
 
-**2d-4b-G is the first commit of this chain to change a second, non-adjacent block of the same file**,
-and it is worth saying why: the docblock it repairs sits 140 lines *above* the hunk every previous round
-was scoped to, and it went stale because round F's fix was correctly scoped to one hunk. A scope that is
-right for the fix is not automatically right for the sentences the fix falsifies elsewhere.
-
-**`081ea14` also carries this session's checkpoint maintenance** — twelve Phase 0 risk rows moved to
-`phase-0.md` — which is a change to two files on the closed list and commissions nothing of its own.
-What commissioned **2d-4b-F** was the one comment block in `src/lib/browser/workspace.test.ts`, and
-nothing else in that commit.
-
-**2d-4b-F is the first commit of this chain whose source change is a deletion rather than a repair**,
-and §7.1 commissions round G from it just the same: the rule reads the diff, never the intent.
-
-**2d-4b-H's commit changes no source file at all** — `docs/decisions/2d-4b-notes.md`, this file,
-`docs/progress-archive/status-table.md` and a new review file, every one of them on §7's closed list —
-**so it commissions nothing, and that is what ends the tail.** The same sentence stands eleven rows
-above for `811d180`, which ended 2d-4a's; these are the only two commits in this project's history to
-have earned it.
-
-**Read the chain's arithmetic as the argument for the rule, not as a curiosity.** Eight commits,
-`be8d424` → `1c34579` → `e510819` → `6dba9f7` → `081ea14` → `54ef596` → `07744ae` → 2d-4b-H's. Seven of
-them changed a source file and each therefore bought the next round; the eighth did not and so bought
-nothing. Nobody decided that, and nobody had to.
+**Two commits in this project’s history have ended a review tail by changing no source file** —
+`811d180` (2d-4a-H, round 13) and `21cbef8` (2d-4b-H, round 8). That is the shape 2d-5-1-B expects
+to reach, and the archived section above carries the full argument for why nobody had to decide it.
