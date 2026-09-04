@@ -469,7 +469,7 @@ describes in as many words.
 | 2d-4b-H — the SHA and push record | `998e346` | ✅ pushed to `origin/main` |
 | **2d-5 design consult (brief, Codex consult, record, review — four new files, all under `docs/`, no source touched)** | **`5787e87`** | ✅ pushed to `origin/main` |
 | 2d-5 design consult — the SHA and push record | `32ffcfc` | ✅ pushed to `origin/main` |
-| **2d-5-1 — the surface and conflict vocabulary; review `ship-with-fixes`, 2 of 4 findings carried to 2d-5-1-A** | _pending_ | _pending_ |
+| **2d-5-1 — the surface and conflict vocabulary; review `ship-with-fixes`, 2 of 4 findings carried to 2d-5-1-A** | **`16a122b`** | ✅ pushed to `origin/main` |
 
 **Each of the six commissions the next round**, the unit being the file, and the source half of each
 is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
