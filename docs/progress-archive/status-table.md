@@ -628,3 +628,38 @@ than the prediction.
 | **2d-5-2a-A** | Round 1's three findings applied: the registry stores a **frozen copy it builds itself**, the `open()` comment names identity reallocation, `withTarget` is gone. **Components: none** | ✅ complete (2026-09-04), risk **routine**, worker **opus**. Review 2 `ship-with-fixes`, **0 blockers**, 3 SHOULD-FIX, **all three carried to 2d-5-2a-B**. Commit `9f32cc5`. Notes `docs/decisions/2d-5-2a-A-notes.md`; review `docs/reviews/phase-2d-5-2a-A.md` |
 | **2d-5-2a-B** | Round 2's three findings — the `@throws` on `BrowserState.registerWriteSurface`, the "leaves the registry exactly as it was" claim (found in **three** places, not the one the review named), and the re-entrancy correction blocks. **No executable line anywhere.** **Components: none** | ✅ complete (2026-09-04), risk **high**, worker **opus**. It found the reviewer **wrong twice**: the old module never read `target.document` at all, so review 2's example was impossible; and its citation `:404` was `:411`. Measured out of repo, the new ordering is **stricter**, not outcome-preserving. Review 3 `ship-with-fixes`, **0 blockers**, 3 SHOULD-FIX, all carried. Commit `52ff829`. Notes `docs/decisions/2d-5-2a-B-notes.md`; review `docs/reviews/phase-2d-5-2a-B.md` |
 | **2d-5-2a-C** | Round 3's three findings — the `:1689-1721` off-by-one, the unscoped `kind`-route sentence at `writeSurfaceRegistry.ts:555-568` (the chain's last source change), and §2.3's unscoped claim. **Components: none** | ✅ **complete, and the 2d-5-2a tail CLOSES here (2026-09-04)** — risk **high**, worker **opus**. It found the reviewer imprecise **three** times, and **caught its own `+8` lines staling two citations and a line count in `2d-5-2a-B-notes.md`**, correcting them in the same pass. Review 4 `ship-with-fixes`, **0 blockers**, 2 SHOULD-FIX, **both record-only** — so the fix changed no source file, §7.1 commissioned nothing, and the tail ended **by rule**. Notes `docs/decisions/2d-5-2a-C-notes.md`; review `docs/reviews/phase-2d-5-2a-C.md` |
+
+
+---
+
+## The git-state rows of the closed 2d-5-1 and 2d-5-2a chains, archived 2026-09-04 at Phase 2d-5-2b
+
+**Taken the moment they stopped being live, not at a length bound.** Both chains are closed —
+2d-5-1 at 2d-5-1-C and 2d-5-2a at 2d-5-2a-C, each ending **by rule** under `CLAUDE.md` §7.2 — and
+`PROGRESS.md`'s git-state table keeps only the rows of the **live** chain. The live head carries one
+summary row and a pointer here.
+
+The precedent that matters is still the *refusal*: 2d-4b-G wanted a live chain's rows and did not take
+them, because *superseded* is not *closed*. These were taken one phase after they closed, and the
+2d-5-2b rows stay in the live head because that chain is live — 2d-5-2b-A is owed.
+
+`d1d9d13` appears among them: it is the checkpoint-maintenance commit that archived the 37 closed
+2d-4a and 2d-4b rows, and it sits here because it landed between 2d-5-1-A and 2d-5-1-B rather than
+because it belongs to either chain.
+
+| Phase | Commit | Push |
+|---|---|---|
+| **2d-5-1 — the surface and conflict vocabulary; review `ship-with-fixes`, 2 of 4 findings carried to 2d-5-1-A** | **`16a122b`** | ✅ pushed to `origin/main` |
+| 2d-5-1 — the SHA and push record | `ae15127` | ✅ pushed to `origin/main` |
+| **2d-5-1-A — the two source fixes, plus the three comment corrections its review found; 2d-5-1-B OWED** | **`1ff4f34`** | ✅ pushed to `origin/main` |
+| Checkpoint maintenance — the 37 closed 2d-4a and 2d-4b git-state rows archived (two files, both on §7's closed list; commissions nothing) | `d1d9d13` | ✅ pushed to `origin/main` |
+| **2d-5-1-B — round B (`ship`, 0 blockers, 0 should-fix, 1 Low) and its fix; 2d-5-1-C OWED** | **`1d623dc`** | ✅ pushed to `origin/main` |
+| 2d-5-1-B — the SHA and push record | `3832f39` | ✅ pushed to `origin/main` |
+| **2d-5-1-C — round C (`ship`, 0 findings) and the chain archived; the 2d-5-1 tail CLOSES here, and 2d-5-1 with it** | **`61aaaba`** | ✅ pushed to `origin/main` |
+| _2d-5-1-C — the SHA and push record_ | `2b3fb03` | ✅ pushed to `origin/main` |
+| **2d-5-2a — the keyed write-surface registry, its suite and its record, plus the checkpoint archiving five things out of the live head; review 1 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-A OWED** | **`15ada19`** | ✅ pushed to `origin/main` |
+| **2d-5-2a-A — round 1's three fixes (the stored surface is now a frozen copy the registry builds), plus 2d-5-2a's SHA record; review 2 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-B OWED** | **`9f32cc5`** | ✅ pushed to `origin/main` |
+| **2d-5-2a-B — round 2's three fixes, every one a comment or a record line and **no executable line anywhere**; review 3 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-C OWED** | **`52ff829`** | ✅ pushed to `origin/main` |
+| _2d-5-2a-B — the SHA and push record_ | `5ec011e` | ✅ pushed to `origin/main` |
+| **2d-5-2a-C — round 3's three fixes and the chain archived; review 4 `ship-with-fixes`, 0 blockers, 2 SHOULD-FIX **both record-only**, both fixed in this commit. The 2d-5-2a tail CLOSES here, and 2d-5-2a with it** | **`2702702`** | ✅ pushed to `origin/main` |
+| _2d-5-2a-C — the SHA and push record_ | `0f1ad8b` | ✅ pushed to `origin/main` |

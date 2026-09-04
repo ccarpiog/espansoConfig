@@ -22,8 +22,9 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, measured on the finished file rather than predicted before it:**
-**643 lines and 77,655 bytes** — 11.8 KiB over the 64 KiB soft bound, and well past the 400-line one.
-**It is over soft and the figure is the honest one.**
+**708 lines and 82,567 bytes** — 16.6 KiB over the 64 KiB soft bound, and well past the
+400-line one. **It is over soft, the figure is re-measured on this file rather than inherited, and it is
+the honest one.**
 
 **The archive-on-state rule was exercised at 2d-5-2a-C rather than merely restated.** The 2d-5-2a
 chain closed, and its narrative and four status rows went to
@@ -35,6 +36,14 @@ The chain had been growing the live head by roughly **50 lines per corrective ph
 is still the refusal: 2d-4b-G wanted a live chain's rows and did not take them, because *superseded*
 is not *closed*. **2d-5-2a's rows were taken the moment they stopped being live, and not one phase
 earlier.**
+
+**Two more moves landed at 2d-5-2b, both on state rather than on length.** The 2d-5-1 and 2d-5-2a
+**git-state** rows — 14 of them, one of which is `d1d9d13`, itself an earlier archiving commit — went
+to [`status-table.md`](docs/progress-archive/status-table.md), leaving one summary row; and the
+superseded 2d-5-1/2d-5-2a **verification narratives** went to
+[`phase-2d.md`](docs/progress-archive/phase-2d.md), because 2d-5-2b re-measured every figure on its own
+tree. The live head still grew — it carries a new chain's record — and **that is the rule working, not
+failing**: 2d-5-2b's own rows stay because 2d-5-2b-A is owed, so that chain is live.
 
 Six things left the live head across 2d-5-2a
 and 2d-5-2a-A and the two steps' records still cost more than they saved. What moved, so nobody
@@ -623,8 +632,9 @@ beside it. These are the ones the next phase needs.
 
 _Updated at each phase boundary. Only the rows of the **live** chain are kept here. Every closed
 chain's rows and the prose that argued them are in
-[`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"The
-git-state rows of the closed 2d-4a and 2d-4b chains"*; older still is
+[`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md), under *"The
+git-state rows of the closed 2d-4a and 2d-4b chains"* and *"The git-state rows of the closed 2d-5-1
+and 2d-5-2a chains"*; older still is
 [`docs/progress-archive/next-action-history.md`](docs/progress-archive/next-action-history.md), and
 all of it is in `git log`._
 
@@ -633,21 +643,8 @@ all of it is in `git log`._
 | _2d-4a through 2d-4a-H, and 2d-4b through 2d-4b-H — **both chains closed**, 37 rows_ | `eced554` … `998e346` | ✅ all pushed; **archived 2026-09-04** |
 | **2d-5 design consult (brief, Codex consult, record, review — four new files, all under `docs/`, no source touched)** | **`5787e87`** | ✅ pushed to `origin/main` |
 | 2d-5 design consult — the SHA and push record | `32ffcfc` | ✅ pushed to `origin/main` |
-| **2d-5-1 — the surface and conflict vocabulary; review `ship-with-fixes`, 2 of 4 findings carried to 2d-5-1-A** | **`16a122b`** | ✅ pushed to `origin/main` |
-| 2d-5-1 — the SHA and push record | `ae15127` | ✅ pushed to `origin/main` |
-| **2d-5-1-A — the two source fixes, plus the three comment corrections its review found; 2d-5-1-B OWED** | **`1ff4f34`** | ✅ pushed to `origin/main` |
-| Checkpoint maintenance — the 37 closed 2d-4a and 2d-4b git-state rows archived (two files, both on §7's closed list; commissions nothing) | `d1d9d13` | ✅ pushed to `origin/main` |
-| **2d-5-1-B — round B (`ship`, 0 blockers, 0 should-fix, 1 Low) and its fix; 2d-5-1-C OWED** | **`1d623dc`** | ✅ pushed to `origin/main` |
-| 2d-5-1-B — the SHA and push record | `3832f39` | ✅ pushed to `origin/main` |
-| **2d-5-1-C — round C (`ship`, 0 findings) and the chain archived; the 2d-5-1 tail CLOSES here, and 2d-5-1 with it** | **`61aaaba`** | ✅ pushed to `origin/main` |
-| _2d-5-1-C — the SHA and push record_ | `2b3fb03` | ✅ pushed to `origin/main` |
-| **2d-5-2a — the keyed write-surface registry, its suite and its record, plus the checkpoint archiving five things out of the live head; review 1 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-A OWED** | **`15ada19`** | ✅ pushed to `origin/main` |
-| **2d-5-2a-A — round 1's three fixes (the stored surface is now a frozen copy the registry builds), plus 2d-5-2a's SHA record; review 2 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-B OWED** | **`9f32cc5`** | ✅ pushed to `origin/main` |
-| **2d-5-2a-B — round 2's three fixes, every one a comment or a record line and **no executable line anywhere**; review 3 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-C OWED** | **`52ff829`** | ✅ pushed to `origin/main` |
-| _2d-5-2a-B — the SHA and push record_ | `5ec011e` | ✅ pushed to `origin/main` |
-| **2d-5-2a-C — round 3's three fixes and the chain archived; review 4 `ship-with-fixes`, 0 blockers, 2 SHOULD-FIX **both record-only**, both fixed in this commit. The 2d-5-2a tail CLOSES here, and 2d-5-2a with it** | **`2702702`** | ✅ pushed to `origin/main` |
-| _2d-5-2a-C — the SHA and push record_ | `0f1ad8b` | ✅ pushed to `origin/main` |
-| **2d-5-2b — the registry made live: the `DetailPane` assembly, seven registrations, the creator's report, the deleted producer, and the review's four fixes including the `BrowserState` reactive mirror; review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed in this commit**; 2d-5-2b-A OWED** | **`PENDING`** | pending |
+| _2d-5-1 through 2d-5-1-C, and 2d-5-2a through 2d-5-2a-C — **both chains closed**, 14 rows including one checkpoint-maintenance commit_ | `16a122b` … `0f1ad8b` | ✅ all pushed; **archived 2026-09-04 at 2d-5-2b** |
+| **2d-5-2b — the registry made live: the `DetailPane` assembly, seven registrations, the creator's report, the deleted producer, and the review's four fixes including the `BrowserState` reactive mirror; review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed in this commit**; 2d-5-2b-A OWED** | **`505caf6`** | ✅ pushed to `origin/main` |
 
 **What commissioned each round of this tail, and what ended it.** `1ff4f34`'s source half — three
 comment corrections in two files — commissioned **2d-5-1-B**, which found all three true. `1d623dc`'s
