@@ -542,3 +542,35 @@ have earned it.
 `be8d424` → `1c34579` → `e510819` → `6dba9f7` → `081ea14` → `54ef596` → `07744ae` → 2d-4b-H's. Seven of
 them changed a source file and each therefore bought the next round; the eighth did not and so bought
 nothing. Nobody decided that, and nobody had to.
+
+---
+
+## The 2d-5-1 corrective chain, archived 2026-09-04
+
+**2d-5-1 — the surface and conflict vocabulary — and its three corrective phases, moved here when the
+chain CLOSED at 2d-5-1-C on the same day it was built.** Four phases, `2d-5-1` → A → B → C, each after
+the first being the adversarial review of its predecessor's fix and each commissioned by `CLAUDE.md`
+§7.1 because that fix changed at least one source file. **The tail ended by rule** — round C found
+nothing, so its fix changed no source file, §7.1 commissioned nothing and §7.2 closed the step. It is
+the **third** tail this project has ended that way, after 2d-4a's at round 13 and 2d-4b's at round 8.
+
+**The subject narrowed at every step**, which is the shape worth remembering: 2d-5-1 built two new
+modules; 2d-5-1-A fixed two behaviours; 2d-5-1-B reviewed three comment corrections and found all three
+true; 2d-5-1-C reviewed one comment and found it true. **No round of the tail after the first moved a
+count** — `1320 / 436 / 2205 / 185` from 2d-5-1-A to the end.
+
+**What 2d-5-1-B added that no earlier round of this project had done**: it settled a coverage claim
+*empirically*, by deleting a line in a scratch copy outside the repository and observing the vitest
+result move by zero tests. That is what makes *"`invalidateEverySurface` is reached by no test"* a
+repository-wide claim rather than a per-suite one.
+
+**What survives the chain and is owed to 2d-5-2**: the `invalidateEverySurface` coverage gap, and the
+five literals of `openWriteSurfaces()` that cannot execute. A closure is a fact about a diff and never
+a discharge of a coverage bound. `docs/decisions/2d-5-1-C-notes.md` §6 is the standing statement.
+
+| Phase | Scope | State |
+|---|---|---|
+| **2d-5-1** | The surface and conflict vocabulary — the widened `OpenWriteSurface` union, the two predicates, `ConflictSource`, the memos, the EN/ES origin lines | ✅ complete (2026-09-04), risk **high**, worker **opus**. Review `ship-with-fixes`, **0 blockers**, 4 SHOULD-FIX — two fixed in the record, two carried to **2d-5-1-A** because they name source files and this phase's one review invocation was spent (`CLAUDE.md` §7.4). Notes `docs/decisions/2d-5-1-notes.md`; review `docs/reviews/phase-2d-5-1.md` |
+| **2d-5-1-A** | 2d-5-1's corrective phase — the two source findings its review left unreviewed | ✅ complete (2026-09-04), risk **routine**, worker **opus**. Both fixed: the `coordinator()` recorder now models production (`closedByReplacementOf`), and `targetingSurfaceFor` prefers an exact document match. Review `ship-with-fixes`, **0 blockers**, 3 SHOULD-FIX — **all three false claims in a comment**, all three fixed. Notes `docs/decisions/2d-5-1-A-notes.md`; review `docs/reviews/phase-2d-5-1-A.md` |
+| **2d-5-1-B** | 2d-5-1-A's corrective phase — the round its three comment corrections commissioned | ✅ complete (2026-09-04), risk **routine**, worker **opus** (the reviewer; no phase worker). Review **`ship`**, **0 blockers, 0 SHOULD-FIX**, 1 Low — **all three corrections re-derived and found true**, including an empirical check that deleting `creating = false` changes the vitest result by zero tests. The Low is a false sentence in the inline comment 2d-5-1-A's *source* fix brought with it; the orchestrator's sweep found a **second** defect in that same comment — the `creatorEligible` gate dropped again, one instance below the docblock where correction 2 had just restored it — and fixed both. Notes `docs/decisions/2d-5-1-B-notes.md`; review `docs/reviews/phase-2d-5-1-B.md` |
+| **2d-5-1-C** | 2d-5-1-B's corrective phase — the round its one comment fix commissioned | ✅ **complete, and the 2d-5-1 tail CLOSES here (2026-09-04)** — risk **routine**, worker **opus**. Review **`ship`**, **0 blockers, 0 should-fix, 0 Low**. All four claims the comment makes were derived true independently, three of them by steps the comment's author had not written down. **Its fix changed no source file, so §7.1 commissioned nothing and §7.2 closed the step** — the **third** tail this project has ended by rule, after 2d-4a's and 2d-4b's. Notes `docs/decisions/2d-5-1-C-notes.md`; review `docs/reviews/phase-2d-5-1-C.md` |

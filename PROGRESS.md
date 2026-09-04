@@ -9,9 +9,11 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. **Phase 2d-5-1-B took that instruction and discharged it**: the 37 closed git-state
-rows of the 2d-4a and 2d-4b chains, and the prose arguing them, are now one summary row plus a pointer
-into [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md). **The figures below are
+triggers the move**. **Two moves landed on 2026-09-04**, both into
+[`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md): the 37 closed
+git-state rows of the 2d-4a and 2d-4b chains with the prose arguing them, and then — the moment the
+2d-5-1 tail closed, rather than at the bound — that chain's own four status rows. Each leaves one
+summary row and a pointer. **The figures below are
 re-measured on the file that carries them**, because a header quoting the size of the file
 it replaced has already had to be corrected twice, and 2d-4b-D found the identical shape in a notes
 section's line citations. **That failure recurred at the 2d-5 consult in a new place**: a citation
@@ -20,7 +22,7 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, measured after the move rather than predicted before it:**
-**481 lines and 62,764 bytes** — 2.7 KiB under the 64 KiB soft bound, still past the 400-line one. 2d-4b-H
+**481 lines and 61,431 bytes** — 4.0 KiB under the 64 KiB soft bound, still past the 400-line one. 2d-4b-H
 closed the eight-row 2d-4b chain and its status rows went to the archive on 2026-08-31; its **git-state**
 rows stayed in the live head another four days, and 2d-5-1-B is what took them, together with 2d-4a's.
 **The next session that closes a 2d-5 step should archive that step's narrative as it goes**
@@ -69,11 +71,8 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-4b design consult** | 2d-4b put to a design consult before any line of it was written, per the standing rule since 2b-2c | ✅ complete (2026-08-30) — [`docs/reviews/phase-2d-4b-design.md`](docs/reviews/phase-2d-4b-design.md), **Codex at high effort**, the **second provider** on this phase since 2d-4a began. Verdict *proceed as one coherent wire step*; it added a general key-without-accessor check and one bounded correction (`duplicateSeam`) that check exposes |
 | **2d-4b** and its seven corrective phases (**B … H**) | The TypeScript half of the wire — the mirror, the drain wrapper, the injectable event source, the i18n accessors, and the deletion of `AWAITING_FRONTEND_DECLARATION` — then eight review rounds over it, of which C to H were all about **one comment block** in `workspace.test.ts` | ✅ **complete and CLOSED at 2d-4b-H (2026-08-31)**, after an **eight**-round tail — the **second** this project has ended **by rule** rather than by an owner ruling (`CLAUDE.md` §7.2), after 2d-4a's. Round H found **no defect in either source hunk** and all four of its findings in the record, so its fix changed no source file and §7.1 commissioned nothing. B … G are each superseded by the next. Per-round scopes, verdicts and dispositions are in [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *“The 2d-4b corrective chain”*; the notes are `docs/decisions/2d-4b-notes.md` §8–§14 |
 | **2d-5 design consult** | 2d-5 put to a design consult before any line of it was written, per the standing rule since 2b-2c | ✅ complete (2026-08-31) — [`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md), **Codex at high effort**, the **second provider** to see this material since 2d-4a began. Verdict: cut 2d-5 into **seven** dependency-ordered steps; it overrides `phase-2d-design.md` in two places. The record is [`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) — 35 binding rulings and a 67-row citation audit — and its own review was `ship-with-fixes`, 0 blockers, 5 SHOULD-FIX, all five fixed in the record |
-| **2d-5** | The browser coordinator and the open-write-surface registry — seven steps, of which two touch components | 🔶 in progress — **step 1 of 7 is complete**, and its corrective tail is at 2d-5-1-C |
-| **2d-5-1** | The surface and conflict vocabulary — the widened `OpenWriteSurface` union, the two predicates, `ConflictSource`, the memos, the EN/ES origin lines | ✅ complete (2026-09-04), risk **high**, worker **opus**. Review `ship-with-fixes`, **0 blockers**, 4 SHOULD-FIX — two fixed in the record, two carried to **2d-5-1-A** because they name source files and this phase's one review invocation was spent (`CLAUDE.md` §7.4). Notes `docs/decisions/2d-5-1-notes.md`; review `docs/reviews/phase-2d-5-1.md` |
-| **2d-5-1-A** | 2d-5-1's corrective phase — the two source findings its review left unreviewed | ✅ complete (2026-09-04), risk **routine**, worker **opus**. Both fixed: the `coordinator()` recorder now models production (`closedByReplacementOf`), and `targetingSurfaceFor` prefers an exact document match. Review `ship-with-fixes`, **0 blockers**, 3 SHOULD-FIX — **all three false claims in a comment**, all three fixed. Notes `docs/decisions/2d-5-1-A-notes.md`; review `docs/reviews/phase-2d-5-1-A.md` |
-| **2d-5-1-B** | 2d-5-1-A's corrective phase — the round its three comment corrections commissioned | ✅ complete (2026-09-04), risk **routine**, worker **opus** (the reviewer; no phase worker). Review **`ship`**, **0 blockers, 0 SHOULD-FIX**, 1 Low — **all three corrections re-derived and found true**, including an empirical check that deleting `creating = false` changes the vitest result by zero tests. The Low is a false sentence in the inline comment 2d-5-1-A's *source* fix brought with it; the orchestrator's sweep found a **second** defect in that same comment — the `creatorEligible` gate dropped again, one instance below the docblock where correction 2 had just restored it — and fixed both. Notes `docs/decisions/2d-5-1-B-notes.md`; review `docs/reviews/phase-2d-5-1-B.md` |
-| **2d-5-1-C** | 2d-5-1-B's corrective phase — the round its one comment fix commissioned | 🔶 **the next action**; scoped to one comment in `src/lib/browser/restore.ts` and nothing else |
+| **2d-5** | The browser coordinator and the open-write-surface registry — seven steps, of which two touch components | 🔶 in progress — **step 1 of 7 is complete and CLOSED**, tail and all; **2d-5-2 is next** |
+| **2d-5-1** and its three corrective phases (**A, B, C**) | The surface and conflict vocabulary — the widened `OpenWriteSurface` union, the two predicates, `ConflictSource`, the memos, the EN/ES origin lines — then three review rounds over it, of which B and C were about comment text | ✅ **complete and CLOSED at 2d-5-1-C (2026-09-04)**, after a **four**-phase tail — the **third** this project has ended **by rule** rather than by an owner ruling (`CLAUDE.md` §7.2). Round C found nothing, so its fix changed no source file and §7.1 commissioned nothing. Per-phase scopes, verdicts and dispositions are in [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"The 2d-5-1 corrective chain"*; the notes are `docs/decisions/2d-5-1{,-A,-B,-C}-notes.md` |
 | **2d-6 … 2d-8** | The remaining three steps of the 2d consult's eight | ⬜️ not started |
 | **2d** | External change reconciliation — plan §6.5 | 🔶 in progress |
 | **3–5** | Validation, packaging, hardening | ⬜️ not started |
@@ -215,52 +214,43 @@ Phase 0 substrate reads the archive section as part of this table.
 
 ## Next action
 
-### Phase 2d-5-1-B is COMPLETE and its round found the three corrections true. The next action is
-### **Phase 2d-5-1-C** — the round 2d-5-1-B's own one-comment fix commissioned, and nothing else.
+### Phase 2d-5-1 is COMPLETE and CLOSED, tail and all — 2d-5-1 → A → B → C, ended **by rule** at
+### round C. The next action is **Phase 2d-5-2 — the exhaustive live registry**.
 
-#### What 2d-5-1-C is
+#### How 2d-5-1 closed, so nobody reopens it
 
-**A review of one fix round, scoped to one comment in one source file.** 2d-5-1-B's round returned
-**0 blockers and 0 should-fix**; its single **Low** named a false sentence in the inline comment that
-2d-5-1-A's *source* fix had brought with it, at `src/lib/browser/restore.ts`. The orchestrator
-re-derived it, confirmed it, **swept for narrower instances as `CLAUDE.md` requires — and found a
-second defect in the same comment that the round had not reported** — and rewrote the comment to
-answer both.
+Round C returned **ship, 0 blockers, 0 should-fix, 0 Low**, having derived all four claims of the
+comment under review true — three of them by steps the comment's author had not written down. Its fix
+round therefore changed **no source file**, `CLAUDE.md` §7.1 commissioned nothing, and §7.2 closed the
+step. **The third tail this project has ended by rule**, after 2d-4a's at round 13 (`811d180`) and
+2d-4b's at round 8 (`21cbef8`).
 
-The comment is now `restore.ts:608-617`, and it makes four checkable claims about `targetingSurfaceFor`:
+**The closure is a fact about a diff, never about thoroughness**, so it discharged no coverage bound:
+the items under *"Where it is thin"* in `docs/decisions/2d-5-1-C-notes.md` §6 survive it, and two of
+them are 2d-5-2's.
 
-1. what the variable holds is gated on `eligibility === 'creatorEligible'` (the gate the old sentence
-   dropped — the identical omission correction 2 had just repaired in the docblock four lines above,
-   which is why the sweep mattered);
-2. when that gate does not hold, nothing is ever kept and a file no open surface names is answered
-   `null`, however many such creators the list holds;
-3. the read **inside the loop** (`:623`) is a first-wins guard;
-4. the read **at the return** (`:638`) is the preference, and only that one waits for the whole list —
-   an exact match returns from inside the loop at `:629`.
+#### What 2d-5-2 is
 
-**What 2d-5-1-C should actually do.** Check those four claims against the function, and check that the
-new sentence did not introduce a fifth claim that is false — the shape this tail keeps producing. The
-phrasing deliberately avoids saying *how often* either read happens, because the loop read sits behind
-`&&` and does not run at all when the gate fails; a reviewer should confirm that no frequency claim
-crept back in. `docs/decisions/2d-5-1-B-notes.md` §3 is the record.
+**The coordinator-owned keyed registry with a register/unregister lease**, and the exact
+`OpenWriteSurfaceKind`-keyed binding object in `DetailPane` that makes **omitting a declared kind a
+compile error in one file**; `MatchCreator` reports its chosen destination upward.
+`docs/decisions/2d-5-split-notes.md` §"2d-5-2 — the exhaustive live registry" is the spec, and the
+consult `docs/reviews/phase-2d-5-design.md` binds over it wherever they differ.
 
-**Why a whole phase for one comment.** `CLAUDE.md` §7.1: a fix round that changed at least one source
-file is owed a round, **the unit is the file and not the line**, and a comment-only change to a source
-file counts — deliberately, so nobody argues about which comment was load-bearing, and several of this
-project's contracts live in comments. 2d-5-1-B's one review invocation was spent on round B, and §7.4
-says a source fix a cap leaves unreviewed is carried by a corrective phase rather than shipped under a
-phase called complete.
+**Evidence it owes:** mounted evidence for **all seven** kinds, the creator's unknown-to-known
+transition, and restore's unchanged behaviour — **plus a narrow window regression reading, which may
+not claim real watcher delivery** (the split's §7 item 7 draws that line). **Components: yes**, but
+registry plumbing only: no new watcher UI.
 
-**Acceptance for 2d-5-1-C:** its review taken and dispositioned, every finding re-derived before being
-accepted; any fix it prompts made; the four gates re-measured on the resulting tree.
+**Two things 2d-5-2 inherits as work, both named below in full.** The `invalidateEverySurface`
+coverage gap is the first — this step already owns `DetailPane` and already owes it mounted evidence,
+which is why the gap belongs here and not in a round. The five unreachable literals of
+`openWriteSurfaces()` are the second: 2d-5-2's window reading is the **first reading of the new
+shape**.
 
-**How this ends, and when to stop calling it a round.** If 2d-5-1-C's fix changes no source file, §7.1
-commissions nothing and the tail ends there by rule — the shape `811d180` and `21cbef8` are the only
-two commits in this project's history to have reached. **But if round C returns another
-source-changing finding in this same comment, that is the point to hold the step open and mark it
-`BLOCKED` under §7.2**, naming the comment as the defect that keeps coming back, rather than spelling
-it "one more round". The tail is already four phases long over a step whose subject is two files.
-`2d-5-1-B-notes.md` §6 carries the argument.
+**Risk class: high.** It touches components, it introduces a compile-time exhaustiveness mechanism
+whose whole value is that it fails loudly in one file, and it owes a window reading — and a green
+suite is not a screen.
 
 #### One actionable item 2d-5-2 inherits, and it is not a blocker
 
@@ -277,7 +267,7 @@ was read against the model at 2d-5-1-A — so `CLAUDE.md` §7.3 does not hold a 
 **2d-5-2 is where it belongs**, because that step already owns `DetailPane` and already owes it
 mounted evidence. `2d-5-1-A-notes.md` §5 item 1 and `2d-5-1-B-notes.md` §2 are the record.
 
-#### What 2d-5-1, 2d-5-1-A and 2d-5-1-B shipped, so 2d-5-2 does not re-derive it
+#### What the whole of 2d-5-1 shipped, so 2d-5-2 does not re-derive it
 
 `src/lib/browser/restore.ts` holds the widened single `OpenWriteSurface` union (the consult's
 declaration, with `WriteSurfaceTarget` and `WriteSurfaceDocumentTarget` named), `competingSurfaceFor`
@@ -299,6 +289,15 @@ is narrower than it first looked**: that function has exactly one caller, `:966`
 `{:else if restoring !== null}` arm at `:947` of the chain beginning at `:844`, so **five of the six
 literals cannot execute at all** — in production or in any test. 2d-5-2's narrow window regression
 reading is the first reading of the new shape and inherits those five.
+
+**One property of `targetingSurfaceFor` that 2d-5-2 could make live.** Its first-wins guard
+(`restore.ts:623`) is **behaviourally inert today**: only the `matchCreator` arm of `OpenWriteSurface`
+carries a `WriteSurfaceTarget` (`:423-435`), so a destination-less surface is always a `matchCreator`
+and the variable can only ever hold that one string. The comment there claims only what is true — that
+the guard keeps the earlier entry — and was deliberately **not** rewritten to say more, because that
+would have touched source and commissioned a fourth corrective phase to correct nothing false. **Give
+a second kind a `WriteSurfaceTarget` and the guard stops being inert on its own.**
+`2d-5-1-C-notes.md` §3 is the record.
 
 #### The rest of the split, so a step is not invented
 
@@ -464,18 +463,19 @@ all of it is in `git log`._
 | **2d-5-1-A — the two source fixes, plus the three comment corrections its review found; 2d-5-1-B OWED** | **`1ff4f34`** | ✅ pushed to `origin/main` |
 | Checkpoint maintenance — the 37 closed 2d-4a and 2d-4b git-state rows archived (two files, both on §7's closed list; commissions nothing) | `d1d9d13` | ✅ pushed to `origin/main` |
 | **2d-5-1-B — round B (`ship`, 0 blockers, 0 should-fix, 1 Low) and its fix; 2d-5-1-C OWED** | **`1d623dc`** | ✅ pushed to `origin/main` |
+| 2d-5-1-B — the SHA and push record | `3832f39` | ✅ pushed to `origin/main` |
 
-**What commissioned 2d-5-1-B was the source half of `1ff4f34` — three comment corrections in two
-files.** Under `CLAUDE.md` §7.1 the unit is the file and a comment-only change to a source file counts,
-so the round was owed however small the diff. It ran, and **found all three corrections true**.
+**What commissioned each round of this tail, and what ended it.** `1ff4f34`'s source half — three
+comment corrections in two files — commissioned **2d-5-1-B**, which found all three true. `1d623dc`'s
+source half — one comment in `restore.ts` — commissioned **2d-5-1-C**, which found nothing. Under
+`CLAUDE.md` §7.1 the unit is the file and a comment-only change to a source file counts, so each round
+was owed however small the diff.
 
-**What commissions 2d-5-1-C is the source half of 2d-5-1-B's own commit, and it is one comment in one
-file** — `src/lib/browser/restore.ts:608-617`. Round B returned 0 blockers and 0 should-fix; its one
-Low, plus a second defect the orchestrator's sweep found in that same comment, were fixed here. The
-other files that commit touches — `PROGRESS.md`, `docs/decisions/2d-5-1-B-notes.md` and
-`docs/reviews/phase-2d-5-1-B.md` — are all on §7's closed list and commission nothing.
+**2d-5-1-C's commit changes no source file at all** — `docs/reviews/phase-2d-5-1-C.md`,
+`docs/decisions/2d-5-1-C-notes.md` and this file, every one of them on §7's closed list — **so it
+commissions nothing, and that is what ends the tail.** Four phases, 2d-5-1 → A → B → C: three fixes
+bought a round each and the fourth bought nothing. Nobody decided that, and nobody had to.
 
 **Two commits in this project’s history have ended a review tail by changing no source file** —
-`811d180` (2d-4a-H, round 13) and `21cbef8` (2d-4b-H, round 8). **2d-5-1-B did not reach it** — its fix
-touched `restore.ts` — so 2d-5-1-C is where the shape is next available. The archived section above
-carries the full argument for why nobody had to decide it.
+`811d180` (2d-4a-H, round 13), `21cbef8` (2d-4b-H, round 8) and now **2d-5-1-C's**. The archived
+section above carries the full argument for the first two, and it is the same argument.
