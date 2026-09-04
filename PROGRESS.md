@@ -22,7 +22,7 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, measured on the finished file rather than predicted before it:**
-**643 lines and 77,637 bytes** — 11.8 KiB over the 64 KiB soft bound, and well past the 400-line one.
+**643 lines and 77,655 bytes** — 11.8 KiB over the 64 KiB soft bound, and well past the 400-line one.
 **It is over soft and the figure is the honest one.**
 
 **The archive-on-state rule was exercised at 2d-5-2a-C rather than merely restated.** The 2d-5-2a
@@ -592,7 +592,7 @@ all of it is in `git log`._
 | **2d-5-2a-A — round 1's three fixes (the stored surface is now a frozen copy the registry builds), plus 2d-5-2a's SHA record; review 2 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-B OWED** | **`9f32cc5`** | ✅ pushed to `origin/main` |
 | **2d-5-2a-B — round 2's three fixes, every one a comment or a record line and **no executable line anywhere**; review 3 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-C OWED** | **`52ff829`** | ✅ pushed to `origin/main` |
 | _2d-5-2a-B — the SHA and push record_ | `5ec011e` | ✅ pushed to `origin/main` |
-| **2d-5-2a-C — round 3's three fixes and the chain archived; review 4 `ship-with-fixes`, 0 blockers, 2 SHOULD-FIX **both record-only**, both fixed in this commit. The 2d-5-2a tail CLOSES here, and 2d-5-2a with it** | **`PENDING`** | _pending_ |
+| **2d-5-2a-C — round 3's three fixes and the chain archived; review 4 `ship-with-fixes`, 0 blockers, 2 SHOULD-FIX **both record-only**, both fixed in this commit. The 2d-5-2a tail CLOSES here, and 2d-5-2a with it** | **`2702702`** | ✅ pushed to `origin/main` |
 
 **What commissioned each round of this tail, and what ended it.** `1ff4f34`'s source half — three
 comment corrections in two files — commissioned **2d-5-1-B**, which found all three true. `1d623dc`'s
