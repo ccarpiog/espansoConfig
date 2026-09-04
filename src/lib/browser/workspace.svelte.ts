@@ -1679,9 +1679,26 @@ export function createBrowserState(
   // component owns its own registration and unregisters through its lease when it
   // closes, so clearing here would make a still-open surface invisible while its
   // component went on holding an inert lease. That is the unsafe direction —
-  // "no surface is open" is exactly the answer that permits a silent reload — and
-  // the safe one costs nothing, because a workspace that has really been replaced
-  // unmounts the surfaces whose hosts then unregister.
+  // "no surface is open" is exactly the answer that permits a silent reload — so
+  // the direction taken here is the safe one.
+  //
+  // **It is not free, and what it costs is named rather than glossed.** `open()`
+  // clears `projectionGenerations` below because the identities of the documents it
+  // holds are *reallocated* by the load it runs, and a registration that survives an
+  // `open()` therefore names a `DocumentId` that now denotes a **different file**:
+  // `competingSurfaceFor` would refuse a restore of a file nobody has open, and
+  // `targetingSurfaceFor` would attribute that file to a surface that is not about
+  // it. Both are refusals rather than permissions, so a write is still safe; the
+  // price is a false refusal over an unrelated file until that host unregisters.
+  // Nothing enforces that it ever does. The expectation is that a workspace which
+  // has really been replaced unmounts its surfaces, whose hosts then unregister —
+  // an expectation, not a guarantee, and 2d-5-2b's mounted evidence is where
+  // disposal is established.
+  //
+  // **Inert at 2d-5-2a and live at 2d-5-2b**: nothing registers yet, so today the
+  // registry is empty across an `open()` by construction. The caller that would have
+  // to change to do better is a component, which is why the decision belongs to the
+  // step that writes components rather than here.
   const writeSurfaces = createWriteSurfaceRegistry();
 
   /**

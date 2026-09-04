@@ -16,6 +16,13 @@
  * that a reported destination changes their answers, which is the join between the
  * two steps and is the thing neither module's own suite can see.
  *
+ * **Three suites here are Phase 2d-5-2a-A's**, and each pins a sentence rather than a
+ * behaviour nobody could have written down: that the registry answers its **own**
+ * copy of a surface, so a host mutating what it registered reaches nothing and the
+ * generation stays a true guard; that an entry is keyed by the kind that was read
+ * once, so the key and the stored `surface.kind` cannot disagree; and that a pairing
+ * `OpenWriteSurface` cannot represent is refused rather than coerced.
+ *
  * **What no case here establishes**, in the same breath as what they do. Nothing
  * here proves a component registers, unregisters, or reports its destination — a
  * model test drives values and never markup, so that is 2d-5-2b's mounted evidence
@@ -33,7 +40,8 @@ import {
   competingSurfaceFor,
   targetingSurfaceFor,
   type OpenWriteSurface,
-  type OpenWriteSurfaceKind
+  type OpenWriteSurfaceKind,
+  type WriteSurfaceDocumentTarget
 } from './restore';
 import {
   createWriteSurfaceRegistry,
@@ -104,6 +112,30 @@ function transition(): WriteSurfaceTransition {
 function kindsOf(registry: WriteSurfaceRegistry): readonly OpenWriteSurfaceKind[] {
   return registry.openWriteSurfaces().map((surface) => surface.kind);
 } // End of function kindsOf()
+
+/** One surface as the host that handed it over could still write to it. */
+interface RetainedSurface {
+  /** The discriminant, writable here because `readonly` is a compile-time claim. */
+  kind: OpenWriteSurfaceKind;
+  /** The target object itself, which is what a shallow copy would still share. */
+  target: { kind: 'unknown' | 'document'; document?: DocumentId };
+}
+
+/**
+ * The same object, typed as the host that registered it still holds it.
+ *
+ * **No cast, and that is the honest part.** `OpenWriteSurface` is `readonly`
+ * throughout, and a `readonly` property is assignable to a mutable one — so this
+ * function is a plain `return`, and what it demonstrates is exactly `CLAUDE.md`'s
+ * sentence that `readonly` freezes nothing at run time. A host in untyped land, or
+ * a component holding its own literal, writes to its surface exactly like this.
+ *
+ * @param surface - The surface a case registered, or one it was answered.
+ * @returns The same object, mutable.
+ */
+function retained(surface: OpenWriteSurface): RetainedSurface {
+  return surface;
+} // End of function retained()
 
 describe('registering a surface', () => {
   it('answers it, for every one of the seven kinds', () => {
@@ -309,6 +341,26 @@ describe('the registry generation', () => {
     expect(registry.generation()).toBe(generation);
   });
 
+  it('does not move when a host mutates the surface it registered', () => {
+    // The load-bearing direction of consult Q5's guard: a coordinator that captured
+    // this counter and rechecks it unmoved is entitled to say *no registry operation
+    // happened*, and that is a claim about what a reader sees only because the
+    // registry answers its own copy. Before 2d-5-2a-A the doc claimed it either way.
+    const registry = createWriteSurfaceRegistry();
+    const surface = over('matchEditor', TARGET);
+    registry.registerWriteSurface(surface, transition());
+    const captured = registry.generation();
+    retained(surface).target.document = OTHER;
+    retained(surface).kind = 'restore';
+    expect(registry.generation()).toBe(captured);
+    // Written out rather than captured from the registry beforehand: a registry that
+    // stored the caller's object would answer *that* object in both reads, so a
+    // captured snapshot would agree with a mutated answer and pin nothing.
+    expect(registry.openWriteSurfaces()).toEqual([
+      { kind: 'matchEditor', target: { kind: 'document', document: TARGET } }
+    ]);
+  }); // End of the "does not move for a host's mutation" case
+
   it('moves twice for a registration and its removal, leaving the set as it was', () => {
     // The property the doc comment claims: a moved generation does not imply the
     // set differs from the capture.
@@ -323,22 +375,99 @@ describe('the registry generation', () => {
   }); // End of the "moves twice, set unchanged" case
 }); // End of the "generation" suite
 
+describe('the copy the registry keeps', () => {
+  it('answers its own value, not the object a host retained', () => {
+    const registry = createWriteSurfaceRegistry();
+    const surface = over('matchEditor', TARGET);
+    registry.registerWriteSurface(surface, transition());
+    // Everything a host can still do to what it handed over: the target's file, the
+    // target's own arm, and the discriminant the entry was keyed by.
+    retained(surface).target.document = OTHER;
+    retained(surface).target.kind = 'unknown';
+    retained(surface).kind = 'restore';
+    expect(registry.openWriteSurfaces()).toEqual([
+      { kind: 'matchEditor', target: { kind: 'document', document: TARGET } }
+    ]);
+    // And the two predicates, which are what actually consumes the answer: the
+    // restore of `TARGET` is still refused, and `OTHER` is still nobody's.
+    expect(competingSurfaceFor(TARGET, registry.openWriteSurfaces())).toBe('matchEditor');
+    expect(competingSurfaceFor(OTHER, registry.openWriteSurfaces())).toBeNull();
+  }); // End of the "not the object a host retained" case
+
+  it('answers its own value, not the target reported through a lease', () => {
+    const registry = createWriteSurfaceRegistry();
+    const lease = registry.registerWriteSurface(UNKNOWN_CREATOR, transition());
+    const reported = { kind: 'document' as const, document: TARGET };
+    expect(lease.replaceTarget(reported)).toBe('replaced');
+    reported.document = OTHER;
+    expect(registry.openWriteSurfaces()).toEqual([
+      { kind: 'matchCreator', target: { kind: 'document', document: TARGET } }
+    ]);
+  }); // End of the "not the target reported through a lease" case
+
+  it('freezes what it answers, so a consumer cannot corrupt the live set', () => {
+    const registry = createWriteSurfaceRegistry();
+    registry.registerWriteSurface(UNKNOWN_CREATOR, transition());
+    const answered = registry.openWriteSurfaces();
+    expect(answered).toHaveLength(1);
+    for (const surface of answered) {
+      expect(Object.isFrozen(surface)).toBe(true);
+      // `Object.freeze` is shallow, so the target is frozen separately or it is the
+      // hole the copy left open.
+      expect(Object.isFrozen(surface.target)).toBe(true);
+      // Module code is strict, so a consumer that casts `readonly` away gets a
+      // `TypeError` rather than a silently corrupted registry.
+      expect(() => {
+        retained(surface).kind = 'restore';
+      }).toThrow(TypeError);
+    } // End of the loop over the answered surfaces
+    expect(kindsOf(registry)).toEqual(['matchCreator']);
+  }); // End of the "freezes what it answers" case
+
+  it('refuses a pairing the union cannot represent, and changes nothing', () => {
+    const registry = createWriteSurfaceRegistry();
+    registry.registerWriteSurface(over('rawEditor', TARGET), transition());
+    const generation = registry.generation();
+    // Only `matchCreator` may name no file. Reaching this takes a caller that has
+    // defeated the compiler, which is what the cast stands for.
+    const unrepresentable = {
+      kind: 'matchEditor',
+      target: { kind: 'unknown' }
+    } as unknown as OpenWriteSurface;
+    expect(() => registry.registerWriteSurface(unrepresentable, transition())).toThrow(TypeError);
+    // And a target arm that is neither of the two: the same problem by a different
+    // route, refused rather than coerced into whichever arm it looks closest to.
+    const neither = {
+      kind: 'matchCreator',
+      target: { kind: 'whatever' }
+    } as unknown as OpenWriteSurface;
+    expect(() => registry.registerWriteSurface(neither, transition())).toThrow(TypeError);
+    expect(kindsOf(registry)).toEqual(['rawEditor']);
+    expect(registry.generation()).toBe(generation);
+    expect(registry.transitionFor('matchEditor')).toBeNull();
+    expect(registry.transitionFor('matchCreator')).toBeNull();
+  }); // End of the "refuses an unrepresentable pairing" case
+}); // End of the "copy the registry keeps" suite
+
 describe('a caller-supplied accessor that re-enters', () => {
   /**
-   * A creator surface whose `kind` runs the given body on the given read.
+   * A creator surface whose `kind` read runs the given body, once.
    *
    * **`readonly` does not freeze anything at run time and a property read runs
-   * arbitrary code**, which is the hazard `CLAUDE.md` names and the two cases below
+   * arbitrary code**, which is the hazard `CLAUDE.md` names and the cases below
    * exercise. This helper is the smallest thing that produces it honestly: an
    * ordinary object that satisfies `OpenWriteSurface` and whose discriminant is an
    * accessor.
    *
-   * @param on - Which read of `kind` runs the body; the first read is 1.
+   * **Which read no longer needs naming, and that is 2d-5-2a-A's finding 3.** The
+   * registry reads `surface.kind` exactly once — at registration, before it takes a
+   * serial — and never again, so this body runs on that read or on none.
+   *
    * @param body - What that read does before answering.
    * @returns The surface.
    */
-  function creatorReading(on: number, body: () => void): OpenWriteSurface {
-    let reads = 0;
+  function creatorRegistering(body: () => void): OpenWriteSurface {
+    let read = false;
     return {
       /**
        * The discriminant, and the re-entry.
@@ -346,25 +475,67 @@ describe('a caller-supplied accessor that re-enters', () => {
        * @returns The kind, always.
        */
       get kind(): 'matchCreator' {
-        reads += 1;
-        if (reads === on) {
+        if (!read) {
+          read = true;
           body();
         }
         return 'matchCreator';
       }, // End of the kind accessor
       target: { kind: 'unknown' }
     };
-  } // End of function creatorReading()
+  } // End of function creatorRegistering()
 
-  it('refuses a replacement whose own read let a newer registration in', () => {
+  /**
+   * A non-creator surface whose `kind` answers differently after the first read.
+   *
+   * **The inconsistent accessor finding 3 named**, on the path the older suite could
+   * not reach: the creator arm short-circuited, so only a non-creator kind exercises
+   * a re-read that could disagree. It satisfies `OpenWriteSurface` without a cast —
+   * its declared type is the non-creator arm's discriminant, and both values it
+   * answers are in it.
+   *
+   * @param first - The kind the first read answers.
+   * @param later - The kind every read after the first answers.
+   * @returns The surface, over `TARGET`.
+   */
+  function kindDrifting(
+    first: Exclude<OpenWriteSurfaceKind, 'matchCreator'>,
+    later: Exclude<OpenWriteSurfaceKind, 'matchCreator'>
+  ): OpenWriteSurface {
+    let reads = 0;
+    return {
+      /**
+       * The discriminant, and the drift.
+       *
+       * @returns The first kind once, then the other one for ever.
+       */
+      get kind(): Exclude<OpenWriteSurfaceKind, 'matchCreator'> {
+        reads += 1;
+        return reads === 1 ? first : later;
+      }, // End of the kind accessor
+      target: { kind: 'document', document: TARGET }
+    };
+  } // End of function kindDrifting()
+
+  it('refuses a replacement whose own read of the file let a newer registration in', () => {
     const registry = createWriteSurfaceRegistry();
-    // The second read of `kind` is the one `withTarget` takes, inside
-    // `replaceTarget` and after its lease check.
-    const surface = creatorReading(2, () => {
-      registry.registerWriteSurface(over('matchCreator', OTHER), transition());
-    });
-    const lease = registry.registerWriteSurface(surface, transition());
-    expect(lease.replaceTarget({ kind: 'document', document: TARGET })).toBe('staleLease');
+    const lease = registry.registerWriteSurface(UNKNOWN_CREATOR, transition());
+    // The read `replaceTarget` takes is of the value it is handed, which is the
+    // caller's object exactly as a registered surface is — and it takes it *before*
+    // it checks the lease, so a re-entry is already done when the check runs.
+    const reported: WriteSurfaceDocumentTarget = {
+      kind: 'document',
+      /**
+       * The file, and the re-entry.
+       *
+       * @returns The file this lease is reporting.
+       */
+      get document(): DocumentId {
+        registry.registerWriteSurface(over('matchCreator', OTHER), transition());
+        return TARGET;
+      } // End of the document accessor
+    };
+    expect(lease.replaceTarget(reported)).toBe('staleLease');
     // The re-entrant registration is the live one, and this call wrote nothing over
     // it — neither its target nor its serial.
     expect(registry.openWriteSurfaces()).toEqual([
@@ -372,14 +543,31 @@ describe('a caller-supplied accessor that re-enters', () => {
     ]);
   }); // End of the "refuses a replacement" case
 
+  it('keys an entry by the kind it read, whatever a later read of that accessor answers', () => {
+    const registry = createWriteSurfaceRegistry();
+    // The shape finding 3 named: an accessor answering one kind to the registration
+    // and another to anything that reads it again. Nothing reads it again.
+    const surface = kindDrifting('matchEditor', 'restore');
+    const lease = registry.registerWriteSurface(surface, transition());
+    expect(lease.replaceTarget({ kind: 'document', document: OTHER })).toBe('replaced');
+    // Keyed `matchEditor`, and the stored surface says `matchEditor`: what the
+    // reader answers and what `transitionFor` is keyed by cannot come apart.
+    expect(registry.openWriteSurfaces()).toEqual([
+      { kind: 'matchEditor', target: { kind: 'document', document: OTHER } }
+    ]);
+    expect(registry.transitionFor('restore')).toBeNull();
+    lease();
+    expect(registry.openWriteSurfaces()).toEqual([]);
+  }); // End of the "keys an entry by the kind it read" case
+
   it('lets the registration that finished last win, whatever its accessor did', () => {
     const registry = createWriteSurfaceRegistry();
     // Collected rather than held in a `let`, so that reading it back is not a
     // narrowing question about a variable a callback assigned.
     const inner: UnregisterWriteSurface[] = [];
-    // The first read of `kind` is the one `registerWriteSurface` takes, before it
-    // has claimed a serial.
-    const surface = creatorReading(1, () => {
+    // The read of `kind` is the one `registerWriteSurface` takes, before it has
+    // claimed a serial.
+    const surface = creatorRegistering(() => {
       inner.push(registry.registerWriteSurface(over('matchCreator', OTHER), transition()));
     });
     registry.registerWriteSurface(surface, transition());

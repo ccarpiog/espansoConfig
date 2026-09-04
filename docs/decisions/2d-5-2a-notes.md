@@ -14,6 +14,15 @@ the parts this step answers.
 
 **Nothing under `crates/` or `src-tauri/` changed, and no `.svelte` file changed.**
 
+> **Corrected by Phase 2d-5-2a-A.** This step's one adversarial review
+> ([`docs/reviews/phase-2d-5-2a.md`](../reviews/phase-2d-5-2a.md)) returned three should-fix findings,
+> and [`2d-5-2a-A-notes.md`](2d-5-2a-A-notes.md) is the phase that applied them. Two of the three named
+> **this record**, so the sections they named carry correction blocks below: §3.5 and §7 item 4
+> (finding 1 — the generation claimed a guarantee the code did not give), §3.8 (finding 2 — *"the safe
+> one costs nothing"*), and §4, which describes two guards whose shape 2d-5-2a-A changed. **Every figure
+> in §6 and every line count in §1.1 is 2d-5-2a's own measurement of 2d-5-2a's tree** and is left as it
+> was written; 2d-5-2a-A's §4 measures the tree after the fixes.
+
 ---
 
 ## 1. What shipped
@@ -159,10 +168,28 @@ coordinator to capture before an await and recheck immediately before it install
 (`docs/reviews/phase-2d-5-design.md:157-163`), and its meaning is *this decision was made over a set
 nothing has touched*, which is deliberately stricter than *the set still looks the same*.
 
+> **Correction — Phase 2d-5-2a-A, review finding 1.** The last sentence above was **false as written
+> at 2d-5-2a**, and it is this project's worst defect class: a record claiming a guarantee the code did
+> not give. The counter moves for registry *operations* only, and at 2d-5-2a the registry stored the
+> caller's own object (§4's last paragraph, and §7 item 4), so a host mutating its registered surface's
+> `target` in place changed what `openWriteSurfaces()` answered **with the generation unmoved** — which
+> is exactly the case consult Q5's guard rests on, the *unmoved* one.
+>
+> **2d-5-2a-A made the sentence true rather than weakening it.** `registerWriteSurface` now reads the
+> caller's object once, in a fixed order, and stores a frozen copy it built itself, so nothing a caller
+> retains can change what a reader sees. An unmoved generation therefore means *no registry operation
+> happened between the capture and this decision*, and that is now a true statement about what a reader
+> sees. **What it still does not say**, in the same breath: nothing forces a host to register at all,
+> so an unmoved counter over an empty registry says nobody registered and not that no write surface is
+> open; and a `DocumentId` a stored surface names can be reallocated by `open()` with no registry
+> operation at all (§3.8's own correction), so the counter does not promise that a surface still names
+> the file it named.
+
 ### 3.6 The reader, its order, and the exhaustiveness that is not here
 
 `openWriteSurfaces()` answers a **fresh array each call**, holding the surface objects as they were
-registered, **in registration order, oldest first** — with the property that a registration displacing
+registered — *corrected by 2d-5-2a-A: it holds the registry's own frozen copies of them, never the
+caller's objects; see §3.5's correction* — **in registration order, oldest first** — with the property that a registration displacing
 a live entry of the same kind **keeps that entry's position** rather than moving to the end (`Map.set`
 over an existing key). That is stated in the doc comment because a predicate depends on it:
 `targetingSurfaceFor` says array order decides which kind it answers when two open surfaces name one
@@ -204,6 +231,21 @@ direction costs nothing, because a workspace that has really been replaced unmou
 hosts then unregister. **Nothing enforces that unmounting-and-unregistering**, which is why 2d-5-2b's
 mounted evidence is where disposal is established.
 
+> **Correction — Phase 2d-5-2a-A, review finding 2.** *"The safe direction costs nothing"* was false,
+> and the contradiction was 586 lines further down the same file it describes: `open()` clears
+> `projectionGenerations` because **the identities of the documents it holds are reallocated by the
+> load below it** (`workspace.svelte.ts:2269`). A registration that survives an `open()` therefore
+> names a `DocumentId` that now denotes a **different file**, and two things follow:
+> `competingSurfaceFor` refuses a restore of a file nobody has open, and `targetingSurfaceFor`
+> attributes that file to a surface that is not about it. Both are refusals rather than permissions, so
+> **a write is still safe** — the cost is a false refusal over an unrelated file, which is not nothing.
+>
+> **The decision itself stands and 2d-5-2a-A changed no behaviour**: `open()` still does not clear the
+> registry, because the caller that would have to change is a component and that is 2d-5-2b's. What
+> changed is the sentence, here and in the comment the finding named. The cost is **inert at 2d-5-2a**,
+> where nothing registers and the registry is empty across an `open()` by construction, and **live at
+> 2d-5-2b**, where hosts register.
+
 ---
 
 ## 4. Two re-entrancy guards nothing asked for, and why they are in
@@ -227,6 +269,28 @@ accessor:
 Both are exotic, and both are cheap. What they are **not** is a general defence: the surface value is
 still held as it was handed, so a caller that mutates the object it registered changes what the reader
 answers about it, and nothing in this module can see that.
+
+> **Correction — Phase 2d-5-2a-A, findings 1 and 3.** Both halves of this section describe code that no
+> longer exists, and the last paragraph repeats finding 1's false sentence.
+>
+> **Guard 1 is unchanged in reason and wider in reach.** `registerWriteSurface` still reads before it
+> takes a serial, for exactly the reason above, but it now reads *everything* the caller can be asked —
+> `kind`, `target`, that target's `kind`, and on the document arm its `document` — before the serial and
+> before the map is touched. So after the serial there is no caller-supplied read left in that path at
+> all.
+>
+> **Guard 2 is gone, and what replaced it is stronger.** `replaceTarget` no longer builds between two
+> lease checks; it reads the caller's `target.document` **first**, builds the registry's own value, and
+> only then checks the lease and writes — one synchronous block with nothing caller-supplied between
+> the check and the spend, which is the shape `CLAUDE.md` asks for rather than a second check after
+> one. A re-entry during that read is already done when the check runs, so the outcome is the same
+> `staleLease` the old ordering produced, and the suite's case still pins it — driven now from the
+> **reported target's** accessor, since `surface.kind` is no longer read twice. Keeping the second check
+> would have been a guard nothing could fire, documented as if it could.
+>
+> **The last paragraph is false as written.** A registered surface is now the registry's own frozen
+> copy, so a caller that mutates what it registered changes nothing a reader sees. What is still true is
+> the narrower sentence in §7 item 4's correction.
 
 ---
 
@@ -314,6 +378,21 @@ and it reads a diff. **No item names a correctness defect in a source file**, so
 4. **A registered surface object is held, not copied — *recorded only*.** `readonly` does not freeze at
    run time, so a caller that mutates what it registered changes what the reader answers. Copying would
    be shallow and would carry the same caveat one level down, so the module says what it does instead.
+
+   > **Correction — Phase 2d-5-2a-A, review finding 1.** This item recorded the hazard and **failed to
+   > connect it to consult Q5's guard**, which is why it was marked *recorded only* rather than treated
+   > as the defect it was: mutation-in-place is the one way the live set's *content* changes with the
+   > generation unmoved, and the guard is a recheck of exactly that unmoved case (§3.5's correction).
+   > The reasoning that a copy "would be shallow and carry the same caveat one level down" was the
+   > wrong conclusion drawn from a true premise — a shallow copy is indeed not enough, because `target`
+   > is an object, which is why the copy 2d-5-2a-A built goes one level down and freezes both objects.
+   > The registry now stores its own value and answers it, so the item is **closed, not carried**.
+   >
+   > **What replaces it, and it is narrower.** A copy freezes the `DocumentId` a surface names, never
+   > what that number denotes — `open()` reallocates document identities without any registry operation
+   > — so the registry can hold a perfectly immutable surface that is about a file which no longer
+   > exists under that identity. That is §3.8's correction, and it is *recorded only*: no consumer of it
+   > exists until 2d-5-2b.
 
 5. **`BrowserState.openWriteSurfaces()` and `restoreDocument`'s `surfaces` argument are two answers to
    one question — *actionable*, and not a defect.** They will disagree until 2d-5-2b routes the pane

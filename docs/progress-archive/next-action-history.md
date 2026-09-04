@@ -9687,3 +9687,113 @@ None is a correctness defect in source. Named so a later step does not spend a r
    when a file is *added* under the scanned roots and no author touches it. 2d-5-1's own record got its
    +27 breakdown wrong by inferring per-file figures from a total that summed correctly
    (`2d-5-1-notes.md` §5). **Re-derive a test count per file, on a pristine tree, never from the total.**
+
+
+---
+
+## The 2d-5-2a next action, archived 2026-09-04 at Phase 2d-5-2a-A
+
+**History, never an instruction.** This is what `PROGRESS.md` carried between 2d-5-2a's commit
+(`15ada19`) and 2d-5-2a-A's. Its account of the three-way split and of what 2d-5-2a shipped is
+still true; its *Next action* — 2d-5-2a-A — is done, and its transcription of round 1's three
+findings is the input 2d-5-2a-A answered.
+
+### Phase **2d-5-2 has been split three ways** by the orchestrator, and **2d-5-2a is complete**.
+### The next action is **Phase 2d-5-2a-A — the review round 2d-5-2a's three fixes are owed**.
+
+#### The split, and why it was taken
+
+`docs/decisions/2d-5-split-notes.md` and `docs/reviews/phase-2d-5-design.md` both describe 2d-5-2 as
+one step. **The orchestrator split it on 2026-09-04**, before any line of it was written, following
+this project's own 2c-5-4a/4b precedent — *"the coordinator wiring, with nothing drawn"*, then
+*"the screen and the phase's whole mounted evidence"*:
+
+- **2d-5-2a** — the coordinator-owned keyed registry as a value. **Components: none.** ✅ complete.
+- **2d-5-2b** — the exact `satisfies Record<OpenWriteSurfaceKind, …>` assembly in `DetailPane`,
+  `MatchCreator` reporting its chosen destination upward, and **the phase's whole mounted evidence**:
+  all seven kinds, the creator's unknown→known transition, restore's unchanged behaviour, and the
+  `invalidateEverySurface` coverage gap. **Components: yes.**
+- **2d-5-2c** — the narrow window regression reading, which **may not claim real watcher delivery**
+  (`2d-5-split-notes.md` §7 item 7).
+
+**The third piece is a separate step because the instrument no longer exists.** Every prior window
+reading ran out of `/private/tmp/espansoconfig-harness-2c-5/`, which 2c-5-7 removed and which is not
+on disk today (checked). Rebuilding it was a whole sub-phase twice already (2c-5-5a, 2c-5-5b), so
+folding it into a step that also writes components would have made one worker own two unrelated
+jobs. **A window reading is still owed and is not discharged**; 2d-5-2c is where.
+
+Nothing about the split changes what 2d-5-2 delivers. The consult still binds; the three steps'
+deliverables union to exactly the one step it specified.
+
+#### What 2d-5-2a shipped
+
+`src/lib/browser/writeSurfaceRegistry.ts` — **new, plain TypeScript, no Svelte runes**, which settles
+`2d-5-split-notes.md` §6 item 2 (*"the consult does not say where the coordinator lives"*) for this
+step: a module beside `workspace.svelte.ts` rather than inside it, because that file is already
+3 588 lines and 2d-5-3, 2d-5-4 and 2d-5-5 each add more coordinator machinery to it, and because a
+plain-TS registry is model-testable without mounting anything.
+
+It holds one live entry per `OpenWriteSurfaceKind` in a `Map`, and `registerWriteSurface(surface,
+transition)` answers the consult's `UnregisterWriteSurface` as a **callable lease** carrying
+`replaceTarget(WriteSurfaceDocumentTarget) → 'replaced' | 'staleLease'`. Unregister is idempotent and
+**inert once displaced**; `openWriteSurfaces()` snapshots in registration order, and a displacing
+registration keeps its predecessor's position; `generation()` moves for all three mutators and for no
+no-op; `transitionFor(kind)` is the only reader of the stored transition, **which nothing invokes** —
+2d-5-4/2d-5-5 give it a caller. `BrowserState` owns one instance and exposes `registerWriteSurface`,
+`openWriteSurfaces()` and `writeSurfaceGeneration()`.
+
+**Two things it deliberately did not do**, both because the caller that would change is a component:
+`restoreDocument` was **not** rerouted through the registry, and `open()` does **not** clear it. Both
+are 2d-5-2b's. And **no `satisfies Record<OpenWriteSurfaceKind, …>` assembly exists anywhere** — the
+consult puts exhaustiveness in the composition file, and the composition file is a component.
+
+The record is [`docs/decisions/2d-5-2a-notes.md`](docs/decisions/2d-5-2a-notes.md); the review is
+[`docs/reviews/phase-2d-5-2a.md`](docs/reviews/phase-2d-5-2a.md).
+
+#### What 2d-5-2a-A is, and why it exists
+
+**Round 1 returned `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX (one of them Low). All three are
+carried to 2d-5-2a-A rather than fixed inside 2d-5-2a**, so that what was committed is exactly what
+was reviewed. 2d-5-2a-A applies them and takes its own review — which is what discharges the round
+`CLAUDE.md` §7.1 commissions for a source-changing fix. §7.4 is why it is a phase and not a second
+round: the autoclaude workflow caps a phase at its own review budget, that cap outranks §7, and the
+debt it leaves is **carried as a corrective phase, never written off**.
+
+**The three findings, in the reviewer's order:**
+
+1. **`writeSurfaceRegistry.ts:245-249` — the generation's doc claims a guarantee the code does not
+   give.** It says an unmoved counter means *a set nothing has touched*, but the counter moves only
+   for registry operations, and the same file's header (`:51-55`) says surface values are **held by
+   reference**. A host mutating its own registered surface's `target` in place therefore changes what
+   `openWriteSurfaces()` answers **with the generation unmoved** — and the consult's Q5 guard
+   (`phase-2d-5-design.md:157-163`) rests on exactly that unmoved case.
+   `docs/decisions/2d-5-2a-notes.md` §3.5 repeats the sentence verbatim, and §7 item 4 records the
+   mutation hazard **without connecting it to the guard**. This is this project's **named worst
+   defect class**. The preferred fix makes the sentence true rather than weakening it: store a
+   normalized copy of the surface (`kind`, then `target.kind`, then `target.document`, read in a
+   defined order) so the registry's answer cannot move without the generation moving.
+2. **`workspace.svelte.ts:1683` — "the safe one costs nothing" is false.** The same file at `:2269`
+   says *"Their identities are reallocated by the load below"*, so a registration surviving `open()`
+   names a `DocumentId` that now denotes a **different file**: `competingSurfaceFor` would refuse a
+   restore of a file nobody has open, and `targetingSurfaceFor` would attribute it to a surface that
+   is not about it. Fail-safe for writes, but **not free** — and neither that comment nor notes §3.8
+   names reallocation. **Inert at 2d-5-2a, live at 2d-5-2b**, which is what makes it 2d-5-2a-A's
+   rather than a later step's.
+3. **(Low) `writeSurfaceRegistry.ts:306-308` — `withTarget` reads `surface.kind` a second time.** The
+   accessor test at `writeSurfaceRegistry.test.ts:359` does not exercise it, because the creator path
+   short-circuits. An inconsistent accessor yields an entry keyed K whose `surface.kind` is not K,
+   making `transitionFor` and `openWriteSurfaces` disagree. The fix is to pass the captured `kind`
+   in rather than re-read it — the same discipline finding 1's fix needs.
+
+**Findings 1 and 3 are one discipline seen twice:** never re-read a caller-supplied property after
+you have acted on it. Fix them together.
+
+#### What the review did not verify, so 2d-5-2a-A does not assume it did
+
+The reviewer re-ran only `npx vitest run src/lib/browser/writeSurfaceRegistry.test.ts` (22 passed) and
+`npm run check` (438 files, 0/0). **`npm test`'s total, `npm run build`'s module count and both
+bundle oracles were not re-run inside its budget** — the orchestrator had run all four itself, and
+those runs are the record below. `cargo test`, clippy, fmt and `cargo tree` were not re-run by the
+reviewer either; no Rust file changed. **And no mounted evidence or window reading exists for this
+step by design**, so every claim about a host registering, unregistering on unmount, or reporting a
+destination is **unverifiable until 2d-5-2b**.

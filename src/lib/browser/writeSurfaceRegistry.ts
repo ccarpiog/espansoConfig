@@ -48,18 +48,33 @@
  *   write surface and never calls {@link WriteSurfaceRegistry.registerWriteSurface}
  *   is invisible to every consumer, and an empty reader answer claims there are
  *   none — `competingSurfaceFor`'s own stated limitation, inherited unchanged.
- * - **A registered surface value is held as it was handed.** `readonly` does not
- *   freeze at run time, so a caller that mutates the object it registered changes
- *   what {@link WriteSurfaceRegistry.openWriteSurfaces} answers about it;
- *   {@link UnregisterWriteSurface.replaceTarget} is the supported way to change a
- *   target and the only one this module can see.
+ * - **What a caller retains cannot change what the registry answers**, and that is
+ *   enforced rather than asked for. A registration reads the caller's object once,
+ *   in a fixed order, and builds the stored `OpenWriteSurface` itself — frozen,
+ *   member by member, from the values it read — so a host that goes on holding the
+ *   object it registered and mutates it changes nothing
+ *   {@link WriteSurfaceRegistry.openWriteSurfaces} answers and moves no generation.
+ *   {@link UnregisterWriteSurface.replaceTarget} is the only way to change a
+ *   registered target, which is what lets {@link WriteSurfaceRegistry.generation}
+ *   count every change to what a reader sees.
+ * - **What that copy does not force is that the values stay meaningful.** A
+ *   `DocumentId` is session-local and `open()` in `./workspace.svelte.ts`
+ *   reallocates the identities of the documents it reloads, so a registration that
+ *   survives a workspace replacement names a `DocumentId` that now denotes a
+ *   different file. Copying the value freezes the *number*, never what it denotes,
+ *   and no operation here moves for a reallocation.
+ * - **A pairing the union cannot represent is refused, not coerced**, and the
+ *   refusal is a thrown `TypeError`; {@link WriteSurfaceRegistry.registerWriteSurface}
+ *   says which pairing and why that answer.
  */
 
+import type { DocumentId } from '../ipc/types';
 import type { ExternalConflictObservation } from './conflictSource';
 import type {
   OpenWriteSurface,
   OpenWriteSurfaceKind,
-  WriteSurfaceDocumentTarget
+  WriteSurfaceDocumentTarget,
+  WriteSurfaceTarget
 } from './restore';
 
 /**
@@ -166,6 +181,16 @@ export interface UnregisterWriteSurface {
    * unregisters and registers again — a re-key, where by design the newest
    * registration wins.
    *
+   * **What it reads, and what it never reads.** It reads `document` off the value
+   * it is handed, once, and builds the stored target itself; the stored surface is
+   * the registry's own frozen copy, so mutating the target you reported afterwards
+   * changes nothing here. It does **not** read that value's own `kind` — the
+   * parameter type *is* the document arm and this method means *this is the file*,
+   * so the registry writes `'document'` rather than trusting a discriminant it
+   * would have to read. And it does not re-read the kind of the surface that was
+   * registered: the entry keeps the kind this lease was minted for, which is what
+   * makes the key and the stored `surface.kind` incapable of disagreeing.
+   *
    * @param target - The file this surface would write, as the document arm.
    * @returns Whether the live entry was changed, or that this lease is stale.
    */
@@ -195,6 +220,29 @@ export interface WriteSurfaceRegistry {
    * it; a registration of a kind that already has a live entry **displaces** that
    * entry, and the displaced lease can neither remove nor re-target this one.
    *
+   * **The surface is copied, not kept.** Its properties are read exactly once
+   * each, in this order — `kind`, then `target`, then that target's `kind`, then,
+   * on the document arm, its `document` — and the stored value is built from what
+   * those reads answered and frozen. Every one of them happens **before** this call
+   * takes a serial or writes anything, so a read that re-enters this registry lands
+   * first and is displaced by this call rather than clobbering it, and once the
+   * serial is taken there is no caller-supplied read left in this path for anything
+   * to run inside.
+   *
+   * **A pairing `OpenWriteSurface` cannot represent is refused by throwing a
+   * `TypeError`.** A `kind` other than `matchCreator` read together with a
+   * `target.kind` of `'unknown'` is not a value of that union — nor is a
+   * `target.kind` that is neither arm — and reaching either takes a caller that has
+   * defeated the compiler: a cast, or an accessor whose answer differs from its
+   * declared type. The registry will not coerce it: inventing a
+   * document, storing something no consumer can narrow, and dropping the
+   * registration silently are each worse than a throw, and the last is the
+   * fail-unsafe one, since an invisible surface is exactly the answer that permits a
+   * silent reload. The throw happens before the serial is taken, so a refused
+   * registration leaves the registry exactly as it was and moves no generation. The
+   * message is a programmer's and nothing renders it, so it is not a string the
+   * i18n rule is about.
+   *
    * @param surface - The surface, exactly as a consumer of the registry will see
    *   it — the new-snippet form may name no file, every other kind names one.
    * @param transition - What this surface is told about an external observation of
@@ -212,8 +260,11 @@ export interface WriteSurfaceRegistry {
    *
    * **A fresh array each call, and it is a snapshot**: it does not track later
    * registrations, and nothing a caller does to it reaches the registry. The
-   * surface objects inside are the ones that were registered rather than copies,
-   * for the reason this module's header gives.
+   * surface objects inside are the registry's own frozen copies rather than the
+   * objects that were registered, so neither a host that kept what it handed over
+   * nor a consumer that casts away `readonly` on what it was handed here can change
+   * what a later call answers — the second is refused by the freeze, whose exact
+   * strength `ownedDocumentSurface` in this module states.
    *
    * **The order is the order the live entries were registered in, oldest first**,
    * with one property worth naming because a predicate depends on it: a
@@ -242,11 +293,21 @@ export interface WriteSurfaceRegistry {
    * is. It does **not** say *what* changed, does not say the change concerns any
    * particular document, and does **not** say the set differs from the capture now
    * — registering a surface and unregistering it moves this twice and leaves the
-   * set exactly as it was. It is the guard the consult's Q5 asks a coordinator to
-   * capture before an await and recheck immediately before it installs
-   * (`docs/reviews/phase-2d-5-design.md:157-163`); the recheck's meaning is *this
-   * decision was made over a set nothing has touched*, which is deliberately
-   * stricter than *the set still looks the same*.
+   * set exactly as it was.
+   *
+   * **What an unmoved generation implies, and what it does not.** It is the guard
+   * the consult's Q5 asks a coordinator to capture before an await and recheck
+   * immediately before it installs (`docs/reviews/phase-2d-5-design.md:157-163`),
+   * and unmoved it means *no registry operation happened between the capture and
+   * this decision* — which is a true statement about what a reader sees, because
+   * every surface this registry answers is its own frozen copy and the three
+   * operations counted here are the only ways one can change. It is not a statement
+   * that nothing relevant changed. **Nothing forces a host to register at all**, so
+   * an unmoved counter over an empty registry says that nobody registered and not
+   * that no write surface is open — `competingSurfaceFor`'s own limitation,
+   * inherited. And a `DocumentId` a stored surface names can be reallocated by
+   * `open()` in `./workspace.svelte.ts` with no registry operation at all, so this
+   * counter does not promise that a surface still names the file it named.
    *
    * @returns The current generation; zero for a registry nothing has registered
    *   with.
@@ -282,31 +343,83 @@ export interface WriteSurfaceRegistry {
 interface LiveRegistration {
   /** Which registration this is, within this registry. */
   readonly serial: number;
-  /** The surface as it now stands, including any reported target. */
+  /**
+   * This registry's own frozen copy of the surface, with any reported target.
+   *
+   * Never the object a caller handed over: it is built here from values already
+   * read, which is what makes an unmoved {@link WriteSurfaceRegistry.generation} a
+   * true claim about what a reader sees.
+   */
   readonly surface: OpenWriteSurface;
   /** What that surface is told about an external observation of its file. */
   readonly transition: WriteSurfaceTransition;
 }
 
 /**
- * The same surface with a different target, keeping the union's own shape.
+ * This registry's own copy of one surface, over one file.
  *
- * Written as a branch on the kind rather than a spread so that no cast is needed:
- * the `matchCreator` arm takes any {@link WriteSurfaceDocumentTarget} and so does
- * every other arm, and TypeScript checks each separately.
+ * **Built member by member from values already read, and frozen.** A spread of a
+ * caller's object would read whatever it holds at the moment of the spread and
+ * would still share `target`, which is an object of its own — so a host mutating
+ * `target.document` afterwards would change what the registry answers. Both objects
+ * are frozen because `Object.freeze` is shallow, and freezing at all is what stops a
+ * consumer that casts away `readonly` on a surface it was handed from corrupting the
+ * live set. **The refusal is what varies, never the protection**: that write throws
+ * a `TypeError` from strict-mode code, which is all of this project's, and fails
+ * silently from sloppy-mode code — the registry is unchanged either way.
  *
- * @param surface - The surface as it stands.
- * @param target - The file it is now about.
- * @returns A new surface value of the same kind, carrying that target.
+ * Written as a branch on the kind rather than one literal so that no cast is needed:
+ * TypeScript checks the `matchCreator` arm and the other arm separately, and neither
+ * is built from the other.
+ *
+ * @param kind - The kind, already read once by the caller.
+ * @param document - The file, already read once by the caller.
+ * @returns A frozen surface of that kind, over that file.
  */
-function withTarget(
-  surface: OpenWriteSurface,
-  target: WriteSurfaceDocumentTarget
-): OpenWriteSurface {
-  return surface.kind === 'matchCreator'
-    ? { kind: 'matchCreator', target }
-    : { kind: surface.kind, target };
-} // End of function withTarget()
+function ownedDocumentSurface(kind: OpenWriteSurfaceKind, document: DocumentId): OpenWriteSurface {
+  const target: WriteSurfaceDocumentTarget = Object.freeze({
+    kind: 'document' as const,
+    document
+  });
+  return Object.freeze(
+    kind === 'matchCreator' ? { kind: 'matchCreator' as const, target } : { kind, target }
+  );
+} // End of function ownedDocumentSurface()
+
+/**
+ * This registry's own copy of one surface, whatever its target arm.
+ *
+ * **One read of each caller-supplied property, in a stated order**: the target's
+ * `kind`, then — only on the document arm — its `document`. The surface's own `kind`
+ * is not read here at all; it is the value the caller of this function already read,
+ * so nothing can answer one kind to the key and another to the stored surface.
+ *
+ * **Exactly two pairings are representable, and anything else throws.** Any kind over
+ * the document arm is one; `matchCreator` over the unknown arm is the other. A kind
+ * other than `matchCreator` that names no file is the pairing the review named, and a
+ * discriminant that is *neither* arm is the same problem arriving by a different
+ * route — both are tested for positively, so neither is coerced into the arm it looks
+ * closest to. {@link WriteSurfaceRegistry.registerWriteSurface} carries the argument
+ * for throwing rather than dropping. Every caller builds before it mutates anything,
+ * so a throw here leaves the registry exactly as it was.
+ *
+ * @param kind - The kind, already read once by the caller.
+ * @param target - The caller's target, read here and not retained.
+ * @returns A frozen surface of that kind, over that target.
+ * @throws TypeError - When the kind and the target arm are not a representable pair.
+ */
+function ownedSurface(kind: OpenWriteSurfaceKind, target: WriteSurfaceTarget): OpenWriteSurface {
+  const targetKind = target.kind;
+  if (targetKind === 'document') {
+    return ownedDocumentSurface(kind, target.document);
+  }
+  if (targetKind === 'unknown' && kind === 'matchCreator') {
+    return Object.freeze({ kind, target: Object.freeze({ kind: 'unknown' as const }) });
+  }
+  throw new TypeError(
+    `writeSurfaceRegistry: a ${kind} surface cannot carry a target of kind '${targetKind}'`
+  );
+} // End of function ownedSurface()
 
 /**
  * Builds one empty registry.
@@ -332,10 +445,10 @@ export function createWriteSurfaceRegistry(): WriteSurfaceRegistry {
   /**
    * The registration this lease names, or `undefined` when it is stale.
    *
-   * **It answers the entry itself rather than a boolean**, so that a caller which
-   * has to act after reading something else can compare *the same object* again
-   * instead of asking a second yes/no question. `replaceTarget` below is the caller
-   * that needs it, and why is in its own comment.
+   * **It answers the entry itself rather than a boolean**, because the caller that
+   * acts on a live entry needs what the entry carries: `replaceTarget` below writes
+   * the entry's own transition back beside the new surface, so a boolean would make
+   * it ask the map a second time for a value it has already been given.
    *
    * **Nothing a caller supplied is read here**: the map, the captured `kind` and
    * `serial`, and the `serial` of this module's own entry object. So no getter and
@@ -355,17 +468,26 @@ export function createWriteSurfaceRegistry(): WriteSurfaceRegistry {
       surface: OpenWriteSurface,
       transition: WriteSurfaceTransition
     ): UnregisterWriteSurface {
-      // **The caller's object is read first, before the serial is taken.** `surface`
-      // is the caller's, so `surface.kind` may be an accessor that runs arbitrary
-      // code — including code that registers another surface of this very kind. Read
-      // first and every such registration takes a *lower* serial and lands before
-      // this one, which is the truth: this call finished last. Taking the serial
-      // first would let a re-entrant registration be silently clobbered by the older
-      // number.
+      // **Everything the caller can be asked is read here, before the serial is
+      // taken and before anything is written.** `surface` is the caller's, so
+      // `surface.kind`, `surface.target` and that target's own properties may each
+      // be an accessor running arbitrary code — including code that registers
+      // another surface of this very kind. Reading them all first has two
+      // consequences and both are the truth rather than a convenience. Any such
+      // re-entrant registration takes a *lower* serial and lands before this one,
+      // which is right: this call finished last, and taking the serial first would
+      // let the re-entrant registration be silently clobbered by the older number.
+      // And after the reads there is nothing caller-supplied left to read in this
+      // path, so no accessor can run between the serial and the `live.set`.
+      //
+      // `ownedSurface` throws on a pairing the union cannot represent, and it does
+      // so here — before the serial and before the map is touched — so a refused
+      // registration changes nothing at all.
       const kind = surface.kind;
+      const owned = ownedSurface(kind, surface.target);
       serials += 1;
       const serial = serials;
-      live.set(kind, { serial, surface, transition });
+      live.set(kind, { serial, surface: owned, transition });
       generation += 1;
 
       /**
@@ -396,19 +518,21 @@ export function createWriteSurfaceRegistry(): WriteSurfaceRegistry {
       const replaceTarget = (
         target: WriteSurfaceDocumentTarget
       ): WriteSurfaceTargetReplacement => {
+        // **The caller's value is read before the lease is checked, so that the
+        // check and the spend below have nothing between them.** `target.document`
+        // may be an accessor running arbitrary code — this project has shipped a
+        // check and a spend separated by exactly such a read twice — and anything
+        // it re-enters and does is therefore *already done* when `heldBy` runs. If
+        // it displaced this kind's entry, the check that follows sees the newer
+        // registration and this call refuses; if it did not, nothing between the
+        // check and the `live.set` can run at all.
+        //
+        // **The kind is the captured one, and no surface's `kind` is re-read.** The
+        // entry keeps the key its lease was minted for, so the key and the stored
+        // `surface.kind` cannot come apart.
+        const next = ownedDocumentSurface(kind, target.document);
         const held = heldBy(kind, serial);
         if (held === undefined) {
-          return 'staleLease';
-        }
-        // **Built before the lease is checked again, and that second check is not
-        // redundant.** `withTarget` reads `kind` off the surface the caller
-        // registered, which may be an accessor running arbitrary code — and this
-        // project has shipped a check and a spend separated by exactly such a read
-        // twice. If anything re-entered and replaced this kind's entry during that
-        // read, the entry object is no longer the one checked and this call must
-        // refuse rather than write the older registration back over it.
-        const next = withTarget(held.surface, target);
-        if (heldBy(kind, serial) !== held) {
           return 'staleLease';
         }
         // The serial and the transition travel through unchanged: this is a target
