@@ -605,9 +605,16 @@ export function targetingSurfaceFor(
   surfaces: readonly OpenWriteSurface[],
   eligibility: CreatorEligibility
 ): OpenWriteSurfaceKind | null {
-  // The first destination-less creator the list holds, kept as the answer to give
-  // when nothing in the list names this file. It is read only after the whole list
-  // has failed to produce an exact match, which is the preference in one variable.
+  // The first destination-less creator the list holds **while `eligibility` is
+  // `creatorEligible`**, kept as the answer to give when nothing in the list names
+  // this file. When `eligibility` is anything else nothing is ever kept here, so a
+  // file no open surface names is answered `null` however many such creators the
+  // list holds.
+  //
+  // Two reads, two rules. The read inside the loop is the first-wins guard: it
+  // keeps a later destination-less creator from displacing an earlier one. The read
+  // at the return is the preference, and only that one waits for the whole list —
+  // an exact match returns from inside the loop and never reaches it.
   let unnamedCreator: OpenWriteSurfaceKind | null = null;
   for (const surface of surfaces) {
     const target = surface.target;
