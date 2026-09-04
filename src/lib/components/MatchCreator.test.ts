@@ -247,6 +247,14 @@ interface Mounted {
    * only reached the panel is the pre-emptive install the consult's Q2 ruled out.
    */
   readonly adoptions: ConflictModel<CreationBuffers>[];
+  /**
+   * Every destination the form reported upward, in order.
+   *
+   * **Repeats included.** The report comes from an effect over the model's answer,
+   * so a transition that leaves the destination where it was reports it again; a
+   * host is what makes a repeat inert, and no type forces it to.
+   */
+  readonly reports: readonly (DocumentId | null)[];
   /** How many times the form asked to be closed. */
   readonly closed: () => number;
   /** Replaces what the projections reader answers, as a re-read would. */
@@ -285,6 +293,7 @@ function mountCreator(
   const remaining = [...answers];
   const calls: RecordedCreate[] = [];
   const adoptions: ConflictModel<CreationBuffers>[] = [];
+  const reports: (DocumentId | null)[] = [];
   let closes = 0;
   let views: readonly DocumentView[] = [
     profile(),
@@ -336,6 +345,14 @@ function mountCreator(
         adoptions.push(conflict);
         return adoption;
       },
+      // **Every report, in order, including the repeats** — Phase 2d-5-2b. The
+      // component reports from an effect, so it reports again whenever the session
+      // is replaced even if the destination did not move; recording the calls
+      // rather than the latest value is what lets a case see that, and what would
+      // catch a report the component stopped sending.
+      reportDestination: (into: DocumentId | null): void => {
+        reports.push(into);
+      },
       close: (): void => {
         closes += 1;
       }
@@ -345,6 +362,7 @@ function mountCreator(
     target,
     calls,
     adoptions,
+    reports,
     closed: () => closes,
     reproject: (next: readonly DocumentView[]) => {
       views = next;
@@ -1453,3 +1471,56 @@ describe('the creation form’s recovery', () => {
     form.stop();
   });
 }); // End of the "creation form’s recovery" suite
+
+describe('the form reporting its destination upward', () => {
+  it('reports no file on mount, then the file that is chosen', () => {
+    // **Phase 2d-5-2b.** The destination is state that lives inside this
+    // component, so the host can only register this form as a surface over a file
+    // by being told — and the consult says no type can force a child to invoke its
+    // required reporter correctly, which makes this a mounted fact or nothing.
+    const form = mountCreator();
+    flushSync();
+    expect(form.reports[0]).toBeNull();
+
+    destination(form.target, 'match/base.yml').click();
+    flushSync();
+    expect(form.reports.at(-1)).toBe(2);
+    form.stop();
+  }); // End of the "reports what is chosen" case
+
+  it('reports the destination the model defaulted to, with no control pressed', () => {
+    // **The report is over `matchCreationView`'s answer, never over the control
+    // that was pressed**, and this is the difference: `startMatchCreation` chooses
+    // the held selection's own file, so the very first report names a file nobody
+    // clicked. A reporter wired into the destination handler would have said
+    // `null` here, and the host would have registered a surface over no file while
+    // the form was already pointed at one.
+    const held: MatchId = { document: 2, revision: BASE, node: 11 };
+    const form = mountCreator([], held);
+    flushSync();
+    expect(form.reports[0]).toBe(2);
+    form.stop();
+  }); // End of the "reports the model's default" case
+
+  it('reports again when a transition leaves the destination where it was', () => {
+    // **What the host has to absorb, said as a fact rather than as a hope.** The
+    // report comes from an effect over the session, so every transition re-runs it
+    // — typing moves no destination and still reports one. Nothing here can force
+    // a host to make the repeat inert; `DetailPane.svelte` assigns it to state,
+    // where an equal value notifies nothing, and `DetailPane.test.ts`'s *"leaves
+    // the registry alone when the form reports the same file again"* is what shows
+    // the registry is not churned by it. **That case was written by Phase 2d-5-2b's
+    // review** (finding 3): this sentence named coverage that did not exist for one
+    // phase, because no case over there drove a repeat report at all.
+    const form = mountCreator();
+    destination(form.target, 'match/base.yml').click();
+    flushSync();
+    const afterChoosing = form.reports.length;
+
+    type(form.target, 'trigger', ':new');
+    flushSync();
+    expect(form.reports.length).toBeGreaterThan(afterChoosing);
+    expect(new Set(form.reports.slice(afterChoosing))).toEqual(new Set([2]));
+    form.stop();
+  }); // End of the "reports repeat" case
+}); // End of the "reporting its destination" suite

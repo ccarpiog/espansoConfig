@@ -164,6 +164,7 @@
     held,
     create,
     adoptDiskVersion,
+    reportDestination,
     close,
     clock = () => Date.now()
   }: {
@@ -203,7 +204,6 @@
       baseRevision: ContentRevision,
       acknowledgement: Acknowledgement
     ) => Promise<MatchSaveAnswer>;
-    /** Leaves the form. */
     /**
      * Installs the disk observation a conflict carried into the window.
      *
@@ -215,6 +215,26 @@
      * transition finishes on.
      */
     adoptDiskVersion: AdoptTheDiskVersion<CreationBuffers>;
+    /**
+     * Reports which file this form would write, or that it names none yet.
+     *
+     * **Required rather than optional, and that is the consult's Q1 ruling read
+     * exactly** (`docs/reviews/phase-2d-5-design.md:45`): the destination lives
+     * inside this component, so a host that has to hand over a reporter is a host
+     * the compiler will not let forget. What the required prop forces is that
+     * every host supplies one; **nothing in TypeScript forces this component to
+     * call it, to call it with the destination the model actually holds, or to
+     * call it at all after the first time** — `MatchCreator.test.ts` is what
+     * establishes those, and only by mounting this file.
+     *
+     * **`null` means this form names no file**, which is the registry's `unknown`
+     * target and not "no form is open": whether the form is open at all is the
+     * host's own knowledge, since the host is what mounts it.
+     *
+     * @param document - The file chosen, or `null` when none is.
+     */
+    reportDestination: (document: DocumentId | null) => void;
+    /** Leaves the form. */
     close: () => void;
     /**
      * Where the typing group's boundary readings come from.
@@ -324,6 +344,51 @@
    */
   $effect(() => {
     revealReapplyReport(reapplyReveal(reapplyReport?.kind ?? null), reapplyPanel);
+  });
+
+  /*
+   * **The destination, reported upward — Phase 2d-5-2b.** The host registers this
+   * form as an open write surface, and a form that has not chosen a file is the
+   * one surface `OpenWriteSurface` lets name none. Until this effect existed the
+   * choice stayed inside this component and the host could only ever say
+   * *unknown*.
+   *
+   * **The model's answer is what is reported, never the control that was
+   * pressed.** `view.chosen` is `matchCreationView`'s, so every transition that
+   * moves the destination is covered by one call site: {@link onDestination}, a
+   * re-seed after a committed create, an undo or a redo that restores a step with
+   * a different file, and a reload that replaces the session whole. Reporting from
+   * `onDestination` alone would have been a second rule about which transitions
+   * change the destination, and it would have been wrong for four of them.
+   *
+   * **What the model's answer *is*, which is narrower than "the chosen file"** —
+   * Phase 2d-5-2b's review, finding 4. `view.chosen` is `chosenDestination`, and
+   * that function looks the held identity up in the destinations this session
+   * holds: a form whose `chosen` names a file no longer among them answers `null`,
+   * so what is reported for it is *names no file*. The direction is under-refusal
+   * on the restore's side — `competingSurfaceFor` treats an unnamed creator as
+   * competing with nothing — and over-refusal on the other, since
+   * `targetingSurfaceFor` attributes an unnamed creator to every creator-eligible
+   * file. It is the same pair of directions as the flush gap below, arrived at by
+   * a different route.
+   *
+   * **Reading `view.chosen` inside the effect is what subscribes it to the
+   * session**, so this re-runs on every transition and reports the same value
+   * again when the destination did not move; the host's own state assignment is
+   * what makes a repeat inert, and nothing here can force a host to make it so.
+   *
+   * **What the report is late for, said plainly.** An effect runs after the
+   * transition that changed the session, so between a person choosing a file and
+   * this flushing, the host still describes this surface as naming none. Both
+   * consumers of that answer refuse conservatively for an unnamed creator —
+   * `targetingSurfaceFor` attributes it to every creator-eligible file, and
+   * `competingSurfaceFor` lets a restore of any file proceed — so the window is
+   * over-refusing on one side and under-refusing on the other during that gap.
+   * Nothing reads either answer in production at 2d-5-2b, and the pane's `busy`
+   * rule keeps a restore from being open beside this form at all.
+   */
+  $effect(() => {
+    reportDestination(view.chosen?.document ?? null);
   });
 
   /**

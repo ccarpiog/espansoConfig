@@ -107,7 +107,8 @@ import {
   type OpenWriteSurface,
   type RestoreContext,
   type RestoreSession,
-  type StartedRestore
+  type StartedRestore,
+  type WriteSurfaceDocumentTarget
 } from './restore';
 import { filterMatches } from './search';
 import type { SelectedMatch, SelectionRepair } from './selection';
@@ -117,6 +118,7 @@ import { ALL_DOCUMENTS, buildSidebar, holdsMatches, sameSelection } from './side
 import {
   createWriteSurfaceRegistry,
   type UnregisterWriteSurface,
+  type WriteSurfaceTargetReplacement,
   type WriteSurfaceTransition
 } from './writeSurfaceRegistry';
 
@@ -1482,10 +1484,13 @@ export interface BrowserState {
    * contract: a lease rather than a bare kind key, an idempotent unregister that is
    * inert once displaced, and a target that can be reported in place.
    *
-   * **Nothing registers anything yet.** 2d-5-2b is what makes the surface hosts
-   * call this, what makes `MatchCreator.svelte` report its destination through the
-   * lease, and what carries the exhaustiveness assembly; at 2d-5-2a this method has
-   * no production caller and nothing on any screen changes because of it.
+   * **`DetailPane.svelte` is the one production caller** — Phase 2d-5-2b. It
+   * registers all seven kinds from a single exhaustive assembly, re-targets the
+   * new-snippet form through the lease when `MatchCreator.svelte` reports the file
+   * the person chose, and returns every lease when it is unmounted. Nothing on any
+   * screen changed because of it: the transitions those seven register are no-ops,
+   * and the only reader of the live set is the restore's own pre-send gate, which
+   * used to be handed the same list by the same component.
    *
    * **What it cannot force, in the same sentence as what it does.** It forces that
    * a stale instance of one kind can neither remove nor re-target a newer one —
@@ -1493,11 +1498,18 @@ export interface BrowserState {
    * completeness: **nothing makes a component register**, and
    * {@link BrowserState.openWriteSurfaces} answering an empty array claims there are
    * no open surfaces, which is `competingSurfaceFor`'s stated limitation reaching
-   * this layer unchanged.
+   * this layer unchanged. What 2d-5-2b added is narrower than completeness: the one
+   * host that exists cannot omit a kind **it declares**, because its assembly is an
+   * exact record over `OpenWriteSurfaceKind`. A component written later and never
+   * classified as a write surface is still invisible.
    *
-   * **It is not wired to {@link BrowserState.restoreDocument}**, which still takes
-   * its surfaces as an argument. Routing that call through this registry is
-   * 2d-5-2b's, because the caller that would change is a component.
+   * **{@link BrowserState.restoreDocument} still takes its surfaces as an
+   * argument**, and that has not changed — what changed is who supplies them.
+   * `DetailPane.svelte` passes {@link BrowserState.openWriteSurfaces} into the
+   * restore rather than a list it builds itself, so the argument is now this
+   * registry's answer travelling through a component. The parameter stays because a
+   * caller that must state what it holds open is what stops silence compiling into
+   * *"there are none"*.
    *
    * **It can throw, and a host that calls it on mount is the caller that has to know
    * that.** This method is straight through, so the registry's refusal of a
@@ -1512,6 +1524,15 @@ export interface BrowserState {
    * rather than where they were written. **Uncaught inside a mount effect that is a
    * blank pane, not a refused registration**, so a host that cannot hand over a
    * correlated literal is the host that has to catch.
+   *
+   * **The lease this answers is not the registry's own object.** It is a wrapper
+   * that calls through and then brings this state's reactive mirror into step —
+   * see {@link BrowserState.openWriteSurfaces} — because unregistering and
+   * re-targeting are two of the three ways the live set moves. It changes no
+   * answer: the unregister is still idempotent and inert once displaced, and
+   * `replaceTarget` still answers the registry's own `replaced` or `staleLease`.
+   * What it does change is identity, which nothing compares: the registry recognises
+   * a lease by the serial it captured itself, never by the function object.
    *
    * @param surface - The surface, exactly as a consumer will see it.
    * @param transition - What that surface is told about an external observation of
@@ -1537,10 +1558,26 @@ export interface BrowserState {
    * order is the registry's own — see `./writeSurfaceRegistry.ts` for what that
    * order does and does not decide.
    *
-   * **It is not what `DetailPane.svelte` passes to a restore today.** That
-   * component still assembles its own array from what it has open, and this method
-   * answers only what has been registered — which, until 2d-5-2b, is nothing in
-   * production.
+   * **It is what `DetailPane.svelte` passes to a restore** since Phase 2d-5-2b,
+   * replacing the second array that component used to assemble from what it had
+   * open. What it answers is only what has been **registered**, which is the whole
+   * of the limitation: a surface whose host never registered is not in it, and an
+   * empty answer says nobody registered rather than that nothing is open.
+   *
+   * **Reading it is reactive, and that is a property of this door rather than of
+   * the registry** — Phase 2d-5-2b's review, finding 1. The registry itself holds a
+   * plain `Map` and nothing watches it; this method reads a signal mirroring the
+   * registry's generation, so a `$derived` or an `$effect` that asks re-runs when a
+   * surface is registered, unregistered or re-targeted through this state. Without
+   * it, `RestorePane.svelte`'s `$derived.by` had no dependency any registration
+   * moved: measured, its first read ran *before* the pane's registration effect,
+   * answered the empty set, and was never invalidated again.
+   *
+   * **What that does not make current.** The answer is in step with the last
+   * operation performed on this door, so a surface a component has opened but not
+   * yet registered — its host's `$effect` has not run — is not in it, exactly as
+   * before. Reactivity closes the gap between two flushes and not the one inside a
+   * synchronous block.
    *
    * @returns Every live surface, oldest registration first.
    */
@@ -1555,6 +1592,13 @@ export interface BrowserState {
    * nothing about *what* changed, nothing about any particular document, and does
    * not imply the set now differs from the capture. Nothing calls it yet: 2d-5-4 is
    * the step that captures it.
+   *
+   * **It answers the mirror {@link BrowserState.openWriteSurfaces} reads**, which
+   * is the registry's own generation copied in the same synchronous block as every
+   * change this state makes, so the two doors cannot report different numbers and a
+   * caller inside a reactive context re-runs when either would have moved. A
+   * coordinator capturing it across an `await` is not in such a context and is
+   * unaffected by that.
    *
    * @returns The current generation; zero for a state nothing has registered with.
    */
@@ -1692,9 +1736,12 @@ export function createBrowserState(
   // `DocumentId` is session-local, so a shared one would make a surface open in one
   // window visible in the other.
   //
-  // **Not `$state`, and not cleared by `open()`.** Nothing renders it — it is read
-  // by a coordinator immediately before it decides something, exactly as the
-  // generation counters above are. And `open()` deliberately does not clear it,
+  // **Not `$state`, and not cleared by `open()`.** The registry is a plain `Map`
+  // and stays one; what is reactive is the mirrored generation declared below, and
+  // that mirror exists because something *does* render from this — the restore's
+  // refusal is derived from the live set (Phase 2d-5-2b's review, finding 1). The
+  // sentence this replaces said nothing renders it, which was true only while no
+  // component consumed the answer. And `open()` deliberately does not clear it,
   // although it clears documents, projections, selection and the viewer: a
   // component owns its own registration and unregisters through its lease when it
   // closes, so clearing here would make a still-open surface invisible while its
@@ -1710,16 +1757,114 @@ export function createBrowserState(
   // `targetingSurfaceFor` would attribute that file to a surface that is not about
   // it. Both are refusals rather than permissions, so a write is still safe; the
   // price is a false refusal over an unrelated file until that host unregisters.
-  // Nothing enforces that it ever does. The expectation is that a workspace which
-  // has really been replaced unmounts its surfaces, whose hosts then unregister —
-  // an expectation, not a guarantee, and 2d-5-2b's mounted evidence is where
-  // disposal is established.
+  // Nothing enforces that it ever does.
   //
-  // **Inert at 2d-5-2a and live at 2d-5-2b**: nothing registers yet, so today the
-  // registry is empty across an `open()` by construction. The caller that would have
-  // to change to do better is a component, which is why the decision belongs to the
-  // step that writes components rather than here.
+  // **Re-taken at Phase 2d-5-2b, when a host started registering, and measured
+  // rather than restated.** The decision stands, and three things are now known
+  // rather than expected. A registration really does survive an `open()` when its
+  // host does — driven in `DetailPane.test.ts`, so the price above is real and not
+  // hypothetical. **No production `open()` can run while a surface is registered**:
+  // this method has exactly two callers, both in `AppShell.svelte`, one in `onMount`
+  // before the pane exists and one on a *Retry* control drawn only in the `failed`
+  // arm, where the pane is not mounted. And the guard those callers sit behind
+  // disposes anyway — this method sets `status` to `'loading'` synchronously, before
+  // its first await, so the arm holding `DetailPane` is torn down and its leases come
+  // back at the next flush. What that leaves open, said plainly: the window between
+  // that synchronous assignment and the flush, in which the registry still answers
+  // surfaces over identities this load is about to reallocate. Nothing reads it there
+  // today, and 2d-5-4's discarded-history recovery — the third caller consult Q3
+  // adds — is required by that ruling not to re-open while any surface is open.
   const writeSurfaces = createWriteSurfaceRegistry();
+  // **The registry's own generation, mirrored into a signal** — Phase 2d-5-2b's
+  // review, finding 1. The registry is deliberately not reactive and stays that
+  // way; what is reactive is this number, which is assigned the registry's
+  // generation after every operation *this door* performs on it. It is a mirror
+  // rather than a second count, so the two cannot drift: nothing here decides when
+  // the set changed, it only copies the registry's answer to that question.
+  //
+  // **What it is for.** `DetailPane.svelte` hands the restore
+  // `() => browser.openWriteSurfaces()`, and `RestorePane.svelte` calls that inside
+  // a `$derived.by`. Without a signal in that answer the derived had no dependency
+  // any registration moved, so a surface opened after it last ran was invisible to
+  // the restore's refusal and to what `confirmRestore` is handed — under-refusal,
+  // measured rather than reasoned: opening the restore, the child's derived ran
+  // *before* `DetailPane`'s registration effect and answered `[]`, and nothing
+  // afterwards made it run again.
+  //
+  // **What it forces and what it does not, in one sentence.** It forces that a
+  // `$derived` or an `$effect` that asks {@link BrowserState.openWriteSurfaces} or
+  // {@link BrowserState.writeSurfaceGeneration} re-runs when the live set moves
+  // through this door. It forces nothing about *completeness* — a component that
+  // never registers is still invisible, which is `competingSurfaceFor`'s standing
+  // limitation — and nothing about a surface opened in the same synchronous block
+  // as the question, which is not registered until its host's effect has run. And
+  // nothing in TypeScript keeps a later method of this state from moving the live
+  // set without mirroring afterwards: the three operations that can move it — the
+  // registration below, and the two the lease performs — are today's whole set, and
+  // a fourth written without a `noticeWriteSurfaces()` would leave this number
+  // behind the registry with nothing failing.
+  let surfaceGeneration = $state(0);
+
+  /**
+   * Brings the reactive mirror into step with the registry.
+   *
+   * Called after every operation this state performs on the registry, including
+   * the ones a lease performs. Assigning an unchanged number notifies nothing, so
+   * an unregister that was already inert and a `staleLease` report cost no
+   * invalidation — which is why this copies the generation rather than counting
+   * calls.
+   */
+  function noticeWriteSurfaces(): void {
+    surfaceGeneration = writeSurfaces.generation();
+  } // End of function noticeWriteSurfaces()
+
+  /**
+   * One registry lease, wrapped so that using it moves the mirror.
+   *
+   * **The lease is the other half of the door.** Two of the three operations that
+   * can change the live set are performed through it — the unregister and
+   * `replaceTarget` — so a mirror updated only in
+   * {@link BrowserState.registerWriteSurface} would go stale the moment a surface
+   * closed or the new-snippet form reported its destination.
+   *
+   * **It adds no rule and reads nothing of its own.** Both wrappers call through
+   * first and copy the registry's generation afterwards; `replaceTarget`'s answer
+   * is passed back unchanged, because a consuming operation whose result is
+   * discarded is this project's named silent-success defect class. What the wrapper
+   * cannot preserve is the lease's *identity*: a caller comparing the value it was
+   * handed with one the registry minted would find two different functions, and
+   * nothing in the type says so. No caller does — the registry compares serials it
+   * captured itself, never the lease object.
+   *
+   * @param lease - The lease the registry answered.
+   * @returns A lease that does the same and then updates the mirror.
+   */
+  function mirroringLease(lease: UnregisterWriteSurface): UnregisterWriteSurface {
+    /**
+     * Removes the registration, then brings the mirror into step.
+     *
+     * @returns Nothing; see `UnregisterWriteSurface`.
+     */
+    const unregister = (): void => {
+      lease();
+      noticeWriteSurfaces();
+    };
+    return Object.assign(unregister, {
+      /**
+       * Reports the file this surface is about, then brings the mirror into step.
+       *
+       * @param target - The file this surface would write.
+       * @returns Whatever the registry answered, unchanged.
+       */
+      replaceTarget: (
+        target: WriteSurfaceDocumentTarget
+      ): WriteSurfaceTargetReplacement => {
+        const answered = lease.replaceTarget(target);
+        noticeWriteSurfaces();
+        return answered;
+      }
+    });
+  } // End of function mirroringLease()
 
   /**
    * The loaded projection of one document, if it has arrived.
@@ -3211,17 +3356,36 @@ export function createBrowserState(
       surface: OpenWriteSurface,
       transition: WriteSurfaceTransition
     ): UnregisterWriteSurface {
-      // Straight through: the registry owns the lease, the key and the generation,
-      // and adding a check here would be a second rule that can drift from it.
-      return writeSurfaces.registerWriteSurface(surface, transition);
+      // Straight through for the decision: the registry owns the lease, the key and
+      // the generation, and adding a check here would be a second rule that can
+      // drift from it. What this door adds is not a rule but a mirror — the
+      // registry's own generation copied into a signal, so that a window can derive
+      // from the live set at all. A throw from the registry leaves the mirror alone,
+      // which is right for the narrow reason and not the broad one: *this* call
+      // wrote nothing, and a registration the caller's own reads performed on the
+      // way in came through this same door and mirrored itself before answering.
+      const lease = writeSurfaces.registerWriteSurface(surface, transition);
+      noticeWriteSurfaces();
+      return mirroringLease(lease);
     },
 
     openWriteSurfaces(): readonly OpenWriteSurface[] {
+      // **This read is the dependency, and its value is deliberately unused.**
+      // Reading the mirror inside the answer is what subscribes a caller's
+      // `$derived` or `$effect` to the live set: the array below is built from a
+      // plain `Map` that no signal watches, so without this line a consumer would
+      // hold whatever the set was when it last happened to run. The restore's
+      // `surfaces` prop is exactly such a consumer.
+      void surfaceGeneration;
       return writeSurfaces.openWriteSurfaces();
     },
 
     writeSurfaceGeneration(): number {
-      return writeSurfaces.generation();
+      // The mirror rather than `writeSurfaces.generation()`, so that this answer
+      // carries the same dependency the one above does. They are the same number:
+      // every door that can move the registry's generation copies it here in the
+      // same synchronous block, so no caller can observe them apart.
+      return surfaceGeneration;
     }
   };
 

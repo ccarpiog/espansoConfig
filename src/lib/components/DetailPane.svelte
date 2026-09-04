@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import {
     describeMatch,
     hasDiscovery,
@@ -13,10 +14,15 @@
   import { documentHasUnsavedDraft } from '../browser/matchDuplication';
   import type { RawDocumentText } from '../browser/rawDocument';
   import { rawEditorRefusal } from '../browser/rawEditor';
-  // `OpenWriteSurface` alone: the invalidation supplier below is written against
-  // `RawSaveInvalidation` and is checked against `InvalidateEverySurface` where it
-  // is passed, which is the prop that requires one.
-  import type { OpenWriteSurface } from '../browser/restore';
+  // The invalidation supplier below is written against `RawSaveInvalidation` and
+  // is checked against `InvalidateEverySurface` where it is passed, which is the
+  // prop that requires one — so no type from `../ipc/commands` is needed for it
+  // beyond that one.
+  import type { OpenWriteSurface, OpenWriteSurfaceKind } from '../browser/restore';
+  import type {
+    UnregisterWriteSurface,
+    WriteSurfaceTransition
+  } from '../browser/writeSurfaceRegistry';
   import type {
     ConflictModel,
     DiskAdoptionOutcome,
@@ -393,6 +399,52 @@
   let creating = $state(false);
 
   /**
+   * The file the open new-snippet form has chosen, or `null`.
+   *
+   * **The one piece of a write surface's identity this pane does not own** — Phase
+   * 2d-5-2b. Every other surface is opened *over* something this pane captured, so
+   * the file it would write is in the session beside it; the form asks which file
+   * itself, so the answer has to come back up. `MatchCreator.reportDestination` is
+   * what carries it, and this is where it lands.
+   *
+   * **`null` is `unknown`, not "closed"**: {@link creating} says whether the form
+   * is open at all, and the two are separate because a form that is open and has
+   * chosen nothing is exactly the state `OpenWriteSurface` models with an unknown
+   * target.
+   *
+   * **Reset when the form opens as well as when it closes**, so a value reported by
+   * a previous form cannot describe the next one. The form reports its own initial
+   * choice on mount — it may have one, since `startMatchCreation` defaults the
+   * destination from the held selection — but that report arrives when the child's
+   * effect flushes, and a stale value left here would describe this surface until
+   * it did.
+   */
+  let creatorDestination = $state.raw<DocumentId | null>(null);
+
+  /**
+   * Opens the new-snippet form over no chosen destination.
+   *
+   * A named function rather than two assignments in the markup so that the flag
+   * and the destination cannot be moved apart: opening the form without clearing
+   * the destination is exactly the stale-value case {@link creatorDestination}
+   * describes.
+   */
+  function startCreating(): void {
+    creatorDestination = null;
+    creating = true;
+  } // End of function startCreating()
+
+  /**
+   * Closes the new-snippet form and forgets the file it had chosen.
+   *
+   * The other half of {@link startCreating}, for the same reason.
+   */
+  function stopCreating(): void {
+    creating = false;
+    creatorDestination = null;
+  } // End of function stopCreating()
+
+  /**
    * What one open restore is over: which file, of which parse, and what this
    * window had loaded of its text.
    */
@@ -451,63 +503,325 @@
   } // End of function startRestoring()
 
   /**
-   * Every write surface this window has open, and which file each would write.
+   * One of this pane's write surfaces while it is open, or `null` while it is
+   * not.
    *
-   * **`restore.ts`'s `OpenWriteSurface` list, and the only producer of one.** A
-   * restore is refused while another surface over the same file is open, and
-   * `competingSurfaceFor` cannot see a session held inside a component (R36) —
-   * so this pane, which holds them, is the only thing that can enumerate them.
-   * **Nothing anywhere can check that this list is complete**: an empty array
-   * claims there are none, which is exactly why the pre-send refusal it feeds is
-   * an affordance and {@link invalidateEverySurface} is the safety proof.
-   *
-   * **The new-snippet form is still absent, and the reason has changed.**
-   * `MatchCreator` chooses its own destination and this pane never learns which
-   * one; until 2d-5-1 that meant a surface value for it would have had to invent
-   * a document, and it no longer does — `OpenWriteSurface` now carries an
-   * `unknown` target for exactly this state. What is missing is the reporting,
-   * not the shape, and adding it is 2d-5-2's. Either way an unknown target
-   * competes with no restore (`competingSurfaceFor` answers `null` for it), so
-   * listing one here would change nothing this pane does; what keeps the form from
-   * being open beside a restore is {@link busy}, which is a fact about this pane
-   * rather than a guarantee of the model's.
-   *
-   * @returns One entry per open surface, in any order.
+   * `null` is *this kind is not open*, and it is a different fact from an
+   * `unknown` target, which is *this kind is open and names no file*. Only the
+   * new-snippet form can be in the second state.
    */
-  function openWriteSurfaces(): readonly OpenWriteSurface[] {
-    const open: OpenWriteSurface[] = [];
-    if (editing !== null) {
-      open.push({ kind: 'rawEditor', target: { kind: 'document', document: editing.file.id } });
+  type PaneWriteSurface = OpenWriteSurface | null;
+
+  /**
+   * This pane's seven write surfaces, keyed by kind.
+   *
+   * **The exhaustive assembly consult Q1 rules**
+   * (`docs/reviews/phase-2d-5-design.md:39-45`), and the whole reason the type is
+   * written out here rather than inferred: every member of
+   * `OpenWriteSurfaceKind` has to appear, so **deleting a key from
+   * {@link openSurfaces} — or adding an eighth kind to the union and not adding a
+   * key here — is a compile error in this file**, which is the composition file
+   * and the only place that knows what this window can have open.
+   *
+   * **`OpenWriteSurface & { kind: K }` rather than a second copy of the union.**
+   * It intersects the shipped union with the key, so each entry can only be a
+   * surface *of the kind it is filed under*: the six non-creator keys reduce to
+   * the arm that requires a file, and `matchCreator` reduces to the arm that
+   * allows `unknown`. Writing the seven arms out again would be a second
+   * definition of `OpenWriteSurface` that can drift from the first.
+   *
+   * **What that forces, and what it does not.** It forces that every kind is
+   * mentioned and that no entry can describe another kind's surface; it does
+   * **not** force that the value filed under a key is *true* — a key wired to the
+   * wrong session, or to a document identity taken from the wrong side of a
+   * session, type-checks perfectly. `DetailPane.test.ts` opens each of the seven
+   * and reads back what the registry holds, which is the only thing that can
+   * catch that.
+   */
+  type PaneWriteSurfaces = {
+    readonly [K in OpenWriteSurfaceKind]: (OpenWriteSurface & { readonly kind: K }) | null;
+  };
+
+  /**
+   * What this pane has open, kind by kind.
+   *
+   * **Two checks, and they overlap deliberately.** The `satisfies
+   * Record<OpenWriteSurfaceKind, PaneWriteSurface>` is the construction check the
+   * consult names, written where a reader looks for it; the annotation is what
+   * additionally ties each entry to its own key, which a `Record` with one value
+   * type cannot express. Either one alone turns a missing key into a compile
+   * error.
+   *
+   * **This is the only place in this file that builds an `OpenWriteSurface`.**
+   * Until 2d-5-2b the pane assembled a second list of its own and handed it
+   * straight to the restore, so the registry and the pane answered one question
+   * twice — `2d-5-2a-notes.md` section 7 item 5. The restore now reads
+   * `browser.openWriteSurfaces()`, and what puts anything in there is
+   * {@link reconcileWriteSurfaces} below, walking this value.
+   *
+   * **Five of the old producer's six entries could not execute at all**, in
+   * production or in any test — 2d-5-1-C's measurement, quoted rather than
+   * re-derived: its one caller sat inside the `{:else if restoring !== null}` arm,
+   * so `restoring` was non-null and {@link busy} had already made the other five
+   * null. Nothing here is conditioned on which arm is being drawn, so all seven
+   * entries are live. **What `busy` still means for the live set** is that at most
+   * one of them is non-null at a time, so the registry holds at most one entry from
+   * this pane and its documented array order decides nothing here.
+   */
+  const openSurfaces: PaneWriteSurfaces = $derived({
+    matchEditor:
+      editingMatch === null
+        ? null
+        : {
+            kind: 'matchEditor',
+            target: { kind: 'document', document: editingMatch.match.id.document }
+          },
+    matchCreator: !creating
+      ? null
+      : {
+          kind: 'matchCreator',
+          target:
+            creatorDestination === null
+              ? { kind: 'unknown' }
+              : { kind: 'document', document: creatorDestination }
+        },
+    matchDeleter:
+      deletingMatch === null
+        ? null
+        : {
+            kind: 'matchDeleter',
+            target: { kind: 'document', document: deletingMatch.projection.id }
+          },
+    matchMover:
+      movingMatch === null
+        ? null
+        : {
+            kind: 'matchMover',
+            target: { kind: 'document', document: movingMatch.projection.id }
+          },
+    matchDuplicator:
+      duplicatingMatch === null
+        ? null
+        : {
+            kind: 'matchDuplicator',
+            target: { kind: 'document', document: duplicatingMatch.projection.id }
+          },
+    rawEditor:
+      editing === null
+        ? null
+        : { kind: 'rawEditor', target: { kind: 'document', document: editing.file.id } },
+    restore:
+      restoring === null
+        ? null
+        : { kind: 'restore', target: { kind: 'document', document: restoring.projection.id } }
+  } satisfies Record<OpenWriteSurfaceKind, PaneWriteSurface>);
+
+  /**
+   * What this pane holds for one kind it has registered.
+   *
+   * The surface is kept beside the lease so that {@link reconcileWriteSurfaces}
+   * can tell *nothing changed* from *the file moved* without asking the registry,
+   * which answers a snapshot rather than one kind's entry.
+   */
+  interface HeldRegistration {
+    /** The surface this pane last asked the registry to hold for this kind. */
+    readonly surface: OpenWriteSurface;
+    /** The lease that registration answered. */
+    readonly lease: UnregisterWriteSurface;
+  }
+
+  /**
+   * The leases this pane holds, by kind.
+   *
+   * **Deliberately not reactive.** It is this pane's own bookkeeping about calls
+   * it has already made, read by one effect and by the teardown; making it `$state`
+   * would make the effect that writes it depend on it, which is a loop.
+   */
+  const heldRegistrations = new Map<OpenWriteSurfaceKind, HeldRegistration>();
+
+  /**
+   * What a registered surface is told about an external observation of its file.
+   *
+   * **A no-op, and the same one for all seven kinds** — Phase 2d-5-2b. Nothing
+   * invokes a stored transition anywhere in this repository: `transitionFor` is the
+   * only reader and it has no caller until 2d-5-4 routes an admitted observation to
+   * the surface a reload would strand. Writing seven different bodies now would be
+   * seven claims about a protocol that does not exist, and any body that *did*
+   * something would be inventing it.
+   *
+   * **What it will do when it stops being inert, said now rather than discovered
+   * later.** Under consult Q5 the coordinator installs no projection when a surface
+   * may target the document and hands the observation to that surface instead — so
+   * with this body the person's draft survives and they are never told the file
+   * moved. That is the conservative half of the rule and the wrong half of the
+   * answer, and replacing it is 2d-5-4's and 2d-5-5's work rather than a defect
+   * here.
+   */
+  const tellNobodyYet: WriteSurfaceTransition = () => undefined;
+
+  /**
+   * Whether two targets name the same thing.
+   *
+   * A file compares by identity; two unknown targets are the same state. It has to
+   * be written over the discriminant first, because only one arm of
+   * `WriteSurfaceTarget` has a `document` to compare at all — which is the shape
+   * `restore.ts` chose over an optional field, and for the same reason: an
+   * `undefined` equal to an `undefined` would have made *names no file* and *names
+   * this file* look like one answer.
+   *
+   * @param one - One target.
+   * @param other - The other.
+   * @returns Whether they say the same thing.
+   */
+  function sameTarget(one: OpenWriteSurface['target'], other: OpenWriteSurface['target']): boolean {
+    if (one.kind === 'document' && other.kind === 'document') {
+      return one.document === other.document;
     }
-    if (editingMatch !== null) {
-      open.push({
-        kind: 'matchEditor',
-        target: { kind: 'document', document: editingMatch.match.id.document }
-      });
-    }
-    if (deletingMatch !== null) {
-      open.push({
-        kind: 'matchDeleter',
-        target: { kind: 'document', document: deletingMatch.projection.id }
-      });
-    }
-    if (movingMatch !== null) {
-      open.push({
-        kind: 'matchMover',
-        target: { kind: 'document', document: movingMatch.projection.id }
-      });
-    }
-    if (duplicatingMatch !== null) {
-      open.push({
-        kind: 'matchDuplicator',
-        target: { kind: 'document', document: duplicatingMatch.projection.id }
-      });
-    }
-    if (restoring !== null) {
-      open.push({ kind: 'restore', target: { kind: 'document', document: restoring.projection.id } });
-    }
-    return open;
-  } // End of function openWriteSurfaces()
+    return one.kind === other.kind;
+  } // End of function sameTarget()
+
+  /**
+   * Registers one surface and records the lease it answers.
+   *
+   * **`registerWriteSurface` throws a `TypeError` on a pairing `OpenWriteSurface`
+   * cannot represent, and a throw on a mount path is a blank pane** — which this
+   * project has shipped once (R32). No value that reaches this function can be
+   * such a pairing, and the argument is about construction rather than about care:
+   * every surface here comes from {@link openSurfaces}, whose entries are object
+   * literals written in this file, checked against the shipped union by
+   * {@link PaneWriteSurfaces}, and built with no cast and no assertion. The
+   * registry's refusal fires on what a *read* answers rather than on what was
+   * declared, and neither read can run anything here — the seven sources are
+   * `$state.raw` or a boolean, so no reactive proxy stands between the registry
+   * and a plain data property, and none of these objects has an accessor.
+   *
+   * **What that says and what it does not.** It says no production path in this
+   * pane can reach the throw. It does not say the throw is unreachable: a caller
+   * that takes a kind and a target apart and reconciles them with a cast reaches
+   * it, which is the caller the registry's own `@throws` describes.
+   *
+   * @param surface - The surface to register.
+   */
+  function registerSurface(surface: OpenWriteSurface): void {
+    heldRegistrations.set(surface.kind, {
+      surface,
+      lease: browser.registerWriteSurface(surface, tellNobodyYet)
+    });
+  } // End of function registerSurface()
+
+  /**
+   * Brings the registry into step with {@link openSurfaces}.
+   *
+   * **A reconciliation rather than a re-registration.** This runs on every change
+   * to any of the seven sessions — a keystroke in the raw editor replaces
+   * {@link openSurfaces} whole — and every registration moves the registry's
+   * generation, which consult Q5 makes a coordinator's guard. Tearing down and
+   * rebuilding here would move that counter for changes nobody made. What this does
+   * instead is ask the registry for exactly the three differences that can exist: a
+   * kind that has been opened, one that has been closed, and one whose file has
+   * moved.
+   *
+   * **The values are walked, not the keys.** `Object.values` gives entries whose
+   * own `kind` the type has already tied to the key they were filed under, so the
+   * registry is keyed by the surface rather than by a string this function would
+   * have to widen with a cast.
+   *
+   * **A moved file goes through `replaceTarget`, in place**, which is what the
+   * lease exists for: the entry keeps its key, its position and its transition, and
+   * the new-snippet form's unknown-to-known step is exactly this case. **Its answer
+   * is read** — a consuming operation whose result is discarded is this project's
+   * named silent-success defect class — and `staleLease` means a newer registration
+   * of that kind displaced this pane's, in which case this pane re-registers rather
+   * than believing a report that did not land.
+   *
+   * **Going back to naming no file is a re-key and cannot be anything else**:
+   * `replaceTarget` takes the document arm only, which the registry's own comment
+   * argues for, so a form whose destination is taken back unregisters and registers
+   * again. That moves the generation twice and sends the entry to the end of the
+   * reader's order; neither changes any answer either predicate gives.
+   *
+   * @param wanted - What this pane has open right now.
+   */
+  function reconcileWriteSurfaces(wanted: PaneWriteSurfaces): void {
+    const open = new Map<OpenWriteSurfaceKind, OpenWriteSurface>();
+    const entries: readonly PaneWriteSurface[] = Object.values(wanted);
+    for (const surface of entries) {
+      if (surface !== null) {
+        open.set(surface.kind, surface);
+      }
+    } // End of the loop over the assembly's seven entries
+    for (const kind of [...heldRegistrations.keys()]) {
+      if (!open.has(kind)) {
+        heldRegistrations.get(kind)?.lease();
+        heldRegistrations.delete(kind);
+      }
+    } // End of the loop over the kinds this pane had registered
+    for (const [kind, surface] of open) {
+      const current = heldRegistrations.get(kind);
+      if (current === undefined) {
+        registerSurface(surface);
+        continue;
+      }
+      if (sameTarget(current.surface.target, surface.target)) {
+        continue;
+      }
+      if (surface.target.kind !== 'document') {
+        // A destination taken back. The lease cannot express it, so this is a
+        // re-key. The old lease is returned before the new registration for
+        // legibility rather than for correctness: doing it the other way round
+        // would displace this entry and leave an inert lease, which the registry
+        // ignores — the end state is the same and the reading is worse.
+        current.lease();
+        registerSurface(surface);
+        continue;
+      }
+      if (current.lease.replaceTarget(surface.target) === 'replaced') {
+        heldRegistrations.set(kind, { surface, lease: current.lease });
+        continue;
+      }
+      // `staleLease`: something displaced this pane's registration of this kind.
+      // Nothing in this window does that today, and believing the report landed is
+      // the defect either way.
+      registerSurface(surface);
+    } // End of the loop over the kinds this pane has open
+  } // End of function reconcileWriteSurfaces()
+
+  /*
+   * **The registration itself.** An effect rather than a call in each opener and
+   * each closer: there are seven of the first and more than seven of the second —
+   * a `close` prop on six components, {@link invalidateEverySurface}, and the
+   * form's own re-seed — and a rule spread over that many call sites is a rule one
+   * of them can omit, with no type to notice. Reading {@link openSurfaces} here is
+   * what subscribes this to every one of them.
+   *
+   * **No cleanup is returned**, deliberately. An effect's cleanup runs before each
+   * re-run as well as at teardown, so returning the disposal would return every
+   * lease this pane holds and take them out again whenever anything moved — a
+   * keystroke in the raw editor replaces {@link openSurfaces} whole — which is the
+   * churn {@link reconcileWriteSurfaces} exists to avoid. Teardown is `onDestroy`
+   * below.
+   */
+  $effect(() => {
+    reconcileWriteSurfaces(openSurfaces);
+  });
+
+  /*
+   * **Disposal, which no type can force.** `UnregisterWriteSurface` is callable so
+   * that a host can return it straight from a cleanup; this one is a loop instead,
+   * because {@link heldRegistrations} is keyed by kind and this pane reconciles it
+   * rather than owning a single registration for the life of one effect. **How many
+   * leases it actually holds is one**, since {@link busy} keeps the seven mutually
+   * exclusive — the loop is written over the map rather than over that coincidence.
+   * Nothing in TypeScript makes a host call any of them: a pane that dropped its
+   * leases would leave its surfaces registered for the life of the window, and
+   * `DetailPane.test.ts` is what establishes that this one does not.
+   */
+  onDestroy(() => {
+    for (const registration of heldRegistrations.values()) {
+      registration.lease();
+    } // End of the loop over every lease this pane holds
+    heldRegistrations.clear();
+  });
 
   /**
    * Closes every write surface over a file whose whole text has just been
@@ -526,12 +840,17 @@
    * where the outcome of the write is drawn, and `RestoreSession.restored`
    * already stops it offering to replace anything again.
    *
-   * **The new-snippet form is closed whatever file it names**, because this pane
-   * cannot learn which one it chose. That is over-broad by construction — the
-   * conservative direction, since a form left open over a replaced file holds a
-   * position anchor that names nothing — and it costs nothing today, because
-   * {@link busy} means the form cannot be open while a restore is. It is written
-   * for the day that stops being true rather than for today.
+   * **The new-snippet form is closed whatever file it names, and the reason has
+   * changed at 2d-5-2b.** It used to be that this pane could not learn which file
+   * the form had chosen; it can now — {@link creatorDestination} is exactly that,
+   * reported upward so the form can be registered as a surface over a file. What
+   * has not changed is that the form may have chosen **no** file, which is a state
+   * no comparison against the replaced document can exclude, so closing it
+   * whichever file it names is still the conservative direction and is still what
+   * happens. It costs nothing today either way, because {@link busy} means the form
+   * cannot be open while a restore is. **Narrowing this to the replaced file is a
+   * behaviour change with a live consequence** — a form over another file would
+   * survive a restore — and it is not taken here.
    *
    * **What no type forces**, in the same sentence as what one does:
    * `InvalidateEverySurface` forces that a caller supplies a body and never that
@@ -559,7 +878,7 @@
     if (duplicatingMatch !== null && duplicatingMatch.projection.id === replaced) {
       duplicatingMatch = null;
     }
-    creating = false;
+    stopCreating();
   } // End of function invalidateEverySurface()
 
   /**
@@ -582,7 +901,7 @@
    * a coordinator is not.
    *
    * **Today it always answers `null` while a move panel is open**, and that is a
-   * fact about this pane rather than about the rule: the six write surfaces are
+   * fact about this pane rather than about the rule: the seven write surfaces are
    * mutually exclusive through {@link busy}, so a snippet with an open editor is
    * not offered a move in the first place — which is the same conservative refusal
    * reached one step earlier. The wiring is here so the model's own arm becomes
@@ -835,7 +1154,7 @@
        and offers every file the window lists (the consult's Q5). -->
   {#if !busy}
     <p class="toggle">
-      <button type="button" onclick={() => (creating = true)}>
+      <button type="button" onclick={startCreating}>
         {t('browser.matchCreation.open')}
       </button>
     </p>
@@ -934,7 +1253,13 @@
   {:else if creating}
     <!-- Every reader is a function, so a re-seed after a committed create sees
          the files as the window has just re-read them rather than as they were
-         when the form opened. -->
+         when the form opened.
+
+         **`reportDestination` is the one prop that goes the other way**, and it is
+         required for that reason (consult Q1): the destination is state that lives
+         inside the child, so the only way this pane can register the form as a
+         surface over a file is to be told. What it lands in is
+         `creatorDestination`, which the assembly above reads. -->
     <MatchCreator
       documents={() => browser.documents}
       projections={() => browser.views}
@@ -942,7 +1267,8 @@
       create={(document, newMatch, position, baseRevision, acknowledgement) =>
         browser.createMatch(document, newMatch, position, baseRevision, acknowledgement)}
       {adoptDiskVersion}
-      close={() => (creating = false)}
+      reportDestination={(document) => (creatorDestination = document)}
+      close={stopCreating}
     />
   {:else if restoring !== null}
     {@const open = restoring}
@@ -955,6 +1281,36 @@
          `browser.fileTextTarget`, and reading it live would move that sentence
          onto another file's bytes.
 
+         **`surfaces` is the registry's answer since 2d-5-2b, not this pane's own
+         list.** The pane used to build a second array here, so the registry and the
+         pane answered one question twice and could disagree; the effect above is
+         now the only thing that puts a surface anywhere, and this reads what it
+         registered. The same value reaches `restoreDocument`: `RestorePane` reads
+         this function once into the value it checks the confirmation against and
+         sends *that* list, so the gate and the write cannot be about two
+         different readings.
+         **What it changes:** the pane's array was built at the instant it was
+         asked, and the registry's is in step with the last effect flush — so a
+         surface opened in the same synchronous block as the question is not in it
+         yet. That is the direction the pre-send refusal was already an affordance
+         about: what actually stands between a restore and a file another surface
+         is writing is the transaction's own locked read and revision check, never
+         this list.
+
+         **The reading is live between flushes, and that took a fix.** The registry
+         is a plain `Map`, so this closure gave `RestorePane`'s `$derived.by` no
+         dependency that a registration moved: measured, the derived ran *before*
+         this pane's registration effect, answered the empty set, and was never
+         invalidated again — so a surface opened after it last ran was invisible
+         both to the refusal on screen and to what `confirmRestore` was handed.
+         `BrowserState.openWriteSurfaces` now reads a signal mirroring the
+         registry's generation, so this closure re-runs when the live set moves.
+         **`confirmRestore` re-checks the surfaces it is handed** — which is this
+         same one reading, taken when the send is pressed — rather than asking the
+         registry itself; that it is *current* is the mirror's doing and not
+         `confirmRestore`'s. The sentence here used to say it re-asked at the
+         write, which claimed a guarantee neither function gave.
+
          **`invalidateEverySurface` is this pane's, and it is the post-commit half
          of the open-surface rule** — the pre-send refusal is an affordance,
          because a surface can open after the preview. -->
@@ -963,7 +1319,7 @@
       file={open.file}
       loadedText={open.loaded}
       projections={() => browser.views}
-      surfaces={openWriteSurfaces}
+      surfaces={() => browser.openWriteSurfaces()}
       listBatches={() => browser.listBackupBatches()}
       listEntries={(batch) => browser.listBackupEntries(batch)}
       readEntry={(entry, document) => browser.readBackupText(entry, document)}

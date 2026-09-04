@@ -23,21 +23,33 @@
  * what lets 2d-5-2b spend its whole evidence budget on the components that do the
  * registering.
  *
- * **Nothing here is reactive, deliberately.** Nothing renders a registry: it is
- * read by a coordinator immediately before it decides something, exactly as the
- * generation counters in `./workspace.svelte.ts` are read by the request that took
- * one. Making it `$state` would add a dependency to every effect that happened to
- * read it.
+ * **Nothing here is reactive, deliberately**, and that is still true — but what a
+ * consumer sees is not. A registry is read by a coordinator immediately before it
+ * decides something, exactly as the generation counters in `./workspace.svelte.ts`
+ * are read by the request that took one, and this module is a `.ts` file with no
+ * runes in it. What Phase 2d-5-2b's review added is one layer up:
+ * `BrowserState.openWriteSurfaces` mirrors {@link WriteSurfaceRegistry.generation}
+ * into a signal, because a window *does* render from the live set — the restore's
+ * refusal is derived from it — and a plain `Map` gives a `$derived` nothing to
+ * depend on. The mirror is that door's, not this module's; nothing here changed.
  *
- * ## What this step does **not** ship, said plainly
+ * ## What this module does **not** ship, said plainly
  *
- * **No component registers anything yet, and no transition is ever called.**
- * 2d-5-2b is what makes the surface hosts register, what makes
- * `MatchCreator.svelte` report its chosen destination upward, and what adds the
- * exact `satisfies Record<OpenWriteSurfaceKind, …>` assembly in the composition
- * file that turns omitting a declared kind into a compile error. This module
- * deliberately contains no such assembly: an exhaustiveness check that lives
- * anywhere but the composition file checks the wrong thing.
+ * **No transition stored here has ever been called.** {@link
+ * WriteSurfaceRegistry.transitionFor} is the only reader of one and it has no
+ * caller; 2d-5-4 is where an admitted observation is routed to the surface a
+ * reload would strand, and 2d-5-5 is where the six existing conflict
+ * registrations are generalized. What Phase 2d-5-2b added is on the other side:
+ * `src/lib/components/DetailPane.svelte` now registers all seven kinds from one
+ * `satisfies Record<OpenWriteSurfaceKind, …>` assembly, `MatchCreator.svelte`
+ * reports its chosen destination through {@link
+ * UnregisterWriteSurface.replaceTarget}, and every one of those surfaces
+ * registers the same **no-op** transition — so a stored transition is still a
+ * value nothing produces an effect from at either end.
+ *
+ * **This module deliberately contains no exhaustive assembly**, and that has not
+ * changed: an exhaustiveness check that lives anywhere but the composition file
+ * checks the wrong thing.
  *
  * ## What it cannot force
  *
@@ -48,6 +60,9 @@
  *   write surface and never calls {@link WriteSurfaceRegistry.registerWriteSurface}
  *   is invisible to every consumer, and an empty reader answer claims there are
  *   none — `competingSurfaceFor`'s own stated limitation, inherited unchanged.
+ *   The one host that exists registers from an exhaustive assembly, so *that* host
+ *   cannot omit a kind the union declares; nothing makes a **new** component
+ *   declare itself a write surface in the first place.
  * - **What a caller retains cannot change what the registry answers**, and that is
  *   enforced rather than asked for. A registration reads the caller's object once,
  *   in a fixed order, and builds the stored `OpenWriteSurface` itself — frozen,
@@ -139,8 +154,13 @@ export type WriteSurfaceTargetReplacement = 'replaced' | 'staleLease';
  * that are not tidiness. It keeps the consult's own signature —
  * `registerWriteSurface(surface, transition): UnregisterWriteSurface`
  * (`docs/reviews/phase-2d-5-design.md:42`) — and it is directly usable as what a
- * Svelte host returns from `$effect` or `onMount` as its cleanup, so the disposal
- * path 2d-5-2b writes is one `return` with nothing to forget. Hanging
+ * Svelte host returns from `$effect` or `onMount` as its cleanup — **which the one
+ * host that exists does not do, and the reason is worth recording rather than
+ * hiding.** `DetailPane.svelte` holds up to seven of these at once and reconciles
+ * them against an assembly, so its teardown is a loop over the leases it is
+ * holding; returning one directly is available to a host that registers exactly one
+ * surface for exactly as long as one effect lives, and no host in this repository
+ * is that. Hanging
  * {@link replaceTarget} on the same value is the other half: there is no second
  * token for a caller to pair with the wrong registration, which is the shape
  * `sendRestore(started)` in `./restore.ts` already uses for the same reason.
@@ -168,10 +188,10 @@ export interface UnregisterWriteSurface {
    *
    * **In place: the entry keeps its key, its lease and its position** in the
    * reader's order, and the transition it was registered with is untouched. This
-   * is the new-snippet form's unknown-to-known transition, which is why it exists:
-   * `MatchCreator.svelte` registers with `target: { kind: 'unknown' }` and reports
-   * its destination when the person chooses one (2d-5-2b). It has no production
-   * caller at 2d-5-2a.
+   * is the new-snippet form's unknown-to-known transition, which is why it exists,
+   * and since Phase 2d-5-2b that is its production caller: `DetailPane.svelte`
+   * registers the form with `target: { kind: 'unknown' }` and calls this when
+   * `MatchCreator.svelte` reports the file the person chose.
    *
    * **A document target only, and that is a shape argument rather than a
    * restriction on purpose.** `OpenWriteSurface` lets only `matchCreator` carry an

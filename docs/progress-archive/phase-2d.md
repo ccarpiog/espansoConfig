@@ -3211,3 +3211,87 @@ head when 2d-5-2a took it over its 64 KiB soft bound. They are still true.
    untracked, invisible to every gate. Correct today; a dependency bump falsifies it silently.
 3. **`workspace.test.ts:468` says "six review rounds"** where three carried the cross-file ranges the
    sentence justifies. Two rounds were told they could take it and **both deliberately left it**.
+
+
+---
+
+## The 2d-5-1 and 2d-5-2a verification narratives, archived 2026-09-04 at Phase 2d-5-2b
+
+**Superseded, not deleted.** These are the baseline blocks the live checkpoint carried while the
+2d-5-1 and 2d-5-2a chains were open. Both chains are **closed**, and 2d-5-2b re-measured every figure
+on its own tree, so what follows is history: the per-file derivations, the ladder rungs and the
+gate narratives of `1320 / 438 / 2205 / 185` through `1320 / 438 / 2235 / 186`.
+
+**Nothing here is an instruction.** The live baseline, the gate commands, the two bundle oracles and
+the `cargo test` concurrency scar stay in `PROGRESS.md`; only the closed chains' narratives moved.
+
+**`1320 / 438 / 2235 / 186`** — `cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules. **Re-measured in full by the orchestrator alone on 2026-09-04 at Phase
+2d-5-2a-C, and every figure was unmoved** — as it was at 2d-5-2a-B, which is what a phase that changes
+only comment lines should produce, and the measurement is the evidence rather than the prediction.
+**Three consecutive phases now share one baseline** (2d-5-2a-A, -B, -C), because the last two changed
+no executable line at all. Each command was run on its own. `npm run check` → **438 files, 0 errors, 0 warnings**; `npm test` → **59 files, 2235
+passed**; `npm run build` → **186 modules**; `cargo test --workspace` → **1320**, summed over **26
+binaries** *and* checked by the complementary question — **no `test result` line lacking `0 failed`** —
+because a sum can be right while a binary is silent. Clippy, `cargo fmt --check` and
+`cargo tree -p espansoconfig-core | rg tauri` (finds nothing) were all clean. **Both bundle oracles
+were read and both lines are reported**, the second because it proves the search can match at all:
+server-only markers **absent**, client-only markers **present (2)**. **The Rust half was proven
+untouched and then re-run anyway** — `git diff --stat HEAD -- crates/ src-tauri/` came back empty
+first. **The scope bound was checked mechanically at both phases, not asserted**: `git diff -U0 -- src/`
+filtered to non-comment changed lines returns **nothing**, so no executable line changed anywhere in
+either 2d-5-2a-B or 2d-5-2a-C. **`cargo test` was run twice at 2d-5-2a-C**, once to sum the binaries
+(**26**, totalling 1320) and once to ask the complementary question, because a single run cannot
+answer both without trusting its own arithmetic.
+
+**The identical figures were measured at Phase 2d-5-2a-A**,
+each command run on its own, on the tree carrying that phase's work. `npm run check` reported
+**438 files, 0 errors, 0 warnings**; `npm test` reported **59 files, 2229 passed**; `npm run build`
+reported **186 modules transformed**; the Rust figure came back **1320** with **no `test result` line
+lacking `0 failed`**, at exit 0. **The Rust total was summed at 2d-5-2a over 26 binaries and checked at
+2d-5-2a-A by the complementary question** — not *do the passes add to 1320* but *does any binary report
+a failure* — because a sum can be right while a binary is silent. `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo fmt --check` and the architecture check `cargo tree -p espansoconfig-core | rg tauri` (finds
+nothing) were all run and all clean.
+
+**The Rust half was proven untouched and then re-run anyway**, never instead of being re-run:
+`git diff --stat HEAD -- crates/ src-tauri/` came back empty first, and the suite was run after it.
+
+**2d-5-2a-A's one move, derived per file rather than from the total.** `npm test` moved **+6**, all of
+them in `writeSurfaceRegistry.test.ts` (22 → 28), re-derived against a pristine `git archive HEAD` copy
+on which **59 files appear on both sides and exactly one row differs**. `scripts/lint/ipc-detail.test.ts`
+stayed at **132**, because no file was added. **`npm run build` did not move, and that is the
+measurement rather than the prediction**: 2d-5-2a-A added no module, so 186 is what an unmoved count
+should be, and a move would have been the regression the oracles exist for. `npm run check` did not
+move either — no file entered the program — and `cargo test` did not, because no Rust changed.
+
+**2d-5-2a's own three moves, kept because the ladder is checked rather than accepted.** `cargo test` did not move,
+because no Rust changed. `npm run check` moved **+2**, for the two new `src/` files entering the
+program. `npm test` moved **+24**: **+22** in the new `writeSurfaceRegistry.test.ts`, and **+2** in
+`scripts/lint/ipc-detail.test.ts` (130 → 132), whose `it.each(scannableFiles())` enrolled the two new
+files by itself with no author touching that file — **the fourth recorded instance of that shape**.
+`npm run build` moved **+1** for one new reachable `.ts` module: `writeSurfaceRegistry.ts` becomes
+reachable because `workspace.svelte.ts` imports it. **No `.svelte` file was added**, so the
+two-per-styled-component rung does not apply — and no `.svelte` file was *modified* either, which is
+2d-5-2a's central claim about its own scope and is checkable from `git status --short`.
+
+**The worker re-derived the three frontend baselines on a pristine `git archive HEAD` copy**
+(2205 / 436 / 185) rather than copying them forward, which is what `CLAUDE.md` §4 requires of a count
+a harness could make unobservable. The orchestrator's own runs on the working tree are the record for
+the new figures.
+
+**Both bundle oracles were read, and both lines are reported**, because the second exists to prove the
+search can match at all (`CLAUDE.md` §4): `rg -c '\$\$payload|head_payload|push_element'
+dist/assets/index-*.js` matched **nothing** (server-only markers **absent**, correct), and
+`rg -c 'window\.__svelte|svelte-trusted-html' dist/assets/index-*.js` matched **2** (client-only
+markers **present**, correct). **186 is not the old "~180" regression shorthand and never was** — the
+ladder below is what makes the number checkable.
+
+**The previous baseline was `1320 / 438 / 2229 / 186`**, measured at Phase 2d-5-2a on 2026-09-04; before
+it, `1320 / 436 / 2205 / 185`, re-measured at Phase 2d-5-1-B on 2026-09-04
+and unmoved by 2d-5-1-C, whose commit changed no source file. Before that: 2d-5-1 produced
+`1320 / 436 / 2202 / 185`; 2d-5-1-A moved `npm test` by **+3**, all three in `restore.test.ts`
+(218 → 221), and moved nothing else, because it added no file — `scripts/lint/ipc-detail.test.ts`
+stayed at 130, its generated cases moving only when a file is *added* under the scanned roots.
+2d-5-1-B moved nothing at all. In every case the orchestrator's own run is the record, never the
+worker's claim.
