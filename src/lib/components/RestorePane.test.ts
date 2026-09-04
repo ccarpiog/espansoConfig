@@ -1043,7 +1043,7 @@ describe('the mounted restore pane: the two-stage confirmation', () => {
 
   it('refuses to prepare while another write surface over this file is open', async () => {
     const pane = await mountRestore([], {
-      surfaces: [{ kind: 'matchEditor', document: TARGET }]
+      surfaces: [{ kind: 'matchEditor', target: { kind: 'document', document: TARGET } }]
     });
     await walkToCandidate(pane);
 
@@ -1057,7 +1057,7 @@ describe('the mounted restore pane: the two-stage confirmation', () => {
 
   it('ignores a surface open over another file', async () => {
     const pane = await mountRestore([], {
-      surfaces: [{ kind: 'matchEditor', document: 99 }]
+      surfaces: [{ kind: 'matchEditor', target: { kind: 'document', document: 99 } }]
     });
     await walkToCandidate(pane);
 
@@ -1076,7 +1076,7 @@ describe('the mounted restore pane: the two-stage confirmation', () => {
     await walkToQuestion(pane);
     expect(control(pane.target, 'browser.restore.confirm').disabled).toBe(false);
 
-    pane.surfaces.push({ kind: 'rawEditor', document: TARGET });
+    pane.surfaces.push({ kind: 'rawEditor', target: { kind: 'document', document: TARGET } });
     control(pane.target, 'browser.restore.confirm').click();
     await settle();
 
@@ -1501,7 +1501,9 @@ function panels(): readonly {
     ...COMPETING_SURFACES.map((kind) => ({
       name: `a ${kind} open over the destination`,
       reach: async (): Promise<Mounted> => {
-        const pane = await mountRestore([], { surfaces: [{ kind, document: TARGET }] });
+        const pane = await mountRestore([], {
+          surfaces: [{ kind, target: { kind: 'document', document: TARGET } }]
+        });
         await walkToCandidate(pane);
         return pane;
       },

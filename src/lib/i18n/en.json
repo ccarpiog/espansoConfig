@@ -191,6 +191,8 @@
   "browser.saveOutcome.copyHeading": "A reference copy of a draft that was not saved. Each field is named, then its text. This is not YAML.",
   "browser.saveOutcome.draftCopied": "A labelled copy of what you wrote was put on the clipboard.",
   "browser.saveOutcome.draftCopyFailed": "What you wrote could not be put on the clipboard. It is still shown above, but any character no font can draw is written there by name instead of as itself, so selecting it by hand does not always give back exactly what you wrote. Loading the version on disk discards it either way.",
+  "browser.conflictOrigin.refusedSave": "What is compared here came from a save this app attempted: the file had already changed since its text was loaded here, so the write was refused under the file's own lock.",
+  "browser.conflictOrigin.changedWhileOpen": "What is compared here came from watching the file: it changed on disk while this was open. No save was attempted, so nothing was written from here in response to that change, and this app cannot say what changed the file or when.",
   "browser.rawEditor.open": "Edit this file’s text",
   "browser.rawEditor.label": "This file’s text",
   "browser.rawEditor.close": "Stop editing",

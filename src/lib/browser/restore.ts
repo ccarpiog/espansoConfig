@@ -275,6 +275,7 @@ import type {
   ContentRevision,
   DocumentId,
   DocumentView,
+  FileKind,
   PresentationNote
 } from '../ipc/types';
 import {
@@ -310,6 +311,7 @@ import {
   type SendFailureLine
 } from './editorSave';
 import { openWholeDocumentSave, type SealedWholeDocumentSave } from './invalidation';
+import { destinationEligibility } from './matchCreation';
 import type { RawSaveChoice } from './rawSave';
 import {
   conflictChoicesFor,
@@ -361,26 +363,76 @@ export type OpenWriteSurfaceKind =
 export type CompetingWriteSurfaceKind = Exclude<OpenWriteSurfaceKind, 'restore'>;
 
 /**
- * One write surface this window has open, and which file it is about.
+ * The file one open write surface would write, when it names one.
  *
- * **Only the file is carried, and that is the point** — the same argument
+ * **The identity this window holds, and nothing finer**, which is the argument
  * `documentHasUnsavedDraft` in `./matchDuplication.ts` makes for a draft: a form
  * minted over an *earlier* parse of the file is stranded by a whole-document
  * replacement exactly as a current one is, because the write gives every identity
  * in the file a new revision. Comparing anything finer would let the very surface
  * this rule protects slip through.
- *
- * **A creator with no chosen destination produces no value of this type**, which is
- * consult Q4's "creator with a chosen target": a form that names no file competes
- * with no restore, and a coordinator that invented a document for it would refuse
- * restores of files nobody was writing to.
  */
-export interface OpenWriteSurface {
-  /** What kind of surface it is. */
-  readonly kind: OpenWriteSurfaceKind;
+export interface WriteSurfaceDocumentTarget {
+  /** Which arm this is. */
+  readonly kind: 'document';
   /** The file it would write, by the identity this window holds. */
   readonly document: DocumentId;
 }
+
+/**
+ * Which file one open write surface is about, or that it has not named one.
+ *
+ * **A discriminated union rather than an optional `document`**, which is
+ * `docs/decisions/2d-5-split-notes.md` section 5.1 read exactly: an optional field
+ * would make a destination-less form compete with no restore *by accident* — the
+ * old comparison `surface.document === document` is false for `undefined` — rather
+ * than by a rule a reader can find. What the union forces is narrowing before any
+ * file can be read off a surface; what it does **not** force is that a consumer
+ * treats the `unknown` arm conservatively once it has narrowed, and the two
+ * predicates below answer that arm differently on purpose.
+ */
+export type WriteSurfaceTarget =
+  | {
+      /**
+       * The surface is open and names no file yet.
+       *
+       * **Only the new-snippet form reaches this state.** It chooses its own
+       * destination, and until it reports that choice upward this window holds a
+       * surface it cannot attribute to any file.
+       */
+      readonly kind: 'unknown';
+    }
+  | WriteSurfaceDocumentTarget;
+
+/**
+ * One write surface this window has open, and which file it is about.
+ *
+ * **One discriminated union, never two registries**, which is the design consult's
+ * Q1 (`docs/reviews/phase-2d-5-design.md:49-63`). The new-snippet form is the only
+ * kind whose target may be `unknown`; every other kind carries a file, so a
+ * consumer that has narrowed to one of them has a `DocumentId` without asking.
+ *
+ * **What the shape forces, and what it does not, in one sentence each.** It forces
+ * that `matchCreator` is the only kind that can be open without naming a file, so
+ * inventing a document for a destination-less form is not representable. It does
+ * not force any consumer to *classify* a new component as a write surface at all —
+ * that is 2d-5-2's exhaustive assembly and its mounted tests — and it does not make
+ * the list of surfaces complete: an empty array still claims there are none, which
+ * is `competingSurfaceFor`'s own stated limitation below.
+ */
+export type OpenWriteSurface =
+  | {
+      /** The new-snippet form, which may not have chosen its destination yet. */
+      readonly kind: 'matchCreator';
+      /** The file it would write, or that it has not named one. */
+      readonly target: WriteSurfaceTarget;
+    }
+  | {
+      /** What kind of surface it is. */
+      readonly kind: Exclude<OpenWriteSurfaceKind, 'matchCreator'>;
+      /** The file it would write, by the identity this window holds. */
+      readonly target: WriteSurfaceDocumentTarget;
+    };
 
 /**
  * The first competing write surface open over one file, or `null`.
@@ -392,6 +444,21 @@ export interface OpenWriteSurface {
  * window ever drew two restore surfaces over one file this predicate would not see
  * the other one. 2c-5-4 draws restore as a mode of the third pane, of which there
  * is one.
+ *
+ * **A creator that has not named a file competes with nothing**, and that is
+ * 2c-5's shipped behaviour preserved rather than a new rule: a form naming no file
+ * competes with no restore, and refusing every restore because some form is open
+ * somewhere would refuse restores of files nobody was writing to. The `switch` with
+ * its `never` terminus is how that answer is given deliberately — the comparison
+ * this function used to make, `surface.document === document`, would have given the
+ * same answer by accident the moment `document` became optional, and the opposite
+ * answer the moment somebody made it required again.
+ *
+ * **The `never` terminus turns a future arm of {@link WriteSurfaceTarget} into a
+ * compile error here, and nowhere else.** It cannot stop a consumer written without
+ * a switch from collapsing the two arms, and only this function's own tests
+ * establish that `unknown` competes with nothing while a named file competes with
+ * itself alone.
  *
  * **Nothing here can check that the caller passed every surface it holds open.**
  * The argument being required is what stops silence compiling into "there are
@@ -406,12 +473,140 @@ export function competingSurfaceFor(
   surfaces: readonly OpenWriteSurface[]
 ): CompetingWriteSurfaceKind | null {
   for (const surface of surfaces) {
-    if (surface.kind !== 'restore' && surface.document === document) {
-      return surface.kind;
+    const kind = surface.kind;
+    if (kind === 'restore') {
+      continue;
     }
+    const target = surface.target;
+    switch (target.kind) {
+      case 'unknown':
+        // A form that names no file competes with no restore. Deliberate, and the
+        // whole reason this is a switch.
+        break;
+      case 'document':
+        if (target.document === document) {
+          return kind;
+        }
+        break;
+      default: {
+        const unreachable: never = target;
+        return unreachable;
+      }
+    } // End of the switch over the target's discriminant
   } // End of the loop over every open write surface
   return null;
 } // End of function competingSurfaceFor()
+
+/**
+ * Whether one file is a **creator-eligible match document**, as the value
+ * {@link targetingSurfaceFor} takes.
+ *
+ * **A named value rather than a boolean**, because the caller of that predicate has
+ * to have decided this question before it asks, and
+ * `targetingSurfaceFor(id, surfaces, true)` at a call site says nothing about which
+ * question the `true` answers. {@link creatorEligibilityOf} is what produces it
+ * honestly; **nothing in TypeScript forces a caller to use that function** rather
+ * than pass a literal, and a wrong literal fails in the unsafe direction for
+ * `notCreatorEligible` — an unknown creator that really could be about the file
+ * would then be missed.
+ */
+export type CreatorEligibility = 'creatorEligible' | 'notCreatorEligible';
+
+/**
+ * Whether the new-snippet form would offer one file as a destination.
+ *
+ * **This is the definition `docs/decisions/2d-5-split-notes.md` section 6 item 3
+ * leaves to this step**, and it is deliberately not a new rule: a creator-eligible
+ * match document is exactly a file the new-snippet form would offer as a *choosable*
+ * destination — `destinationEligibility` in `./matchCreation.ts` answering
+ * `eligible`, which today means a file espanso loads snippets from, that this
+ * application may write, that this window has read, whose text parsed, and that has
+ * a top-level snippet list. Restating those five conditions here would create a
+ * second rule that can drift from the form's own; delegating means the two cannot
+ * disagree.
+ *
+ * **What it does not guarantee, in the same breath.** It is a fact about *this
+ * window's current projection* of the file and never about the file on disk, so a
+ * document can stop being eligible — or become eligible — between an observation
+ * being admitted and this answer being asked for; it says nothing about whether a
+ * new-snippet form is open at all, and nothing about which destination such a form
+ * would actually choose. It is the *set an unknown target may be about*, never a
+ * claim that it is about any particular member of it.
+ *
+ * @param summary - Anything carrying the file's kind and its read-only flag: a
+ *   `DocumentSummary`, or a `DocumentView`, which carries both fields itself.
+ * @param view - The file's projection, exactly as this window holds it, or `null`
+ *   when it holds none.
+ * @returns Whether the new-snippet form would offer this file as a destination.
+ */
+export function creatorEligibilityOf(
+  summary: { readonly kind: FileKind; readonly read_only: boolean },
+  view: DocumentView | null
+): CreatorEligibility {
+  return destinationEligibility(summary, view).kind === 'eligible'
+    ? 'creatorEligible'
+    : 'notCreatorEligible';
+} // End of function creatorEligibilityOf()
+
+/**
+ * The first open write surface that may be about one file, or `null`.
+ *
+ * **The watcher half of consult Q1's two predicates, and it answers the `unknown`
+ * arm the other way round on purpose.** {@link competingSurfaceFor} treats a
+ * creator that has named no file as competing with **no** document; this treats it
+ * as targeting **every** creator-eligible match document, because the question is
+ * different: a restore asks *may I replace this file's text*, where over-refusing
+ * costs one closed form, and reconciliation asks *may I silently reload this file
+ * under an open surface*, where under-refusing is the loss of somebody's work.
+ *
+ * **Restore surfaces are counted here and skipped there**, for the same reason: a
+ * restore over the file is a surface a reload would pull the ground out from under,
+ * and the caller of this predicate is the coordinator rather than the restore
+ * itself.
+ *
+ * **What the `never` terminus forces, and what it does not.** A future arm of
+ * {@link WriteSurfaceTarget} is a compile error in this function and in
+ * {@link competingSurfaceFor}, and in no other consumer; it cannot force a third
+ * predicate written later to switch at all. Only this function's own tests
+ * establish that an unknown target answers for every creator-eligible document and
+ * for none that is not.
+ *
+ * **It says nothing about whether the surface has been edited** (R36): `isDirty` is
+ * derived inside each surface's own session and no coordinator can observe it, so
+ * an answer here means *a surface capable of writing this file is open*, never
+ * *there are unsaved edits*.
+ *
+ * @param document - The file an observation is about.
+ * @param surfaces - Every write surface this window has open, in any order.
+ * @param eligibility - Whether that file is a creator-eligible match document.
+ * @returns The kind of the first surface that may be about it, or `null`.
+ */
+export function targetingSurfaceFor(
+  document: DocumentId,
+  surfaces: readonly OpenWriteSurface[],
+  eligibility: CreatorEligibility
+): OpenWriteSurfaceKind | null {
+  for (const surface of surfaces) {
+    const target = surface.target;
+    switch (target.kind) {
+      case 'unknown':
+        if (eligibility === 'creatorEligible') {
+          return surface.kind;
+        }
+        break;
+      case 'document':
+        if (target.document === document) {
+          return surface.kind;
+        }
+        break;
+      default: {
+        const unreachable: never = target;
+        return unreachable;
+      }
+    } // End of the switch over the target's discriminant
+  } // End of the loop over every open write surface
+  return null;
+} // End of function targetingSurfaceFor()
 
 /**
  * Why this application will not prepare or confirm a restore right now.

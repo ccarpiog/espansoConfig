@@ -191,6 +191,8 @@
   "browser.saveOutcome.copyHeading": "Copia de referencia de un borrador que no se guardó. Primero el nombre de cada campo y después su texto. Esto no es YAML.",
   "browser.saveOutcome.draftCopied": "Se ha puesto en el portapapeles una copia con etiquetas de lo que escribiste.",
   "browser.saveOutcome.draftCopyFailed": "No se ha podido poner en el portapapeles lo que escribiste. Se sigue mostrando arriba, pero los caracteres que ninguna tipografía puede dibujar se escriben ahí por su nombre y no como tales, así que seleccionarlo a mano no siempre devuelve exactamente lo que escribiste. Cargar la versión del disco lo descarta de todas formas.",
+  "browser.conflictOrigin.refusedSave": "Lo que se compara aquí viene de un guardado que intentó esta aplicación: el archivo ya había cambiado desde que su texto se cargó aquí, así que la escritura se rechazó bajo el bloqueo del propio archivo.",
+  "browser.conflictOrigin.changedWhileOpen": "Lo que se compara aquí viene de la vigilancia del archivo: cambió en el disco mientras esto estaba abierto. No se intentó ningún guardado, así que desde aquí no se escribió nada como respuesta a ese cambio, y esta aplicación no puede decir qué cambió el archivo ni cuándo.",
   "browser.rawEditor.open": "Editar el texto de este archivo",
   "browser.rawEditor.label": "Texto de este archivo",
   "browser.rawEditor.close": "Dejar de editar",

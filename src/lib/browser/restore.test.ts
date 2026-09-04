@@ -45,6 +45,7 @@ import type {
   BackupEntryListing,
   BackupTextResponse,
   ContentRevision,
+  DocumentId,
   DocumentView,
   Finding,
   PresentationNote,
@@ -52,7 +53,7 @@ import type {
   SaveResult
 } from '../ipc/types';
 import type { AdoptTheDiskVersion } from './editorSave';
-import { makeDocument } from './fixtures';
+import { makeDocument, makeSummary } from './fixtures';
 import { sealWholeDocumentSave, type SealedWholeDocumentSave } from './invalidation';
 import {
   acknowledgeRestoreFindings,
@@ -73,6 +74,7 @@ import {
   conflictOf,
   dismissRestoreOutcome,
   entriesLoaded,
+  creatorEligibilityOf,
   loadingBatches,
   loadingEntries,
   openWriteSurfaceKey,
@@ -86,6 +88,7 @@ import {
   revisionInProjection,
   sendRestore,
   startRestore,
+  targetingSurfaceFor,
   targetRevisionObserved,
   type CompetingWriteSurfaceKind,
   type OpenWriteSurface,
@@ -95,7 +98,8 @@ import {
   type RestoreSend,
   type RestoreSession,
   type SendRestore,
-  type StartedRestore
+  type StartedRestore,
+  type WriteSurfaceTarget
 } from './restore';
 import type { ConflictModel, DiskAdoptionOutcome, SaveOutcomeModel } from './saveOutcome';
 
@@ -522,7 +526,12 @@ function coordinator(surfaces: readonly OpenWriteSurface[] = []) {
      */
     close(invalidation: RawSaveInvalidation): void {
       closed.push(invalidation);
-      const kept = open.filter((surface) => surface.document !== invalidation.document);
+      // **The unknown-target creator stays open**, because it is not over the replaced
+      // file: it is over no file at all until it reports a destination upward.
+      const kept = open.filter(
+        (surface) =>
+          surface.target.kind !== 'document' || surface.target.document !== invalidation.document
+      );
       open.length = 0;
       open.push(...kept);
     } // End of function close()
@@ -722,18 +731,26 @@ describe('the candidate', () => {
 describe('the six write surfaces a restore refuses to run beside', () => {
   it('names every one of them, and never restore itself', () => {
     for (const kind of EVERY_SURFACE) {
-      const surfaces: readonly OpenWriteSurface[] = [{ kind, document: TARGET }];
+      const surfaces: readonly OpenWriteSurface[] = [
+        { kind, target: { kind: 'document', document: TARGET } }
+      ];
       expect(competingSurfaceFor(TARGET, surfaces), kind).toBe(kind === 'restore' ? null : kind);
     } // End of the loop over every surface kind
   }); // End of the "names every one" case
 
   it('ignores a surface over another file', () => {
-    expect(competingSurfaceFor(TARGET, [{ kind: 'matchEditor', document: 99 }])).toBeNull();
+    expect(
+      competingSurfaceFor(TARGET, [
+        { kind: 'matchEditor', target: { kind: 'document', document: 99 } }
+      ])
+    ).toBeNull();
   });
 
   it('refuses to prepare, and to confirm, for each of the six', () => {
     for (const kind of COMPETING) {
-      const surfaces: readonly OpenWriteSurface[] = [{ kind, document: TARGET }];
+      const surfaces: readonly OpenWriteSurface[] = [
+        { kind, target: { kind: 'document', document: TARGET } }
+      ];
       const session = withCandidate();
       expect(canPrepareRestore(session, at(BASE, surfaces)), kind).toBe(false);
       expect(restoreRefusal(session, at(BASE, surfaces)), kind).toEqual({
@@ -790,6 +807,177 @@ describe('the six write surfaces a restore refuses to run beside', () => {
     } // End of the loop over the two locales
   }); // End of the "cannot read a dirty state" case
 }); // End of the "six write surfaces" suite
+
+/**
+ * Every arm of a write surface's target, one key each.
+ *
+ * `EVERY_SURFACE`'s mechanism one union along: a union has no run-time extent, so a
+ * third arm of `WriteSurfaceTarget` added later is a compile error **in this file**
+ * rather than an arm neither predicate is ever driven over. It is the run-time half
+ * of the `never` terminus both predicates carry — the terminus makes a new arm a
+ * compile error in `restore.ts`, and this makes it one here, which is what stops a
+ * new arm shipping with a switch that handles it and no case that drives it.
+ */
+const EVERY_TARGET = Object.keys({
+  unknown: true,
+  document: true
+} satisfies Record<WriteSurfaceTarget['kind'], true>) as readonly WriteSurfaceTarget['kind'][];
+
+/**
+ * One target of the named arm, over the named file.
+ *
+ * @param kind - Which arm to build.
+ * @param document - The file, ignored by the `unknown` arm which names none.
+ * @returns The target.
+ */
+function targetOf(kind: WriteSurfaceTarget['kind'], document: DocumentId): WriteSurfaceTarget {
+  return kind === 'unknown' ? { kind } : { kind, document };
+} // End of function targetOf()
+
+/** The new-snippet form, open and not yet naming a destination. */
+const UNKNOWN_CREATOR: OpenWriteSurface = { kind: 'matchCreator', target: { kind: 'unknown' } };
+
+describe('a creator that has not named a file', () => {
+  it('competes with no restore at all, which is 2c-5 unchanged', () => {
+    // The behaviour this phase's whole switch exists to preserve. A destination-less
+    // form still produces no `OpenWriteSurface` value — 2d-5-2 is what starts
+    // reporting one — but the type can now express it, and the `unknown` arm is what
+    // keeps the answer the same on the day it does.
+    expect(competingSurfaceFor(TARGET, [UNKNOWN_CREATOR])).toBeNull();
+    expect(competingSurfaceFor(99, [UNKNOWN_CREATOR])).toBeNull();
+  }); // End of the "competes with no restore" case
+
+  it('lets a restore be prepared and confirmed, beside a named creator that does not', () => {
+    const open = at(BASE, [UNKNOWN_CREATOR]);
+    expect(canPrepareRestore(withCandidate(), open)).toBe(true);
+    expect(restoreRefusal(withCandidate(), open)).toBeNull();
+    expect(confirmRestore(pending(), open)).not.toBeNull();
+
+    // And the same form, once it has reported the destination upward, refuses both.
+    const named = at(BASE, [
+      { kind: 'matchCreator', target: { kind: 'document', document: TARGET } }
+    ]);
+    expect(canPrepareRestore(withCandidate(), named)).toBe(false);
+    expect(restoreRefusal(withCandidate(), named)).toEqual({
+      kind: 'writeSurfaceOpen',
+      surface: 'matchCreator'
+    });
+    expect(confirmRestore(pending(), named)).toBeNull();
+  }); // End of the "lets a restore be prepared" case
+
+  it('is answered by both predicates for every arm the union has', () => {
+    // The exhaustive drive. `EVERY_TARGET` is what fails to compile when an arm is
+    // added, and this is what fails to *pass* when an arm is added whose answers
+    // nobody decided. It is driven through `matchCreator`, and only through it,
+    // because that is the one kind whose target may be either arm: a `rawEditor`
+    // with an `unknown` target is not representable, so a case asserting over one
+    // would be asserting over a value the type forbids.
+    for (const arm of EVERY_TARGET) {
+      const surface: OpenWriteSurface = { kind: 'matchCreator', target: targetOf(arm, TARGET) };
+      const named = arm === 'document';
+      expect(competingSurfaceFor(TARGET, [surface]), arm).toBe(named ? 'matchCreator' : null);
+      expect(targetingSurfaceFor(TARGET, [surface], 'creatorEligible'), arm).toBe('matchCreator');
+      expect(targetingSurfaceFor(TARGET, [surface], 'notCreatorEligible'), arm).toBe(
+        named ? 'matchCreator' : null
+      );
+    } // End of the loop over every target arm
+  }); // End of the "answered by both predicates" case
+}); // End of the "creator that has not named a file" suite
+
+describe('the watcher-targeting predicate, which answers the unknown arm the other way', () => {
+  it('treats an unknown target as every creator-eligible match document', () => {
+    // Not "the destination it will choose", which nothing here knows: the set it may
+    // be about. Two unrelated files both answer, because both are eligible.
+    expect(targetingSurfaceFor(TARGET, [UNKNOWN_CREATOR], 'creatorEligible')).toBe('matchCreator');
+    expect(targetingSurfaceFor(99, [UNKNOWN_CREATOR], 'creatorEligible')).toBe('matchCreator');
+  }); // End of the "every creator-eligible document" case
+
+  it('treats an unknown target as no document that is not creator-eligible', () => {
+    expect(targetingSurfaceFor(TARGET, [UNKNOWN_CREATOR], 'notCreatorEligible')).toBeNull();
+    expect(targetingSurfaceFor(99, [UNKNOWN_CREATOR], 'notCreatorEligible')).toBeNull();
+  });
+
+  it('counts a restore, which the competition predicate skips', () => {
+    // The two predicates disagreeing on purpose, in one case. A restore over the
+    // file is a surface a silent reload would pull the ground out from under; a
+    // restore asking whether it may run is asking about *other* surfaces.
+    const restoring: OpenWriteSurface = {
+      kind: 'restore',
+      target: { kind: 'document', document: TARGET }
+    };
+    expect(targetingSurfaceFor(TARGET, [restoring], 'notCreatorEligible')).toBe('restore');
+    expect(competingSurfaceFor(TARGET, [restoring])).toBeNull();
+  }); // End of the "counts a restore" case
+
+  it('ignores a named surface over another file, whatever the eligibility says', () => {
+    const elsewhere: readonly OpenWriteSurface[] = [
+      { kind: 'matchEditor', target: { kind: 'document', document: 99 } }
+    ];
+    expect(targetingSurfaceFor(TARGET, elsewhere, 'creatorEligible')).toBeNull();
+    expect(targetingSurfaceFor(TARGET, elsewhere, 'notCreatorEligible')).toBeNull();
+  }); // End of the "ignores another file" case
+
+  it('answers the first surface of the list, and nothing at all for an empty one', () => {
+    expect(targetingSurfaceFor(TARGET, [], 'creatorEligible')).toBeNull();
+    expect(
+      targetingSurfaceFor(
+        TARGET,
+        [UNKNOWN_CREATOR, { kind: 'rawEditor', target: { kind: 'document', document: TARGET } }],
+        'creatorEligible'
+      )
+    ).toBe('matchCreator');
+  }); // End of the "first surface of the list" case
+}); // End of the "watcher-targeting predicate" suite
+
+describe('what a creator-eligible match document is', () => {
+  it('is exactly what the new-snippet form would offer as a destination', () => {
+    // Delegated rather than restated, so the two rules cannot drift. The five
+    // conditions driven below are `destinationEligibility`'s, through this function.
+    expect(creatorEligibilityOf(makeSummary(), makeDocument())).toBe('creatorEligible');
+  });
+
+  it('refuses a file espanso loads no snippets from', () => {
+    const profile = { kind: 'ConfigProfile' } as const;
+    expect(
+      creatorEligibilityOf(
+        makeSummary(profile),
+        makeDocument({ ...profile, topLevelKeys: ['matches'] })
+      )
+    ).toBe('notCreatorEligible');
+  }); // End of the "loads no snippets" case
+
+  it('refuses a read-only file, an unread one, an unparsed one, and one with no snippet list', () => {
+    expect(creatorEligibilityOf(makeSummary({ readOnly: true }), makeDocument())).toBe(
+      'notCreatorEligible'
+    );
+    expect(creatorEligibilityOf(makeSummary(), null)).toBe('notCreatorEligible');
+    expect(creatorEligibilityOf(makeSummary(), makeDocument({ parsed: false }))).toBe(
+      'notCreatorEligible'
+    );
+    expect(creatorEligibilityOf(makeSummary(), makeDocument({ topLevelKeys: [] }))).toBe(
+      'notCreatorEligible'
+    );
+  }); // End of the "refuses four ineligible files" case
+
+  it('answers the value the watcher predicate takes, so nothing converts between them', () => {
+    // The two halves fit without a boolean in between, which is the whole reason the
+    // eligibility is a named value: what this function answers is what that
+    // predicate's third argument is, and no call site has to decide how to spell it.
+    const eligibility = creatorEligibilityOf(makeSummary(), makeDocument());
+    expect(targetingSurfaceFor(TARGET, [UNKNOWN_CREATOR], eligibility)).toBe('matchCreator');
+    expect(
+      targetingSurfaceFor(TARGET, [UNKNOWN_CREATOR], creatorEligibilityOf(makeSummary(), null))
+    ).toBeNull();
+  }); // End of the "answers the value the predicate takes" case
+
+  it('says nothing about whether a form is open, which is the predicate above', () => {
+    // The two are independent facts and the coordinator needs both: eligibility is
+    // about the file, the surface list is about the window. An eligible file with no
+    // creator open is targeted by nothing.
+    expect(creatorEligibilityOf(makeSummary(), makeDocument())).toBe('creatorEligible');
+    expect(targetingSurfaceFor(TARGET, [], 'creatorEligible')).toBeNull();
+  }); // End of the "says nothing about a form" case
+}); // End of the "creator-eligible match document" suite
 
 describe('the confirmation and the five values it binds', () => {
   it('is the only producer of an authorization to send', () => {
@@ -1040,7 +1228,11 @@ describe('the permit a confirmation mints', () => {
       },
       ...COMPETING.map((kind) => ({
         name: `the open surfaces, which now hold a ${kind} over the destination`,
-        live: () => ({ context: at(BASE, [{ kind, document: TARGET }] as readonly OpenWriteSurface[]) })
+        live: () => ({
+          context: at(BASE, [
+            { kind, target: { kind: 'document', document: TARGET } }
+          ] as readonly OpenWriteSurface[])
+        })
       }))
     ];
   } // End of function drifts()
@@ -1933,7 +2125,7 @@ describe('no save is issued without a confirmation', () => {
         name: `a ${kind} open over the destination`,
         session: pending(),
         observed: BASE as ContentRevision | null,
-        surfaces: [{ kind, document: TARGET }] as readonly OpenWriteSurface[]
+        surfaces: [{ kind, target: { kind: 'document', document: TARGET } }] as readonly OpenWriteSurface[]
       }))
     ];
   } // End of function forbidden()
@@ -2087,7 +2279,7 @@ describe('nothing here changes until the file answers', () => {
   it('discharges a committed seal even when the preview has gone', () => {
     const started = confirmRestore(pending(), at(BASE, []))!;
     const stripped: RestoreSession = { ...started.session, preview: null };
-    const surfaces = coordinator([{ kind: 'matchEditor', document: TARGET }]);
+    const surfaces = coordinator([{ kind: 'matchEditor', target: { kind: 'document', document: TARGET } }]);
     const answered = applyRestore(stripped, sealed(saved()), surfaces.close);
     expect(surfaces.closed).toEqual([{ document: TARGET, revision: AFTER }]);
     expect(answered.restored).toBe(true);
@@ -2106,7 +2298,7 @@ describe('nothing here changes until the file answers', () => {
       submitted: null,
       inFlight: null
     };
-    const surfaces = coordinator([{ kind: 'rawEditor', document: TARGET }]);
+    const surfaces = coordinator([{ kind: 'rawEditor', target: { kind: 'document', document: TARGET } }]);
     const answered = applyRestore(bare, sealed(saved()), surfaces.close);
     expect(surfaces.closed).toEqual([{ document: TARGET, revision: AFTER }]);
     expect(surfaces.open).toEqual([]);
@@ -2190,13 +2382,13 @@ describe('the answer', () => {
     }
     // Opened while the send was in flight, which no refusal could have caught.
     const surfaces = coordinator([
-      { kind: 'matchEditor', document: TARGET },
-      { kind: 'matchCreator', document: TARGET },
-      { kind: 'rawEditor', document: 99 }
+      { kind: 'matchEditor', target: { kind: 'document', document: TARGET } },
+      { kind: 'matchCreator', target: { kind: 'document', document: TARGET } },
+      { kind: 'rawEditor', target: { kind: 'document', document: 99 } }
     ]);
     const answered = applyRestore(started.session, sent.answer.sealed, surfaces.close);
     expect(surfaces.closed).toEqual([{ document: TARGET, revision: AFTER }]);
-    expect(surfaces.open).toEqual([{ kind: 'rawEditor', document: 99 }]);
+    expect(surfaces.open).toEqual([{ kind: 'rawEditor', target: { kind: 'document', document: 99 } }]);
     expect(answered.restored).toBe(true);
     expect(answered.extraMessages).toEqual([]);
   }); // End of the "closes every surface" case
@@ -2207,7 +2399,7 @@ describe('the answer', () => {
     ['a success that wrote nothing', saved(false)]
   ])('closes no surface for %s, because nothing went stale', (_name, result) => {
     const started = confirmRestore(pending(), at(BASE, []))!;
-    const surfaces = coordinator([{ kind: 'matchEditor', document: TARGET }]);
+    const surfaces = coordinator([{ kind: 'matchEditor', target: { kind: 'document', document: TARGET } }]);
     applyRestore(started.session, sealed(result), surfaces.close);
     expect(surfaces.closed).toEqual([]);
     expect(surfaces.open).toHaveLength(1);

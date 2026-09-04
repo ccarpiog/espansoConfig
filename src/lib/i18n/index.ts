@@ -10,6 +10,10 @@
 // the other twelve because CLAUDE.md section 2 is about where a component may
 // get a string from, and the answer is only ever this module.
 import {
+  conflictOriginMessageKey,
+  type ConflictOriginMessage
+} from '../browser/conflictSource';
+import {
   detailFieldKey,
   optionGroupKey,
   type DetailFieldName,
@@ -796,6 +800,29 @@ export function tRestoreRefusal(refusal: RestoreRefusal): string {
 export function tSaveOutcomeMessage(message: SaveOutcomeMessage): string {
   return translate(locale.current, saveOutcomeMessageKey(message));
 } // End of function tSaveOutcomeMessage()
+
+/**
+ * Renders the line saying where one conflict came from, in the current language.
+ *
+ * The accessor over `conflictOriginMessageKey` in `../browser/conflictSource`, here
+ * for `tSaveOutcomeMessage`'s reason: a component that turned the code into a key in
+ * markup would be doing the one thing CLAUDE.md section 2 forbids.
+ *
+ * **Neither sentence carries an operand**, so nothing is substituted here. Neither
+ * names a file, a revision or a time — the watcher line says in as many words that
+ * this application cannot say what changed the file or when.
+ *
+ * **Nothing draws this yet.** The two origins are 2d-5-1's vocabulary and 2d-6 is
+ * where a panel shows one; the only caller today is
+ * `../browser/conflictSource.test.ts`. An accessor with no component caller is
+ * deliberate, because a code with no string is worse than a code with no caller.
+ *
+ * @param message - Which origin line the model asked for.
+ * @returns The translated sentence.
+ */
+export function tConflictOriginMessage(message: ConflictOriginMessage): string {
+  return translate(locale.current, conflictOriginMessageKey(message));
+} // End of function tConflictOriginMessage()
 
 /**
  * Renders one thing the person may do about a conflict, in the current language.

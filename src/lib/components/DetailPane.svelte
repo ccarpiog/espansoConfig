@@ -461,11 +461,15 @@
    * claims there are none, which is exactly why the pre-send refusal it feeds is
    * an affordance and {@link invalidateEverySurface} is the safety proof.
    *
-   * **The new-snippet form is deliberately absent.** `MatchCreator` chooses its
-   * own destination and this pane never learns which one, so a surface value for
-   * it would have to invent a document — and consult Q4 is explicit that a
-   * creator naming no file competes with no restore. What keeps it from being
-   * open beside a restore anyway is {@link busy}, which is a fact about this pane
+   * **The new-snippet form is still absent, and the reason has changed.**
+   * `MatchCreator` chooses its own destination and this pane never learns which
+   * one; until 2d-5-1 that meant a surface value for it would have had to invent
+   * a document, and it no longer does — `OpenWriteSurface` now carries an
+   * `unknown` target for exactly this state. What is missing is the reporting,
+   * not the shape, and adding it is 2d-5-2's. Either way an unknown target
+   * competes with no restore (`competingSurfaceFor` answers `null` for it), so
+   * listing one here would change nothing this pane does; what keeps the form from
+   * being open beside a restore is {@link busy}, which is a fact about this pane
    * rather than a guarantee of the model's.
    *
    * @returns One entry per open surface, in any order.
@@ -473,22 +477,34 @@
   function openWriteSurfaces(): readonly OpenWriteSurface[] {
     const open: OpenWriteSurface[] = [];
     if (editing !== null) {
-      open.push({ kind: 'rawEditor', document: editing.file.id });
+      open.push({ kind: 'rawEditor', target: { kind: 'document', document: editing.file.id } });
     }
     if (editingMatch !== null) {
-      open.push({ kind: 'matchEditor', document: editingMatch.match.id.document });
+      open.push({
+        kind: 'matchEditor',
+        target: { kind: 'document', document: editingMatch.match.id.document }
+      });
     }
     if (deletingMatch !== null) {
-      open.push({ kind: 'matchDeleter', document: deletingMatch.projection.id });
+      open.push({
+        kind: 'matchDeleter',
+        target: { kind: 'document', document: deletingMatch.projection.id }
+      });
     }
     if (movingMatch !== null) {
-      open.push({ kind: 'matchMover', document: movingMatch.projection.id });
+      open.push({
+        kind: 'matchMover',
+        target: { kind: 'document', document: movingMatch.projection.id }
+      });
     }
     if (duplicatingMatch !== null) {
-      open.push({ kind: 'matchDuplicator', document: duplicatingMatch.projection.id });
+      open.push({
+        kind: 'matchDuplicator',
+        target: { kind: 'document', document: duplicatingMatch.projection.id }
+      });
     }
     if (restoring !== null) {
-      open.push({ kind: 'restore', document: restoring.projection.id });
+      open.push({ kind: 'restore', target: { kind: 'document', document: restoring.projection.id } });
     }
     return open;
   } // End of function openWriteSurfaces()

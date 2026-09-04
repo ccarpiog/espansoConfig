@@ -9,7 +9,7 @@ file over the hard bound archives first, before anything else. It carries the ph
 standing rules, the open risks, the next action, the verification baseline, the key paths and the git
 head. Everything a closed phase left behind — its narrative, its verification sections, its review
 dispositions and every superseded handoff — is in the archive, and **a phase closing is what
-triggers the move**. As of the 2d-5 design consult it is **520 lines and 62,684 bytes** — **and the
+triggers the move**. As of Phase 2d-5-1 it is **503 lines and 62,860 bytes** — **and the
 figures are re-measured on the file that carries them**, because a header quoting the size of the file
 it replaced has already had to be corrected twice, and 2d-4b-D found the identical shape in a notes
 section's line citations. **That failure recurred at the 2d-5 consult in a new place**: a citation
@@ -69,7 +69,9 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-4b design consult** | 2d-4b put to a design consult before any line of it was written, per the standing rule since 2b-2c | ✅ complete (2026-08-30) — [`docs/reviews/phase-2d-4b-design.md`](docs/reviews/phase-2d-4b-design.md), **Codex at high effort**, the **second provider** on this phase since 2d-4a began. Verdict *proceed as one coherent wire step*; it added a general key-without-accessor check and one bounded correction (`duplicateSeam`) that check exposes |
 | **2d-4b** and its seven corrective phases (**B … H**) | The TypeScript half of the wire — the mirror, the drain wrapper, the injectable event source, the i18n accessors, and the deletion of `AWAITING_FRONTEND_DECLARATION` — then eight review rounds over it, of which C to H were all about **one comment block** in `workspace.test.ts` | ✅ **complete and CLOSED at 2d-4b-H (2026-08-31)**, after an **eight**-round tail — the **second** this project has ended **by rule** rather than by an owner ruling (`CLAUDE.md` §7.2), after 2d-4a's. Round H found **no defect in either source hunk** and all four of its findings in the record, so its fix changed no source file and §7.1 commissioned nothing. B … G are each superseded by the next. Per-round scopes, verdicts and dispositions are in [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *“The 2d-4b corrective chain”*; the notes are `docs/decisions/2d-4b-notes.md` §8–§14 |
 | **2d-5 design consult** | 2d-5 put to a design consult before any line of it was written, per the standing rule since 2b-2c | ✅ complete (2026-08-31) — [`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md), **Codex at high effort**, the **second provider** to see this material since 2d-4a began. Verdict: cut 2d-5 into **seven** dependency-ordered steps; it overrides `phase-2d-design.md` in two places. The record is [`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) — 35 binding rulings and a 67-row citation audit — and its own review was `ship-with-fixes`, 0 blockers, 5 SHOULD-FIX, all five fixed in the record |
-| **2d-5** | The browser coordinator and the open-write-surface registry — seven steps, of which two touch components | 🔶 in progress — the consult is taken and **2d-5-1 is the next action**; no line of 2d-5 is written yet |
+| **2d-5** | The browser coordinator and the open-write-surface registry — seven steps, of which two touch components | 🔶 in progress — **step 1 of 7 is complete**; 2d-5-1-A is the next action |
+| **2d-5-1** | The surface and conflict vocabulary — the widened `OpenWriteSurface` union, the two predicates, `ConflictSource`, the memos, the EN/ES origin lines | ✅ complete (2026-09-04), risk **high**, worker **opus**. Review `ship-with-fixes`, **0 blockers**, 4 SHOULD-FIX — two fixed in the record, two carried to **2d-5-1-A** because they name source files and this phase's one review invocation was spent (`CLAUDE.md` §7.4). Notes `docs/decisions/2d-5-1-notes.md`; review `docs/reviews/phase-2d-5-1.md` |
+| **2d-5-1-A** | 2d-5-1's corrective phase — the two source findings its review left unreviewed | 🔶 **the next action**; carries the review §7.1 commissioned |
 | **2d-6 … 2d-8** | The remaining three steps of the 2d consult's eight | ⬜️ not started |
 | **2d** | External change reconciliation — plan §6.5 | 🔶 in progress |
 | **3–5** | Validation, packaging, hardening | ⬜️ not started |
@@ -211,49 +213,54 @@ Phase 0 substrate reads the archive section as part of this table.
 
 ## Next action
 
-### Phase 2d-5's design consult is COMPLETE. The next action is **Phase 2d-5-1** — the surface and
-### conflict vocabulary, the first of the consult's seven steps.
+### Phase 2d-5-1 is COMPLETE. The next action is **Phase 2d-5-1-A** — its corrective phase, carrying
+### the review round §7.1 commissioned and this workflow's one-review cap could not run.
 
-**Phase 2d-4b closed by rule on 2026-08-31 after eight rounds**, the second tail this project has ended
-that way. Its narrative is `docs/decisions/2d-4b-notes.md` §14.7 and
-[`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md); nothing of it is live
-work. **Phase 2d-5's consult is now taken**, and it is the second provider to look at this material
-since 2d-4a began — Codex at high effort, dispatched via the companion CLI, read-only, no gate run.
+#### What 2d-5-1-A is, and why it exists
 
-#### The three documents that bind 2d-5, in reading order
+**Two source findings from 2d-5-1's review, fixed and then reviewed.** `CLAUDE.md` §7.4 is the rule:
+a source fix a review cap leaves unreviewed becomes a new corrective phase carrying that review, with
+its own acceptance criteria, its own commit and its own mandatory review — never a fix that ships
+unreviewed under a phase called complete. Both findings are named in
+[`docs/decisions/2d-5-1-notes.md`](docs/decisions/2d-5-1-notes.md) §7 with their dispositions, and
+neither is a live correctness defect, which is why 2d-5-1 is complete rather than `BLOCKED`:
 
-1. [`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md) — **the consult, and it
-   binds the phase.** Where it rules against `docs/reviews/phase-2d-design.md` step 5, against Q8, or
-   against a habit of this project, the ruling wins unless a later record says why not.
-2. [`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) — **the record**: the
-   seven-step split, 35 numbered binding rulings each paired with what it does *not* guarantee, a
-   67-row citation audit, five corrections to earlier documents, seven unsettled items marked per
-   `CLAUDE.md` §7.3, and the inherited drain-guard item. **Read its §5 corrections before treating
-   `phase-2d-design.md` step 5 as the spec** — the consult overrides it in two places.
-3. [`docs/decisions/2d-5-design-brief.md`](docs/decisions/2d-5-design-brief.md) — the brief, kept
-   because a consult's answer is only as bounded as its question.
+1. **`src/lib/browser/restore.test.ts` ~:529 — the `coordinator()` recorder's filter.** It now keeps a
+   surface whose target is `unknown` open across `close()`, on the ground that a form naming no file is
+   not over the replaced one. Production disagrees: `invalidateEverySurface` in
+   `src/lib/components/DetailPane.svelte` (comment at :529-535) closes the new-snippet form **whatever
+   file it names**. Inert today — no case drives an unknown-target creator through `close()`, because
+   no production caller constructs one — but a test helper that models production backwards is a trap
+   set for 2d-5-2, which is the step that starts constructing them.
+2. **`src/lib/browser/restore.ts` — `targetingSurfaceFor` returns the first match.** An unknown creator
+   earlier in the array shadows an exact document match later, so the returned **kind** can name the
+   creator when a specific surface is the better answer. The yes/no answer is unaffected, which is why
+   the review graded it Low; the kind is what a 2d-5-4 sentence would put on screen, and there is no
+   consumer yet, so it is free to fix now.
 
-#### What 2d-5-1 is
+**Acceptance for 2d-5-1-A:** both fixed or both deliberately declined with the reason recorded; all
+four gates re-measured on the fixed tree; its own adversarial review taken and dispositioned. It is a
+small phase — do not let it grow into 2d-5-2.
 
-**The surface and conflict vocabulary, with no component touched and no coordinator behaviour.**
-The widened single `OpenWriteSurface` union with a discriminated unknown/known creator target; the
-watcher-target and restore-competition predicates, each switching on the target discriminant with a
-`never` terminus; `ConflictSource` as a discriminated union; the stable save-source memo; the
-origin-specific message values and their EN/ES accessors. `conflictChoicesFor` stays the only
-choice-list producer and `adoptDiskVersion` the only confirmed-install door. Evidence: pure
-model/type tests, including the exhaustive `never` arms and restore's unchanged unknown-creator
-behaviour.
+#### What 2d-5-1 shipped, so 2d-5-2 does not re-derive it
 
-**One thing about it is already known to be wrong, and it is the first thing 2d-5-1 must decide.**
-The consult declares 2d-5-1 *"components: none"* while changing the shape of `OpenWriteSurface`,
-whose only production constructor is `openWriteSurfaces()` in
-`src/lib/components/DetailPane.svelte:473-494` — and `src/lib/components/RestorePane.test.ts:1079`
-builds one too. Replacing the required `document: DocumentId` with a `target` union breaks both at
-compile time, so **`npm run check` cannot be green at the end of 2d-5-1 unless the widening is made
-additive or the step touches that component.** This is a defect in a proposed plan, not in shipped
-source, so it is **actionable** and not a blocker (`CLAUDE.md` §7.3); it is
-`2d-5-split-notes.md` §6 item 1, and 2d-5-1 either makes the widening additive or absorbs the
-component change and says so.
+`src/lib/browser/restore.ts` holds the widened single `OpenWriteSurface` union (the consult's
+declaration, with `WriteSurfaceTarget` and `WriteSurfaceDocumentTarget` named), `competingSurfaceFor`
+rewritten to switch on the target discriminant with a `never` terminus, the new `targetingSurfaceFor`,
+and `creatorEligibilityOf` — which **delegates** to `destinationEligibility` in `./matchCreation.ts`
+rather than restating its five conditions, so the two cannot drift. `src/lib/browser/conflictSource.ts`
+is new and holds `ExternalConflictObservation`, the discriminated `ConflictSource`, the two `WeakMap`
+memos and the origin-line vocabulary; two keys per language and `tConflictOriginMessage` in
+`src/lib/i18n/index.ts` are its user-facing half. `conflictChoicesFor` and `adoptDiskVersion` were not
+touched and are still the only choice-list producer and the only confirmed-install door.
+
+**The §6-item-1 question is settled: the mechanical edit was taken.** `openWriteSurfaces()` in
+`DetailPane.svelte` pushes `{ kind, target: { kind: 'document', document } }` for its six literals, so
+2d-5-1 deviated from the consult's *"components: none"*. **No window reading was taken, and the ground
+is narrower than it first looked**: that function has exactly one caller, `:966`, inside the
+`{:else if restoring !== null}` arm at `:947` of the chain beginning at `:844`, so **five of the six
+literals cannot execute at all** — in production or in any test. 2d-5-2's narrow window regression
+reading is the first reading of the new shape and inherits those five.
 
 #### The rest of the split, so a step is not invented
 
@@ -261,105 +268,82 @@ component change and says so.
 regression reading); **2d-5-3** the drain lifecycle coordinator; **2d-5-4** the observation state
 transitions; **2d-5-5** external conflicts and save arbitration; **2d-5-6** the file-wide route-guard
 closure; **2d-5-7** production activation, the capability widening and the baseline re-measure
-(components: **yes**, `AppShell.svelte` only). Two of the seven touch components, which is itself an
-override of `phase-2d-design.md` step 5's *"no component changes means no mounted or window evidence
-yet"*.
+(components: **yes**, `AppShell.svelte` only).
 
-#### The one item 2d-5 inherits as work
+The three documents that bind every step, in reading order:
+[`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md) (**the consult; it binds**),
+[`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) (the record — read its §5
+corrections before treating `phase-2d-design.md` step 5 as the spec) and
+[`docs/decisions/2d-5-design-brief.md`](docs/decisions/2d-5-design-brief.md) (the brief).
+
+#### The one item 2d-5 still inherits as work
 
 **The drain guard's escaping route, discharged at 2d-5-6 and not before.**
 `src/lib/browser/workspace.svelte.ts` imports its command wrappers at module level, so a call made
 through one of those bindings rather than through an injected parameter increments the `drains`
-counter in nothing. Re-derived by `2d-5-split-notes.md` §7 rather than inherited: the route is caught
-in **six** named cases — one `expect(invoked)` assertion in `DetailPane.test.ts` and five in
-`RestorePane.test.ts`, each in a distinct `it` block and **in neither `afterEach`** — while
-`workspace.test.ts`, whose subject module holds the route, has no `@tauri-apps/api/core` mock at all.
-**The closure is owed to all three files**, not to the one without a spy. This is
-`2d-4b-notes.md` §14.8 item 1, which the tail's closure explicitly did not discharge.
+counter in nothing. The route is caught in **six** named cases — one `expect(invoked)` assertion in
+`DetailPane.test.ts` and five in `RestorePane.test.ts`, each in a distinct `it` block and **in neither
+`afterEach`** — while `workspace.test.ts`, whose subject module holds the route, has no
+`@tauri-apps/api/core` mock at all. **The closure is owed to all three files.** This is
+`2d-4b-notes.md` §14.8 item 1 (re-derived by `2d-5-split-notes.md` §7), which 2d-4b's closure
+explicitly did not discharge.
 
-#### Three residues that are recorded, not work
+#### Residues that are recorded, not work
 
-Named so 2d-5 does not spend a round rediscovering them. None is a correctness defect in source.
+None is a correctness defect in source. Named so a later step does not spend a round rediscovering them.
 
 1. **`07744ae`'s commit message states its source diff as `+9 / -8` when `--numstat` gives `11 10`.**
    Permanent — this project does not rewrite pushed history. `2d-4b-notes.md` §14.4 is the correction.
 2. **`2d-4b-notes.md` §11.8 claim 3 cites `node_modules/@tauri-apps/api/core.js:202`** — version-pinned,
-   untracked, invisible to every gate. Correct today. A dependency bump falsifies it silently.
+   untracked, invisible to every gate. Correct today; a dependency bump falsifies it silently.
 3. **`workspace.test.ts:468` says "six review rounds"** where three carried the cross-file ranges the
    sentence justifies. Two rounds were told they could take it and **both deliberately left it**.
-
+4. **`scripts/lint/ipc-detail.test.ts` generates its cases from `scannableFiles()`**, so its count moves
+   when a file is *added* under the scanned roots and no author touches it. 2d-5-1's own record got its
+   +27 breakdown wrong by inferring per-file figures from a total that summed correctly
+   (`2d-5-1-notes.md` §5). **Re-derive a test count per file, on a pristine tree, never from the total.**
 
 ## Verification baseline
 
-**`1320 / 434 / 2175 / 184`** — `cargo test --workspace` / `npm run check` files / `npm test` /
-`npm run build` modules. **All four re-measured by the orchestrator alone on 2026-08-31**, each
-command unpiped, on the tree Phase 2d-4b-H's fix produced, with orphaned bin targets killed first —
-and re-measured on 2d-4b-B's, C's, D's, E's, F's and G's before that, making **seven** full runs of
-every gate in one session. The Rust figure is the sum of 26 binaries' `test result: ok` lines, 0 failed,
-`cargo test --workspace` exiting 0.
+**`1320 / 436 / 2202 / 185`** — `cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules. **All four re-measured by the orchestrator alone on 2026-09-04**, each command
+unpiped, on the tree Phase 2d-5-1 produced, after the worker had reported its own figures — the
+orchestrator's run is the record, not the worker's claim. `npm run check` reported **0 errors and 0
+warnings**; `npm test` reported **58 files, 2202 passed**; the Rust figure is the sum of **26**
+binaries' `test result: ok` lines, all `0 failed`. `cargo clippy --workspace --all-targets -- -D
+warnings`, `cargo fmt --check` and the architecture check `cargo tree -p espansoconfig-core | rg tauri`
+(finds nothing) were all run and all clean.
 
-**All four were re-measured again at the 2d-5 design consult on 2026-08-31 and none moved**, which is
-the prediction for a documents-only phase rather than a result. That phase created four files, all
-under `docs/`, and `git diff --stat HEAD -- src/ src-tauri/ crates/ scripts/ vite.config.ts
-svelte.config.js tsconfig.json package.json package-lock.json Cargo.toml Cargo.lock index.html` was
-empty — so the proof came first and the re-run confirmed it, in that order. Both bundle oracles were
-read: server-only markers absent, client-only markers present with 2 matches.
+**Both bundle oracles were read, and both lines are reported**, because the second exists to prove the
+search can match at all (`CLAUDE.md` §4): server-only markers **absent**, client-only markers
+**present with 2 matches**.
 
-**No figure moved anywhere in the eight-round 2d-4b tail**, which is the prediction rather than a
-suspicious result: all seven corrective phases changed comment text in test files plus the record, and
-no test case, no production module and no Rust line. 2d-4b-F is the only one to delete more than it
-wrote (`+15 / −34`); 2d-4b-G's source diff is `+11 / −10`; **2d-4b-H changed no source file at all**,
-which is what closed the tail. The baseline before 2d-4b was `1313 / 431 / 2125 / 184`.
+**Every one of the four moves is the ladder's prediction rather than a result to wave through.**
+`cargo test` did not move because no Rust changed and `git status` shows nothing under `crates/` or
+`src-tauri/`. `npm run check` moved **+2** for two new files entering the program. `npm test` moved
+**+27**, which is **13** new cases in `restore.test.ts` (205 → 218), **12** in `conflictSource.test.ts`
+and **2** in `scripts/lint/ipc-detail.test.ts`, whose `it.each(scannableFiles())` enrolled the two new
+files by itself. `npm run build` moved **+1** for one new reachable `.ts` module — `conflictSource.ts`
+becomes reachable because `src/lib/i18n/index.ts` imports its key builder, which is how every browser
+model's key builder becomes reachable here. No `.svelte` file was added, so the two-per-styled-component
+rung does not apply.
 
-**2d-4b-H's re-run was not needed and was taken anyway, and the reason generalizes.** Its source tree is
-byte-identical to `07744ae`, *proved* rather than asserted —
-`git diff --stat 07744ae -- src/ src-tauri/ crates/ scripts/ vite.config.ts svelte.config.js
-tsconfig.json package.json Cargo.toml` is empty — so the gate results already held. **A proof that the
-source did not change is stronger evidence than a re-run and costs less**; a round that can produce it
-should, and then re-run anyway when it is the round that closes a step.
+**`cargo test --workspace` in this repository is not safe to run concurrently with itself**, and 2d-5-1
+is the second recorded instance. Two overlapping runs made
+`watch_check::a_parked_worker_does_not_block_the_reap_of_a_worker_that_exited_behind_it` and
+`watch_check::a_committed_save_is_suppressed_while_a_later_external_write_is_not` **FAIL**; both pass in
+a single clean run. Real filesystem watchers are the cause. "With orphaned bin targets killed first",
+already written down here, is the same hazard. **No conclusion about source may be drawn from a
+concurrent run.**
 
-**The module count did not move at 2d-4b either, and that is the ladder's prediction rather than a
-suspicious result.** `CLAUDE.md` §4 costs one module per **reachable** new source module, and
-`src/lib/ipc/events.ts` is not reachable from the application entry — no non-test file under `src/`
-imports it, because 2d-4b deliberately registers no listener. **Both bundle oracles are read every
-time regardless**, and were at 2d-4b-B: server-only markers absent, client-only markers present with 2
-matches. The `npm run check` file count moved by **three** at 2d-4b for two new files, the third being
-`@tauri-apps/api/event.d.ts` newly entering the program, of which `events.ts` is the only importer.
+**The previous baseline was `1320 / 434 / 2175 / 184`**, re-measured at the 2d-5 design consult on
+2026-08-31 and unmoved through the whole eight-round 2d-4b tail. `npm run check`'s file count moved by
+**three** at 2d-4b for two new files, the third being `@tauri-apps/api/event.d.ts` newly entering the
+program, of which `src/lib/ipc/events.ts` is the only importer.
 
-**When 2d-5 first imports `events.ts` the module count moves by one, and that is the expected step.**
-A larger jump is the regression the oracles exist for.
-
-```sh
-cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings   # clean
-cargo fmt --check                                       # clean
-cargo doc --workspace --no-deps                         # exit 0; 73 private_intra_doc_links, 0 unresolved
-cargo tree -p espansoconfig-core | rg tauri             # must find NOTHING
-
-npm run check    # svelte-check, --fail-on-warnings
-npm test         # vitest
-npm run build    # vite
-```
-
-**The module count alone decides nothing, and searching the bundle for `svelte/internal/server` is
-vacuous** — Vite minifies specifiers away, so that string is absent either way. Use the oracle that
-discriminates and read **both** lines; the second exists to prove the search can match at all:
-
-```sh
-rg -c '\$\$payload|head_payload|push_element' dist/assets/index-*.js   # server-only — must be ABSENT
-rg -c 'window\.__svelte|svelte-trusted-html' dist/assets/index-*.js    # client-only — must be PRESENT
-```
-
-**⚠️ The host scar.** An orphaned bin target left by a killed run produces nine or ten `watch_check::`
-baseline-scan timeouts that look exactly like a real failure. Kill orphans with
-`pkill -f 'target/debug/deps/espansoconfig-'`, run the workspace suite **once**, and stay off the
-machine; the single-threaded gate is
-`cargo test -p espansoconfig --bin espansoconfig watch_check:: -- --test-threads=1` (20/20).
-**Do not pipe a gate whose exit status you intend to trust** — `cargo test --workspace 2>&1 | tail -40`
-reports `tail`'s status, and it hid ten failures once.
-
-`npm install` (or `npm ci`) is required before any frontend command will run.
+**When 2d-5-7 first imports `events.ts` from production the module count moves by one, and that is the
+expected step.** A larger jump is the regression the oracles exist for. 2d-5-1 did **not** import it,
+by design.
 
 ### Where the closed rounds' verification narratives went
 
@@ -484,6 +468,8 @@ describes in as many words.
 | **2d-4b-H (round 8 + its fix — the tail CLOSES here, and 2d-4b with it)** | **`21cbef8`** | ✅ pushed to `origin/main` |
 | 2d-4b-H — the SHA and push record | `998e346` | ✅ pushed to `origin/main` |
 | **2d-5 design consult (brief, Codex consult, record, review — four new files, all under `docs/`, no source touched)** | **`5787e87`** | ✅ pushed to `origin/main` |
+| 2d-5 design consult — the SHA and push record | `32ffcfc` | ✅ pushed to `origin/main` |
+| **2d-5-1 — the surface and conflict vocabulary; review `ship-with-fixes`, 2 of 4 findings carried to 2d-5-1-A** | _pending_ | _pending_ |
 
 **Each of the six commissions the next round**, the unit being the file, and the source half of each
 is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
