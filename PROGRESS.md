@@ -22,7 +22,7 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, measured after the move rather than predicted before it:**
-**481 lines and 61,431 bytes** — 4.0 KiB under the 64 KiB soft bound, still past the 400-line one. 2d-4b-H
+**482 lines and 61,599 bytes** — 3.8 KiB under the 64 KiB soft bound, still past the 400-line one. 2d-4b-H
 closed the eight-row 2d-4b chain and its status rows went to the archive on 2026-08-31; its **git-state**
 rows stayed in the live head another four days, and 2d-5-1-B is what took them, together with 2d-4a's.
 **The next session that closes a 2d-5 step should archive that step's narrative as it goes**
@@ -464,6 +464,7 @@ all of it is in `git log`._
 | Checkpoint maintenance — the 37 closed 2d-4a and 2d-4b git-state rows archived (two files, both on §7's closed list; commissions nothing) | `d1d9d13` | ✅ pushed to `origin/main` |
 | **2d-5-1-B — round B (`ship`, 0 blockers, 0 should-fix, 1 Low) and its fix; 2d-5-1-C OWED** | **`1d623dc`** | ✅ pushed to `origin/main` |
 | 2d-5-1-B — the SHA and push record | `3832f39` | ✅ pushed to `origin/main` |
+| **2d-5-1-C — round C (`ship`, 0 findings) and the chain archived; the 2d-5-1 tail CLOSES here, and 2d-5-1 with it** | **`61aaaba`** | ✅ pushed to `origin/main` |
 
 **What commissioned each round of this tail, and what ended it.** `1ff4f34`'s source half — three
 comment corrections in two files — commissioned **2d-5-1-B**, which found all three true. `1d623dc`'s
