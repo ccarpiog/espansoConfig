@@ -3177,3 +3177,37 @@ both rounds verbatim at
 Two rounds, both `not-ready`, every finding fixed, and **no source file changed** — so the rule M2
 installed commissioned nothing on its own first application.
 
+
+
+---
+
+## The pre-2d-5-2a rungs of the verification ladder, archived 2026-09-04
+
+**History, and still checkable.** These are the two ladder paragraphs `PROGRESS.md` carried until
+Phase 2d-5-2a took the live head over its 64 KiB soft bound. The live checkpoint keeps the current
+baseline, 2d-5-2a's own moves and the immediately preceding rung; everything further back is here.
+
+**Older still, and kept only as a rung: `1320 / 434 / 2175 / 184`**, re-measured at the 2d-5 design consult on
+2026-08-31 and unmoved through the whole eight-round 2d-4b tail. `npm run check`'s file count moved by
+**three** at 2d-4b for two new files, the third being `@tauri-apps/api/event.d.ts` newly entering the
+program, of which `src/lib/ipc/events.ts` is the only importer.
+
+**2d-5-1's own four moves, kept because the ladder is checked rather than accepted.** `npm run check`
+moved **+2** for two new files entering the program. `npm test` moved **+27**, which is **13** new
+cases in `restore.test.ts` (205 → 218), **12** in `conflictSource.test.ts` and **2** in
+`scripts/lint/ipc-detail.test.ts`. `npm run build` moved **+1** for one new reachable `.ts` module —
+`conflictSource.ts` becomes reachable because `src/lib/i18n/index.ts` imports its key builder, which
+is how every browser model's key builder becomes reachable here.
+
+
+### The three 2d-4b residues, archived 2026-09-04 at Phase 2d-5-2a
+
+**None is a correctness defect in source, and no 2d-5 step reads any of them.** They left the live
+head when 2d-5-2a took it over its 64 KiB soft bound. They are still true.
+
+1. **`07744ae`'s commit message states its source diff as `+9 / -8` when `--numstat` gives `11 10`.**
+   Permanent — this project does not rewrite pushed history. `2d-4b-notes.md` §14.4 is the correction.
+2. **`2d-4b-notes.md` §11.8 claim 3 cites `node_modules/@tauri-apps/api/core.js:202`** — version-pinned,
+   untracked, invisible to every gate. Correct today; a dependency bump falsifies it silently.
+3. **`workspace.test.ts:468` says "six review rounds"** where three carried the cross-file ranges the
+   sentence justifies. Two rounds were told they could take it and **both deliberately left it**.

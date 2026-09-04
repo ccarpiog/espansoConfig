@@ -114,6 +114,11 @@ import type { SelectedMatch, SelectionRepair } from './selection';
 import { positionOf, repairSelection, reresolve, selectMatch } from './selection';
 import type { SidebarModel, SidebarSelection } from './sidebar';
 import { ALL_DOCUMENTS, buildSidebar, holdsMatches, sameSelection } from './sidebar';
+import {
+  createWriteSurfaceRegistry,
+  type UnregisterWriteSurface,
+  type WriteSurfaceTransition
+} from './writeSurfaceRegistry';
 
 /**
  * The commands the browser needs, as one injectable object.
@@ -1468,6 +1473,72 @@ export interface BrowserState {
     surfaces: readonly OpenWriteSurface[],
     invalidate: InvalidateEverySurface
   ): Promise<RestoreSession | null>;
+
+  /**
+   * Records that one write surface is open, and answers its lease.
+   *
+   * **This state owns one registry and this is the door to it** — Phase 2d-5-2a.
+   * The registry itself is `./writeSurfaceRegistry.ts`, which carries the whole
+   * contract: a lease rather than a bare kind key, an idempotent unregister that is
+   * inert once displaced, and a target that can be reported in place.
+   *
+   * **Nothing registers anything yet.** 2d-5-2b is what makes the surface hosts
+   * call this, what makes `MatchCreator.svelte` report its destination through the
+   * lease, and what carries the exhaustiveness assembly; at 2d-5-2a this method has
+   * no production caller and nothing on any screen changes because of it.
+   *
+   * **What it cannot force, in the same sentence as what it does.** It forces that
+   * a stale instance of one kind can neither remove nor re-target a newer one —
+   * that is the lease's own guarantee — and it forces nothing at all about
+   * completeness: **nothing makes a component register**, and
+   * {@link BrowserState.openWriteSurfaces} answering an empty array claims there are
+   * no open surfaces, which is `competingSurfaceFor`'s stated limitation reaching
+   * this layer unchanged.
+   *
+   * **It is not wired to {@link BrowserState.restoreDocument}**, which still takes
+   * its surfaces as an argument. Routing that call through this registry is
+   * 2d-5-2b's, because the caller that would change is a component.
+   *
+   * @param surface - The surface, exactly as a consumer will see it.
+   * @param transition - What that surface is told about an external observation of
+   *   its file. Stored and never called at 2d-5-2a.
+   * @returns The lease: call it to unregister, or report a file through it.
+   */
+  registerWriteSurface(
+    surface: OpenWriteSurface,
+    transition: WriteSurfaceTransition
+  ): UnregisterWriteSurface;
+
+  /**
+   * Every write surface registered with this state, oldest registration first.
+   *
+   * **A snapshot, and a fresh array each call.** It is the value
+   * `competingSurfaceFor` and `targetingSurfaceFor` in `./restore.ts` take, and its
+   * order is the registry's own — see `./writeSurfaceRegistry.ts` for what that
+   * order does and does not decide.
+   *
+   * **It is not what `DetailPane.svelte` passes to a restore today.** That
+   * component still assembles its own array from what it has open, and this method
+   * answers only what has been registered — which, until 2d-5-2b, is nothing in
+   * production.
+   *
+   * @returns Every live surface, oldest registration first.
+   */
+  openWriteSurfaces(): readonly OpenWriteSurface[];
+
+  /**
+   * How many times the registered set has changed.
+   *
+   * **The guard the consult's Q5 asks a later coordinator to capture before an
+   * await and recheck before it installs** (`docs/reviews/phase-2d-5-design.md`
+   * lines 157-163). Moving means the set was mutated since the capture; it says
+   * nothing about *what* changed, nothing about any particular document, and does
+   * not imply the set now differs from the capture. Nothing calls it yet: 2d-5-4 is
+   * the step that captures it.
+   *
+   * @returns The current generation; zero for a state nothing has registered with.
+   */
+  writeSurfaceGeneration(): number;
 }
 
 /**
@@ -1595,6 +1666,23 @@ export function createBrowserState(
     ConflictResult,
     { readonly document: DocumentId; readonly generation: number }
   >();
+  // **Every write surface this window has told this state about** — Phase 2d-5-2a.
+  // One registry per state, created here rather than at module level for the reason
+  // `./writeSurfaceRegistry.ts` gives: two windows are two registries, and a
+  // `DocumentId` is session-local, so a shared one would make a surface open in one
+  // window visible in the other.
+  //
+  // **Not `$state`, and not cleared by `open()`.** Nothing renders it — it is read
+  // by a coordinator immediately before it decides something, exactly as the
+  // generation counters above are. And `open()` deliberately does not clear it,
+  // although it clears documents, projections, selection and the viewer: a
+  // component owns its own registration and unregisters through its lease when it
+  // closes, so clearing here would make a still-open surface invisible while its
+  // component went on holding an inert lease. That is the unsafe direction —
+  // "no surface is open" is exactly the answer that permits a silent reload — and
+  // the safe one costs nothing, because a workspace that has really been replaced
+  // unmounts the surfaces whose hosts then unregister.
+  const writeSurfaces = createWriteSurfaceRegistry();
 
   /**
    * The loaded projection of one document, if it has arrived.
@@ -3080,7 +3168,24 @@ export function createBrowserState(
       // that throws comes back as a line beside the committed outcome rather than
       // in place of it.
       return applyRestore(session, sent.answer.sealed, invalidate);
-    } // End of function restoreDocument()
+    }, // End of function restoreDocument()
+
+    registerWriteSurface(
+      surface: OpenWriteSurface,
+      transition: WriteSurfaceTransition
+    ): UnregisterWriteSurface {
+      // Straight through: the registry owns the lease, the key and the generation,
+      // and adding a check here would be a second rule that can drift from it.
+      return writeSurfaces.registerWriteSurface(surface, transition);
+    },
+
+    openWriteSurfaces(): readonly OpenWriteSurface[] {
+      return writeSurfaces.openWriteSurfaces();
+    },
+
+    writeSurfaceGeneration(): number {
+      return writeSurfaces.generation();
+    }
   };
 
   return state;
