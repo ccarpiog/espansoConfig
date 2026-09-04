@@ -22,7 +22,7 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, measured on the finished file rather than predicted before it:**
-**644 lines and 77,687 bytes** — 11.9 KiB over the 64 KiB soft bound, and well past the 400-line one.
+**644 lines and 77,705 bytes** — 11.9 KiB over the 64 KiB soft bound, and well past the 400-line one.
 **It is over soft on purpose and the figure is the honest one.**
 
 **The trend is now the thing to watch, and it is recorded here rather than discovered later.** The
@@ -597,7 +597,7 @@ all of it is in `git log`._
 | _2d-5-1-C — the SHA and push record_ | `2b3fb03` | ✅ pushed to `origin/main` |
 | **2d-5-2a — the keyed write-surface registry, its suite and its record, plus the checkpoint archiving five things out of the live head; review 1 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-A OWED** | **`15ada19`** | ✅ pushed to `origin/main` |
 | **2d-5-2a-A — round 1's three fixes (the stored surface is now a frozen copy the registry builds), plus 2d-5-2a's SHA record; review 2 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-B OWED** | **`9f32cc5`** | ✅ pushed to `origin/main` |
-| **2d-5-2a-B — round 2's three fixes, every one a comment or a record line and **no executable line anywhere**; review 3 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-C OWED** | **`PENDING`** | _pending_ |
+| **2d-5-2a-B — round 2's three fixes, every one a comment or a record line and **no executable line anywhere**; review 3 `ship-with-fixes`, 0 blockers, 3 SHOULD-FIX all carried; 2d-5-2a-C OWED** | **`52ff829`** | ✅ pushed to `origin/main` |
 
 **What commissioned each round of this tail, and what ended it.** `1ff4f34`'s source half — three
 comment corrections in two files — commissioned **2d-5-1-B**, which found all three true. `1d623dc`'s
