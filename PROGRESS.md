@@ -495,7 +495,7 @@ describes in as many words.
 | 2d-5 design consult — the SHA and push record | `32ffcfc` | ✅ pushed to `origin/main` |
 | **2d-5-1 — the surface and conflict vocabulary; review `ship-with-fixes`, 2 of 4 findings carried to 2d-5-1-A** | **`16a122b`** | ✅ pushed to `origin/main` |
 | 2d-5-1 — the SHA and push record | `ae15127` | ✅ pushed to `origin/main` |
-| **2d-5-1-A — the two source fixes, plus the three comment corrections its review found; 2d-5-1-B OWED** | _pending_ | _pending_ |
+| **2d-5-1-A — the two source fixes, plus the three comment corrections its review found; 2d-5-1-B OWED** | **`1ff4f34`** | ✅ pushed to `origin/main` |
 
 **Each of the six commissions the next round**, the unit being the file, and the source half of each
 is comment text with **not one executable line**: `1c34579` six blocks in three files, `e510819` four
