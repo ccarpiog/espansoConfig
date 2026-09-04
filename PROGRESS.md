@@ -22,7 +22,7 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, measured on the finished file rather than predicted before it:**
-**728 lines and 84,597 bytes** — 18.6 KiB over the 64 KiB soft bound, and well past the
+**728 lines and 84,599 bytes** — 18.6 KiB over the 64 KiB soft bound, and well past the
 400-line one. **It is over soft, the figure is re-measured on this file rather than inherited, and it is
 the honest one.**
 
@@ -645,7 +645,7 @@ all of it is in `git log`._
 | 2d-5 design consult — the SHA and push record | `32ffcfc` | ✅ pushed to `origin/main` |
 | _2d-5-1 through 2d-5-1-C, and 2d-5-2a through 2d-5-2a-C — **both chains closed**, 14 rows including one checkpoint-maintenance commit_ | `16a122b` … `0f1ad8b` | ✅ all pushed; **archived 2026-09-04 at 2d-5-2b** |
 | **2d-5-2b — the registry made live: the `DetailPane` assembly, seven registrations, the creator's report, the deleted producer, and the review's four fixes including the `BrowserState` reactive mirror; review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed in this commit**; **2d-5-2b-A TAKEN**, see the row below | **`505caf6`** | ✅ pushed to `origin/main` |
-| **2d-5-2b-A — the round §7.1 commissioned for 2d-5-2b's fix: `writeSurfaceGeneration()` made authoritative, the three mirror sites given reactive coverage proven by mutation, and two over-wide sentences corrected; review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed in this commit**; **2d-5-2b-B OWED** | _SHA in the follow-up commit_ | _pending_ |
+| **2d-5-2b-A — the round §7.1 commissioned for 2d-5-2b's fix: `writeSurfaceGeneration()` made authoritative, the three mirror sites given reactive coverage proven by mutation, and two over-wide sentences corrected; review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed in this commit**; **2d-5-2b-B OWED** | **`92fe0f4`** | ✅ pushed to `origin/main` |
 
 **What commissioned each round of this tail, and what ended it.** `1ff4f34`'s source half — three
 comment corrections in two files — commissioned **2d-5-1-B**, which found all three true. `1d623dc`'s
