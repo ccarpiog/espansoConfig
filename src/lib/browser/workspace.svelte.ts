@@ -1590,15 +1590,22 @@ export interface BrowserState {
    * await and recheck before it installs** (`docs/reviews/phase-2d-5-design.md`
    * lines 157-163). Moving means the set was mutated since the capture; it says
    * nothing about *what* changed, nothing about any particular document, and does
-   * not imply the set now differs from the capture. Nothing calls it yet: 2d-5-4 is
-   * the step that captures it.
+   * not imply the set now differs from the capture. **No caller in production
+   * captures it yet**: 2d-5-4 is the step that does. The callers it has today are
+   * cases in `DetailPane.test.ts`, which assert the number itself — the earlier
+   * wording here said "nothing calls it", which was wider than the code and is
+   * Phase 2d-5-2b-A's review, finding 3.
    *
-   * **It answers the mirror {@link BrowserState.openWriteSurfaces} reads**, which
-   * is the registry's own generation copied in the same synchronous block as every
-   * change this state makes, so the two doors cannot report different numbers and a
-   * caller inside a reactive context re-runs when either would have moved. A
-   * coordinator capturing it across an `await` is not in such a context and is
-   * unaffected by that.
+   * **It answers the registry and reads the mirror**, which is exactly what
+   * {@link BrowserState.openWriteSurfaces} does. The number returned is
+   * `writeSurfaceRegistry`'s own, so the two doors describe the same registry state
+   * *by construction* rather than by the mirror happening to be in step; the mirror
+   * read is what makes a caller inside a reactive context re-run when either would
+   * have moved. **What the mirror owns is the invalidation and not the value**: a
+   * later method that moved the registry without calling `noticeWriteSurfaces()`
+   * would leave both doors truthful and neither reactive, and nothing in TypeScript
+   * prevents that. A coordinator capturing this across an `await` is not in a
+   * reactive context and is unaffected either way.
    *
    * @returns The current generation; zero for a state nothing has registered with.
    */
@@ -3381,12 +3388,25 @@ export function createBrowserState(
     },
 
     writeSurfaceGeneration(): number {
-      // The mirror rather than `writeSurfaces.generation()`, so that this answer
-      // carries the same dependency the one above does. They are the same number:
-      // every door that can move the registry's generation copies it here in the
-      // same synchronous block, so no caller can observe them apart.
-      return surfaceGeneration;
-    }
+      // **The read is the dependency; the registry is the answer.** This is the
+      // same shape `openWriteSurfaces()` above uses, and Phase 2d-5-2b-A's review,
+      // finding 1, is why it is used here too: reading the mirror subscribes a
+      // caller's `$derived` or `$effect` exactly as it does there, and returning
+      // `writeSurfaces.generation()` makes the number itself authoritative rather
+      // than derivative.
+      //
+      // **The direction is the whole reason.** Returning the mirror instead would
+      // make this door *under-report* if a later method of this state ever moved
+      // the registry without calling `noticeWriteSurfaces()`: it would answer
+      // "nothing changed" while `openWriteSurfaces()`, which reads the registry,
+      // answered the new set in the same block — and the Q5 guard 2d-5-4 captures
+      // across an await is precisely the caller that would believe it. Reading the
+      // registry cannot fail that way. What such a path would still cost is the
+      // *invalidation* rather than the *value*, and nothing in TypeScript prevents
+      // it; that is item 9 of this step's "where it is thin", not a claim made here.
+      void surfaceGeneration;
+      return writeSurfaces.generation();
+    } // End of function writeSurfaceGeneration()
   };
 
   return state;

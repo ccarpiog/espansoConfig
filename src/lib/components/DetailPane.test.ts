@@ -923,6 +923,14 @@ describe('the pane as a write-surface host', () => {
 
     pane.stop();
     expect(registered(pane.state)).toEqual([]);
+    // **A registry assertion since Phase 2d-5-2b-A's review, finding 1.** This door
+    // used to answer the reactive mirror, so the number here and the set above came
+    // from two places and could disagree with nothing failing; it now answers
+    // `writeSurfaceRegistry`'s own generation, which is the stronger oracle — one
+    // registration and one unregister, counted by the thing that performed them.
+    // What it consequently no longer observes is the *mirror*, which is why the two
+    // reactive cases below exist — between them they cover all three of the
+    // `noticeWriteSurfaces()` call sites.
     expect(pane.state.writeSurfaceGeneration()).toBe(2);
   }); // End of the "unmount returns every lease" case
 
@@ -932,6 +940,12 @@ describe('the pane as a write-surface host', () => {
     // reporter correctly, so this is a mounted fact or it is nothing: what is
     // asserted is not only that the target moved but that the generation moved by
     // exactly **one**, which an unregister-and-register would have moved by two.
+    //
+    // **The generation read is the registry's own since Phase 2d-5-2b-A's review,
+    // finding 1**, which makes this a stronger claim than it was: the number and
+    // the set below now come from the same place, so "moved by one" is the
+    // registry's own account of what the lease did to it. It says nothing about the
+    // reactive mirror — that is the re-targeting case further down.
     const pane = await mountPane();
     control(pane.target, 'browser.matchCreation.open').click();
     flushSync();
@@ -1102,6 +1116,63 @@ describe('the pane as a write-surface host', () => {
     pane.stop();
   }); // End of the "a late surface reaches the restore" case
 
+  it('shows the restore a surface that was re-targeted onto its file', async () => {
+    // **The third `noticeWriteSurfaces()` call site, observed reactively** — Phase
+    // 2d-5-2b-A's review, finding 2. Three operations move the live set through
+    // `BrowserState`, and each has to bring the mirror into step. The case above
+    // covers two of them: the registration inside `registerWriteSurface` makes the
+    // refusal sentence appear, and the lease's unregister makes it go. The one left
+    // is the lease's `replaceTarget`, whose only coverage was a
+    // `writeSurfaceGeneration()` assertion — and that door now answers the
+    // registry's own number rather than the mirror, so **no generation assertion
+    // anywhere can observe the mirror**. A reactive consumer is the only thing that
+    // can, and this is one.
+    //
+    // **A creator that names no file competes with nothing**, which is what makes
+    // the two halves of this case different: registering one beside the restore
+    // draws no refusal, and pointing it at the restore's own file *through the
+    // lease* is a registry mutation that reaches the screen only if the mirror
+    // moved with it. Nothing else in that block invalidates the child's
+    // `$derived.by`, so the sentence appearing is the observation and not a
+    // coincidence of re-rendering.
+    //
+    // **The registration is a second host's, exactly as above.** This pane keeps
+    // its seven surfaces mutually exclusive through `busy`, so it can never draw a
+    // creator beside an open restore itself.
+    const pane = await mountPane(true);
+    await WALKS.restore.open(pane);
+    flushSync();
+    control(pane.target, 'browser.restore.listBatches').click();
+    await settle();
+    control(pane.target, 'browser.restore.batchNamed', { name: BATCH.name }).click();
+    await settle();
+    entryControl(pane.target, 'match/a.yml').click();
+    await settle();
+
+    const creatorOpen = DICTIONARIES.en['browser.restore.refused.matchCreatorOpen'];
+    const lease = pane.state.registerWriteSurface(
+      { kind: 'matchCreator', target: { kind: 'unknown' } },
+      () => undefined
+    );
+    flushSync();
+
+    expect(pane.target.textContent).not.toContain(creatorOpen);
+    expect(control(pane.target, 'browser.restore.prepare').disabled).toBe(false);
+
+    // The answer travels back unchanged through the mirroring wrapper, which is the
+    // half of `mirroringLease` a screen cannot show.
+    expect(lease.replaceTarget({ kind: 'document', document: 1 })).toBe('replaced');
+    flushSync();
+
+    expect(pane.target.textContent).toContain(creatorOpen);
+    expect(control(pane.target, 'browser.restore.prepare').disabled).toBe(true);
+    expect(registered(pane.state)).toEqual([
+      WALKS.restore.expected,
+      { kind: 'matchCreator', target: { kind: 'document', document: 1 } }
+    ]);
+    pane.stop();
+  }); // End of the "a re-targeted surface reaches the restore" case
+
   it('leaves the registry alone when the form reports the same file again', async () => {
     // **The case `MatchCreator.test.ts` cites, which did not exist until Phase
     // 2d-5-2b's review** (finding 3). That file establishes that the child reports
@@ -1114,6 +1185,11 @@ describe('the pane as a write-surface host', () => {
     // **The generation is the assertion because the entry alone would not be.** A
     // re-registration would leave an identical surface behind it, so a case reading
     // only the live set would pass over the churn this is about.
+    //
+    // **Since Phase 2d-5-2b-A's review, finding 1, that generation is the
+    // registry's own**, which is what makes "did not move" mean anything here: a
+    // mirror can fail to move because the registry did not, or because a mirroring
+    // call was missing, and only the registry's number distinguishes them.
     const pane = await mountPane();
     control(pane.target, 'browser.matchCreation.open').click();
     flushSync();

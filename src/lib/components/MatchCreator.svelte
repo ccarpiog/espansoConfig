@@ -384,8 +384,12 @@
    * `targetingSurfaceFor` attributes it to every creator-eligible file, and
    * `competingSurfaceFor` lets a restore of any file proceed — so the window is
    * over-refusing on one side and under-refusing on the other during that gap.
-   * Nothing reads either answer in production at 2d-5-2b, and the pane's `busy`
-   * rule keeps a restore from being open beside this form at all.
+   * **What makes the gap inert is `busy`, not an absent reader** — Phase 2d-5-2b-A's
+   * review, finding 4. `competingSurfaceFor` *is* read in production, by
+   * `RestorePane.svelte`'s `current` on every open restore; it is
+   * `targetingSurfaceFor` that has no production caller yet. The pane's `busy` rule
+   * is what keeps a restore from being open beside this form at all, and that is a
+   * fact about `DetailPane.svelte` rather than a guarantee of this component's.
    */
   $effect(() => {
     reportDestination(view.chosen?.document ?? null);

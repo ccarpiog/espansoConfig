@@ -22,7 +22,7 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, measured on the finished file rather than predicted before it:**
-**708 lines and 82,567 bytes** — 16.6 KiB over the 64 KiB soft bound, and well past the
+**728 lines and 84,597 bytes** — 18.6 KiB over the 64 KiB soft bound, and well past the
 400-line one. **It is over soft, the figure is re-measured on this file rather than inherited, and it is
 the honest one.**
 
@@ -43,7 +43,7 @@ to [`status-table.md`](docs/progress-archive/status-table.md), leaving one summa
 superseded 2d-5-1/2d-5-2a **verification narratives** went to
 [`phase-2d.md`](docs/progress-archive/phase-2d.md), because 2d-5-2b re-measured every figure on its own
 tree. The live head still grew — it carries a new chain's record — and **that is the rule working, not
-failing**: 2d-5-2b's own rows stay because 2d-5-2b-A is owed, so that chain is live.
+failing**: 2d-5-2b's own rows stay because the chain is live — 2d-5-2b-A has since closed and 2d-5-2b-B is owed.
 
 Six things left the live head across 2d-5-2a
 and 2d-5-2a-A and the two steps' records still cost more than they saved. What moved, so nobody
@@ -238,83 +238,76 @@ any of them anything.
 ---
 ## Next action
 
-### Phase 2d-5-2b is implemented, reviewed, fixed and committed — and the registry is **live**.
-### The next action is **Phase 2d-5-2b-A — the review round §7.1 commissions for 2d-5-2b's fix**.
+### Phase 2d-5-2b-A is complete: the round §7.1 commissioned for 2d-5-2b's fix has run, and its own fix changed source.
+### The next action is **Phase 2d-5-2b-B — the review round §7.1 commissions for 2d-5-2b-A's fix**.
 
 #### Why a round is owed, so nobody has to decide it
 
-2d-5-2b's one review returned `ship-with-fixes`, **0 blockers**, four SHOULD-FIX findings, and **all
-four were fixed in the same commit**. That fix round changed **source** — `workspace.svelte.ts`
-substantively, plus comments in three more source files and two test files — so `CLAUDE.md` §7.1
-commissions a round, scoped to that fix. The autoclaude workflow caps a phase at one review
-invocation and that cap outranks §7 (§7.4), so the debt is **carried as a corrective phase rather
-than written off**: that phase is 2d-5-2b-A, and its review is the round §7.1 already commissioned.
+2d-5-2b-A's one review ([`docs/reviews/phase-2d-5-2b-A.md`](docs/reviews/phase-2d-5-2b-A.md))
+returned `ship-with-fixes`, **0 blockers** and **four SHOULD-FIX** findings, and all four were fixed
+in this phase's own commit. That fix round changed **source** —
+`src/lib/browser/workspace.svelte.ts` substantively, `src/lib/components/MatchCreator.svelte`
+(comment) and `src/lib/components/DetailPane.test.ts` (one new case) — so `CLAUDE.md` §7.1
+commissions a round, scoped to that fix. §7.4 carries the debt as a corrective phase rather than
+writing it off, exactly as the 2d-5-2a chain did four times: that phase is **2d-5-2b-B**.
 
 **Scope it to the fix, not to the phase.** The four findings and what answered them are
-`docs/decisions/2d-5-2b-notes.md` §12; the review itself is `docs/reviews/phase-2d-5-2b.md`. The
-sharpest thing for that round to attack is named under *"What the fix changed"* below.
+[`docs/decisions/2d-5-2b-notes.md`](docs/decisions/2d-5-2b-notes.md) **§13**.
 
-#### What 2d-5-2b shipped
+#### What 2d-5-2b-A changed
 
-`src/lib/components/DetailPane.svelte` holds one
-`const openSurfaces: PaneWriteSurfaces = $derived({…} satisfies Record<OpenWriteSurfaceKind, PaneWriteSurface>)`,
-where `PaneWriteSurfaces` is the mapped type `{[K in OpenWriteSurfaceKind]: (OpenWriteSurface & {kind: K}) | null}`
-— **derived from the shipped union rather than re-spelled**, so an entry cannot be filed under
-another kind's key and a second definition cannot drift from the first. One `$effect` runs
-`reconcileWriteSurfaces`, which asks for the only three differences that can exist — a kind opened,
-a kind closed, a target moved — and **never tears down and rebuilds**, because every registration
-moves the generation consult Q5 makes a coordinator's guard. The effect returns **no** cleanup
-deliberately (an effect's cleanup runs before every re-run, so returning disposal would return every
-lease on a keystroke); teardown is `onDestroy`.
+**Finding 1 was the substantive one, and it moved the guard off the mirror.**
+`writeSurfaceGeneration()` used to *return* the mirror; it now does
+`void surfaceGeneration; return writeSurfaces.generation();` — the read is the dependency, the
+registry is the answer. **The direction is the whole reason**: returning the mirror would make the
+door **under-report** (*"nothing changed"*) if a later method ever moved the registry without
+calling `noticeWriteSurfaces()`, while `openWriteSurfaces()` answered the new set in the same
+block — and the Q5 guard 2d-5-4 captures across an `await` is exactly the caller that would believe
+it. Both doors now read the registry, so *"the two doors cannot report different numbers"* is true
+**by construction** rather than by the mirror happening to be in step. **What the mirror still owns
+is the invalidation and not the value**, nothing in TypeScript enforces that, and the doc block says
+so in the same sentence.
 
-`MatchCreator.svelte` gained a **required** `reportDestination` prop driven by an effect over
-`matchCreationView(session).chosen`, so the creator's `unknown` → document move goes through the
-lease's `replaceTarget` **in place**, and that method's answer is read — `staleLease` re-registers.
-The pane's hand-built `openWriteSurfaces()` producer is **deleted**; `RestorePane`'s `surfaces`, and
-therefore `restoreDocument`'s argument, now come from the registry.
+**Finding 2 is why that fix is not free.** Making the door authoritative removed the only oracle the
+three `noticeWriteSurfaces()` call sites had: every generation assertion in `DetailPane.test.ts`
+used to read the mirror **against itself**, so no test could have failed if mirror and registry
+drifted. The replacement is **reactive** — after the fix, the mirror's only externally visible
+consequence is that a `$derived` reading `browser.openWriteSurfaces()` re-runs — and one new case
+carries it, *shows the restore a surface that was re-targeted onto its file*.
 
-**The compile-error demonstration is this step's central evidence and the orchestrator re-ran it on a
-key it chose itself** (`restore`, not the implementer's `matchMover`): deleting it produces **two**
-independent errors, one at the `PaneWriteSurfaces` annotation and one at the `satisfies`, and
-restoring it returns `npm run check` to 0/0.
+**All three sites were proven by mutation, and the orchestrator re-ran two of the three itself**
+rather than accepting the worker's table. Commenting out `replaceTarget`'s `noticeWriteSurfaces()`
+fails *shows the restore a surface that was re-targeted onto its file* **alone** (1 failed / 23
+passed); commenting out the unregister's fails *shows the restore a surface that opened after its
+derived had run* **alone** (1 / 23). The registration site fails two cases. Restored, 24 pass. This
+also discharges the *"mutation testing of the three call sites"* item the review listed as
+NOT-VERIFIED, which it could not run under its read-only constraint.
 
-#### What the fix changed — and the measurement that justified it
+**Findings 3 and 4 were two more instances of this chain's recurring defect** — a sentence whose
+scope is wider than its code, and they are its **fifth** and **sixth**. `workspace.svelte.ts`'s
+*"Nothing calls it yet"* is now *"no caller **in production** captures it yet"*, and
+`MatchCreator.svelte`'s *"Nothing reads either answer in production"* now says that
+`competingSurfaceFor` **is** read in production and that `targetingSurfaceFor` is the one that is
+not. **Both replacements were re-derived by the orchestrator against the code rather than
+accepted**: `writeSurfaceGeneration` has **five** call sites across **three** cases and **zero** in
+production; `competingSurfaceFor` is called at `restore.ts:1993` and `:2581`, reached from
+`RestorePane.svelte`'s `current` through `restoreView` → `restoreRefusal`; and
+`targetingSurfaceFor`, outside its own definition, appears **only in comments**.
 
-**The review found a reactivity regression this phase had introduced, and measuring it made it worse
-than the finding claimed.** `browser.openWriteSurfaces()` reads a plain `Map` —
-`createWriteSurfaceRegistry` is deliberately rune-free — so `RestorePane`'s
-`current = $derived.by(…)` lost every dependency that opening or closing a surface moves. The
-producer this phase deleted closed over six `$state.raw` sources and had one.
+**The review's own count was wrong and the fix did not copy it.** It said `DetailPane.test.ts` calls
+that door *"four times"*; it is **five, across three cases**. The corrected comment pins no number
+at all. That is this chain's discipline working in the direction it usually fails — a figure
+re-derived instead of inherited.
 
-**Measured, not reasoned** (`2d-5-2b-notes.md` §12.1): opening the restore, within one `flushSync()`,
-the child's `$derived.by` runs **before** the host's registration `$effect` — and on the unfixed tree
-**it never ran again**. So `current.context.surfaces` was `[]` for the life of that restore. The
-under-refusal was **total, not a narrow window**, and finding 2's claim was **false rather than merely
-unobservable**.
-
-**The fix is a mirror at the door, not in the pane**, and the measurement is exactly why: a dependency
-on the pane's own assembly would have re-run the child's derived *before* the reconciler touched the
-registry, trading one stale answer for another. `BrowserState` now copies the registry's own
-`generation()` into a `$state` number, updated after the registration and — through a
-`mirroringLease()` wrapper — after the lease's unregister and `replaceTarget`;
-`openWriteSurfaces()` reads it for the dependency (`void surfaceGeneration`) and
-`writeSurfaceGeneration()` answers it. **`writeSurfaceRegistry.ts` itself was not changed** — its
-diff is comment-only, mechanically verified — so the registry stays framework-free and the runes live
-in the runes file.
-
-**The orchestrator verified the new assertions are not vacuous rather than accepting the claim**:
-deleting `void surfaceGeneration` from `workspace.svelte.ts` fails exactly the two cases findings 1
-and 2 produced (*"gives the restore its surfaces from the registry, itself included"* and *"shows the
-restore a surface that opened after its derived had run"*), and restoring it returns the suite to 23
-passed.
-
-**The sharpest thing for 2d-5-2b-A to attack**: the mirror is **kept by hand and no type enforces
-it** — the three operations that can move the live set are today's whole set, and a fourth written
-without a `noticeWriteSurfaces()` would leave the number behind the registry with nothing failing.
-That is `2d-5-2b-notes.md` §11 item 9, marked *actionable*. Also worth the budget: `mirroringLease`
-cannot preserve the lease's **identity**, so a caller comparing the value it was handed with one the
-registry minted would find two different functions and nothing in the type says so (§11 item 10).
-
+**The sharpest thing for 2d-5-2b-B to attack**: **all three reactive cases observe one consumer.**
+`RestorePane.svelte`'s `$derived.by` drawing a refusal sentence is the only reactive reader of this
+door in the application, so *"the mirror moved"* and *"the restore's refusal redrew"* are
+**indistinguishable in this suite** (`2d-5-2b-notes.md` §13.5 item 2) — every one of the three
+mutations above is caught through that single path. Also worth the budget: §13.5 item 1 — the mirror
+is **still** kept by hand, now narrower (an unmirrored fourth path loses the invalidation, not the
+value) — and note that the check named there, `rg -n 'writeSurfaces\.' src/lib/browser/workspace.svelte.ts`,
+**does not show the two mutations the lease performs**, so the check is weaker than the item it
+serves.
 
 #### Where 2d-5-2 stands
 
@@ -330,7 +323,9 @@ then *"the screen and the phase's whole mounted evidence"*:
   `MatchCreator` reporting its chosen destination upward, and **the phase's whole mounted evidence**:
   all seven kinds, the creator's unknown→known transition, restore's unchanged behaviour, and the
   `invalidateEverySurface` coverage gap. **Components: yes.** ✅ **implemented, reviewed and
-  committed**, with **2d-5-2b-A owed** for the fix round — see the top of this section.
+  committed**. Its fix round commissioned **2d-5-2b-A**, which is ✅ **complete** — one review,
+  `ship-with-fixes`, 0 blockers, four SHOULD-FIX all fixed — and whose own fix round changed source,
+  so **2d-5-2b-B is owed**. See the top of this section.
 - **2d-5-2c** — the narrow window regression reading, which **may not claim real watcher delivery**
   (`2d-5-split-notes.md` §7 item 7). ⬜️ not started. **It is a separate step because the instrument
   no longer exists**: every prior reading ran out of `/private/tmp/espansoconfig-harness-2c-5/`,
@@ -513,66 +508,71 @@ None is a correctness defect in source. Named so a later step does not spend a r
 
 ## Verification baseline
 
-**`1320 / 438 / 2253 / 186`** — `cargo test --workspace` / `npm run check` files / `npm test` /
-`npm run build` modules. **Measured in full by the orchestrator alone on 2026-09-04 at Phase 2d-5-2b,
-twice over** — once on the implementation and once again after the review's four fixes — with each
-command run on its own. `npm run check` → **438 files, 0 errors, 0 warnings**; `npm test` → **59
-files, 2253 passed**; `npm run build` → **186 modules**; `cargo test --workspace` → **1320**, summed
-over **26** binaries *and* checked by the complementary question in a **second** run — **no `test
+**`1320 / 438 / 2254 / 186`** — `cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules. **Measured in full by the orchestrator alone on 2026-09-05 at Phase
+2d-5-2b-A**, each command run on its own. `npm run check` → **438 files, 0 errors, 0 warnings**;
+`npm test` → **59 files, 2254 passed**; `npm run build` → **186 modules**; `cargo test --workspace`
+→ **1320**, summed over **26** binaries *and* checked by the complementary question — **no `test
 result` line lacking `0 failed`** — because a sum can be right while a binary is silent. Clippy,
 `cargo fmt --check` and `cargo tree -p espansoconfig-core | rg tauri` (finds nothing) were all clean.
-**Both bundle oracles were read and both lines are reported**, the second because it proves the search
-can match at all: server-only markers **absent**, client-only markers **present (2)**. **The Rust half
-was proven untouched and then re-run anyway** — `git diff --stat HEAD -- crates/ src-tauri/` came back
-empty first, at both measurements.
+**Both bundle oracles were read and both lines are reported**, the second because it proves the
+search can match at all: server-only markers **absent**, client-only markers **present (2)**.
+**The Rust half was proven untouched** — `git diff --stat` over the phase's four files shows no path
+under `crates/` or `src-tauri/` — so the Rust figure was measured once, before the fix, and the fix
+could not move it.
 
-**The only figure that moved is `npm test`, +18 over the whole phase, and it is derived per file on a
-pristine tree rather than from the total.** Against `git archive HEAD` (`0f1ad8b`):
-`DetailPane.test.ts` **8 → 23 (+15)**, `MatchCreator.test.ts` **33 → 36 (+3)**,
-`scripts/lint/ipc-detail.test.ts` **132 → 132 (unmoved)**. 15 + 3 + 0 = 18, and 2235 + 18 = 2253, so
-the whole move is accounted for and no other file contributed. `ipc-detail.test.ts` staying put is
-**correct rather than lucky**: it generates its cases from `scannableFiles()` and moves only when a
-file is *added* under the scanned roots, and this phase added none. The implementation alone was
-**2251** (+16); the review's fix round added the last **+2**, both in `DetailPane.test.ts`.
+### The `cargo test --workspace` gate is flaky on this host **alone**, and that is new
 
-**`npm run check` and `npm run build` did not move, and that is the measurement rather than the
-prediction.** No file entered or left the program, and no new reachable `.ts` module and no new
-`.svelte` component were added — every file this phase touched was already in the module graph — so
-**186** is what an unmoved count should be, and a move would have been the regression the oracles
-exist for. The two-per-styled-component rung does not apply: no `.svelte` file was added.
+**This is the sharpest thing this phase measured, and it is a host finding rather than a source
+one.** The recorded scar said `cargo test --workspace` is unsafe to run *concurrently with itself*.
+**That is too narrow.** At 2d-5-2b-A a **solo** run — nothing else on the machine — failed **8**
+`watch_check` tests, every one at `wait_until_ready` with *"timed out waiting for the watcher's
+baseline scan"* against a `PATIENCE` of **120 seconds** (`src-tauri/src/watch_check.rs:72`). An
+earlier run in the same session, concurrent with the three frontend gates, failed **9**. The two
+failure sets differ, and `a_real_removal_under_match_reaches_the_sink` passed while its `config`
+twin failed — **partial and unstable, not uniform**, which is what rules out a source defect.
 
-**Two things were verified by mutation rather than accepted as claims, and both are this phase's real
-evidence.** First, **the compile-error demonstration**, re-run by the orchestrator on a key it chose
-itself (`restore`, not the implementer's `matchMover`): deleting it produced **two** independent
-errors — `571:9`, *"Property 'restore' is missing … but required in type 'PaneWriteSurfaces'"*, and a
-second at the `satisfies` — and restoring it returned `npm run check` to 0 errors, 0 warnings. Second,
-**the new assertions were shown not to be vacuous**: deleting `void surfaceGeneration` from
-`openWriteSurfaces()` in `workspace.svelte.ts` failed **exactly** the two cases the review's findings
-1 and 2 produced, and restoring it returned `DetailPane.test.ts` to 23 passed. A test that passes
-either way would have proved nothing about the fix.
+**The cure is `--test-threads=1`, and it was measured rather than guessed.**
+`cargo test -p espansoconfig --bin espansoconfig watch_check -- --test-threads=1` → **20 passed, 0
+failed** in 84.65s. Then `cargo test --workspace -- --test-threads=1` → **1320 passed, no `test
+result` line lacking `0 failed`**, exit 0 — which is exactly the recorded baseline. The cause is
+parallel **real filesystem watchers** inside one binary, not two cargo processes.
 
-**The two coordinator files' diffs were checked mechanically, not asserted.** `git diff -U0` filtered
-to non-comment changed lines returns **nothing** for `src/lib/browser/writeSurfaceRegistry.ts`, so the
-registry is comment-only across the whole phase and stays framework-free; `workspace.svelte.ts` was
-comment-only after the implementation and gained real code only in the fix round, which is the mirror.
+**Three consequences a later phase must not have to rediscover.**
 
-**The previous baseline was `1320 / 438 / 2235 / 186`**, measured at Phase 2d-5-2a-C on 2026-09-04 and
-shared by 2d-5-2a-A and -B, whose commits changed no executable line. Before it,
-`1320 / 438 / 2229 / 186` at 2d-5-2a; before that, `1320 / 436 / 2205 / 185` at 2d-5-1-B, unmoved by
+1. **`cargo test --workspace` on its own is no longer sufficient evidence on this host.** A failing
+   `watch_check` set means *re-run it serially before concluding anything* — and **no conclusion
+   about source may be drawn from either a concurrent run or a parallel one that fails only
+   `watch_check`**.
+2. **`--test-threads=1` is the authoritative form of the gate here**, and it is what produced the
+   1320 above. It costs wall clock and buys a figure that does not move under scheduling luck.
+3. **Never read a cargo exit status through a pipe.** The first run of this phase reported
+   `exited with code 0` while 9 tests failed, because the command ended in `| tail -60` and the
+   pipeline's status is `tail`'s. Redirect to a file and grep it; the exit code is then cargo's.
+   This cost one wrong reading before it was caught.
+
+### What moved this phase, derived per file on a pristine tree
+
+**`npm test` moved by exactly +1 and nothing else moved at all.** Against `git archive HEAD`
+(`505caf6`), built into a throwaway directory with `node_modules` symlinked:
+`DetailPane.test.ts` **23 → 24 (+1)**, and 2253 + 1 = **2254**, so the whole move is accounted for
+by one file. `npm run check` (438) and `npm run build` (186) did not move, which is what an unmoved
+count should be: no file entered or left the program, no new reachable `.ts` module and no new
+`.svelte` component. The two-per-styled-component rung does not apply.
+
+**The one new assertion was proven non-vacuous by mutation, twice over by the orchestrator itself.**
+Commenting out `noticeWriteSurfaces()` at `replaceTarget` fails the new case **alone** (1 failed /
+23 passed); at the unregister it fails *shows the restore a surface that opened after its derived
+had run* **alone** (1 / 23); at the registration it fails two cases. All three restored → 24 passed.
+
+**The previous baseline was `1320 / 438 / 2253 / 186`**, measured at Phase 2d-5-2b on 2026-09-04.
+Before it, `1320 / 438 / 2235 / 186` at 2d-5-2a-C, shared by 2d-5-2a-A and -B; then
+`1320 / 438 / 2229 / 186` at 2d-5-2a; then `1320 / 436 / 2205 / 185` at 2d-5-1-B, unmoved by
 2d-5-1-C. In every case the orchestrator's own run is the record, never the worker's claim.
 
-
-**`cargo test --workspace` in this repository is not safe to run concurrently with itself**, and 2d-5-1
-is the second recorded instance. Two overlapping runs made
-`watch_check::a_parked_worker_does_not_block_the_reap_of_a_worker_that_exited_behind_it` and
-`watch_check::a_committed_save_is_suppressed_while_a_later_external_write_is_not` **FAIL**; both pass in
-a single clean run. Real filesystem watchers are the cause. "With orphaned bin targets killed first",
-already written down here, is the same hazard. **No conclusion about source may be drawn from a
-concurrent run.**
-
-**When 2d-5-7 first imports `events.ts` from production the module count moves by one, and that is the
-expected step.** A larger jump is the regression the oracles exist for. 2d-5-1 did **not** import it,
-by design.
+**When 2d-5-7 first imports `events.ts` from production the module count moves by one, and that is
+the expected step.** A larger jump is the regression the oracles exist for. 2d-5-1 did **not**
+import it, by design.
 
 ### Where the closed rounds' verification narratives went
 
@@ -644,7 +644,8 @@ all of it is in `git log`._
 | **2d-5 design consult (brief, Codex consult, record, review — four new files, all under `docs/`, no source touched)** | **`5787e87`** | ✅ pushed to `origin/main` |
 | 2d-5 design consult — the SHA and push record | `32ffcfc` | ✅ pushed to `origin/main` |
 | _2d-5-1 through 2d-5-1-C, and 2d-5-2a through 2d-5-2a-C — **both chains closed**, 14 rows including one checkpoint-maintenance commit_ | `16a122b` … `0f1ad8b` | ✅ all pushed; **archived 2026-09-04 at 2d-5-2b** |
-| **2d-5-2b — the registry made live: the `DetailPane` assembly, seven registrations, the creator's report, the deleted producer, and the review's four fixes including the `BrowserState` reactive mirror; review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed in this commit**; 2d-5-2b-A OWED** | **`505caf6`** | ✅ pushed to `origin/main` |
+| **2d-5-2b — the registry made live: the `DetailPane` assembly, seven registrations, the creator's report, the deleted producer, and the review's four fixes including the `BrowserState` reactive mirror; review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed in this commit**; **2d-5-2b-A TAKEN**, see the row below | **`505caf6`** | ✅ pushed to `origin/main` |
+| **2d-5-2b-A — the round §7.1 commissioned for 2d-5-2b's fix: `writeSurfaceGeneration()` made authoritative, the three mirror sites given reactive coverage proven by mutation, and two over-wide sentences corrected; review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed in this commit**; **2d-5-2b-B OWED** | _SHA in the follow-up commit_ | _pending_ |
 
 **What commissioned each round of this tail, and what ended it.** `1ff4f34`'s source half — three
 comment corrections in two files — commissioned **2d-5-1-B**, which found all three true. `1d623dc`'s
@@ -706,3 +707,22 @@ tail's continuation from the *phase's* diff and was wrong; the input is the *fix
 the two happen to coincide — the fixes landed in the phase commit — and that coincidence is worth
 naming, because it is exactly the shape that makes the two easy to conflate again. What commissions
 2d-5-2b-A is the **fix**, not the phase.
+
+**What 2d-5-2b-A commissions, read the same way.** Its one review returned four SHOULD-FIX findings
+and **all four were fixed in this phase's own commit**, so once again the fix round's diff and the
+phase's diff coincide. That diff changed **three source files** —
+`src/lib/browser/workspace.svelte.ts` (the door, substantively),
+`src/lib/components/MatchCreator.svelte` (a comment) and `src/lib/components/DetailPane.test.ts`
+(one new case and amended assertions) — plus `docs/decisions/2d-5-2b-notes.md`, which is on §7's
+closed list and therefore does not count. **So a round is owed and it is 2d-5-2b-B's.**
+
+**This chain has now spent five phases and shows no sign of the ending 2d-5-1's and 2d-5-2a's
+found.** Both of those closed the first time a fix round changed no source file. Every fix round of
+this one has changed source, so every one has commissioned the next, and §7.2 says in as many words
+that this is the mechanism working rather than failing — *a tail that keeps finding real defects in
+source is a tail doing its job*. **The escape hatch is `BLOCKED` under §7.2 and is never a shortened
+round.** It is not reached: 2d-5-2b-A's review returned **0 blockers**, its four findings were real
+and independent rather than instances of one defect surviving its fix, and `2d-5-2b-notes.md` §13.5
+names **no correctness defect in a source file**. What would change that verdict is a round whose
+finding is the previous round's fix reintroducing what it closed — and 2d-5-2b-B is the round that
+would see it, because finding 1's fix is exactly the kind of change that could.

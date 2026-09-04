@@ -243,6 +243,17 @@ and `competingSurfaceFor` lets a restore of any file proceed (under-refusing). N
 answer in production at 2d-5-2b, and the pane's `busy` rule keeps a restore from being open beside the
 form at all.
 
+> **Correction, 2d-5-2b-A finding 4 — "nothing reads either answer in production" is wider than the
+> code.** `competingSurfaceFor` **is** read in production, and on every open restore:
+> `RestorePane.svelte`'s `current` builds a context from `surfaces()` and `restoreRefusal` asks it
+> (`restore.ts:1993`), as does `permitHolds` at the send (`restore.ts:2581`). What has no production
+> caller is `targetingSurfaceFor` alone. **The clause that follows is the true one and it was already
+> there**: what makes the gap inert is the pane's `busy` rule, which keeps a restore from being open
+> beside this form at all — a fact about `DetailPane.svelte` rather than a guarantee of the model's.
+> `MatchCreator.svelte`'s effect comment is corrected to say the same, since that is where a reader of
+> the effect looks. This is the fifth instance in this chain of a sentence whose scope is wider than
+> the code, written inside the block that fixed the previous one.
+
 **The pane clears `creatorDestination` on both edges.** `startCreating` and `stopCreating` are named
 functions rather than assignments in the markup, so the flag and the destination cannot be moved apart;
 without the clear on open, a file reported by one form would describe the next one until the child's
@@ -390,6 +401,7 @@ everywhere else too.
 | *runs the whole-document invalidation when a restore commits* | §9.1 |
 | *shows the restore a surface that opened after its derived had run* | §12 finding 1: a surface registered by a **second host** while a restore is open reaches the child — the refusal sentence appears and *Prepare* is disabled — and closing it reaches the child too, which is what puts the lease's own two operations under the mirror |
 | *leaves the registry alone when the form reports the same file again* | §12 finding 3: the host absorbs the creator's repeat report, so the generation does not move |
+| *shows the restore a surface that was re-targeted onto its file* | 2d-5-2b-A finding 2: the lease's `replaceTarget` moves the mirror. A creator registered by a second host naming **no file** draws no refusal; pointing it at the restore's own file through the lease draws one, and only a mirror that moved can put it on screen |
 
 > **Correction, §12 finding 2 — a claim made true rather than corrected.** As shipped, that case
 > asserted `registered(pane.state)` — the registry, read directly — plus the absence of the six
@@ -402,6 +414,13 @@ everywhere else too.
 > `browser.openWriteSurfaces()` gives — that closure is the only call to the door in any component,
 > so its answer *is* what `RestorePane`'s derived was handed — and asserting the **last** of them.
 > The first answer is legitimately `[]`, for the ordering reason §12.1 measures.
+
+> **Correction, 2d-5-2b-A finding 1 — what "the generation" means in three rows above.** *returns
+> every lease when the pane is unmounted*, *moves the new-snippet form …* and *leaves the registry
+> alone …* all assert `writeSurfaceGeneration()`, and that door now answers the **registry's own**
+> number rather than the reactive mirror. Every claim those rows make is unchanged and is now made
+> against a stronger oracle — the number and the set beside it come from the same place. What they
+> no longer establish is anything about the mirror, which is why the row added below them exists.
 
 **`MatchCreator.test.ts`, 3 new cases**: reports `null` on mount then the chosen file; reports the
 model's **default** with no control pressed; reports again when a transition leaves the destination
@@ -558,12 +577,30 @@ and it reads a diff. **No item names a correctness defect in a source file**, so
    and read each hit — so it is actionable; today all three mirror, so it names no defect and holds
    nothing open.
 
+   > **Correction, 2d-5-2b-A finding 1 — the item stands, and what an unmirrored path costs is
+   > narrower than it says.** The mirror is still kept by hand and TypeScript still forces nothing, so
+   > the item is not closed. What changed is the consequence: with `writeSurfaceGeneration()` now
+   > answering `writeSurfaces.generation()`, a fourth method that moved the registry without mirroring
+   > would leave **both doors truthful and neither reactive** — the *invalidation* is lost, not the
+   > *value*. Before the fix it lost the value too, on the door a coordinator captures across an await.
+   > The suggested check answers differently now, so it is re-derived here rather than restated:
+   > `rg -n 'writeSurfaces\.' src/lib/browser/workspace.svelte.ts` gives **five** lines — the copy
+   > inside `noticeWriteSurfaces()`, the registration, the read in `openWriteSurfaces()`, one mention
+   > inside `writeSurfaceGeneration()`'s own comment, and the read in `writeSurfaceGeneration()`. That
+   > is **one mutation, three reads and one comment**, and it is the mutation the check is about; the
+   > two other mutations still reach the registry through the lease, which this `rg` never shows.
+
 10. **The lease `BrowserState` hands out is not the registry's own object — *recorded only*.** It is a
     wrapper that calls through and then mirrors, so a caller comparing the value it was handed against
     one the registry minted would find two different functions. Nothing compares them: the registry
     recognises a lease by the serial it captured itself. What the wrapper cannot change is any answer —
     the unregister stays idempotent and inert once displaced, and `replaceTarget`'s `replaced` or
     `staleLease` is passed back unchanged.
+
+    > **Note, 2d-5-2b-A finding 2.** The pass-back half is no longer only reasoned: *shows the
+    > restore a surface that was re-targeted onto its file* asserts the wrapper answers `'replaced'`
+    > on a mounted screen. The `staleLease` arm is still driven by nothing here — item 3 above is
+    > where that is recorded — and the identity claim is unchanged, because no caller compares leases.
 
 11. **The restore's first reading of the live set is always one step behind — *recorded only*.**
     §12.1 measures why: the child's derived computes before the host's registration effect, so its
@@ -661,6 +698,21 @@ pane's seven mutually exclusive, which is a fact about the pane and not a guaran
    by exactly one over a `replaceTarget`. **Measured, not inferred**: with both `noticeWriteSurfaces()`
    calls inside `mirroringLease` commented out, those two cases fail along with the new one, and they
    pass again when the calls come back.
+
+   > **Correction, 2d-5-2b-A finding 1 — item 3's second half no longer describes the code.**
+   > `writeSurfaceGeneration()` no longer answers the mirror. It now does what `openWriteSurfaces()`
+   > does: `void surfaceGeneration; return writeSurfaces.generation();` — the read is the dependency
+   > and the **registry's own number** is the answer. Returning the mirror made the door *derivative*,
+   > and the direction of that was unsafe: a later method moving the registry without calling
+   > `noticeWriteSurfaces()` would have made this door report "nothing changed" while
+   > `openWriteSurfaces()` answered the new set in the same block, and the Q5 guard 2d-5-4 captures is
+   > exactly the caller that would have believed it.
+   >
+   > **What that costs is stated because it is the part the original sentence got right.** Answering
+   > the registry means the two doors describe the same state *by construction*, but it also means
+   > **no generation assertion can observe the mirror at all** — the two "existing cases put onto the
+   > mirror" above are now registry assertions, which is a stronger oracle for what they claim and no
+   > oracle whatever for the mirror. That is 2d-5-2b-A finding 2, and §13 is what answers it.
 4. The false sentence at `DetailPane.svelte`'s restore block — *"and `confirmRestore` re-asks at the
    write"* — is replaced. `confirmRestore` re-checks the surfaces it is **handed**, which is the same
    one reading taken when the send is pressed; that the reading is current is the mirror's doing, not
@@ -726,3 +778,129 @@ that effect looks.
 | `src/lib/components/MatchCreator.svelte` | the reporting effect's comment — comment only |
 | `src/lib/components/DetailPane.test.ts` | `watchSurfaceAnswers`, `creatorTrigger`, two new cases, and the criterion-4 case's assertions |
 | `src/lib/components/MatchCreator.test.ts` | the cited case's comment — comment only |
+
+---
+
+## 13. Phase 2d-5-2b-A — the review of 2d-5-2b's own fix round
+
+[`docs/reviews/phase-2d-5-2b-A.md`](../reviews/phase-2d-5-2b-A.md) — **0 blockers**, four should-fix
+findings, all four closed. Two changed source and two are prose. The round exists because §12's fix
+round changed source, which is `CLAUDE.md` §7.1 and nothing else.
+
+### 13.1 Finding 1 — the guard made authoritative
+
+`writeSurfaceGeneration()` returned `surfaceGeneration` — the reactive mirror *instead of* the
+registry's number. It now reads the mirror for the dependency and answers the registry, which is the
+shape `openWriteSurfaces()` one method above already used:
+
+```ts
+void surfaceGeneration;
+return writeSurfaces.generation();
+```
+
+**The direction is the argument.** The two doors were only guaranteed equal by every registry-moving
+path remembering to mirror, and where that guarantee failed the failure went the unsafe way: this door
+would have answered *nothing changed* while `openWriteSurfaces()` answered the new set in the same
+synchronous block. The Q5 guard 2d-5-4 captures across an await is exactly the caller that would
+believe it. Reading the registry cannot fail that way, and it costs nothing — the dependency is
+identical, because the mirror is still read.
+
+**What it does not fix**, said where it is claimed: the mirror is still kept by hand. An unmirrored
+path now loses the *invalidation* rather than the *value*, which is a strictly narrower failure and
+still not one TypeScript prevents. §11 item 9 carries that correction; the method's own comment and
+`BrowserState.writeSurfaceGeneration`'s doc block both say it in the same breath as what they force.
+
+### 13.2 Finding 2 — the mirror's three call sites, covered and mutated
+
+Fixing finding 1 makes every generation assertion an assertion about the **registry**, so nothing left
+in the suite could observe the mirror through a number. What can observe it is a reactive consumer
+re-running, and `DetailPane.svelte`'s `surfaces={() => browser.openWriteSurfaces()}` feeding
+`RestorePane.svelte`'s `$derived.by` is one that draws a sentence.
+
+One case is new — *shows the restore a surface that was re-targeted onto its file*. It registers a
+`matchCreator` naming **no file** the way a second host would, which competes with nothing and draws
+no refusal, then points it at the restore's own file through `lease.replaceTarget(…)`. That is a pure
+registry mutation; the refusal sentence and the disabled *Prepare* can only appear if the mirror moved
+with it. It also asserts the wrapper answers `'replaced'`, which is the pass-back half of
+`mirroringLease` that no screen shows.
+
+**Every assertion was proven non-vacuous by mutation** — the call commented out, the suite run, the
+failing case named, the call restored, the suite run again. `phase-2d-5-2b-A.md` lists this under
+"not verified" because that round was read-only; it is verified here:
+
+| `noticeWriteSurfaces()` call site | Case that fails when it is commented out |
+|---|---|
+| the registration in `registerWriteSurface` | *gives the restore its surfaces from the registry, itself included* **and** *shows the restore a surface that opened after its derived had run* |
+| the unregister inside `mirroringLease` | *shows the restore a surface that opened after its derived had run* |
+| `replaceTarget` inside `mirroringLease` | *shows the restore a surface that was re-targeted onto its file* |
+
+Each mutation was run alone against the whole file, and 24 of 24 pass with all three calls in place.
+**No site turned out to be unobservable**, so no gap is admitted here.
+
+**One thing the table is not.** Mutating the registration does not fail the new case, and that is
+correct rather than a hole: the creator that case registers names no file, so the registration it
+makes is invisible on screen by design — the mutation it is built to catch is the one on the row
+below it.
+
+### 13.3 Findings 3 and 4 — two sentences wider than their code
+
+Both are the defect this chain keeps producing: a claim whose scope exceeds what the code does,
+written inside the block that fixed the previous instance. Both were re-derived against the file they
+describe rather than re-read.
+
+- **`workspace.svelte.ts`, `writeSurfaceGeneration`'s doc block** said *"Nothing calls it yet"*. The
+  unsaid word was **production**: `DetailPane.test.ts` calls it in three cases. The sentence now says
+  no caller in production captures it yet, names 2d-5-4 as the step that will, and names the test file
+  as today's callers. The neighbouring *"the two doors cannot report different numbers"* claim was
+  checked in the same pass and rewritten, because finding 1 changed its justification from *the mirror
+  is kept in step* to *both doors answer the registry* — by construction rather than by hand.
+- **`MatchCreator.svelte`'s reporting effect** said *"Nothing reads either answer in production at
+  2d-5-2b"*. `competingSurfaceFor` is read in production on every open restore, by
+  `RestorePane.svelte`'s `current` through `restoreRefusal` (`restore.ts:1993`) and by `permitHolds`
+  at the send (`restore.ts:2581`); only `targetingSurfaceFor` has no production caller. The true
+  sentence was the clause already beside it — the pane's `busy` rule — and it now carries the
+  attribution that `busy` is a fact about `DetailPane.svelte`, not a guarantee of this component's.
+  §5 carries the same correction.
+
+### 13.4 The gates, measured
+
+Each run on its own, on the tree as this step leaves it.
+
+| Gate | Result |
+|---|---|
+| `npm run check` | **438 files, 0 errors, 0 warnings** |
+| `npm test` | **59 files, 2254 passed** — up 1 from 2253, the new `DetailPane.test.ts` case |
+| `npm run build` | **186 modules** — unchanged, since nothing new is reachable from the entry |
+
+`cargo test --workspace` was not run: no Rust is touched by any of these four fixes, and the
+orchestrator had already run it at 1320 passing.
+
+**The module count needs no rebaseline and the bundle oracle was still run**, because the count alone
+decides nothing (`CLAUDE.md` §4): `rg -c '\$\$payload|head_payload|push_element'` over the built
+bundle matches nothing and `rg -c 'window\.__svelte|svelte-trusted-html'` matches, which is the pair
+that discriminates rather than the vacuous `svelte/internal/server` search.
+
+### 13.5 Where it is thin
+
+Marked per `CLAUDE.md` §7.3. No item here commissions a round, and none names a correctness defect in
+a source file.
+
+1. **The mirror is still kept by hand — *actionable*.** §11 item 9, unclosed and now narrower: an
+   unmirrored fourth path loses the invalidation, not the value. The check is
+   `rg -n 'writeSurfaces\.' src/lib/browser/workspace.svelte.ts` plus the two mutations the lease
+   performs, which that `rg` never shows. It names no defect today, so it holds nothing open.
+
+2. **The three reactive cases all observe one consumer — *recorded only*.** Every mutation above is
+   caught through `RestorePane.svelte`'s `$derived.by` drawing a refusal sentence. That is the only
+   reactive reader of this door in the application, so "the mirror moved" and "the restore's refusal
+   redrew" are indistinguishable in this suite. A second reader would be the first thing to separate
+   them.
+
+3. **§11 item 11 is unaffected and was re-derived, not assumed — *recorded only*.** The restore's
+   first reading of the live set is still one step behind for the ordering reason §12.1 measured, and
+   none of these four fixes touches the ordering. No correction block was added to it, because adding
+   one would have claimed a change that did not happen.
+
+4. **No window has been opened on any of this — *recorded only*.** 2d-5-2c is still the reading that
+   is owed, and it now covers a door whose answer changed. A mounted test proves a handler fires; it
+   does not prove a window draws.
