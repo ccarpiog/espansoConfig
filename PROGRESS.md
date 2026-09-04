@@ -20,7 +20,7 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, measured after the move rather than predicted before it:**
-**479 lines and 62,433 bytes** — 3.0 KiB under the 64 KiB soft bound, still past the 400-line one. 2d-4b-H
+**481 lines and 62,764 bytes** — 2.7 KiB under the 64 KiB soft bound, still past the 400-line one. 2d-4b-H
 closed the eight-row 2d-4b chain and its status rows went to the archive on 2026-08-31; its **git-state**
 rows stayed in the live head another four days, and 2d-5-1-B is what took them, together with 2d-4a's.
 **The next session that closes a 2d-5 step should archive that step's narrative as it goes**
@@ -462,6 +462,8 @@ all of it is in `git log`._
 | **2d-5-1 — the surface and conflict vocabulary; review `ship-with-fixes`, 2 of 4 findings carried to 2d-5-1-A** | **`16a122b`** | ✅ pushed to `origin/main` |
 | 2d-5-1 — the SHA and push record | `ae15127` | ✅ pushed to `origin/main` |
 | **2d-5-1-A — the two source fixes, plus the three comment corrections its review found; 2d-5-1-B OWED** | **`1ff4f34`** | ✅ pushed to `origin/main` |
+| Checkpoint maintenance — the 37 closed 2d-4a and 2d-4b git-state rows archived (two files, both on §7's closed list; commissions nothing) | `d1d9d13` | ✅ pushed to `origin/main` |
+| **2d-5-1-B — round B (`ship`, 0 blockers, 0 should-fix, 1 Low) and its fix; 2d-5-1-C OWED** | **`1d623dc`** | ✅ pushed to `origin/main` |
 
 **What commissioned 2d-5-1-B was the source half of `1ff4f34` — three comment corrections in two
 files.** Under `CLAUDE.md` §7.1 the unit is the file and a comment-only change to a source file counts,
