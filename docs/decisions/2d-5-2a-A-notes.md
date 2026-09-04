@@ -186,6 +186,19 @@ not about it. `2d-5-2a-notes.md` §3.8 named neither.
 > same phase is editing is exactly the shape this finding names, and the defence is the quoted text
 > beside the number rather than a promise to keep the number fresh.
 
+> **Correction — Phase 2d-5-2a-C, 2026-09-04, review 3 finding 1.** **`:1690-1721` in the bullet above
+> is off by one at its start**, and the fix that answered a stale-citation finding is what wrote it.
+> Re-derived on the tree 2d-5-2a-C leaves, with `rg -n` for the block's own first sentence and by
+> reading the lines around it, rather than by trusting either record: the block's first line —
+> `// **Every write surface this window has told this state about** — Phase 2d-5-2a.` — is
+> `src/lib/browser/workspace.svelte.ts:1689`; its last comment line is `:1721`
+> (*"// step that writes components rather than here."*); and `:1722` is the
+> `const writeSurfaces = createWriteSurfaceRegistry();` the block introduces. **The block is
+> `:1689-1721`.** The **end** was derived and not assumed — no earlier round had checked it, and it
+> happens to be the number that was already there. *"the direction taken here is the safe one"* at
+> `:1703` was re-read and is right. `src/lib/browser/workspace.svelte.ts` is untouched by 2d-5-2a-C
+> and still 3 730 lines, so these numbers describe `5ec011e` and this phase's tree alike.
+
 ### 3.2 What changed, and what deliberately did not
 
 **No behaviour.** `open()` still does not clear the registry: the decision stands, and the caller that

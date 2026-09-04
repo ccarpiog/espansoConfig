@@ -555,9 +555,17 @@ export function createWriteSurfaceRegistry(): WriteSurfaceRegistry {
         // outcome from the two-check ordering it replaced. That one had no read of
         // `target.document` at all; its own re-entry route was a `kind` accessor on
         // the caller's retained surface — gone, now that the stored surface is this
-        // module's frozen copy — and on that route it answered `staleLease` for a
-        // lease that was live. `docs/decisions/2d-5-2a-B-notes.md` section 2 carries
-        // both derivations.
+        // module's frozen copy — and **what that route answered depended on what the
+        // accessor did, so the sentence has to say which case it is about.** A
+        // re-entrant same-lease `replaceTarget` kept the serial and swapped the entry
+        // object, so the removed second check failed on identity and the old code
+        // answered `staleLease` for a lease that was still live, leaving the inner
+        // call's target installed. A re-entrant *registration* of this kind through
+        // that same accessor took a new serial, so there the old `staleLease` named a
+        // lease that really had been displaced and was correct — this comment attributed
+        // the untruthful answer to the whole route until Phase 2d-5-2a-C.
+        // `docs/decisions/2d-5-2a-B-notes.md` section 2 and `2d-5-2a-C-notes.md`
+        // section 3 carry both derivations.
         //
         // **The kind is the captured one, and no surface's `kind` is re-read.** The
         // entry keeps the key its lease was minted for, so the key and the stored

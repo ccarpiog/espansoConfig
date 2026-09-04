@@ -32,6 +32,18 @@ restates a reviewer's sentence without re-deriving it is the failure mode this p
 | `docs/decisions/2d-5-2a-notes.md` | correction blocks on §3.8's own correction (finding 3 — the citation) and §4's own correction (finding 1) |
 | `docs/decisions/2d-5-2a-B-notes.md` | this record |
 
+> **Correction — Phase 2d-5-2a-C, 2026-09-04.** **The two `writeSurfaceRegistry.ts` ranges this record
+> gives for the `replaceTarget` comment name the tree at `52ff829`, and 2d-5-2a-C has moved them.**
+> Review 3 finding 2 sent that phase back into the comment's last sentence, and the replacement is
+> eight lines longer. Re-derived by reading the file after that edit rather than by adding eight to a
+> remembered number: the comment now runs **`:538-568`** — `:538` is unmoved, `:568` is
+> *"// section 3 carry both derivations."* — and the module is **605** lines, not 597. Section 2.5's
+> second `:538-560` is the same range and moves with it. **Every other citation in the table is before
+> the edited region or in a file 2d-5-2a-C does not touch**, and each was re-read on the post-edit
+> tree: `:241-250`, `:258-260`, `:412-416`, `:421`, `:495-502` and `:106-120` in the registry, and
+> `:1477-1530`, `:1502-1514`, `:1520-1525` in `src/lib/browser/workspace.svelte.ts`, which is
+> unchanged at 3 730 lines.
+
 `src/lib/browser/workspace.svelte.ts` is a **`.ts` module**, not a Svelte component. No component,
 markup, prop or reactive statement was touched, so **no window reading is owed or was taken**, exactly
 as at 2d-5-2a and 2d-5-2a-A.
@@ -71,6 +83,20 @@ reference; that is what the removed second check (`heldBy(...) !== held`,
 frozen copy, so `kind` is a data property and cannot re-enter; its only caller-supplied read is
 `target.document`, which the old one never took. Any sentence of the form *"the same answer as the old
 ordering"* is therefore comparing outcomes across two different routes, and has to say which.
+
+> **Correction — Phase 2d-5-2a-C, 2026-09-04, review 3 finding 3.** ***"So the two orderings share no
+> re-entrancy route"* is true of `replaceTarget` and false of the two modules.** The sentence with its
+> scope stated, which is what this paragraph should have said: **the two `replaceTarget` orderings
+> share no re-entrancy route.** Registration is a shared one. Both modules read `surface.kind` off the
+> caller's object in `registerWriteSurface` — `git show 15ada19:src/lib/browser/writeSurfaceRegistry.ts`
+> line **365** and the current file's line **503**, each `const kind = surface.kind;`, each re-derived
+> by reading that line on the tree it belongs to. The new module reads more there, not less:
+> `surface.target` at `:504`, and inside `ownedSurface` that target's `kind` and then, on the document
+> arm, its `document`. The old `registerWriteSurface` read nothing but `surface.kind`, so the shared
+> registration route is exactly that one property and the new module's is strictly wider. **The
+> paragraph's conclusion survives unscoped**: a sentence of the form *"the same answer as the old
+> ordering"* still has to say which route it means, because the `replaceTarget` routes really are
+> disjoint.
 
 ### 2.4 The three routes, measured
 
@@ -201,6 +227,18 @@ replaced"* — checked. It names nothing on this tree, where the phrase exists n
 the replacement comment block runs `:1690-1721`. The correction block says so instead of renumbering a
 historical pointer. `2d-5-2a-A-notes.md:41`'s `writeSurfaceRegistry.ts:245-249` is the same shape and is
 left for the same reason (§6 item 3).
+
+> **Correction — Phase 2d-5-2a-C, 2026-09-04, review 3 finding 1.** **`:1690-1721` above is off by one
+> at its start**, and this record introduced it inside the fix that answered a stale-citation finding.
+> Re-derived on the post-edit tree, with `rg -n` for the block's own first sentence and by reading the
+> lines around it: the block's first line —
+> `// **Every write surface this window has told this state about** — Phase 2d-5-2a.` — is
+> `src/lib/browser/workspace.svelte.ts:1689`; its last comment line is `:1721`; and `:1722` is the
+> `const writeSurfaces = createWriteSurfaceRegistry();` it introduces. **The block is `:1689-1721`.**
+> The **end** was derived rather than carried forward — no earlier round had checked it — and 1721 is
+> what it derives to. The identical range in `2d-5-2a-A-notes.md` §3.1 carries the same correction.
+> `workspace.svelte.ts` is untouched by 2d-5-2a-C, so `:1689-1721` describes `5ec011e` and this
+> phase's tree alike.
 
 The *"586 lines further down"* figure in `2d-5-2a-notes.md` §3.8's correction is **dropped rather than
 re-derived**: it subtracts two line numbers in a file every later step of 2d-5 edits, so it goes stale

@@ -574,3 +574,57 @@ a discharge of a coverage bound. `docs/decisions/2d-5-1-C-notes.md` §6 is the s
 | **2d-5-1-A** | 2d-5-1's corrective phase — the two source findings its review left unreviewed | ✅ complete (2026-09-04), risk **routine**, worker **opus**. Both fixed: the `coordinator()` recorder now models production (`closedByReplacementOf`), and `targetingSurfaceFor` prefers an exact document match. Review `ship-with-fixes`, **0 blockers**, 3 SHOULD-FIX — **all three false claims in a comment**, all three fixed. Notes `docs/decisions/2d-5-1-A-notes.md`; review `docs/reviews/phase-2d-5-1-A.md` |
 | **2d-5-1-B** | 2d-5-1-A's corrective phase — the round its three comment corrections commissioned | ✅ complete (2026-09-04), risk **routine**, worker **opus** (the reviewer; no phase worker). Review **`ship`**, **0 blockers, 0 SHOULD-FIX**, 1 Low — **all three corrections re-derived and found true**, including an empirical check that deleting `creating = false` changes the vitest result by zero tests. The Low is a false sentence in the inline comment 2d-5-1-A's *source* fix brought with it; the orchestrator's sweep found a **second** defect in that same comment — the `creatorEligible` gate dropped again, one instance below the docblock where correction 2 had just restored it — and fixed both. Notes `docs/decisions/2d-5-1-B-notes.md`; review `docs/reviews/phase-2d-5-1-B.md` |
 | **2d-5-1-C** | 2d-5-1-B's corrective phase — the round its one comment fix commissioned | ✅ **complete, and the 2d-5-1 tail CLOSES here (2026-09-04)** — risk **routine**, worker **opus**. Review **`ship`**, **0 blockers, 0 should-fix, 0 Low**. All four claims the comment makes were derived true independently, three of them by steps the comment's author had not written down. **Its fix changed no source file, so §7.1 commissioned nothing and §7.2 closed the step** — the **third** tail this project has ended by rule, after 2d-4a's and 2d-4b's. Notes `docs/decisions/2d-5-1-C-notes.md`; review `docs/reviews/phase-2d-5-1-C.md` |
+
+---
+
+## The 2d-5-2a corrective chain — archived 2026-09-04, the moment it closed
+
+**Four phases, 2d-5-2a → A → B → C, and the tail ended by rule at C** — the **fourth** this project
+has ended that way, after 2d-4a's, 2d-4b's and 2d-5-1's. Review 4 returned two SHOULD-FIX findings,
+**both record-only**, so the fix answering them changed no source file, so `CLAUDE.md` §7.1
+commissioned nothing and §7.2 closed the step.
+
+**What the chain was about, narrowing at every step.** 2d-5-2a built
+`src/lib/browser/writeSurfaceRegistry.ts` — the coordinator-owned keyed registry with a
+register/unregister lease — and its `BrowserState` wiring, with **no component touched**. 2d-5-2a-A
+changed how a surface is *stored*: the registry now reads the caller's object once per property in a
+stated order, **all before the serial is taken**, and keeps a copy it builds itself, **frozen at both
+levels** because `Object.freeze` is shallow — which makes the generation's documented guarantee true
+rather than merely weakened. 2d-5-2a-B and 2d-5-2a-C changed **only comments and records**: neither
+altered a single executable line, checked mechanically rather than asserted.
+
+**The defining feature of this chain, and the reason it is worth reading.** Every phase created a new
+defect while fixing an old one, and always the **same** defect: *a sentence true of a narrow case,
+written as though it were true of the module*, or its sibling, *a citation that has gone stale*. The
+sharpest instance: round 2's finding 3 was **about stale citations**, and the fix answering it
+introduced a fresh off-by-one (`:1690-1721` for a block beginning at `:1689`). Round 4 then found a
+**fourth** generation — *"the shipped module has no `kind` route at all"*, false because
+`registerWriteSurface` reads `surface.kind` at `:503` — sitting inside the record written to fix the
+third. **Four generations of one shape across four phases.**
+
+**Why that did not end as `BLOCKED`, which was a live question.** `PROGRESS.md` had recorded, before
+round 4 ran, that a fourth generation would mean `BLOCKED` work under §7.2 rather than a round to keep
+spending. A fourth generation did occur — but **in a record, not in source**. `CLAUDE.md` §7.3
+reserves blocking for an actionable item naming a **correctness defect in a source file**, and review
+4 verified the chain's one source change (`writeSurfaceRegistry.ts:555-568`) as correct against
+`git show 15ada19:…`. So the warning fired in letter and not in effect: the chain **converged**,
+because the fix was prose and prose commissions nothing. The clause was written to catch a
+non-terminating tail, and the tail terminated.
+
+**What the chain established, and the bound on it.** The registry's copy, freeze, refusal and lease
+disposal are established **over values only** — no component consumes it, so whether a host registers
+on mount, unregisters on destroy, survives an `open()`, or **blanks a pane on the `TypeError`** is
+unverifiable until 2d-5-2b, as is whether Svelte 5's `$state` proxy handles a **frozen** surface the
+way a 2d-5-2b host needs. That last one is 2d-5-2b's to check **first**, because 2d-5-2a-A introduced
+the freeze. **A closure is a fact about a diff and never a discharge of a coverage bound.**
+
+**No round of this chain moved a count.** `1320 / 438 / 2235 / 186` held from 2d-5-2a-A to the end,
+and 2d-5-2a-B and 2d-5-2a-C were both comment-only, where an unmoved count is the measurement rather
+than the prediction.
+
+| Phase | Scope | State |
+|---|---|---|
+| **2d-5-2a** | The coordinator-owned keyed registry with a register/unregister lease — `src/lib/browser/writeSurfaceRegistry.ts`, plain TypeScript, and its `BrowserState` wiring. **Components: none** | ✅ complete (2026-09-04), risk **high**, worker **opus**. Review 1 `ship-with-fixes`, **0 blockers**, 3 SHOULD-FIX (one Low), **all three carried to 2d-5-2a-A** so the commit is exactly what was reviewed. Commit `15ada19`. Notes `docs/decisions/2d-5-2a-notes.md`; review `docs/reviews/phase-2d-5-2a.md` |
+| **2d-5-2a-A** | Round 1's three findings applied: the registry stores a **frozen copy it builds itself**, the `open()` comment names identity reallocation, `withTarget` is gone. **Components: none** | ✅ complete (2026-09-04), risk **routine**, worker **opus**. Review 2 `ship-with-fixes`, **0 blockers**, 3 SHOULD-FIX, **all three carried to 2d-5-2a-B**. Commit `9f32cc5`. Notes `docs/decisions/2d-5-2a-A-notes.md`; review `docs/reviews/phase-2d-5-2a-A.md` |
+| **2d-5-2a-B** | Round 2's three findings — the `@throws` on `BrowserState.registerWriteSurface`, the "leaves the registry exactly as it was" claim (found in **three** places, not the one the review named), and the re-entrancy correction blocks. **No executable line anywhere.** **Components: none** | ✅ complete (2026-09-04), risk **high**, worker **opus**. It found the reviewer **wrong twice**: the old module never read `target.document` at all, so review 2's example was impossible; and its citation `:404` was `:411`. Measured out of repo, the new ordering is **stricter**, not outcome-preserving. Review 3 `ship-with-fixes`, **0 blockers**, 3 SHOULD-FIX, all carried. Commit `52ff829`. Notes `docs/decisions/2d-5-2a-B-notes.md`; review `docs/reviews/phase-2d-5-2a-B.md` |
+| **2d-5-2a-C** | Round 3's three findings — the `:1689-1721` off-by-one, the unscoped `kind`-route sentence at `writeSurfaceRegistry.ts:555-568` (the chain's last source change), and §2.3's unscoped claim. **Components: none** | ✅ **complete, and the 2d-5-2a tail CLOSES here (2026-09-04)** — risk **high**, worker **opus**. It found the reviewer imprecise **three** times, and **caught its own `+8` lines staling two citations and a line count in `2d-5-2a-B-notes.md`**, correcting them in the same pass. Review 4 `ship-with-fixes`, **0 blockers**, 2 SHOULD-FIX, **both record-only** — so the fix changed no source file, §7.1 commissioned nothing, and the tail ended **by rule**. Notes `docs/decisions/2d-5-2a-C-notes.md`; review `docs/reviews/phase-2d-5-2a-C.md` |
