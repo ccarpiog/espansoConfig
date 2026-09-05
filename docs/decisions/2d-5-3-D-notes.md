@@ -11,6 +11,34 @@ any fix was applied**, and all four are fixed.
 Phase 2d-5-3-D"*, with the two claims this round proved wrong marked **at the top of the archived
 copy** rather than after it — 2d-5-2b-C's precedent.
 
+> ## ⚠️ Corrected by Phase 2d-5-3-E — two of this round's own replacements were wrong
+>
+> The round §7.1 commissioned for this one re-derived all three Mediums and found that **two of the
+> three replacements this round wrote are themselves false**. Both are corrected in
+> `src/lib/browser/reconciliationCoordinator.ts` at 2d-5-3-E; this block marks the claims here that no
+> longer hold, and the sections below are left as they were written.
+>
+> 1. **§1's replacement over-attributes.** This round wrote that a refused `list_documents` *"is the
+>    incoming-lifecycle case above with its queue reset to empty"*. It establishes only that
+>    `open_workspace` **succeeded**. Which of the first two states the batch is in is decided by
+>    whether the in-flight drain took the session lock *before or after* `open`'s swap block — a race
+>    a refusal observed later in `open()` cannot see. It is **one of the first two, whichever the race
+>    gave**, and the arm above already separates them by exactly that race.
+> 2. **§3's replacement states a false absence.** This round replaced a false coverage citation with
+>    *"nothing in this repository drives the third state, and nothing here could"*. The **workspace
+>    half is driven and asserted in Rust**: `src-tauri/src/watch_check.rs`'s
+>    `a_failed_reopen_keeps_the_previous_watcher_watching` opens a real tree, refuses a second open,
+>    and asserts the session is still open at the same epoch, still ready, and still delivering a live
+>    edit — so a change letting a refused open replace or empty the session turns that test **red**,
+>    and this round's *"an edit to that early return falsifies this paragraph with every gate green"*
+>    is false with it. **Only the queue half is unpinned**, and that is what the corrected paragraph
+>    now says.
+>
+> **The shape both share is this chain's own**: a round replaced a false claim with a differently
+> false one, and only re-deriving against the code caught it. §3's is the sharper of the two — it
+> traded an overclaim about coverage for an overclaim about *absence*, which reads as humility and is
+> just as unchecked.
+
 **Scope.** §7.1 commissioned this round for 2d-5-3-C's fix and for nothing else: the four rewritten
 comments in `src/lib/browser/reconciliationCoordinator.ts`, the rewritten `with_workspace_read` doc
 comment in `src-tauri/src/commands.rs`, and `docs/decisions/2d-5-3-C-notes.md` with the correction

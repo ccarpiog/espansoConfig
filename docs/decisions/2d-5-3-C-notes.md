@@ -31,6 +31,17 @@ including the two correction blocks it added to `2d-5-3-A-notes.md` §3.1 and §
 > **What must not be "corrected" with it**: `2d-5-3-notes.md` §"the two sequences" and
 > `2d-5-3-A-notes.md`'s two occurrences say a refused `list_documents` leaves **`workspaceReady()`
 > unreached**, which is true and is a claim about the *gate*, not about what Rust holds.
+>
+> **Correction to the correction, Phase 2d-5-3-E.** Two claims *in the block above* are themselves
+> false, and 2d-5-3-E fixed both in `reconciliationCoordinator.ts`. **(1)** A refused
+> `list_documents` is **not** "the *incoming-lifecycle* case"; it establishes only that
+> `open_workspace` succeeded, and which of the first two states the batch is in is decided by whether
+> the in-flight drain took the session lock before or after `open`'s swap block. It is **one of the
+> first two, whichever the race gave**. **(2)** "Nothing in this repository drives the third state" is
+> false of its **workspace** half: `src-tauri/src/watch_check.rs`'s
+> `a_failed_reopen_keeps_the_previous_watcher_watching` drives and asserts it against a real tree.
+> **Only the queue half is unpinned.** What the block above says about `workspace.test.ts` — that it
+> pins the *gate* and that no batch reaches the arm in it — is correct and stands.
 
 **This is the third consecutive round of this chain to find the same shape: the *action* is right and
 the *justification* names an ordering that does not exhaust the cases.** 2d-5-3-A's finding 1 raised

@@ -11115,6 +11115,15 @@ before the prose.**
    pins the *gate*, which is a different claim, and a scripted-command vitest drives no Rust state.
    **Nothing in this repository drives the third state**, and the comment now says so.
 
+**Corrected again by 2d-5-3-E — both marks above are themselves partly false.** (1) A refused
+`list_documents` is **not** the *incoming-lifecycle* state; it establishes only that `open_workspace`
+succeeded, and which of the first two states the batch is in is decided by whether the in-flight drain
+took the session lock before or after `open`'s swap block — **one of the first two, whichever the race
+gave**. (2) "Nothing in this repository drives the third state" is false of its **workspace** half:
+`src-tauri/src/watch_check.rs`'s `a_failed_reopen_keeps_the_previous_watcher_watching` drives and
+asserts it against a real tree, so a change letting a refused open replace the session turns that test
+red. **Only the queue half is unpinned.** What mark 2 says about `workspace.test.ts` itself stands.
+
 **What was *not* wrong, and must not be "corrected" with it**: the third state itself, the reason the
 arm now rests on (unattributability), and the separate — true — claim in `2d-5-3-notes.md` and
 `2d-5-3-A-notes.md` that a refused `list_documents` leaves **`workspaceReady()` unreached**. That is a
@@ -11252,3 +11261,151 @@ demonstration in one chain that a line citation into a file the record keeps edi
 its own commit. The durable alternative `PROGRESS.md` has nominated twice — a checker that resolves
 `file:line` references in comments — is still unbuilt.
 
+
+---
+
+## The 2d-5-3-D Next-action prose, archived 2026-09-05 at Phase 2d-5-3-E
+
+**Two of its claims were proved wrong by 2d-5-3-E, and they are marked here — at the top of the
+archived copy rather than after it, which is 2d-5-2b-C's precedent — so a reader meets the correction
+before the prose.**
+
+1. **"a refused `list_documents` ... is the *incoming-lifecycle* case above with its queue reset"** —
+   over-attributed. A refused `list_documents` establishes only that `open_workspace` **succeeded**.
+   Which of the first two states the batch is in is decided by whether the in-flight drain took the
+   session lock *before or after* `open`'s swap block — a race a refusal observed later in `open()`
+   cannot see. It is **one of the first two, whichever the race gave**, and the arm above already
+   separates them by exactly that race. Right that it is not the third state; wrong that it is the
+   second.
+2. **"nothing in this repository drives the third state, and nothing here could"** — false of the
+   state's **workspace** half. `src-tauri/src/watch_check.rs`'s
+   `a_failed_reopen_keeps_the_previous_watcher_watching` opens a real tree, refuses a second open with
+   a path that is not a directory, and asserts the session is still open at the same epoch, still
+   ready, and still delivering a live edit. So a change letting a refused open replace or empty the
+   session turns that test **red**, and this round's *"an edit to that early return falsifies this
+   paragraph with every gate in the project green"* is false with it. **Only the queue half is
+   unpinned**, which is what the corrected comment now says.
+
+**What was *not* wrong**: everything this round said about `workspace.test.ts` — that its failed-open
+case pins the *gate*, that no batch reaches the arm in it, and that a scripted-command vitest drives no
+Rust state — is correct and stands, as do all three of its Mediums' *diagnoses* of 2d-5-3-C. **The
+shape both corrections share is this chain's own**: a round replaced a false claim with a differently
+false one, and only re-deriving against the code caught it. The second is the sharper — it traded an
+overclaim about *coverage* for an overclaim about *absence*, which reads as humility and is just as
+unchecked.
+
+#### Phase 2d-5-3-D — the round §7.1 commissioned for 2d-5-3-C's fix
+
+**Complete as a round, every gate green — and `SUPERSEDED BY 2d-5-3-E`, never complete.** Risk class
+**high**; worker model **opus** (no implementation worker: the phase's product is a review and its
+fix, both taken by the orchestrator). Record:
+[`docs/decisions/2d-5-3-D-notes.md`](docs/decisions/2d-5-3-D-notes.md); review
+[`docs/reviews/phase-2d-5-3-D.md`](docs/reviews/phase-2d-5-3-D.md). 2d-5-3-C's own Next-action prose is
+archived in [`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"archived
+2026-09-05 at Phase 2d-5-3-D"*, with the two claims this round corrected marked at the top of the
+archived copy rather than after it.
+
+**Verdict `ship-with-fixes`, 0 blockers**, 3 Medium and 1 Low. **All four were re-derived by the
+orchestrator against the code before any fix was applied**, and all four are fixed.
+
+**The brief's one instruction is what found all three Mediums**: *check the comments against the code,
+not the code against the comments.* Every one of them is a comment claiming something the code does not
+give — this project's stated worst defect class — and none of them is reachable by any gate.
+
+**Medium 1: the paragraph written to forbid a two-way disjunction widened its own third state by a
+case that belongs to the second.** 2d-5-3-C established a genuine third state — a refused
+`open_workspace` returns from `Workspace::discover(root)?` before the lock is taken, so the **previous**
+workspace stays installed — and then wrote *"or a refused `list_documents` after it"* into it.
+**Re-derived in three places**: `./workspace.svelte.ts` returns on `!opened.ok` **before** it reaches
+`await commands.listDocuments()`; `WorkspaceSession::open` on success runs `reconciliation.begin_epoch`
+and `guard.replace(Open { .. })` **in one session-lock block**; and `guard.replace` is that slot's only
+writer. So a `list_documents` refusal is reachable **only after `open_workspace` succeeded**, where
+Rust holds the **new** workspace under a new epoch with an empty queue — the *incoming-lifecycle* case
+the same comment already enumerated. The clause is removed and given its own paragraph saying which
+state it really is, attributed to that host rather than to the line.
+
+**Medium 2: the `awaitingReady()` arm's new reason is false at the arm it justifies, and the fix
+introduced it.** It read *"this drain was issued under a generation this session has left"* — but that
+arm is reached **only when `openedAt === host.openGeneration()`**, because the arm above returns for
+exactly the case where the generation moved, and **the arm's own opening sentence** says the two checks
+are not the same question. The pre-`85181ac` wording (*"for a lifecycle this session has left"*) did not
+name the generation. The arm now keeps the shared *shape* of the reason — nothing here can attribute
+the `newest_sequence` — while stating a **different premise**: what is unknown is not which lifecycle
+replaced this session's but whether the announced open has replaced it **yet**.
+
+**Medium 3: the coverage citation names a case that drives neither the state nor any Rust.**
+*"`./workspace.test.ts`'s failed-open case drives exactly that state"* is false three ways — that case
+scripts `open: { ok: false }` for its **only** open, so no workspace was ever installed to be left in
+place; it asserts `drainSequences` stays **`[0]`**, so **no batch reaches the arm at all** (what it
+pins is the *gate*); and a `scriptedCommands` vitest drives **no Rust state**. **The fix does not hunt
+for a better citation** — it says the true thing: nothing in this repository drives the third state and
+nothing here could, the claim is reasoned from `WorkspaceSession::open` rather than executed, and an
+edit to that early return falsifies the paragraph with every gate green. That is 2d-5-3-C's own
+recorded residue, moved to where a reader of the comment meets it.
+
+**The Low is a record defect, and the check that made it one is the point.** `2d-5-3-C-notes.md` §5
+reason 1 said the losing drain *"is blocked on the session mutex … and acquires it on release"* — two
+threads contending. `commands.rs`'s module doc **"Why every command is synchronous"** excludes it, and
+`rg 'pub async fn' src-tauri/src/commands.rs` returns **nothing**, so both commands are synchronous,
+serialized by the dispatcher, and never block on each other. **The conclusion survives the mechanism**
+and reason 1 now says so. **The two source comments that mention the mutex were checked and left**:
+both claim an **order** (*"neither side chooses which takes it first"*, *"according to which reached
+that mutex first"*), never that either side blocks, and both are true under dispatcher serialization.
+
+**The sweep refused to correct five of the seven places it touched.** `rg 'list_documents|listDocuments'`
+returns seven positions over the record and the source. **Two carry the false claim** and are fixed;
+**five carry a different, true one** — that a refused `list_documents` leaves **`workspaceReady()`
+unreached**, a claim about the gate — and correcting those would have been this round's own version of
+the defect it was closing. One further position in `2d-5-3-notes.md` was **clarified rather than
+corrected**: it lists both refusals for the gate claim and then writes *"Rust keeps the previous
+workspace when an open refuses"*, which is true only of `open_workspace`; a parenthetical marks which
+half is being corrected and states that the gate sentence above it is not.
+
+**§7.1 commissions a round, so this phase is `SUPERSEDED`, not complete.** The fix changed **one
+source file** — `src/lib/browser/reconciliationCoordinator.ts`, `numstat` **`33 11`**. The diff is
+**comment-only, proven mechanically rather than by eye** (`git diff -U0` filtered to changed lines that
+are neither comments nor blank returns nothing), and **the unit is the file and not the line**. Under
+`/autoclaude-opus` a phase gets **one** review invocation and this phase spent it, so that round is a
+new corrective phase (`CLAUDE.md` §7.4).
+
+**Nothing is `BLOCKED`.** §8 of the notes marks every item, and **no item names a correctness defect in
+a source file**, so §7.3's blocker clause does not apply. The cross-epoch watermark question is marked
+*recorded only* **with its reasoning stated rather than asserted**: it names a risk whose reachability
+is unestablished, not a file that is wrong in a nameable way, and its real fix is a wire change owned
+by 2d-5-5.
+
+#### The next action is **Phase 2d-5-3-E — the round §7.1 commissioned for 2d-5-3-D's fix**
+
+Scope it to that fix and to nothing else: the **two** rewritten comments in
+`src/lib/browser/reconciliationCoordinator.ts` — `runOneDrain()`'s `staleOpen` arm (its third-state
+paragraph, now three paragraphs) and its `awaitingReady()` arm — and
+`docs/decisions/2d-5-3-D-notes.md` in full, including the correction block it added at the top of
+`2d-5-3-C-notes.md` §1, the inline correction to that file's §5 reason 1, the parenthetical in
+`2d-5-3-notes.md` and the marker block in `next-action-history.md`. **Check the comments against the
+code, not the code against the comments** — that instruction has now found seven Mediums across four
+rounds and is worth repeating verbatim.
+
+**Four things worth a reviewer's attention that this round did not reach**, all four marked in
+`2d-5-3-D-notes.md` §8. **The three-state claim is now asserted in five comment paragraphs and tested
+by none**, and this round *widened* that exposure rather than narrowing it — §3's fix replaced a false
+coverage citation with an explicit admission that nothing drives the state, which is honest and leaves
+five paragraphs falsifiable at once by one edit to `WorkspaceSession::open`. **The `awaitingReady()`
+arm is unreachable under the only production host** (`open()` bumps the generation in the statement
+before `workspaceOpened()`, so the arm above always fires first), so its new premise is reasoned and
+not executed — the suite pins the gate, nothing pins the reason. **The cross-epoch watermark question
+is narrowed and still unsettled**: this round's reviewer established that `drain`'s
+`acknowledged.max(after_sequence)` is unconditional and epoch-blind, that `begin_epoch` runs under the
+session lock so a losing drain always meets a fresh queue, and that a stale `W > 0` makes the new
+epoch's first `W` observations refused **and counted** — what is unsettled is whether the losing
+dispatch order occurs at all, which is Tauri's scheduling and readable from nothing here. And
+**2d-5-3's able-to-fail claims for seven of its eight cases, and its §8.3 five-failure transcript, are
+still unreproduced** — this round cleared **none** of that residue, the first round of the chain not to,
+because its three Mediums all needed re-derivation against Rust instead.
+
+**One thing a reviewer should judge rather than inherit, carried forward from 2d-5-3-C and now
+sharper.** Five positions cite a comment by **the words it opens with** or a function by **symbol**
+rather than by line, a convention with nothing enforcing it. **An anchor is robust against
+renumbering, not against a rewording — and this round reworded two of the anchored comments.** No
+round has yet checked whether the anchors still match. The durable alternative `PROGRESS.md` has now
+nominated three times — a checker that resolves `file:line` references in comments — is still unbuilt,
+and it would also discharge the four stale cross-file citations under `src/` recorded below.

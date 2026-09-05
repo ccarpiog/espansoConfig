@@ -762,17 +762,30 @@ export function createReconciliationCoordinator(
       // **A refused `list_documents` is not that state**, under the one host that
       // issues one: `./workspace.svelte.ts` returns on `!opened.ok` before it calls
       // `listDocuments()`, so reaching a `list_documents` refusal at all means
-      // `open_workspace` **succeeded** — the swap block already ran
-      // `reconciliation.begin_epoch` and installed the new `Open` together, which
-      // is the incoming-lifecycle case above with its queue reset to empty, not
-      // this one.
+      // `open_workspace` **succeeded** and the swap block ran
+      // `reconciliation.begin_epoch` and installed the new `Open` together. **It
+      // does not say which of the first two cases the batch is**, and writing it as
+      // the incoming one would decide a race this refusal cannot see: the batch was
+      // produced when the drain took the session lock, which is before or after that
+      // block according to the order the two commands reached it, and a refusal
+      // observed later in `open()` is no evidence either way. So it is one of those
+      // two, whichever the race gave, and never this one.
       //
-      // **Nothing in this repository drives the third state, and nothing here
-      // could.** It is a claim about what Rust holds, reasoned from
-      // `WorkspaceSession::open` rather than executed, and no scripted-command
-      // suite in `./workspace.test.ts` drives Rust at all — its failed-open case
-      // asserts the *gate*, and no batch reaches this arm in it. So an edit to that
-      // early return falsifies this paragraph with every gate in the project green.
+      // **The workspace half of the third state is driven and asserted in Rust; the
+      // queue half is not.** `src-tauri/src/watch_check.rs`'s
+      // `a_failed_reopen_keeps_the_previous_watcher_watching` opens a real tree,
+      // refuses a second open with a path that is not a directory, and then asserts
+      // the session is still open at the same epoch, still ready, and still
+      // delivering a live edit — so a change that let a refused open replace or
+      // empty the session turns that test **red**, and the paragraph above is not
+      // reasoned-only. **What nothing pins is that the queue survives it**: that
+      // test never drains, and no scripted-command suite in `./workspace.test.ts`
+      // drives Rust at all — its failed-open case asserts the *gate*, and no batch
+      // reaches this arm in it. So the half this arm actually rests on — that the
+      // batch's `newest_sequence` still indexes the queue Rust is holding — is
+      // reasoned from `WorkspaceSession::open` rather than executed, and an edit
+      // that reset the queue on the refusal path would falsify it with every gate
+      // in the project green.
       //
       // **What makes the refusal right in all three is that nothing here can
       // attribute the number, never that the queue is gone.** The only value that
