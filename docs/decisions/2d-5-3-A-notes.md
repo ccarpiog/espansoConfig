@@ -68,7 +68,21 @@ justifying it said:
 > *Not, however, an `open()` still loading: **`AppShell` calls `start()` and `open(null)` in the same
 > block**, so this is reached with the gate already closed whenever the host opens first…*
 
-**Re-derived: it does not.** `rg '\.start\(\)' src --glob '!*.test.ts'` matches exactly one line,
+> **Corrected at Phase 2d-5-3-B — the recipe below no longer reproduces, and the fix is what broke
+> it.** *"matches exactly one line"* was true of the tree the finding was raised on and false of the
+> tree that closed it: the fix's own second paragraph writes `` `BrowserState.start()` `` into a
+> comment at `reconciliationCoordinator.ts:979`, so the same `rg` now matches **two** lines. This is
+> the self-invalidating citation `PROGRESS.md` names at its line 21 — *a derived figure outlives the
+> thing it was derived from unless something re-derives it* — and it is the second time this chain has
+> produced one (2d-5-2b-D found the identical shape in a notes section's line citations). **The claim
+> is unaffected; only the recipe is.** Re-derived at 2d-5-3-B: of the two matches, one *is* the new
+> comment and the other is `workspace.svelte.ts:3506` as described below, so there is still no
+> production caller. The recipe that survives its own fix excludes the prose —
+> `rg -n '\.start\(\)' src --glob '!*.test.ts' | rg -v '^\S+:[0-9]+: *(//|\*)'` — and it matches the
+> one line the paragraph below names.
+
+**Re-derived: it does not.** `rg '\.start\(\)' src --glob '!*.test.ts'` matched exactly one line
+**when this finding was raised**,
 `src/lib/browser/workspace.svelte.ts:3506` — which is the `reconciliation.start()` call **inside**
 `BrowserState.start()`'s own body (the member is defined at :3502), so it is the wrapper passing the
 call through and not a caller of it. Nothing calls that wrapper. `src/lib/components/AppShell.svelte`'s `onMount` calls
@@ -140,6 +154,20 @@ AssertionError: expected [ +0, +0 ] to deeply equal [ +0 ]
 
 and the `afterEach` budget fails beside it with `expected 2 to be 1`. Restored, it passes:
 `Tests  1 passed | 195 skipped (196)`.
+
+> **Completed at Phase 2d-5-3-B — that mutation evidences the first two assertions and not the
+> third.** It fails at `workspace.test.ts:7616`, which is the assertion *after the failed open*; the
+> case stops there, so the wake-after-gate assertion at `:7624` — *"the third assertion is what makes
+> the case about the gate"*, the sentence above — was never shown able to fail. Claiming a case
+> discriminates what its name says, on evidence that stops one assertion short, is the same overclaim
+> §3.4 was raised about. **Measured at 2d-5-3-B rather than argued**: reducing `drainMayStart()` to
+> `started && !disposed` — deleting the `!awaitingReady()` conjunct, so the gate no longer holds
+> anything — fails the case at **`src/lib/browser/workspace.test.ts:7624`** with
+> `AssertionError: expected [ +0, +0 ] to deeply equal [ +0 ]`, the budget assertion
+> `expected 2 to be 1` beside it, `Tests  1 failed | 195 skipped (196)`. The line differs from the one
+> above, which is the point: it is the third assertion, and the gate is what holds the later wake.
+> Restored from a copy taken before the mutation, and `drainMayStart()` re-read to confirm the
+> conjunct is back.
 
 ### 3.4 Finding 2 — a residual in the record stated wider than it was
 

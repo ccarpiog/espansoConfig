@@ -733,16 +733,27 @@ export function createReconciliationCoordinator(
     }
     if (openedAt !== host.openGeneration()) {
       // An `open()` landed while this was in flight: the number the host reports
-      // is no longer the one this drain was issued under, so every identity in the
-      // batch belongs to a workspace lifecycle on its way out. Neither sequence
-      // state moves, and **that is true whether or not the cursor has been
-      // cleared** — nothing on this line observes `workspaceOpened()`, and a host
-      // may move `openGeneration()` without ever calling it, which is exactly the
+      // is no longer the one this drain was issued under. Neither sequence state
+      // moves, and **that is true whether or not the cursor has been cleared** —
+      // nothing on this line observes `workspaceOpened()`, and a host may move
+      // `openGeneration()` without ever calling it, which is exactly the
       // independence {@link awaitingReady}'s doc comment states and the arm below
-      // states again. What makes the refusal right on its own is the batch: its
-      // `newest_sequence` indexes a queue this session is no longer reading, so
-      // moving the watermark here would ask the next drain with a number from that
-      // queue.
+      // states again.
+      //
+      // **Which lifecycle the batch describes is not knowable here, and the
+      // refusal does not need it to be.** In `src-tauri/src/commands.rs` both
+      // `drain_external_changes` and `open_workspace` reach the same session
+      // mutex, and neither side chooses which takes it first: win, and the batch
+      // is the outgoing queue; lose, and `WorkspaceSession::open`'s swap block has
+      // already run — the one block that calls `reconciliation.begin_epoch` and
+      // installs the new `Open` together — so the batch is the **incoming**
+      // lifecycle's queue under a new epoch. The number that tells those apart is
+      // the batch's `epoch`, and this arm fires **above** the check that reads it.
+      // What makes the refusal right in both orders is the generation alone: this
+      // drain was issued under one this session has left, so its `newest_sequence`
+      // is not a watermark for the lifecycle now installed, and moving it here
+      // would ask the next drain with a number from a queue that is either gone or
+      // not yet this session's to count from.
       record(afterSequence, reasons, 'staleOpen');
       return;
     }
@@ -754,8 +765,10 @@ export function createReconciliationCoordinator(
       // that `open()` bumps its generation in the statement before it says so — but
       // the generation is read through {@link ReconciliationHost} and the gate is
       // set through a call on this interface, and nothing ties the two. The outcome
-      // is the same as the check above's: this drain answered for a lifecycle on
-      // its way out, and a batch of it must move neither sequence state.
+      // is the same as the check above's, and so is the reason: this drain was
+      // issued for a lifecycle this session has left, whichever of the two the
+      // batch turned out to describe, and a batch of it must move neither sequence
+      // state.
       record(afterSequence, reasons, 'staleOpen');
       return;
     }
@@ -924,12 +937,15 @@ export function createReconciliationCoordinator(
    * the consult's two orders both have to work, and losing the reason would make
    * one of them silently produce no drain at all. **A request made while an
    * `open()` is loading is remembered for the same reason and for a second one**:
-   * Rust still holds the workspace being replaced until that open succeeds, so a
-   * drain issued here would come back describing it, and every generation capture
-   * in the pump would legitimately pass because `open()` had already taken the
-   * generation this drain captures. Recording without issuing is what answers both
-   * — the reason survives to the post-`ready` drain, and no batch is accepted for
-   * a lifecycle on its way out.
+   * a drain issued here would come back describing **one of two** lifecycles and
+   * the coordinator could not say which — `WorkspaceSession::open` swaps the
+   * workspace under the same session mutex `drain_external_changes` takes, so the
+   * batch is the outgoing queue or the incoming one according to which reached
+   * that mutex first — while every generation capture in the pump would
+   * legitimately pass, because `open()` had already taken the generation this
+   * drain captures. Recording without issuing is what answers both: the reason
+   * survives to the post-`ready` drain, and no batch is accepted for a lifecycle
+   * this session is not showing.
    *
    * @param reason - Which trigger is asking.
    */
@@ -1024,12 +1040,15 @@ export function createReconciliationCoordinator(
       lastDiscarded = 0;
       discardedNoticeCount = 0;
       observationsDroppedCount = 0;
-      // **And the gate closes.** Rust holds the workspace being replaced until
-      // this open succeeds, so a drain issued between here and `ready` answers for
-      // that one — and `adopted` has just been cleared, so `accept()` would take
-      // its epoch as this session's shown epoch, the post-`ready` batch would come
-      // back `staleEpoch`, and `onWake` would drop every wake for the real epoch
-      // from then on. Every generation capture in the pump passes in that window,
+      // **And the gate closes.** A drain issued between here and `ready` answers
+      // for whichever lifecycle reached the session mutex first — Rust holds the
+      // workspace being replaced only until `WorkspaceSession::open`'s swap block
+      // runs, which is not tied to when this window learns the open succeeded — and
+      // the gate does not need to know which, because the objection is to accepting
+      // **any** batch in this window: `adopted` has just been cleared, so
+      // `accept()` would take that batch's epoch as this session's shown epoch, the
+      // post-`ready` batch would come back `staleEpoch`, and `onWake` would drop
+      // every wake for the real epoch from then on. Every generation capture in the pump passes in that window,
       // because `open()` took its generation in the statement before this call;
       // being *told* is the only thing that distinguishes it.
       openInProgress = true;
