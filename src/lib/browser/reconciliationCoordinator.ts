@@ -771,15 +771,20 @@ export function createReconciliationCoordinator(
       // observed later in `open()` is no evidence either way. So it is one of those
       // two, whichever the race gave, and never this one — **which is a claim about
       // where the batch came from, not about the property the paragraph above draws
-      // from it.** In case 2 the batch already *is* the incoming lifecycle's queue
-      // and Rust is still holding that lifecycle, so the property *"its
+      // from it.** In case 2 the batch already *is* the incoming lifecycle's queue,
+      // so **at the instant the drain took the session lock** the property *"its
       // `newest_sequence` really is a watermark for the lifecycle Rust is still
-      // holding"* is satisfied there outright — no second open is needed to arrange
-      // it, and none is claimed. Provenance is what the paragraphs above classify,
-      // and **nothing here rests on the property** — the refusal below is justified
-      // by unattributability — so the distinction costs the refusal nothing and is
-      // written down only because a reader who takes "this one" as the property
-      // would find the enumeration short by a case.
+      // holding"* was satisfied outright — no second open is needed to arrange it,
+      // and none is claimed. **The time index is load-bearing and is the whole of
+      // the claim.** This arm runs after the await, a further successful open may
+      // have installed another lifecycle and emptied the queue by then — nothing
+      // stops one, and `./workspace.test.ts`'s *"lets the newer open win, however
+      // late the older one answers"* drives two overlapping opens — and nothing
+      // here observes whether one did. Provenance is what the paragraphs above
+      // classify, and **nothing here rests on the property** — the refusal below is
+      // justified by unattributability — so the distinction costs the refusal
+      // nothing and is written down only because a reader who takes "this one" as
+      // the property would find the enumeration short by a case.
       //
       // **The workspace half of the third state is driven and asserted in Rust; the
       // queue half is not.** `src-tauri/src/watch_check.rs`'s
@@ -791,14 +796,20 @@ export function createReconciliationCoordinator(
       // reasoned-only. **What nothing pins is that the queue survives it**: that
       // test never drains, and no scripted-command suite in `./workspace.test.ts`
       // drives Rust at all — its failed-open case asserts the *gate*, and no batch
-      // reaches this arm in it. So the queue half is **asserted by the paragraph
-      // above and rested on by nothing here**: this arm records the *pre-await*
-      // `afterSequence` and returns, never reading `batch.newest_sequence`, which
-      // is consumed in `accept()` alone — the paragraph below and the one opening
-      // *"Which lifecycle the batch describes"* both say the refusal rests on
-      // unattributability instead. It is reasoned from `WorkspaceSession::open`
-      // rather than executed, and an edit that reset the queue on the refusal path
-      // would falsify **this comment** with every gate in the project green.
+      // reaches this arm in it. So the queue half is **asserted in prose and rested
+      // on by nothing here** — asserted by the paragraph opening *"A third state is
+      // neither of those"*, and again by the case-2 sentence above, which are the
+      // sites this sentence means and the reason it names them rather than saying
+      // *the paragraph above*: this arm records the *pre-await* `afterSequence` and
+      // returns, never reading `batch.newest_sequence`, which is consumed in
+      // `accept()` alone. **The two paragraphs that carry the refusal's own
+      // justification say different things and are cited as such**: the one below
+      // says the refusal rests on unattributability; the one opening *"Which
+      // lifecycle the batch describes"* says only that the lifecycle is not
+      // knowable here and that the refusal does not need it to be, which is the
+      // weaker claim. It is reasoned from `WorkspaceSession::open` rather than
+      // executed, and an edit that reset the queue on the refusal path would
+      // falsify **this comment** with every gate in the project green.
       //
       // **What makes the refusal right in all three is that nothing here can
       // attribute the number, never that the queue is gone.** The only value that

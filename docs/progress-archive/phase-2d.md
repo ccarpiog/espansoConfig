@@ -3425,3 +3425,188 @@ status rows stayed**, because the chain is live — 2d-5-3-H is owed, and *super
 2d-4b-G's refusal is still the precedent that matters, and it is precisely the precedent that costs
 something now.
 
+
+---
+
+## Phase 2d-5-3-G's verification narrative, archived 2026-09-05 at Phase 2d-5-3-H
+
+**71 lines, moved verbatim out of `PROGRESS.md`'s *Verification baseline* when 2d-5-3-H re-measured
+the same four gates and wrote its own block in that place.** History, never an instruction: the live
+baseline is the one in `PROGRESS.md`.
+
+**Nothing below is superseded as a statement about the tree 2d-5-3-G committed** — every figure in it
+was true of that tree, and 2d-5-3-H's own run is a second party confirming it rather than replacing
+it. What the move removes from the head is the round-specific narrative, not the ladder or the host
+scar, both of which stay live in `PROGRESS.md`.
+
+### ⚠️ Two baselines are live at once, and only one of them is now a measurement
+
+**With the instrument in the working tree the four commands answer `1320 / 441 / 2307 / 188`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-3-G, twice** — once on the inherited tree and once after the fix — and
+at 2d-5-3-F (once), 2d-5-3-E (twice), 2d-5-3-D (twice), 2d-5-3-C (twice), 2d-5-3-B and 2d-5-3-A before
+it. **Eleven independent full runs across seven phases, returning the same four figures every time.**
+**2d-5-3-G's inherited-tree run was not redundant, and the reason is worth keeping**: 2d-5-3-F ran the
+gates once, correctly reasoning that its inherited tree *was* the tree 2d-5-3-E measured — but that
+round's own reviewer re-ran nothing either (its §7 item 5), so **no figure on that tree had been
+confirmed by a second party for a full round**. 2d-5-3-G re-ran it rather than inherit an inheritance.
+`cargo test --workspace -- --test-threads=1` was read **not through a pipe**, summed over **26**
+`test result` lines *and* checked by the complementary question — no line lacking `0 failed` — because
+a sum can be right while a binary is silent. `cargo clippy --workspace --all-targets -- -D warnings`
+(exit 0), `cargo fmt --check` (exit 0) and `cargo tree -p espansoconfig-core | rg tauri` (finds
+nothing) are all clean. **Both bundle oracles were read and both lines are reported**, the second
+because it proves the search can match at all: server-only markers **absent**, client-only markers
+**present (2)**.
+
+**Nothing moved at 2d-5-3-G, and nothing could have.** Its source diff is **comment-only in the one
+file it touches** — `src/lib/browser/reconciliationCoordinator.ts` — so no file
+entered or left the program, no new reachable module, no new component and no new case. **It was
+proven comment-only mechanically rather than by eye**: `git diff -U0` filtered to changed lines that
+are neither comment lines nor blank returns nothing. **Every figure was run rather than inferred**,
+`cargo test` included — **this phase changed no Rust source at all**, which is precisely the shape that
+tempts an inference, and this round has the sharpest excuse of the three to make it: its Medium 2 was
+established by reading the `WorkspaceSession` **struct** in `src-tauri/src/commands.rs`, a file it did
+not touch. The three consequences of the host scar were followed on **both** runs — serial form,
+redirected to a file rather than read through a pipe, and the complementary question asked of every one
+of the 26 `test result` lines. **The instrument's pin was re-checked after the fix** and held at
+`5 insertions(+), 1 deletion(-)`. **No line in the edited file exceeds 90 characters**,
+checked with `awk`, because 2d-5-3-C shipped a 112-character line that nothing in this repository
+catches.
+
+**The gate figure 2d-5-3-F added is still carried and was re-confirmed rather than assumed.** The
+comment cites `src-tauri/src/watch_check.rs`'s `a_failed_reopen_keeps_the_previous_watcher_watching`
+as the thing that pins the third state's workspace half; that citation survives this round's edits
+untouched, and both of this phase's serial transcripts carry
+`test watch_check::a_failed_reopen_keeps_the_previous_watcher_watching ... ok`. A citation naming a
+test that does not run would be a later round's version of the defect 2d-5-3-F closed.
+
+**What 2d-5-3-C measured, kept because its shape differs from this phase's.** Its diff was
+comment-only in **two** files — `reconciliationCoordinator.ts` (`54 33`) and `src-tauri/src/commands.rs`
+(`8 3`) — so it edited a Rust file no test can reach and ran `cargo test` anyway. Same rule, one phase
+earlier, applied to the opposite temptation.
+
+**What moved at 2d-5-3-A, and what did not.** `npm test` **2306 → 2307**, exactly the one new
+workspace case (the failing open); `npm run check` **unmoved at 441**, because the case went into an
+existing file and the phase's two new files are `.md`; `npm run build` **unmoved at 188**, because a
+`.test.ts` is not in the production graph. `cargo test` is **unmoved at 1320**, and it was **run
+rather than inferred**: no Rust file changed — `git status` names `src-tauri/src/main.rs` only as the
+instrument, still at its pinned `5 insertions(+), 1 deletion(-)` — so the figure could not have moved,
+but this chain's own rule is that a high-risk phase is not the place to infer a gate, and six hours of
+iteration budget is not a reason to weaken it.
+
+**The `reconciliationCoordinator.ts` half of the fix is comment-only, and that was proven
+mechanically rather than by eye** — `git diff -U0` filtered to changed lines that are neither comment
+lines nor blank returns nothing. `workspace.svelte.ts` is byte-identical to `HEAD`. So no file entered
+or left the program, no new reachable module and no new component, which is what the three unmoved
+frontend figures say independently.
+
+**The production, harness-free baseline is still not a measured figure, and it must not be written as
+one.** It was `1320 / 438 / 2254 / 186` before the instrument landed. Subtracting the instrument's
+known contribution from the quadruple above — one `npm run check` file, one `npm test` case, one
+`npm run build` module, no Rust test — **predicts** `1320 / 440 / 2306 / 187`. **That is arithmetic,
+not a measurement**, and this file's own history is why the distinction is kept: `1623` stood here for
+three step records because a figure only a harness-free tree can produce was copied forward instead of
+re-derived. **2d-5-7 removes the instrument and re-derives all four on that tree**; until then, the
+with-harness quadruple above is what a gate run actually prints and the production one is a prediction
+awaiting its measurement.
+
+
+---
+
+## `PROGRESS.md`'s headroom narrative as it stood at 2d-5-3-G, archived 2026-09-05 at Phase 2d-5-3-H
+
+**80 lines, moved verbatim out of `PROGRESS.md`'s header when 2d-5-3-H re-measured the file and wrote
+a compact replacement.** History, never an instruction: the live figures are the ones in `PROGRESS.md`,
+and this file's own rule is that a derived figure outlives the thing it was derived from unless
+something re-derives it.
+
+**Every figure below is stale by construction** — it describes the file as it stood before this round's
+record, its two content archives and this archive itself. **Do not quote any number from it.** What
+survives the move is kept live in `PROGRESS.md`: the size bounds, the rule that the figure is
+re-derived after the record rather than before it, the decoupling of lines from bytes, the three
+archive rules, and the list of what may not be archived to make room.
+
+**One prediction in it is now known to have been wrong five rounds running**, always in the same
+direction: that the 2d-5-3 tail was about to close. 2d-5-3-H did not close it either, and it writes no
+prediction of its own.
+
+**Where the headroom stands, measured on the finished file rather than predicted before it:**
+**787 lines and 115,256 bytes (~113 KiB)** — over the 64 KiB soft bound, well past the 400-line one,
+and **13 lines and 15,816 bytes under the hard bounds** (800 lines / 128 KiB). **It is over soft,
+the figure is re-measured on this file rather than inherited, and it is the honest one** — measured
+after 2d-5-3-G's archive *and after this paragraph was written*, which is the only order that gives a
+true number, and this round took it **after** the SHA record too — **the first of this chain to do
+so.** Earlier rounds measured before it and stated that it adds **one** line; 2d-5-3-G recorded its SHA
+**in place**, into the row the phase commit already wrote, so it added **10 bytes and no line at all**.
+That is worth naming rather than smoothing over: *"the SHA-record commit adds one line"* was a claim
+about a **second commit appending a row**, not about recording a SHA, and a later session that inherits
+the words without the distinction will predict a line that never arrives. A session's draft of this
+sentence once said 698, measured before the
+paragraph it sat in existed: **a derived figure outlives the thing it was derived from unless something
+re-derives it**, which this file already says in the paragraph opening *"That failure recurred at the
+2d-5 consult in a new place"*. **That citation used to read "at line 21"**, and it was changed to an
+anchor for the reason the whole 2d-5-3 chain has been arguing: a line number into a file the record
+keeps editing does not survive its own commit.
+
+**⚠️ Lines and bytes have decoupled, and the line count is now the wrong single thing to watch.**
+**These rows are long** — 2d-5-3-G's status row alone is **2,460 bytes on one line** — so the two
+bounds no longer move together, and a session watching only lines will misjudge the room. **Measure
+both.** This round's net cost, after **three** archives totalling 139 lines, was **+26 lines and
++4,913 bytes** — the head rose despite all three. **The totals and the headroom are in the paragraph
+above and are not repeated here**, which is this file's own rule: a figure written in two places is a
+figure that goes stale in one, and an earlier draft of this very sentence proved it by repeating them
+and falling four bytes behind within one edit. On lines the room is about one more round; on bytes it
+is nearer four. **The line bound binds first, and it
+binds soon**: an unarchived round of this chain has cost as much as 132 lines, so the next session must
+archive before it writes, exactly as the paragraph below says. **The figure that caught this was the
+byte one**: 2d-5-3-G inherited a header whose line count was exact and whose **byte** count was 69
+bytes stale, which is the same decoupling seen a round early and missed.
+
+**The order that keeps this header honest, kept as a rule while its arithmetic is archived.** The
+figure above is re-derived **after** the record is written, never before, and the SHA-record commit's
+one-line contribution is stated rather than folded in. That order is what made three consecutive
+headers accurate after two stale ones — and 2d-5-3-G still found the inherited **byte** figure 69
+bytes stale while the line figure was exact, which is the decoupling above, seen a round early and
+missed. **The next session must re-derive both rather than quote them**; an accurate inherited header
+is precisely the moment that feels safe to skip. The round-by-round accuracy history and this phase's
+own step-by-step arithmetic are archived in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"`PROGRESS.md`'s header accuracy history and
+per-phase arithmetic"*. **One archive was not enough this time, and that is the change**: for two
+rounds the displacing prose came in *smaller* than the prose it displaced; this round's came in
+**larger**, so the head rose across an archive of 101 lines and **two further archives were taken in
+the same session** — the nine closed-chain status rows and this header history. **An archive holds a
+live chain's growth near zero and does not reduce it.**
+
+**The next session must archive before writing its record, and one target will not be enough.** A phase
+record of this chain has cost between 16 and **132** lines — the upper figure is 2d-5-3-D's, and the
+range is worth re-deriving rather than quoting — so the room above is **not** large enough to make
+writing first safe by arithmetic, and on bytes it is not large enough for two more rounds at all.
+**The prediction this header carried into 2d-5-3-G was wrong for the fourth round running, and always
+in the same direction**: it said that if 2d-5-3-G's fix touched no source file the chain would close.
+It touched one — `reconciliationCoordinator.ts`, comment-only, for **two Mediums** — so the tail
+continues. **Seven rounds have now run and six found a real defect in the previous round's fix**; the
+sixth found none and its record read that as convergence, and **the seventh returned three Mediums and
+disproved it**. **Do not plan an archive around this chain closing**, and treat a header sentence that
+predicts closure as a wish rather than a figure.
+
+**Two of the three targets this session named have already been spent by it, and the next session
+inherits a shorter list than the last one did.** **Taken at 2d-5-3-G**: the nine closed-chain status
+rows — 2d-3, 2d-4a, 2d-4a-D…H, 2d-4a-C-1, 2d-4a-C-2, the 2d-4b design consult, 2d-4b, 2d-5-1 and
+2d-5-2, **9 lines and 5,013 bytes** — to
+[`status-table.md`](docs/progress-archive/status-table.md), leaving one summary row and a pointer; and
+this header's own accuracy history and per-phase arithmetic, **29 lines**, to
+[`phase-2d.md`](docs/progress-archive/phase-2d.md). Both were archiving on *state* under rule 1: those
+chains are closed, and that arithmetic is history the moment this figure is re-measured. **Neither
+touched the live chain**, per rule 2. **What is left for the next session** is the standing target,
+unchanged in kind: **this phase's own record and Next-action prose** (~109 lines) to
+`next-action-history.md`, once 2d-5-3-H supersedes it — which holds the line count roughly level and,
+as this round measured twice, **does not by itself hold the bytes**. **If 2d-5-3 does close**, the
+larger move becomes available and should be taken in
+the same session: the chain's status rows to `status-table.md` — **six** rows, not eight, because
+2d-5-3, -A and -B share one, which is the sort of thing to count rather than infer. Measured:
+**16,016 bytes** on six lines, and it is the first archive of this chain that would leave the head
+genuinely short rather than merely level. What may **not** be taken to make room: the flaky-`cargo test`
+section under *Verification baseline* — every one of its three consequences was followed this session
+and the gate is clean because of them — and the pre-instrument production baseline, which is the figure
+2d-5-7 compares against.
+

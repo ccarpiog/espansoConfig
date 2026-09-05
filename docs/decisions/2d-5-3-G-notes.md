@@ -86,6 +86,19 @@ A comment claim that is unverified *and* load-bearing on nothing is pure liabili
 
 **Fixed** in source. The passage now makes the case-2 argument directly and claims no second open.
 
+> **Correction, 2d-5-3-H — this section removed one unverified absence claim and asserted another in
+> the next clause.** *"…nothing has replaced that lifecycle since, so Rust is still holding it and the
+> property is satisfied **outright**"* is a guarantee the code does not give, written one sentence
+> after *"`open()` has no re-entrancy guard"* was removed **for being unverified**. Same absence,
+> opposite sign, and no more evidence behind it: the arm evaluates **after** the await, and a further
+> successful open would install another lifecycle and empty the queue in that window — `open()` is not
+> gated by the drain, and `./workspace.test.ts`'s *"lets the newer open win, however late the older one
+> answers"*, in a suite named **overlapping requests**, drives two overlapping opens. What is true is
+> the **time-indexed** claim: in case 2 the property held **at the instant the drain took the session
+> lock**. The conclusion this section reached is unaffected — the enumeration is still short by a case
+> under the property reading — because that needs the property to hold only at *some* moment in case 2.
+> The source passage carries the time index as of 2d-5-3-H; this section did not.
+
 ## 3. Medium 3 — the absence claim defending it was false, and it is the same shape 2d-5-3-E raised a Medium against
 
 `2d-5-3-F-notes.md` §7 item 1: *"**nothing in this repository drives two overlapping opens**"*.
@@ -131,6 +144,17 @@ problem**: the predicate is ambiguous, so the figure is a function of the reader
 
 **Fixed** in the record (a correction block on `2d-5-3-E-notes.md` §7), asserting no figure.
 
+> **Correction, 2d-5-3-H — this section asserts the figure it says it does not.** *"Counting production
+> sites that assert the third state, this round gets **eight**"* stands four lines above *"**No number
+> is written down as the answer**"* and *"Writing "eight" would be the sixth instance"*. That is a
+> proposition and its negation inside one section — **the shape of this round's own Medium 1**, in the
+> section written to close the count defect. The correction block it produced on `2d-5-3-E-notes.md` §7
+> carries the identical pair: *"gives **eight** in production"* and *"this round asserts **no**
+> figure"*. **The ruling stands and the prose did not honour it**: the criterion problem is the finding,
+> so no figure belongs in either place, and a figure offered as an illustration of an ambiguous
+> predicate is still a figure a later round will inherit. Neither number is re-derived here, on the same
+> ruling.
+
 ## 5. Low 2 — two fresh uncounted counts in the same commit
 
 1. The new source text said *"these three paragraphs"* — a fresh hand count, introduced by the round
@@ -142,6 +166,18 @@ problem**: the predicate is ambiguous, so the figure is a function of the reader
    2d-5-3-D §8 item 5 records and this chain has been converting citations to for three rounds. **Both
    resolve today**, checked; that is luck, not a guard. **Recorded** with a correction block rather
    than renumbered, because renumbering is the move that produced 2d-5-3-C's Medium 2.
+
+> **Correction, 2d-5-3-H — the commit carried three more uncounted counts than this section names, and
+> one of them is demonstrably underived.** *"The **fifth** time this chain has recorded a count with no
+> mechanism behind it"* (§4), *"a **sixth** opening-words anchor"* (§7 item 5) and *"`PROGRESS.md` has
+> now nominated a citation checker **five** times without one being built"* (§7 item 5) are all fresh
+> hand counts, in the commit whose own Low 2 was that hand counts had been introduced by the round
+> whose finding was about hand counts. The third is checkable and does not hold up: the archived
+> Next-action blocks of **2d-5-3-E** and **2d-5-3-F** both say the checker has been nominated *"four
+> times"*, and nothing between them and this round records a further nomination — so *"five"* is an
+> increment with nothing behind it. **No replacement figure is written here**, on §4's own ruling. What
+> the sweep should have looked for is the shape — *a bare ordinal or cardinal asserted about this
+> chain's own history* — and not the words *"three paragraphs"*.
 
 ---
 

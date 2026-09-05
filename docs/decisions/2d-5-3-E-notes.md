@@ -209,6 +209,16 @@ established.
 > this chain's own opening-words convention (2d-5-3-D §8 item 5), adopted in the commit that shifted
 > lines in that file; both still resolve today, which is luck rather than a guard.
 
+> **Correction, 2d-5-3-H — the block above carries the pair it was written to close.** *"Counting sites
+> that assert the third state gives **eight** in production"* stands three lines above *"this round
+> asserts **no** figure"*. That is a proposition and its negation inside one block, which is the shape
+> 2d-5-3-G's own Medium 1 named, appearing in the block that round wrote to retire the count. **The
+> ruling is the sound half and it stands**: the predicate is ambiguous, so the figure is a function of
+> the reader and no figure belongs here. A number offered as an illustration of an ambiguous predicate
+> is still a number the next round inherits — 2d-5-3-G's §4 then inherited this one, wrote *"this round
+> gets **eight**"* and said *"no number is written down as the answer"* four lines later. **No
+> replacement figure is written here**, and none is re-derived, on that same ruling.
+
 ## 8. Where it is thin
 
 1. **The new Rust citation is this round's own most likely defect — *actionable*, and it is not a
