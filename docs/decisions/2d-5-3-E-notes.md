@@ -113,7 +113,7 @@ Each re-derived by the orchestrator, not accepted from the review:
   wording named a two-thread race that cannot occur — is itself sound, and the two source comments it
   checked and left claim only an *order*, which dispatcher serialization gives.
 
-**2d-5-3-D's thin item 4 is closed by measurement.** It worried that the five positions citing a
+**2d-5-3-D's thin item 5 is closed by measurement.** It worried that the five positions citing a
 comment by its opening words or a function by symbol might have been broken by that round's own
 rewording of two anchored comments. All five were resolved and **all five still match**. The class is
 not closed — see §8 — but this instance of it is.
@@ -174,9 +174,14 @@ It did not reproduce 2d-5-3's able-to-fail claims for seven of its eight cases, 
 five-failure transcript. No round of this chain has, and this is the second consecutive round to leave
 that residue untouched, because both of its findings needed re-derivation against Rust instead.
 
-It did not enumerate the "asserted in five comment paragraphs" count that 2d-5-3-D's §8 states and the
-reviewer recorded as `NOT-VERIFIED`. That figure is **still unverified** and is carried as such rather
-than repeated as though it had been checked.
+It did not enumerate the "asserted in five comment paragraphs" count that 2d-5-3-D's §8 states and its
+own reviewer recorded as `NOT-VERIFIED`. **2d-5-3-F enumerated it**: the real figure is **six**, not
+five — `reconciliationCoordinator.ts` at its module doc (`:70-71`), at
+`awaitingWorkspaceReady`'s doc (`:440`), and at three paragraphs of the `staleOpen` arm, plus
+`workspace.svelte.ts`'s failed-open arm — and this round's own fix is what took it from five to six.
+**Both halves of D's sentence were wrong by the time this round finished**: the count, and *"tested by
+none"*, which is false of the workspace half precisely because of what this round's Medium 1
+established.
 
 ## 8. Where it is thin
 
@@ -192,11 +197,14 @@ than repeated as though it had been checked.
    gate in the project green. That is narrower than what 2d-5-3-D claimed for the whole state, and it is
    real. Its fix is a test that drains after a refused open, which nothing in this chain's scope asks
    for.
-3. **The five-paragraph count is unverified — *actionable*, in the record.** 2d-5-3-D's §8 says the
-   three-state claim is asserted in five comment paragraphs; neither that round nor this one enumerated
-   them, and the reviewer recorded the count as `NOT-VERIFIED`. Whoever next touches those paragraphs
-   should count them rather than inherit the number — this project has already lost three step records
-   to a figure copied forward instead of re-derived.
+3. **The paragraph count was unverified and is now enumerated — *recorded only*, corrected by
+   2d-5-3-F.** This item shipped saying *five*, inherited from 2d-5-3-D's §8, and repeating an
+   unverified figure inside the item that warns about unverified figures. The enumerated answer is
+   **six**, and this round's own fix is what added the sixth. *"Tested by none"* is false with it: the
+   workspace half is pinned in Rust, which is what this round's Medium 1 established one section
+   earlier. **The item is left standing with its correction attached rather than rewritten**, because
+   the failure it demonstrates — a count copied forward into the very paragraph forbidding it — is
+   worth more than a tidy number.
 4. **The cross-epoch watermark question is untouched here — *recorded only*.** `ReconciliationQueue::drain`'s
    `acknowledged.max(after_sequence)` is unconditional and epoch-blind; whether the losing dispatch order
    occurs at all is Tauri's scheduling and is readable from nothing in this repository. Its real fix is a

@@ -769,7 +769,18 @@ export function createReconciliationCoordinator(
       // produced when the drain took the session lock, which is before or after that
       // block according to the order the two commands reached it, and a refusal
       // observed later in `open()` is no evidence either way. So it is one of those
-      // two, whichever the race gave, and never this one.
+      // two, whichever the race gave, and never this one — **which is a claim about
+      // where the batch came from, not about the property the paragraph above draws
+      // from it.** `open()` has no re-entrancy guard, so a case-2 batch followed by
+      // a *later* open refusing at `Workspace::discover(root)?` leaves Rust holding
+      // the very workspace that batch came from: the property *"its
+      // `newest_sequence` really is a watermark for the lifecycle Rust is still
+      // holding"* is satisfied while the provenance is still case 2. Provenance is
+      // what these three paragraphs classify, and **nothing here rests on the
+      // property** — the refusal below is justified by unattributability — so the
+      // distinction costs the refusal nothing and is written down only because a
+      // reader who takes "this one" as the property would find the enumeration
+      // short by a case.
       //
       // **The workspace half of the third state is driven and asserted in Rust; the
       // queue half is not.** `src-tauri/src/watch_check.rs`'s
