@@ -732,10 +732,17 @@ export function createReconciliationCoordinator(
       return;
     }
     if (openedAt !== host.openGeneration()) {
-      // An `open()` landed while this was in flight. Every identity in the batch
-      // belongs to the workspace being replaced, and the cursor has already been
-      // cleared by `workspaceOpened()`; moving it here would ask the next drain
-      // with a watermark from a queue this session is no longer reading.
+      // An `open()` landed while this was in flight: the number the host reports
+      // is no longer the one this drain was issued under, so every identity in the
+      // batch belongs to a workspace lifecycle on its way out. Neither sequence
+      // state moves, and **that is true whether or not the cursor has been
+      // cleared** — nothing on this line observes `workspaceOpened()`, and a host
+      // may move `openGeneration()` without ever calling it, which is exactly the
+      // independence {@link awaitingReady}'s doc comment states and the arm below
+      // states again. What makes the refusal right on its own is the batch: its
+      // `newest_sequence` indexes a queue this session is no longer reading, so
+      // moving the watermark here would ask the next drain with a number from that
+      // queue.
       record(afterSequence, reasons, 'staleOpen');
       return;
     }
@@ -963,9 +970,17 @@ export function createReconciliationCoordinator(
       if (requested && drainMayStart()) {
         // Anything recorded before the lifecycle began — an `open()` that reached
         // `ready` first — is flushed here, in arrival order. Not, however, an
-        // `open()` still loading: `AppShell` calls `start()` and `open(null)` in
-        // the same block, so this is reached with the gate already closed whenever
-        // the host opens first, and the flush is `workspaceReady()`'s.
+        // `open()` still loading, and what that rests on is the predicate rather
+        // than any call order in a host: `drainMayStart()` is the question being
+        // asked, so a host that announced an open through `workspaceOpened()` and
+        // has not reported `ready` reaches this line with the gate already closed,
+        // and the flush is `workspaceReady()`'s.
+        //
+        // **No production code calls `start()` at all today.** `BrowserState.start()`
+        // in `./workspace.svelte.ts` is its only wrapper and nothing invokes that
+        // wrapper either; wiring it to a host's `onMount` is 2d-5-7's business. This
+        // comment is aimed at that author, so it states the gate and not a call
+        // order this repository does not yet contain.
         ensurePumping();
       }
     }, // End of function start()

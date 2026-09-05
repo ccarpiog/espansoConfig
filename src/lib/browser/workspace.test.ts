@@ -7563,7 +7563,7 @@ describe('the reconciliation lifecycle', () => {
     expect(events.unlistens()).toBe(1);
   }); // End of the registration-drain case
 
-  it('drains again once a workspace reaches ready, and never for a failed one', async () => {
+  it('drains again once a workspace reaches ready', async () => {
     expectDrains(2);
     const events = testEvents();
     const state = createBrowserState(
@@ -7587,6 +7587,43 @@ describe('the reconciliation lifecycle', () => {
     expect(drainSequences).toEqual([0, 0]);
     state.dispose();
   }); // End of the open-drain case
+
+  it('drains for no failed open, and holds later triggers behind the gate it left closed', async () => {
+    expectDrains(1);
+    const failure: IpcFailure = { kind: 'command', error: { code: 'noWorkspaceOpen' } };
+    const events = testEvents();
+    const state = createBrowserState(
+      scriptedCommands({
+        open: { ok: false, failure },
+        drains: [reconciliationBatch({ newest_sequence: 6 })]
+      }),
+      () => undefined,
+      undefined,
+      events.source
+    );
+    state.start();
+    await settleDrains();
+    expect(drainSequences).toEqual([0]);
+
+    // **The half the case above does not cover.** `open()` closes the drain gate at
+    // its entry and only `workspaceReady()` opens one; a refused `open_workspace`
+    // returns before that call, so this open both requests no drain of its own and
+    // leaves the gate closed. Put `workspaceReady()` on that failure arm and the
+    // expectation below reads `[0, 0]`.
+    await state.open(null);
+    await settleDrains();
+    expect(state.status).toBe('failed');
+    expect(drainSequences).toEqual([0]);
+
+    // And the gate is what holds it, rather than the mere absence of a trigger: a
+    // wake arriving afterwards is recorded and issues nothing, where the same wake
+    // after an open that reached `ready` drains.
+    events.wake(5, 12);
+    await settleDrains();
+
+    expect(drainSequences).toEqual([0]);
+    state.dispose();
+  }); // End of the failed-open case
 
   it('drains for an open that completes before start, in one call', async () => {
     expectDrains(1);

@@ -10623,3 +10623,173 @@ following this project's own 2c-5-4a/4b precedent:
 Nothing about the split changes what 2d-5-2 delivers; the three steps' deliverables union to exactly
 the one step the consult specified.
 
+
+---
+
+## The Next-action prose of Phase 2d-5-3, archived 2026-09-05 at Phase 2d-5-3-A
+
+**This is history, not an instruction.** It was the live Next-action block while Phase 2d-5-3 stood
+`SUPERSEDED BY 2d-5-3-A`; the round it commissioned has since run and returned `ship-with-fixes` with
+**0 blockers**, and both of 2d-5-3's fixed blockers were re-derived by that round and hold. The block
+is kept because it is the fullest narrative account of the two concurrency defects and of the fix's
+one deliberate decision; the authoritative record is
+[`docs/decisions/2d-5-3-notes.md`](../decisions/2d-5-3-notes.md) §8, and the round over it is
+[`docs/decisions/2d-5-3-A-notes.md`](../decisions/2d-5-3-A-notes.md).
+
+**Two sentences in what follows were corrected by that round, and a reader meets the correction here
+rather than after the prose:**
+
+1. It says the review's two Lows and its two blockers were the whole of what the fix answered. That
+   is true of 2d-5-3, but the round over the fix found **four** further findings — two source
+   comments claiming what the code does not give, a test name claiming a case its body did not
+   cover, and a residual in the record stated wider than it was. All four are fixed at 2d-5-3-A.
+2. It repeats, from the notes' §7 item 10, that **no test drives the gate through a real `open()`**
+   and that the wiring is "asserted by reading source". **That is wrong as written**:
+   `src/lib/browser/workspace.test.ts:7565` already drove a real `state.open(null)` and pinned both
+   `workspaceOpened()` and `workspaceReady()` through it. The residual was only ever the *failing*
+   open, and 2d-5-3-A closed that half too.
+
+#### Phase 2d-5-3 — the drain lifecycle coordinator
+
+**Implemented, every gate green, review answered — and `SUPERSEDED BY 2d-5-3-A`, never complete.**
+Risk class **high**; worker model **opus**. Record:
+[`docs/decisions/2d-5-3-notes.md`](docs/decisions/2d-5-3-notes.md); review
+[`docs/reviews/phase-2d-5-3.md`](docs/reviews/phase-2d-5-3.md).
+
+**What it built.** `src/lib/browser/reconciliationCoordinator.ts` — **plain TypeScript, no Svelte
+runes**, beside `workspace.svelte.ts` rather than inside it, which is 2d-5-2a's precedent and settles
+`2d-5-split-notes.md` §6 item 2 for this step. It holds one idempotent `requestDrain` behind a
+single-flight pump, all four triggers, the `{ epoch, watermark, lastDiscarded }` cursor with a typed
+`notObserved | notWatched | watching` state, the captures around every await, and disposal owning the
+registration race. `BrowserState` gained `start()` and `dispose()`; `createBrowserState` gained two
+**injected** sources whose defaults are inert. `open()` clears the cursor at entry and requests a drain
+at `ready`. **No `.svelte` file changed** — components: none, as the split says.
+
+**What it deliberately does not do, each with the step that owns it.** No observation is applied and no
+`discarded` recovery is performed (**2d-5-4**); no route-guard work (**2d-5-6**); **no production import
+of `REAL_RECONCILIATION_EVENTS`** (**2d-5-7**), checked by
+`rg -n 'REAL_RECONCILIATION_EVENTS' src/ --glob '!*.test.ts'`, which still matches only
+`src/lib/ipc/events.ts`. No i18n key was added for the `notWatched` state — §6 item 6 gives those to
+whichever step first *names* it on screen, and this one does not draw. **Nothing in production calls
+`start()`**, so the coordinator is unreachable in the shipped window at this step, and that is what
+makes dropping a batch's observations safe rather than lossy.
+
+**Its review returned `do-not-ship` with two blockers, and both were real.** This is the first
+`do-not-ship` of the 2d-5 chain. **Both were re-derived by the orchestrator against the code before the
+fix was commissioned**, and both are concurrency defects no gate could have caught:
+
+1. **A stranded request in the single-flight release window.** `pump()`'s loop exits the moment
+   `requested` is false, but the in-flight slot was cleared a **microtask later** by
+   `void running.then(release, release)`. A `requestDrain` arriving in that window set `requested`,
+   saw an occupied slot, returned, and was stranded until some later trigger happened to arrive.
+   Reproduced at microtask-chain depth two — `calls=1 pending=["foreground"] pumping=false`, against
+   `calls=2` at depths 0, 1 and 3–10 — which is **the depth an `open()`'s tail calling
+   `workspaceReady()` arrives at**. Fixed by making `release` clear the slot and then re-enter
+   `ensurePumping()` when a request is outstanding and the lifecycle permits it. It cannot spin: a
+   restart happens only because a trigger set `requested`, and the loop clears `requested` before each
+   drain. `.then(release, release)` stays — a `void`-ed `.finally` on a rejection is an unhandled one.
+2. **An epoch adopted from a drain taken before the open reached `ready`, which silently killed
+   reconciliation for the whole session.** `open()` bumps `openGeneration` **and** clears `adopted` in
+   the same entry block, then awaits the whole load before `workspaceReady()`. In that window Rust
+   still holds the **previous** workspace, and any trigger — a foreground signal, or *any* wake, since
+   a cleared `adopted` makes `onWake`'s epoch check pass unconditionally — started a drain whose
+   captured generation was **already current**, so every guard passed after the await and `accept()`
+   adopted the **old** lifecycle's epoch. `adopted` is never re-cleared, so the post-`ready` batch came
+   back `staleEpoch`, every later wake was dropped, and `watchState()` reported `watching` at an epoch
+   that was not the shown one. Reproduced: `mid-open adoption: {"kind":"watching","epoch":5}`. Ruling 8
+   says the epoch is learned from the first **post-open** drain; the code accepted any drain at the
+   current generation. Fixed by a **fourth capture** — `openInProgress`, set by `workspaceOpened()` and
+   cleared by `workspaceReady()` *before* its flush — behind one predicate `drainMayStart()` that
+   `requestDrain`, `start()`, the pump loop and the release all read, with `runOneDrain()` re-observing
+   it after the await as `staleOpen`.
+
+**Two Lows, both fixed**: `cursor()` claimed a frozen snapshot and returned a mutable literal (it now
+`Object.freeze`s), and `isPumping()` claimed more than it measures (its JSDoc now says it measures slot
+occupancy, release microtask included).
+
+**One decision the fix took deliberately, recorded because it is a choice and not a consequence.** A
+**failed** `open()` never calls `workspaceReady()`, so the gate stays closed until the next open that
+reaches `ready` — which also covers a **superseded** open. The rejected alternative was keying the gate
+to the generation it was recorded under, which would let a generation the coordinator was never told
+about *open* the gate: precisely the hole the gate exists to close.
+
+**§7.1 commissions a round, so this phase is `SUPERSEDED`, not complete.** The fix round changed
+**three source files** — `reconciliationCoordinator.ts`, `reconciliationCoordinator.test.ts` and a
+comment-only hunk in `workspace.svelte.ts`, which is still a source change under §7's file-not-line
+rule. Under `/autoclaude-opus` a phase gets **one** review invocation, so that round is a **new
+corrective phase** carrying its own acceptance criteria, commit and review (`CLAUDE.md` §7.4).
+
+**Every new test was proven able to fail.** Each hunk was reverted alone and restored: blocker 1's test
+gave `expected [ +0 ] to deeply equal [ +0, 6 ]`; with the gate forced `false`, five of blocker 2's six
+cases failed, four with `expected [ +0, +0 ] to deeply equal [ +0 ]` and one with
+`expected 'accepted' to be 'staleOpen'`. The sixth — "never told about an open" — passes by design and
+is the negative control.
+
+#### The next action is **Phase 2d-5-3-A — the round §7.1 commissioned for 2d-5-3's fix**
+
+Scope it to the fix, not to the phase: the release re-entry in `ensurePumping()`, the `openInProgress`
+gate and its four readers, `runOneDrain()`'s post-await `staleOpen` arm, the eight new tests, and the
+new §8 of [`docs/decisions/2d-5-3-notes.md`](docs/decisions/2d-5-3-notes.md). **A fix that changes
+source is a change, and the round that reviews it is not optional** — three of 2d-5-2a-1's ten findings
+were regressions a previous round's fix had introduced.
+
+Two things worth a reviewer's attention that the first round did not reach, neither of them a
+carried-over finding: **nothing in TypeScript pairs `workspaceOpened()` with `workspaceReady()`**, so a
+host that calls the first and never the second gates the pump forever, and **no test drives the gate
+through a real `open()`** — the coordinator is driven directly and the wiring in `workspace.svelte.ts`
+is asserted by reading source. Both are `recorded only` in the notes; neither is carried as a blocker.
+
+Then 2d-5-4 — the observation state transitions. Read
+[`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md) (**the consult; it binds**) and
+[`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) §5 before treating
+`phase-2d-design.md` step 5 as the spec.
+
+**The instrument stays in the working tree until a step deliberately removes it.** Nothing in 2d-5-3
+needs it. The production baseline cannot be re-measured until it is gone, which is 2d-5-7's business
+(*production activation, the capability widening and the baseline re-measure*); until then the two
+baselines below are both live. When that step comes, it must also delete the **fourteen** scratch files
+outside the harness tree that `rm -rf` on the harness path does not reach
+(`/private/tmp/espansoconfig-probe-decoy-C01.yml` … `…-C07.yml` and their `.before` siblings).
+
+---
+
+## `What writeSurfaceRegistry.ts is, after five phases`, archived 2026-09-05 at Phase 2d-5-3-A
+
+**This is history, not an instruction**, but unlike most of this file it is still *true*, and 2d-5-4
+and 2d-5-5 are the steps that will want it — both add coordinator machinery beside the registry. It
+stood in `PROGRESS.md`'s Next-action section from 2d-5-2b until 2d-5-3-A moved it here on **state**:
+the 2d-5-2 chain that produced it is closed, and `docs/decisions/2d-5-2b-notes.md` carries all of it.
+The live head keeps a pointer.
+
+Nothing in it was superseded by 2d-5-3 or 2d-5-3-A. In particular the enumeration of the **three
+places the generation moves** is still the check that discriminates, and the weaker
+`rg -n 'writeSurfaces\.' src/lib/browser/workspace.svelte.ts` is still weaker than the item it
+serves. Its `file:line` citations are the class the live head records as **drift-prone**, so a step
+relying on one should re-derive it rather than quote it.
+
+#### What `writeSurfaceRegistry.ts` is, after five phases
+
+`src/lib/browser/writeSurfaceRegistry.ts` is **plain TypeScript, no Svelte runes**, beside
+`workspace.svelte.ts` rather than inside it — `workspace.svelte.ts` is already ~3 600 lines and
+2d-5-3, 2d-5-4 and 2d-5-5 each add more coordinator machinery to it.
+
+It holds one live entry per `OpenWriteSurfaceKind` in a `Map`. `registerWriteSurface(surface,
+transition)` answers a **callable lease** carrying `replaceTarget(WriteSurfaceDocumentTarget) →
+'replaced' | 'staleLease'`. Unregister is idempotent and **inert once displaced**;
+`openWriteSurfaces()` snapshots in registration order and a displacing registration keeps its
+predecessor's position; `transitionFor(kind)` is the only reader of the stored transition, **which
+nothing invokes** — 2d-5-4/2d-5-5 give it a caller.
+
+**The generation moves at exactly three places** — `writeSurfaceRegistry.ts:528` (register), `:546`
+(unregister), `:602` (replaceTarget) — and `workspace.svelte.ts` reaches all three through only two
+doors: `registerWriteSurface` (`:3374`) and `mirroringLease` (`:1857`, `:1870`). Each is followed by
+`noticeWriteSurfaces()`. **The `rg -n 'writeSurfaces\.' src/lib/browser/workspace.svelte.ts` check
+named in `2d-5-2b-notes.md` §11 item 9 does not show the lease's two mutations and is weaker than the
+item it serves**; the enumeration above is the check that discriminates, and 2d-5-2b-B's review
+re-derived it independently.
+
+**`writeSurfaceGeneration()` and `openWriteSurfaces()` both read the registry and touch the mirror.**
+The read is the reactivity dependency; the registry is the answer. The direction is the whole reason:
+returning the mirror would let the door **under-report** *"nothing changed"* while `openWriteSurfaces()`
+answered the new set in the same block, and the Q5 guard 2d-5-4 captures across an `await` is exactly
+the caller that would believe it.

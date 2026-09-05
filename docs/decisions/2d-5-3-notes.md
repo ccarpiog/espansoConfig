@@ -90,7 +90,11 @@ All four are wired, and each has a named case in both suites where the wiring re
    entry — before its first await — and `reconciliation.workspaceReady()` after
    `status = 'ready'`. Every early return in `open()` (a superseded generation, a refused
    `open_workspace`, a refused `list_documents`) leaves the second unreached, so a drain is
-   requested only for the load that really finished. **Since §8's round the two calls are also a
+   requested only for the load that really finished. **That wiring is pinned by two executing
+   cases and not by reading this paragraph** — `src/lib/browser/workspace.test.ts:7566` for the
+   successful open, where deleting either call changes the assertion, and
+   `src/lib/browser/workspace.test.ts:7591` for the refused `open_workspace`; §7 item 10 has the
+   mutations and names the two arms that are still unasserted. **Since §8's round the two calls are also a
    gate, not only two clears and a trigger**: `workspaceOpened()` closes it and only
    `workspaceReady()` opens it, so between them a trigger is *recorded* and no physical drain is
    issued. That is why the failure and supersede returns above matter twice — they leave the gate
@@ -358,14 +362,48 @@ mechanism and it reads a diff.
    window, is where a wrong pairing would first be observable — and it is observable, through
    `awaitingWorkspaceReady()`.
 
-10. **Nothing tests the gate against a *real* `open()`, only against the coordinator — *recorded
-    only*, and not a defect in source.** Every case in §8 drives `workspaceOpened()` and
-    `workspaceReady()` directly; `workspace.test.ts` never starts a coordinator across a failing
-    `open()`. What that leaves unpinned is the wiring rather than the rule — that `open()` really
-    does call `workspaceOpened()` after its generation bump and `workspaceReady()` only on the
-    successful path — which §2.1 item 2 asserts by reading the source. A workspace-level case
-    would be worth adding when 2d-5-4 gives the coordinator something observable to do in a
-    window.
+10. **The wiring *is* pinned by an executing test, and the residual is narrower than this item
+    said — *recorded only*, and not a defect in source. Corrected by the 2d-5-3-A round; see
+    [`2d-5-3-A-notes.md`](2d-5-3-A-notes.md) §3.4.** As written, this item claimed that nothing
+    tested the gate against a real `open()` and that the wiring was something "§2.1 item 2 asserts
+    by reading the source". **Both halves were wrong.**
+    `src/lib/browser/workspace.test.ts:7566` — *"drains again once a workspace reaches ready"* —
+    drives a real `state.open(null)` on a started coordinator and discriminates on **both** calls.
+    Measured, by mutating `open()` in `workspace.svelte.ts` and running that case:
+
+    - delete `reconciliation.workspaceReady()` and it fails with
+      `expected [ +0 ] to deeply equal [ +0, +0 ]` — the open triggers no second drain at all;
+    - delete `reconciliation.workspaceOpened()` and it fails with
+      `expected [ +0, 6 ] to deeply equal [ +0, +0 ]` — the second drain asks `6` rather than `0`,
+      because the registration's answer set `newest_sequence: 6` and nothing cleared the cursor.
+
+    So the success path is executable coverage, not a reading. **What genuinely remained was the
+    *failing* open**, and the same round closed that too:
+    `src/lib/browser/workspace.test.ts:7591` — *"drains for no failed open, and holds later triggers
+    behind the gate it left closed"* — scripts a refused `open_workspace`, asserts that the open
+    adds no drain and that a wake arriving afterwards adds none either. It was proven able to fail
+    by putting `workspaceReady()` on that failure arm: `expected [ +0, +0 ] to deeply equal [ +0 ]`.
+
+    **What is left is smaller than either.** No case drives a *superseded* `open()` (two opens
+    overlapping, the first returning stale) or a refused `list_documents` across a started
+    coordinator; both leave `workspaceReady()` unreached by the same early-return shape the two
+    covered arms use, and neither is asserted. And no case runs any of this in a window — 2d-5-7
+    owns that, per item 7 above.
+
+11. **`pump()` checks `drainMayStart()` and `runOneDrain()` then calls `host.openGeneration()`
+    before `host.drain()` — *recorded only*, and deliberately not restructured. Raised as the one
+    Low of the 2d-5-3-A round.** That is the check-and-spend *shape* `CLAUDE.md` names: the
+    predicate is evaluated in `pump()`'s loop condition, and the first thing the drain does is call
+    a **caller-supplied** function, so a host whose `openGeneration()` accessor re-entered
+    `workspaceOpened()` would have closed the gate and still get the drain issued.
+    **It is inert as shipped**: the only production accessor is `() => openGeneration` in
+    `workspace.svelte.ts`, a plain read of a module-local number that calls nothing. It is recorded
+    rather than fixed because rewriting this control flow — re-asking the gate between the
+    generation capture and the drain, or capturing the generation before the loop condition —
+    changes the ordering of a pump that had two real concurrency blockers fixed one round earlier,
+    and the risk of that change is larger than the risk of the shape. A later step that gives
+    `ReconciliationHost` an accessor with behaviour behind it is where this stops being inert, and
+    it should re-read this item before it does.
 
 ---
 
