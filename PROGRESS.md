@@ -402,7 +402,7 @@ following this project's own 2c-5-4a/4b precedent:
   (`2d-5-split-notes.md` §7 item 7). **Split in two by the orchestrator on 2026-09-05**, before any
   line of it was written, because the instrument did not exist anywhere on this machine:
   - **2d-5-2c-1** — the instrument, rebuilt from the records. **Components: none.** ✅ **complete and
-    CLOSED** (`{SHA}`), one review, `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX all fixed, and its fix
+    CLOSED** (`4dff3a3`), one review, `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX all fixed, and its fix
     round changed no source file so §7.1 commissioned nothing.
   - **2d-5-2c-2** — the reading itself. ⬜️ **not started, and it is the next action.**
     **A window reading is still owed and is not discharged.**
@@ -700,7 +700,8 @@ all of it is in `git log`._
 | 2d-5-2b-D — the SHA and push record | `d71f5aa` | ✅ pushed to `origin/main` |
 | **2d-5-2b-E — the round §7.1 commissioned for 2d-5-2b-D's fix, and the phase that CLOSES the tail: review 1 returned **`ship`** — 0 blockers, 0 SHOULD-FIX, 0 NIT — so the fix round changed **no source file** and §7.1 commissioned nothing; **the closing round was checked rather than accepted**; also records the orchestrator's sweep finding **four stale cross-file citations elsewhere in `src/`** as a candidate corrective phase. **No source file changed in this commit** | **`4e77f85`** | ✅ pushed to `origin/main` |
 | 2d-5-2b-E — the SHA and push record | `156214f` | ✅ pushed to `origin/main` |
-| **2d-5-2c-1 — the window-reading instrument, rebuilt from the records for the third time. Stages `PROGRESS.md` and two `docs/` files **by path**; the four harness paths are left uncommitted in the working tree on purpose, and a later step deletes them. Review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed before this commit**, all four **re-derived by the orchestrator** before being accepted; one of them a real script defect, fixed and measured. **No source file in this repository changed at all** — the two scripts fixed live under `/private/tmp`. §7.1 commissions nothing | **`{SHA}`** | {PUSH} |
+| **2d-5-2c-1 — the window-reading instrument, rebuilt from the records for the third time. Stages `PROGRESS.md` and two `docs/` files **by path**; the four harness paths are left uncommitted in the working tree on purpose, and a later step deletes them. Review 1 `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX **all fixed before this commit**, all four **re-derived by the orchestrator** before being accepted; one of them a real script defect, fixed and measured. **No source file in this repository changed at all** — the two scripts fixed live under `/private/tmp`. §7.1 commissions nothing | **`4dff3a3`** | ✅ pushed to `origin/main` |
+| 2d-5-2c-1 — the SHA and push record | `4a2c652` | ✅ pushed to `origin/main` |
 
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
