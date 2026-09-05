@@ -10400,3 +10400,99 @@ bundle path — an occluded WKWebView stops running `setTimeout` about six secon
 `docs/decisions/2c-2-2-window-reading.md` §1.2 (**`localStorage` follows the bundle identifier, not
 `HOME`**, so a plan must set the language explicitly through the picker).
 
+
+---
+
+## Archived 2026-09-05 at Phase 2d-5-2c-2
+
+The Next-action prose of **Phase 2d-5-2c-1** (the instrument rebuild) and the pre-execution brief for
+**2d-5-2c-2** ("what it is, and the four things it must not assume"), moved out of `PROGRESS.md` when
+2d-5-2c-2 closed and both became history. The instrument record
+`docs/decisions/2d-5-2c-1-instrument-rebuild.md` and the reading
+`docs/decisions/2d-5-2c-2-window-reading.md` are the authoritative versions; this is the checkpoint
+prose only.
+
+#### Phase 2d-5-2c-1 — the instrument, rebuilt from the records
+
+**✅ complete and CLOSED.** Risk class **high**; worker model **opus**. The record is
+[`docs/decisions/2d-5-2c-1-instrument-rebuild.md`](docs/decisions/2d-5-2c-1-instrument-rebuild.md)
+(twelve sections) and the review is
+[`docs/reviews/phase-2d-5-2c-1.md`](docs/reviews/phase-2d-5-2c-1.md).
+
+**Why it was a phase of its own.** 2d-5-2c was one step in the split; the orchestrator cut it in two on
+2026-09-05, before any line was written, because **the instrument did not exist anywhere on this
+machine**. Measured, not assumed: `/private/tmp/espansoconfig-harness-*` matched nothing, and
+`src/probe.ts` and `src-tauri/src/probe.rs` were both absent — so unlike 2c-5-5b, which inherited the
+four harness paths, this step inherited **none of them**. That is the third time the instrument has had
+to be rebuilt from the records (2c-5-5a, 2c-5-5b, this), and `PROGRESS.md` already said to budget it as
+a whole sub-phase.
+
+**The tree is `/private/tmp/espansoconfig-harness-2d-5/`** — a **new** path, never `…-2c-5`, because a
+shared path reads as a shared ledger (2c-5-5a §1). Note that `HARNESS_ROOT` in `src-tauri/src/probe.rs`
+is a **compile-time constant that must agree with `launch.sh`'s `HARNESS`**. It holds `launch.sh`,
+`inert.sh`, `confine.sh`, `adversary.sh`, nine fixtures, 30 retained launches and
+`manifest-2d-5-2c-1-post.sha256`.
+
+**The proof set is Q21–Q28** — eight cases, **four `:en` and four `:es`** — `editor-exact`,
+`editor-third`, `editor-collision`, `creator-front`, `deleter-exact`, `mover-exact`,
+`duplicator-exact`, `raw-negative`. **Every one `bytes=MATCH`, `probe.err=0`, `reached-end=yes
+end-lines=1 failed-lines=0`**, all on binary `40d1e67b64c764fcd5c35820467da3c3cb3c5887a1e620bc46cb3177454c8254`.
+Read by the orchestrator from the retained `bytes.txt` files, not relayed from the worker. Beside them:
+N01–N02 (no-plan controls), C01–C05 (confinement) and C06–C07 (the re-takes of §12.4 below). **Q01–Q13
+are a superseded shakedown generation on three earlier binaries** — retained deliberately, and a reader
+sweeping `launches/` for `bytes=MATCH` will find them, so read the record's §5.6 table first.
+
+**Its review returned `ship-with-fixes` — 0 blockers, 4 SHOULD-FIX — and all four are fixed.** The
+orchestrator **re-derived every one against the files before accepting it**; all four held. Three were
+corrections to the record and one was a real defect in two scripts:
+
+1. **§9.1 claimed adding a dropped case row *"needs no driver edit and therefore no rebuild of the
+   frontend"*. False.** `runCase` (`src/probe.ts:889`) has no arm for `deleter-changed`,
+   `mover-changed` or `duplicator-changed`, and its `default:` throws. §5.4 contradicted itself inside
+   one paragraph. **This is the defect class `CLAUDE.md` names as this project's worst** — a record
+   claiming a guarantee the code does not give — and it would have cost 2d-5-2c-2 three `--- failed`
+   transcripts after a rebuild it was told was unnecessary. Both passages now state the real cost.
+2. **`creator-anchor` is not a "changed" variant** — it is 2c-5-5a §4's P45, under that name.
+3. **`decoy=unchanged` is vacuous on C02 and C05**, where the decoy is the writer's *read* path and
+   where it is never referenced at all. The refusal lines carry both rows regardless.
+4. **The confinement wait loop could never break early.** `confine.sh:101` and `adversary.sh:124`
+   waited on `--- end` alone, and a confinement control's pass is `--- failed` — so the loop was a
+   fixed 25-second sleep wearing the shape of a wait. **Fixed in both scripts and measured, not
+   asserted**: C06 (`confine.sh target`) now finishes in **6.46 s** and C07
+   (`adversary.sh target-elsewhere`) in **4.41 s**, both with the same refusal, the same binary and an
+   unchanged outcome. C01–C05 ran the unfixed loop; that is disclosed in §12.4 rather than hidden.
+
+**§7.1 commissions nothing for that fix round, so §7.2 closes the step.** Its diff touched
+`docs/decisions/2d-5-2c-1-instrument-rebuild.md` — on §7's closed list — and `confine.sh` and
+`adversary.sh`, which are **not files in this repository at all**: they live under `/private/tmp` and
+appear in no `git diff`. **No source file changed.** The `/autoclaude-opus` workflow reaches the same
+place by its own route, one review per phase with no re-review inside it.
+
+#### What 2d-5-2c-2 is, and the four things it must not assume
+
+**The narrow window regression reading of Phase 2d-5-2's changes** — the `DetailPane` registry
+assembly and `MatchCreator` reporting its destination upward. It **may not claim real watcher
+delivery** (`2d-5-split-notes.md` §7 item 7); the full native matrix is 2d-7's.
+
+1. **The instrument observes neither the write-surface registry, nor the watcher, nor restore.** The
+   record's §6.8 and §9.2 say so plainly. If the reading needs any of the three observed, that is
+   instrument work 2d-5-2c-2 must do first — it is a scope statement, not a defect.
+2. **Adding a dropped case row costs a `runCase` arm, an `src/probe.ts` edit and a full rebuild**
+   (§12.1 above). The three `'changed'` plan functions exist at `src/probe.ts:757`, `:786`, `:820`;
+   the dispatch arms do not.
+3. **`setTimeout` cannot carry a wait in this harness.** The window is `visibility=hidden` on every
+   launch, so a timer-based wait *hangs* rather than times out — Q04 is the demonstration. `pause()`
+   spends IPC round trips instead.
+4. **The tree may be gone again.** `/private/tmp` is cleared by the operating system and has taken
+   this instrument twice. Check `/private/tmp/espansoconfig-harness-2d-5/` exists before planning a
+   launch; if it does not, the four repository harness paths may still be in the working tree, and
+   only the scratch tree needs rebuilding.
+
+Read before starting it: [`docs/decisions/1c-2b-2b-2-notes.md`](docs/decisions/1c-2b-2b-2-notes.md)
+§6.1 (one plan per launch, into a fresh bundle path — an occluded WKWebView stops running `setTimeout`
+about six seconds after launch, `open -a` does not restart it, and LaunchServices silently drops
+`--env` for a bundle path it thinks is already running) and
+[`docs/decisions/2c-2-2-window-reading.md`](docs/decisions/2c-2-2-window-reading.md) §1.2
+(**`localStorage` follows the bundle identifier, not `HOME`**, so a plan must set the language
+explicitly through the picker).
+
