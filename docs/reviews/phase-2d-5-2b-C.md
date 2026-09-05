@@ -1,5 +1,21 @@
 Reviewer: autoclaude adversarial reviewer
 
+> **Correction added 2026-09-05 at Phase 2d-5-2b-D — three figures in this report are wrong, and
+> they were copied verbatim into the comments that answered it.** The report is otherwise left
+> exactly as written, a review being a historical snapshot; these three are marked here so no later
+> round re-derives a stale figure from this file.
+>
+> - `workspace.svelte.ts:3320-3322` for the `RestoreContext` rebuild → it is **`:3328-3331`**.
+>   It stood at `:3321` before commit `eb1134a`, whose own hunk in that file added seven lines
+>   above it.
+> - `RestorePane.svelte:511` for where `now.context.surfaces` is handed onward → it is **`:515`**;
+>   `:511` is `if (started === null) {`.
+> - the sibling case having "four assertions" after its `flushSync()` → it has **three**
+>   (`DetailPane.test.ts:1113`, `:1114`, `:1115`).
+>
+> `docs/decisions/2d-5-2b-notes.md` §16 is the record.
+
+
 Scope: `4f1fdb3` restricted to `src/lib/browser/workspace.svelte.ts`,
 `src/lib/components/MatchCreator.svelte`, `src/lib/components/DetailPane.test.ts`.
 

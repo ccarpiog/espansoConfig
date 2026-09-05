@@ -398,14 +398,14 @@
    * drawn refusal. A competing surface seen at `:1993` therefore stops the write
    * before `:2581` is ever reached. The sentence this replaces called the second read
    * "the read that decides whether the restore is written"; that is the shape this
-   * chain keeps shipping, and `RestorePane.svelte`'s own comment above `current`
-   * already said otherwise.
+   * chain keeps shipping, and `RestorePane.svelte`'s own component header
+   * (`:106-111`) already said otherwise.
    *
    * **Both also consult the same surface list, and it is `current`'s.**
    * `RestorePane.svelte:340` builds `surfaces: surfaces()` once inside `current`'s
    * `$derived.by`; `runRestore` captures `const now = current` (`:509`), hands
    * `now.context` to `confirmRestore` (`:510`) and `now.context.surfaces` onward
-   * (`:511`), and `workspace.svelte.ts:3320-3322` rebuilds a `RestoreContext` around
+   * (`:515`), and `workspace.svelte.ts:3328-3331` rebuilds a `RestoreContext` around
    * that very array — only `observed` is the coordinator's own read. So what is true
    * of `:2581` is that the *call* is not made from inside `current`'s derivation, not
    * that `current` is uninvolved: the list it judges came from there.

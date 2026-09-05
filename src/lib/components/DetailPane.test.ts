@@ -1191,7 +1191,7 @@ describe('the pane as a write-surface host', () => {
 
     // Released before the pane stops. **Not for the sibling case's reason** — Phase
     // 2d-5-2b-C's finding 6. That case's `lease()` is an observed step, with a
-    // `flushSync()` and four assertions after it, and its comment calls it "the other
+    // `flushSync()` and three assertions after it, and its comment calls it "the other
     // half of the same claim"; this one is bare cleanup, placed after the last
     // assertion so it can mask nothing. This lease is this block's own — no host owns
     // it — and `mountPane`'s `stop()` unmounts the component without disposing the

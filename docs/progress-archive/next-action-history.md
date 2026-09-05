@@ -10167,3 +10167,94 @@ called at `restore.ts:1993` and `:2581` *"reached from `RestorePane.svelte`'s `c
 message carries the identical mis-attribution and is **left as written**: a commit message is a
 historical snapshot, and only live pointers are maintained.
 
+
+---
+
+## The Next-action block of Phase 2d-5-2b-C, archived 2026-09-05 at Phase 2d-5-2b-D
+
+**Three figures in the block below are wrong and are marked here rather than edited out** — this file
+is the record of what the live head said while it was wrong. `workspace.svelte.ts:3320-3322` for the
+`RestoreContext` rebuild is **`:3328-3331`**; `RestorePane.svelte:511` for where
+`now.context.surfaces` is handed onward is **`:515`**; and the sibling case's "four assertions" after
+its `flushSync()` are **three**. All three were carried out of `docs/reviews/phase-2d-5-2b-C.md`,
+which now carries the same correction at its head.
+`docs/decisions/2d-5-2b-notes.md` §16 is the record.
+
+
+
+### Phase 2d-5-2b-C is complete: the round §7.1 commissioned for 2d-5-2b-B's fix has run, and its own fix changed source.
+### The next action is **Phase 2d-5-2b-D — the review round §7.1 commissions for 2d-5-2b-C's fix**.
+
+#### Why a round is owed, so nobody has to decide it
+
+2d-5-2b-C's one review ([`docs/reviews/phase-2d-5-2b-C.md`](docs/reviews/phase-2d-5-2b-C.md))
+returned `ship-with-fixes`, **0 blockers**, **three SHOULD-FIX** and **three NITs**, and all six were
+fixed in this phase's own commit. That fix round changed **three source files** —
+`src/lib/browser/workspace.svelte.ts`, `src/lib/components/MatchCreator.svelte` and
+`src/lib/components/DetailPane.test.ts` — **every changed line a comment**, verified mechanically
+rather than by eye. The unit is the file, so §7.1 commissions a round and §7.4 carries it as a
+corrective phase: **2d-5-2b-D**. **Scope it to the fix, not to the phase.** The six findings and what
+answered them are [`docs/decisions/2d-5-2b-notes.md`](docs/decisions/2d-5-2b-notes.md) **§15**.
+
+#### What 2d-5-2b-C found, and why two of its findings matter beyond wording
+
+**Two of the three SHOULD-FIX are about production reachability, not about prose.** Both sat in the
+sentence 2d-5-2b-B wrote to answer its own finding 1.
+
+- **`restore.ts:1993` is not display-only, and the previous round said it was.** `restoreRefusal`
+  holds that read; `canPrepareRestore` (`restore.ts:2009`) calls it, and gates `prepareRestore`
+  (`:2095`) **and `confirmRestore` (`:2397`) — the call that mints the permit**
+  (`RestorePane.svelte:510`). A competing surface seen at `:1993` stops the write before `:2581` is
+  ever reached, so **both reads decide whether the restore is written**. `RestorePane.svelte:106-111`
+  had said so all along — *"`prepareRestore` and `confirmRestore` are handed the very same object"* —
+  and the two comments contradicted each other for a whole round. `MatchCreator.svelte` was the wrong
+  side and is the side that changed.
+- **`:2581` *is* reached through `current`, in the half that matters.** `RestorePane.svelte:340`
+  builds `surfaces: surfaces()` once inside `current`'s `$derived.by`; `runRestore` captures
+  `const now = current` (`:509`), hands `now.context` to `confirmRestore` (`:510`) and
+  `now.context.surfaces` onward (`:511`); `workspace.svelte.ts:3320-3322` rebuilds a `RestoreContext`
+  around that very array and **re-reads only `observed`** — as `:3319`'s own comment already said.
+  What is true is that the *call* is not made from inside `current`'s derivation.
+
+**The third is the reactive-context split.** 2d-5-2b-B had divided the cost of an unmirrored path
+between *"an imperative caller"* and *"a `$derived`"*. **An `$effect` calls**, so that wording sorts
+it into the arm that pays nothing — when it never re-runs and is stale exactly as the derived is; a
+template read is a render effect and is the same case. **The line is the reactive context, not
+whether the caller calls.** Both rewritten sites now say so, ending their disagreement with
+`workspace.svelte.ts:3407`, with the sibling door's JSDoc at `:1570` and with the `mirroringLease`
+comment near `:1808`, all three of which already had it right.
+
+The three NITs: the JSDoc's *"the one caller"* (there is **no** production caller —
+`rg -n 'writeSurfaceGeneration' src/ --glob '!*.test.ts'` finds a declaration, an implementation and a
+comment); a `DetailPane.test.ts` sentence written of *"the first half"* that is true of only one of
+its two assertions; and *"as the sibling case above does"*, where the sibling's `lease()` is an
+**observed step** with a flush and four assertions after it while this one is bare cleanup.
+
+**This phase caught three defects in its own fix before committing**, which is the discipline the
+chain has been missing and is `2d-5-2b-notes.md` §15.5: a *"three paragraphs above"* that was one, a
+*"fifteen lines above"* that measured 26, and a *"this site's alone"* that was false because the
+JSDoc twin had the same wording. Each was found by re-deriving the figure, never by re-reading the
+sentence.
+
+#### The `BLOCKED` question was asked and answered — the step is not blocked
+
+§14.7 had named this round as the one positioned to see the tail diverge, and **all six findings are
+in text 2d-5-2b-B wrote**. `2d-5-2b-notes.md` §15.6 is the full answer; the short form is four
+reasons. *"All findings are in the fix's text"* is **tautological**, because §7.1 scopes the round to
+that fix. No finding names a correctness defect in **executable** source — every changed line is a
+comment and both suites are unmoved. Nothing is carried: all three *actionable* items were fixed
+here. And 2d-5-2a ran four phases of exactly this shape and closed by rule.
+
+**What would reach the hatch, so 2d-5-2b-D applies it rather than re-argues it**: the *same*
+mis-attribution reappearing — the reachability of `restore.ts:1993` versus `:2581`, or the
+reactive-context split — in the sentences written this phase. That is one defect surviving two
+consecutive fixes aimed at it. **Different** defects in the same three files are the tail working,
+and are answered under §7.1 as usual.
+
+#### Where the closed rounds' Next-action prose went
+
+2d-5-2b-B's block is in
+[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"archived 2026-09-05
+at Phase 2d-5-2b-C"*, with its three superseded claims marked **in place** — it is the record of what
+the live head said while it was wrong, and 2d-5-2b-B's own commit message carries the same
+mis-attribution and is left as written, a commit message being a historical snapshot.

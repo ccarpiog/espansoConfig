@@ -1235,3 +1235,105 @@ This phase's fix changed **three source files** — `src/lib/browser/workspace.s
 line a comment. The unit is the file, so **§7.1 commissions a round, and it is 2d-5-2b-D**, scoped to
 this fix. `PROGRESS.md`, this notes file and the review report are on §7's closed list and count for
 nothing.
+
+---
+
+## 16. Phase 2d-5-2b-D — the review of 2d-5-2b-C's own fix round
+
+**Commissioned by `CLAUDE.md` §7.1**, because 2d-5-2b-C's fix round changed three source files
+(`src/lib/browser/workspace.svelte.ts`, `src/lib/components/MatchCreator.svelte`,
+`src/lib/components/DetailPane.test.ts`), every changed line a comment. The round was scoped to that
+fix and to nothing else. The report is
+[`docs/reviews/phase-2d-5-2b-D.md`](../reviews/phase-2d-5-2b-D.md): **`ship-with-fixes`, 0 blockers,
+3 SHOULD-FIX and 1 NIT**, all four fixed in this phase's commit.
+
+### 16.1 The four findings, each re-derived by the orchestrator before it was accepted
+
+Every figure below was measured against the tree, not read off the review. That is the discipline
+§15.5 introduced and it is the reason this section can state what the review got right.
+
+1. **`MatchCreator.svelte:408` cited `workspace.svelte.ts:3320-3322` for the `RestoreContext`
+   rebuild. It is `:3328-3331`.** `3320-3322` is comment prose about `RestoreContext.observed`.
+2. **`MatchCreator.svelte:407-408` said `now.context.surfaces` is handed onward at
+   `RestorePane.svelte:511`. It is `:515`.** `:511` is `if (started === null) {`; `:515` is
+   `const answered = await restore(started, now.context.surfaces, invalidate);`.
+3. **`DetailPane.test.ts:1193-1194` said the sibling case has "a `flushSync()` and four assertions
+   after it". It has three** — `lease()` at `:1110`, `flushSync()` at `:1111`, `expect`s at `:1113`,
+   `:1114`, `:1115`. `pane.stop()` at `:1116` is not an assertion.
+4. **(NIT) `MatchCreator.svelte:401` pointed at "`RestorePane.svelte`'s own comment above
+   `current`"** for the claim that both reads gate the write. That docblock (`:323-331`) says only
+   that `current` is one read of the window. The comment that makes the claim is the **component
+   header at `:106-111`**, which the C review had cited precisely.
+
+### 16.2 The mechanical cause of finding 1, which is new and generalizes
+
+**A cross-file line citation into a file that the same commit edits above the cited line is
+self-invalidating.** `const context: RestoreContext = {` stood at **`:3321`** at `eb1134a^` — verified
+with `git show eb1134a^:src/lib/browser/workspace.svelte.ts | rg -n 'const context: RestoreContext'` —
+and 2d-5-2b-C's own first hunk in that file (`@@ -3412,12 +3419,22 @@`) added seven lines above it,
+moving it to `:3328`. So the citation was **correct when it was written and wrong when it was
+committed**, and the commit invalidated it in the very file it was editing. Nothing re-derives such a
+citation, and no test pins one.
+
+**The mitigation applied here is structural rather than prose:** this phase's fix changes **no line
+counts** — `git diff --numstat` is `1 1` and `3 3` — so it cannot have shifted any citation in either
+file. A later fix in this chain that adds or removes a line must re-derive every citation into the
+file it edited, including the ones it did not touch.
+
+### 16.3 Three of the four were propagated from the C review's own report
+
+Findings 1's `3320-3322`, 2's `:511` and 3's "four assertions" were **carried verbatim** out of
+[`docs/reviews/phase-2d-5-2b-C.md`](../reviews/phase-2d-5-2b-C.md) into the comments that answered it.
+That review is a closed round's report and is left as written, with a correction block added at its
+head naming the three figures; the same three are corrected in `PROGRESS.md`, which is the live head
+and must not carry them forward.
+
+**2d-5-2b-C's commit message claims every reported figure was re-derived and held. Three of them had
+not been.** What §15.5 actually measured is narrower and is still true: the three figures the C phase
+caught in *its own* fix before committing were re-derived. The figures it inherited **from its
+reviewer** were not, and that is the gap this round closed. **Re-derive a reviewer's figures too, not
+only your own.**
+
+### 16.4 What the orchestrator re-derived beyond the four findings
+
+The unflagged neighbours in the same passage, because a stale figure hides beside a corrected one.
+All seven `restore.ts` citations hold: `:1993` in `restoreRefusal` (`1971→`), `:2009` in
+`canPrepareRestore` (`2005→`), `:2095` in `prepareRestore` (`2074→`), `:2397` in `confirmRestore`
+(`2375→`), `:2581` in `permitHolds` (`2550-2582`), `:2663` in `sendRestore` (`2650-2691`), `:3228` in
+`restoreView` (`3203→`). `RestorePane.svelte:340`, `:509` and `:510` hold. The twin sweep
+(`rg -n 'four assertions|3320-3322|comment above \`current\`' src/`) returns nothing, and
+`rg -n 'writeSurfaceGeneration' src/ --glob '!*.test.ts'` still finds a declaration, a comment, an
+implementation and a closing-bracket comment — **no production caller**, so the NIT that C fixed still
+holds.
+
+### 16.5 The `BLOCKED` hatch was asked and is not reached
+
+The condition §15.6 named was **the same mis-attribution reappearing** — the reachability of
+`restore.ts:1993` versus `:2581`, or the reactive-context split — in the sentences 2d-5-2b-C wrote.
+It did not. Both are **correct in substance at every rewritten site**, independently confirmed by the
+round and by the orchestrator's own re-derivation in §16.4. This round's findings are stale figures:
+a different defect, which is the tail working rather than diverging.
+
+**The recurrence condition for 2d-5-2b-E, so it applies this rather than re-arguing it.** What would
+reach the hatch is **a figure corrected here being wrong again**, or **any citation in these two files
+going stale for a second consecutive commit**. That is one defect class surviving two consecutive
+fixes aimed at it. A *different* defect in the same files is answered under §7.1 as usual.
+
+### 16.6 Where it is thin
+
+Marked per §7.3.
+
+1. **The review's own item 1 was marked *actionable* and named findings 1 and 2** — comment defects
+   in source. Both were **fixed in this phase**, so §7.3's blocker clause is discharged and nothing
+   is carried. Its other half — that these citations are unpinned by any test — is a coverage bound.
+   — *recorded only*.
+2. **No test pins any cross-file line citation in this repository, and there is no cheap way to add
+   one.** A citation is prose about a location; pinning it would mean a checker that resolves
+   `file:line` references in comments. That is a real tool and it is not this chain's work.
+   — *recorded only*.
+3. **Assertion counts written in prose about a neighbouring test block drift on any edit to that
+   block**, and finding 3 is the instance. — *recorded only*.
+4. **This round did not re-verify the substance of the reachability and reactive-context claims from
+   first principles**; it confirmed them at the rewritten sites and against `restore.ts`'s structure.
+   A defect in the underlying model, as opposed to in the sentences describing it, would not have been
+   caught here and was not in scope. — *recorded only*.

@@ -663,3 +663,62 @@ because it belongs to either chain.
 | _2d-5-2a-B — the SHA and push record_ | `5ec011e` | ✅ pushed to `origin/main` |
 | **2d-5-2a-C — round 3's three fixes and the chain archived; review 4 `ship-with-fixes`, 0 blockers, 2 SHOULD-FIX **both record-only**, both fixed in this commit. The 2d-5-2a tail CLOSES here, and 2d-5-2a with it** | **`2702702`** | ✅ pushed to `origin/main` |
 | _2d-5-2a-C — the SHA and push record_ | `0f1ad8b` | ✅ pushed to `origin/main` |
+
+---
+
+## The tail-termination prose of the closed 2d-5-1 and 2d-5-2a chains, archived 2026-09-05 at Phase 2d-5-2b-D
+
+Both chains are closed and their git-state rows were archived above at 2d-5-2b. This is the prose
+that argued how each of them ended — the §7.1 reading round by round, the three commits in this
+project's history that ended a tail by changing no source file, and the wrong prediction that was
+deliberately left standing. It is kept because the *reasoning* is the precedent a later tail reuses,
+not because any of it is live work. `PROGRESS.md` keeps only the live 2d-5-2b chain's paragraphs.
+
+**What commissioned each round of this tail, and what ended it.** `1ff4f34`'s source half — three
+comment corrections in two files — commissioned **2d-5-1-B**, which found all three true. `1d623dc`'s
+source half — one comment in `restore.ts` — commissioned **2d-5-1-C**, which found nothing. Under
+`CLAUDE.md` §7.1 the unit is the file and a comment-only change to a source file counts, so each round
+was owed however small the diff.
+
+**2d-5-1-C's commit changes no source file at all** — `docs/reviews/phase-2d-5-1-C.md`,
+`docs/decisions/2d-5-1-C-notes.md` and this file, every one of them on §7's closed list — **so it
+commissions nothing, and that is what ends the tail.** Four phases, 2d-5-1 → A → B → C: three fixes
+bought a round each and the fourth bought nothing. Nobody decided that, and nobody had to.
+
+**Three commits in this project’s history have ended a review tail by changing no source file** —
+`811d180` (2d-4a-H, round 13), `21cbef8` (2d-4b-H, round 8) and `61aaaba` (2d-5-1-C). The archived
+section above carries the full argument for the first two, and it is the same argument. **The count
+said "Two" while listing three for one commit**, which is this file's own recurring defect: a figure
+that outlives what it was derived from. It is corrected here rather than left standing because its
+subject is unimportant.
+
+**What this chain commissioned, round by round.** Each of the first three fix rounds changed a source
+file — `src/lib/browser/writeSurfaceRegistry.ts`, its test file, `src/lib/browser/workspace.svelte.ts`
+— so under `CLAUDE.md` §7.1 each owed a round. Round 1's three findings were applied by **2d-5-2a-A**,
+which took the round they commissioned. Round 2's three were applied by **2d-5-2a-B**, which took its
+own. Round 3's three — including `writeSurfaceRegistry.ts:555-568`'s unscoped sentence, the chain's
+**last** source change — were applied by **2d-5-2a-C**, which took its own. Round 4's two were
+**record-only**, so the chain stopped there. §7.4 is why each was a phase rather than another round
+inside one: the autoclaude workflow caps a phase at its own review budget, that cap outranks §7, and
+**the debt it leaves is carried as a corrective phase, never written off** — which is precisely what
+kept every one of these source fixes reviewed.
+
+**The tail ended at 2d-5-2a-C, exactly as 2d-5-1's did.** Round 4 returned two SHOULD-FIX findings and
+**both were record-only**, so the fix answering them changed no source file, so §7.1 commissioned
+nothing and §7.2 closed the step. **Four commits in this project's history have now ended a review
+tail by a fix that changed no source file** — `811d180` (2d-4a-H), `21cbef8` (2d-4b-H), `61aaaba`
+(2d-5-1-C) and 2d-5-2a-C's, below. Nobody decided any of them, and nobody had to.
+
+**The prediction recorded here before round 4 ran was wrong, and it is left standing rather than
+quietly deleted.** This section said the chain was *"not near a tail ending"* and that round 3's
+finding 2 *"guarantees the next fix touches source"*. It did not: 2d-5-2a-C's fix round was prose
+only. The guarantee was about the **phase's** diff, which did change source, and the rule reads the
+**fix round's** diff — two different things, and conflating them is what produced a confident wrong
+call. **§7.1's input is the diff of the fix answering a round, never the diff of the phase.**
+
+**The `BLOCKED` warning this section carried also fired in letter and not in effect**, and the ruling
+is recorded under *"The fourth-generation instance"* above rather than here: a fourth instance of the
+chain's recurring defect **did** appear, in a record rather than in source, and §7.3 reserves blocking
+for a correctness defect in a **source** file. The chain converged. **The escape hatch is still
+`BLOCKED` under §7.2 and is still never a shortened round** — it simply was not reached.
+
