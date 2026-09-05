@@ -526,7 +526,14 @@ failed or superseded open is re-armed by the next open and released by that open
   keeps the *previous* workspace when an open refuses, while the window has already cleared every
   document and shows a failure, so a drain from there would come back describing a lifecycle
   nothing on screen belongs to and hand it to `accept()` as this session's epoch — High 2 again,
-  in the failure shape. **It is not permanently gated**: the next `open()` that reaches `ready`
+  in the failure shape.
+  *(Clarified at 2d-5-3-D, because this chain has been bitten three times by the conflation this
+  sentence invites and once by taking a `list_documents` refusal for it.* **"When an open refuses"
+  is `open_workspace` refusing, and only that.** A refused `list_documents` is reached only after
+  `open_workspace` **succeeded**, so there Rust holds the **new** workspace under a new epoch with
+  its queue reset — the gate conclusion above is unchanged and right for both, but for two different
+  reasons. The first sentence of this bullet, about `workspaceReady()` being left unreached, is true
+  of both and is **not** what is being corrected.*) **It is not permanently gated**: the next `open()` that reaches `ready`
   opens it, and an `open()` is the only thing that puts a workspace on screen at all, so no shown
   workspace can be left behind a closed gate. The decision is written at both failure arms of
   `open()` as well as here, because that is where a future author would otherwise add the door.

@@ -753,12 +753,26 @@ export function createReconciliationCoordinator(
       // disjunction over two.** `open()` bumps the generation in its first
       // statement, unconditionally, while `WorkspaceSession::open` returns from
       // `Workspace::discover(root)?` before it takes the lock at all — so a refused
-      // `open_workspace`, or a refused `list_documents` after it, leaves the
-      // **previous** workspace installed and its queue untouched, which that
-      // function's own doc comment states in as many words. There the batch's queue
-      // is neither gone nor foreign, and its `newest_sequence` really is a
-      // watermark for the lifecycle Rust is still holding. `./workspace.test.ts`'s
-      // failed-open case drives exactly that state.
+      // `open_workspace` leaves the **previous** workspace installed and its queue
+      // untouched, which that function's own doc comment states in as many words.
+      // There the batch's queue is neither gone nor foreign, and its
+      // `newest_sequence` really is a watermark for the lifecycle Rust is still
+      // holding.
+      //
+      // **A refused `list_documents` is not that state**, under the one host that
+      // issues one: `./workspace.svelte.ts` returns on `!opened.ok` before it calls
+      // `listDocuments()`, so reaching a `list_documents` refusal at all means
+      // `open_workspace` **succeeded** — the swap block already ran
+      // `reconciliation.begin_epoch` and installed the new `Open` together, which
+      // is the incoming-lifecycle case above with its queue reset to empty, not
+      // this one.
+      //
+      // **Nothing in this repository drives the third state, and nothing here
+      // could.** It is a claim about what Rust holds, reasoned from
+      // `WorkspaceSession::open` rather than executed, and no scripted-command
+      // suite in `./workspace.test.ts` drives Rust at all — its failed-open case
+      // asserts the *gate*, and no batch reaches this arm in it. So an edit to that
+      // early return falsifies this paragraph with every gate in the project green.
       //
       // **What makes the refusal right in all three is that nothing here can
       // attribute the number, never that the queue is gone.** The only value that
@@ -782,11 +796,19 @@ export function createReconciliationCoordinator(
       // that `open()` bumps its generation in the statement before it says so — but
       // the generation is read through {@link ReconciliationHost} and the gate is
       // set through a call on this interface, and nothing ties the two. The outcome
-      // is the same as the check above's, and so is the reason: this drain was
-      // issued under a generation this session has left, and nothing here can
-      // attribute its `newest_sequence` to a lifecycle — whichever of the **three**
-      // states the arm above enumerates the batch turned out to describe. So a
-      // batch of it must move neither sequence state.
+      // is the same as the check above's, and so is the *shape* of the reason —
+      // nothing here can attribute the batch's `newest_sequence` to a lifecycle —
+      // but **the premise is not that arm's**, and writing it as that arm's would
+      // contradict the sentence this comment opens with. The generation this drain
+      // was issued under is still the one the host reports; this arm is reached
+      // only because the check above did not fire. So what is unknown here is not
+      // which lifecycle replaced this session's, but whether the open this
+      // coordinator was *told* about has replaced it **yet**:
+      // `WorkspaceSession::open` may not have reached its swap block, may have
+      // passed it, or may refuse at `Workspace::discover(root)?` and leave the
+      // previous workspace installed indefinitely. The batch's `epoch` is the only
+      // value that would separate those, and it is read below this arm. So a batch
+      // of it must move neither sequence state.
       record(afterSequence, reasons, 'staleOpen');
       return;
     }

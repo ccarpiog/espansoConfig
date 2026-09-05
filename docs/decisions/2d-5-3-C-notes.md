@@ -13,6 +13,25 @@ including the two correction blocks it added to `2d-5-3-A-notes.md` §3.1 and §
 
 ## 1. Medium 1 — the rewrite named two orders, and a third state falsifies its reason
 
+> **Correction, Phase 2d-5-3-D — read before the section, not after it.** Two claims below are false
+> and were fixed in `reconciliationCoordinator.ts` at 2d-5-3-D. **(1) "or a refused `list_documents`
+> after it" does not reach the third state.** `./workspace.svelte.ts` returns on `!opened.ok`
+> *before* it calls `listDocuments()`, so reaching a `list_documents` refusal at all means
+> `open_workspace` **succeeded** — `WorkspaceSession::open`'s swap block already ran
+> `reconciliation.begin_epoch` and installed the new `Open`, which is the *incoming-lifecycle* case
+> with its queue reset to empty. Only a refused `open_workspace` leaves the previous workspace
+> installed. **(2) `workspace.test.ts`'s failed-open case does not drive that state.** It scripts
+> `open: { ok: false }` for its **only** open, so no workspace was ever installed to be left in
+> place, and it asserts `drainSequences` stays `[0]` — **no batch reaches the arm at all**. It pins
+> the *gate*, which is a different claim. Nothing in this repository drives the third state, and a
+> scripted-command vitest drives no Rust state; the claim is reasoned from `WorkspaceSession::open`,
+> and the comment now says so. **Everything else in this section stands**, including the third state
+> itself and the reason the arm now rests on.
+>
+> **What must not be "corrected" with it**: `2d-5-3-notes.md` §"the two sequences" and
+> `2d-5-3-A-notes.md`'s two occurrences say a refused `list_documents` leaves **`workspaceReady()`
+> unreached**, which is true and is a claim about the *gate*, not about what Rust holds.
+
 **This is the third consecutive round of this chain to find the same shape: the *action* is right and
 the *justification* names an ordering that does not exhaust the cases.** 2d-5-3-A's finding 1 raised
 it against an unstated host call order; 2d-5-3-B raised it against an unstated cross-process order and
@@ -175,11 +194,20 @@ watermark to a number from a different lifecycle and pruning every entry at or b
 
 **Why it is recorded rather than fixed here.** Three reasons, in order of weight:
 
-1. **The reachability is not established.** The losing drain's thread is blocked on the session mutex
-   the swap block holds and acquires it on release, while epoch *N+1*'s first observation waits on a
-   fresh watcher's baseline scan — which takes real time (`watch_check`'s `PATIENCE` is 120 s). Harm
-   needs the drain's Tauri handler thread to be scheduled *after* that scan produces entries. Nothing
-   forbids it; nothing this round ran demonstrates it.
+1. **The reachability is not established.**
+   *(Corrected at 2d-5-3-D — the mechanism this reason named was wrong; the conclusion it reached
+   was not.* The original said the losing drain's thread *"is blocked on the session mutex the swap
+   block holds and acquires it on release"*. That describes two threads contending, and this crate's
+   own module doc excludes it: **"Why every command is synchronous"** says Tauri runs a command
+   written without `async` on the **main thread**, and `commands.rs` declares no `async fn` at all —
+   `open_workspace` and `drain_external_changes` are both synchronous, so they are serialized by the
+   dispatcher and never block on each other's session lock.*)*
+   The order is therefore the **dispatcher's**, chosen by neither side and read by nothing in this
+   repository. Harm needs the drain to be dispatched *after* the swap **and** after epoch *N+1*'s
+   first observation has been enqueued — and that observation waits on a fresh watcher's baseline
+   scan, which takes real time (`watch_check`'s `PATIENCE` is 120 s). Nothing forbids that order;
+   nothing this round or 2d-5-3-D's ran demonstrates it, and 2d-5-3-D's reviewer recorded Tauri's
+   real command scheduling as `NOT-VERIFIED` for the same reason.
 2. **The design's loss counting covers the continuing case.** Once `acknowledged` is high, `enqueue`
    refuses at or below it and **counts those refusals** in `ReconciliationBatch::discarded`, which is
    a counted loss and a whole-workspace reload. The uncounted part is only the entries the `retain`

@@ -3295,3 +3295,88 @@ and unmoved by 2d-5-1-C, whose commit changed no source file. Before that: 2d-5-
 stayed at 130, its generated cases moving only when a file is *added* under the scanned roots.
 2d-5-1-B moved nothing at all. In every case the orchestrator's own run is the record, never the
 worker's claim.
+
+---
+
+## `PROGRESS.md`'s archive arithmetic for the closed 2d-5-1, 2d-5-2a and 2d-5-2b chains, archived 2026-09-05 at Phase 2d-5-3-D
+
+**Why it moved.** It is the live head's own narrative of archives it has already taken, for chains
+that are closed. The three sentences in it that are *rules* rather than arithmetic were kept in
+`PROGRESS.md` rather than moved: archive on **state, not on length**; the precedent that matters is
+2d-4b-G's **refusal**, because *superseded* is not *closed*; and the archive holds a live chain's
+growth near zero rather than reducing it.
+
+**One correction, because this block is where the claim was made.** It says of 2d-5-3's session that
+the head went **737 → 698**, *"the first time in this chain that an archive left the head shorter than
+it found it by more than a line."* Two phases later that reading needs a caveat: at 2d-5-3-D the head
+went **788 → 790** across an archive of **130** lines, so the arithmetic below describes what archives
+of *closed* chains achieve, never what a mid-tail phase can expect. The head has fallen exactly when a
+chain closed and risen every other time.
+
+
+**2d-5-3 archived three times in one session, all on state**, because the 2d-5-2 chain closed in the
+session before it: its **five sub-phase status rows** and its **fifteen git-state rows** to
+[`status-table.md`](docs/progress-archive/status-table.md), and its **107 lines of Next-action prose**
+to [`next-action-history.md`](docs/progress-archive/next-action-history.md). The live head went **737 →
+698** while gaining a whole phase record — the first time in this chain that an archive left the head
+**shorter** than it found it by more than a line, and the reason is that this was the first session to
+open a step after a three-step chain closed rather than mid-tail. 2d-5-2b-C archived 71 lines and added back rather more, which
+is the same arithmetic every corrective phase of this chain has produced: **the archive is what keeps
+the growth to roughly zero per phase, and it is not what gets the file under the bound.** The cheapest
+remaining target is unchanged — the Next-action section, whose closed-phase narrative compacts without
+loss, and which this phase again archived rather than deleted.
+
+**The archive-on-state rule was exercised at 2d-5-2a-C rather than merely restated.** The 2d-5-2a
+chain closed, and its narrative and four status rows went to
+[`status-table.md`](docs/progress-archive/status-table.md) **in the same session that closed it**,
+leaving one summary row and a pointer — which is what this header had asked the closing session to do.
+The chain had been growing the live head by roughly **50 lines per corrective phase** (581 at
+2d-5-2a, 644 at 2d-5-2a-B), and the archive is why closing a four-phase chain left the live head
+**one line shorter than it found it** — 644 → 643 — instead of fifty longer. **The rule stays *archive on state, not on length***, and the precedent that matters
+is still the refusal: 2d-4b-G wanted a live chain's rows and did not take them, because *superseded*
+is not *closed*. **2d-5-2a's rows were taken the moment they stopped being live, and not one phase
+earlier.**
+
+**Two more moves landed at 2d-5-2b, both on state rather than on length.** The 2d-5-1 and 2d-5-2a
+**git-state** rows — 14 of them, one of which is `d1d9d13`, itself an earlier archiving commit — went
+to [`status-table.md`](docs/progress-archive/status-table.md), leaving one summary row; and the
+superseded 2d-5-1/2d-5-2a **verification narratives** went to
+[`phase-2d.md`](docs/progress-archive/phase-2d.md), because 2d-5-2b re-measured every figure on its own
+tree. The live head still grew — it carries a new chain's record — and **that is the rule working, not
+failing**: 2d-5-2b's own rows stay because the chain is live — 2d-5-2b-A and 2d-5-2b-B have since
+closed, 2d-5-2b-C has since closed too and 2d-5-2b-D is owed. **2d-5-2b-B archived 268 further
+lines** — the detailed Next-action prose of 2d-5-2b and 2d-5-2b-A — into `next-action-history.md`,
+without losing a measurement: the archive is cited from the live head and from `2d-5-2b-notes.md`.
+**2d-5-2b-C archived 71 more the same way** — its own predecessor's Next-action block — and did the
+one thing that archive had not been asked for before: it marked, in the archived copy and at the top,
+the **three claims 2d-5-2b-C proved wrong**, so a reader who follows the pointer meets the correction
+before the prose rather than after it.
+
+**That did not bring this file under the soft budget, and the figure is stated rather than rounded.**
+At 2d-5-2b-B: 728 lines before, **684** after (~80 KiB), the archive removing 268 lines and that
+phase's own record adding back most of them. At 2d-5-2b-C, the same shape at a smaller scale: **728
+before, 735 after**, an archive of 71 lines against a record that added 78. **Two phases running, an
+archive has held the live head to roughly its own size rather than reduced it** — which is what an
+archive on *state* does when the state being recorded is a live chain. The budget is **400 lines / 64 KiB soft, 800 / 128 hard**, so the file is
+over the soft threshold and comfortably under the hard one — no split is forced, and none was done
+beyond the archive above. **A later phase resuming onto this file should expect to archive again**,
+and the cheapest target is the same one: the Next-action section is ~180 of the 684 lines, and its
+closed-phase narrative is what compacts without loss.
+
+Six things left the live head across 2d-5-2a
+and 2d-5-2a-A and the two steps' records still cost more than they saved. What moved, so nobody
+looks for it here — the 2d-5-1 closure narrative *and* the 2d-5-2a one, both to
+[`next-action-history.md`](docs/progress-archive/next-action-history.md); two ladder rungs and the
+three 2d-4b residues, to [`phase-2d.md`](docs/progress-archive/phase-2d.md); and the closed-risk
+index, to [`decisions.md`](docs/progress-archive/decisions.md). **Archiving on state rather than on
+length is the rule**, and the precedent that matters is still the *refusal*: 2d-4b-G wanted a live
+chain's rows badly and did not take them, because *superseded* is not *closed*. **The 2d-5-2a chain
+is live, so its rows stay** until it closes — which is exactly why this file is over soft and will
+stay over soft while the chain runs. 2d-4b-H
+closed the eight-row 2d-4b chain and its status rows went to the archive on 2026-08-31; its **git-state**
+rows stayed in the live head another four days, and 2d-5-1-B is what took them, together with 2d-4a's.
+**The next session that closes a 2d-5 step should archive that step's narrative as it goes**
+rather than at the bound, and the precedent that matters is the *refusal* rather than the move: 2d-4b-G
+wanted the chain's rows badly, they were the longest thing in the table, and it did not take them,
+because *superseded* is not *closed*. Archiving on length rather than on state is how a live chain
+loses its head.

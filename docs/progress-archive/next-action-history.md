@@ -11093,3 +11093,162 @@ residue. Unedited.
    answered, the mutation results, the fourth-generation instance and what review 4 did not verify —
    is archived in this same file under *"archived 2026-09-05 at Phase 2d-5-2b-B"*.
    `2d-5-2b-notes.md` cites it; no 2d-5 step needs it inline.
+
+---
+
+## Phase 2d-5-3-C's Next-action prose, archived 2026-09-05 at Phase 2d-5-3-D
+
+**Two of its claims were proved wrong by 2d-5-3-D, and they are marked here — at the top of the
+archived copy rather than after it, which is 2d-5-2b-C's precedent — so a reader meets the correction
+before the prose.**
+
+1. **"or a refused `list_documents` after it, leaves the previous workspace installed"** — false.
+   `src/lib/browser/workspace.svelte.ts` returns on `!opened.ok` *before* it calls `listDocuments()`,
+   so reaching a `list_documents` refusal at all means `open_workspace` **succeeded**:
+   `WorkspaceSession::open`'s swap block already ran `reconciliation.begin_epoch` and installed the
+   new `Open`. That is the *incoming-lifecycle* state with its queue reset to empty, not the third
+   state. **Only a refused `open_workspace` reaches the third state**, because only it returns from
+   `Workspace::discover(root)?` before the lock is taken.
+2. **"it is what `workspace.test.ts`'s failed-open case drives"** — false, in two ways. That case
+   scripts `open: { ok: false }` for its **only** open, so no workspace was ever installed to be left
+   in place; and it asserts `drainSequences` stays `[0]`, so **no batch reaches the arm at all**. It
+   pins the *gate*, which is a different claim, and a scripted-command vitest drives no Rust state.
+   **Nothing in this repository drives the third state**, and the comment now says so.
+
+**What was *not* wrong, and must not be "corrected" with it**: the third state itself, the reason the
+arm now rests on (unattributability), and the separate — true — claim in `2d-5-3-notes.md` and
+`2d-5-3-A-notes.md` that a refused `list_documents` leaves **`workspaceReady()` unreached**. That is a
+claim about the gate, not about what Rust holds.
+
+The record is `docs/decisions/2d-5-3-D-notes.md`; the review is `docs/reviews/phase-2d-5-3-D.md`.
+
+#### Phase 2d-5-3-C — the round §7.1 commissioned for 2d-5-3-B's fix
+
+**Complete as a round, every gate green — and `SUPERSEDED BY 2d-5-3-D`, never complete.** Risk class
+**high**; worker model **opus** (no implementation worker: the phase's product is a review and its
+fix, both taken by the orchestrator). Record:
+[`docs/decisions/2d-5-3-C-notes.md`](docs/decisions/2d-5-3-C-notes.md); review
+[`docs/reviews/phase-2d-5-3-C.md`](docs/reviews/phase-2d-5-3-C.md). 2d-5-3-B's own Next-action prose is
+archived in [`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"archived
+2026-09-05 at Phase 2d-5-3-C"*, with the three claims this round corrected marked at the top of the
+archived copy rather than after it.
+
+**Verdict `ship-with-fixes`, 0 blockers**, 2 Medium and 3 Low. **All five were re-derived by the
+orchestrator against the code before any fix was applied**, and all five are fixed.
+
+**Its first Medium is the third consecutive round of this chain to find one shape: the action is right
+and the justification names an ordering that does not exhaust the cases.** 2d-5-3-A's finding 1 raised
+it against an unstated *host call* order; 2d-5-3-B raised it against an unstated *cross-process* order
+and replaced it with a two-order enumeration; this round finds a **third state neither order covers**.
+`open()` bumps `openGeneration` in its **first statement, unconditionally**
+(`workspace.svelte.ts:2554`), while `WorkspaceSession::open` returns from `Workspace::discover(root)?`
+**before it takes the lock at all** — and that function's own doc comment says what follows: **"A
+failure leaves the previously open workspace in place."** So under a refused `open_workspace`, or a
+refused `list_documents` after it, **the generation has moved and Rust's workspace has not**: the
+batch's queue is neither gone nor foreign, and its `newest_sequence` really *is* a watermark for the
+lifecycle Rust is still holding. The disjunction *"either gone or not yet this session's"* is false,
+and the state is not exotic — it is what `workspace.test.ts`'s failed-open case drives, and the
+frontend's own `!opened.ok` arm already stated the Rust behaviour in a comment two thousand lines from
+the one that contradicted it.
+
+**The obvious replacement would have reintroduced the defect one paragraph above its own
+contradiction.** Resting the refusal on *"the cursor was cleared by `workspaceOpened()`"* contradicts
+that comment's own first paragraph, which states the independence — *nothing on this line observes
+`workspaceOpened()`, and a host may move `openGeneration()` without ever calling it*. **The arm now
+rests on unattributability**: the only value separating two lifecycles' sequences is the batch's
+`epoch`, and this arm fires *above* the check that reads it, so `newest_sequence` arrives
+unattributable **by construction**. The trade is named rather than asserted — refusing costs at most
+one repeated drain, and **on the failed-open path not even that** — and the `workspaceOpened()` clear
+is kept as a *second* way the refusal is right **under this host**, marked as a property of the host
+and not of the line.
+
+**The sweep found a fourth site the report did not name.** `CLAUDE.md` says to sweep for the shape and
+never for the words, and the review named three sites. The fourth is `workspaceOpened()`'s own gate
+comment, which said Rust holds the workspace being replaced *"**only** until `WorkspaceSession::open`'s
+swap block runs"* — on the failed-open path it holds it **indefinitely**. All four are fixed, and **two
+of them keep a justification that never depended on any ordering**, kept rather than rewritten.
+
+**Its second Medium is the sharpest thing this chain has produced: the correction written to close a
+self-invalidating citation shipped stale in its own commit.** `2d-5-3-A-notes.md` §3.1's correction
+block cited the comment as `reconciliationCoordinator.ts:979`; on the tree that same commit produced,
+it stood at **`:995`** — moved by the commit's own `+19` lines. **Re-derived** — `git show
+1a135fd:…| sed -n '979p'` returns the comment, so `:979` was right at the previous commit and wrong at
+the one shipping the correction. **This is the third instance of the shape in this chain, not the
+second**, and it recurred *inside the correction block written to fix its previous occurrence* —
+independently arriving at what `2d-4a-notes.md` §22.1 records as this project's strongest instance.
+**The instance was broader than the report said**: the citation stood in **four** places, not one. **The
+fix is a form, not a number** — re-numbering would have shipped a fourth stale citation, because this
+phase's own fix moved the comment again, to `:1014`. Every instance is now anchored on the comment's
+opening words, and `2d-5-3-B-notes.md`'s two Rust citations are anchored by symbol for the same reason.
+
+**Its three Lows.** A 112-character line, the only one over 90 in the file, left unwrapped by the
+previous rewrite and caught by nothing in this repository — fixed inside the fourth comment site. **A
+precedent attributed to the wrong phase**, settled by reading rather than by preferring one of two:
+**`2d-5-2b-D`** is where the shape was first named as new (`2d-5-2b-notes.md` §16.2), while
+`2d-4b-notes.md` §10.3 and §14.5 record *relatives* of the class. And — **out of §7.1's scope and
+fixed anyway** — `with_workspace_read`'s doc comment claimed *"The three backup-catalogue methods above
+are its only customers"* when `rg` returns **four** call sites, the fourth inside
+`WorkspaceSession::drain_external_changes`, **whose own doc says it is on that path deliberately**.
+Two source comments in flat contradiction, on the exact citation this chain has spent three rounds
+tracing.
+
+**Four things the reviewer recorded as `NOT-VERIFIED` were closed by measurement.** All four gates were
+re-run in full (the reviewer had run only `npm run build`); the precedent attribution was settled; and
+**the `:7624` mutation no round of this chain had yet reproduced was run**. Reducing `drainMayStart()`
+to `started && !disposed` returns `1 failed | 195 passed`, failing at **`workspace.test.ts:7624`** with
+`expected [ +0, +0 ] to deeply equal [ +0 ]` and `expected 2 to be 1` beside it — exactly 2d-5-3-B's
+claim, now a measurement. The file was restored from a copy taken first and `git diff` over it
+confirmed empty before the real fix began.
+
+**One finding is carried rather than fixed, and it is the sharpest thing outside this round's scope.**
+`ReconciliationQueue::drain` opens with `guard.acknowledged = guard.acknowledged.max(after_sequence)`
+and then retains only entries above it, while `begin_epoch` resets `acknowledged` to 0 and **sequences
+are per-epoch** (`FIRST_OBSERVATION_SEQUENCE = 1`). So a drain issued under epoch *N* whose IPC reaches
+the session mutex **after** `open`'s swap block raises epoch *N+1*'s watermark to a number from a
+different lifecycle and prunes every entry at or below it. **Recorded, not fixed, for three reasons**:
+the reachability is not established (the losing drain acquires the mutex on release, while the new
+epoch's first observation waits on a fresh watcher's baseline scan); the design's loss counting covers
+the continuing case, since `enqueue` refuses at or below `acknowledged` and **counts** it, which is a
+whole-workspace reload; and a real fix is a **wire change** — `drain` has no caller-epoch parameter —
+belonging to **2d-5-5**, not to a round scoped to four comments. `reconciliation.rs` and
+`2d-4a-notes.md` §17.1 document `after_sequence` as an unvalidated `u64` off the wire, but only as an
+*escape* from the poisoned-lock disagreement; **the cross-epoch case is named in no record file**, and
+`2d-5-3-C-notes.md` §5 and §7 item 1 are now that record.
+
+**§7.1 commissions a round, so this phase is `SUPERSEDED`, not complete.** The fix changed **two
+source files** — `src/lib/browser/reconciliationCoordinator.ts` and `src-tauri/src/commands.rs`. Both
+diffs are **comment-only, proven mechanically rather than by eye** (`git diff -U0` filtered to changed
+lines that are neither comments nor blank returns nothing for both), and the unit is the file and not
+the line. Under `/autoclaude-opus` a phase gets **one** review invocation and this phase spent it, so
+that round is a new corrective phase (`CLAUDE.md` §7.4).
+
+**Nothing is `BLOCKED`.** The one `actionable` item this round records names a gap in **the record**,
+not a correctness defect in source, so §7.3's blocker clause does not apply.
+
+#### The next action is **Phase 2d-5-3-D — the round §7.1 commissioned for 2d-5-3-C's fix**
+
+Scope it to that fix and to nothing else: the **four** rewritten comments in
+`src/lib/browser/reconciliationCoordinator.ts` — `runOneDrain()`'s two arms, `requestDrain()`'s JSDoc
+and `workspaceOpened()`'s gate comment — the rewritten `with_workspace_read` doc comment in
+`src-tauri/src/commands.rs`, and `docs/decisions/2d-5-3-C-notes.md` in full, including the correction
+blocks it added to `2d-5-3-A-notes.md` §3.1, `2d-5-3-B-notes.md` §3.1 and its Rust-citation bullets,
+and the marker block in `next-action-history.md`. **Check the comments against the code, not the code
+against the comments.**
+
+**Four things worth a reviewer's attention that this round did not reach.** The four comments now
+assert a **three-state** claim about Rust locking that nothing in this repository tests and nothing can
+from the frontend — which makes them *more* exposed to a Rust change than the two-state version, since
+an edit to `WorkspaceSession::open`'s early return would falsify four comments at once with every gate
+green. **Two of the four keep a justification whose sufficiency was argued and not tested.** The
+**cross-epoch watermark question of §5** is traced but unresolved, and its reachability is exactly what
+a Rust-reading round could settle. And **2d-5-3's able-to-fail claims for seven of its eight cases, and
+its §8.3 five-failure transcript, are still unreproduced** — the residue has shrunk by one per round
+(three at 2d-5-3-A, four by its reviewer, one at 2d-5-3-B, one here) and no round has yet cleared it.
+
+**A note on the citation form this round adopted, because a reviewer should judge it rather than
+inherit it.** Five positions now cite a comment by **the words it opens with**, or a function by
+**symbol**, instead of by line. That is a convention with nothing enforcing it, adopted after the third
+demonstration in one chain that a line citation into a file the record keeps editing does not survive
+its own commit. The durable alternative `PROGRESS.md` has nominated twice — a checker that resolves
+`file:line` references in comments — is still unbuilt.
+
