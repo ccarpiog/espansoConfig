@@ -763,8 +763,9 @@ export function createReconciliationCoordinator(
       // previously open workspace in place"*; neither names the queue. The queue
       // half follows from that same early return rather than from any sentence,
       // because `reconciliation.begin_epoch` is reached only inside the swap block
-      // below it — which is why the paragraph opening *"The workspace half of the
-      // third state"* calls that half reasoned rather than executed.
+      // that early return skips — which is why the paragraph opening *"The
+      // workspace half of the third state"* calls that half reasoned rather than
+      // executed.
       //
       // **A refused `list_documents` is not that state**, under the one host that
       // issues one: `./workspace.svelte.ts` returns on `!opened.ok` before it calls
@@ -786,11 +787,17 @@ export function createReconciliationCoordinator(
       // and none is claimed. **The time index is load-bearing and is the whole of
       // the claim.** This arm runs after the await, a further successful open may
       // have installed another lifecycle and emptied the queue by then — nothing
-      // stops one — and **no test in this repository drives that overlap against
-      // Rust.** `./workspace.test.ts`'s *"lets the newer open win, however late the
-      // older one answers"* overlaps two **opens** with each other and contains no
-      // drain at all: it never calls `start()`, so no coordinator runs in it. What
-      // drives an open landing during a drain is
+      // stops one. **The two tests that come nearest drive that overlap somewhere
+      // other than Rust, and nothing wider is claimed here.**
+      // `./workspace.test.ts`'s *"lets the newer open win, however late the older
+      // one answers"* overlaps two **opens** with each other and issues no drain at
+      // all — but **coordinator code does run in it**: the host constructs one,
+      // every `open()` calls `workspaceOpened()` synchronously, and the open that
+      // wins reaches `workspaceReady()`, whose body is a
+      // `requestDrain('workspaceOpened')` (the superseded one returns before it).
+      // The test never calls `start()`, so `drainMayStart()` is false and that
+      // reason is **remembered rather than issued**. What drives an open landing
+      // during a drain is
       // `./reconciliationCoordinator.test.ts`'s *"installs nothing from a drain an
       // open overtook"*, and it moves the generation on the **injected** host — so
       // it reaches this arm and says nothing about Rust either. Nothing here

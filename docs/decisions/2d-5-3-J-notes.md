@@ -47,13 +47,33 @@ the coordinator: `workspace.svelte.ts:3502` is `start(): void { reconciliation.s
 through. With no coordinator started, no drain is ever issued, so the test overlaps two **opens with
 each other** and pins nothing about an open overlapping a drain.
 
+> **Correction, 2d-5-3-K — `start()` is the only route to a *drain*, not to the coordinator.**
+> *"`start()` is the only route to the coordinator"* is **false**, and the sentence this round put into
+> the source comment carried the same error in a sharper form: *"it never calls `start()`, so no
+> coordinator runs in it"*. Coordinator code runs in that test throughout. `createBrowserState`
+> constructs one unconditionally; every `open()` calls `reconciliation.workspaceOpened()`
+> **synchronously, before its first await**; and the open that wins reaches
+> `reconciliation.workspaceReady()`, whose body is `requestDrain('workspaceOpened')` — the superseded
+> open returns above it, at the generation check, which `open()`'s own comment states. That request is
+> then **remembered rather than dropped**, because `drainMayStart()` is `started && !disposed &&
+> !awaitingReady()` and `started` is false. **The conclusion holds and the reason does not**: what
+> `start()` gates is the *drain*, so no drain is issued and the test still pins nothing about an open
+> overlapping one. Fixed in source.
+
 **What does drive that overlap was found and cited instead.**
-`src/lib/browser/reconciliationCoordinator.test.ts:750` — *"installs nothing from a drain an open
+`src/lib/browser/reconciliationCoordinator.test.ts` — *"installs nothing from a drain an open
 overtook"*, in the suite *"the four captures around the await"* — starts the coordinator, asserts one
 outstanding drain, then does `control.generation += 1; coordinator.workspaceOpened();` before
 answering, and asserts `coordinator.drains()[0]?.outcome === 'staleOpen'`. That reaches **this arm**.
 It moves the generation on the **injected** host, so it says nothing about Rust either — and the
 comment now says exactly that rather than borrowing a Rust-shaped implication from it.
+
+> **Correction, 2d-5-3-K — the line anchor is dropped, not renumbered.** This citation read
+> `reconciliationCoordinator.test.ts:750`, and the `it(...)` it names is on **749** (its `describe` on
+> 748). The test's name and its suite's name are both quoted here and both are unique in the file, so
+> the number carried nothing the words did not, and it is removed rather than corrected — the same
+> remedy 2d-5-3-C adopted for the anchors inside the comment block. Nothing else in the paragraph
+> changes: the derivation of what that test drives was re-checked line by line and holds.
 
 **The removal was checked for what else it carried**, which is 2d-5-3-H's lesson. The
 `workspace.test.ts` clause entered at 2d-5-3-H's fix to answer 2d-5-3-G's Medium 3, which found
@@ -136,6 +156,24 @@ and none of them is a paragraph citation: `:740`'s *"the arm below"* refers to *
 `awaitingReady()` arm) and resolves; `:798`'s *"the paragraphs above"* is a plural description of
 which paragraphs classify provenance, not a citation supporting a claim; and `:819`'s *"the paragraph
 above"* is the **quoted mention** of the form the sentence says it avoids, not a use of it.
+
+> **Correction, 2d-5-3-K — two of the three anchors are stale and the enumeration is not exhaustive.**
+> *(a)* `:798` and `:819` were each off by one **on this round's own committed tree** (`3428cde`):
+> there *"the paragraphs above"* sat on **797** and the quoted mention *"the paragraph above"* on
+> **818**. **2d-5-3-K asserts no replacement number**, and the reason is the demonstration rather than
+> a preference: its own fix moved both phrases again, so any figure written here would have been stale
+> in the commit that wrote it — the very shape §7 item 3 of this file names. Both phrases are unique in
+> the file, so the words are the anchor, which is this chain's remedy since 2d-5-3-C. *(b)* The sweep's pattern matches more than the three enumerated. It matches
+> *"**The case-2 sentence above** is not a second site for it"* — in the **same paragraph** as the
+> third survivor, and the review's *"one line below"* is measured from that survivor's stale
+> anchor — which stays for §5's own stated reason — it cites a **sentence**, and the convention the block
+> declares is about **paragraph** citations — and it matched a phrase **this round's own fix had
+> added**, *"reached only inside the swap block below it"*, whose *"it"* has *"any sentence"* as its
+> nearest antecedent rather than the early return; 2d-5-3-K rewrote that one. **No figure replaces
+> "three"**, per 2d-5-3-H's finding 3, which found the section retiring a count asserting it: what
+> belongs here is the criterion, not a number. Paragraph citations are converted; code references,
+> plural descriptions, quoted mentions and sentence citations are recorded. §7 item 7 inherits the
+> same count and the same correction.
 
 **One further ambiguity was disambiguated because the fix came to rest on it.** Finding 2's fix cites
 the sentence *"It is reasoned from `WorkspaceSession::open` rather than executed"*, whose *"It"* has
@@ -222,6 +260,14 @@ source file, so nothing is `BLOCKED`.**
 8. **recorded only.** `:800-801`'s *"no scripted-command suite … drives Rust at all — **its**
    failed-open case"* puts a singular possessive over a negated plural. Pre-existing, prose only, and
    the review raised it; left alone rather than opening a sentence this round has no finding about.
+
+   > **Correction, 2d-5-3-K — the anchor is the pre-fix line.** `:800-801` is where that sentence sat
+   > in `eec0b70`, the tree this round inherited; the same round's fix moved it, and on the tree it
+   > committed (`3428cde`) the sentence begins on **812**. The citation was therefore stale **inside
+   > the commit that wrote it** — 2d-5-3-C's shape, which §7 item 3 of this same file names.
+   > **2d-5-3-K asserts no replacement number either**, having moved the sentence a second time: the
+   > phrase *"no scripted-command suite"* is unique in the file and is the anchor that does not move.
+   > The item itself stands.
 9. **recorded only.** Finding 1's fix **adds three propositions** — that the cited host test contains
    no drain, that it never calls `start()`, and that the coordinator test moves the generation on the
    injected host. Each was read out of the test bodies before being written, and each is the kind of
