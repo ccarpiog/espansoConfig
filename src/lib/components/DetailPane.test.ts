@@ -1140,10 +1140,19 @@ describe('the pane as a write-surface host', () => {
     // saying "different" invited the other reading.** The first half's
     // `not.toContain` held before the registration too, so it passes identically
     // whether the mirror moved or the child's `$derived.by` never re-ran at all: it
-    // is a **negative control** establishing the starting screen, and it can fail
-    // only if registering an unknown-target creator wrongly *draws* a refusal.
-    // Everything that makes this case evidence for the third `noticeWriteSurfaces()`
-    // site is below the `replaceTarget`.
+    // is a **negative control** establishing the starting screen. The `not.toContain`
+    // can fail only if registering an unknown-target creator wrongly *draws* the
+    // creator refusal; its neighbour, the `disabled` assertion, is weaker still and
+    // can fail on any other refusal arm — `noCandidate` or `targetMoved` — with no
+    // creator refusal drawn anywhere. That is Phase 2d-5-2b-C's finding 5: the
+    // sentence was written of "the first half" and was true of only one of its two
+    // assertions.
+    //
+    // **What that control is *for*, since it is not the evidence.** The evidence for
+    // the third `noticeWriteSurfaces()` site is below the `replaceTarget`; this half
+    // is what makes the `toContain` down there a *change* rather than a screen that
+    // might have said so all along. Necessary to the reading, and not an oracle for
+    // the mirror — the two are different jobs.
     //
     // **The registration is a second host's, exactly as above.** This pane keeps
     // its seven surfaces mutually exclusive through `busy`, so it can never draw a
@@ -1180,9 +1189,14 @@ describe('the pane as a write-surface host', () => {
       { kind: 'matchCreator', target: { kind: 'document', document: 1 } }
     ]);
 
-    // Released before the pane stops, as the sibling case above does. This lease is
-    // this block's own — no host owns it — so leaving it held would end the case
-    // with a registration nothing can reach.
+    // Released before the pane stops. **Not for the sibling case's reason** — Phase
+    // 2d-5-2b-C's finding 6. That case's `lease()` is an observed step, with a
+    // `flushSync()` and four assertions after it, and its comment calls it "the other
+    // half of the same claim"; this one is bare cleanup, placed after the last
+    // assertion so it can mask nothing. This lease is this block's own — no host owns
+    // it — and `mountPane`'s `stop()` unmounts the component without disposing the
+    // state, so releasing it is symmetry with the sibling's *placement* rather than a
+    // leak that would otherwise outlive the case.
     lease();
     pane.stop();
   }); // End of the "a re-targeted surface reaches the restore" case

@@ -1063,3 +1063,175 @@ were independent rather than one defect surviving its own fix, and §14.6 names 
 defect in a source file** — item 4's *actionable* mark is on a cross-module figure that is currently
 true, which §7.3 does not blocking-qualify. What *would* reach the hatch is a round whose finding is
 this fix reintroducing what it closed, and 2d-5-2b-C is the round positioned to see it.
+
+---
+
+## 15. Phase 2d-5-2b-C — the review of 2d-5-2b-B's own fix round
+
+### 15.1 Why this phase existed
+
+2d-5-2b-B's fix changed three source files — `src/lib/browser/workspace.svelte.ts`,
+`src/lib/components/MatchCreator.svelte` and `src/lib/components/DetailPane.test.ts`. Under §7.1 the
+unit is the file and a comment-only change counts, so a round was owed and this is it. It was scoped
+to that fix and to nothing else: the rest of `4f1fdb3` is `PROGRESS.md`, this notes file and
+`docs/`, all on §7's closed list.
+
+One review invocation. Verdict **`ship-with-fixes`**, **0 blockers**, **three SHOULD-FIX** and
+**three NITs**. All six were fixed in this phase's own commit. The report is
+[`docs/reviews/phase-2d-5-2b-C.md`](../reviews/phase-2d-5-2b-C.md).
+
+### 15.2 Every figure was re-derived before it was accepted
+
+The orchestrator counted each citation off the files rather than taking it from the review, and every
+one held. `RestorePane.svelte:340` builds `surfaces: surfaces()` inside `current`'s `$derived.by`;
+`:509` captures `const now = current`, `:510` hands `now.context` to `confirmRestore` and `:511`
+passes `now.context.surfaces` onward. `restore.ts`: `restoreRefusal` 1971-1995, `canPrepareRestore`
+2005-2010 calling it at `:2009`, `prepareRestore`'s gate at `:2095`, `confirmRestore`'s at `:2397`,
+`restoreView` 3203-3246 reading it at `:3228`, `permitHolds` 2550-2582 and `sendRestore`'s call at
+`:2663`. `workspace.svelte.ts:3320-3322` rebuilds the `RestoreContext`, and its own comment at
+`:3319` already said *"The surfaces half is the caller's"*. The `$derived`-or-`$effect` wording
+exists correctly at `:1570`, at `:3407` and in the `mirroringLease` comment near `:1808`. And
+`rg -n 'writeSurfaceGeneration' src/ --glob '!*.test.ts'` finds a declaration, an implementation and
+a comment — **no production caller at all**.
+
+### 15.3 The three SHOULD-FIX findings
+
+**Finding 1 — `MatchCreator.svelte`: "not reached through `current` at all" is false.** The sentence
+2d-5-2b-B wrote to fix its own finding 1 claimed the `restore.ts:2581` read is not reached through
+`current`. The *call* is not made from inside `current`'s derivation — but the **surface list it
+judges is `current`'s**, built once in that `$derived.by` and carried through `runRestore` into the
+coordinator, which re-reads only `observed`. The comment now says which half is true.
+
+**Finding 2 — `MatchCreator.svelte`: the first read is not display-only.** The same sentence called
+`:2581` *"the read that decides whether the restore is written"*, and contrasted it with a claim that
+*"names only the drawn refusal describes the display and not the spend"*. But `:1993` sits in
+`restoreRefusal`, which `canPrepareRestore` reaches, which gates **`confirmRestore`** — the call that
+mints the permit. A competing surface seen at `:1993` stops the write before `:2581` is ever reached.
+**Both reads decide whether the restore is written**, and the live comment at
+`RestorePane.svelte:106-111` had said so all along: *"`prepareRestore` and `confirmRestore` are handed
+the very same object"*. The fix corrected `MatchCreator.svelte`, the side that was wrong; the
+`RestorePane` comment is right as written and is untouched.
+
+**Finding 3 — `workspace.svelte.ts`: the two-audience split omits `$effect` and template reads.**
+2d-5-2b-B's finding 2 had split the cost between *"an imperative caller"* and *"a `$derived`"*. An
+`$effect` **calls**, so that wording sorts it into the arm that pays nothing — and it is stale
+exactly as the derived is, because nothing invalidates it either. A template read is a render effect
+and is the same case. **The line is the reactive context, not whether the caller calls.** Both
+rewritten sites — the `BrowserState` JSDoc and the implementation comment — now say so, which also
+ends their disagreement with the correct wording earlier in that same comment and with the sibling
+door's JSDoc.
+
+### 15.4 The three NITs, all fixed
+
+**NIT 4** — the JSDoc called a coordinator *"the one caller"* for which the invalidation is the whole
+truth, in the paragraph directly after the one saying no production caller exists yet and that the
+callers it has today are cases in `DetailPane.test.ts`. Those tests are the same kind. It is now a *kind*, not a
+count.
+
+**NIT 5** — `DetailPane.test.ts`'s new comment said the first half *"can fail only if registering an
+unknown-target creator wrongly draws a refusal"*, but that half is **two** assertions and the claim is
+true of one. The neighbouring `disabled` assertion fails on `noCandidate` or `targetMoved` with no
+creator refusal drawn. The comment now says what each assertion is worth, and says what the negative
+control is *for* — it is what makes the `toContain` below a **change** — instead of implying it is
+surplus.
+
+**NIT 6** — *"Released before the pane stops, as the sibling case above does"*. The sibling's
+`lease()` is an **observed step** with a `flushSync()` and four assertions after it; this one is bare
+cleanup after the last assertion. The comment no longer borrows the sibling's reason. It also records
+what was measured here: `mountPane`'s `stop()` unmounts the component and removes the target but
+**does not dispose the state**, so the release is symmetry of placement rather than a leak avoided.
+
+### 15.5 Three defects this phase introduced into its own fix and caught before committing
+
+Recorded because the chain's failure mode is precisely a fix that ships a new instance of what it
+closed, and because catching them is the only reason this round's diff is not itself a ninth
+generation:
+
+1. *"as this docblock says three paragraphs above"* — the docblock has **two** paragraphs and the
+   claim sits in the one directly above. Counted, then corrected.
+2. *"Fifteen lines above ... the class is written correctly"* — measured at **26** lines. Replaced
+   with *"at the top of this same comment"*, which cannot rot.
+3. *"the narrow wording was this site's alone"* — **false**: the JSDoc twin had it too, and this
+   phase fixed both. Replaced with a sentence naming both sites.
+
+Each was found by re-deriving the figure against the file, never by re-reading the sentence.
+
+### 15.6 The `BLOCKED` question, asked because §14.7 named this exact round
+
+§14.7 ended by saying the escape hatch would be reached by *"a round whose finding is this fix
+reintroducing what it closed, and 2d-5-2b-C is the round positioned to see it"*. **All six findings
+this round returned are in text 2d-5-2b-B wrote.** The question therefore has to be answered rather
+than skipped, and the answer is that the step is **not** `BLOCKED`. Four reasons, in order of weight:
+
+1. **"All findings are in the fix's text" is tautological here, not evidence.** §7.1 scopes the round
+   *to that fix*, so a finding outside it would be out of scope. Non-convergence cannot be read off a
+   property the scoping rule guarantees.
+2. **No finding names a correctness defect in executable source.** Every changed line in this phase's
+   diff is a comment — verified mechanically, not by eye — and both suites are unmoved at 1320 and
+   2254. §7.2's hatch is for a genuine correctness blocker; §7.3's is for a correctness defect in a
+   source file. A wrong comment in a source file is a defect in the record, which §7.3 explicitly
+   does not blocking-qualify.
+3. **Nothing is carried.** All three *actionable* items in the review's "where it is thin" were fixed
+   in this phase, so no known defect closes with the step.
+4. **The precedent is that these chains terminate.** 2d-5-2a ran four phases of exactly this shape —
+   each fix creating a new instance of one prose defect — and closed **by rule** when a round's
+   findings landed only in the record.
+
+**What would reach the hatch, stated so the next round can apply it rather than re-argue it**: a
+round whose findings are the *same* mis-attribution this phase just corrected — the reachability of
+`restore.ts:1993` versus `:2581`, or the reactive-context split — reappearing in the sentences written
+here. That would be one defect surviving two consecutive fixes aimed directly at it, which is
+divergence rather than scope. A round returning *different* defects in the same three files is the
+tail doing its job, and is answered under §7.1 as usual.
+
+### 15.7 The gates
+
+Measured by the orchestrator alone and **twice** — once on the tree as inherited, once after the
+fixes — each command run on its own, and unmoved at **`1320 / 438 / 2254 / 186`**.
+
+`cargo test --workspace -- --test-threads=1` → exit 0, **1320** passed summed over **26** `test
+result` lines, and the complementary question asked: **no line lacking `0 failed`**. Redirected to a
+file, never read through a pipe, per the host scar in `PROGRESS.md`. `npm run check` → **438 files, 0
+errors, 0 warnings**. `npm test` → 59 files, **2254 passed**. `npm run build` → **186 modules**.
+Clippy, `cargo fmt --check` and `cargo tree -p espansoconfig-core | rg tauri` (finds nothing) all
+clean. **Both bundle oracles read and both reported**: server-only markers **absent**, client-only
+**present (2)**.
+
+**The Rust half was proven untouched rather than assumed** — `git diff --stat` over this phase's fix
+shows no path under `crates/` or `src-tauri/` — so the Rust figure was measured before the fix and the
+fix could not move it. No count moved, which is what a comment-only diff should do: no file entered or
+left the program, no new reachable module, no new component, no new case.
+
+### 15.8 Where it is thin
+
+1. **The two sentences this phase rewrote in `MatchCreator.svelte` trace reachability across three
+   files** (`MatchCreator.svelte` → `RestorePane.svelte` → `restore.ts` → `workspace.svelte.ts`), and
+   nothing executable holds that trace together. Any of the six line citations rots the moment a
+   function moves. — *recorded only*.
+2. **No executable test pins any sentence this chain has argued over.** The suites check parity and
+   behaviour, never attribution; reverting any of these six fixes leaves 2254 tests green. This is the
+   gap `CLAUDE.md` already names, and six rounds have now lived in it. — *recorded only*.
+3. **`writeSurfaceGeneration()` still has no production reader**, so every sentence about its audience
+   — including the ones this phase corrected — describes a caller that does not exist. 2d-5-4 is the
+   step that creates one, and it is the first thing that can falsify any of it. — *recorded only*.
+4. **`RestorePane.svelte:106-111` and `MatchCreator.svelte`'s block now agree, and nothing enforces
+   that they stay agreeing.** They were contradictory for one whole round before this one. — *recorded
+   only*.
+5. **All three reactive cases still observe one consumer** (`RestorePane.svelte`'s `$derived.by`), so
+   *"the mirror moved"* and *"the restore's refusal redrew"* remain indistinguishable in this suite —
+   §14.6 item 3, unchanged and not narrowed by this round. — *recorded only*.
+6. **The mirror's reactivity is still contingent on a writer existing** — §14.6 item 1. Three sites
+   assign today; remove every write and the compiler optimises the signal away with nothing failing.
+   — *recorded only*.
+
+**No item here is actionable, and that is a statement about this round's findings rather than a
+convenience**: the three the review marked actionable were all fixed in this phase, so none is
+carried.
+
+### 15.9 What §7.1 says next
+
+This phase's fix changed **three source files** — `src/lib/browser/workspace.svelte.ts`,
+`src/lib/components/MatchCreator.svelte` and `src/lib/components/DetailPane.test.ts` — every changed
+line a comment. The unit is the file, so **§7.1 commissions a round, and it is 2d-5-2b-D**, scoped to
+this fix. `PROGRESS.md`, this notes file and the review report are on §7's closed list and count for
+nothing.

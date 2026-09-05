@@ -10082,3 +10082,88 @@ None is a correctness defect in source. Named so a later step does not spend a r
    disagree until 2d-5-2b routes the pane — **names no correctness defect in source**, so §7.3 does
    not hold the step open for it. It is 2d-5-2b's acceptance criterion.
 
+
+---
+
+## The Next-action prose of Phase 2d-5-2b-B, archived 2026-09-05 at Phase 2d-5-2b-C
+
+Verbatim as the live head carried it while 2d-5-2b-C was the owed round. It is superseded on three
+points, all corrected by 2d-5-2b-C and recorded in `docs/decisions/2d-5-2b-notes.md` §15:
+
+- the claim that `restore.ts:2581` is **the** read that decides whether the restore is written —
+  `:1993` decides it too, through `canPrepareRestore` → `confirmRestore`;
+- the claim that `:2581` "is not reached through `current` at all" — the *call* is not, but the
+  surface list it judges is `current`'s;
+- the two-audience split naming only `$derived`, which puts an `$effect` in the wrong arm.
+
+
+### Phase 2d-5-2b-B is complete: the round §7.1 commissioned for 2d-5-2b-A's fix has run, and its own fix changed source.
+### The next action is **Phase 2d-5-2b-C — the review round §7.1 commissions for 2d-5-2b-B's fix**.
+
+#### Why a round is owed, so nobody has to decide it
+
+2d-5-2b-B's one review ([`docs/reviews/phase-2d-5-2b-B.md`](docs/reviews/phase-2d-5-2b-B.md))
+returned `ship-with-fixes`, **0 blockers** and **three SHOULD-FIX** findings (one a Low with two
+parts), and all three were fixed in this phase's own commit. That fix round changed **three source
+files** — `src/lib/browser/workspace.svelte.ts`, `src/lib/components/MatchCreator.svelte` and
+`src/lib/components/DetailPane.test.ts` — so `CLAUDE.md` §7.1 commissions a round, scoped to that
+fix. Every change but one is a comment, and **the unit is the file**, so the size of the diff decides
+nothing. §7.4 carries the debt as a corrective phase rather than writing it off: that phase is
+**2d-5-2b-C**.
+
+**Scope it to the fix, not to the phase.** The three findings and what answered them are
+[`docs/decisions/2d-5-2b-notes.md`](docs/decisions/2d-5-2b-notes.md) **§14**.
+
+#### What 2d-5-2b-B changed, and the one thing it measured that was not asked for
+
+**Findings 1 and 2 are the recurring defect's seventh and eighth instances** — *a sentence whose
+scope is wider than its code*. Finding 1's sits **inside the sentence written to fix the sixth**,
+which is the same shape as the fourth instance (one inside the correction block that closed the
+third). The class has now survived six attempts to kill it. What caught it again is what has caught
+every one: **re-deriving a sentence's scope against the code**, never re-reading the sentence.
+
+- **Finding 1** — `MatchCreator.svelte` said `competingSurfaceFor` is read in production *"by
+  `RestorePane.svelte`'s `current` on every open restore"*. There are **two** production readers:
+  `restore.ts:1993` in `restoreRefusal`, which `current` reaches, and `restore.ts:2581` in
+  `permitHolds`, called by `sendRestore` at `:2663` — and **the second is the read that decides
+  whether the restore is written**, reached not through `current` at all. Nor is it *every* open
+  restore: `restoreRefusal` returns one of **six** earlier reasons first (`restore.ts:1975-1992`), so
+  an open restore with no candidate never reaches the call. **Both figures were counted off the file
+  by the orchestrator, not taken from the review.**
+- **Finding 2** — two sites in `workspace.svelte.ts` said a future unmirrored path would cost *"the
+  invalidation and not the value"*. **That is true only of a caller that calls.** A `$derived` over
+  either door memoizes, so with no invalidation it keeps rendering its cached number until some
+  *other* dependency moves — a **stale screen**, for the exact audience the mirror exists for. Both
+  sentences now name the two audiences separately.
+- **Finding 3 (Low)** — the new `DetailPane.test.ts` case's first half is a **negative control**, not
+  an oracle: its `not.toContain` held before the registration too, so it passes whether or not the
+  mirror moved. The comment said *"what makes the two halves different"* and invited the stronger
+  reading; it now says the evidence starts below the `replaceTarget`. The manually taken lease is
+  also now released before `pane.stop()`, as its sibling case does.
+
+**The orchestrator settled the review's own NOT-VERIFIED item by measuring it.** Whether the Svelte
+compiler emits a *tracked* read for `void surfaceGeneration` in a `.svelte.ts` module was believed by
+analogy with `openWriteSurfaces()`. Compiled through `svelte/compiler`'s `compileModule` (v5.56.8,
+client), `void surfaceGeneration` becomes **`void $.get(surfaceGeneration)`** — `$.get` is the
+tracked read, so the statement **is** a subscription. Settled favourably.
+
+**That probe found a hazard nobody had recorded, and it is the sharpest thing for 2d-5-2b-C to
+weigh.** With **no writer** to `surfaceGeneration` the same compiler emits a plain `let … = 0` and
+**optimises the signal away entirely** — the read is then tracked by nothing. So this door's
+reactivity is contingent on `noticeWriteSurfaces()` continuing to *assign*, and a change that removed
+every write would make both doors silently non-reactive with no type error, no failing test and no
+visible difference in either door's source. It is a **second** failure mechanism for the hand-kept
+mirror, independent of item 9's *"a fourth path forgets to mirror"*, and it is `2d-5-2b-notes.md`
+§14.6 item 1, *recorded only* — no source is wrong today, because three sites assign.
+
+**Also worth the budget**: §14.6 item 3 — **all three reactive cases still observe one consumer**.
+`RestorePane.svelte`'s `$derived.by` is still the only reactive reader of this door in the
+application, so *"the mirror moved"* and *"the restore's refusal redrew"* remain indistinguishable in
+this suite. This round narrowed what the cases **claim**; it did not widen what they **observe**.
+
+**One live pointer in this file was wrong and is fixed here.** It said `competingSurfaceFor` is
+called at `restore.ts:1993` and `:2581` *"reached from `RestorePane.svelte`'s `current` through
+`restoreView` → `restoreRefusal`"* — true of the first, false of the second. `92fe0f4`'s commit
+message carries the identical mis-attribution and is **left as written**: a commit message is a
+historical snapshot, and only live pointers are maintained.
+

@@ -385,17 +385,34 @@
    * `competingSurfaceFor` lets a restore of any file proceed — so the window is
    * over-refusing on one side and under-refusing on the other during that gap.
    * **What makes the gap inert is `busy`, not an absent reader** — Phase 2d-5-2b-A's
-   * review, finding 4; Phase 2d-5-2b-B's finding 1 is why the sentence that answered
-   * it is narrower here. `competingSurfaceFor` *is* read in production, at **two**
-   * sites rather than one: `restore.ts:1993` inside `restoreRefusal`, which
-   * `RestorePane.svelte`'s `current` reaches, and `restore.ts:2581` inside
-   * `permitHolds`, which `sendRestore` calls at `:2663`. **The second is the read
-   * that decides whether the restore is written, and it is not reached through
-   * `current` at all** — so a claim about this answer that names only the drawn
-   * refusal describes the display and not the spend. **Neither is read on *every*
-   * open restore**: `restoreRefusal` returns one of six earlier reasons before it,
-   * so an open restore with no candidate never reaches the call. It is
-   * `targetingSurfaceFor` that has no production caller yet. The pane's `busy` rule
+   * review, finding 4; Phase 2d-5-2b-B's finding 1 narrowed the sentence that
+   * answered it, and Phase 2d-5-2b-C's findings 1 and 2 are why the narrowing was
+   * itself wrong twice. `competingSurfaceFor` *is* read in production, at **two**
+   * sites rather than one: `restore.ts:1993` inside `restoreRefusal`, and
+   * `restore.ts:2581` inside `permitHolds`, which `sendRestore` calls at `:2663`.
+   *
+   * **Both decide whether the restore is written, so neither is the display-only
+   * one.** `restoreRefusal` is reached by `canPrepareRestore` (`restore.ts:2009`),
+   * which gates `prepareRestore` (`:2095`) *and* `confirmRestore` (`:2397`) — the
+   * call that mints the permit — as well as by `restoreView` (`:3228`), which is the
+   * drawn refusal. A competing surface seen at `:1993` therefore stops the write
+   * before `:2581` is ever reached. The sentence this replaces called the second read
+   * "the read that decides whether the restore is written"; that is the shape this
+   * chain keeps shipping, and `RestorePane.svelte`'s own comment above `current`
+   * already said otherwise.
+   *
+   * **Both also consult the same surface list, and it is `current`'s.**
+   * `RestorePane.svelte:340` builds `surfaces: surfaces()` once inside `current`'s
+   * `$derived.by`; `runRestore` captures `const now = current` (`:509`), hands
+   * `now.context` to `confirmRestore` (`:510`) and `now.context.surfaces` onward
+   * (`:511`), and `workspace.svelte.ts:3320-3322` rebuilds a `RestoreContext` around
+   * that very array — only `observed` is the coordinator's own read. So what is true
+   * of `:2581` is that the *call* is not made from inside `current`'s derivation, not
+   * that `current` is uninvolved: the list it judges came from there.
+   *
+   * **Neither is read on *every* open restore**: `restoreRefusal` returns one of six
+   * earlier reasons before it, so an open restore with no candidate never reaches the
+   * call. It is `targetingSurfaceFor` that has no production caller yet. The pane's `busy` rule
    * is what keeps a restore from being open beside this form at all, and that is a
    * fact about `DetailPane.svelte` rather than a guarantee of this component's.
    */

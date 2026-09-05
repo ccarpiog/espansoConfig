@@ -1606,12 +1606,19 @@ export interface BrowserState {
    * this sentence, which used to say the two could be separated. A later method that
    * moved the registry without calling `noticeWriteSurfaces()` would leave both
    * doors truthful *to a caller that calls them*, and nothing in TypeScript prevents
-   * such a path; but a `$derived` over either door memoizes, so it would go on
-   * showing the number it had already cached until some **other** dependency of that
-   * derived invalidated it. A stale screen is the cost, not merely a missed re-run.
-   * A coordinator capturing this across an `await` is not in a reactive context, and
-   * is the one caller for which "the invalidation and not the value" is the whole
-   * truth.
+   * such a path; but a `$derived`, an `$effect` or a template read over either door
+   * only re-runs when something invalidates it, so it would go on showing — or go on
+   * having acted on — the number it last computed, until some **other** dependency of
+   * that derivation moved. A stale screen is the cost, not merely a missed re-run.
+   * **The line is the reactive context, not whether the caller calls** — Phase
+   * 2d-5-2b-C's finding 3: an `$effect` calls this method exactly as an imperative
+   * caller does, and is stale exactly as the `$derived` is. A caller outside any
+   * reactive context — a coordinator capturing this across an `await`, or the cases
+   * in `DetailPane.test.ts` that call it today — is the kind for which "the
+   * invalidation and not the value" is the whole truth. It is a *kind* rather than
+   * "the one caller" — Phase 2d-5-2b-C's NIT 4: that coordinator does not exist yet,
+   * as the paragraph directly above says, and the test callers that do exist are the
+   * same kind.
    *
    * @returns The current generation; zero for a state nothing has registered with.
    */
@@ -3412,12 +3419,22 @@ export function createBrowserState(
       //
       // **What such a path would still cost depends on who is asking, and Phase
       // 2d-5-2b-B's finding 2 is that the old sentence here named only half of
-      // them.** For an imperative caller the cost is the *invalidation* alone — it
-      // calls, so it gets today's number regardless. For a `$derived` the cost is
-      // the *value* as well, because a derived that is never invalidated keeps the
-      // number it cached until some other dependency moves it, and what is on
-      // screen is that cached number. Nothing in TypeScript prevents the path;
-      // that is item 9 of this step's "where it is thin", not a claim made here.
+      // them.** For a caller in **no reactive context** the cost is the
+      // *invalidation* alone — it calls, so it gets today's number regardless. For a
+      // caller **inside one** the cost is the *value* as well, because a derivation
+      // that is never invalidated keeps what it last computed until some other
+      // dependency moves it, and what is on screen is that stale answer.
+      //
+      // **The split is by reactive context, not by "does it call"** — Phase
+      // 2d-5-2b-C's finding 3. An `$effect` calls this method just as an imperative
+      // caller does, so the old wording sorted it into the arm that pays nothing,
+      // when in fact it never re-runs and is as stale as the derived; a template read
+      // is a render effect and is the same case. The class is already written
+      // correctly as "`$derived` or `$effect`" at the top of this same comment and
+      // elsewhere in this file; the narrow wording was in the two sentences Phase
+      // 2d-5-2b-B rewrote — this one and its twin in this door's JSDoc — and both
+      // were corrected together. Nothing in TypeScript prevents the path; that is
+      // item 9 of this step's "where it is thin", not a claim made here.
       void surfaceGeneration;
       return writeSurfaces.generation();
     } // End of function writeSurfaceGeneration()
