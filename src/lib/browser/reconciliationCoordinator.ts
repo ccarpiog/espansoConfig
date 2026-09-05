@@ -742,18 +742,35 @@ export function createReconciliationCoordinator(
       //
       // **Which lifecycle the batch describes is not knowable here, and the
       // refusal does not need it to be.** In `src-tauri/src/commands.rs` both
-      // `drain_external_changes` and `open_workspace` reach the same session
-      // mutex, and neither side chooses which takes it first: win, and the batch
-      // is the outgoing queue; lose, and `WorkspaceSession::open`'s swap block has
-      // already run — the one block that calls `reconciliation.begin_epoch` and
-      // installs the new `Open` together — so the batch is the **incoming**
-      // lifecycle's queue under a new epoch. The number that tells those apart is
-      // the batch's `epoch`, and this arm fires **above** the check that reads it.
-      // What makes the refusal right in both orders is the generation alone: this
-      // drain was issued under one this session has left, so its `newest_sequence`
-      // is not a watermark for the lifecycle now installed, and moving it here
-      // would ask the next drain with a number from a queue that is either gone or
-      // not yet this session's to count from.
+      // `WorkspaceSession::drain_external_changes` and `WorkspaceSession::open`
+      // reach the same session mutex, and neither side chooses which takes it
+      // first: win, and the batch is the outgoing queue; lose, and `open`'s swap
+      // block has already run — the one block that calls
+      // `reconciliation.begin_epoch` and installs the new `Open` together — so the
+      // batch is the **incoming** lifecycle's queue under a new epoch.
+      //
+      // **A third state is neither of those, so no reason here may be written as a
+      // disjunction over two.** `open()` bumps the generation in its first
+      // statement, unconditionally, while `WorkspaceSession::open` returns from
+      // `Workspace::discover(root)?` before it takes the lock at all — so a refused
+      // `open_workspace`, or a refused `list_documents` after it, leaves the
+      // **previous** workspace installed and its queue untouched, which that
+      // function's own doc comment states in as many words. There the batch's queue
+      // is neither gone nor foreign, and its `newest_sequence` really is a
+      // watermark for the lifecycle Rust is still holding. `./workspace.test.ts`'s
+      // failed-open case drives exactly that state.
+      //
+      // **What makes the refusal right in all three is that nothing here can
+      // attribute the number, never that the queue is gone.** The only value that
+      // separates two lifecycles' sequences is the batch's `epoch`, and this arm
+      // fires **above** the check that reads it, so `newest_sequence` arrives
+      // unattributable by construction. Refusing costs at most one repeated drain,
+      // and on the failed-open path not even that: the gate `workspaceOpened()`
+      // closed stays closed and the window is showing a failure. Moving a sequence
+      // state on a number that may belong to another lifecycle poisons the cursor
+      // for the session. Under `./workspace.svelte.ts` the cursor has also just
+      // been cleared, which makes the same refusal right a second way — a property
+      // of that host and not of this line, exactly as the paragraph above says.
       record(afterSequence, reasons, 'staleOpen');
       return;
     }
@@ -766,9 +783,10 @@ export function createReconciliationCoordinator(
       // the generation is read through {@link ReconciliationHost} and the gate is
       // set through a call on this interface, and nothing ties the two. The outcome
       // is the same as the check above's, and so is the reason: this drain was
-      // issued for a lifecycle this session has left, whichever of the two the
-      // batch turned out to describe, and a batch of it must move neither sequence
-      // state.
+      // issued under a generation this session has left, and nothing here can
+      // attribute its `newest_sequence` to a lifecycle — whichever of the **three**
+      // states the arm above enumerates the batch turned out to describe. So a
+      // batch of it must move neither sequence state.
       record(afterSequence, reasons, 'staleOpen');
       return;
     }
@@ -937,15 +955,16 @@ export function createReconciliationCoordinator(
    * the consult's two orders both have to work, and losing the reason would make
    * one of them silently produce no drain at all. **A request made while an
    * `open()` is loading is remembered for the same reason and for a second one**:
-   * a drain issued here would come back describing **one of two** lifecycles and
-   * the coordinator could not say which — `WorkspaceSession::open` swaps the
-   * workspace under the same session mutex `drain_external_changes` takes, so the
-   * batch is the outgoing queue or the incoming one according to which reached
-   * that mutex first — while every generation capture in the pump would
-   * legitimately pass, because `open()` had already taken the generation this
-   * drain captures. Recording without issuing is what answers both: the reason
-   * survives to the post-`ready` drain, and no batch is accepted for a lifecycle
-   * this session is not showing.
+   * a drain issued here would come back describing a lifecycle the coordinator
+   * could not name — `WorkspaceSession::open` swaps the workspace under the same
+   * session mutex `WorkspaceSession::drain_external_changes` takes, so the batch is
+   * the outgoing queue or the incoming one according to which reached that mutex
+   * first, and it is the **previous, still-installed** one when the open is refused
+   * before that swap ever runs — while every generation capture in the pump would
+   * legitimately pass, because `open()` had already taken the generation this drain
+   * captures. Recording without issuing is what answers all three: the reason
+   * survives to the drain that follows the next `ready`, and no batch is accepted
+   * for a lifecycle this session is not showing.
    *
    * @param reason - Which trigger is asking.
    */
@@ -1042,15 +1061,17 @@ export function createReconciliationCoordinator(
       observationsDroppedCount = 0;
       // **And the gate closes.** A drain issued between here and `ready` answers
       // for whichever lifecycle reached the session mutex first — Rust holds the
-      // workspace being replaced only until `WorkspaceSession::open`'s swap block
-      // runs, which is not tied to when this window learns the open succeeded — and
-      // the gate does not need to know which, because the objection is to accepting
-      // **any** batch in this window: `adopted` has just been cleared, so
-      // `accept()` would take that batch's epoch as this session's shown epoch, the
-      // post-`ready` batch would come back `staleEpoch`, and `onWake` would drop
-      // every wake for the real epoch from then on. Every generation capture in the pump passes in that window,
-      // because `open()` took its generation in the statement before this call;
-      // being *told* is the only thing that distinguishes it.
+      // workspace being replaced until `WorkspaceSession::open`'s swap block runs,
+      // which is not tied to when this window learns the open succeeded, and holds
+      // it **indefinitely** when that open is refused before the swap, which is
+      // that function's own documented behaviour — and the gate does not need to
+      // know which, because the objection is to accepting **any** batch in this
+      // window: `adopted` has just been cleared, so `accept()` would take that
+      // batch's epoch as this session's shown epoch, the post-`ready` batch would
+      // come back `staleEpoch`, and `onWake` would drop every wake for the real
+      // epoch from then on. Every generation capture in the pump passes in that
+      // window, because `open()` took its generation in the statement before this
+      // call; being *told* is the only thing that distinguishes it.
       openInProgress = true;
     }, // End of function workspaceOpened()
 

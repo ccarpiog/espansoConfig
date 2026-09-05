@@ -38,12 +38,22 @@ this as a claim about the frontend being unable to *know* the ordering and expli
 `NOT-VERIFIED`, that it had not traced the Rust side to show the losing order is reachable. That trace
 is the orchestrator's, and it is what turns the finding from an argument into a measurement:
 
-- `src-tauri/src/commands.rs:3491` — `drain_external_changes` calls
-  `WorkspaceSession::drain_external_changes`, which runs under `with_workspace_read`, i.e. **the
-  session mutex**.
-- `src-tauri/src/commands.rs:682` — `WorkspaceSession::open` runs `Workspace::discover` *outside* the
-  lock, then takes **the same mutex** for one block that calls `self.reconciliation.begin_epoch(...)`
-  and `guard.replace(Open { … })` **together**.
+- The `#[tauri::command] drain_external_changes` in `src-tauri/src/commands.rs` calls
+  `WorkspaceSession::drain_external_changes`, and **that method** is the one running under
+  `with_workspace_read`, i.e. **the session mutex**.
+- `WorkspaceSession::open` in the same file runs `Workspace::discover` *outside* the lock, then takes
+  **the same mutex** for one block that calls `self.reconciliation.begin_epoch(...)` and
+  `guard.replace(Open { … })` **together**.
+
+> **Corrected at Phase 2d-5-3-C.** Both bullets carried line numbers — `:3491` and `:682` — and the
+> first attached `with_workspace_read` to the **command wrapper**, which does not call it; the session
+> method one level down does. The wrapper's own line has since moved to `:3496` (2d-5-3-C's fix added
+> five comment lines above it), which is the third demonstration in this chain that a line citation
+> into a file the record keeps editing does not survive. Both are cited by symbol now. For a reader
+> who wants numbers on **2d-5-3-C's** tree, re-derived rather than carried:
+> `WorkspaceSession::open` `:682`, its `Workspace::discover(root)?` `:683`,
+> `WorkspaceSession::drain_external_changes` `:1353`, `with_workspace_read` `:1451`, the command
+> wrapper `:3496`.
 
 So the two are serialized against each other in an order **neither side chooses**. If the drain
 reaches the mutex first, its batch is the outgoing queue and 2d-5-3-A's sentence is true. If
@@ -107,13 +117,27 @@ Those halves are load-bearing and are kept; only the ordering clause each rested
 
 `2d-5-3-A-notes.md` §3.1 justified its finding with
 `rg '\.start\(\)' src --glob '!*.test.ts'` **matching exactly one line**. It now matches **two**: the
-fix's own second paragraph writes `` `BrowserState.start()` `` into a comment at
-`reconciliationCoordinator.ts:979`. **Re-derived, and confirmed** — the recipe no longer reproduces as
-written.
+fix's own second paragraph writes `` `BrowserState.start()` `` into a comment in
+`reconciliationCoordinator.ts`, the one opening `` `No production code calls `start()` at all
+today.` ``. **Re-derived, and confirmed** — the recipe no longer reproduces as written.
+
+> **Corrected at Phase 2d-5-3-C, twice, in this paragraph alone.** It cited that comment as
+> `reconciliationCoordinator.ts:979`, and **the commit carrying this correction had already moved it
+> to `:995`** — so the correction written to close a self-invalidating citation shipped stale in its
+> own commit, which is the third instance of the shape, not the second. 2d-5-3-C's own fix moved it
+> again, to `:1014`. It is therefore cited above by the words it opens with rather than by a line,
+> because that is the only form of it no later fix can invalidate. And the precedent below was
+> attributed to the wrong phase: **2d-5-2b-D** is where this shape was first named as new and
+> generalizing (`2d-5-2b-notes.md` §16.2 — *"A cross-file line citation into a file that the same
+> commit edits above the cited line is self-invalidating"*), and `2d-5-3-A-notes.md` §3.1 credited it
+> correctly while this section did not. `2d-4b-notes.md` §10.3 and §14.5 are earlier **relatives** of
+> the class — a citation written during a fix measuring the file the fix replaced — and not this
+> shape.
 
 This is the shape `PROGRESS.md` names at its own line 21 — *a derived figure outlives the thing it was
-derived from unless something re-derives it* — and the chain has now produced it twice (2d-4b-D found
-it in a notes section's line citations).
+derived from unless something re-derives it* — and the chain has now produced it **three** times:
+2d-5-2b-D found it in a notes section's line citations, this section found it in 2d-5-3-A's recipe,
+and 2d-5-3-C found it in this section's own correction.
 
 **The claim is unaffected; only the recipe is.** Both matches were checked: one *is* the new comment,
 and the other is `workspace.svelte.ts:3506`, which is `reconciliation.start()` **inside**

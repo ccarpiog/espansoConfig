@@ -1440,9 +1440,14 @@ impl WorkspaceSession {
     /// rather than `&mut` is the point rather than an economy: a caller reached
     /// through this one cannot fill the parse cache, cannot evict it, and cannot
     /// be handed the [`BackupSession`] that [`WorkspaceSession::with_open`]
-    /// exists to lend. The three backup-catalogue methods above are its only
-    /// customers, and *"nothing on that path can write"* is a property of what
-    /// they are given as much as of what they do.
+    /// exists to lend. Its customers are the three backup-catalogue methods
+    /// above **and** [`WorkspaceSession::drain_external_changes`], which is on
+    /// this path deliberately rather than by accident and says so in its own doc
+    /// comment; an earlier draft of this paragraph called the three the only
+    /// ones, which the two comments made a flat contradiction. *"Nothing on that
+    /// path can write"* is a property of what they are given as much as of what
+    /// they do, and it survives the fourth: what that caller mutates is this
+    /// session's own queue, never the workspace it is lent.
     fn with_workspace_read<T>(
         &self,
         action: impl FnOnce(&Workspace) -> Result<T, CommandError>,

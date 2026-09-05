@@ -71,7 +71,7 @@ justifying it said:
 > **Corrected at Phase 2d-5-3-B — the recipe below no longer reproduces, and the fix is what broke
 > it.** *"matches exactly one line"* was true of the tree the finding was raised on and false of the
 > tree that closed it: the fix's own second paragraph writes `` `BrowserState.start()` `` into a
-> comment at `reconciliationCoordinator.ts:979`, so the same `rg` now matches **two** lines. This is
+> comment in `reconciliationCoordinator.ts`, so the same `rg` now matches **two** lines. This is
 > the self-invalidating citation `PROGRESS.md` names at its line 21 — *a derived figure outlives the
 > thing it was derived from unless something re-derives it* — and it is the second time this chain has
 > produced one (2d-5-2b-D found the identical shape in a notes section's line citations). **The claim

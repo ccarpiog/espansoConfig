@@ -10807,7 +10807,10 @@ than after it**, which is 2d-5-2b-C's precedent.
 >
 > 1. **"`rg '\.start\(\)' src --glob '!*.test.ts'` finds only `workspace.svelte.ts:3506`."** It finds
 >    **two** lines on the tree that closed 2d-5-3-A, because that phase's own fix wrote
->    `` `BrowserState.start()` `` into a comment at `reconciliationCoordinator.ts:979`. The
+>    `` `BrowserState.start()` `` into a comment in `reconciliationCoordinator.ts` — cited here by
+>    line as `:979` until Phase 2d-5-3-C found that citation stale in the very commit that wrote it,
+>    and now anchored on the comment's own first words, `` `No production code calls `start()` at all
+>    today.` ``. The
 >    self-invalidating citation `PROGRESS.md` names at its line 21. **The claim it supports is
 >    unaffected** — there is still no production caller — and the recipe that survives its own fix is
 >    `rg -n '\.start\(\)' src --glob '!*.test.ts' | rg -v '^\S+:[0-9]+: *(//|\*)'`.
@@ -10923,3 +10926,170 @@ baselines below are both live. When that step comes, it must also delete the **f
 outside the harness tree that `rm -rf` on the harness path does not reach
 (`/private/tmp/espansoconfig-probe-decoy-C01.yml` … `…-C07.yml` and their `.before` siblings).
 
+
+---
+
+## The 2d-5-3-B Next-action prose — archived 2026-09-05 at Phase 2d-5-3-C
+
+Moved out of `PROGRESS.md`'s live head the moment 2d-5-3-C superseded it, per that file's own
+instruction to **archive before writing the record, not after**. 115 lines. Nothing here is deleted;
+the sentences a later round proved wrong are **marked at the top rather than after them**, which is
+2d-5-2b-C's precedent.
+
+> **⚠️ Three claims below were corrected by Phase 2d-5-3-C.** Read them as history.
+>
+> 1. **The `staleOpen` arm's reason, given here as resting on "the generation alone" because the
+>    batch's queue "is either gone or not yet this session's".** There is a **third state** in which
+>    it is neither: `open()` bumps the generation unconditionally in its first statement, while
+>    `WorkspaceSession::open` returns from `Workspace::discover(root)?` before taking the lock, so a
+>    refused `open_workspace` or `list_documents` leaves the **previous** workspace installed and its
+>    queue untouched. The refusal stays right; the reason is now unattributability, not absence. See
+>    `docs/decisions/2d-5-3-C-notes.md` §1.
+> 2. **"`reconciliationCoordinator.ts:979`."** The citation was stale in the very commit that wrote
+>    it — the comment stood at `:995` on that tree, and at `:1014` after 2d-5-3-C's own fix. Every
+>    instance is now anchored on the comment's opening words,
+>    `` `No production code calls `start()` at all today.` ``. The **third** instance of the shape in
+>    this chain, not the second. See `2d-5-3-C-notes.md` §2.
+> 3. **"The sweep found three more instances of that shape."** A **fourth** stood at
+>    `workspaceOpened()`'s gate comment, which claimed Rust holds the workspace being replaced *"only
+>    until `WorkspaceSession::open`'s swap block runs"* — it holds it indefinitely when that open is
+>    refused. See `2d-5-3-C-notes.md` §1.2.
+
+#### Phase 2d-5-3-B — the round §7.1 commissioned for 2d-5-3-A's fix
+
+**Complete as a round, every gate green — and `SUPERSEDED BY 2d-5-3-C`, never complete.** Risk class
+**high**; worker model **opus**. Record:
+[`docs/decisions/2d-5-3-B-notes.md`](docs/decisions/2d-5-3-B-notes.md); review
+[`docs/reviews/phase-2d-5-3-B.md`](docs/reviews/phase-2d-5-3-B.md). 2d-5-3-A's own Next-action prose is
+archived in [`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"archived
+2026-09-05 at Phase 2d-5-3-B"*, with the two sentences this round proved wrong marked at the top of
+the archived copy rather than after it.
+
+**The verdict was `ship-with-fixes` with 0 blockers**, and the round confirmed the half of 2d-5-3-A
+that was right: the *independence* claim — that nothing on the `staleOpen` line observes
+`workspaceOpened()`, and that a host may move `openGeneration()` without ever calling it — is true and
+survives this phase's rewrite intact.
+
+**Its Medium is that 2d-5-3-A replaced one unstated ordering with another, and that is the same shape
+its own finding 1 was raised to remove.** The rewritten `staleOpen` comment claimed *"every identity in
+the batch belongs to a workspace lifecycle on its way out"* and nominated as *"what makes the refusal
+right on its own"* the sentence *"its `newest_sequence` indexes a queue this session is no longer
+reading"*. **Both hold only if the drain reached Rust's session mutex before the open did.** The
+reviewer raised this as a claim about the frontend being unable to *know* the order and recorded under
+`NOT-VERIFIED` that it had not traced the Rust side; **the orchestrator traced it, which is what turns
+the finding from an argument into a measurement**:
+
+- `commands.rs:3491` — `drain_external_changes` runs under `with_workspace_read`, i.e. the session
+  mutex.
+- `commands.rs:682` — `WorkspaceSession::open` runs `Workspace::discover` *outside* the lock, then
+  takes **the same mutex** for one block that calls `reconciliation.begin_epoch(...)` and
+  `guard.replace(Open { … })` **together**.
+
+Neither side chooses which reaches it first. Drain first → the batch is the outgoing queue and the
+sentence is true. `open`'s swap block first → the queue has already adopted the new epoch and the batch
+describes the **incoming** lifecycle, and the sentence is false. **The arm cannot tell**, because the
+number that separates two epochs is the batch's own `epoch` — `WorkspaceSession::drain_external_changes`
+says so in its own doc — and this arm fires **above** the `staleEpoch` check that reads it. The
+*action* is right under both orders, which is why this is a Medium; what was wrong was the
+justification. The arm now rests on the generation alone and names both orders, the mutex, and the
+check below that could tell them apart.
+
+**The sweep found three more instances of that shape, none in 2d-5-3-A's diff, and all three were
+fixed.** `CLAUDE.md` says to sweep for the shape and never for the words of the finding just closed,
+and 2c-4a-2 took four passes because each fix left a narrower instance standing. The three are
+`runOneDrain()`'s `awaitingReady()` arm, `requestDrain()`'s JSDoc and `workspaceOpened()`'s gate
+comment — each asserting that a drain in flight across an open necessarily describes the **outgoing**
+workspace. **The scope extension is deliberate and is argued in `2d-5-3-B-notes.md` §2.1**: the fixes
+are comment-only, this project's severity standard makes a false source comment its worst class, and
+§7.3 makes a correctness defect in source a blocker rather than something a step may close over. Two of
+the three keep a justification that never depended on the ordering — `workspaceOpened()`'s real
+objection is to accepting **any** batch in that window, because `adopted` has just been cleared — and
+the rewrites keep those halves rather than deleting them.
+
+**Its Low is a self-invalidating citation, and the fix is what invalidated it.** `2d-5-3-A-notes.md`
+§3.1 justified its finding with `rg '\.start\(\)' src --glob '!*.test.ts'` **matching exactly one
+line**. It matches **two**: that phase's own fix wrote `` `BrowserState.start()` `` into a comment at
+`reconciliationCoordinator.ts` — the one opening `` `No production code calls `start()` at all
+today.` ``, cited by its words because **2d-5-3-C found this very sentence's line citation stale in
+the commit that wrote it**. This is the shape line 21 of this file names, and the chain has now
+produced it **three** times. **The claim is unaffected and was re-derived** — one match *is* the new comment, the
+other is the wrapper's own body at `workspace.svelte.ts:3506`, and `:1891` says *"Created here, started
+by nobody"* independently. The recipe that survives its own fix, **run rather than asserted**, returns
+the one line: `rg -n '\.start\(\)' src --glob '!*.test.ts' | rg -v '^\S+:[0-9]+: *(//|\*)'`.
+
+**The second half of that Low is an able-to-fail claim that stopped one assertion short.** §3.3 called
+the new failing-open case *proven able to fail* on a mutation that fails at `workspace.test.ts:7616` —
+the assertion **after the failed open**. The case stops there, so the **third** assertion at `:7624`,
+which §3.3 itself calls *what makes the case about the gate*, was never shown able to fail. **Measured
+here rather than taken from the reviewer**: reducing `drainMayStart()` to `started && !disposed` fails
+the case at **`:7624`** with `expected [ +0, +0 ] to deeply equal [ +0 ]` and `expected 2 to be 1`
+beside it. A different line from the mutation above, which is the point.
+
+**No production behaviour changed.** The `reconciliationCoordinator.ts` diff is **comment-only**,
+verified mechanically rather than by eye — `git diff -U0` filtered to changed lines that are neither
+comments nor blank returns nothing — and `numstat` is `42 23`. No other file under `src/`,
+`src-tauri/` or `crates/` changed, which is what the four unmoved gate figures say independently.
+
+**§7.1 commissions a round, so this phase is `SUPERSEDED`, not complete.** The fix changed **one
+source file**, `src/lib/browser/reconciliationCoordinator.ts`. The unit is the file and not the line,
+and a comment-only change to a source file **is** a source change here — for exactly the reason this
+phase and 2d-5-3-A both demonstrate. Under `/autoclaude-opus` a phase gets **one** review invocation
+and this phase spent it, so that round is a new corrective phase (`CLAUDE.md` §7.4).
+
+**Nothing is `BLOCKED`.** The one `actionable` item carried from 2d-5-3-A — two `open()` early-return
+arms with no workspace-level case — is still a **coverage gap and not a correctness defect in source**,
+so §7.3's blocker clause does not apply.
+
+#### The next action is **Phase 2d-5-3-C — the round §7.1 commissioned for 2d-5-3-B's fix**
+
+Scope it to that fix and to nothing else: the **four** rewritten comments in
+`src/lib/browser/reconciliationCoordinator.ts` — `runOneDrain()`'s two `staleOpen` arms,
+`requestDrain()`'s JSDoc and `workspaceOpened()`'s gate comment — and
+`docs/decisions/2d-5-3-B-notes.md` in full, including the two correction blocks it added to
+`2d-5-3-A-notes.md` §3.1 and §3.3. **Check the comments against the code, not the code against the
+comments**, and note that three of the four are **outside** what §7.1 scoped this round to; §2.1 of the
+notes argues the extension and a later round is entitled to judge that trade differently.
+
+Three things worth a reviewer's attention that this round did not reach. **The four comments now assert
+a claim about Rust locking that nothing in this repository tests, and nothing can from the frontend** —
+it was derived by reading `WorkspaceSession::open` and `with_workspace_read`, so a change to either
+would falsify four comments at once with every gate green. **Two of the four keep a justification whose
+sufficiency was argued and not tested.** And **2d-5-3's able-to-fail claims for seven of its eight
+cases, and its §8.3 five-failure transcript, are still unreproduced** — 2d-5-3-A reproduced three
+mutations, this round's reviewer four, this phase one more.
+
+Then 2d-5-4 — the observation state transitions. Read
+[`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md) (**the consult; it binds**) and
+[`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) §5 before treating
+`phase-2d-design.md` step 5 as the spec.
+
+**The instrument stays in the working tree until a step deliberately removes it.** Nothing in the
+2d-5-3 chain needs it. The production baseline cannot be re-measured until it is gone, which is
+2d-5-7's business (*production activation, the capability widening and the baseline re-measure*); until
+then the two baselines below are both live. When that step comes, it must also delete the **fourteen**
+scratch files outside the harness tree that `rm -rf` on the harness path does not reach
+(`/private/tmp/espansoconfig-probe-decoy-C01.yml` … `…-C07.yml` and their `.before` siblings).
+
+---
+
+## The recorded residues, archived 2026-09-05 at Phase 2d-5-3-C
+
+Moved out of `PROGRESS.md`'s live head at 2d-5-3-C, on **length** rather than on state: the live head
+had reached 797 lines against its 800-line hard bound. **None is a correctness defect in source**, so
+none held a step open under `CLAUDE.md` §7.3, and none is superseded by the archiving. Item 2 stayed
+in the live head as well, because it is a method rule a later step will trip over rather than a
+residue. Unedited.
+
+1. **Three 2d-4b residues** — a commit message's own diff figure, a `node_modules` line citation and a
+   *"six review rounds"* count in `workspace.test.ts:468` — are in
+   [`phase-2d.md`](phase-2d.md). All three are still true.
+2. **`scripts/lint/ipc-detail.test.ts` generates its cases from `scannableFiles()`**, so its count moves
+   when a file is *added* under the scanned roots and no author touches it. 2d-5-2a moved it by **+2**
+   without an author touching it — the fourth recorded instance. **Re-derive a test count per file, on
+   a pristine tree, never from the total.**
+3. **The mirror's reactivity depends on a writer existing** — `2d-5-2b-notes.md` §14.6 item 1, new at
+   2d-5-2b-B. *Recorded only*; three sites assign today.
+4. **The detailed Next-action prose of 2d-5-2b and 2d-5-2b-A** — the three open questions 2d-5-2b
+   answered, the mutation results, the fourth-generation instance and what review 4 did not verify —
+   is archived in this same file under *"archived 2026-09-05 at Phase 2d-5-2b-B"*.
+   `2d-5-2b-notes.md` cites it; no 2d-5 step needs it inline.
