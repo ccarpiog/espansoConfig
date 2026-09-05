@@ -10496,3 +10496,130 @@ about six seconds after launch, `open -a` does not restart it, and LaunchService
 (**`localStorage` follows the bundle identifier, not `HOME`**, so a plan must set the language
 explicitly through the picker).
 
+
+---
+
+## The closed 2d-5-2 Next-action prose, archived 2026-09-05 at Phase 2d-5-3
+
+**History, never an instruction.** Everything below described a *next action* that is finished. The
+only live next action is the one in `PROGRESS.md`.
+
+Two blocks moved here, both on state rather than on length: 2d-5-2 closed at 2d-5-2c-2 (`23595a7`)
+on 2026-09-05, so the narrative of its two `c` steps and the *"Where 2d-5-2 stands"* block stopped
+being live the moment 2d-5-3 opened. The live head keeps a pointer to this section and nothing else
+about them. Nothing in either block is corrected here — both were true of the tree that committed
+them, and the five status rows they belong beside are in
+[`status-table.md`](status-table.md) under *"The five sub-phase rows of the closed 2d-5-2 chain"*.
+
+### Block 1 — the two `2d-5-2c` step records
+
+#### Phase 2d-5-2c-1 — the instrument, rebuilt from the records
+
+**✅ complete and CLOSED** (`4dff3a3`). Record:
+[`docs/decisions/2d-5-2c-1-instrument-rebuild.md`](docs/decisions/2d-5-2c-1-instrument-rebuild.md);
+review [`docs/reviews/phase-2d-5-2c-1.md`](docs/reviews/phase-2d-5-2c-1.md) (`ship-with-fixes`, 0
+blockers, 4 SHOULD-FIX, all fixed and all re-derived before acceptance). Its Next-action prose is
+archived in
+[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"archived 2026-09-05 at
+Phase 2d-5-2c-2"*.
+
+#### Phase 2d-5-2c-2 — the narrow window regression reading
+
+**✅ complete and CLOSED.** Risk class **high**; worker model **opus**. Record:
+[`docs/decisions/2d-5-2c-2-window-reading.md`](docs/decisions/2d-5-2c-2-window-reading.md) (ten
+sections); review [`docs/reviews/phase-2d-5-2c-2.md`](docs/reviews/phase-2d-5-2c-2.md).
+
+**With it, 2d-5-2 is complete: 2a, 2b and 2c are all closed.**
+
+**What it built.** §9.2 item 1 of the instrument record said the instrument observed neither the
+registry nor restore, and that a reading wanting either had to build it. This step built one case —
+**`restore-registry`** — costing a plan function, a `runCase` arm, a `launch.sh` case row and a full
+rebuild in §3's order. The plan edits and saves a snippet (putting a backup batch on disk), closes the
+editor, opens the new-snippet form and **gives it that same file as its destination** (2d-5-2's second
+deliverable, `reportDestination` → the lease's `replaceTarget`), closes it, then opens restore and
+drives it to a committed whole-file replacement.
+
+**The finding, and it inverted the orchestrator's own briefed hypothesis.** The
+`DetailPane` → `RestorePane` `surfaces` path **is** live and drawn — every link was read, and all six
+sentences exist in both dictionaries — but **none of the six `openWriteSurfaceKey` sentences can be put
+on this screen**: `AppShell.svelte:84` mounts one `<DetailPane>`, `busy` (`:999`) is a `$derived` over
+all seven sessions with every opener withdrawn while any surface is open, and `competingSurfaceFor`
+skips `restore`. The orchestrator re-derived it independently and it holds. **It is not a new defect** —
+`MatchCreator.svelte:415` already says it and `CLAUDE.md` records the same `busy` argument about
+`invalidateEverySurface` — so it is a **coverage bound**, `recorded only`.
+
+**What the reading is therefore evidence of: a leak detector.** Before 2d-5-2 the pane built its surface
+list inside the restore arm, so a leaked registration was unreachable; after 2d-5-2 the registry is
+long-lived and `reconcileWriteSurfaces` returns the lease when a kind leaves the assembly, so **a leaked
+registration is a failure mode that exists only because of 2d-5-2**. A leak would draw a refusal,
+disable *Prepare*, time the plan out and leave `bytes=DIFFER`. Five launches pass.
+**The detector's reach is bounded and the record says so**: `competingSurfaceFor` breaks on
+`target.kind === 'unknown'` and `DetailPane.svelte:585` gives the creator exactly that when it has no
+destination, so a leaked **destination-less** creator registration is invisible to it. The plan
+constructs the `document`-target shape deliberately.
+
+**The launches.** 15, all on binary `0af15a34…fde62e9`, verdict = the reader's conjunction of
+`reached-end=yes` + `failed-lines=0` + `probe.err=0` + `bytes=`. `S01` and `R01`–`R04` are the new case
+(3 `:en`, 2 `:es`), all `bytes=MATCH backups=PRESENT tree-diff=1`, and their four observation lines are
+**byte-identical across all five** (measured by `shasum`, `:es` included). `R05`–`R13` re-ran **the
+eight inherited cases** on this step's binary — nine launches, `creator-front` twice for both languages
+— all pass. `N03` is the no-plan control: zero-byte log, `tree-diff=0`. 14 plan launches, 8 `:en` /
+6 `:es`, language always set **through the picker**.
+
+**Its review returned `ship-with-fixes` — 0 blockers, 6 SHOULD-FIX — and all six are fixed.** The
+orchestrator **re-derived every one against the files before accepting it**; all six held, and **all six
+were defects in the record rather than in anything the launches measured**. §10.1 of the record is the
+disposition. The sharpest was the unscoped leak-detector claim above; the others were three bundle
+searches presented as evidence about the binary when they are searches of `dist` (measured:
+`restore-registry` occurs **0** times in `target/debug/espansoconfig`, because the asset is embedded
+compressed — the launches running the case is what proves the binary carried it), a transcript block
+column-aligned with padding no `probe.log` contains while being called *"character for character"*, an
+"eight inherited cases" enumeration that summed to nine by counting the raw editor twice, a privacy-sweep
+file count nothing had measured, and an `actionable` cleanup list four files short (`C06`/`C07` exist,
+created by 2d-5-2c-1's own fix round — established from two agreeing facts, their `bytes.txt` digest and
+their mtimes, which also answers a `NOT-VERIFIED` the review left open).
+
+**§7.1 commissions nothing for that fix round, so §7.2 closes the step.** Its whole diff is
+`docs/decisions/2d-5-2c-2-window-reading.md`, which is under `docs/` and on §7's closed list. **No
+source file changed** — not `src/probe.ts`, not `launch.sh`, nothing under `src/lib/`, `crates/` or
+`src-tauri/src/`. The `/autoclaude-opus` workflow reaches the same place by its own route.
+
+**What it does not prove**, and none of it may be claimed later: **real watcher delivery** (forbidden by
+`2d-5-split-notes.md` §7 item 7; the full native matrix is 2d-7's), that any stored
+`WriteSurfaceTransition` was invoked (`transitionFor` still has no production caller), or that the
+registry was observed **directly** — an empty registry and a correct one read identically at the window
+while `competingSurfaceFor` skips `restore`. R38 is untouched: every launch used the easy fixture shape,
+so a restore drawn over a block scalar, a BOM or a CRLF document remains unevidenced at the window.
+
+
+### Block 2 — "Where 2d-5-2 stands"
+
+#### Where 2d-5-2 stands
+
+`docs/decisions/2d-5-split-notes.md` and `docs/reviews/phase-2d-5-design.md` both describe 2d-5-2 as
+one step. **The orchestrator split it three ways on 2026-09-04**, before any line of it was written,
+following this project's own 2c-5-4a/4b precedent:
+
+- **2d-5-2a** — the coordinator-owned keyed registry as a value. **Components: none.** ✅ **complete
+  and CLOSED** (`15ada19`, `9f32cc5`, `52ff829`, `0f1ad8b`), after a four-phase review tail that ended
+  **by rule**.
+- **2d-5-2b** — the `satisfies Record<OpenWriteSurfaceKind, …>` assembly in `DetailPane`,
+  `MatchCreator` reporting its destination upward, and the phase's whole mounted evidence.
+  **Components: yes.** ✅ **complete and CLOSED** (`505caf6`), after a **five**-round review tail
+  that ended **by rule** at round E. Its fix commissioned **2d-5-2b-A** ✅ (`92fe0f4`), whose fix
+  commissioned **2d-5-2b-B** ✅ (`4f1fdb3`), whose fix commissioned **2d-5-2b-C** ✅ (`eb1134a`),
+  whose fix commissioned **2d-5-2b-D** ✅ (`0917cc3`), whose fix commissioned **2d-5-2b-E** ✅
+  (this phase) — which returned `ship` with nothing to fix, so its fix round changed no source file
+  and §7.1 commissioned nothing.
+- **2d-5-2c** — the narrow window regression reading, which **may not claim real watcher delivery**
+  (`2d-5-split-notes.md` §7 item 7). **Split in two by the orchestrator on 2026-09-05**, before any
+  line of it was written, because the instrument did not exist anywhere on this machine:
+  - **2d-5-2c-1** — the instrument, rebuilt from the records. **Components: none.** ✅ **complete and
+    CLOSED** (`4dff3a3`), one review, `ship-with-fixes`, 0 blockers, 4 SHOULD-FIX all fixed, and its fix
+    round changed no source file so §7.1 commissioned nothing.
+  - **2d-5-2c-2** — the reading itself. ⬜️ **not started, and it is the next action.**
+    **A window reading is still owed and is not discharged.**
+
+Nothing about the split changes what 2d-5-2 delivers; the three steps' deliverables union to exactly
+the one step the consult specified.
+

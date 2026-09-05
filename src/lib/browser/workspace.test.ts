@@ -50,6 +50,12 @@ import {
   makeSummary,
   matchListPath
 } from './fixtures';
+import type {
+  ReconciliationEventSource,
+  ReconciliationUnlisten,
+  ReconciliationWakeHandler
+} from '../ipc/events';
+import type { ForegroundSource } from './reconciliationCoordinator';
 import {
   applyDeletion,
   baseRevisionOf as deletionBaseRevisionOf,
@@ -305,6 +311,18 @@ interface Script {
    * drives the invalidation the state performs.
    */
   readonly raws?: readonly CommandResult<SaveResult>[];
+  /**
+   * What `drain_external_changes` answers, in order — Phase 2d-5-3.
+   *
+   * **A finite queue, and running out is a failure rather than a fallback.** A
+   * reconciliation case declares exactly how many drains it expects through
+   * {@link expectDrains}, and every answer it scripts must be consumed: the
+   * `afterEach` below asserts both, so a coordinator that drained one time too
+   * many or too few fails its own case instead of the next one. A case that
+   * scripts nothing keeps the refusal every other case in this file has always
+   * had.
+   */
+  readonly drains?: readonly CommandResult<ReconciliationBatch>[];
 }
 
 /**
@@ -317,6 +335,45 @@ interface Script {
  * incremented. The `afterEach` below reads and resets it.
  */
 let drains = 0;
+
+/**
+ * How many drains the case now running has declared it will make.
+ *
+ * **Zero is still the default, and that is the point.** Every case written
+ * before Phase 2d-5-3 declares nothing and is held to zero exactly as before;
+ * only a case that calls {@link expectDrains} may drain, and it must drain that
+ * many times. Ruling 35's uniform file-wide treatment of the three suites — the
+ * hoisted `@tauri-apps/api/core` spy and its own `invoked` assertion — is
+ * 2d-5-6's and is deliberately not started here.
+ */
+let drainBudget = 0;
+
+/**
+ * The `afterSequence` of every drain made through an injected surface, in order.
+ *
+ * Read by the reconciliation cases so that "the watermark the previous answer
+ * established" is an assertion rather than an inference, and cleared with the
+ * budget.
+ */
+let drainSequences: number[] = [];
+
+/**
+ * How many scripted drain answers have been built and not yet consumed.
+ *
+ * The "nothing pending" half of ruling 35: a case that scripts three answers and
+ * drains twice has a queue with something left in it, which is a different defect
+ * from draining three times and is caught separately.
+ */
+let drainsPending = 0;
+
+/**
+ * Declares how many drains this case will make through the injected surface.
+ *
+ * @param count - The exact number, asserted by the `afterEach` below.
+ */
+function expectDrains(count: number): void {
+  drainBudget = count;
+} // End of function expectDrains()
 
 /**
  * A command surface that answers from a script.
@@ -334,6 +391,8 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
   let deletes = 0;
   let duplicates = 0;
   let raws = 0;
+  let drained = 0;
+  drainsPending += script.drains?.length ?? 0;
   const documents =
     script.documents ??
     new Map<number, CommandResult<DocumentView>>([
@@ -468,8 +527,20 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     // ranges in files other than this one, nothing in this repository checks a
     // comment, and six review rounds went to keeping such sentences true in a
     // place where only reading catches them going stale.
-    drainExternalChanges: vi.fn(async () => {
+    //
+    // **Phase 2d-5-3 answers from a script when one is given.** The refusal below
+    // is still what an unscripted case gets, so the paragraphs above remain true
+    // of every case that predates this one; what changed is that a case may now
+    // declare a budget and a finite queue of batches, and both are asserted.
+    drainExternalChanges: vi.fn(async (afterSequence: number) => {
       drains += 1;
+      drainSequences.push(afterSequence);
+      const scripted = script.drains?.[drained];
+      if (scripted !== undefined) {
+        drained += 1;
+        drainsPending -= 1;
+        return scripted;
+      }
       const answer: CommandResult<ReconciliationBatch> = {
         ok: false,
         failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
@@ -501,15 +572,28 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 afterEach(() => {
   // The assertion `scriptedCommands()`'s refusal cannot make on its own, applied
-  // to every case in this file: nothing in `BrowserState` drains *through the
-  // injected surface* at 2d-4b — the bound, and the one route that escapes it,
-  // are stated where {@link drains} is incremented. The count is read, then
+  // to every case in this file — the bound, and the one route that escapes it,
+  // are stated where {@link drains} is incremented. The counts are read, then
   // cleared, then asserted, so one drain fails one case rather than every case
-  // after it, and the phase that starts draining changes this on purpose instead
-  // of discovering it.
+  // after it.
+  //
+  // **Extended at Phase 2d-5-3 rather than deleted, which the comment this
+  // replaces said this phase would do "on purpose".** The blanket zero is now the
+  // *default* budget: every case written before this phase declares nothing and is
+  // held to zero exactly as it was, and a reconciliation case declares an exact
+  // budget with {@link expectDrains} and is held to that. Two questions, asked
+  // separately: how many drains happened, and whether every scripted answer was
+  // consumed — a case that drains too few times and one that scripts too many
+  // answers are different defects.
   const drained = drains;
+  const budget = drainBudget;
+  const pending = drainsPending;
   drains = 0;
-  expect(drained).toBe(0);
+  drainBudget = 0;
+  drainsPending = 0;
+  drainSequences = [];
+  expect(drained).toBe(budget);
+  expect(pending).toBe(0);
 });
 
 describe('the load', () => {
@@ -7323,3 +7407,336 @@ describe('sending a confirmed restore', () => {
     expect(answered.extraMessages).toHaveLength(1);
   }); // End of the "invalidation threw" case
 }); // End of the "sending a confirmed restore" suite
+
+/**
+ * Lets every queued microtask run, so the drain pump can make progress.
+ *
+ * `BrowserState.start()` and `open()` both *request* a drain and return; the
+ * coordinator's pump yields once before its first call so that triggers arriving
+ * together coalesce. **It waits for the queue and not for the coordinator**: a
+ * drain that never happened is a failed count rather than a hung case.
+ *
+ * @returns A promise that resolves once the queue has drained ten times.
+ */
+async function settleDrains(): Promise<void> {
+  for (let turn = 0; turn < 10; turn += 1) {
+    await Promise.resolve();
+  } // End of the loop that lets the microtask queue run
+} // End of function settleDrains()
+
+/**
+ * A wake transport this file drives, with an exact unlisten count.
+ */
+interface TestEvents {
+  /** What `createBrowserState` is given. */
+  readonly source: ReconciliationEventSource;
+  /**
+   * How many times the unlisten was called.
+   *
+   * @returns The count.
+   */
+  unlistens(): number;
+  /**
+   * Delivers one wake.
+   *
+   * @param epoch - Its `workspace_epoch`.
+   * @param newest - Its `newest_sequence`.
+   */
+  wake(epoch: number, newest: number): void;
+}
+
+/**
+ * Builds a wake transport whose registration resolves on its own.
+ *
+ * @returns The source and the handles that drive it.
+ */
+function testEvents(): TestEvents {
+  let handler: ReconciliationWakeHandler | null = null;
+  let unlistens = 0;
+  /**
+   * Ends the subscription and counts the call.
+   */
+  const unlisten = (): void => {
+    unlistens += 1;
+  };
+  return {
+    source: {
+      /**
+       * Registers, and resolves immediately.
+       *
+       * @param wakeHandler - Where a wake goes.
+       * @returns The unlisten.
+       */
+      subscribe(wakeHandler: ReconciliationWakeHandler): Promise<ReconciliationUnlisten> {
+        handler = wakeHandler;
+        return Promise.resolve(unlisten);
+      }
+    },
+    unlistens: (): number => unlistens,
+    wake: (epoch: number, newest: number): void => {
+      handler?.({ workspace_epoch: epoch, newest_sequence: newest });
+    }
+  };
+} // End of function testEvents()
+
+/**
+ * A foreground transport this file can signal through.
+ */
+interface TestForeground {
+  /** What `createBrowserState` is given. */
+  readonly source: ForegroundSource;
+  /** Signals a foreground or resume. */
+  signal(): void;
+}
+
+/**
+ * Builds a foreground transport this file drives.
+ *
+ * @returns The source and the handle that signals it.
+ */
+function testForeground(): TestForeground {
+  let handler: (() => void) | null = null;
+  return {
+    source: {
+      /**
+       * Registers synchronously.
+       *
+       * @param onForeground - Where a signal goes.
+       * @returns The unsubscribe.
+       */
+      subscribe(onForeground: () => void): () => void {
+        handler = onForeground;
+        return (): void => {
+          handler = null;
+        };
+      }
+    },
+    signal: (): void => {
+      handler?.();
+    }
+  };
+} // End of function testForeground()
+
+/**
+ * One batch, with only what a case is about spelled out.
+ *
+ * @param overrides - Whatever the case cares about.
+ * @returns A successful command answer carrying it.
+ */
+function reconciliationBatch(
+  overrides: Partial<ReconciliationBatch> = {}
+): CommandResult<ReconciliationBatch> {
+  return {
+    ok: true,
+    value: { epoch: 5, newest_sequence: 0, observations: [], discarded: 0, ...overrides }
+  };
+} // End of function reconciliationBatch()
+
+describe('the reconciliation lifecycle', () => {
+  it('drains nothing until start is called, however many opens there are', async () => {
+    // The default budget, stated rather than inherited: this is the case that says
+    // every other case in this file is honest about draining zero times, and it
+    // says it for a state whose `open()` really did reach `ready`.
+    const state = createBrowserState(scriptedCommands(), () => undefined);
+    await state.open(null);
+    await state.open(null);
+    await settleDrains();
+
+    expect(state.status).toBe('ready');
+    state.dispose();
+  }); // End of the no-start case
+
+  it('drains once when the injected registration resolves', async () => {
+    expectDrains(1);
+    const events = testEvents();
+    const state = createBrowserState(
+      scriptedCommands({ drains: [reconciliationBatch({ newest_sequence: 4 })] }),
+      () => undefined,
+      undefined,
+      events.source
+    );
+    state.start();
+    await settleDrains();
+
+    expect(drainSequences).toEqual([0]);
+    state.dispose();
+    expect(events.unlistens()).toBe(1);
+  }); // End of the registration-drain case
+
+  it('drains again once a workspace reaches ready, and never for a failed one', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const state = createBrowserState(
+      scriptedCommands({
+        drains: [reconciliationBatch({ newest_sequence: 6 }), reconciliationBatch({ newest_sequence: 6 })]
+      }),
+      () => undefined,
+      undefined,
+      events.source
+    );
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+
+    // **Two calls, and the second asks `0` rather than `4`** — which is the wiring
+    // this case exists for. `open()` clears the session cursor at its entry, so the
+    // watermark the registration's answer established belongs to the workspace that
+    // was just closed and is not asked with again. The case below shows the other
+    // half, where nothing intervenes and the watermark really is carried.
+    expect(drainSequences).toEqual([0, 0]);
+    state.dispose();
+  }); // End of the open-drain case
+
+  it('drains for an open that completes before start, in one call', async () => {
+    expectDrains(1);
+    const events = testEvents();
+    const state = createBrowserState(
+      scriptedCommands({ drains: [reconciliationBatch()] }),
+      () => undefined,
+      undefined,
+      events.source
+    );
+    // Open first: the request is recorded and nothing is drained, because the
+    // lifecycle has not begun. Losing it would leave this order with no drain.
+    await state.open(null);
+    await settleDrains();
+    expect(drainSequences).toEqual([]);
+
+    state.start();
+    await settleDrains();
+
+    expect(drainSequences).toEqual([0]);
+    state.dispose();
+  }); // End of the open-before-start case
+
+  it('drains for a wake at the current epoch and for nothing else', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const state = createBrowserState(
+      scriptedCommands({
+        drains: [
+          reconciliationBatch({ epoch: 5, newest_sequence: 11 }),
+          reconciliationBatch({ epoch: 5, newest_sequence: 12 })
+        ]
+      }),
+      () => undefined,
+      undefined,
+      events.source
+    );
+    state.start();
+    await settleDrains();
+
+    events.wake(99, 40);
+    await settleDrains();
+    expect(drainSequences).toEqual([0]);
+
+    events.wake(5, 12);
+    await settleDrains();
+    expect(drainSequences).toEqual([0, 11]);
+    state.dispose();
+  }); // End of the wake case
+
+  it('drains on a foreground signal', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const activity = testForeground();
+    const state = createBrowserState(
+      scriptedCommands({ drains: [reconciliationBatch({ newest_sequence: 2 }), reconciliationBatch()] }),
+      () => undefined,
+      undefined,
+      events.source,
+      activity.source
+    );
+    state.start();
+    await settleDrains();
+
+    activity.signal();
+    await settleDrains();
+
+    expect(drainSequences).toEqual([0, 2]);
+    state.dispose();
+  }); // End of the foreground case
+
+  it('clears the session cursor at the entry of every open', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const state = createBrowserState(
+      scriptedCommands({
+        drains: [
+          reconciliationBatch({ newest_sequence: 9 }),
+          reconciliationBatch({ newest_sequence: 9 }),
+          reconciliationBatch({ newest_sequence: 3 })
+        ]
+      }),
+      () => undefined,
+      undefined,
+      events.source
+    );
+    state.start();
+    await settleDrains();
+    expect(drainSequences).toEqual([0]);
+
+    // Nothing intervenes here, so the second drain really does carry the watermark
+    // the first answer established.
+    events.wake(5, 10);
+    await settleDrains();
+    expect(drainSequences).toEqual([0, 9]);
+
+    // A second workspace: the epoch belongs to the lifecycle being closed and the
+    // watermark indexes its queue, so the next drain starts from nothing again.
+    await state.open(null);
+    await settleDrains();
+
+    expect(drainSequences).toEqual([0, 9, 0]);
+    state.dispose();
+  }); // End of the cursor-cleared-by-open case
+
+  it('stops draining once disposed, and unlistens exactly once', async () => {
+    expectDrains(1);
+    const events = testEvents();
+    const activity = testForeground();
+    const state = createBrowserState(
+      scriptedCommands({ drains: [reconciliationBatch({ newest_sequence: 7 })] }),
+      () => undefined,
+      undefined,
+      events.source,
+      activity.source
+    );
+    state.start();
+    await settleDrains();
+    expect(drainSequences).toEqual([0]);
+
+    state.dispose();
+    state.dispose();
+    events.wake(5, 8);
+    activity.signal();
+    await state.open(null);
+    await settleDrains();
+
+    expect(drainSequences).toEqual([0]);
+    expect(events.unlistens()).toBe(1);
+  }); // End of the disposal case
+
+  it('registers nothing through the inert default source, and still drains on an open', async () => {
+    expectDrains(1);
+    // No event source injected: `createBrowserState` defaults to the inert one,
+    // which refuses rather than reporting a subscription this application does not
+    // have. The other triggers are unaffected, which is the honest description of
+    // a window with no wake transport — and the whole of what a shipped window has
+    // until 2d-5-7 injects the real one.
+    const state = createBrowserState(
+      scriptedCommands({ drains: [reconciliationBatch()] }),
+      () => undefined
+    );
+    state.start();
+    await settleDrains();
+    expect(drainSequences).toEqual([]);
+
+    await state.open(null);
+    await settleDrains();
+
+    expect(drainSequences).toEqual([0]);
+    state.dispose();
+  }); // End of the inert-default case
+}); // End of the "reconciliation lifecycle" suite

@@ -67,6 +67,14 @@ import type {
 } from '../ipc/commands';
 import { mayHaveWritten, reportIpcFailure } from '../ipc/errors';
 import type { IpcFailure } from '../ipc/errors';
+// **A type-only import, and that is load-bearing.** `../ipc/events` builds its real
+// adapter at module scope from Tauri's `listen`, so a *value* import here would make
+// it a production module and pull the plugin call into the bundle — which is exactly
+// the first production import 2d-5-7 owns. `import type` is erased, so this file
+// names the interface and imports nothing. The adapter is described rather than
+// named here so that searching `src/` for its identifier stays the oracle for that
+// reservation.
+import type { ReconciliationEventSource } from '../ipc/events';
 import type {
   Acknowledgement,
   BackupBatchId,
@@ -110,6 +118,13 @@ import {
   type StartedRestore,
   type WriteSurfaceDocumentTarget
 } from './restore';
+import {
+  createReconciliationCoordinator,
+  INERT_FOREGROUND_EVENTS,
+  INERT_RECONCILIATION_EVENTS,
+  type ForegroundSource,
+  type ReconciliationCoordinator
+} from './reconciliationCoordinator';
 import { filterMatches } from './search';
 import type { SelectedMatch, SelectionRepair } from './selection';
 import { positionOf, repairSelection, reresolve, selectMatch } from './selection';
@@ -1623,6 +1638,35 @@ export interface BrowserState {
    * @returns The current generation; zero for a state nothing has registered with.
    */
   writeSurfaceGeneration(): number;
+
+  /**
+   * Begins the reconciliation lifecycle — Phase 2d-5-3.
+   *
+   * Registers for `workspace://reconciliation-ready` through the injected event
+   * source and for foreground and resume signals through the injected activity
+   * source, and drains once registration resolves. **Idempotent**: a host with
+   * two `onMount`s must not end up with two subscriptions.
+   *
+   * **No production caller invokes it, and that is this step's boundary.**
+   * `AppShell.svelte` is 2d-5-7's to change, and until it does, both injected
+   * sources default to the inert ones in `./reconciliationCoordinator.ts` — so a
+   * shipped window registers nothing, drains nothing and derives nothing from a
+   * batch. Nothing in TypeScript makes a host call this, or call
+   * {@link BrowserState.dispose} afterwards.
+   */
+  start(): void;
+
+  /**
+   * Ends it: unsubscribes exactly once and makes every drain in flight inert.
+   *
+   * Idempotent, and safe to call whether or not {@link BrowserState.start} ever
+   * was. A `subscribe` that resolves *after* this is called has its unlisten
+   * invoked immediately rather than stored, which is the registration race
+   * `docs/decisions/2d-5-split-notes.md` section 3 ruling 16 gives to disposal —
+   * and nothing in TypeScript forces that continuation to be written, so the
+   * exact unlisten count is asserted by test.
+   */
+  dispose(): void;
 }
 
 /**
@@ -1656,12 +1700,22 @@ interface DuplicateIntent {
  *   one. Separate from `commands` for the reason {@link BackupCommands} records,
  *   which is a constraint on the step that added it rather than a property of
  *   the design.
+ * @param events - Where a reconciliation wake arrives — Phase 2d-5-3. **Defaults
+ *   to the inert source, never to the real adapter**: the split reserves the first
+ *   production import of `src/lib/ipc/events.ts` for 2d-5-7, together with the two
+ *   capability entries that registration needs.
+ * @param foreground - Where a foreground or resume signal arrives — Phase
+ *   2d-5-3. Defaults to the inert source, which registers a real handler that
+ *   nothing ever calls. Its type names neither the DOM nor Tauri, exactly as
+ *   `ReconciliationEventSource` does not.
  * @returns Reactive state a component can read directly.
  */
 export function createBrowserState(
   commands: BrowserCommands = REAL_COMMANDS,
   report: (failure: IpcFailure) => void = reportIpcFailure,
-  backup: BackupCommands = REAL_BACKUP_COMMANDS
+  backup: BackupCommands = REAL_BACKUP_COMMANDS,
+  events: ReconciliationEventSource = INERT_RECONCILIATION_EVENTS,
+  foreground: ForegroundSource = INERT_FOREGROUND_EVENTS
 ): BrowserState {
   let status = $state<BrowserStatus>('loading');
   let failure = $state<IpcFailure | null>(null);
@@ -1824,6 +1878,41 @@ export function createBrowserState(
   // a fourth written without a `noticeWriteSurfaces()` would leave this number
   // behind the registry with nothing failing.
   let surfaceGeneration = $state(0);
+  // **The drain lifecycle, as a value beside this file** — Phase 2d-5-3. It owns
+  // when a drain fires and what a batch does to the session cursor; this state owns
+  // the two facts it cannot see for itself, which are the injected command surface
+  // and the workspace-open generation.
+  //
+  // **The drain goes through `commands`, never through the module-level wrapper
+  // imported at the top of this file.** That is the bound `workspace.test.ts`'s
+  // drain counter measures, and the route around it — a call made through one of
+  // those bindings — is what 2d-5-6 closes for all three suites.
+  //
+  // **Created here, started by nobody.** Construction registers nothing: `start()`
+  // is what subscribes, and no production caller invokes it at this step. What that
+  // buys is stated where it is decided, in `./reconciliationCoordinator.ts`'s
+  // header — a coordinator that cannot run in the shipped window is a coordinator
+  // whose dropped observations cannot be seen by anyone.
+  const reconciliation: ReconciliationCoordinator = createReconciliationCoordinator(
+    {
+      /**
+       * Asks for everything above the session watermark.
+       *
+       * @param afterSequence - The coordinator's watermark.
+       * @returns The batch, or a failure.
+       */
+      drain: (afterSequence: number) => commands.drainExternalChanges(afterSequence),
+      /**
+       * The generation the coordinator captures around its await.
+       *
+       * @returns The number `open()` last took.
+       */
+      openGeneration: () => openGeneration,
+      report
+    },
+    events,
+    foreground
+  );
 
   /**
    * Brings the reactive mirror into step with the registry.
@@ -2463,6 +2552,21 @@ export function createBrowserState(
 
     async open(root: string | null): Promise<void> {
       const generation = ++openGeneration;
+      // **The reconciliation cursor goes with the workspace, and it goes first.**
+      // The epoch belongs to the lifecycle being closed, the watermark indexes that
+      // lifecycle's queue and `lastDiscarded` is cumulative within its epoch, so
+      // carrying any of them into the next open would compare two lifecycles'
+      // numbers. Cleared *before* the first await for `projectionGenerations`'
+      // reason: a drain already in flight rechecks `openGeneration` after its own
+      // await and installs nothing, and the bump above has already invalidated it.
+      //
+      // **It also closes the coordinator's drain gate, and that half is about the
+      // drains this open has not started yet.** Rust holds the workspace being
+      // replaced until `open_workspace` succeeds, so a trigger arriving between
+      // here and `ready` would drain *that* lifecycle — and every generation
+      // capture in the pump would pass, because the bump above has already
+      // happened. Those reasons are recorded and issued by `workspaceReady()`.
+      reconciliation.workspaceOpened();
       // A selection into the workspace being replaced can never be applied to
       // the one replacing it, so every pending `select()` is invalidated here —
       // globally, which is right because *every* projection is about to go.
@@ -2501,6 +2605,17 @@ export function createBrowserState(
         return;
       }
       if (!opened.ok) {
+        // **The coordinator is deliberately not told**, and this is the one place
+        // that decision is visible from. `workspaceOpened()` closed its drain gate
+        // above and only `workspaceReady()` opens one, so this path leaves
+        // reconciliation held — which is the wanted answer rather than an omission:
+        // `WorkspaceSession::open` leaves the *previously* open workspace in place
+        // when it refuses, while this window has already cleared every document and
+        // shows a failure, so a drain from here would come back describing a
+        // lifecycle nothing on screen belongs to and hand it to `accept()` as this
+        // session's epoch. The gate is not stuck by it — the next `open()` that
+        // reaches `ready` opens it, and an `open()` is the only thing that puts a
+        // workspace on screen at all.
         fail(opened.failure);
         return;
       }
@@ -2511,6 +2626,8 @@ export function createBrowserState(
         return;
       }
       if (!listed.ok) {
+        // Same as the arm above, and for the same reason: the drain gate stays
+        // closed because no open reached `ready`.
         fail(listed.failure);
         return;
       }
@@ -2558,6 +2675,16 @@ export function createBrowserState(
       views = projected;
       loadFailures = refused;
       status = 'ready';
+      // **The second trigger, and only for a load that really finished.** Every
+      // early return above — a superseded generation, a refused `open_workspace`, a
+      // refused `list_documents` — leaves this unreached, so a drain is requested
+      // exactly for the successful current open the consult's Q2 names. It is also
+      // where the shown epoch comes from: `open_workspace` answers a root and
+      // counts, so the first batch this drain brings back is the only thing that
+      // can supply one. And it is the **only** thing that opens the gate
+      // `workspaceOpened()` closed, so it also flushes every trigger that arrived
+      // while this open was loading.
+      reconciliation.workspaceReady();
     }, // End of function open()
 
     show(next: SidebarSelection): void {
@@ -3371,6 +3498,17 @@ export function createBrowserState(
       // in place of it.
       return applyRestore(session, sent.answer.sealed, invalidate);
     }, // End of function restoreDocument()
+
+    start(): void {
+      // Straight through, for `registerWriteSurface`'s reason one member down: the
+      // coordinator owns idempotence, the registration race and the pump, and a
+      // guard here would be a second rule that can drift from it.
+      reconciliation.start();
+    },
+
+    dispose(): void {
+      reconciliation.dispose();
+    },
 
     registerWriteSurface(
       surface: OpenWriteSurface,
