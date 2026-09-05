@@ -779,8 +779,10 @@ export function createReconciliationCoordinator(
       // the claim.** This arm runs after the await, a further successful open may
       // have installed another lifecycle and emptied the queue by then — nothing
       // stops one, and `./workspace.test.ts`'s *"lets the newer open win, however
-      // late the older one answers"* drives two overlapping opens — and nothing
-      // here observes whether one did. Provenance is what the paragraphs above
+      // late the older one answers"* drives two overlapping opens **at the host
+      // level only**, over `scriptedCommands()`: it pins that the overlap is
+      // reachable and pins nothing about Rust — and nothing here observes whether
+      // one did. Provenance is what the paragraphs above
       // classify, and **nothing here rests on the property** — the refusal below is
       // justified by unattributability — so the distinction costs the refusal
       // nothing and is written down only because a reader who takes "this one" as
@@ -792,17 +794,23 @@ export function createReconciliationCoordinator(
       // refuses a second open with a path that is not a directory, and then asserts
       // the session is still open at the same epoch, still ready, and still
       // delivering a live edit — so a change that let a refused open replace or
-      // empty the session turns that test **red**, and the paragraph above is not
+      // empty the session turns that test **red**, so the **workspace** half of the
+      // paragraph opening *"A third state is neither of those"* is not
       // reasoned-only. **What nothing pins is that the queue survives it**: that
       // test never drains, and no scripted-command suite in `./workspace.test.ts`
       // drives Rust at all — its failed-open case asserts the *gate*, and no batch
       // reaches this arm in it. So the queue half is **asserted in prose and rested
       // on by nothing here** — asserted by the paragraph opening *"A third state is
-      // neither of those"*, and again by the case-2 sentence above, which are the
-      // sites this sentence means and the reason it names them rather than saying
+      // neither of those"* and by that one alone, which is the site this sentence
+      // means and the reason it names it by its opening words rather than saying
       // *the paragraph above*: this arm records the *pre-await* `afterSequence` and
       // returns, never reading `batch.newest_sequence`, which is consumed in
-      // `accept()` alone. **The two paragraphs that carry the refusal's own
+      // `accept()` alone. **The case-2 sentence above is not a second site for it.**
+      // It repeats the same property *text* about **case 2** — a successful open
+      // that lost the lock race — and the paragraph opening *"A refused
+      // `list_documents` is not that state"* separates that case from this one in
+      // as many words, so the falsifying edit named at the end of this paragraph
+      // does not reach it. **The two paragraphs that carry the refusal's own
       // justification say different things and are cited as such**: the one below
       // says the refusal rests on unattributability; the one opening *"Which
       // lifecycle the batch describes"* says only that the lifecycle is not
@@ -821,7 +829,8 @@ export function createReconciliationCoordinator(
       // state on a number that may belong to another lifecycle poisons the cursor
       // for the session. Under `./workspace.svelte.ts` the cursor has also just
       // been cleared, which makes the same refusal right a second way — a property
-      // of that host and not of this line, exactly as the paragraph above says.
+      // of that host and not of this line, exactly as the paragraph opening *"An
+      // `open()` landed while this was in flight"* says.
       record(afterSequence, reasons, 'staleOpen');
       return;
     }

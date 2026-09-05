@@ -3610,3 +3610,68 @@ section under *Verification baseline* — every one of its three consequences wa
 and the gate is clean because of them — and the pre-instrument production baseline, which is the figure
 2d-5-7 compares against.
 
+
+## Phase 2d-5-3-H's verification narrative — archived 2026-09-05 at Phase 2d-5-3-I
+
+**55 lines, moved verbatim out of `PROGRESS.md`'s *Verification baseline* when 2d-5-3-I's replaced
+them.** The four figures it records — `1320 / 441 / 2307 / 188` — are unchanged and live; what is
+archived is that round's narrative about them.
+
+**One correction, marked here rather than after the text**: the block below says *"Thirteen independent
+full runs across eight phases"*. That was right when written; 2d-5-3-I's two runs make it **fifteen
+across nine**, and the live figure is in `PROGRESS.md`.
+
+### ⚠️ Two baselines are live at once, and only one of them is now a measurement
+
+**With the instrument in the working tree the four commands answer `1320 / 441 / 2307 / 188`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-3-H, twice** — once on the inherited tree, before the review was acted
+on, and once after the fix — and at 2d-5-3-G (twice), 2d-5-3-F (once), 2d-5-3-E (twice), 2d-5-3-D
+(twice), 2d-5-3-C (twice), 2d-5-3-B and 2d-5-3-A before it. **Thirteen independent full runs across
+eight phases, returning the same four figures every time** — and that is 2d-5-3-G's recorded *eleven
+across seven* plus this round's two, written with its derivation because a bare running total about
+this chain's own history is the shape 2d-5-3-H's findings 3 and 4 are about. The per-round split is in
+the same sentence, so a reader can re-derive it rather than inherit it.
+
+**Why the inherited-tree run is taken every round rather than inherited.** 2d-5-3-F ran the gates once,
+correctly reasoning that its inherited tree *was* the tree 2d-5-3-E measured — but that round's reviewer
+re-ran nothing either, so **no figure on that tree had been confirmed by a second party for a full
+round**. Every round since re-runs rather than inherit an inheritance, and this round's reviewer was
+told **not** to run `cargo test` at all, because the host scar below makes a concurrent run corrupt both
+readings. That is a deliberate trade: one party measures, and the measurement is taken twice.
+
+`cargo test --workspace -- --test-threads=1` was read **not through a pipe**, summed over **26**
+`test result` lines *and* checked by the complementary question — no line lacking `0 failed` — because a
+sum can be right while a binary is silent. `cargo clippy --workspace --all-targets -- -D warnings`
+(exit 0, read from a file rather than a pipe after a first reading was taken through `tail`),
+`cargo fmt --check` (exit 0) and `cargo tree -p espansoconfig-core | rg tauri` (finds nothing) are all
+clean. **Both bundle oracles were read on both builds and both lines are reported**, the second because
+it proves the search can match at all: server-only markers **absent**, client-only markers **present
+(2)**.
+
+**The citation the untouched half of this comment block rests on was re-confirmed, not assumed.**
+`test watch_check::a_failed_reopen_keeps_the_previous_watcher_watching ... ok` is present in this
+phase's serial transcripts. A citation naming a test that does not run is the defect a later round of
+this tail would find, and it costs one `rg` to rule out.
+
+**Nothing moved at 2d-5-3-H, and nothing could have.** Its source diff is **comment-only in the one
+file it touches** — `src/lib/browser/reconciliationCoordinator.ts` — so no file entered or left the
+program, no new reachable module, no new component and no new case. **It was proven comment-only
+mechanically rather than by eye**: `git diff -U0` filtered to changed lines that are neither comment
+lines nor blank returns nothing. **Every figure was run rather than inferred**, `cargo test` included —
+**this phase changed no Rust source at all**, which is precisely the shape that tempts an inference, and
+this round has the same sharp excuse the last one had: it re-derived the `WorkspaceSession` struct
+reading in `src-tauri/src/commands.rs`, a file it did not touch. The three consequences of the host scar
+were followed on **both** runs — serial form, redirected to a file rather than read through a pipe, and
+the complementary question asked of every one of the 26 `test result` lines. **The instrument's pin was
+re-checked before the fix and after it** and held at `5 insertions(+), 1 deletion(-)`. **No line in the
+edited file exceeds 90 characters**, checked with `awk`, because 2d-5-3-C shipped a 112-character line
+that nothing in this repository catches.
+
+**What no gate in this project can do, stated here because four green figures invite the opposite
+reading.** **No gate reads prose.** Every finding of this tail has been invisible to all four, and this
+round's are no exception: a dropped time index, an over-claiming citation, an absence claim asserted one
+sentence after its own negation was rejected, and a figure written four lines above a sentence saying no
+figure is written. `svelte-check`, `vitest`, `vite` and `cargo test` are evidence about code and
+evidence about **nothing this round changed**. The reviewer's `NOT-VERIFIED` list opens with exactly
+that, and it is the correct thing for it to have written rather than a gap in the review.
