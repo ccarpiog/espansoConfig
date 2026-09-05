@@ -818,3 +818,86 @@ different facts in the replacement sentence. `2d-5-2b-notes.md` §15.6 argues th
 verdict in full and, more usefully, states the condition that **would** reach the hatch: the same
 mis-attribution reappearing in the sentences written this phase. 2d-5-2b-D is the round positioned to
 see that, and it should apply the stated condition rather than re-argue it.
+
+---
+
+## The git-state prose of the closed 2d-5-2b chain, archived 2026-09-05 at Phase 2d-5-2c-1
+
+**Why it is here.** Every paragraph below argues a tail that is closed: the round-by-round §7.1
+reading for 2d-5-2b-D and -E, the hatch condition C set and D applied, what the five rounds bought
+stated without inflation, and the stale-citation sweep taken while E ran. The live checkpoint keeps
+the git table itself and a compact form of the one finding that is still work. Nothing is withdrawn.
+
+_The §7.1 reading applied round by round — to the **closed** 2d-5-1 and 2d-5-2a tails, and to
+2d-5-2b and its rounds A, B and C — is in
+[`status-table.md`](docs/progress-archive/status-table.md), under *"the tail-termination prose of the
+closed 2d-5-1 and 2d-5-2a chains"* and *"the round-by-round commissioning prose of the closed 2d-5-2b
+chain"*, both archived 2026-09-05. `docs/decisions/2d-5-2b-notes.md` §13-§17 is the authoritative
+per-round record. **What follows is only the two rounds that closed the tail.**_
+
+_The condition round C recorded for D to apply, since its paragraph is now archived: **the same
+mis-attribution reappearing** — the reachability of `restore.ts:1993` versus `:2581`, or the
+reactive-context split — in the sentences C had written. One defect surviving two consecutive fixes
+aimed at it._
+
+
+**2d-5-2b-D applied that condition rather than re-arguing it, and it is not met.** The round was
+asked to look for the *same* mis-attribution — `restore.ts:1993` versus `:2581`, or the
+reactive-context split — surviving in the sentences 2d-5-2b-C wrote. It does not: both are correct in
+substance at every rewritten site, confirmed by the round and independently re-derived by the
+orchestrator against `restore.ts`'s own function boundaries (`2d-5-2b-notes.md` §16.4). **What D found
+instead is a class this chain had not yet seen** — four **stale figures**, of which three were carried
+verbatim out of C's own reviewer's report and one had been invalidated by C's own commit. So the
+prediction two paragraphs above holds again on both halves: no round has found the code wrong, and D's
+findings are neither the same defect surviving nor a twelfth instance of *a sentence wider than its
+code*.
+
+**The round D commissions is 2d-5-2b-E**, by the same reading of the same rule: §7.1's input is this
+phase's own fix-round diff, and here — as in every phase of this chain — the fix round and the phase
+coincide. That diff changed **two source files**, `src/lib/components/MatchCreator.svelte` and
+`src/lib/components/DetailPane.test.ts`, **every changed line a comment and the diff
+line-count-neutral**, plus `docs/decisions/2d-5-2b-notes.md`, `docs/reviews/phase-2d-5-2b-{C,D}.md`,
+`docs/progress-archive/next-action-history.md` and this file — every one of those on §7's closed list
+and therefore not counted. **So a round is owed and it is 2d-5-2b-E's.**
+
+**The one general lesson worth carrying past this chain**: a cross-file line citation is invalidated by
+any commit that adds or removes a line above the cited line **in the file it points at** — including
+the citing commit itself, which is what happened here. Nothing in this repository pins such a citation,
+and building a checker that resolves `file:line` references in comments is a real tool that is not this
+chain's work (`2d-5-2b-notes.md` §16.6 item 2, *recorded only*). Until one exists, the practical guard
+is the one D used: **keep a fix line-count-neutral where it can be, and re-derive every citation into
+any file the fix does change.**
+
+**2d-5-2b-E closed the tail, and it is the mechanism's second clean closure in this chain's
+neighbourhood.** Round E returned `ship` — 0 blockers, 0 SHOULD-FIX, 0 NIT — so the fix answering it
+changed nothing, so it changed no source file, so §7.1 commissioned no round and §7.2 closed the step.
+2d-5-1's tail and 2d-5-2a's ended the same way; 2d-5-2b's took five rounds to get there because each of
+the first four fixes touched source. **No human said stop and no owner ruled**, which is the whole
+point of the rule.
+
+**What the five rounds actually bought, stated without inflation.** Rounds A through D found and closed
+**fifteen** findings, 0 blockers among them, and **every one was a defect in a comment** — a sentence
+wider than its code, or a figure that no longer described the file. Not one round found an executable
+line wrong, and the four gate figures never moved. That is a real result and it is also a bounded one:
+**this tail verified sentences about the model, never the model.** A defect in `restore.ts`'s actual
+reachability, as opposed to in the prose describing it, would have survived all five rounds
+(`2d-5-2b-notes.md` §17.4 item 4, *recorded only*).
+
+**The finding that outlives the tail was produced outside it.** While round E ran, the orchestrator
+swept `src/` for the defect class round D had found in one passage, and found **four stale cross-file
+citations in three other files** — `reapply.ts` twice, `writeSurfaceRegistry.ts` and `restore.test.ts`.
+**Every one that was chased had been correct when written**: `MatchDeleter.svelte:464` was
+`{#if view.confirming}` at `a2069db`, the commit whose sentence cites it as "the deleter's renewed
+confirmation", and `DetailPane.svelte`'s per-kind chain ended at **`:961` exactly** at `0f1ad8b`, the
+commit whose sentence cites `:844-961`. So the class is **drift**, it is repository-wide, and
+`writeSurfaceRegistry.ts`'s instance was caused by **2d-5-2b's own additions to `DetailPane.svelte`** and
+survived all five rounds of the chain that caused it.
+
+**It was deliberately not fixed in this phase.** E's commissioned scope was four comment lines in two
+other files, and the workflow forbids unrelated changes in a phase commit; fixing four citations in
+three further files would also have changed source and commissioned another round on work nobody had
+scoped. It is recorded as a **candidate corrective phase** with its measurement intact
+(`2d-5-2b-notes.md` §17.3), for a later phase to adopt deliberately. **The durable guard, if one is
+wanted, is a checker that resolves `file:line` references in comments** — `src/` holds 26 such
+references today and no test pins a single one.
+

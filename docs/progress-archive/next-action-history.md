@@ -10330,3 +10330,73 @@ second consecutive commit**. That is one defect class surviving two consecutive 
 [`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"archived 2026-09-05
 at Phase 2d-5-2b-D"*, with its three superseded figures marked **in place**. 2d-5-2b-C's own commit
 message carries the same three and is left as written, a commit message being a historical snapshot.
+
+---
+
+## The Next-action prose of Phase 2d-5-2b-E, archived 2026-09-05 at Phase 2d-5-2c-1
+
+**Why it is here.** 2d-5-2b's five-round tail closed by rule at round E, and the block below is
+the closure argument in full, together with the stale-cross-file-citation sweep that tail produced
+and 2d-5-2b-E's own account of what 2d-5-2c would be. The live checkpoint keeps a compact form of
+the two things that are still work — the four stale citations, and what 2d-5-2c is — and this is
+where the argument behind them lives. Nothing here is withdrawn.
+
+#### Why nothing is owed, so nobody has to decide it
+
+2d-5-2b-E's one review ([`docs/reviews/phase-2d-5-2b-E.md`](docs/reviews/phase-2d-5-2b-E.md))
+returned **`ship`: 0 blockers, 0 SHOULD-FIX, 0 NIT.** §7.1 reads one input — the diff of the fix round
+answering the round — and **a round with nothing to fix produces a fix round that changes nothing**,
+which changes no source file, which commissions no round. Under §7.2 **the step closes**. That is
+§7.2's named common case, not a second rule, and no owner ruling was needed or taken.
+
+The chain that just ended: **2d-5-2b** (`505caf6`) → **A** (`92fe0f4`) → **B** (`4f1fdb3`) →
+**C** (`eb1134a`) → **D** (`0917cc3`) → **E** (closing). Five rounds after the original, each
+commissioned by the previous fix touching source.
+
+**The closing round was checked, not accepted.** §7 names *"a tail that closes on a round nobody
+checked"* as the failure mode this rule invites. Every substantive claim in E's report had already been
+measured independently by the orchestrator while fixing D, and the two agree on all of it — the four
+corrected figures, the seven unchanged `restore.ts` citations, and the line-count neutrality
+(`git show --numstat 0917cc3` → `3 3`, `1 1`). The one claim E added,
+`docs/reviews/phase-2d-5-design.md:45`, was checked separately and holds.
+`2d-5-2b-notes.md` §17.2 is the record.
+
+#### The one thing this tail produced that outlives it — and it is **not** discharged
+
+**Cross-file `file:line` citations in comments drift, and four of them in `src/` are stale right now.**
+The orchestrator swept for the class while round E ran. `src/` holds **10 fully-qualified citations**
+and **16 bare `:NNN` continuations**; of the ten, **four are wrong**:
+
+| Citing site | Cites | Is actually |
+|---|---|---|
+| `browser/reapply.ts:612` | `MatchDeleter.svelte:464` as "the deleter's renewed confirmation" | `</dl>` — the control is `:486` |
+| `browser/reapply.ts:613` | `MatchMover.svelte:663` as "the mover's rebuilt destination list" | `<dd>{label}</dd>` |
+| `browser/writeSurfaceRegistry.ts:231` | `DetailPane.svelte:844-961` as the one-block-per-kind chain | comment prose — the chain is `:1165`-`:1317` |
+| `browser/restore.test.ts:2504` | `DetailPane.svelte:525-527` as where the pane declines to close the restore | JSDoc about `OpenWriteSurface & { kind: K }` |
+
+**Every one that was chased was correct when written** — `MatchDeleter.svelte:464` was
+`{#if view.confirming}` at `a2069db`, the commit that wrote the sentence citing it, and the
+`DetailPane` chain ended at **`:961` exactly** at `0f1ad8b`, the commit that wrote
+`writeSurfaceRegistry.ts`'s sentence. **So this is drift, and `writeSurfaceRegistry.ts`'s instance was
+caused by 2d-5-2b's own additions to `DetailPane.svelte`** — unnoticed by all five rounds of the chain
+that caused it.
+
+**It is recorded as a candidate corrective phase and deliberately not fixed**: fixing it inside a phase
+whose commissioned scope was four comment lines in two other files would be exactly the unrelated
+change the workflow forbids. A later phase adopts it, and `2d-5-2b-notes.md` §17.3 and §17.4 hold the
+measurement. **The cheap durable guard, if a phase wants one, is a checker that resolves `file:line`
+references in comments** — nothing in this repository pins one of the 26 today.
+
+#### What 2d-5-2c is, and why it is a whole step
+
+**2d-5-2c — the narrow window regression reading**, which **may not claim real watcher delivery**
+(`2d-5-split-notes.md` §7 item 7). ⬜️ not started. **It is a separate step because the instrument no
+longer exists**: every prior reading ran out of `/private/tmp/espansoconfig-harness-2c-5/`, which
+2c-5-7 removed and which is not on disk today. Rebuilding it was a whole sub-phase twice already
+(2c-5-5a, 2c-5-5b), so **budget it as one**. **A window reading is still owed and is not discharged.**
+
+Read before starting it: `docs/decisions/1c-2b-2b-2-notes.md` §6.1 (one plan per launch, into a fresh
+bundle path — an occluded WKWebView stops running `setTimeout` about six seconds after launch) and
+`docs/decisions/2c-2-2-window-reading.md` §1.2 (**`localStorage` follows the bundle identifier, not
+`HOME`**, so a plan must set the language explicitly through the picker).
+
