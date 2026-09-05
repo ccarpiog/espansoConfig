@@ -11531,3 +11531,136 @@ test named by symbol from a TypeScript comment — which nothing enforces either
 alternative `PROGRESS.md` has now nominated four times — a checker that resolves `file:line` references
 in comments — is still unbuilt, and it would also discharge the four stale cross-file citations under
 `src/` recorded below.
+
+---
+
+## Phase 2d-5-3-F's record and its Next-action prose — archived 2026-09-05 at Phase 2d-5-3-G
+
+**101 lines, moved verbatim out of `PROGRESS.md`'s *Next action* when 2d-5-3-G superseded them.**
+History, never an instruction: the only live next action is the one in `PROGRESS.md`.
+
+**Three claims below were corrected by 2d-5-3-G, and they are marked here at the top rather than
+after the text**, which is 2d-5-2b-C's precedent — a reader who scrolls stops at the first wrong
+sentence.
+
+1. **"no test in this repository runs two overlapping opens" is FALSE** (2d-5-3-G Medium 3).
+   `src/lib/browser/workspace.test.ts`'s *"lets the newer open win, however late the older one
+   answers"* runs `const pending = state.open(null); await state.open('/tmp/other');` in a suite
+   named *overlapping requests*. Only the Rust-refusal half was undriven, and the source sentence
+   that rested on the claim has been removed.
+2. **"The paragraph count is now six" is not re-derivable** (2d-5-3-G Low 1). *"Three paragraphs of
+   the `staleOpen` arm"* names no set — `runOneDrain()` has **two** arms recording `'staleOpen'`, and
+   the second one's paragraph asserts the third state and falls outside the six on every reading.
+   Counting production sites gives **eight**. 2d-5-3-G asserts **no** figure and records the
+   criterion problem instead.
+3. **Low 2's fix, described below as the round's only source change, was itself replaced**
+   (2d-5-3-G Medium 2). The conclusion held, but the *"`open()` has no re-entrancy guard … a case-2
+   batch followed by a later open"* construction was unnecessary and its premise undriven: in case 2
+   the batch already is the incoming lifecycle's queue and Rust still holds that lifecycle, so the
+   property is satisfied outright.
+
+**One thing below is not corrected but was overtaken**: the round is described as *"the first with no
+Medium … the first sign of convergence"*. 2d-5-3-G returned three Mediums, one of them a
+contradiction that had been inside the edited comment block for two rounds.
+
+#### Phase 2d-5-3-F — the round §7.1 commissioned for 2d-5-3-E's fix
+
+**Complete as a round, every gate green — and `SUPERSEDED BY 2d-5-3-G`, never complete.** Risk class
+**high**; worker model **opus** (no implementation worker: the phase's product is a review and its fix,
+both taken by the orchestrator). Record:
+[`docs/decisions/2d-5-3-F-notes.md`](docs/decisions/2d-5-3-F-notes.md); review
+[`docs/reviews/phase-2d-5-3-F.md`](docs/reviews/phase-2d-5-3-F.md). 2d-5-3-E's Next-action prose —
+**98 lines** — is archived in
+[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"archived 2026-09-05 at
+Phase 2d-5-3-F"*, with the three claims this round corrected marked at the top of the archived copy.
+
+**Verdict `ship-with-fixes`, 0 blockers**, **0 Medium**, and three findings the reviewer graded
+SHOULD-FIX — one record defect and two Lows. **All three were re-derived against the code before any
+fix was applied**, all three hold, and all three are fixed.
+
+**Two things about this round are new to the tail.** It is the **first whose findings are not all in
+the previous round's fix** — one is, one is a record-keeping defect, and one is an ambiguity 2d-5-3-E
+inherited rather than created. And **the severity fell**: three rounds of Mediums, then none.
+
+**The record defect: one file both closed and left open the same numbered item.** `2d-5-3-E-notes.md`
+§3 said *"2d-5-3-D's thin item 4 is closed by measurement"* while describing the **citation-anchor**
+item, which is 2d-5-3-D's §8 item **5**. Item **4** is the unreproduced able-to-fail residue, and
+2d-5-3-E's own §7 says it cleared **none** of it. The wrong number had propagated to three positions in
+this file. All four are corrected in place, carrying the correction rather than a silent renumber:
+*which* item a round discharged is exactly the sort of claim a later phase inherits without re-checking.
+
+**Low 1: the paragraph count was six, and five was repeated inside the warning against repeating it.**
+2d-5-3-D asserted the three-state claim is *"asserted in five comment paragraphs and tested by none"*;
+its reviewer recorded the count `NOT-VERIFIED`; 2d-5-3-E carried it into **its own §8 item 3, the item
+whose whole point is that a count must be re-derived rather than inherited**. Enumerated this round the
+answer is **six** — `reconciliationCoordinator.ts`'s module doc, the `awaitingWorkspaceReady` doc, three
+paragraphs of the `staleOpen` arm, and `workspace.svelte.ts`'s failed-open arm — and **2d-5-3-E's own
+fix added the sixth**. *"Tested by none"* is false too, because 2d-5-3-E's Medium 1 established that the
+workspace half **is** pinned in Rust. That item is **left standing with its correction attached rather
+than rewritten**: a count copied forward into the paragraph forbidding exactly that is worth more than a
+tidy number.
+
+**Low 2, the only fix that touched source: *"never this one"* is true of provenance and short by a case
+under the property reading.** The third-state paragraph defines that state by **provenance** — a refused
+`open_workspace`, which returns from `Workspace::discover(root)?` before the lock — and then states a
+**property** as its consequence. `open()` has **no re-entrancy guard**, so a batch produced after open
+#1's swap (case 2), followed by a **later** open refusing at that early return, leaves Rust holding the
+very workspace that batch came from: the property holds while the provenance is still case 2. **The
+refusal is unaffected** — the arm rests on unattributability, never on the queue being intact — which is
+why this is a Low. The comment now says which reading it means. **It was inherited, not introduced**:
+the property sentence is 2d-5-3-C's, and 2d-5-3-E's fix merely put a classifying sentence beside it.
+
+**What the round checked and left standing**, each re-derived: the Rust citation is accurate and refuses
+through the same early return the comment names; **the queue half really is unpinned**, so 2d-5-3-E's
+narrowed claim is not its predecessor's defect repeated; and the lock-race attribution holds, state 1
+included.
+
+**§7.1 commissions a round, so this phase is `SUPERSEDED`, not complete.** The fix changed **one source
+file** — `src/lib/browser/reconciliationCoordinator.ts` — comment-only, proven mechanically. **Two of
+the three fixes were prose and commission nothing; the third is why a round is owed, and it is a Low** —
+exactly the case §7.1 was rewritten to cover, because its first version said fixing a Low opens no round
+and that was backwards for a Low whose fix edits source.
+
+**Nothing is `BLOCKED`.** No item in `2d-5-3-F-notes.md` §7 names an unfixed correctness defect in a
+source file.
+
+#### The next action is **Phase 2d-5-3-G — the round §7.1 commissioned for 2d-5-3-F's fix**
+
+Scope it to that fix and to nothing else: the **one** rewritten passage in
+`src/lib/browser/reconciliationCoordinator.ts` — the sentence closing `runOneDrain()`'s `list_documents`
+paragraph, now qualified with the provenance/property distinction — and
+`docs/decisions/2d-5-3-F-notes.md` in full, together with the item-number and count corrections this
+round made to `2d-5-3-E-notes.md` and to this file. **Check the comments against the code, not the code
+against the comments** — that instruction has now found nine Mediums and three Lows across six rounds.
+
+**Five things worth a reviewer's attention that this round did not reach**, all five marked in
+`2d-5-3-F-notes.md` §7. **The clarification this round added is itself a new comment claim about
+`open()`'s re-entrancy**, re-derived from `workspace.svelte.ts`'s generation checks but driven by
+nothing — no test in this repository runs two overlapping opens — so it is reasoned exactly like the
+paragraph it qualifies. **The paragraph count is now six and nothing holds it at six**: it was
+enumerated once, by hand, and the next comment added to any of those six sites falsifies it silently.
+**The cross-language anchor added at 2d-5-3-E is unchanged and unenforced.** **2d-5-3's able-to-fail
+residue — 2d-5-3-D §8 item *4*, now correctly numbered — is still unreproduced**, and three consecutive
+rounds have cleared none of it. **And this round's reviewer re-ran no gate**, inheriting every figure
+from the orchestrator's own runs and saying so; a reviewer that inherits figures cannot catch a figure
+that is wrong, which is why the orchestrator ran all four itself, twice.
+
+**One thing a reviewer should judge rather than inherit.** Six positions now cite a comment by **the
+words it opens with**, or a function or a **Rust test** by symbol, rather than by line. 2d-5-3-E checked
+the five that existed then and all five resolved; **this round added no new anchor and re-checked
+none**. The durable alternative `PROGRESS.md` has now nominated four times — a checker that resolves
+`file:line` references in comments — is still unbuilt, and it would also discharge the four stale
+cross-file citations under `src/` recorded below.
+
+Then 2d-5-4 — the observation state transitions. Read
+[`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md) (**the consult; it binds**) and
+[`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) §5 before treating
+`phase-2d-design.md` step 5 as the spec.
+
+**The instrument stays in the working tree until a step deliberately removes it.** Nothing in the
+2d-5-3 chain needs it. The production baseline cannot be re-measured until it is gone, which is
+2d-5-7's business (*production activation, the capability widening and the baseline re-measure*); until
+then the two baselines below are both live. When that step comes, it must also delete the **fourteen**
+scratch files outside the harness tree that `rm -rf` on the harness path does not reach
+(`/private/tmp/espansoconfig-probe-decoy-C01.yml` … `…-C07.yml` and their `.before` siblings).
+

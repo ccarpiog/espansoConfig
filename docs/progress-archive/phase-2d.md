@@ -3380,3 +3380,48 @@ rather than at the bound, and the precedent that matters is the *refusal* rather
 wanted the chain's rows badly, they were the longest thing in the table, and it did not take them,
 because *superseded* is not *closed*. Archiving on length rather than on state is how a live chain
 loses its head.
+
+---
+
+## `PROGRESS.md`'s header accuracy history and per-phase arithmetic — archived 2026-09-05 at Phase 2d-5-3-G
+
+**29 lines moved verbatim out of the header.** What stays in `PROGRESS.md` is the *live* figure, the
+*rules* and the *targets*; what is here is the round-by-round arithmetic that established them, which
+is history the moment the next round re-measures. This is the same split the header already applies to
+the three archive rules — *"kept here because they are rules; the arithmetic that established them is
+archived"*.
+
+**The one sentence worth carrying forward, because it is a rule rather than arithmetic:** the header's
+figure is re-derived **after** the record is written, never before, and the SHA-record commit's
+one-line contribution is stated rather than folded in. That order is what made three consecutive
+headers accurate after two stale ones.
+
+**The header has now been accurate three times running, and the third is the one that means something,
+because this round's archive did not keep the file level.** 2d-5-3-E inherited **761 lines and ~99 KiB**
+against an actual 761 and 100,986 bytes; 2d-5-3-F inherited **755 and 105,349** against exactly that;
+2d-5-3-G inherited **755 and 109,910** against a promised 754 + the one line its SHA-record commit adds,
+and 109,841 bytes against 109,910 — **the byte figure was 69 bytes stale even while the line figure was
+exact**, which is the same decoupling the paragraph above names, seen a round early and missed. Before
+them, two rounds running found it stale — 2d-5-3-C wrote a whole phase record without re-deriving it,
+and 2d-5-3-D opened a file **22 lines and 4.5 KiB** from what the paragraph promised, with 12 lines of
+headroom where it advertised 34. **What changed is only the order**: the figure is re-derived *after*
+the record is written instead of before, and the SHA-record commit's contribution is stated rather than
+folded in. **The next session must still re-derive these rather than quote them** — an accurate
+inherited header is precisely the moment that feels safe to skip.
+
+**The honest arithmetic of this phase, every step of it measured rather than predicted: 755 → 654
+(archive, −101) → 763 (this phase's record and Next-action prose, +109) → the figure above, once the
+status row, the git-state row, the baseline and ladder updates and this header were written.** **One
+archive was not enough this time, and that is the change**: for two rounds the displacing prose came in
+*smaller* than the prose it displaced, and this round's came in **larger** — 109 against 101 — so the
+head rose by **19 lines and 7,965 bytes across an archive of 101 lines**. That is the rule working as
+stated rather than failing: **an archive holds a live chain's growth near zero and does not reduce it.**
+**The total is stated once, in the paragraph above, and nowhere else** — a figure repeated in two places
+is a figure that goes stale in one. What moved out: 2d-5-3-F's record and Next-action prose, **101
+lines**, to [`next-action-history.md`](docs/progress-archive/next-action-history.md) — the target the
+previous session named a phase in advance — with **the three claims this round corrected marked at the
+top of the archived copy rather than after it**, which is 2d-5-2b-C's precedent. **The 2d-5-3 chain's
+status rows stayed**, because the chain is live — 2d-5-3-H is owed, and *superseded* is not *closed*;
+2d-4b-G's refusal is still the precedent that matters, and it is precisely the precedent that costs
+something now.
+

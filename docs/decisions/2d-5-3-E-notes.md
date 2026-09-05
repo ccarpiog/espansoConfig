@@ -55,6 +55,19 @@ asserts that the reconciliation queue's stored entries survive a refused open �
 arm actually rests on, because what the arm needs is that the batch's `newest_sequence` still indexes
 the queue Rust is holding. The comment now says exactly that, and no more.
 
+> **Correction, 2d-5-3-G.** The clause *"which is the half this arm actually rests on, because what the
+> arm needs is …"* is **false**, and so is the sentence it put into the source comment. **This arm rests
+> on nothing of the kind**: it calls `record(afterSequence, reasons, 'staleOpen')` and returns, where
+> `afterSequence` is the **pre-await** watermark captured before `host.drain(...)`, and
+> `batch.newest_sequence` is consumed in `accept()` alone — which this arm returns above and never
+> reaches. It contradicted two paragraphs of the very comment block it was added to: 2d-5-3-C's
+> *"What makes the refusal right in all three is that nothing here can attribute the number, **never
+> that the queue is gone**"*, and 2d-5-3-F's *"nothing here rests on the property"*. What survives is
+> the narrower true claim: **the queue half is asserted by the comment and rested on by nothing**, so
+> an edit that reset the queue on the refusal path falsifies *the comment* rather than the refusal.
+> The source comment is corrected; this paragraph is left standing with the correction attached, which
+> is 2d-5-3-F's precedent for a claim a later round has to re-check.
+
 **The shape matters more than the instance.** A round traded an overclaim about *coverage* for an
 overclaim about *absence*. An absence claim reads as humility — it appears to be the careful,
 self-limiting thing to write — and it is exactly as unchecked as the citation it replaced, with the
@@ -183,6 +196,19 @@ five — `reconciliationCoordinator.ts` at its module doc (`:70-71`), at
 none"*, which is false of the workspace half precisely because of what this round's Medium 1
 established.
 
+> **Correction, 2d-5-3-G — the replacement count is not re-derivable either, and no number replaces
+> it.** *"Three paragraphs of the `staleOpen` arm"* does not name a set: `runOneDrain()` has **two**
+> arms that record `'staleOpen'`, and the second one — the `awaitingReady()` arm, whose paragraph says
+> `WorkspaceSession::open` *"may refuse at `Workspace::discover(root)?` and leave the previous
+> workspace installed indefinitely"* — asserts the third state and falls outside the six on **every**
+> disambiguation. Counting sites that assert the third state gives **eight** in production; a different
+> predicate gives a different number, and that is the defect rather than the arithmetic. **Five, then
+> six, then eight is a count re-derived three times and pinned by nothing**, which is the fifth time
+> this chain has recorded one with no mechanism behind it, so this round asserts **no** figure: what is
+> written down is the criterion problem. The `:70-71` and `:440` line anchors above are also against
+> this chain's own opening-words convention (2d-5-3-D §8 item 5), adopted in the commit that shifted
+> lines in that file; both still resolve today, which is luck rather than a guard.
+
 ## 8. Where it is thin
 
 1. **The new Rust citation is this round's own most likely defect — *actionable*, and it is not a
@@ -197,6 +223,13 @@ established.
    gate in the project green. That is narrower than what 2d-5-3-D claimed for the whole state, and it is
    real. Its fix is a test that drains after a refused open, which nothing in this chain's scope asks
    for.
+
+   > **Correction, 2d-5-3-G.** The item survives, but **its premise did not**: it was written on the
+   > false clause corrected in §1 above, as though the queue property were what the arm needs. It is
+   > not — the arm refuses without reading `newest_sequence`. So what an edit resetting the queue
+   > falsifies is **the comment's own assertion**, not the refusal's justification, and the item is a
+   > **documentation-coverage** bound rather than a behavioural one. It stays *recorded only* either
+   > way, so §7.3 holds no step open for it.
 3. **The paragraph count was unverified and is now enumerated — *recorded only*, corrected by
    2d-5-3-F.** This item shipped saying *five*, inherited from 2d-5-3-D's §8, and repeating an
    unverified figure inside the item that warns about unverified figures. The enumerated answer is

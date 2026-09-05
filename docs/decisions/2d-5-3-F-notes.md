@@ -120,6 +120,17 @@ no round, and that was backwards for a Low whose fix edits source.
    without unwinding its *Rust* ones — but **nothing in this repository drives two overlapping opens**,
    so the sentence is reasoned rather than executed, exactly like the paragraph it qualifies. A later
    phase may adopt it.
+
+   > **Correction, 2d-5-3-G — the absence claim is false, and the source claim it defended is gone.**
+   > `src/lib/browser/workspace.test.ts`'s *"lets the newer open win, however late the older one
+   > answers"* runs `const pending = state.open(null); await state.open('/tmp/other');` inside a suite
+   > named *overlapping requests*, so the **frontend** half of the re-entrancy claim is executed today;
+   > only the Rust-refusal half was undriven. This is the same shape 2d-5-3-E's own Medium 1 was raised
+   > against — **an absence claim reads as humility and is exactly as unchecked as a citation**, with
+   > the added property that no reader is prompted to go and look. 2d-5-3-G removed the re-entrancy
+   > sentence from the source comment altogether rather than re-scoping it: the point it was arguing
+   > holds in case 2 **outright**, because the batch there already is the incoming lifecycle's queue
+   > and Rust is still holding that lifecycle, so no second open was ever needed to arrange it.
 2. **The paragraph count is now six and nothing holds it at six — *recorded only*.** The figure was
    enumerated once, by hand, and the next comment added to any of those six sites falsifies it silently.
    This is the fourth time this chain has recorded a count with no mechanism behind it.

@@ -22,66 +22,76 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, measured on the finished file rather than predicted before it:**
-**754 lines and 109,841 bytes (~107 KiB)** — over the 64 KiB soft bound and well past the 400-line
-one, but **46 lines under the 800-line hard bound**. **It is over soft, the figure is re-measured on
-this file rather than inherited, and it is the honest one** — measured after 2d-5-3-F's archive *and
-after this paragraph was written*, which is the only order that gives a true number. It was taken
-**before** the SHA-record commit below it, which has added **one** line every time this chain has
-measured it. A session's draft of this sentence once said 698, measured before the paragraph it sat in
-existed: **a derived figure outlives the thing it was derived from unless something re-derives it**,
-which this file already says in the paragraph opening *"That failure recurred at the 2d-5 consult in a
-new place"*. **That citation used to read "at line 21"**, and it was changed to an anchor for the
-reason the whole 2d-5-3 chain has been arguing: a line number into a file the record keeps editing does
-not survive its own commit.
+**776 lines and 114,362 bytes (~112 KiB)** — over the 64 KiB soft bound, well past the 400-line one,
+and **24 lines and 16,710 bytes under the hard bounds** (800 lines / 128 KiB). **It is over soft,
+the figure is re-measured on this file rather than inherited, and it is the honest one** — measured
+after 2d-5-3-G's archive *and after this paragraph was written*, which is the only order that gives a
+true number. It was taken **before** the SHA-record commit below it, which has added **one** line every
+time this chain has measured it. A session's draft of this sentence once said 698, measured before the
+paragraph it sat in existed: **a derived figure outlives the thing it was derived from unless something
+re-derives it**, which this file already says in the paragraph opening *"That failure recurred at the
+2d-5 consult in a new place"*. **That citation used to read "at line 21"**, and it was changed to an
+anchor for the reason the whole 2d-5-3 chain has been arguing: a line number into a file the record
+keeps editing does not survive its own commit.
 
-**The header has now been accurate twice running, and the second time is the one that means
-something.** 2d-5-3-E inherited **761 lines and ~99 KiB** against an actual 761 and 100,986 bytes, and
-2d-5-3-F inherited **755 and 105,349** against exactly that, plus the one line its SHA-record commit
-says it adds. Before them, two rounds running found it stale — 2d-5-3-C wrote a whole phase record
-without re-deriving it, and 2d-5-3-D opened a file **22 lines and 4.5 KiB** from what the paragraph
-promised, with 12 lines of headroom where it advertised 34. **What changed is only the order**: the
-figure is re-derived *after* the record is written instead of before, and the SHA-record commit's
-contribution is stated rather than folded in. **The next session must still re-derive these rather than
-quote them** — an accurate inherited header is precisely the moment that feels safe to skip.
+**⚠️ Lines and bytes have decoupled, and the line count is now the wrong single thing to watch.**
+**These rows are long** — 2d-5-3-G's status row alone is **2,460 bytes on one line** — so the two
+bounds no longer move together, and a session watching only lines will misjudge the room. **Measure
+both.** This round's net cost, after **three** archives totalling 139 lines, was **+21 lines and
++4,452 bytes** (755 → 776; 109,910 → 114,362), which leaves **24 lines** and **16,710 bytes**. On
+lines that is about one more round; on bytes it is nearer four. **The line bound binds first, and it
+binds soon**: an unarchived round of this chain has cost as much as 132 lines, so the next session must
+archive before it writes, exactly as the paragraph below says. **The figure that caught this was the
+byte one**: 2d-5-3-G inherited a header whose line count was exact and whose **byte** count was 69
+bytes stale, which is the same decoupling seen a round early and missed.
 
-**The honest arithmetic of this phase, every step of it measured rather than predicted: 756 → 758 (the
-three record corrections) → 660 (archive, −98) → 748 (this phase's Next-action prose, +88) → the figure
-above, once the status row, the git-state row, the baseline and ladder updates and this header were
-written.** **One archive was enough, as at 2d-5-3-E and unlike 2d-5-3-D**, because this round's
-Next-action prose again came in **smaller than the prose it displaced** — 88 against 98, the second
-round running to do so. That does not make the chain's shape different: **an archive holds a live
-chain's growth near zero and does not reduce it**, and this phase moves the head by a handful of lines
-in either direction. **The total is stated once, in the paragraph above, and nowhere else** — a figure
-repeated in two places is a figure that goes stale in one. What moved out:
-2d-5-3-E's own Next-action prose, **98 lines**, to
-[`next-action-history.md`](docs/progress-archive/next-action-history.md) — the target the previous
-session named a phase in advance — with **the three claims this round corrected marked at the top of
-the archived copy rather than after it**, which is 2d-5-2b-C's precedent. **The 2d-5-3 chain's status
-rows stayed**, because the chain is live — 2d-5-3-G is owed, and *superseded* is not *closed*;
-2d-4b-G's refusal is still the precedent that matters.
+**The order that keeps this header honest, kept as a rule while its arithmetic is archived.** The
+figure above is re-derived **after** the record is written, never before, and the SHA-record commit's
+one-line contribution is stated rather than folded in. That order is what made three consecutive
+headers accurate after two stale ones — and 2d-5-3-G still found the inherited **byte** figure 69
+bytes stale while the line figure was exact, which is the decoupling above, seen a round early and
+missed. **The next session must re-derive both rather than quote them**; an accurate inherited header
+is precisely the moment that feels safe to skip. The round-by-round accuracy history and this phase's
+own step-by-step arithmetic are archived in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"`PROGRESS.md`'s header accuracy history and
+per-phase arithmetic"*. **One archive was not enough this time, and that is the change**: for two
+rounds the displacing prose came in *smaller* than the prose it displaced; this round's came in
+**larger**, so the head rose across an archive of 101 lines and **two further archives were taken in
+the same session** — the nine closed-chain status rows and this header history. **An archive holds a
+live chain's growth near zero and does not reduce it.**
 
-**The next session should still archive before writing its record, not after.** A phase record of this
-chain has cost between 16 and **132** lines — the upper figure is 2d-5-3-D's, and the range is worth
-re-deriving rather than quoting — so the room above is **not** large enough to make writing first safe
-by arithmetic. **The prediction this header carried into 2d-5-3-F was wrong for the third round
-running, and always in the same direction**: it said that if 2d-5-3-F's fix touched no source file the
-chain would close with it. It touched one — `reconciliationCoordinator.ts`, comment-only, for a **Low**
-— so the tail continues. **Six rounds have now run and five found a real defect in the previous round's
-fix**; the sixth found none, which is the first sign of convergence this chain has produced, and it is
-still not closure. **Do not plan an archive around this chain closing**, and treat a header sentence
-that predicts closure as a wish rather than a figure.
+**The next session must archive before writing its record, and one target will not be enough.** A phase
+record of this chain has cost between 16 and **132** lines — the upper figure is 2d-5-3-D's, and the
+range is worth re-deriving rather than quoting — so the room above is **not** large enough to make
+writing first safe by arithmetic, and on bytes it is not large enough for two more rounds at all.
+**The prediction this header carried into 2d-5-3-G was wrong for the fourth round running, and always
+in the same direction**: it said that if 2d-5-3-G's fix touched no source file the chain would close.
+It touched one — `reconciliationCoordinator.ts`, comment-only, for **two Mediums** — so the tail
+continues. **Seven rounds have now run and six found a real defect in the previous round's fix**; the
+sixth found none and its record read that as convergence, and **the seventh returned three Mediums and
+disproved it**. **Do not plan an archive around this chain closing**, and treat a header sentence that
+predicts closure as a wish rather than a figure.
 
-**The target is named rather than left to be searched for.** If 2d-5-3-G's fix touches no source file
-the chain closes with it, and the archivable move grows by one row rather than changing in kind, on
-*state* rather than on length: the chain's **seven** status rows (2d-5-3, -A, -B, -C, -D, -E, -F) to
-[`status-table.md`](docs/progress-archive/status-table.md), leaving one summary row and a pointer, and
-2d-5-3-F's Next-action prose to `next-action-history.md`. That is well over 150 lines and it is the
-first archive of this chain that would leave the head genuinely short rather than merely level. **If
-the chain does not close**, the cheapest single target is unchanged in kind — this phase's own
-Next-action prose, once 2d-5-3-G supersedes it. What may **not** be taken to make room: the
-flaky-`cargo test` section under *Verification baseline* — every one of its three consequences was
-followed this session and the gate is clean because of them — and the pre-instrument production
-baseline, which is the figure 2d-5-7 compares against.
+**Two of the three targets this session named have already been spent by it, and the next session
+inherits a shorter list than the last one did.** **Taken at 2d-5-3-G**: the nine closed-chain status
+rows — 2d-3, 2d-4a, 2d-4a-D…H, 2d-4a-C-1, 2d-4a-C-2, the 2d-4b design consult, 2d-4b, 2d-5-1 and
+2d-5-2, **9 lines and 5,013 bytes** — to
+[`status-table.md`](docs/progress-archive/status-table.md), leaving one summary row and a pointer; and
+this header's own accuracy history and per-phase arithmetic, **29 lines**, to
+[`phase-2d.md`](docs/progress-archive/phase-2d.md). Both were archiving on *state* under rule 1: those
+chains are closed, and that arithmetic is history the moment this figure is re-measured. **Neither
+touched the live chain**, per rule 2. **What is left for the next session** is the standing target,
+unchanged in kind: **this phase's own record and Next-action prose** (~109 lines) to
+`next-action-history.md`, once 2d-5-3-H supersedes it — which holds the line count roughly level and,
+as this round measured twice, **does not by itself hold the bytes**. **If 2d-5-3 does close**, the
+larger move becomes available and should be taken in
+the same session: the chain's status rows to `status-table.md` — **six** rows, not eight, because
+2d-5-3, -A and -B share one, which is the sort of thing to count rather than infer. Measured:
+**16,016 bytes** on six lines, and it is the first archive of this chain that would leave the head
+genuinely short rather than merely level. What may **not** be taken to make room: the flaky-`cargo test`
+section under *Verification baseline* — every one of its three consequences was followed this session
+and the gate is clean because of them — and the pre-instrument production baseline, which is the figure
+2d-5-7 compares against.
 
 **Three rules this file's archive history established, kept here because they are rules; the
 arithmetic that established them is archived.** Sixty-seven lines of narrative about the archives
@@ -131,22 +141,15 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d design consult** | Phase 2d put to a design consult before any line of it was written | ✅ complete — `docs/reviews/phase-2d-design.md`; it changed the phase in four places and cut it into eight steps |
 | **2d-1** | The core observation engine with no caller — debounce, stability, read, hash, project, validate, over an injected clock | ✅ complete, after five review rounds |
 | **2d-2** | The watcher lifecycle behind the workspace session, and the real-filesystem adapter | ✅ complete — READY at round 5 |
-| **2d-3** | The write ledger and the admission gate | ✅ complete — **CLOSED at 2d-3-C (2026-08-26)**, after a fourteen-round tail the owner ended |
-| **2d-4a** | The Rust half of the reconciliation wire — the queue, `ReconciliationWake`, `drain_external_changes`, the wire types, the EN/ES JSON | ✅ **complete and CLOSED at 2d-4a-H (2026-08-30)**, after a **thirteen**-round tail — the first tail this project has ended **by rule** rather than by an owner ruling (`CLAUDE.md` §7.2). Superseded through D → E → F → G → H, each by its successor |
-| **2d-4a-D … 2d-4a-H** | The five corrective phases of 2d-4a's tail — review rounds 9 to 13, each one the review of its predecessor's fix | ✅ **the chain is complete and CLOSED at 2d-4a-H (2026-08-30)**; D, E, F and G are each superseded by the next. Round 13's fix changed no source file, so §7.1 commissioned nothing and the tail ended **by rule** — the first this project has ended that way. Verdicts, counts and dispositions per round are in [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"the 2d-4a corrective chain"*; the notes are `docs/decisions/2d-4a-notes.md` §22 |
-| **2d-4a-C-1** | The scoped-lifetime contract, stated once, and its pointers | ✅ complete and **CLOSED** — four rounds, round 4 READY with 0 findings |
-| **2d-4a-C-2** | The check that keeps it — `src-tauri/src/prose_sweep.rs` and `src-tauri/src/retained_state_contract.rs` | ✅ implemented, every gate green, **CLOSED by owner decision 2026-08-29** after nine rounds |
-| **2d-4b design consult** | 2d-4b put to a design consult before any line of it was written, per the standing rule since 2b-2c | ✅ complete (2026-08-30) — [`docs/reviews/phase-2d-4b-design.md`](docs/reviews/phase-2d-4b-design.md), **Codex at high effort**, the **second provider** on this phase since 2d-4a began. Verdict *proceed as one coherent wire step*; it added a general key-without-accessor check and one bounded correction (`duplicateSeam`) that check exposes |
-| **2d-4b** and its seven corrective phases (**B … H**) | The TypeScript half of the wire — the mirror, the drain wrapper, the injectable event source, the i18n accessors, and the deletion of `AWAITING_FRONTEND_DECLARATION` — then eight review rounds over it, of which C to H were all about **one comment block** in `workspace.test.ts` | ✅ **complete and CLOSED at 2d-4b-H (2026-08-31)**, after an **eight**-round tail — the **second** this project has ended **by rule** rather than by an owner ruling (`CLAUDE.md` §7.2), after 2d-4a's. Round H found **no defect in either source hunk** and all four of its findings in the record, so its fix changed no source file and §7.1 commissioned nothing. B … G are each superseded by the next. Per-round scopes, verdicts and dispositions are in [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *“The 2d-4b corrective chain”*; the notes are `docs/decisions/2d-4b-notes.md` §8–§14 |
+| _**2d-3**, **2d-4a** with its five corrective phases, **2d-4a-C-1**, **2d-4a-C-2**, the **2d-4b design consult**, **2d-4b** with its seven, **2d-5-1** with its three, and **2d-5-2** with its three — **nine rows, every chain closed**_ | see the archive | ✅ **all complete and CLOSED**; rows archived 2026-09-05 at 2d-5-3-G to [`status-table.md`](docs/progress-archive/status-table.md) under *"The nine closed-chain status rows"*. 2d-4a (13 rounds), 2d-4b (8) and 2d-5-1 (4) are the three tails this project has ended **by rule** rather than by an owner ruling (`CLAUDE.md` §7.2); 2d-3 (14 rounds) and 2d-4a-C-2 (9) are the two a human stopped |
 | **2d-5 design consult** | 2d-5 put to a design consult before any line of it was written, per the standing rule since 2b-2c | ✅ complete (2026-08-31) — [`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md), **Codex at high effort**, the **second provider** to see this material since 2d-4a began. Verdict: cut 2d-5 into **seven** dependency-ordered steps; it overrides `phase-2d-design.md` in two places. The record is [`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) — 35 binding rulings and a 67-row citation audit — and its own review was `ship-with-fixes`, 0 blockers, 5 SHOULD-FIX, all five fixed in the record |
-| **2d-5** | The browser coordinator and the open-write-surface registry — seven steps, of which two touch components | 🔶 in progress — **steps 1 and 2 of 7 are complete and CLOSED**, tails and all, and **step 3 is implemented and six rounds into its tail**, each round commissioned by its predecessor's fix; **five of the six found a real defect in the previous round's fix**, and the sixth was the first not to — its severity fell to 0 Medium. Step 2 was split three ways and its third part split again; **2d-5-3-G is the next action** |
-| **2d-5-1** and its three corrective phases (**A, B, C**) | The surface and conflict vocabulary — the widened `OpenWriteSurface` union, the two predicates, `ConflictSource`, the memos, the EN/ES origin lines — then three review rounds over it, of which B and C were about comment text | ✅ **complete and CLOSED at 2d-5-1-C (2026-09-04)**, after a **four**-phase tail — the **third** this project has ended **by rule** rather than by an owner ruling (`CLAUDE.md` §7.2). Round C found nothing, so its fix changed no source file and §7.1 commissioned nothing. Per-phase scopes, verdicts and dispositions are in [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"The 2d-5-1 corrective chain"*; the notes are `docs/decisions/2d-5-1{,-A,-B,-C}-notes.md` |
-| **2d-5-2** | The exhaustive live registry — **split three ways by the orchestrator on 2026-09-04** (2c-5-4a/4b's precedent): **a** the registry as a value, **b** the `DetailPane` assembly with `MatchCreator` reporting upward and all the mounted evidence, **c** the narrow window regression reading | ✅ **complete and CLOSED (2026-09-05)** — all three steps are closed, tails and all. b's ran five rounds and ended **by rule** at 2d-5-2b-E, which returned `ship`. **Step c was itself split in two on 2026-09-05**, because the instrument did not exist anywhere on this machine, and **both halves are now closed**: 2d-5-2c-1 (the rebuild) and 2d-5-2c-2 (the reading). The three steps' deliverables union to exactly the one step the consult specified. **Its five sub-phase rows were archived at 2d-5-3, the session that opened the next step** — archive on state, not on length — to [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"The five sub-phase rows of the closed 2d-5-2 chain"*, and their Next-action prose to [`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The closed 2d-5-2 Next-action prose"* |
+| **2d-5** | The browser coordinator and the open-write-surface registry — seven steps, of which two touch components | 🔶 in progress — **steps 1 and 2 of 7 are complete and CLOSED**, tails and all, and **step 3 is implemented and seven rounds into its tail**, each round commissioned by its predecessor's fix; **six of the seven found a real defect in the previous round's fix**. The sixth was the first not to and its record read that as convergence; **the seventh returned three Mediums and disproved it**, one of them a contradiction that had sat inside the edited comment block for two rounds. Step 2 was split three ways and its third part split again; **2d-5-3-H is the next action** |
 | **2d-5-3**, **2d-5-3-A** and **2d-5-3-B** | The drain lifecycle coordinator (`src/lib/browser/reconciliationCoordinator.ts`, `start()`/`dispose()` on `BrowserState`, the single-flight pump, all four triggers, the `{ epoch, watermark, lastDiscarded }` cursor and the registration/disposal race), then two review rounds over it. **Components: none** | 🔶 **each is `SUPERSEDED` by the next link and none is complete.** 2d-5-3's review returned `do-not-ship` — the first of the 2d-5 chain — with **2 blockers, both concurrency defects no gate could catch** and both re-derived by the orchestrator: a request stranded in the single-flight release window, and an epoch adopted from a drain taken **before** the open reached `ready`, which poisoned the cursor and silently killed reconciliation for the session. 2d-5-3-A (`ship-with-fixes`, 0 blockers) **re-derived both and they hold**, and found four more — two source comments claiming what the code does not give. 2d-5-3-B (`ship-with-fixes`, 0 blockers) found that 2d-5-3-A had replaced one unstated ordering with another. Each fix was comment-only and each changed source, so each commissioned the next. **Rows archived at 2d-5-3-C** to [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"The three superseded rows of the 2d-5-3 chain"*; the notes are `docs/decisions/2d-5-3{,-A,-B}-notes.md` |
 | **2d-5-3-C** | The round `CLAUDE.md` §7.1 commissioned for 2d-5-3-B's fix — scoped to the four rewritten comments in `reconciliationCoordinator.ts` and `2d-5-3-B-notes.md` in full. **Components: none** | 🔶 round taken and answered, every gate green at `1320 / 441 / 2307 / 188` — **every figure unmoved**, which is what two comment-only source diffs must produce — and **`SUPERSEDED BY 2d-5-3-D`, never recorded as complete**. Risk class **high**; worker model **opus**. **Verdict `ship-with-fixes`, 0 blockers**, 2 Medium and 3 Low, **all five re-derived before being fixed**. Medium 1 is the **third consecutive round of this chain to find one shape** — the action right, the justification naming an ordering that does not exhaust the cases: `open()` bumps the generation unconditionally while `WorkspaceSession::open` returns from `Workspace::discover(root)?` **before taking the lock**, so a refused open leaves the **previous** workspace installed and the batch's queue is **neither gone nor foreign**. The arm now rests on **unattributability** — resting it on the cursor clear would have contradicted the same comment's own first paragraph. **The sweep found a fourth site the review did not name.** Medium 2 is the sharpest instance this project has recorded: **the correction written to close a self-invalidating citation shipped stale in its own commit** (`:979` → `:995` → `:1014`), in **four** places, now anchored on the comment's opening words rather than renumbered. Its Lows closed a 112-character line, a precedent attributed to the wrong phase (**`2d-5-2b-D`**, settled by reading), and — out of scope, fixed anyway — `with_workspace_read`'s doc claiming **three** customers when it has **four**, contradicting the fourth's own doc. **Four `NOT-VERIFIED` items were closed by measurement**, including the `:7624` mutation no round had reproduced. **One finding is carried**: a losing drain can seed a fresh queue's watermark with the previous epoch's number (`ReconciliationQueue::drain`) — reachability unestablished, loss counting covers the continuing case, and a real fix is a wire change owned by **2d-5-5**. The fix changed **two source files**, so §7.1 commissions a round. Notes `docs/decisions/2d-5-3-C-notes.md`; review `docs/reviews/phase-2d-5-3-C.md` |
 | **2d-5-3-D** | The round `CLAUDE.md` §7.1 commissioned for 2d-5-3-C's fix — scoped to the four rewritten comments in `reconciliationCoordinator.ts`, the rewritten `with_workspace_read` doc in `commands.rs`, and `2d-5-3-C-notes.md` in full. **Components: none** | 🔶 round taken and answered, every gate green at `1320 / 441 / 2307 / 188` — **every figure unmoved**, which is what a comment-only source diff must produce — and **`SUPERSEDED BY 2d-5-3-E`, never recorded as complete**. Risk class **high**; worker model **opus**. **Verdict `ship-with-fixes`, 0 blockers**, 3 Medium and 1 Low, **all four re-derived against the code before being fixed**. The brief's instruction — *check the comments against the code, not the code against the comments* — is what found all three Mediums. Medium 1: the paragraph written to say *"no reason here may be written as a disjunction over two"* **widened its own third state by a case that belongs to the second** — `workspace.svelte.ts` returns on `!opened.ok` **before** calling `listDocuments()`, so a refused `list_documents` means `open_workspace` **succeeded**, and Rust holds the **new** workspace with its queue reset. Medium 2: the `awaitingReady()` arm's new reason — *"a generation this session has left"* — is **false at that arm**, which is reached only when the generation is unchanged, and the arm's **own opening sentence** says the two checks are not the same question; the previous wording did not carry it, so **the fix introduced it**. Medium 3: *"`workspace.test.ts`'s failed-open case drives exactly that state"* is false three ways — no workspace was ever installed, **no batch reaches the arm** (`drainSequences` stays `[0]`), and a scripted vitest drives no Rust state; the comment now says **nothing in this repository drives it**. The Low is a record defect: §5 reason 1's *"blocked on the session mutex"* contradicts `commands.rs`'s own **"Why every command is synchronous"** — no `async fn` exists there, so the order is the **dispatcher's**, not a two-thread race; **the two source comments that mention the mutex claim only an order and were checked and left**. The sweep found the false claim in **two** of seven `list_documents` positions and **refused to "correct" the five carrying the adjacent true one** (a refused `list_documents` leaves `workspaceReady()` unreached). The fix changed **one source file**, comment-only, proven mechanically, so §7.1 commissions a round. Notes `docs/decisions/2d-5-3-D-notes.md`; review `docs/reviews/phase-2d-5-3-D.md`. **⚠️ Two of this row's claims were corrected by 2d-5-3-E**: a refused `list_documents` does **not** establish the incoming-lifecycle case — only that `open_workspace` succeeded, with the lock race still deciding which of the first two states the batch is in — and *"nothing in this repository drives it"* is **false of the state's workspace half**, which `src-tauri/src/watch_check.rs`'s `a_failed_reopen_keeps_the_previous_watcher_watching` drives and asserts against a real tree. Only the queue half is unpinned. Everything this row says about `workspace.test.ts` stands |
 | **2d-5-3-E** | The round `CLAUDE.md` §7.1 commissioned for 2d-5-3-D's fix — scoped to the two rewritten comments in `reconciliationCoordinator.ts` and `2d-5-3-D-notes.md` in full. **Components: none** | 🔶 round taken and answered, every gate green at `1320 / 441 / 2307 / 188` — **every figure unmoved**, which is what a comment-only source diff must produce — and **`SUPERSEDED BY 2d-5-3-F`, never recorded as complete**. Risk class **high**; worker model **opus**. **Verdict `ship-with-fixes`, 0 blockers**, 2 Medium and 0 Low, **both re-derived against the code before being fixed** and both holding. **Both are claims 2d-5-3-D's own fix introduced**, which makes this the **fourth consecutive round of this chain whose entire finding list is its predecessor's fix**. Medium 1: the replacement written to close a false *coverage* citation states a false *absence* — *"nothing in this repository drives the third state … an edit to that early return falsifies this paragraph with every gate green"* — when `src-tauri/src/watch_check.rs`'s `a_failed_reopen_keeps_the_previous_watcher_watching` opens a real tree, refuses a second open with a non-directory path, and asserts the session is **still open at epoch 1, still ready, and still delivering a live edit**; that module is included under `#[cfg(test)]` with no `#[ignore]`, so such an edit turns it **red**. **Only the queue half is unpinned**, and the comment now says that. Medium 2: the paragraph that correctly removed the `list_documents` case from the third state then attributed it to the **wrong one of the remaining two** — a refusal establishes only that `open_workspace` succeeded, while the **lock race** between `drain_external_changes` (via `with_workspace_read`) and `open`'s swap block is what decides whether the batch is the outgoing or the incoming queue; it is **one of the first two, whichever the race gave**. **Checked and left standing**, each re-derived: `awaitingReady()`'s premise at its arm, `discover` outside the lock, `begin_epoch` + `guard.replace` in one block with `guard.replace` the slot's only writer, `workspace.test.ts` pinning the *gate* at `drainSequences === [0]`, and no `pub async fn` in `commands.rs`. **2d-5-3-D's thin item 5 was closed by measurement** — all five anchored citations still resolve after the rewording that prompted it. (Its item **4**, the unreproduced able-to-fail claims, stays open; 2d-5-3-F found this round citing the wrong number.) The fix changed **one source file**, comment-only, proven mechanically, `23 10`, so §7.1 commissions a round. Notes `docs/decisions/2d-5-3-E-notes.md`; review `docs/reviews/phase-2d-5-3-E.md` |
-| **2d-5-3-F** | The round `CLAUDE.md` §7.1 commissioned for 2d-5-3-E's fix — scoped to the two rewritten paragraphs in `reconciliationCoordinator.ts` and `2d-5-3-E-notes.md` in full. **Components: none** | 🔶 round taken and answered, every gate green at `1320 / 441 / 2307 / 188` — **every figure unmoved** — and **`SUPERSEDED BY 2d-5-3-G`, never recorded as complete**. Risk class **high**; worker model **opus**. **Verdict `ship-with-fixes`, 0 blockers, 0 Medium**, and three SHOULD-FIX findings — one record defect and two Lows — **all three re-derived against the code before being fixed** and all three holding. **Two things are new to the tail**: this is the **first round whose findings are not all in the previous round's fix**, and **the severity fell** after three rounds of Mediums. The record defect: `2d-5-3-E-notes.md` §3 said *"2d-5-3-D's thin item 4 is closed"* while describing item **5**, when item **4** is the unreproduced able-to-fail residue that the same round's §7 says it cleared **none** of — **one file closing and leaving open the same numbered item**, propagated to three positions here, all four corrected in place. Low 1: 2d-5-3-D's *"asserted in five comment paragraphs and tested by none"* was carried into 2d-5-3-E's **own §8 item whose point is that a count must be re-derived**; enumerated here the answer is **six** — module doc, `awaitingWorkspaceReady` doc, three `staleOpen` paragraphs, `workspace.svelte.ts`'s failed-open arm — **2d-5-3-E's own fix added the sixth**, and *"tested by none"* is false because that round pinned the workspace half in Rust. The item is **left standing with its correction attached**. Low 2, the only source fix: *"never this one"* is true of the batch's **provenance** and short by a case under the **property** reading, because `open()` has **no re-entrancy guard** — a case-2 batch followed by a *later* refused open leaves Rust holding that batch's own workspace. **The refusal is unaffected**, and the ambiguity was **inherited from 2d-5-3-C, not introduced**. **Checked and left standing**: the Rust citation refuses through the same early return it names, the queue half really is unpinned, and state 1 stays reachable. The fix changed **one source file**, comment-only, proven mechanically, so §7.1 commissions a round — **and it is a Low that does it**, the case §7.1 was rewritten to cover. Notes `docs/decisions/2d-5-3-F-notes.md`; review `docs/reviews/phase-2d-5-3-F.md` |
+| **2d-5-3-F** | The round `CLAUDE.md` §7.1 commissioned for 2d-5-3-E's fix — scoped to the two rewritten paragraphs in `reconciliationCoordinator.ts` and `2d-5-3-E-notes.md` in full. **Components: none** | 🔶 round taken and answered, every gate green at `1320 / 441 / 2307 / 188` — **every figure unmoved** — and **`SUPERSEDED BY 2d-5-3-G`, never recorded as complete**. Risk class **high**; worker model **opus**. **Verdict `ship-with-fixes`, 0 blockers, 0 Medium**, and three SHOULD-FIX findings — one record defect and two Lows — **all three re-derived against the code before being fixed** and all three holding. **Two things are new to the tail**: this is the **first round whose findings are not all in the previous round's fix**, and **the severity fell** after three rounds of Mediums. The record defect: `2d-5-3-E-notes.md` §3 said *"2d-5-3-D's thin item 4 is closed"* while describing item **5**, when item **4** is the unreproduced able-to-fail residue that the same round's §7 says it cleared **none** of — **one file closing and leaving open the same numbered item**, propagated to three positions here, all four corrected in place. Low 1: 2d-5-3-D's *"asserted in five comment paragraphs and tested by none"* was carried into 2d-5-3-E's **own §8 item whose point is that a count must be re-derived**; enumerated here the answer is **six** — module doc, `awaitingWorkspaceReady` doc, three `staleOpen` paragraphs, `workspace.svelte.ts`'s failed-open arm — **2d-5-3-E's own fix added the sixth**, and *"tested by none"* is false because that round pinned the workspace half in Rust. The item is **left standing with its correction attached**. Low 2, the only source fix: *"never this one"* is true of the batch's **provenance** and short by a case under the **property** reading, because `open()` has **no re-entrancy guard** — a case-2 batch followed by a *later* refused open leaves Rust holding that batch's own workspace. **The refusal is unaffected**, and the ambiguity was **inherited from 2d-5-3-C, not introduced**. **Checked and left standing**: the Rust citation refuses through the same early return it names, the queue half really is unpinned, and state 1 stays reachable. The fix changed **one source file**, comment-only, proven mechanically, so §7.1 commissions a round — **and it is a Low that does it**, the case §7.1 was rewritten to cover. Notes `docs/decisions/2d-5-3-F-notes.md`; review `docs/reviews/phase-2d-5-3-F.md`. **⚠️ Three of this row's claims were corrected by 2d-5-3-G**: the enumerated count **six** is not re-derivable (*"three paragraphs of the `staleOpen` arm"* names no set — `runOneDrain()` has **two** such arms, and the second's paragraph is outside the six on every reading; production sites give **eight**, and 2d-5-3-G asserts no figure at all); the *"no re-entrancy guard … a case-2 batch followed by a later refused open"* construction was **unnecessary and its premise undriven**, since in case 2 the batch already is the incoming lifecycle's queue and Rust still holds it, so the sentence was **removed** from source rather than re-scoped; and this row's *"0 Medium"* was read at the time as convergence, which the next round disproved. What stands: the record defect, Low 1's substance, and that a Low commissioned the round |
+| **2d-5-3-G** | The round `CLAUDE.md` §7.1 commissioned for 2d-5-3-F's fix — scoped to the one rewritten passage in `reconciliationCoordinator.ts`, `2d-5-3-F-notes.md` in full, and that round's item-number and count corrections. **Components: none** | 🔶 round taken and answered, every gate green at `1320 / 441 / 2307 / 188` — **every figure unmoved**, which is what a comment-only source diff must produce — and **`SUPERSEDED BY 2d-5-3-H`, never recorded as complete**. Risk class **high**; worker model **opus**. **Verdict `ship-with-fixes`, 0 blockers**, **3 Medium** and 2 Low, **all five re-derived against the code before being fixed** and all five holding. **The convergence 2d-5-3-F reported was false**, and the sharpest finding had sat **inside the edited comment block for two rounds**, past two reviewers and all four gates. Medium 1: **one comment block asserted a proposition and its negation** — the paragraph opening *"The workspace half of the third state is driven and asserted in Rust"* ended *"the half this arm actually rests on — that the batch's `newest_sequence` still indexes the queue Rust is holding"*, while 2d-5-3-F's sentence above says *"nothing here rests on the property"* and 2d-5-3-C's below says the refusal rests on unattributability, *"never that the queue is gone"*. **The code settles it**: the arm calls `record(afterSequence, …)` and returns, `afterSequence` is the **pre-await** watermark, and `batch.newest_sequence` is consumed in **`accept()` alone**, which this arm never reaches. `git log -S` puts the false clause on **2d-5-3-E** and shows **2d-5-3-F's fix created the visible contradiction by being correct**; `2d-5-3-E-notes.md` §8 item 2 is a work item resting on it, surviving only as a **documentation-coverage** bound. Medium 2: the fix's central construction was **load-bearing on nothing** — in case 2 the batch already is the incoming lifecycle's queue and Rust still holds that lifecycle, so no second open is needed, and **the Rust no round of this tail had opened makes it simpler still**: `reconciliation: Arc<ReconciliationQueue>` is a field of `WorkspaceSession`, **not of `Open`**, *"emptied by a replacement rather than replaced by one"*. The unverified re-entrancy claim was **removed rather than re-scoped**. Medium 3: `2d-5-3-F-notes.md`'s *"nothing in this repository drives two overlapping opens"* is **false** — `workspace.test.ts`'s *"lets the newer open win, however late the older one answers"*, in a suite named **overlapping requests**, runs two of them — which is **2d-5-3-E's own Medium 1 recurring in the round that recorded the shape**. Low 1: the replacement count is not re-derivable either, and **this round asserts no number**, recording the criterion problem instead. Low 2: two fresh uncounted counts in one commit — *"these three paragraphs"* (removed) and two **line** anchors adopted against this chain's own opening-words convention (both resolve today, which is luck). The fix changed **one source file**, comment-only, proven mechanically, so §7.1 commissions a round. Notes `docs/decisions/2d-5-3-G-notes.md`; review `docs/reviews/phase-2d-5-3-G.md` |
 | **2d-6 … 2d-8** | The remaining three steps of the 2d consult's eight | ⬜️ not started |
 | **2d** | External change reconciliation — plan §6.5 | 🔶 in progress |
 | **3–5** | Validation, packaging, hardening | ⬜️ not started |
@@ -277,8 +280,8 @@ any of them anything.
 ---
 ## Next action
 
-### Phase 2d-5-3-F took the round 2d-5-3-E's fix commissioned, and it is **superseded, not complete**.
-### The next action is **Phase 2d-5-3-G — the round §7.1 commissioned for 2d-5-3-F's fix**.
+### Phase 2d-5-3-G took the round 2d-5-3-F's fix commissioned, and it is **superseded, not complete**.
+### The next action is **Phase 2d-5-3-H — the round §7.1 commissioned for 2d-5-3-G's fix**.
 
 #### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
 
@@ -305,97 +308,111 @@ and again after its final gate run**. **Every commit of this chain stages `PROGR
 `src-tauri/src/commands.rs` **explicitly and by file**, never `src-tauri/src/`, which would sweep the
 instrument's `probe.rs` and `main.rs` in with it. **2d-5-3-D, 2d-5-3-E and 2d-5-3-F each changed no
 Rust source at all**, so none of those commits stages any path under `src-tauri/` whatever — and
-2d-5-3-E and 2d-5-3-F are the rounds with the sharpest reason to be tempted, because both established
-findings by **reading** a Rust test (`src-tauri/src/watch_check.rs`) that neither needed to change.
+2d-5-3-E, 2d-5-3-F and 2d-5-3-G are the rounds with the sharpest reason to be tempted, because each
+established a finding by **reading** Rust that none of them needed to change: a test
+(`src-tauri/src/watch_check.rs`) for the first two, and the `WorkspaceSession` **struct**
+(`src-tauri/src/commands.rs`) for 2d-5-3-G, whose Medium 2 turns on which of `WorkspaceSession` and
+`Open` owns the `reconciliation` field.
 
-#### Phase 2d-5-3-F — the round §7.1 commissioned for 2d-5-3-E's fix
+#### Phase 2d-5-3-G — the round §7.1 commissioned for 2d-5-3-F's fix
 
-**Complete as a round, every gate green — and `SUPERSEDED BY 2d-5-3-G`, never complete.** Risk class
+**Complete as a round, every gate green — and `SUPERSEDED BY 2d-5-3-H`, never complete.** Risk class
 **high**; worker model **opus** (no implementation worker: the phase's product is a review and its fix,
 both taken by the orchestrator). Record:
-[`docs/decisions/2d-5-3-F-notes.md`](docs/decisions/2d-5-3-F-notes.md); review
-[`docs/reviews/phase-2d-5-3-F.md`](docs/reviews/phase-2d-5-3-F.md). 2d-5-3-E's Next-action prose —
-**98 lines** — is archived in
+[`docs/decisions/2d-5-3-G-notes.md`](docs/decisions/2d-5-3-G-notes.md); review
+[`docs/reviews/phase-2d-5-3-G.md`](docs/reviews/phase-2d-5-3-G.md). 2d-5-3-F's record and Next-action
+prose — **101 lines** — are archived in
 [`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"archived 2026-09-05 at
-Phase 2d-5-3-F"*, with the three claims this round corrected marked at the top of the archived copy.
+Phase 2d-5-3-G"*, with the three claims this round corrected marked at the top of the archived copy.
 
-**Verdict `ship-with-fixes`, 0 blockers**, **0 Medium**, and three findings the reviewer graded
-SHOULD-FIX — one record defect and two Lows. **All three were re-derived against the code before any
-fix was applied**, all three hold, and all three are fixed.
+**Verdict `ship-with-fixes`, 0 blockers**, **3 Medium** and 2 Low. **All five were re-derived against
+the code before any fix was applied**, and all five hold.
 
-**Two things about this round are new to the tail.** It is the **first whose findings are not all in
-the previous round's fix** — one is, one is a record-keeping defect, and one is an ambiguity 2d-5-3-E
-inherited rather than created. And **the severity fell**: three rounds of Mediums, then none.
+**The convergence signal 2d-5-3-F reported was false, and that is this round's headline.** That round
+was the first of the tail with no Medium and read it as convergence. This round returns three — and the
+sharpest had been sitting **inside the edited comment block for two rounds**, invisible to two reviewers
+and all four gates.
 
-**The record defect: one file both closed and left open the same numbered item.** `2d-5-3-E-notes.md`
-§3 said *"2d-5-3-D's thin item 4 is closed by measurement"* while describing the **citation-anchor**
-item, which is 2d-5-3-D's §8 item **5**. Item **4** is the unreproduced able-to-fail residue, and
-2d-5-3-E's own §7 says it cleared **none** of it. The wrong number had propagated to three positions in
-this file. All four are corrected in place, carrying the correction rather than a silent renumber:
-*which* item a round discharged is exactly the sort of claim a later phase inherits without re-checking.
+**Medium 1: one comment block asserted a proposition and its negation, and a work item was built on the
+false half.** The paragraph opening *"The workspace half of the third state is driven and asserted in
+Rust"* ended *"the half this arm actually rests on — that the batch's `newest_sequence` still indexes the
+queue Rust is holding"*, while 2d-5-3-F's sentence ten lines above says **"nothing here rests on the
+property"** and 2d-5-3-C's ten lines below says the refusal rests on unattributability, **"never that
+the queue is gone"**. **The code settles it**: the arm calls `record(afterSequence, …)` and returns,
+where `afterSequence` is the **pre-await** watermark, and `batch.newest_sequence` is consumed in
+`accept()` alone — which this arm returns above and never reaches. `git log -S` fixes the provenance:
+the false clause is **2d-5-3-E's**, and **2d-5-3-F's fix created the visible contradiction by being
+correct**. The record instance is worse — `2d-5-3-E-notes.md` §8 item 2 is a work item resting on it,
+and it survives only as a **documentation-coverage** bound.
 
-**Low 1: the paragraph count was six, and five was repeated inside the warning against repeating it.**
-2d-5-3-D asserted the three-state claim is *"asserted in five comment paragraphs and tested by none"*;
-its reviewer recorded the count `NOT-VERIFIED`; 2d-5-3-E carried it into **its own §8 item 3, the item
-whose whole point is that a count must be re-derived rather than inherited**. Enumerated this round the
-answer is **six** — `reconciliationCoordinator.ts`'s module doc, the `awaitingWorkspaceReady` doc, three
-paragraphs of the `staleOpen` arm, and `workspace.svelte.ts`'s failed-open arm — and **2d-5-3-E's own
-fix added the sixth**. *"Tested by none"* is false too, because 2d-5-3-E's Medium 1 established that the
-workspace half **is** pinned in Rust. That item is **left standing with its correction attached rather
-than rewritten**: a count copied forward into the paragraph forbidding exactly that is worth more than a
-tidy number.
+**Medium 2: the fix's central construction was load-bearing on nothing.** *"`open()` has no re-entrancy
+guard, so a case-2 batch followed by a later open refusing at `Workspace::discover(root)?` …"* reaches a
+true conclusion by an unnecessary route: **in case 2 the batch already is the incoming lifecycle's queue
+and Rust still holds that lifecycle**, so the property is satisfied outright. **The Rust makes it
+simpler still, and no round of this tail had read it**: `reconciliation: Arc<ReconciliationQueue>` is a
+field of `WorkspaceSession`, **not of `Open`**, and its doc says the queue is *"emptied by a replacement
+rather than replaced by one"* — one queue for the session's life. The unverified re-entrancy claim was
+**removed rather than re-scoped**: unverified *and* load-bearing on nothing is pure liability.
 
-**Low 2, the only fix that touched source: *"never this one"* is true of provenance and short by a case
-under the property reading.** The third-state paragraph defines that state by **provenance** — a refused
-`open_workspace`, which returns from `Workspace::discover(root)?` before the lock — and then states a
-**property** as its consequence. `open()` has **no re-entrancy guard**, so a batch produced after open
-#1's swap (case 2), followed by a **later** open refusing at that early return, leaves Rust holding the
-very workspace that batch came from: the property holds while the provenance is still case 2. **The
-refusal is unaffected** — the arm rests on unattributability, never on the queue being intact — which is
-why this is a Low. The comment now says which reading it means. **It was inherited, not introduced**:
-the property sentence is 2d-5-3-C's, and 2d-5-3-E's fix merely put a classifying sentence beside it.
+**Medium 3: the absence claim defending it was false, in the round that recorded the shape.**
+`2d-5-3-F-notes.md` §7 item 1 said *"nothing in this repository drives two overlapping opens"*.
+`src/lib/browser/workspace.test.ts`'s *"lets the newer open win, however late the older one answers"* —
+in a suite named **overlapping requests** — runs `const pending = state.open(null); await
+state.open('/tmp/other');`. **This is 2d-5-3-E's own Medium 1 recurring one round later**: an absence
+claim reads as humility and is exactly as unchecked as a citation, with nothing named for a reader to go
+and look at.
 
-**What the round checked and left standing**, each re-derived: the Rust citation is accurate and refuses
-through the same early return the comment names; **the queue half really is unpinned**, so 2d-5-3-E's
-narrowed claim is not its predecessor's defect repeated; and the lock-race attribution holds, state 1
-included.
+**Low 1: the replacement count is not re-derivable either, and this round asserts no number.** *"Three
+paragraphs of the `staleOpen` arm"* names no set — `runOneDrain()` has **two** arms recording
+`'staleOpen'`, and the second's paragraph asserts the third state and is outside the six on every
+disambiguation. Counting production sites gives **eight**. **Five, then six, then eight is a count
+re-derived three times and pinned by nothing**, the fifth such instance in this chain, so what is written
+down is the **criterion problem** rather than a figure. **Low 2: two fresh uncounted counts in one
+commit** — the source text's *"these three paragraphs"* (removed) and `2d-5-3-E-notes.md`'s `:70-71` and
+`:440` **line** anchors, adopted against this chain's own opening-words convention in the commit that
+shifted lines in that file; both resolve today, which is luck.
 
 **§7.1 commissions a round, so this phase is `SUPERSEDED`, not complete.** The fix changed **one source
-file** — `src/lib/browser/reconciliationCoordinator.ts` — comment-only, proven mechanically. **Two of
-the three fixes were prose and commission nothing; the third is why a round is owed, and it is a Low** —
-exactly the case §7.1 was rewritten to cover, because its first version said fixing a Low opens no round
-and that was backwards for a Low whose fix edits source.
+file** — `src/lib/browser/reconciliationCoordinator.ts` — comment-only, proven mechanically. The other
+three fixes are record-only.
 
-**Nothing is `BLOCKED`.** No item in `2d-5-3-F-notes.md` §7 names an unfixed correctness defect in a
+**Nothing is `BLOCKED`.** No item in `2d-5-3-G-notes.md` §7 names an unfixed correctness defect in a
 source file.
 
-#### The next action is **Phase 2d-5-3-G — the round §7.1 commissioned for 2d-5-3-F's fix**
+#### The next action is **Phase 2d-5-3-H — the round §7.1 commissioned for 2d-5-3-G's fix**
 
-Scope it to that fix and to nothing else: the **one** rewritten passage in
-`src/lib/browser/reconciliationCoordinator.ts` — the sentence closing `runOneDrain()`'s `list_documents`
-paragraph, now qualified with the provenance/property distinction — and
-`docs/decisions/2d-5-3-F-notes.md` in full, together with the item-number and count corrections this
-round made to `2d-5-3-E-notes.md` and to this file. **Check the comments against the code, not the code
-against the comments** — that instruction has now found nine Mediums and three Lows across six rounds.
+Scope it to that fix and to nothing else: the **two** rewritten passages in
+`src/lib/browser/reconciliationCoordinator.ts` — the tail of the `list_documents` paragraph, which now
+argues case 2 directly and claims no second open, and the tail of the paragraph opening *"The workspace
+half of the third state is driven and asserted in Rust"*, which now says the queue half is asserted by
+the comment and rested on by nothing — together with `docs/decisions/2d-5-3-G-notes.md` in full and the
+four correction blocks this round added to `2d-5-3-E-notes.md` and `2d-5-3-F-notes.md`. **Check the
+comments against the code, not the code against the comments** — that instruction has now found twelve
+Mediums and five Lows across seven rounds.
 
-**Five things worth a reviewer's attention that this round did not reach**, all five marked in
-`2d-5-3-F-notes.md` §7. **The clarification this round added is itself a new comment claim about
-`open()`'s re-entrancy**, re-derived from `workspace.svelte.ts`'s generation checks but driven by
-nothing — no test in this repository runs two overlapping opens — so it is reasoned exactly like the
-paragraph it qualifies. **The paragraph count is now six and nothing holds it at six**: it was
-enumerated once, by hand, and the next comment added to any of those six sites falsifies it silently.
-**The cross-language anchor added at 2d-5-3-E is unchanged and unenforced.** **2d-5-3's able-to-fail
-residue — 2d-5-3-D §8 item *4*, now correctly numbered — is still unreproduced**, and three consecutive
-rounds have cleared none of it. **And this round's reviewer re-ran no gate**, inheriting every figure
-from the orchestrator's own runs and saying so; a reviewer that inherits figures cannot catch a figure
-that is wrong, which is why the orchestrator ran all four itself, twice.
+**Six things worth a reviewer's attention that this round did not reach**, all six marked in
+`2d-5-3-G-notes.md` §7. **The count is now *unstated* rather than wrong, and nothing enforces even
+that** — the generator is removed, no guard replaces it, and a sentence reintroducing a figure would
+pass every gate. **The overlapping-open case drives the frontend and no Rust**: it uses
+`scriptedCommands()`, so the Rust-refusal half of what 2d-5-3-F claimed is still undriven — this round
+deleted the source claim that depended on it rather than building the coverage. **The queue half is
+still pinned by nothing**, now correctly classified as documentation coverage. **2d-5-3's able-to-fail
+residue — 2d-5-3-D §8 item 4 — is still unreproduced, and four consecutive rounds have cleared none of
+it**; four reasons in a row are a pattern, not four coincidences. **The citation checker has now been
+nominated five times without being built**, and this round added a **sixth** opening-words anchor
+(*"Which lifecycle the batch describes"*, checked and resolving) to what it would have to resolve.
 
-**One thing a reviewer should judge rather than inherit.** Six positions now cite a comment by **the
-words it opens with**, or a function or a **Rust test** by symbol, rather than by line. 2d-5-3-E checked
-the five that existed then and all five resolved; **this round added no new anchor and re-checked
-none**. The durable alternative `PROGRESS.md` has now nominated four times — a checker that resolves
-`file:line` references in comments — is still unbuilt, and it would also discharge the four stale
-cross-file citations under `src/` recorded below.
+**The one thing a reviewer should treat as this round's own most likely defect.** §2's argument rests on
+a reading of `WorkspaceSession`'s **field placement** — `reconciliation` beside the session, `Open`
+holding only `workspace`, `backups` and `watcher` — which **six previous rounds of this tail reasoned
+around without opening**. It was read this time, and the doc comment agrees with the struct; but a
+comment corrected on the strength of a first reading of Rust nobody had checked is exactly the shape
+this tail keeps punishing. **What else in `commands.rs` these comments describe without anyone having
+opened it is not known.**
+
+**Do not read the header's closure prediction as a figure.** It has now been wrong for **four** rounds
+running, always in the same direction, and six of seven rounds have found a real defect in the previous
+round's fix.
 
 Then 2d-5-4 — the observation state transitions. Read
 [`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md) (**the consult; it binds**) and
@@ -485,13 +502,13 @@ pristine tree, never from the total.**
 
 **With the instrument in the working tree the four commands answer `1320 / 441 / 2307 / 188`** —
 `cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
-full by the orchestrator at 2d-5-3-F**, each command on its own, and by the orchestrator at 2d-5-3-E
-(twice), at 2d-5-3-D (twice), at 2d-5-3-C (twice), at 2d-5-3-B and at 2d-5-3-A before it. **Nine
-independent full runs across six phases, returning the same four figures every time.** **2d-5-3-F ran
-them once rather than twice, and the reason is a fact rather than a shortcut**: its inherited tree *is*
-the tree 2d-5-3-E committed and measured, so the second of that round's two runs is this round's
-inherited-tree measurement. Nothing was skipped; one run is shared by two phases, and it is named here
-so a later reader does not read *once* as a lapse.
+full by the orchestrator at 2d-5-3-G, twice** — once on the inherited tree and once after the fix — and
+at 2d-5-3-F (once), 2d-5-3-E (twice), 2d-5-3-D (twice), 2d-5-3-C (twice), 2d-5-3-B and 2d-5-3-A before
+it. **Eleven independent full runs across seven phases, returning the same four figures every time.**
+**2d-5-3-G's inherited-tree run was not redundant, and the reason is worth keeping**: 2d-5-3-F ran the
+gates once, correctly reasoning that its inherited tree *was* the tree 2d-5-3-E measured — but that
+round's own reviewer re-ran nothing either (its §7 item 5), so **no figure on that tree had been
+confirmed by a second party for a full round**. 2d-5-3-G re-ran it rather than inherit an inheritance.
 `cargo test --workspace -- --test-threads=1` was read **not through a pipe**, summed over **26**
 `test result` lines *and* checked by the complementary question — no line lacking `0 failed` — because
 a sum can be right while a binary is silent. `cargo clippy --workspace --all-targets -- -D warnings`
@@ -500,26 +517,27 @@ nothing) are all clean. **Both bundle oracles were read and both lines are repor
 because it proves the search can match at all: server-only markers **absent**, client-only markers
 **present (2)**.
 
-**Nothing moved at 2d-5-3-F, and nothing could have.** Its source diff is **comment-only in the one
+**Nothing moved at 2d-5-3-G, and nothing could have.** Its source diff is **comment-only in the one
 file it touches** — `src/lib/browser/reconciliationCoordinator.ts` — so no file
 entered or left the program, no new reachable module, no new component and no new case. **It was
 proven comment-only mechanically rather than by eye**: `git diff -U0` filtered to changed lines that
 are neither comment lines nor blank returns nothing. **Every figure was run rather than inferred**,
 `cargo test` included — **this phase changed no Rust source at all**, which is precisely the shape that
-tempts an inference, and this round shares 2d-5-3-E's sharpest excuse to make it, because both
-established findings by *reading* a Rust test neither needed to touch. The three consequences of
-the host scar were followed on **both** runs — serial form, redirected to a file rather than read
-through a pipe, and the complementary question asked of every one of the 26 `test result` lines. **The
-instrument's pin was re-checked after the fix** and held at `5 insertions(+), 1 deletion(-)`. **No line in the edited file exceeds 90 characters**,
+tempts an inference, and this round has the sharpest excuse of the three to make it: its Medium 2 was
+established by reading the `WorkspaceSession` **struct** in `src-tauri/src/commands.rs`, a file it did
+not touch. The three consequences of the host scar were followed on **both** runs — serial form,
+redirected to a file rather than read through a pipe, and the complementary question asked of every one
+of the 26 `test result` lines. **The instrument's pin was re-checked after the fix** and held at
+`5 insertions(+), 1 deletion(-)`. **No line in the edited file exceeds 90 characters**,
 checked with `awk`, because 2d-5-3-C shipped a 112-character line that nothing in this repository
 catches.
 
-**One figure this phase added to the gate rather than inherited.** The corrected comment now cites
-`src-tauri/src/watch_check.rs`'s `a_failed_reopen_keeps_the_previous_watcher_watching` as the thing
-that pins the third state's workspace half, so that citation was checked **by execution and not by
-reading**: the serial run's transcript carries
+**The gate figure 2d-5-3-F added is still carried and was re-confirmed rather than assumed.** The
+comment cites `src-tauri/src/watch_check.rs`'s `a_failed_reopen_keeps_the_previous_watcher_watching`
+as the thing that pins the third state's workspace half; that citation survives this round's edits
+untouched, and both of this phase's serial transcripts carry
 `test watch_check::a_failed_reopen_keeps_the_previous_watcher_watching ... ok`. A citation naming a
-test that does not run would be this round's own version of the defect it closed.
+test that does not run would be a later round's version of the defect 2d-5-3-F closed.
 
 **What 2d-5-3-C measured, kept because its shape differs from this phase's.** Its diff was
 comment-only in **two** files — `reconciliationCoordinator.ts` (`54 33`) and `src-tauri/src/commands.rs`
@@ -626,25 +644,27 @@ parallel **real filesystem watchers** inside one binary, not two cargo processes
 
 ### What moved this phase, and how the ladder now reads
 
-**No figure moved this phase, and none could have.** 2d-5-3-F's source diff is **comment-only in one
+**No figure moved this phase, and none could have.** 2d-5-3-G's source diff is **comment-only in one
 file**, so no file entered or left the program, no new reachable `.ts` module, no new `.svelte`
 component and no new case — neither the one-per-module rung nor the two-per-styled-component rung has
 anything to apply to. **No pristine-tree rebuild was needed to say so** — a rebuild is what
 distinguishes *"the count did not move"* from *"a file moved it and another moved it back"*, and the
-only files this phase added are two `.md`, which are in no count. **A comment-only phase produces the
-one ladder rung that is a repeat**, and that is the expected shape rather than a missing measurement:
-the figures were re-run in full, not carried forward. **Six such phases running have now produced
-it**, which is worth naming as a risk rather than as reassurance — a rung that repeats proves the gates
-were run, never that they could have caught what these rounds keep finding, and **every finding of this
-tail has been invisible to all four**. This round is the sharpest instance yet: the claim it corrected
-was *"an edit to that early return falsifies this paragraph with every gate in the project green"*, and
-what made it false is a Rust test that is **in** the 1320 — so the gates did hold the evidence, and no
-gate could have been what surfaced it.
+only file this phase added is one `.md` (plus its review), which are in no count. **A comment-only
+phase produces the one ladder rung that is a repeat**, and that is the expected shape rather than a
+missing measurement: the figures were re-run in full, not carried forward. **Seven such phases running
+have now produced it**, which is worth naming as a risk rather than as reassurance — a rung that
+repeats proves the gates were run, never that they could have caught what these rounds keep finding,
+and **every finding of this tail has been invisible to all four**. **This round is the sharpest
+instance the tail has produced, and it is sharper than 2d-5-3-F's.** That round's example was a claim
+whose falsifier was a Rust test *inside* the 1320, so the gates at least held the evidence. This
+round's Medium 1 is a comment block asserting **a proposition and its negation ten lines apart**: no
+gate in this project reads prose, so the evidence was not merely unsurfaced but absent from every
+oracle, and it survived two full review rounds in plain sight.
 
-**The ladder, so a later phase can check rather than accept**: `1320 / 441 / 2307 / 188` at 2d-5-3-F
-(this phase), at 2d-5-3-E (measured twice — inherited tree and committed tree), at 2d-5-3-D (also
-twice), at 2d-5-3-C (also twice), at 2d-5-3-B and at 2d-5-3-A, **the same rung measured nine times
-across six phases**;
+**The ladder, so a later phase can check rather than accept**: `1320 / 441 / 2307 / 188` at 2d-5-3-G
+(this phase, measured twice — inherited tree and after the fix), at 2d-5-3-F, at 2d-5-3-E (twice), at
+2d-5-3-D (also twice), at 2d-5-3-C (also twice), at 2d-5-3-B and at 2d-5-3-A, **the same rung measured
+eleven times across seven phases**;
 `1320 / 441 / 2306 / 188` at 2d-5-3 after its fix round, `1320 / 441 / 2298 / 188` on
 its worker's tree; `1320 / 439 / 2255 / 187` at 2d-5-2c-1 and 2d-5-2c-2 — **and every rung from here
 down is a *with-instrument* figure, which is why they may not be compared with the pre-instrument
@@ -745,7 +765,8 @@ all of it is in `git log`._
 | **2d-5-3-E — the round §7.1 commissioned for 2d-5-3-D's fix. Verdict `ship-with-fixes`, **0 blockers**, 2 Medium and 0 Low, **both re-derived by the orchestrator against the code before being fixed** and both holding. **Both are claims 2d-5-3-D's own fix introduced**, making this the **fourth consecutive round whose entire finding list is its predecessor's fix**. Medium 1: the replacement for a false *coverage* citation states a false *absence* — *"nothing in this repository drives the third state … an edit to that early return falsifies this paragraph with every gate green"* — while `src-tauri/src/watch_check.rs`'s `a_failed_reopen_keeps_the_previous_watcher_watching` opens a real tree, refuses a second open with a non-directory path, and asserts the session **still open at epoch 1, still ready, still delivering a live edit**; the module is `#[cfg(test)]` with no `#[ignore]`, so that edit turns it **red**. **Only the queue half is unpinned.** Medium 2: the paragraph that correctly removed the `list_documents` case from the third state **attributed it to the wrong one of the other two** — a refusal establishes only that `open_workspace` succeeded, and the **lock race** between `drain_external_changes` (via `with_workspace_read`) and `open`'s swap block decides which queue the batch is; it is **one of the first two, whichever the race gave**. **2d-5-3-D's thin item 5 closed by measurement** — all five anchors still resolve (this row said *item 4* until 2d-5-3-F corrected it; item 4 is the unreproduced able-to-fail residue and stays open). The diff is **comment-only, proven mechanically**, `23 10`, in **one source file**, so §7.1 commissions a round and this phase is **`SUPERSEDED BY 2d-5-3-F`**, never complete. Stages `PROGRESS.md`, `docs/` and `src/lib/browser/` **by path**; **no path under `src-tauri/` at all**, though this is the round whose finding came from *reading* a Rust test, and the four harness paths stay uncommitted. Also archives 2d-5-3-D's Next-action prose — 115 lines — with the two claims this round corrected marked at the top of the archived copy** | **`b1c7b4b`** | ✅ pushed to `origin/main` |
 | 2d-5-3-E — the SHA and push record | `<this commit>` | ✅ pushed to `origin/main` |
 | **2d-5-3-F — the round §7.1 commissioned for 2d-5-3-E's fix. Verdict `ship-with-fixes`, **0 blockers, 0 Medium**, three SHOULD-FIX — one record defect and two Lows — **all three re-derived against the code before being fixed**. **The first round of this tail whose findings are not all in the previous round's fix**, and the first with no Medium. The record defect: `2d-5-3-E-notes.md` §3 closed *"2d-5-3-D's thin item 4"* while describing item **5**, when item **4** is the residue the same round's §7 says it cleared none of — **one file closing and leaving open the same numbered item** — propagated to three positions in `PROGRESS.md`, all four corrected in place. Low 1: *"asserted in five comment paragraphs and tested by none"* was carried into 2d-5-3-E's **own §8 item about not inheriting counts**; enumerated here the answer is **six**, 2d-5-3-E's own fix added the sixth, and *"tested by none"* is false because that round pinned the workspace half in Rust — the item is **left standing with its correction attached**. Low 2, the only source fix: *"never this one"* is true of the batch's **provenance** and short by a case under the **property** reading, because `open()` has **no re-entrancy guard**; the refusal is unaffected and the ambiguity was **inherited from 2d-5-3-C, not introduced**. The diff is **comment-only, proven mechanically**, in **one source file**, so §7.1 commissions a round — **and a Low is what does it**, the case §7.1 was rewritten to cover — and this phase is **`SUPERSEDED BY 2d-5-3-G`**, never complete. Stages `PROGRESS.md`, `docs/` and `src/lib/browser/` **by path**; **no path under `src-tauri/` at all**, and the four harness paths stay uncommitted. Also archives 2d-5-3-E's Next-action prose — 98 lines — with the three claims this round corrected marked at the top of the archived copy** | **`c717e9a`** | ✅ pushed to `origin/main` |
-| 2d-5-3-F — the SHA and push record | `<this commit>` | ✅ pushed to `origin/main` |
+| 2d-5-3-F — the SHA and push record | `91e444a` | ✅ pushed to `origin/main` |
+| **2d-5-3-G — the round §7.1 commissioned for 2d-5-3-F's fix. Verdict `ship-with-fixes`, **0 blockers**, **3 Medium** and 2 Low, **all five re-derived against the code before being fixed**. **2d-5-3-F's "first sign of convergence" is disproved.** Medium 1: **one comment block asserts a proposition and its negation ten lines apart** — 2d-5-3-E's *"the half this arm actually rests on — that the batch's `newest_sequence` still indexes the queue Rust is holding"* against 2d-5-3-F's *"nothing here rests on the property"* and 2d-5-3-C's *"never that the queue is gone"*. The code settles it: the arm records the **pre-await** `afterSequence` and returns, and `batch.newest_sequence` is consumed in `accept()` alone, which it never reaches — so **2d-5-3-F's fix created the visible contradiction by being correct**, and `2d-5-3-E-notes.md` §8 item 2 is a work item resting on the false half. Medium 2: the fix's *"no re-entrancy guard … a case-2 batch followed by a later refused open"* construction is **load-bearing on nothing** — in case 2 the batch already is the incoming lifecycle's queue and Rust still holds it — and **the Rust no round of this tail had opened settles it further**: `reconciliation` is a field of `WorkspaceSession`, **not of `Open`**, *"emptied by a replacement rather than replaced by one"*. The unverified claim was **removed, not re-scoped**. Medium 3: *"nothing in this repository drives two overlapping opens"* is **false** — `workspace.test.ts`'s *"lets the newer open win"* runs two — **2d-5-3-E's own Medium 1 recurring in the round that recorded the shape**. Low 1: the replacement count is not re-derivable either (two `'staleOpen'` arms; eight production sites), and **this round asserts no figure**, recording the criterion problem. Low 2: two fresh uncounted counts in one commit. The diff is **comment-only, proven mechanically**, in **one source file**, so §7.1 commissions a round and this phase is **`SUPERSEDED BY 2d-5-3-H`**, never complete. Stages `PROGRESS.md`, `docs/` and `src/lib/browser/` **by path**; **no path under `src-tauri/` at all**, though this is the round whose Medium 2 came from *reading* the `WorkspaceSession` struct in `commands.rs`, and the four harness paths stay uncommitted. Also archives 2d-5-3-F's record and Next-action prose — 101 lines — with the three claims this round corrected marked at the top of the archived copy** | **`<this commit>`** | ⏳ pending |
 
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in

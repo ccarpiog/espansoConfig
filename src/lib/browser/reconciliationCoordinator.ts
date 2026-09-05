@@ -771,16 +771,15 @@ export function createReconciliationCoordinator(
       // observed later in `open()` is no evidence either way. So it is one of those
       // two, whichever the race gave, and never this one — **which is a claim about
       // where the batch came from, not about the property the paragraph above draws
-      // from it.** `open()` has no re-entrancy guard, so a case-2 batch followed by
-      // a *later* open refusing at `Workspace::discover(root)?` leaves Rust holding
-      // the very workspace that batch came from: the property *"its
+      // from it.** In case 2 the batch already *is* the incoming lifecycle's queue
+      // and Rust is still holding that lifecycle, so the property *"its
       // `newest_sequence` really is a watermark for the lifecycle Rust is still
-      // holding"* is satisfied while the provenance is still case 2. Provenance is
-      // what these three paragraphs classify, and **nothing here rests on the
-      // property** — the refusal below is justified by unattributability — so the
-      // distinction costs the refusal nothing and is written down only because a
-      // reader who takes "this one" as the property would find the enumeration
-      // short by a case.
+      // holding"* is satisfied there outright — no second open is needed to arrange
+      // it, and none is claimed. Provenance is what the paragraphs above classify,
+      // and **nothing here rests on the property** — the refusal below is justified
+      // by unattributability — so the distinction costs the refusal nothing and is
+      // written down only because a reader who takes "this one" as the property
+      // would find the enumeration short by a case.
       //
       // **The workspace half of the third state is driven and asserted in Rust; the
       // queue half is not.** `src-tauri/src/watch_check.rs`'s
@@ -792,11 +791,14 @@ export function createReconciliationCoordinator(
       // reasoned-only. **What nothing pins is that the queue survives it**: that
       // test never drains, and no scripted-command suite in `./workspace.test.ts`
       // drives Rust at all — its failed-open case asserts the *gate*, and no batch
-      // reaches this arm in it. So the half this arm actually rests on — that the
-      // batch's `newest_sequence` still indexes the queue Rust is holding — is
-      // reasoned from `WorkspaceSession::open` rather than executed, and an edit
-      // that reset the queue on the refusal path would falsify it with every gate
-      // in the project green.
+      // reaches this arm in it. So the queue half is **asserted by the paragraph
+      // above and rested on by nothing here**: this arm records the *pre-await*
+      // `afterSequence` and returns, never reading `batch.newest_sequence`, which
+      // is consumed in `accept()` alone — the paragraph below and the one opening
+      // *"Which lifecycle the batch describes"* both say the refusal rests on
+      // unattributability instead. It is reasoned from `WorkspaceSession::open`
+      // rather than executed, and an edit that reset the queue on the refusal path
+      // would falsify **this comment** with every gate in the project green.
       //
       // **What makes the refusal right in all three is that nothing here can
       // attribute the number, never that the queue is gone.** The only value that
