@@ -754,10 +754,17 @@ export function createReconciliationCoordinator(
       // statement, unconditionally, while `WorkspaceSession::open` returns from
       // `Workspace::discover(root)?` before it takes the lock at all — so a refused
       // `open_workspace` leaves the **previous** workspace installed and its queue
-      // untouched, which that function's own doc comment states in as many words.
-      // There the batch's queue is neither gone nor foreign, and its
+      // untouched. There the batch's queue is neither gone nor foreign, and its
       // `newest_sequence` really is a watermark for the lifecycle Rust is still
-      // holding.
+      // holding. **That function's doc comment states the workspace half and not
+      // the queue half.** It says a failed discovery *"returns before touching the
+      // session, so the previous workspace and its watcher both stay exactly as
+      // they were"*, and its `# Errors` section says a failure *"leaves the
+      // previously open workspace in place"*; neither names the queue. The queue
+      // half follows from that same early return rather than from any sentence,
+      // because `reconciliation.begin_epoch` is reached only inside the swap block
+      // below it — which is why the paragraph opening *"The workspace half of the
+      // third state"* calls that half reasoned rather than executed.
       //
       // **A refused `list_documents` is not that state**, under the one host that
       // issues one: `./workspace.svelte.ts` returns on `!opened.ok` before it calls
@@ -770,19 +777,24 @@ export function createReconciliationCoordinator(
       // block according to the order the two commands reached it, and a refusal
       // observed later in `open()` is no evidence either way. So it is one of those
       // two, whichever the race gave, and never this one — **which is a claim about
-      // where the batch came from, not about the property the paragraph above draws
-      // from it.** In case 2 the batch already *is* the incoming lifecycle's queue,
-      // so **at the instant the drain took the session lock** the property *"its
+      // where the batch came from, not about the property the paragraph opening *"A
+      // third state is neither of those"* draws from it.** In case 2 the batch
+      // already *is* the incoming lifecycle's queue, so **at the instant the drain
+      // took the session lock** the property *"its
       // `newest_sequence` really is a watermark for the lifecycle Rust is still
       // holding"* was satisfied outright — no second open is needed to arrange it,
       // and none is claimed. **The time index is load-bearing and is the whole of
       // the claim.** This arm runs after the await, a further successful open may
       // have installed another lifecycle and emptied the queue by then — nothing
-      // stops one, and `./workspace.test.ts`'s *"lets the newer open win, however
-      // late the older one answers"* drives two overlapping opens **at the host
-      // level only**, over `scriptedCommands()`: it pins that the overlap is
-      // reachable and pins nothing about Rust — and nothing here observes whether
-      // one did. Provenance is what the paragraphs above
+      // stops one — and **no test in this repository drives that overlap against
+      // Rust.** `./workspace.test.ts`'s *"lets the newer open win, however late the
+      // older one answers"* overlaps two **opens** with each other and contains no
+      // drain at all: it never calls `start()`, so no coordinator runs in it. What
+      // drives an open landing during a drain is
+      // `./reconciliationCoordinator.test.ts`'s *"installs nothing from a drain an
+      // open overtook"*, and it moves the generation on the **injected** host — so
+      // it reaches this arm and says nothing about Rust either. Nothing here
+      // observes whether one did. Provenance is what the paragraphs above
       // classify, and **nothing here rests on the property** — the refusal below is
       // justified by unattributability — so the distinction costs the refusal
       // nothing and is written down only because a reader who takes "this one" as
@@ -794,7 +806,7 @@ export function createReconciliationCoordinator(
       // refuses a second open with a path that is not a directory, and then asserts
       // the session is still open at the same epoch, still ready, and still
       // delivering a live edit — so a change that let a refused open replace or
-      // empty the session turns that test **red**, so the **workspace** half of the
+      // empty the session turns that test **red**, and the **workspace** half of the
       // paragraph opening *"A third state is neither of those"* is not
       // reasoned-only. **What nothing pins is that the queue survives it**: that
       // test never drains, and no scripted-command suite in `./workspace.test.ts`
@@ -809,15 +821,16 @@ export function createReconciliationCoordinator(
       // It repeats the same property *text* about **case 2** — a successful open
       // that lost the lock race — and the paragraph opening *"A refused
       // `list_documents` is not that state"* separates that case from this one in
-      // as many words, so the falsifying edit named at the end of this paragraph
-      // does not reach it. **The two paragraphs that carry the refusal's own
-      // justification say different things and are cited as such**: the one below
-      // says the refusal rests on unattributability; the one opening *"Which
-      // lifecycle the batch describes"* says only that the lifecycle is not
+      // as many words, so the edit that would falsify this comment — one that reset
+      // the queue on the refusal path — does not reach it. **The two paragraphs
+      // that carry the refusal's own justification say different things and are
+      // cited as such**: the one opening *"What makes the refusal right in all
+      // three"* says the refusal rests on unattributability; the one opening
+      // *"Which lifecycle the batch describes"* says only that the lifecycle is not
       // knowable here and that the refusal does not need it to be, which is the
-      // weaker claim. It is reasoned from `WorkspaceSession::open` rather than
-      // executed, and an edit that reset the queue on the refusal path would
-      // falsify **this comment** with every gate in the project green.
+      // weaker claim. **The queue half** is reasoned from `WorkspaceSession::open`
+      // rather than executed, and an edit that reset the queue on the refusal path
+      // would falsify **this comment** with every gate in the project green.
       //
       // **What makes the refusal right in all three is that nothing here can
       // attribute the number, never that the queue is gone.** The only value that

@@ -3675,3 +3675,152 @@ sentence after its own negation was rejected, and a figure written four lines ab
 figure is written. `svelte-check`, `vitest`, `vite` and `cargo test` are evidence about code and
 evidence about **nothing this round changed**. The reviewer's `NOT-VERIFIED` list opens with exactly
 that, and it is the correct thing for it to have written rather than a gap in the review.
+
+---
+
+## Phase 2d-5-3-I's verification narrative — archived 2026-09-05 at Phase 2d-5-3-J
+
+_Verbatim from `PROGRESS.md`, superseded by 2d-5-3-J's own measurement of the same four gates. The figures below were true of the tree that committed them; the live baseline is in `PROGRESS.md`._
+
+### ⚠️ Two baselines are live at once, and only one of them is now a measurement
+
+**With the instrument in the working tree the four commands answer `1320 / 441 / 2307 / 188`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-3-I, twice** — once on the inherited tree, before the review was acted
+on, and once after the fix — and at 2d-5-3-H (twice), 2d-5-3-G (twice), 2d-5-3-F (once), 2d-5-3-E
+(twice), 2d-5-3-D (twice), 2d-5-3-C (twice), 2d-5-3-B and 2d-5-3-A before it. **Fifteen independent full
+runs across nine phases, returning the same four figures every time** — that is 2d-5-3-H's recorded
+*thirteen across eight* plus this round's two, and the per-round split is written in the same sentence
+so a reader can re-derive the total rather than inherit it. **A bare running total about this chain's
+own history is the shape 2d-5-3-H's findings 3 and 4 were about**, which is why the derivation travels
+with the figure.
+
+**Why the inherited-tree run is taken every round rather than inherited.** 2d-5-3-F ran the gates once,
+correctly reasoning that its inherited tree *was* the tree 2d-5-3-E measured — but that round's reviewer
+re-ran nothing either, so **no figure on that tree had been confirmed by a second party for a full
+round**. Every round since re-runs rather than inherit an inheritance, and this round's reviewer was
+told to run **no build, test or package command of any kind** — not merely no `cargo test` — because the
+host scar below makes even a run concurrent with the frontend gates corrupt both readings. That is a
+deliberate trade: one party measures, and the measurement is taken twice.
+
+`cargo test --workspace -- --test-threads=1` was read **not through a pipe**, summed over **26**
+`test result` lines *and* checked by the complementary question — no line lacking `0 failed` — because a
+sum can be right while a binary is silent. `cargo clippy --workspace --all-targets -- -D warnings`
+(exit 0, read from a file rather than a pipe), `cargo fmt --check` (exit 0) and
+`cargo tree -p espansoconfig-core | rg tauri` (finds nothing) are all clean on both runs. **Both bundle
+oracles were read on both builds and both lines are reported**, the second because it proves the search
+can match at all: server-only markers **absent**, client-only markers **present (2)**.
+
+**The citation the untouched half of this comment block rests on was re-confirmed, not assumed.**
+`test watch_check::a_failed_reopen_keeps_the_previous_watcher_watching ... ok` is present in **both** of
+this phase's serial transcripts, at line 242 of each. A citation naming a test that does not run is the
+defect a later round of this tail would find, and it costs one `rg` to rule out. **This round had a
+second reason to check it**: its finding 2 turns on which paragraph that test de-reasons, so the test
+had to exist *and* to assert what the comment says.
+
+**Nothing moved at 2d-5-3-I, and nothing could have.** Its source diff is **comment-only in the one file
+it touches** — `src/lib/browser/reconciliationCoordinator.ts` — so no file entered or left the program,
+no new reachable module, no new component and no new case. **It was proven comment-only mechanically
+rather than by eye**: `git diff -U0` filtered to changed lines that are neither comment lines nor blank
+returns nothing. **Every figure was run rather than inferred**, `cargo test` included — **this phase
+changed no Rust source at all**, which is precisely the shape that tempts an inference, and this round
+has the same sharp excuse the last two had: it re-read `src-tauri/src/watch_check.rs:514` to settle a
+deictic's referent, in a file it did not touch. The three consequences of the host scar were followed on
+**both** runs — serial form, redirected to a file rather than read through a pipe, and the complementary
+question asked of every one of the 26 `test result` lines. **The instrument's pin was re-checked before
+the fix and after it** and held at `5 insertions(+), 1 deletion(-)`. **No line in the edited file exceeds
+90 characters**, checked with `awk`, because 2d-5-3-C shipped a 112-character line that nothing in this
+repository catches.
+
+**What no gate in this project can do, stated here because four green figures invite the opposite
+reading.** **No gate reads prose.** Every finding of this tail has been invisible to all four, and this
+round's three are no exception: a citation naming a site its own paragraph excludes, a deictic resolving
+to the wrong paragraph **inside the paragraph that forbids the form**, and a frontend test cited for a
+Rust-side effect nine lines above the sentence saying that suite drives no Rust. `svelte-check`,
+`vitest`, `vite` and `cargo test` are evidence about code and evidence about **nothing this round
+changed** — and this round is the first of the tail whose entire finding list is in source, which makes
+the point sharper rather than softer: all three were in a source file, and all four gates were green
+over them twice.
+
+---
+
+## `PROGRESS.md`'s headroom narrative as it stood at 2d-5-3-I — archived 2026-09-05 at Phase 2d-5-3-J
+
+_Verbatim from the header of `PROGRESS.md`, superseded by 2d-5-3-J's own re-derivation on the file that carries it. This is the **third** consecutive round to archive this narrative rather than only the two the header names, and 2d-5-3-J took the third **before** writing rather than after, which is what 2d-5-3-I's own byte arithmetic said the next round would have to do. The three archive rules, the "what may not be archived" pair and the plan-of-record links stayed in the live file; only the round-specific arithmetic moved._
+
+**Where the headroom stands, re-derived on this file after this round's record was written — never
+before it, and never quoted from the header it replaces:** **773 lines and 125,745 bytes**,
+which is **27 lines and 5,327 bytes under the hard bounds** (800 lines / 131,072 bytes) and
+far over both soft ones (400 lines / 65,536 bytes). **The figure is a fixed point, not an estimate**:
+substituting it changes the file's size, so it was substituted and re-measured until it stopped moving.
+That is the only method that makes a self-referential figure true, and this file has had to correct an
+inherited one three times. **It is re-derived once more in the SHA-record commit**, which edits the
+git-state row **in place** — 2d-5-3-G's precedent, and the reason *"the SHA-record commit adds one
+line"* is false: that sentence was about a second commit **appending** a row, never about recording a
+SHA.
+
+**⛔️ The byte bound binds first now, the line bound does not, and the two-archive pattern no longer
+clears the byte one.** This round took two archives totalling **178 lines** and still finished
+**15 lines and 7,441 bytes larger than it started** (758 / 118,304 → the figures above),
+because a round of this chain adds one status row and one git-state row of two to four thousand bytes
+each while archiving lines that are far thinner. **Run this round's own growth against the room left
+and the two bounds disagree**: 15 lines against 27 of room **fits**, 7,441 bytes
+against 5,327 of room **does not**. That is the decoupling note below stated as an arithmetic
+instead of a warning, and it is the first time the two have given different answers. **So the next
+session archives for bytes and needs a third target**, taken before writing like the other two: this
+header's own narrative to `phase-2d.md`, which is what 2d-5-3-G took when it was six lines under the
+line bound. Measured, not projected — the growth figures above are this round's own, and nothing here
+predicts the next round's size.
+
+**⚠️ Lines and bytes have decoupled, and the line count is the wrong single thing to watch.** The
+status and git-state rows are single lines of two to four thousand bytes each, so the two bounds no
+longer move together and a session watching only lines will misjudge the room. **Measure both, on this
+file, after writing.**
+
+**This round took two archives and finished with the head above where it started, as every round of
+this chain has.** Both were taken before a word of the record was written, as the previous header
+demanded — 2d-5-3-H's record and Next-action prose (**123 lines**) to
+[`next-action-history.md`](docs/progress-archive/next-action-history.md), and that round's verification
+narrative (**55 lines**) to [`phase-2d.md`](docs/progress-archive/phase-2d.md). **Two were enough on
+lines and not on bytes**, which is the distinction the block above is about. **An archive holds a live
+chain's growth near zero and does not reduce it.**
+
+**What the next session must do, in this order.** Archive **first** — this phase's record and
+Next-action prose to `next-action-history.md`, and this phase's verification narrative to `phase-2d.md`,
+the moment 2d-5-3-J supersedes them. Then write, then **re-derive both figures on the finished file**
+and substitute to a fixed point. An accurate inherited header is precisely the moment that feels safe
+to skip the re-derivation, and skipping it is how this file shipped a stale byte count beside an exact
+line count. **If the two archives leave the byte figure over the bound, the chain's status rows are
+still not available** — *superseded* is not *closed*, which is rule 2 below and 2d-4b-G's refusal —
+so what is available is a third archive of this header's own narrative, which is what 2d-5-3-G took.
+
+**If the 2d-5-3 tail closes, take the larger move in the same session**: the chain's status rows to
+[`status-table.md`](docs/progress-archive/status-table.md). **Count them rather than infer them** —
+2d-5-3, -A and -B share one row — and re-measure their bytes rather than quoting the figure a previous
+header derived. **No prediction about that closure is written here.** The header carried one for five
+rounds running and was wrong every time, always in the same direction; what the mechanism guarantees is
+only that **the first fix round of this tail that changes no source file is its last**.
+
+---
+
+## The 2d-5-3 chain's per-round staging history — archived 2026-09-05 at Phase 2d-5-3-J
+
+_Verbatim from `PROGRESS.md`'s **⚠️ READ FIRST** block, archived for bytes rather than because it was superseded. **The rules it carried are still live in `PROGRESS.md`** — never commit the four harness paths, stage `src-tauri/` files by name and never by directory, and re-check the `5 insertions(+), 1 deletion(-)` pin every round. What moved is only the round-by-round account of which commit staged what, which every round since 2d-5-3-D has restated at growing length._
+
+**2d-5-3-C is the only round of the chain to have staged a path under `src-tauri/src/`** — its fix
+corrected `commands.rs`'s `with_workspace_read` doc comment — and that commit named
+`src-tauri/src/commands.rs` **explicitly and by file**, never `src-tauri/src/`, which would sweep the
+instrument's `probe.rs` and `main.rs` in with it. **Every round from 2d-5-3-D onward changed no Rust
+source at all**, so none of those commits stages any path under `src-tauri/` whatever — and 2d-5-3-E
+through 2d-5-3-J are the rounds with the sharpest reason to be tempted, because each established or
+re-derived a finding by **reading** Rust that none of them needed to change: a test
+(`src-tauri/src/watch_check.rs`) for the first two, and the `WorkspaceSession` **struct**
+(`src-tauri/src/commands.rs`) for 2d-5-3-G — whose Medium 2 turns on which of `WorkspaceSession` and
+`Open` owns the `reconciliation` field — re-derived and confirmed by 2d-5-3-H, which read the same
+struct and staged nothing under `src-tauri/` either; 2d-5-3-I re-read `watch_check.rs:514` to settle
+which paragraph a deictic named. **2d-5-3-J is the sixth and read more Rust than any of them**: its
+finding 2 rests on the **whole** of `WorkspaceSession::open`'s doc comment
+(`src-tauri/src/commands.rs:610-681`), and it **quotes two of that comment's sentences into a
+TypeScript comment**. Reading is not changing, and this commit stages no path under `src-tauri/`
+either — but note what the quoting does to the next round's scope: **a Rust file this chain does not
+commit is now load-bearing for a claim in a file it does.**
