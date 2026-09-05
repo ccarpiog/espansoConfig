@@ -10258,3 +10258,75 @@ and are answered under §7.1 as usual.
 at Phase 2d-5-2b-C"*, with its three superseded claims marked **in place** — it is the record of what
 the live head said while it was wrong, and 2d-5-2b-B's own commit message carries the same
 mis-attribution and is left as written, a commit message being a historical snapshot.
+
+---
+
+## The Next-action block of Phase 2d-5-2b-D, archived 2026-09-05 at Phase 2d-5-2b-E
+
+The block below is accurate as written — 2d-5-2b-E re-derived all four of its corrected figures and
+found none wrong, and the recurrence condition it states was applied by E and not met. It is archived
+because **the 2d-5-2b tail closed at E by rule**, not because anything in it is superseded.
+
+
+### Phase 2d-5-2b-D is complete: the round §7.1 commissioned for 2d-5-2b-C's fix has run, and its own fix changed source.
+### The next action is **Phase 2d-5-2b-E — the review round §7.1 commissions for 2d-5-2b-D's fix**.
+
+#### Why a round is owed, so nobody has to decide it
+
+2d-5-2b-D's one review ([`docs/reviews/phase-2d-5-2b-D.md`](docs/reviews/phase-2d-5-2b-D.md))
+returned `ship-with-fixes`, **0 blockers**, **three SHOULD-FIX** and **one NIT**, and all four were
+fixed in this phase's own commit. That fix round changed **two source files** —
+`src/lib/components/MatchCreator.svelte` and `src/lib/components/DetailPane.test.ts` — **every changed
+line a comment**, verified mechanically with `git diff -U0` filtered to changed non-comment lines,
+which returned nothing. The unit is the file, so §7.1 commissions a round and §7.4 carries it as a
+corrective phase: **2d-5-2b-E**. **Scope it to the fix, not to the phase.** The four findings and
+what answered them are [`docs/decisions/2d-5-2b-notes.md`](docs/decisions/2d-5-2b-notes.md) **§16**.
+
+#### What 2d-5-2b-D found: four stale figures, and why that is a different defect from C's
+
+**All four findings are line citations and counts that do not describe the code.** None touches the
+substance of the reachability or reactive-context claims 2d-5-2b-C wrote — those were re-derived
+independently, by the round and again by the orchestrator, and **hold at every rewritten site**.
+
+- **`workspace.svelte.ts:3320-3322` for the `RestoreContext` rebuild → `:3328-3331`.** `3320-3322`
+  is comment prose. This one is the sharpest: the line stood at **`:3321`** at `eb1134a^`, and
+  2d-5-2b-C's own hunk in that same file added seven lines above it. **The citation was correct when
+  it was written and wrong when it was committed** — a cross-file citation into a file the same
+  commit edits above the cited line is self-invalidating, and nothing re-derives it.
+- **`RestorePane.svelte:511` for where `now.context.surfaces` is handed onward → `:515`.** `:511` is
+  `if (started === null) {`.
+- **The sibling case's "four assertions" after its `flushSync()` → three** (`DetailPane.test.ts:1113`,
+  `:1114`, `:1115`; `pane.stop()` at `:1116` is not an assertion).
+- **(NIT) "`RestorePane.svelte`'s own comment above `current`" → the component header (`:106-111`).**
+  The docblock above `current` (`:323-331`) says only that `current` is one read of the window; the
+  header is what says both reads gate the write.
+
+**Three of the four were carried verbatim out of the C review's own report**, so that file now carries
+a correction block at its head and the archived C block carries one too. **2d-5-2b-C's commit message
+claims every reported figure was re-derived and held; three of them had not been.** What §15.5
+measured is narrower and still true — the figures C caught in *its own* fix were re-derived; the ones
+it inherited **from its reviewer** were not. **Re-derive a reviewer's figures too, not only your own.**
+
+**The mitigation this phase applied is structural**: its fix changes **no line counts**
+(`git diff --numstat` is `1 1` and `3 3`), so it cannot have shifted a citation in either file. A
+later fix in this chain that adds or removes a line **must re-derive every citation into the file it
+edited**, including the ones it did not touch.
+
+#### The `BLOCKED` hatch was asked and is not reached — and E's condition is narrower
+
+§15.6's condition was **the same mis-attribution reappearing** — the reachability of `restore.ts:1993`
+versus `:2581`, or the reactive-context split. It did not: both are correct in substance everywhere
+they were rewritten, confirmed twice independently. Stale figures are a **different** defect, which is
+the tail working rather than diverging. `2d-5-2b-notes.md` §16.5 is the full answer.
+
+**What would reach the hatch at 2d-5-2b-E**, so it applies this rather than re-argues it: **a figure
+corrected in this phase being wrong again**, or **any citation in these two files going stale for a
+second consecutive commit**. That is one defect class surviving two consecutive fixes aimed at it.
+**Different** defects in the same files are answered under §7.1 as usual.
+
+#### Where the closed rounds' Next-action prose went
+
+2d-5-2b-C's block is in
+[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"archived 2026-09-05
+at Phase 2d-5-2b-D"*, with its three superseded figures marked **in place**. 2d-5-2b-C's own commit
+message carries the same three and is left as written, a commit message being a historical snapshot.

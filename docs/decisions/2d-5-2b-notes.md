@@ -1337,3 +1337,100 @@ Marked per §7.3.
    first principles**; it confirmed them at the rewritten sites and against `restore.ts`'s structure.
    A defect in the underlying model, as opposed to in the sentences describing it, would not have been
    caught here and was not in scope. — *recorded only*.
+
+---
+
+## 17. Phase 2d-5-2b-E — the review of 2d-5-2b-D's own fix round, and the tail's closure
+
+**Commissioned by `CLAUDE.md` §7.1**, because 2d-5-2b-D's fix round changed two source files
+(`src/lib/components/MatchCreator.svelte`, `src/lib/components/DetailPane.test.ts`), four lines, every
+one a comment. The report is [`docs/reviews/phase-2d-5-2b-E.md`](../reviews/phase-2d-5-2b-E.md):
+**`ship`, 0 blockers, 0 SHOULD-FIX, 0 NIT.**
+
+### 17.1 The tail is CLOSED, and it closed by rule
+
+§7.1 is the only mechanism that commissions a round and it reads one thing: the diff of the fix round
+answering the round. **Round E returned nothing to fix, so its fix round changed nothing, so it changed
+no source file, so no round is commissioned — and under §7.2 the step closes.** No human said stop, no
+owner ruled, and the `BLOCKED` hatch was not reached. This is §7.2's named common case rather than a
+second rule.
+
+The chain, so the shape is legible: **2d-5-2b** (`505caf6`) → **A** (`92fe0f4`) → **B** (`4f1fdb3`) →
+**C** (`eb1134a`) → **D** (`0917cc3`) → **E** (this phase, closing). Six phases, five review rounds
+after the original, each commissioned by the previous fix touching source, and the sixth commissioning
+nothing.
+
+### 17.2 The closing round was checked rather than accepted
+
+`CLAUDE.md` §7 names the failure mode this closure rule invites — *"a tail that closes on a round
+nobody checked"* — and says the defence is that the closing round is reviewed like any other. Every
+substantive claim in E's report had **already been measured independently by the orchestrator** while
+fixing D, and the two sets agree:
+
+- `workspace.svelte.ts:3328-3331` is the `RestoreContext` object literal;
+- `RestorePane.svelte:515` passes `now.context.surfaces` and `:511` is the null guard;
+- `DetailPane.test.ts:1110-1115` has exactly three `expect` calls after its `flushSync()`, `pane.stop()`
+  correctly excluded;
+- `RestorePane.svelte:106-111` carries the *"handed the very same object"* claim and the docblock at
+  `:323-331` does not;
+- all seven `restore.ts` citations land inside the function each names (§16.4);
+- `git show --numstat 0917cc3` is `3 3` and `1 1` — line-count-neutral.
+
+The one claim E added that the orchestrator had not already taken was
+`docs/reviews/phase-2d-5-design.md:45`, cited from `MatchCreator.svelte:222`. It was checked: that line
+is the consult's `satisfies Record<OpenWriteSurfaceKind, …>` ruling, which is what the citing sentence
+claims, and the file is unchanged since `5787e87`.
+
+**E's three `NOT-VERIFIED` items are all honest and none is a gap in the verdict.** The gate figures were
+taken from the brief rather than re-run — the orchestrator ran them, twice for the frontend gates. The
+pre-fix wording of finding 4's sentence was not chased through history, which changes nothing about
+whether the post-fix sentence is true. And the standing coverage bound is restated below.
+
+### 17.3 The orchestrator's own sweep: the defect class is repository-wide and it is drift
+
+While round E ran, the orchestrator swept `src/` for the defect class D had found in one passage. **The
+result is the most generalizable thing this tail produced, and it is not a finding of round E** — it is
+outside E's scope and it commissions nothing.
+
+`src/` holds **10 fully-qualified `file.ext:NNN` citations** in comments and **16 bare `:NNN`
+continuations**. Of the qualified ten, **four are plainly stale**:
+
+| Citing site | Cites | Is actually | Was, when written |
+|---|---|---|---|
+| `browser/reapply.ts:612` | `MatchDeleter.svelte:464` as "the deleter's renewed confirmation" | `</dl>`; the confirm control is `:486` | **`{#if view.confirming}`** at `a2069db` — exactly the claim |
+| `browser/reapply.ts:613` | `MatchMover.svelte:663` as "the mover's rebuilt destination list" | `<dd>{label}</dd>` | `<div class="field">` at `a2069db` |
+| `browser/writeSurfaceRegistry.ts:231` | `DetailPane.svelte:844-961` as the one-block-per-kind `if`/`else` chain | comment prose; the chain is `:1165`-`:1317` | the chain ran to **`:961` exactly** at `0f1ad8b` |
+| `browser/restore.test.ts:2504` | `DetailPane.svelte:525-527` as where the pane declines to close the restore | JSDoc about `OpenWriteSurface & { kind: K }` | not chased |
+
+Two more are imprecise rather than wrong (`MatchDeleter.svelte:516`, `MatchMover.svelte:779`), and
+`ipc/types.ts:2891-2911` holds.
+
+**Every one that was chased was correct when written.** `MatchDeleter.svelte:464` was
+`{#if view.confirming}` at the commit that wrote the sentence citing it, and the `DetailPane` chain
+ended at `:961` at the commit that wrote `writeSurfaceRegistry.ts`'s sentence. **So this is drift, not
+carelessness** — §16.2's mechanism operating across phases instead of inside one commit, and
+`writeSurfaceRegistry.ts`'s instance was caused by **2d-5-2b's own additions to `DetailPane.svelte`**
+and went unnoticed by five review rounds of this very chain.
+
+**This is recorded as a candidate corrective phase, not fixed here.** Fixing it would be an unrelated
+source change in a phase whose commissioned scope is four comment lines in two other files, and the
+autoclaude workflow forbids unrelated changes in a phase commit. A later phase adopts it deliberately.
+
+### 17.4 Where it is thin
+
+Marked per §7.3.
+
+1. **Four stale cross-file citations in three source files**, measured in §17.3. — *actionable*, and
+   **it does not hold this step open**: it is not an item in a round's own section, it is outside the
+   scope §7.1 gave this phase, and this chain has treated every one of its eleven-plus stale-figure
+   findings as a within-phase fix rather than a blocker. A later phase adopts it.
+2. **No test pins any cross-file line citation, and there are 26 of them in `src/`.** A checker that
+   resolves `file:line` references in comments is the only thing that would; it is a real tool and it
+   is not this chain's work. — *recorded only*.
+3. **The 16 bare `:NNN` continuations were not individually checked**, only counted. They are the
+   likeliest place a further stale figure hides, because a continuation's meaning depends on which file
+   the surrounding prose last named. — *recorded only*.
+4. **This tail verified sentences about the model, never the model.** Six phases corrected prose
+   describing `restore.ts`'s reachability and Svelte's reactive contexts; none re-derived that the
+   underlying behaviour is right. A defect in the model rather than in its description would have
+   survived all six. — *recorded only*.

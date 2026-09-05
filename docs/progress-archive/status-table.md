@@ -722,3 +722,99 @@ chain's recurring defect **did** appear, in a record rather than in source, and 
 for a correctness defect in a **source** file. The chain converged. **The escape hatch is still
 `BLOCKED` under §7.2 and is still never a shortened round** — it simply was not reached.
 
+
+---
+
+## The round-by-round commissioning prose of the closed 2d-5-2b chain, archived 2026-09-05 at Phase 2d-5-2b-E
+
+The §7.1 reading applied to 2d-5-2b and to rounds A, B and C — what each fix round's diff contained and
+why it commissioned the next round — plus the prediction, recorded before round C ran, that the chain
+showed "no sign of the ending 2d-5-1's and 2d-5-2a's had". **That prediction was wrong and is left
+standing**: the chain ended at round E exactly as the other two did, by rule, two rounds later.
+`PROGRESS.md` keeps only rounds D and E, which are the closure narrative;
+`docs/decisions/2d-5-2b-notes.md` §13-§17 is the authoritative per-round record.
+
+**What 2d-5-2b commissions, and why it is not the same shape as the chain above.** Its one review
+returned four SHOULD-FIX findings and **all four were fixed in the phase's own commit**, so the input
+§7.1 reads — *the diff of the fix answering the round* — is a diff that **changed source**:
+`src/lib/browser/workspace.svelte.ts` substantively (the reactive mirror), plus comments in
+`writeSurfaceRegistry.ts`, `DetailPane.svelte` and `MatchCreator.svelte`, plus two test files. Every
+one of those is source under §7's closed-list reading. **So a round is owed and it is 2d-5-2b-A's.**
+
+**This is the paragraph above's lesson applied rather than restated.** 2d-5-2a-C's record predicted a
+tail's continuation from the *phase's* diff and was wrong; the input is the *fix round's* diff. Here
+the two happen to coincide — the fixes landed in the phase commit — and that coincidence is worth
+naming, because it is exactly the shape that makes the two easy to conflate again. What commissions
+2d-5-2b-A is the **fix**, not the phase.
+
+**What 2d-5-2b-A commissions, read the same way.** Its one review returned four SHOULD-FIX findings
+and **all four were fixed in this phase's own commit**, so once again the fix round's diff and the
+phase's diff coincide. That diff changed **three source files** —
+`src/lib/browser/workspace.svelte.ts` (the door, substantively),
+`src/lib/components/MatchCreator.svelte` (a comment) and `src/lib/components/DetailPane.test.ts`
+(one new case and amended assertions) — plus `docs/decisions/2d-5-2b-notes.md`, which is on §7's
+closed list and therefore does not count. **So a round is owed and it is 2d-5-2b-B's.**
+
+**What 2d-5-2b-B commissions, read the same way.** Its one review returned three SHOULD-FIX findings
+and **all three were fixed in this phase's own commit**, so for the third phase running the fix
+round's diff and the phase's diff coincide. That diff changed **three source files** —
+`src/lib/browser/workspace.svelte.ts` and `src/lib/components/MatchCreator.svelte` (comments) and
+`src/lib/components/DetailPane.test.ts` (a comment and one added `lease()` call) — plus
+`docs/decisions/2d-5-2b-notes.md`, `docs/reviews/phase-2d-5-2b-B.md`,
+`docs/progress-archive/next-action-history.md` and this file, every one of them on §7's closed list
+and therefore not counted. **So a round is owed and it is 2d-5-2b-C's.**
+
+**Every change but one is a comment, and that changes nothing.** §7.1's unit is the **file**, and a
+comment-only change to a source file counts — the rule says so in as many words, because a comment is
+where this project keeps several of its contracts. Two of the three fixes here are precisely that: a
+contract sentence that was wider than its code.
+
+**This chain has now spent six phases and shows no sign of the ending 2d-5-1's and 2d-5-2a's
+found.** Both of those closed the first time a fix round changed no source file. Every fix round of
+this one has changed source, so every one has commissioned the next, and §7.2 says in as many words
+that this is the mechanism working rather than failing — *a tail that keeps finding real defects in
+source is a tail doing its job*. **The escape hatch is `BLOCKED` under §7.2 and is never a shortened
+round.** It is not reached: 2d-5-2b-B's review returned **0 blockers**, its three findings were real
+and independent rather than instances of one defect surviving its fix, and `2d-5-2b-notes.md` §14.6
+names **no correctness defect in a source file** — its one *actionable* mark is on a cross-module
+figure that is currently true, which §7.3 does not blocking-qualify.
+
+**The round that was positioned to catch a self-undoing fix ran, and it did not find one.** The
+previous checkpoint predicted that 2d-5-2b-B would be the round to see finding 1's fix reintroduce
+what it closed, *"because finding 1's fix is exactly the kind of change that could"*. It did not: the
+review's own *"not a finding"* section re-derived the three generation-moving sites
+(`writeSurfaceRegistry.ts:528`, `:546`, `:602`) against the two doors that reach them
+(`workspace.svelte.ts:3374`, `:1857`, `:1870`) and found **no fourth unmirrored path**, and the
+orchestrator re-derived that enumeration independently. **The prediction is recorded as not borne
+out rather than quietly dropped**, which is this file's own standing correction of the habit that
+produced a confident wrong call at 2d-5-2a-C.
+
+**What the two findings that *were* returned have in common is worth naming for 2d-5-2b-C.** Neither
+is a regression in the guard; both are sentences that outran their code, and one of them sat inside
+the sentence written to fix the previous instance. That is the chain's recurring class, not its
+correctness converging badly — the source change 2d-5-2b-A made is the same change it was before, and
+two rounds have now examined it. What would change the verdict is a round finding the *code* wrong,
+and none has.
+
+**What 2d-5-2b-C commissions, read the same way.** Its one review returned three SHOULD-FIX and three
+NIT findings and **all six were fixed in this phase's own commit**, so for the fourth phase running
+the fix round's diff and the phase's diff coincide. That diff changed **three source files** —
+`src/lib/browser/workspace.svelte.ts`, `src/lib/components/MatchCreator.svelte` and
+`src/lib/components/DetailPane.test.ts`, **every changed line a comment** — plus
+`docs/decisions/2d-5-2b-notes.md`, `docs/reviews/phase-2d-5-2b-C.md`,
+`docs/progress-archive/next-action-history.md` and this file, every one on §7's closed list and
+therefore not counted. **So a round is owed and it is 2d-5-2b-D's.**
+
+**2d-5-2b-C answered the `BLOCKED` question rather than inheriting the paragraphs above, and the
+answer changed on one point.** The prediction directly above — *"what would change the verdict is a
+round finding the code wrong, and none has"* — **still holds**: C found no executable line wrong, and
+its own diff is comment-only. But the sentence beside it, that 2d-5-2b-B's findings were *"real and
+independent rather than instances of one defect surviving its fix"*, is **not** what C found about
+B's: all six of C's findings sit in text B wrote, and two of them correct B's account of **production
+reachability** — which read decides whether a restore is written, and whether `current` is involved
+at all — rather than mere wording. **That is a new instance of the class, not the same defect
+surviving**, because B closed *"one reader"* and *"on every open restore"* and C's findings are about
+different facts in the replacement sentence. `2d-5-2b-notes.md` §15.6 argues the not-`BLOCKED`
+verdict in full and, more usefully, states the condition that **would** reach the hatch: the same
+mis-attribution reappearing in the sentences written this phase. 2d-5-2b-D is the round positioned to
+see that, and it should apply the stated condition rather than re-argue it.
