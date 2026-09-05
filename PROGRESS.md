@@ -22,11 +22,14 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, measured on the finished file rather than predicted before it:**
-**757 lines and ~98 KiB** — over the 64 KiB soft bound and well past the 400-line one,
-but **43 lines under the 800-line hard bound**. **It is over soft, the figure is re-measured on
+**761 lines and ~99 KiB** — over the 64 KiB soft bound and well past the 400-line one,
+but **39 lines under the 800-line hard bound**. **It is over soft, the figure is re-measured on
 this file rather than inherited, and it is the honest one** — measured after 2d-5-3-D's archive *and
-after this paragraph was written*, which is the only order that gives a true number, and before its
-own SHA-record commit, which adds two lines. A session's draft of this sentence once said 698,
+after this paragraph was written*, which is the only order that gives a true number. It was taken
+**before** the SHA-record commit below it, which took the file to **758**; the inherited version of
+this sentence said that commit *"adds two lines"*, and it added **one**. The figure above is this
+file's size **after** that correction and its own re-measurement, so it is what the next session
+inherits — and it is still to be re-derived rather than quoted. A session's draft of this sentence once said 698,
 measured before the paragraph it sat in existed: **a derived figure outlives the thing it was derived
 from unless something re-derives it**, which this file already says in the paragraph opening *"That
 failure recurred at the 2d-5 consult in a new place"*. **That citation used to read "at line 21"**, and
