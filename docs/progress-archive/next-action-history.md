@@ -13213,3 +13213,126 @@ finding has lived in every tail this project has run:
 **Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-D-notes.md` §9 carries this round's marked items, and
 none of them names an unfixed correctness defect in a source file.
 
+
+---
+
+## Phase 2d-5-4-E's record and its Next-action block — archived 2026-09-20 at Phase 2d-5-4-F
+
+#### Phase 2d-5-4-E — the round `CLAUDE.md` §7.1 commissioned for 2d-5-4-D's fix
+
+**Taken and answered, and `SUPERSEDED BY 2d-5-4-F` rather than complete**, because its own fix changed
+source. Risk class **high**; worker model **opus** — **no implementation worker**: one **read-only
+re-derivation** worker, then one fix worker, the shape this chain has settled on. Record
+[`docs/decisions/2d-5-4-E-notes.md`](docs/decisions/2d-5-4-E-notes.md); review
+[`docs/reviews/phase-2d-5-4-E.md`](docs/reviews/phase-2d-5-4-E.md); brief
+[`docs/reviews/phase-2d-5-4-E.brief.md`](docs/reviews/phase-2d-5-4-E.brief.md); the re-derivation
+[`docs/reviews/phase-2d-5-4-E.rederivation.md`](docs/reviews/phase-2d-5-4-E.rederivation.md).
+
+**The review was Codex**, through `autoclaude-review.sh`, which **exited 0** so no agent was spawned —
+**seven consecutive Codex rounds**. **Verdict `ship-with-fixes`, 2 blockers and 1 SHOULD-FIX**, the
+SHOULD-FIX record-only. **The body arrived truncated for the sixth round running**, so it was **not**
+accepted on the report's strength: a read-only worker re-derived all three from the code and swept by
+shape, and the orchestrator spot-checked the decisive lines itself — `accept()`'s read order above the
+session literal, `routeObservation`'s property reads, the *"Epoch `0` is adopted exactly like any
+other"* comment the review's own finding turns on, and the record passage at
+`2d-5-4-notes.md:525`.
+
+**Both blockers HOLD, and the first one's anchor is half-wrong.** **A1**: the fence 2d-5-4-D added can
+**compare the replacement lifecycle with itself**. `accept()` reads `batch.epoch`, `batch.discarded`
+and `batch.newest_sequence` — caller-controlled on a wire value — **above** the `ObservationSession`
+literal that captures `epoch`, so a getter that synchronously calls `BrowserState.open()` reaches
+`workspaceOpened` (`epoch = 0`, `accepted.clear()`, `block` back to running, `disposed` untouched) and
+the session's baseline is the **already-reset** value: the fence asks `0 !== 0`, passes, and `admit`
+accepts on a cleared map. The defect is real and the anchor is not — the cause is the coordinator's
+call site, not `observationTransitions.ts:913`. **A2**: the comment 2d-5-4-D added claimed
+`applyRemoval` and `applyUnreadable` *"run nothing caller-supplied above their own `admit` and so are
+safe in isolation"*, which **overlooks `routeObservation()`** — nothing but caller-controlled property
+reads, run before **every** arm — so a **single** `Removed` can reset the lifecycle inside its own
+routing. The asymmetry reaches four arms, not one. **A3** (record-only): `2d-5-4-notes.md:525` still
+justifies clearing statuses with *"an identity the load is about to reallocate"* — present tense,
+unstruck, justifying an action, so an **instance** of the struck claim and not a historical quotation
+of one. The review's line number was `:523`.
+
+**Five more found by sweeping.** **S1 (HIGH, source)** — the fence's own comment asserted of the
+**injected** `ObservationSession` what is true only of the coordinator's implementation. **S2 (MEDIUM,
+record)** — 2d-5-4-D's *"an adopted epoch is non-zero"* is contradicted by
+`reconciliationCoordinator.ts:892-893`'s own comment, *"Epoch `0` is adopted exactly like any other"*,
+so the epoch half of the fence **cannot fire at all** for a session that adopted `0`; what keeps that
+out of production is a Rust invariant (`FIRST_WORKSPACE_EPOCH = 1`) that does not reach the injected
+boundary the fence defends. **S3 (LOW, source)** — a **narrower wording** of A2's false claim four
+lines above it, the fifth round running in which the survivor shape has produced a finding. **S4 (LOW,
+record)** and **S5 (LOW, record)** — a citation off by eight lines, and a second live instance of A3's
+claim in `2d-5-2b-notes.md`.
+
+**The fix is one monotonic counter, and the review's own proposal was refused.** A lifecycle token
+*carried on the batch* is machinery this round has no evidence for; what it has evidence for is that
+**the epoch cannot be the token** (S2). So `reconciliationCoordinator.ts` gets a `let lifecycle = 0`
+incremented at **three derived sites** — `workspaceOpened()` above its `accepted.clear()`,
+`recoverFromLostHistory()` before `host.reopenWorkspace`, and `dispose()` — captured as
+`runOneDrain`'s **first statement**, above every read of anything a caller supplied, and carried into
+`observationTransitions.ts` by a fourth `ObservationSession` member, `lifecycleIsOurs()`. One shared
+predicate, `lifecycleMovedUnder`, is asked **immediately after `routeObservation` and above the
+switch** — which closes A2 for every arm — and **again in `applyAddition`**, whose materialization
+window runs after routing has returned. `accept()` now materializes the batch's four members before
+comparing, and **no new outcome arm was invented**: the coordinator-side refusal records the
+**existing** `'staleOpen'`, and the transitions-side one the `'lifecycleMoved'` 2d-5-4-D added.
+**`applyChange`'s guard was deliberately not widened**; §9 item 2 of the record says what defends it
+instead and that the defence lives in another module.
+
+**Deriving the capture point exposed two further instances of A1's own shape**, both fixed and both
+recorded as beyond the brief's literal instruction (§2.3, §2.4): a getter on the `CommandResult`
+itself, and cursor poisoning from `accept()`'s interleaved read-and-write sequence.
+
+**Two things this round did not do, stated rather than glossed.** It added **no user-facing string in
+any language** and touched **no `.svelte` file**, so no window reading is owed. And it left `npm run
+build` at **189** modules: nothing new lives in a module of its own.
+
+**What it deliberately left standing.** 21 of the 23 `docs/` occurrences of the false identity claim
+are still unread — this round's re-derivation read two more and fixed both — and §9 item 7 carries it
+as a sweep to run rather than a number to trust. **The counter is a `let` and nothing enforces its
+increment sites**: a fourth place that clears `accepted`, or a host that replaces the workspace
+without calling `workspaceOpened()`, leaves every fence built on it answering `true`, and **no test
+can fail that**, because a missing increment is indistinguishable from a lifecycle that did not end.
+
+#### The next action is **Phase 2d-5-4-F — the round §7.1 commissions for 2d-5-4-E's fix**
+
+**Scoped to that fix's diff**: `src/lib/browser/observationTransitions.ts`,
+`src/lib/browser/reconciliationCoordinator.ts` and two suites —
+`observationTransitions.test.ts` and `reconciliationCoordinator.test.ts` — plus
+`docs/decisions/2d-5-4-E-notes.md` in full and the correction blocks this round wrote into
+`2d-5-4-notes.md`, `2d-5-2b-notes.md` and `2d-5-4-D-notes.md`. **This is a review round, not
+implementation**: it takes no implementation worker, and its own fix decides whether another round
+follows, by §7.1 and nothing else.
+
+**Five things to point it at first**, each because the fix that answered a finding is where the next
+finding has lived in every tail this project has run:
+
+1. **The counter's three increment sites.** Re-derive them: does anything else clear `accepted`,
+   replace the workspace, or end the applying lifecycle **without** passing through
+   `workspaceOpened()`, `recoverFromLostHistory()` or `dispose()`? Is `dispose()`'s increment really
+   redundant with the live `disposed` read, as the record says, or does it carry a case the other two
+   do not? And is the capture in `runOneDrain` genuinely above **every** caller-controlled read —
+   `host.openGeneration()` is a host call and it runs *after* the capture; check that order is the one
+   the record claims.
+2. **`lifecycleMovedUnder`'s three clauses and the doc that says what each does not discriminate.**
+   Check every half: that `stillApplying` says nothing about a replaced workspace, that
+   `lifecycleIsOurs` says *something ended* and never *which one is showing*, and that the epoch
+   clause is vacuous at `0` — and that the sentence saying none of the three is forced by a type is
+   true of `session.epoch` as a `readonly` declaration.
+3. **`accept()`'s materialization.** Is any read of the injected batch left **above** the capture, and
+   can any write still precede the comparison? §9 item 1 names `observations.length` and the
+   `for…of`'s `Symbol.iterator` as caller-controlled reads that sit **below** it; check the claim that
+   neither is a defect, and check what a statement added after either would be below.
+4. **The routing fence's placement.** It is above the switch — but `routeObservation` both reads
+   caller values and builds the literal the arms admit on. Can any arm still arbitrate on a value
+   captured before the fence, and is `applyAddition`'s second fence still doing work the first does
+   not? The record says its materialization window runs after routing returned; re-derive that.
+5. **The three new cases and the pre-fix messages in §8.** They were confirmed against the whole
+   `git show HEAD:` tree rather than partial reverts. Check that each pins the **fence**, not merely
+   an outcome string — §9 item 6 records that `'staleOpen'` now covers two facts a case cannot tell
+   apart — and check the one measurement the fix worker flagged: reverting only §2.4's comparison left
+   two assertions passing and failed on the cursor instead.
+
+**Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-E-notes.md` §9 carries this round's marked items, all
+eight **recorded only**, and none of them names an unfixed correctness defect in a source file.
+

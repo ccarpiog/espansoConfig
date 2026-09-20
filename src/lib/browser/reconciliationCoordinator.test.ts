@@ -923,6 +923,61 @@ describe('the epoch', () => {
     expect(coordinator.watchState()).toEqual({ kind: 'watching', epoch: EPOCH + 5 });
     coordinator.dispose();
   }); // End of the epoch-cleared-by-open case
+
+  it('accounts for the batch whose epoch it validated, not a second read', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.start();
+    await flush();
+    control.answer(batch({ newest_sequence: 10 }));
+    await flush();
+    expect(coordinator.cursor()).toEqual({ epoch: EPOCH, watermark: 10, lastDiscarded: 0 });
+
+    // **The check and the spend were two reads of the same property** — Phase
+    // 2d-5-4-F. `answer.value` used to be read once to validate the epoch and
+    // again on the line that hands the batch to `accept()`, so an accessor
+    // answering a different object between them made the validation vacuous. **No
+    // lifecycle movement is required**, which is why no fence this chain added
+    // defends it: one session, one epoch, two reads.
+    let reads = 0;
+    const answer: CommandResult<ReconciliationBatch> = {
+      ok: true,
+      /**
+       * Answers one batch to be validated and a different one to be spent.
+       *
+       * @returns The first read's batch, then the substitute.
+       */
+      get value(): ReconciliationBatch {
+        reads += 1;
+        return reads === 1
+          ? { epoch: EPOCH, discarded: 0, newest_sequence: 20, observations: [] }
+          : {
+              epoch: EPOCH + 90,
+              discarded: 0,
+              newest_sequence: 500,
+              observations: [addition(500, 42)]
+            };
+      }
+    };
+    events.wake(EPOCH, 11);
+    await flush();
+    control.answer(answer);
+    await flush();
+
+    // The watermark is the validated batch's, never the substitute's — a foreign
+    // epoch's `newest_sequence` is not comparable with this session's (ruling 7),
+    // and it would be handed straight back to `host.drain()`.
+    expect(coordinator.cursor().watermark).toBe(20);
+    expect(control.added).toEqual([]);
+    expect(coordinator.acceptedSequence(42)).toBe(0);
+    // The fence itself: one read, so validation and spending cannot disagree.
+    expect(reads).toBe(1);
+    // Non-discriminating, and named as such: `'accepted'` is what both trees
+    // record — the substitution is not a refusal, it is the wrong batch accepted.
+    expect(coordinator.drains()[1]?.outcome).toBe('accepted');
+    coordinator.dispose();
+  }); // End of the validated-batch-is-the-accepted-batch case
 }); // End of the "epoch" suite
 
 describe('the watermark and the loss count', () => {
@@ -1901,6 +1956,118 @@ describe('the discarded-history recovery', () => {
     expect(control.statuses).toEqual([{ document: 2, status: { kind: 'stale' } }]);
     coordinator.dispose();
   }); // End of the blocked-reread case
+
+  it('writes no cursor when the registry read reopened the workspace', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+
+    // **The one injected call inside the blocked arm** — Phase 2d-5-4-F.
+    // `recoverFromLostHistory()` opens with `host.openWriteSurfaces()`, which this
+    // host answers from `control.surfaces`; a getter there is the same door
+    // `BrowserState.open()` goes through, and it reaches `workspaceOpened()`
+    // before the recovery has decided anything. Answering a non-empty registry
+    // afterwards makes the recovery decline — ruling 12's arm — and the two cursor
+    // writes below it used to land in the workspace that had just replaced this
+    // one.
+    let sprung = false;
+    Object.defineProperty(control, 'surfaces', {
+      configurable: true,
+      /**
+       * Reopens the workspace once, then reports a surface so recovery declines.
+       *
+       * @returns A one-element registry.
+       */
+      get(): readonly OpenWriteSurface[] {
+        if (!sprung) {
+          sprung = true;
+          coordinator.workspaceOpened('/tmp/other');
+        }
+        return [SURFACE_OVER_ONE];
+      }
+    });
+
+    control.answer(
+      batch({
+        newest_sequence: 500,
+        discarded: 1,
+        observations: [removal(2), removal(3)]
+      })
+    );
+    await flush();
+
+    expect(sprung).toBe(true);
+    // The closed lifecycle's watermark does not land in the replacing workspace's
+    // freshly zeroed cursor. It would never be corrected: the next drain asks
+    // `host.drain(500)`, so the new epoch's first five hundred observations are
+    // never fetched at all.
+    expect(coordinator.cursor()).toEqual({ epoch: 0, watermark: 0, lastDiscarded: 0 });
+    // And the closed batch's count is not attributed to the workspace replacing it.
+    expect(coordinator.observationsDropped()).toBe(0);
+    // `'staleOpen'` rather than `'accepted'`: the lifecycle moved **under** this
+    // session, which is not the refusal the session performs for itself.
+    expect(coordinator.drains()[0]?.outcome).toBe('staleOpen');
+    // Non-discriminating, and named: the recovery declined on both trees, because
+    // the registry answered non-empty either way.
+    expect(control.reopened).toEqual([]);
+    coordinator.dispose();
+  }); // End of the reopened-by-the-registry-read case
+
+  it('drops no count when the observation list’s own length reopened the workspace', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    // A plain open surface, so the recovery declines without running any caller
+    // code of its own: this case is about the **operand** of the line below it.
+    control.surfaces = [SURFACE_OVER_ONE];
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+
+    // **A compound assignment stores after it evaluates its operand** — Phase
+    // 2d-5-4-F. `observationsDroppedCount += observations.length` read the count
+    // where it was used, below the comparison; a `length` trap that reopened the
+    // workspace had `workspaceOpened()`'s `observationsDroppedCount = 0`
+    // overwritten by the closed lifecycle's total on the very next step of the
+    // same statement. `2d-5-4-E-notes.md` §9 item 1 called the read harmless
+    // because *nothing is written after it* — it is not a statement, it is an
+    // operand.
+    let sprung = false;
+    const observations = new Proxy([removal(2), removal(3)] as ExternalObservation[], {
+      /**
+       * Reopens the workspace the first time the length is asked for.
+       *
+       * @param target - The real list.
+       * @param property - What is being read.
+       * @param receiver - The proxy.
+       * @returns Whatever the real list answers.
+       */
+      get(target, property, receiver): unknown {
+        if (property === 'length' && !sprung) {
+          sprung = true;
+          coordinator.workspaceOpened('/tmp/other');
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    control.answer(batch({ newest_sequence: 500, discarded: 1, observations }));
+    await flush();
+
+    expect(sprung).toBe(true);
+    // The count belongs to the lifecycle that dropped it, and that lifecycle is
+    // gone. Nothing of it is attributed to the workspace now in force.
+    expect(coordinator.observationsDropped()).toBe(0);
+    expect(coordinator.drains()[0]?.outcome).toBe('staleOpen');
+    // Non-discriminating: `workspaceOpened()` zeroes the cursor on both trees, so
+    // this assertion cannot tell them apart and is here to say the reset happened.
+    expect(coordinator.cursor()).toEqual({ epoch: 0, watermark: 0, lastDiscarded: 0 });
+    coordinator.dispose();
+  }); // End of the reopened-by-the-length-read case
 }); // End of the "discarded-history recovery" suite
 
 describe('the membership-reload request', () => {

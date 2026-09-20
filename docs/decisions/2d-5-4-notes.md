@@ -482,8 +482,17 @@ recovery, which passes **no observed identity** — it passes the retained open 
 Q8 says these arms produce *"state-only transitions, notices, or a deferred whole-workspace refresh"*.
 This step raises `membershipReloadWanted` and **acts on it nowhere**, deliberately:
 
-- the only whole reload this application has is `open()`, which reallocates every identity in the
-  window, and ruling 12 forbids running it while any surface is open;
+- the only whole reload this application has is `open()`, which ~~reallocates every identity in the
+  window~~ **replaces the whole workspace — struck and corrected at 2d-5-4-F, review finding 4, as a
+  live instance of the false identity claim rather than a quotation of one.** `open()` reallocates
+  nothing: `identity_of` in `crates/espansoconfig-core/src/workspace/mod.rs` mints from a
+  process-lifetime table keyed by **path**, so the same path answers the same `DocumentId` for as
+  long as the process runs, a recreation of the file included, and `Workspace::from_tree`'s own doc
+  says identities are stable across two `open` calls. What an `open()` does replace is **workspace
+  membership and everything derived from it** — which files the workspace holds, every projection,
+  the selection, the viewer state and each per-document generation — and the replacing epoch restarts
+  its observation sequences. That is the cost, and ruling 12 forbids running it while any surface is
+  open;
 - performing it automatically would mean replacing the person's whole window because an unrelated
   file appeared beside the configuration;
 - *request* is what the consult's own wording says, twice.
@@ -815,10 +824,15 @@ were written at delivery: three items moved, and the paragraph under each says w
     > future ingress added beside them would not fail to compile.
 
 13. **`pendingAdditions` is cleared only by `open()` and by the removal transition — *recorded
-    only*.** There is no *other* way for an invented identity to become addressable today, because the
-    only thing that reallocates identities is a whole load. If a later phase ever gives this window a
-    narrower membership refresh, that refresh owes this list a clearing rule, and nothing in TypeScript
-    will ask it for one.
+    only*.** There is no *other* way for an invented identity to become addressable today, because
+    ~~the only thing that reallocates identities is a whole load~~ **the only thing that changes
+    which files the workspace holds is a whole load — struck and corrected at 2d-5-4-F, review
+    finding 4's sweep, as a second live instance in this file.** Nothing reallocates identities at
+    all: `identity_of` mints per path from a process-lifetime table, so the number a `Named` identity
+    carries is stable. What makes it *addressable* is the replacing workspace enumerating that path,
+    which is a membership fact and not a renumbering. The obligation is unchanged: if a later phase
+    ever gives this window a narrower membership refresh, that refresh owes this list a clearing
+    rule, and nothing in TypeScript will ask it for one.
 
 14. **`stillApplying` conflates two states under one answer — *recorded only*.** A blocked session and
     a disposed one both answer `false`, and a guard that wanted to treat them differently could not.

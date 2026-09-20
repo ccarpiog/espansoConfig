@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T17:20:38Z",
+ "updated": "2026-09-20T19:34:22Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -322,9 +322,18 @@
   {
    "id": "2d-5-4-F",
    "title": "The round §7.1 commissions for 2d-5-4-E's fix",
+   "status": "skipped",
+   "risk": "high",
+   "summary": "Superseded by 2d-5-4-G: the round was taken, all four findings re-derived and fixed plus seven the review missed, and its own fix changed four source files.",
+   "review": "docs/reviews/phase-2d-5-4-F.md",
+   "narrative": "docs/decisions/2d-5-4-F-notes.md"
+  },
+  {
+   "id": "2d-5-4-G",
+   "title": "The round §7.1 commissions for 2d-5-4-F's fix",
    "status": "queued",
    "risk": "high",
-   "summary": "Not started; the round CLAUDE.md 7.1 commissions because 2d-5-4-E fix changed four source files."
+   "summary": "Not started; the round CLAUDE.md 7.1 commissions because 2d-5-4-F fix changed four source files."
   },
   {
    "id": "2d-5-5",

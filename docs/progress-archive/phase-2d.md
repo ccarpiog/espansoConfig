@@ -4508,3 +4508,44 @@ code** — reverted, run, message recorded, restored; the messages are in `2d-5-
 could be read. **Nothing was discarded**: no candidate passed against both trees. The three
 comment-only fixes have no case and the record says so rather than implying one.
 
+
+---
+
+## Phase 2d-5-4-E's verification narrative — archived 2026-09-20 at Phase 2d-5-4-F
+
+True of the tree `fe7d61b` committed, and superseded as the live rung by Phase 2d-5-4-F's
+`1320 / 443 / 2413 / 189`.
+
+### The rung moved by three, and only by this round's own cases
+
+**With the instrument in the working tree the four commands answer `1320 / 443 / 2409 / 189`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-4-E**, on the post-fix tree, each command run on its own and nothing
+run concurrently with `cargo`:
+
+| Gate | Was at 2d-5-4-D | Now | Why it moved, or did not |
+|---|---|---|---|
+| `cargo test --workspace` | 1320 | **1320** | no Rust changed — `git diff --numstat -- crates/ src-tauri/` names only the instrument's `main.rs` hook |
+| `npm run check` files | 443 | **443** | no file added or removed; the fix is inside four existing files |
+| `npm test` | 2406 | **2409** | +3, the three cases this round's three behavioural fixes are pinned by |
+| `npm run build` modules | 189 | **189** | no new module: the counter, the predicate and the fences all live inside functions that already existed |
+
+**Both complementary questions were asked of the Rust gate**, not one: the sum over **26** `test
+result` lines, no line lacking `0 failed`, **and no line lacking `0 filtered out`**. It completed on
+the first attempt, so the stale-`target/` host finding has not recurred for eight phases. Clippy (exit
+0), `cargo fmt --check` (exit 0) and `cargo tree -p espansoconfig-core | rg tauri` (finds nothing) are
+clean. **Both bundle oracles were read and both lines are reported**: server-only markers **absent**,
+client-only markers **present (2)**. **The instrument's pin was re-checked** and holds at
+`5 insertions(+), 1 deletion(-)`.
+
+**No gate caught either blocker and none could have** — both are reachable only through an injected
+accessor, which is this chain's standing coverage bound and is recorded as such (§9 item 5 of the
+notes). **Three cases now pin the three behavioural fixes, and each was confirmed to fail against the
+pre-fix code** — against the whole `git show HEAD:` tree rather than a partial revert, with the
+messages recorded verbatim in `2d-5-4-E-notes.md` §8: `expected 'removed' to be 'lifecycleMoved'`,
+and `expected [ { id: 42, …(6) } ] to deeply equal []` for both coordinator cases. With the masking
+assertions suspended, the blocker's own measurement reads `expected 500 to be +0` — the closed epoch's
+sequence standing in the replacing workspace's map. **Nothing was discarded**: no candidate passed
+against both trees. The comment-only fixes have no case and the record says so rather than implying
+one.
+

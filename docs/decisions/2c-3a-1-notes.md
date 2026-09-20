@@ -603,9 +603,14 @@ other, which is exactly the gap.
 
 `select()` captures both and drops its answer when either has moved, through one
 `selectionLookupIsStale` used at both of its checks. `open()` bumps the intent counter globally —
-every projection is about to go — and clears the per-document map, because a document identity is
+every projection is about to go — and clears the per-document map, because ~~a document identity is
 reallocated by the load that follows and a kept entry would be a count of replacements of a different
-file.
+file~~ **the load that follows replaces the workspace that map is about — struck and corrected at
+2d-5-4-F, review finding 4's sweep.** No identity is reallocated: `identity_of` in
+`crates/espansoconfig-core/src/workspace/mod.rs` mints per **path** from a process-lifetime table, so
+a retained entry is a count about the *same* file. What makes it wrong to keep is that it counts
+replacements of a projection belonging to a workspace this window is closing, which the replacing one
+may not hold at all. The clearing rule is unchanged; only its reason is.
 
 **Neither counter implies the other, and that is why both are kept.** A create committing in file B
 can move the selection to the snippet it just made while a lookup for file A is in flight: A's

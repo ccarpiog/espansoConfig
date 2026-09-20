@@ -93,7 +93,7 @@ let lifecycle = 0;
 |---|---|---|
 | `workspaceOpened()` | `:1537` | The one the fence exists for. It clears `accepted` — the map `admit` answers permissively when empty — along with the cursor and the outcome record. The increment is its **first** statement, above every clear, so caller code re-entering part-way through the reset already sees a lifecycle it cannot claim rather than a half-cleared one it can. |
 | `recoverFromLostHistory()` | `:899` | The one place this coordinator asks for the workspace it is applying to be replaced. It is moved **before** `host.reopenWorkspace(...)` rather than left to the announcement, because nothing in TypeScript forces a host to announce — that call's own comment says so. It cannot rescue the batch being applied when it runs: `accept()` returns immediately below it, having already compared its own capture. |
-| `dispose()` | `:1510` | **Redundant today and kept anyway.** `stillApplying()` reads `disposed` live, so every fence already refuses after it. What the increment keeps true is the rule *every site that ends the applying lifecycle moves the counter*, so a reader does not have to re-derive which of two values covers which site. The comment beside it says it is redundant, in the same sentence that says why it is there. |
+| `dispose()` | `:1510` | ~~**Redundant today and kept anyway.** `stillApplying()` reads `disposed` live, so every fence already refuses after it. What the increment keeps true is the rule *every site that ends the applying lifecycle moves the counter*, so a reader does not have to re-derive which of two values covers which site. The comment beside it says it is redundant, in the same sentence that says why it is there.~~ **Struck and corrected at 2d-5-4-F, review finding 3.** The increment is **necessary**, not redundant. It *overlaps* the live `disposed` read for the fences that consult `stillApplying()` — every per-observation arm in `observationTransitions.ts`. It does **not** overlap `accept()`, whose comparison reads `lifecycle` **alone** and never reads `disposed`; the only other `disposed` read on the drain path is `runOneDrain`'s, which sits above every caller-controlled read of the command's answer, so a `dispose()` fired from a getter on `answer.value`, on a batch member or on `observations.length` lands below it. Without this increment such a disposal leaves `accept()` adopting an epoch, entering the blocked state, moving the watermark and reaching `host.reopenWorkspace()` — a disposed coordinator asking the window to reload its whole workspace. The rule about every site moving the counter is a second reason, not the reason. Both source comments were corrected in the same pass. |
 
 **What no type forces, said where it is done:** `lifecycle` is a plain `let`, and a fourth reset site
 added without a `lifecycle += 1` would compile and silently widen every fence built on it. The
@@ -131,7 +131,14 @@ which is precisely the state `workspaceOpened`'s own comment says poisons `onWak
 is routed.
 
 The fix is the smallest that closes it at the cause: `accept()` reads the batch's four members into
-locals **first**, compares the lifecycle **once**, and only then writes anything (`:951-954` and `:955-963`). Every
+locals **first**, compares the lifecycle **once**, and ~~only then writes anything~~ **— struck and
+corrected at 2d-5-4-F, swept finding W3 and review finding 1. *"Only then writes anything"* was false
+of the blocked arm.** That comparison was taken once and **two kinds of caller code ran below it**:
+`recoverFromLostHistory()`'s injected `host.openWriteSurfaces()`, above the arm's two cursor writes,
+and the observations. 2d-5-4-F added a recheck of the same comparison inside the arm, above both
+writes, answering `false` so the drain records `'staleOpen'`. What is true of the shape this section
+describes is narrower: the four reads are above the comparison, and **every write the unblocked path
+makes** is below it (`:951-954` and `:955-963`). Every
 existing branch afterwards uses the locals. Two early returns that were `return` are now `return true`
 — a batch refused under ruling 10 *was* accounted for, and the recovery is this session's own act
 rather than a lifecycle that moved under it.
@@ -375,13 +382,25 @@ Every item carries one of §7.3's two marks. **No item commissions a round** —
 mechanism and it reads a diff — and **no item below names an unfixed correctness defect in a source
 file**, so none holds this step open.
 
-1. **recorded only** — `observations.length` in `accept()`'s blocked arm and the `Symbol.iterator`
+1. ~~**recorded only** — `observations.length` in `accept()`'s blocked arm and the `Symbol.iterator`
    the `for…of` runs are both caller-controlled reads that sit **below** the comparison. Neither is a
    defect: the `.length` read is the last statement before that arm returns and nothing is written
    after it, and every observation the iterator yields is fenced by `applyObservation` before any arm
    sees it — which is what the loop's own comment now says. What is left is that *a future statement
    added after either* would be below the comparison and above nothing, and no type marks that
-   boundary.
+   boundary.~~
+
+   **Struck and corrected at 2d-5-4-F, swept finding W3.** *"The `.length` read is the last statement
+   before that arm returns and nothing is written after it"* is false, and the error is in the word
+   **statement**: the read is not a statement, it is the **operand** of one.
+   `observationsDroppedCount += observations.length` evaluates the target reference, evaluates the
+   operand, and **stores afterwards** — so a `length` getter that reopened the workspace had
+   `workspaceOpened()`'s `observationsDroppedCount = 0` overwritten by the closed lifecycle's total,
+   a write after the read and into the wrong lifecycle. 2d-5-4-F materializes the count with the four
+   members, above the comparison, and
+   `reconciliationCoordinator.test.ts` — *drops no count when the observation list's own length
+   reopened the workspace* — measures it. The half of the item that survives is the `Symbol.iterator`
+   sentence, unchanged, and the closing observation that no type marks the boundary.
 2. **recorded only** — **`applyChange`'s guard asks two of the three questions, not three.** A session
    that adopted epoch `0` and is neither disposed nor blocked cannot tell a replacement from its own
    lifecycle inside that guard. It is not a defect: what catches a read in flight across an `open()`

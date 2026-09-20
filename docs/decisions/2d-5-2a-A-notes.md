@@ -140,9 +140,15 @@ would hold that same object and would "agree" with a mutated answer while pinnin
 - **Nothing forces a host to register at all**, so an unmoved generation over an **empty** registry says
   nobody registered — not that no write surface is open. That is `competingSurfaceFor`'s own inherited
   limitation, and it is now in the generation's own doc comment rather than only in the header.
-- **A copy freezes the `DocumentId`, never what it denotes.** `open()` reallocates document identities
+- **A copy freezes the `DocumentId`, never what it denotes.** ~~`open()` reallocates document identities
   with no registry operation, so a stored surface can be perfectly immutable and about a file that no
-  longer exists under that identity. That is finding 2, and the two now cite each other.
+  longer exists under that identity.~~ **Struck and corrected at 2d-5-4-F, review finding 4's sweep.**
+  `open()` reallocates nothing — `identity_of` mints per path from a process-lifetime table, so the
+  frozen number denotes the same path for as long as the process runs. What `open()` replaces with no
+  registry operation is **workspace membership and everything derived from it**, so a stored surface
+  can be perfectly immutable and about a **workspace this window is closing**, which may not hold that
+  file at all. The bullet's own claim — a copy freezes the number, never what it denotes — is
+  unchanged and is if anything sharper this way. That is finding 2, and the two now cite each other.
 - **The copy is exactly as deep as today's union.** Adding a member to an arm of `OpenWriteSurface` is a
   compile error in `ownedDocumentSurface`, which is a real force; adding a member that is *itself an
   object* would compile and would be copied by reference, and only a reader would catch it.
@@ -370,8 +376,13 @@ it reads a diff. **No item names a correctness defect in a source file**, so non
    registry is uncorrupted either way, which is the property claimed; the throw is the diagnosis, not
    the defence.
 
-5. **A registration that survives an `open()` names a reallocated `DocumentId` — *actionable*, and not a
-   defect today.** The check a later step can run: after 2d-5-2b, open a workspace with a write surface
+5. **A registration that survives an `open()` names a ~~reallocated `DocumentId`~~ document of a
+   workspace that is gone — *actionable*, and not a defect today.** *(Heading struck and corrected at
+   2d-5-4-F, review finding 4's sweep: `open()` reallocates no identity — `identity_of` mints per
+   path from a process-lifetime table — so what makes the surviving registration stale is that it is
+   about a workspace this window is closing, which may not hold that file at all. The item's
+   substance, its mark and the check below are unchanged by the correction.)* The check a later step
+   can run: after 2d-5-2b, open a workspace with a write surface
    open and assert the registry is empty on the other side, or that the host unregistered. It is **not**
    a correctness defect in source now — nothing registers, so the registry is empty across an `open()`
    by construction and no consumer can observe the disagreement — so it does not hold this step open

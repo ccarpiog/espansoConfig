@@ -437,6 +437,17 @@ and it reads a diff. **No item names a correctness defect in a source file**, so
    > exists under that identity. That is §3.8's correction, and it is *recorded only*: no consumer of it
    > exists until 2d-5-2b.
 
+   **Correction to the correction — Phase 2d-5-4-F, review finding 4's sweep.** The block above is
+   quoted as 2d-5-2a-A wrote it, and one clause inside it is false: *"`open()` reallocates document
+   identities without any registry operation"*. `open()` **reallocates nothing** — `identity_of` in
+   `crates/espansoconfig-core/src/workspace/mod.rs` mints from a process-lifetime table keyed by
+   **path**, so the frozen `DocumentId` denotes the same path for the life of the process, a
+   recreation of the file at that path included. What `open()` replaces without any registry
+   operation is **workspace membership and everything derived from it**, so the registry can hold a
+   perfectly immutable surface that is about a **workspace this window is closing** — which may not
+   hold that file at all. The block's own conclusion is unchanged and is sharper this way: a copy
+   freezes the number, never what it denotes, and it stays *recorded only*.
+
 5. **`BrowserState.openWriteSurfaces()` and `restoreDocument`'s `surfaces` argument are two answers to
    one question — *actionable*, and not a defect.** They will disagree until 2d-5-2b routes the pane
    through the registry: today the registry is empty in production and the pane's own array is the live

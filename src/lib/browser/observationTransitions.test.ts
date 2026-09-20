@@ -1412,6 +1412,44 @@ describe('a Named identity the open workspace refuses', () => {
     expect(session.requests).toHaveLength(1);
     expect(workspace.statuses).toEqual([]);
   }); // End of the pending-row ownership case
+
+  it('removes no row when the host row question admitted a newer observation', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    workspace.rows = [9];
+    // **The `removed` arm's removal used to be outside the fence beside it** —
+    // Phase 2d-5-4-F. `workspace.holdsDocument()` is injected and stands between
+    // this arm's `admit` and every write below it, so a newer observation can be
+    // admitted in between; the status write was arbitrated and the removal was
+    // not, and a removal is permanent — the batch watermark has already moved past
+    // the observation that carried it.
+    const hostile: ReconciliationWorkspace = {
+      ...workspace.workspace,
+      /**
+       * Answers the question, and admits a newer observation while doing it.
+       *
+       * @param document - The identity.
+       * @returns Whatever the recording workspace would have answered.
+       */
+      holdsDocument: (document: DocumentId): boolean => {
+        sequences.admit(document, 12);
+        return workspace.workspace.holdsDocument(document);
+      }
+    };
+
+    expect(applyObservation(removal(4, NAMED_NINE), hostile, sequences, session.session)).toBe(
+      'pendingRow'
+    );
+
+    // Both of this arm's writes are under one arbitration, so neither happens.
+    expect(workspace.removed).toEqual([]);
+    expect(workspace.statuses).toEqual([]);
+    // Non-discriminating, and named: it establishes only that the trap fired and
+    // that the newer sequence is what the map now holds.
+    expect(sequences.sequenceFor(9)).toBe(12);
+    expect(workspace.rows).toEqual([9]);
+  }); // End of the pending-row removal-ownership case
 }); // End of the "Named identity" suite
 
 describe('an Unnamed path', () => {

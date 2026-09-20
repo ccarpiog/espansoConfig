@@ -329,9 +329,19 @@ pre-send refusal was already an affordance about — a surface can open after th
 ## 7. The `open()` decision, re-taken with evidence
 
 `2d-5-2a-notes.md` §3.8 decided that `open()` does **not** clear the registry, and its 2d-5-2a-A
-correction recorded the cost — a registration that survives an `open()` names a `DocumentId` that now
-denotes a **different file**, because the load below reallocates identities — as *"inert at 2d-5-2a
+correction recorded the cost — ~~a registration that survives an `open()` names a `DocumentId` that now
+denotes a **different file**, because the load below reallocates identities~~ — as *"inert at 2d-5-2a
 … and live at 2d-5-2b, where hosts register."*
+
+> **Correction — Phase 2d-5-4-F, review finding 4's sweep.** The struck clause is this record's own
+> restatement of 2d-5-2a-A's cost, and it states the cost wrongly. `open()` **reallocates nothing**:
+> `identity_of` in `crates/espansoconfig-core/src/workspace/mod.rs` mints from a process-lifetime
+> table keyed by path, so a surviving registration's `DocumentId` goes on denoting the same **path**
+> for the life of the process. What the load replaces is **workspace membership and everything
+> derived from it**, so the true cost is narrower and still real: the registration is about a
+> workspace this window is closing, and the replacing one may not hold that file at all. The decision
+> §7 goes on to re-take, and all three of its measurements, are unaffected — none of them turns on
+> which of the two costs it is.
 
 **The decision stands, and three things are now measured rather than expected.**
 

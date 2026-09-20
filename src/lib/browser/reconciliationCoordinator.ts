@@ -779,10 +779,15 @@ export function createReconciliationCoordinator(
   // increment it. The three sites that do are `workspaceOpened()`, `dispose()` and
   // `recoverFromLostHistory()` — see each for why — and a fourth added without a
   // `lifecycle += 1` would compile and silently widen every fence built on it.
-  // `dispose()`'s increment is **redundant today**, because `stillApplying()` reads
-  // `disposed` live; it is there so the rule is *every site that ends the applying
-  // lifecycle moves this*, rather than *every site except the ones another live
-  // read happens to cover*.
+  // `dispose()`'s increment **overlaps** the live `disposed` read of
+  // `stillApplying()` for the per-observation fences, and is **necessary** for
+  // `accept()`, whose comparison reads this counter alone — Phase 2d-5-4-F, which
+  // corrected the sentence that stood here calling it redundant. Removing it would
+  // let a disposal fired from a wire getter run the whole of `accept()`, cursor
+  // writes and `host.reopenWorkspace()` included; see `dispose()` for the
+  // derivation. The rule it keeps true beside that is *every site that ends the
+  // applying lifecycle moves this*, rather than *every site except the ones
+  // another live read happens to cover*.
   let lifecycle = 0;
 
   // The open gate. `true` from the `workspaceOpened()` of an `open()` until the
@@ -924,10 +929,28 @@ export function createReconciliationCoordinator(
    * therefore comparing that replacement with itself.
    *
    * **The comparison here is not the whole defence, and cannot be.** It is taken
-   * once, before anything is written; the observations are applied after it, and
-   * each of them reads caller-controlled properties of its own. That is what
-   * {@link ObservationSession.lifecycleIsOurs} carries into every arm, and what
-   * `./observationTransitions.ts` re-asks after routing.
+   * once, before anything is written, and **two kinds of caller code run below
+   * it** — Phase 2d-5-4-F. The first is the blocked arm's recovery:
+   * {@link recoverFromLostHistory} opens with the injected
+   * `host.openWriteSurfaces()`, so a registry read stands between this comparison
+   * and the two cursor writes that arm makes when recovery declines. That is why
+   * the arm re-asks this same comparison rather than relying on this one, and the
+   * enumeration here was short by exactly that until 2d-5-4-F. The second is the
+   * observations, applied after it, each reading caller-controlled properties of
+   * its own; that is what {@link ObservationSession.lifecycleIsOurs} carries into
+   * every arm, and what `./observationTransitions.ts` re-asks after routing.
+   *
+   * **`observations.length` is read with the four members, and that is not
+   * tidiness** — Phase 2d-5-4-F. `observationsDroppedCount += observations.length`
+   * evaluates its operand and **stores afterwards**, so a `length` getter that
+   * reopened the workspace from inside that operand would have the
+   * `observationsDroppedCount = 0` of `workspaceOpened()` overwritten by the closed
+   * lifecycle's total — a read below the comparison feeding a write below it. The
+   * count taken above the comparison is what that arm adds. The record said the
+   * opposite for one round (`2d-5-4-E-notes.md` §9 item 1, corrected in
+   * `2d-5-4-F-notes.md`), on the strength of *the `.length` read is the last
+   * statement before that arm returns*: it is not a statement at all, it is an
+   * operand.
    *
    * **`discarded` is handled before the observations** (ruling 10), because a
    * per-document reread is not a recovery from a hole in the history: the lost
@@ -952,13 +975,23 @@ export function createReconciliationCoordinator(
     const batchDiscarded = batch.discarded;
     const newestSequence = batch.newest_sequence;
     const observations = batch.observations;
+    // **The fifth read, and it belongs up here with the other four** — Phase
+    // 2d-5-4-F. It feeds a compound assignment in the blocked arm below, whose
+    // store happens *after* its operand has been evaluated; read there, a `length`
+    // getter that reopened the workspace would be followed by this function
+    // writing the closed lifecycle's total over the zero that reset left.
+    const observationCount = observations.length;
     if (lifecycle !== lifecycleAt) {
       // Something between the caller's capture and this line ended the lifecycle
-      // this batch was drained in — one of the four reads above reopened the
+      // this batch was drained in — one of the **five** reads above reopened the
       // workspace, or an `open()` or a disposal landed while the drain was in
-      // flight. Nothing of a closed lifecycle's queue may be written into the one
-      // that replaced it, and the cursor is the half no per-observation fence
-      // below could protect.
+      // flight. **The first of those is unreachable from the one live caller and
+      // is still checked**: `runOneDrain` now hands this function a plain snapshot
+      // of own data properties, so those five reads run no caller code at all
+      // today; nothing in `ReconciliationBatch` forces a caller to do that, which
+      // is why the comparison stays. Nothing of a closed lifecycle's queue may be
+      // written into the one that replaced it, and the cursor is the half no
+      // per-observation fence below could protect.
       return false;
     }
     if (!adopted) {
@@ -987,8 +1020,32 @@ export function createReconciliationCoordinator(
         // act, not a lifecycle that moved under it.
         return true;
       }
+      if (lifecycle !== lifecycleAt) {
+        // **The same comparison the top of this function makes, asked again
+        // because the call above spent it** — Phase 2d-5-4-F.
+        // `recoverFromLostHistory()` opens with `host.openWriteSurfaces()`, which
+        // is injected: a call that synchronously reaches `BrowserState.open()` —
+        // and so `workspaceOpened()`, `lifecycle += 1` and a zeroed cursor — and
+        // *then* answers a non-empty registry declines the recovery, which lands
+        // here. Both writes below would then put the closed lifecycle's numbers
+        // into the replacing workspace's freshly zeroed cursor, after which
+        // `host.drain(watermark)` would never fetch the new epoch's early
+        // observations at all.
+        //
+        // **`false`, not `true`**, and that is the difference from the arm above:
+        // this is a lifecycle that moved *under* the session, not a refusal the
+        // session itself performed. `runOneDrain` records `'staleOpen'` for a
+        // `false`, which already means *this batch's numbers cannot be attributed
+        // to the lifecycle now in force*, so no new outcome arm is invented.
+        //
+        // **The recovery's own `true` arm needs no such recheck**: it writes
+        // nothing. It may fire a second, redundant `reopenWorkspace` for a
+        // workspace that has just opened — `openRequest` holds the new request by
+        // then — which is wasteful and not corrupting.
+        return false;
+      }
       watermark = newestSequence;
-      observationsDroppedCount += observations.length;
+      observationsDroppedCount += observationCount;
       return true;
     }
     // **Advanced for an empty batch too** (ruling 7) — that is what stops the
@@ -1263,7 +1320,34 @@ export function createReconciliationCoordinator(
       record(afterSequence, reasons, 'refused');
       return;
     }
-    if (expectedAdopted && answer.value.epoch !== expectedEpoch) {
+    // **One read of `answer.value`, and one materialization of what it carries**
+    // — Phase 2d-5-4-F. `answer` is whatever the injected `host.drain()` resolved
+    // with, so `value` may be an accessor answering a different object each time
+    // it is asked. Validating one read and spending another is the check-and-spend
+    // shape `CLAUDE.md` names, and here the check and the spend were two reads of
+    // the **same property**: the epoch validated below belonged to one object and
+    // the `discarded`, `newest_sequence` and `observations` consumed by
+    // {@link accept} to another. **No lifecycle movement is required for that**, so
+    // no fence in this module defended it.
+    //
+    // **The snapshot is a plain object of own data properties**, so `accept()`'s
+    // own four reads read data rather than accessors, and the epoch validated
+    // below is the epoch it adopts.
+    //
+    // **The consequence, written down rather than discovered later**: the `value`
+    // getter and the four member getters now fire **above** the `staleEpoch` arm
+    // instead of below it. They are still below the `disposed` check and both
+    // generation checks, and still above `accept()`'s comparison, so a getter that
+    // ends the lifecycle is caught exactly as it was — by `accept()` answering
+    // `false` and this drain recording `'staleOpen'`.
+    const delivered = answer.value;
+    const batch: ReconciliationBatch = {
+      epoch: delivered.epoch,
+      discarded: delivered.discarded,
+      newest_sequence: delivered.newest_sequence,
+      observations: delivered.observations
+    };
+    if (expectedAdopted && batch.epoch !== expectedEpoch) {
       // **Neither sequence state moves**: not the watermark, not `lastDiscarded`.
       // The batch describes a queue for a workspace lifecycle this session is not
       // showing, and its `newest_sequence` is not comparable with this session's —
@@ -1271,13 +1355,14 @@ export function createReconciliationCoordinator(
       record(afterSequence, reasons, 'staleEpoch');
       return;
     }
-    if (!accept(answer.value, lifecycleAt)) {
+    if (!accept(batch, lifecycleAt)) {
       // The lifecycle this drain was issued in ended before the batch could be
-      // accounted for — including inside the `answer.value` read on this line, or
-      // inside `accept`'s own reads of the batch. Nothing moved, so this is the
-      // same outcome as the two rechecks above and for the same reason: the
-      // number this batch carries cannot be attributed to the lifecycle now in
-      // force.
+      // accounted for — inside the `answer.value` read above, inside one of the
+      // four member reads that built the snapshot, inside `accept`'s own reads of
+      // it, or inside the registry read its blocked arm makes. Nothing moved, so
+      // the outcome here is the same as the two rechecks above and for the same
+      // reason: the number this batch carries cannot be attributed to the
+      // lifecycle now in force.
       record(afterSequence, reasons, 'staleOpen');
       return;
     }
@@ -1360,9 +1445,17 @@ export function createReconciliationCoordinator(
         ensurePumping();
       }
     }; // End of function release()
-    // **Both arms, rather than `.finally`.** `pump()` catches everything a drain
-    // can throw, so this is defence against a throw from the bookkeeping itself —
-    // and a `void`-ed `.finally` on a rejected promise is an *unhandled* rejection
+    // **Both arms, rather than `.finally`.** `pump()` catches **nothing** — it
+    // holds no `try` at all, and `runOneDrain`'s wraps only the `await
+    // host.drain(...)` itself — so everything below that await is unprotected: a
+    // throwing getter on `answer.ok`, on `answer.value`, on any of the four batch
+    // members, on the `Symbol.iterator` the batch loop runs, or on any host member
+    // an arm calls, propagates out of `runOneDrain`, out of `pump()`, and rejects
+    // `running`. The comment here claimed the opposite until Phase 2d-5-4-F. What
+    // that costs is one drain missing from {@link drains} — its reasons were
+    // spliced off `pendingReasons` before the await and no `record()` runs — and
+    // **not** a stranded slot, because the rejection arm below releases it.
+    // A `void`-ed `.finally` on a rejected promise is an *unhandled* rejection
     // with nothing to report it, while a rejection handler that returns normally
     // is not. `release` itself returns normally on both arms: `ensurePumping` calls
     // an `async` function, which reports a synchronous throw as a rejected promise
@@ -1502,11 +1595,22 @@ export function createReconciliationCoordinator(
         return;
       }
       disposed = true;
-      // **Redundant with the line above, and kept for the rule rather than for an
-      // effect.** `stillApplying()` reads `disposed` live, so every fence already
-      // refuses after this point; what this keeps true is *every site that ends the
-      // applying lifecycle moves the counter*, so the next reader does not have to
-      // re-derive which of the two values covers which site.
+      // **Necessary, not redundant, and this comment said the opposite for a
+      // round** — Phase 2d-5-4-F. It *overlaps* the line above for the fences that
+      // read `stillApplying()`, which reads `disposed` live: every per-observation
+      // arm in `./observationTransitions.ts` refuses after this point whether or
+      // not this counter moves. It does **not** overlap {@link accept}, whose
+      // comparison reads `lifecycle` **alone** and never reads `disposed`. The only
+      // other `disposed` read on the drain path is `runOneDrain`'s, and that one is
+      // above every caller-controlled read of the command's answer — so a
+      // `dispose()` fired from a getter on `answer.value`, on one of the batch's
+      // four members or on `observations.length` lands *below* it. Delete this line
+      // and such a disposal leaves `accept()` adopting an epoch, entering the
+      // blocked state, moving the watermark, and reaching
+      // `host.reopenWorkspace()`: a disposed coordinator asking the window to throw
+      // away and reload its whole workspace. The rule it also keeps true — *every
+      // site that ends the applying lifecycle moves the counter* — is a second
+      // reason, not the reason.
       lifecycle += 1;
       // **Synchronously**, before anything can await: ruling 16 says foreground
       // listeners are removed synchronously, and there is no reason for the wake

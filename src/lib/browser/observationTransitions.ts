@@ -750,8 +750,12 @@ export interface ObservationSession {
    *   stopped.
    *
    * **What it does not cover.** It is a fact about the *coordinator*, not about the
-   * window: it says nothing about whether the workspace was replaced (the epoch and
-   * the host's open-generation capture say that), nothing about whether a newer
+   * window: it says nothing about whether the workspace was replaced
+   * ({@link ObservationSession.lifecycleIsOurs} is the member that answers that
+   * — named here at Phase 2d-5-4-F, which added it one round earlier and left this
+   * list reading as though the two below were the whole set; the epoch says it only
+   * for a session that adopted a non-zero one, and the host's open-generation
+   * capture only on the paths that take one), nothing about whether a newer
    * observation of the file was admitted, and nothing about whether a surface has
    * unsaved edits (R36). A recovery that *runs* answers `true` again immediately —
    * it clears the block before firing `reopenWorkspace` — and what catches the read
@@ -817,11 +821,15 @@ export type ObservationOutcome =
  * Whether the lifecycle an observation was accepted in has moved under it.
  *
  * **One producer for the three questions, so two fences cannot drift** — Phase
- * 2d-5-4-E. It is asked twice on every observation's path: once by
- * {@link applyObservation} the moment routing returns, and once by
- * {@link applyAddition} after its own materialization window. Written out at each
- * site instead, a later fence could be added with two of the three clauses and
- * compile.
+ * 2d-5-4-E. It is asked **once on every observation's path** — by
+ * {@link applyObservation}, the moment routing returns — **and a second time on
+ * the addition path alone**, by {@link applyAddition} after its own
+ * materialization window. The other five arms get exactly one comparison, and this
+ * sentence claimed two for all six until Phase 2d-5-4-F; a reader who believed it
+ * would credit `applyChange`, `applyRemoval`, `applyUnreadable`,
+ * {@link applyNamedRow} and `applyUnnamedPath` with a recheck none of them makes.
+ * Written out at each site instead, a later fence could be added with two of the
+ * three clauses and compile.
  *
  * **What each clause discriminates, and what it does not.**
  *
@@ -1157,11 +1165,24 @@ function applyChange(
    * **Asked immediately before the installation, in the same synchronous block**
    * (ruling 18). Five questions, in an order that matters: whether this session is
    * still applying observations at all, which is the broadest and is therefore
-   * first; the epoch, because a workspace replaced meanwhile is a different
-   * lifecycle; whether this is still the newest observation for the file; whether a
+   * first; the epoch, which catches a replacement **only when this session adopted
+   * a non-zero one** — `workspaceOpened()` sets the coordinator's epoch to `0` and
+   * its `accept()` adopts `0` exactly like any other value, so for a session
+   * holding `0` this question is vacuous, which is what
+   * {@link lifecycleMovedUnder}'s own doc says and what this sentence denied until
+   * Phase 2d-5-4-F; whether this is still the newest observation for the file; whether a
    * surface can now be about it, which is the one arm that *re-arbitrates* rather
    * than merely refusing; and whether the registry moved at all, which catches a
    * surface that opened and closed again while the read was in flight.
+   *
+   * **The member that does answer a replacement outright is
+   * {@link ObservationSession.lifecycleIsOurs}, and this guard deliberately does
+   * not ask it** — Phase 2d-5-4-F, stating here what `2d-5-4-E-notes.md` §9 item 2
+   * records. What catches a replacement across *this* read is the host's own
+   * open-generation capture inside {@link ReconciliationWorkspace.rereadUnderGuard},
+   * taken before the await and compared after it; the safety therefore lives in
+   * another module and no type ties the two files together. The ordering below is
+   * unchanged by saying so.
    *
    * **`stillApplying` is first because the arm below it calls a component's
    * callback.** `tellTheSurfaceAbout` fires the registered
@@ -1396,10 +1417,17 @@ function applyUnreadable(
  * is a state-only transition over the row an earlier `Added` inserted.
  *
  * - `changed`: the row is marked stale and a safe membership reload is requested.
- * - `removed`: the row is removed if present, and nothing is requested. Q8 asks
- *   for no reload here, and that is not an omission: a row this window invented
- *   going away leaves the open workspace exactly as it was.
+ * - `removed`: the row is removed if present **and this observation is still the
+ *   newest for it**, and nothing is requested. Q8 asks for no reload here, and
+ *   that is not an omission: a row this window invented going away leaves the open
+ *   workspace exactly as it was.
  * - `unreadable`: the reason is attached to the row where there is one.
+ *
+ * **Every write this function makes is fenced, the removal included** — Phase
+ * 2d-5-4-F. `session.requestMembershipReload()` and `workspace.holdsDocument()`
+ * are injected calls standing between the `admit` above and every write below, so
+ * a newer observation of this identity can be admitted between the two; the
+ * removal used to be the one write outside the arbitration that answers it.
  *
  * **A membership reload is requested even when there is no row**, for the
  * `changed` arm alone: an identity this process minted for a file the open
@@ -1428,10 +1456,9 @@ function applyNamedRow(
    * **The same fence as {@link applyChange}'s, and this function needs its own**
    * — Phase 2d-5-4-C's M4. Two injected calls stand between the arbitration above
    * and every write below: `session.requestMembershipReload()` and
-   * `workspace.holdsDocument()`, and the `removed` arm adds
-   * `workspace.removeDocument()` on top of them. A `stale` this module wrote over
-   * a newer `removed` would be permanent, because the batch watermark has already
-   * moved past the observation that carried it.
+   * `workspace.holdsDocument()`. A `stale` this module wrote over a newer
+   * `removed` would be permanent, because the batch watermark has already moved
+   * past the observation that carried it.
    *
    * @param status - What to record.
    */
@@ -1441,6 +1468,34 @@ function applyNamedRow(
     }
     workspace.noteDocumentStatus(named, status);
   }; // End of function noteWhileOurs()
+  /**
+   * Drops the pending row and records the removal, under **one** arbitration.
+   *
+   * **Both of the `removed` arm's writes, fenced together** — Phase 2d-5-4-F.
+   * Until then `workspace.removeDocument()` was called unconditionally, outside
+   * the fence guarding the status write beside it and below the same two injected
+   * calls this arm's doc names as the reason that fence exists. A
+   * `holdsDocument()` implementation that admitted a newer observation of this
+   * identity and then answered `true` had the older `removed` drop the row anyway
+   * — permanently, because the batch watermark has already moved past the
+   * observation carrying it — while `noteWhileOurs` correctly wrote nothing, so
+   * the row vanished with no status and nothing recording why.
+   *
+   * **It does not contradict {@link applyRemoval}'s unconditional-transition
+   * rule.** That rule is about an `Addressable` removal, whose `admit` and whose
+   * write have no injected call between them; here there are two, and the
+   * arbitration re-asked below is the same question `admit` answered before them.
+   *
+   * **One `isNewest` call, not two**, so the two writes cannot be split by a
+   * later reader without deleting a fence rather than merely moving a line.
+   */
+  const removeWhileOurs = (): void => {
+    if (!sequences.isNewest(named, route.sequence)) {
+      return;
+    }
+    workspace.removeDocument(named);
+    workspace.noteDocumentStatus(named, { kind: 'removed' });
+  }; // End of function removeWhileOurs()
   const detail = route.detail;
   if (detail.kind === 'changed') {
     session.requestMembershipReload();
@@ -1453,8 +1508,7 @@ function applyNamedRow(
       noteWhileOurs({ kind: 'stale' });
       return 'pendingRow';
     case 'removed':
-      workspace.removeDocument(named);
-      noteWhileOurs({ kind: 'removed' });
+      removeWhileOurs();
       return 'pendingRow';
     case 'unreadable':
       noteWhileOurs({ kind: 'unavailable', reason: detail.reason });
