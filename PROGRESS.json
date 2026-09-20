@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T12:40:49Z",
+ "updated": "2026-09-20T12:42:10Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -262,7 +262,7 @@
    "title": "Review round for 2d-5-3-M's fix",
    "status": "done",
    "risk": "high",
-   "summary": "The round CLAUDE.md 7.1 commissioned for 2d-5-3-M's fix: Codex, ship-with-fixes, 0 blockers, 2 Low findings both in the record; its own fix changed no source file, so 7.2 closes the tail at fourteen rounds.",
+   "summary": "Codex, ship-with-fixes, 0 blockers, 2 Low both in the record; its fix changed no source file, so CLAUDE.md 7.2 closed the fourteen-round 2d-5-3 tail by rule.",
    "review": "docs/reviews/phase-2d-5-3-N.md",
    "narrative": "docs/decisions/2d-5-3-N-notes.md",
    "commit": "a8bb43f"
