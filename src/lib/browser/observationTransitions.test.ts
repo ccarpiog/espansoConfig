@@ -1442,7 +1442,8 @@ describe('a Named identity the open workspace refuses', () => {
       'pendingRow'
     );
 
-    // Both of this arm's writes are under one arbitration, so neither happens.
+    // Each of this arm's writes is behind an arbitration taken above it, and this
+    // trap fires above both, so neither happens.
     expect(workspace.removed).toEqual([]);
     expect(workspace.statuses).toEqual([]);
     // Non-discriminating, and named: it establishes only that the trap fired and
@@ -1450,6 +1451,53 @@ describe('a Named identity the open workspace refuses', () => {
     expect(sequences.sequenceFor(9)).toBe(12);
     expect(workspace.rows).toEqual([9]);
   }); // End of the pending-row removal-ownership case
+
+  it('writes no removal status when the removal itself admitted a newer observation', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    workspace.rows = [9];
+    // **`workspace.removeDocument()` stands between the removal's arbitration and
+    // the status write beside it** — Phase 2d-5-4-G. It is an injected host member
+    // — `./reconciliationCoordinator.ts` passes its own `host` straight in — so one
+    // that admits a newer observation of this identity spends the `isNewest` taken
+    // above it before the write below it runs. Phase 2d-5-4-F put **both** writes
+    // under that single call, which fenced the removal and left the status write on
+    // the far side of an injected call, so the older observation's `removed` was
+    // written over the newer one's verdict; the batch watermark has already moved
+    // past the observation that carried it, so nothing re-derives it.
+    //
+    // **This case traps the second injected call and the case above it traps the
+    // first**, which is what makes them together evidence about *placement* rather
+    // than existence: a single arbitration anywhere in this helper passes one of the
+    // two and fails the other, whichever end it is taken at.
+    const hostile: ReconciliationWorkspace = {
+      ...workspace.workspace,
+      /**
+       * Drops the row, and admits a newer observation while doing it.
+       *
+       * @param document - The identity.
+       */
+      removeDocument: (document: DocumentId): void => {
+        sequences.admit(document, 12);
+        workspace.workspace.removeDocument(document);
+      }
+    };
+
+    expect(applyObservation(removal(4, NAMED_NINE), hostile, sequences, session.session)).toBe(
+      'pendingRow'
+    );
+
+    // The removal is this arm's transition and it happened: the arbitration above
+    // it was asked while this observation still owned the file.
+    expect(workspace.removed).toEqual([9]);
+    // The status write has its own, asked after the call above spent the first.
+    expect(workspace.statuses).toEqual([]);
+    // Non-discriminating, and named: they establish only that the trap fired and
+    // that the real removal ran underneath it.
+    expect(sequences.sequenceFor(9)).toBe(12);
+    expect(workspace.rows).toEqual([]);
+  }); // End of the removal-spends-its-own-arbitration case
 }); // End of the "Named identity" suite
 
 describe('an Unnamed path', () => {

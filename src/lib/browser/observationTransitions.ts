@@ -733,8 +733,21 @@ export interface ObservationSession {
    * epoch, the accepted sequence, the registry generation and the host's own three
    * captures all compare one number taken before an await with the same number
    * after it — so every one of them is unmoved by a coordinator that has *stopped*
-   * without replacing the workspace. Two such states exist and both are reachable
-   * while a clean reread is in flight:
+   * without replacing the workspace.
+   *
+   * **The enumeration above is `applyChange`'s guard's four questions, and it is
+   * not every question this interface offers** — Phase 2d-5-4-G, correcting a
+   * sentence that read as though it were. {@link lifecycleIsOurs} was added to this
+   * interface one round earlier and it **does** move on a disposal:
+   * `./reconciliationCoordinator.ts`'s `dispose()` increments the applying
+   * lifecycle, which is the counter that member compares, and
+   * {@link lifecycleMovedUnder}'s doc says so in as many words. So the reason this
+   * member exists is a fact about the guard that consumes it rather than about
+   * every guard that could be built — `applyChange`'s guard deliberately does not
+   * ask `lifecycleIsOurs`, so nothing **it** compares moves on a disposal, and this
+   * member is what that guard asks instead.
+   *
+   * Two such states exist and both are reachable while a clean reread is in flight:
    *
    * - **A hole in the observation history that could not be recovered from.**
    *   `ReconciliationBlock`'s `blockedByLostHistory` arm is entered when `discarded`
@@ -745,9 +758,13 @@ export interface ObservationSession {
    *   state's entire safety argument, and clearing the file's status would tell the
    *   person the file is reconciled while the session is in the state that means
    *   *I cannot describe this workspace's membership*.
-   * - **Disposal.** Nothing a guard compares moves when a coordinator is disposed,
-   *   so a read in flight at `dispose()` would install after reconciliation was
-   *   stopped.
+   * - **Disposal.** Nothing `applyChange`'s guard compares moves when a coordinator
+   *   is disposed — its four questions are the epoch, the accepted sequence, the
+   *   registry generation and the host's capture, and none of them is the applying
+   *   lifecycle — so a read in flight at `dispose()` would install after
+   *   reconciliation was stopped. **Bounded to that guard at Phase 2d-5-4-G**: the
+   *   sentence said *nothing a guard compares*, which is false of a guard that asks
+   *   {@link lifecycleIsOurs}, because `dispose()` moves the counter behind it.
    *
    * **What it does not cover.** It is a fact about the *coordinator*, not about the
    * window: it says nothing about whether the workspace was replaced
@@ -810,7 +827,19 @@ export type ObservationOutcome =
    * admitted by a session that has admitted nothing.
    */
   | 'lifecycleMoved'
-  /** A locally pending row was marked, removed or annotated. */
+  /**
+   * A locally pending row's arm ran; whether it wrote depends on its own
+   * arbitration.
+   *
+   * **It does not say the row was marked, removed or annotated, and it said so
+   * until Phase 2d-5-4-G.** Every write in {@link applyNamedRow} is behind an
+   * `isNewest` call taken immediately above it, and an arm all of whose writes
+   * refuse still answers this — the `removed` arm can now leave both the row and
+   * the status untouched, which `./observationTransitions.test.ts`'s
+   * *removes no row when the host row question admitted a newer observation*
+   * asserts. That is the type header's own rule about these names applied to this
+   * variant rather than an exception to it.
+   */
   | 'pendingRow'
   /** There was no locally pending row to act on, so nothing was changed. */
   | 'noPendingRow'
@@ -1423,11 +1452,21 @@ function applyUnreadable(
  *   workspace exactly as it was.
  * - `unreadable`: the reason is attached to the row where there is one.
  *
- * **Every write this function makes is fenced, the removal included** — Phase
- * 2d-5-4-F. `session.requestMembershipReload()` and `workspace.holdsDocument()`
- * are injected calls standing between the `admit` above and every write below, so
- * a newer observation of this identity can be admitted between the two; the
- * removal used to be the one write outside the arbitration that answers it.
+ * **Every write this function makes is fenced, and this is which fence covers
+ * which write** — Phase 2d-5-4-G. `session.requestMembershipReload()` and
+ * `workspace.holdsDocument()` are injected calls standing between the `admit`
+ * above and every write below, so a newer observation of this identity can be
+ * admitted between the two; the removal used to be the one write outside the
+ * arbitration that answers it. There are **three** writes and **three** `isNewest`
+ * calls, each immediately above the write it guards: `noteWhileOurs`'s own call
+ * covers the `changed` arm's `stale`, the `unreadable` arm's `unavailable` and —
+ * because the `removed` arm reaches the status write through the same helper —
+ * that arm's `removed` status; `removeWhileOurs`'s own call covers
+ * `workspace.removeDocument()` and nothing else. **The removal's fence does not
+ * cover the status write beside it**, because `workspace.removeDocument()` is
+ * itself an injected member standing between the two; that is why the `removed`
+ * arm asks twice, and Phase 2d-5-4-F's single call for both writes is the defect
+ * this replaces.
  *
  * **A membership reload is requested even when there is no row**, for the
  * `changed` arm alone: an identity this process minted for a file the open
@@ -1469,32 +1508,45 @@ function applyNamedRow(
     workspace.noteDocumentStatus(named, status);
   }; // End of function noteWhileOurs()
   /**
-   * Drops the pending row and records the removal, under **one** arbitration.
+   * Drops the pending row and records the removal, each under its own
+   * arbitration.
    *
-   * **Both of the `removed` arm's writes, fenced together** — Phase 2d-5-4-F.
-   * Until then `workspace.removeDocument()` was called unconditionally, outside
-   * the fence guarding the status write beside it and below the same two injected
-   * calls this arm's doc names as the reason that fence exists. A
-   * `holdsDocument()` implementation that admitted a newer observation of this
-   * identity and then answered `true` had the older `removed` drop the row anyway
-   * — permanently, because the batch watermark has already moved past the
-   * observation carrying it — while `noteWhileOurs` correctly wrote nothing, so
-   * the row vanished with no status and nothing recording why.
+   * **Two `isNewest` calls for two writes, because an injected call stands
+   * between them** — Phase 2d-5-4-G. Until 2d-5-4-F
+   * `workspace.removeDocument()` was called unconditionally, outside the fence
+   * guarding the status write beside it and below the same two injected calls this
+   * arm's doc names as the reason that fence exists: a `holdsDocument()`
+   * implementation that admitted a newer observation of this identity and then
+   * answered `true` had the older `removed` drop the row anyway — permanently,
+   * because the batch watermark has already moved past the observation carrying it
+   * — while `noteWhileOurs` correctly wrote nothing, so the row vanished with no
+   * status and nothing recording why. 2d-5-4-F fenced the removal by collapsing
+   * both writes under a **single** call above them, which fenced the removal and
+   * **unfenced the status write**: a `removeDocument()` that admitted a newer
+   * observation of this identity had the older `removed` status written over the
+   * newer observation's verdict, permanently and for the same reason.
+   *
+   * **The call above the removal is not the status write's fence.**
+   * `workspace.removeDocument()` is an injected host member — `workspace` is a
+   * parameter of the enclosing function, and `./reconciliationCoordinator.ts`
+   * passes its own `host` straight in — so it spends the check above it before the
+   * write below it runs. A check and a spend separated by a whole method call are
+   * not atomic, which is the derivation {@link applyRemoval} states about the
+   * identical pair of calls and the derivation this arm's doc states about
+   * `requestMembershipReload` and `holdsDocument`.
    *
    * **It does not contradict {@link applyRemoval}'s unconditional-transition
    * rule.** That rule is about an `Addressable` removal, whose `admit` and whose
-   * write have no injected call between them; here there are two, and the
-   * arbitration re-asked below is the same question `admit` answered before them.
-   *
-   * **One `isNewest` call, not two**, so the two writes cannot be split by a
-   * later reader without deleting a fence rather than merely moving a line.
+   * removal have no injected call between them; here there are two, and the
+   * arbitration re-asked above the removal is the same question `admit` answered
+   * before them.
    */
   const removeWhileOurs = (): void => {
     if (!sequences.isNewest(named, route.sequence)) {
       return;
     }
     workspace.removeDocument(named);
-    workspace.noteDocumentStatus(named, { kind: 'removed' });
+    noteWhileOurs({ kind: 'removed' });
   }; // End of function removeWhileOurs()
   const detail = route.detail;
   if (detail.kind === 'changed') {

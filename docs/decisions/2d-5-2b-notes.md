@@ -366,6 +366,16 @@ permit — a write stays safe. Clearing would cost the opposite: a host that *di
 holding an open surface the registry no longer reports, and *"no surface is open"* is the answer that
 permits a silent reload.
 
+> **Correction — Phase 2d-5-4-G, 2026-09-20, this round's sweep.** ~~a false refusal over an unrelated
+> file~~ — **over the same file.** This is the identical claim the correction block twenty lines above
+> struck, in this section's own voice three paragraphs below it, and 2d-5-4-F's sweep missed it here
+> while fixing it there. Identities are minted per path from a process-lifetime table and
+> `SessionIdentities::next` is never reused, so a surviving registration's `DocumentId` denotes the same
+> path for the life of the process and no other file can be handed that number. The refusal is over
+> **the file the surface really was about**. **The comparison this paragraph draws is unaffected**: both
+> costs are still refusals rather than permissions on the *keep* side and a permission on the *clear*
+> side, which is the whole of why keeping it is the safe direction.
+
 **What that leaves open**, and it is the honest residue: the window between the synchronous
 `status = 'loading'` and the flush, in which the registry still answers surfaces over identities
 ~~the load is about to reallocate~~ **that belong to the workspace being replaced** — struck and

@@ -2017,6 +2017,74 @@ describe('the discarded-history recovery', () => {
     coordinator.dispose();
   }); // End of the reopened-by-the-registry-read case
 
+  it('reopens nothing when the registry read disposed the coordinator', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+
+    // **The complementary arm of the case above** — Phase 2d-5-4-G. That one has
+    // the registry read reopen the workspace and then answer a **non-empty** list,
+    // so the recovery declines and the caller's recheck catches it. This one has the
+    // read end the lifecycle and then answer an **empty** list, so the recovery
+    // proceeds — and until this round nothing inside it asked either question, so a
+    // disposed coordinator bumped the lifecycle a second time, reset the blocked
+    // state and asked the window to throw away and reload its whole workspace. That
+    // is the harm `dispose()`'s own increment is documented as preventing, and the
+    // increment cannot prevent it, because this disposal lands *below* the one
+    // comparison `accept()` takes above everything.
+    let sprung = false;
+    Object.defineProperty(control, 'surfaces', {
+      configurable: true,
+      /**
+       * Disposes the coordinator once, then reports an empty registry.
+       *
+       * @returns No open surfaces, so the recovery would proceed.
+       */
+      get(): readonly OpenWriteSurface[] {
+        if (!sprung) {
+          sprung = true;
+          coordinator.dispose();
+        }
+        return [];
+      }
+    });
+
+    control.answer(
+      batch({
+        newest_sequence: 500,
+        discarded: 1,
+        observations: [removal(2), removal(3)]
+      })
+    );
+    await flush();
+
+    expect(sprung).toBe(true);
+    // The injected side-effecting call is the harm, and it is refused: a disposed
+    // coordinator never asks the window to reload its whole workspace.
+    expect(control.reopened).toEqual([]);
+    // And neither module-state write above that call happens. This is what makes
+    // the pair of assertions about the fence's *placement* rather than its
+    // existence: a comparison taken above the registry read passes — the getter has
+    // not fired yet — and leaves both of these exposed, while one taken below the
+    // first write leaves this one exposed.
+    expect(coordinator.block().kind).toBe('blockedByLostHistory');
+    // `'staleOpen'` rather than `'accepted'`: the lifecycle moved **under** this
+    // session inside its own registry read, and `'accepted'` claims the cursor
+    // legitimately moved.
+    expect(coordinator.drains()[0]?.outcome).toBe('staleOpen');
+    // Non-discriminating, and named: the recovery's `true` arm returned above both
+    // cursor writes on the pre-fix tree too, so the cursor is identical either way.
+    // What it does establish is that the five pre-recovery values a disposal does
+    // not clear are still here — `dispose()` clears none of them.
+    expect(coordinator.cursor()).toEqual({ epoch: EPOCH, watermark: 0, lastDiscarded: 1 });
+    expect(coordinator.observationsDropped()).toBe(0);
+    coordinator.dispose();
+  }); // End of the disposed-by-the-registry-read case
+
   it('drops no count when the observation list’s own length reopened the workspace', async () => {
     const control = controlledHost();
     const events = controlledEvents(true);

@@ -68,6 +68,15 @@ not refused with a record, never asked for.
 
 `reconciliationCoordinator.ts:1019` re-asks the same comparison the top of the function makes, **after**
 recovery has declined and **above both writes**, and answers `false`. No new outcome arm was invented:
+
+> **Correction — Phase 2d-5-4-G, 2026-09-20, this round's sweep.** ~~`:1019`~~ — **`:1023`**, and the
+> statement is `if (lifecycle !== lifecycleAt) {` inside the `blockedByLostHistory` arm. The number was
+> off by exactly four on the tree this record describes (`c410548`), and §3.2's own last paragraph names
+> the mechanism: the orchestrator rewrote `accept()`'s top-fence comment block, four lines longer, after
+> this record was written, which moved everything below it. On the tree **Phase 2d-5-4-G** leaves the
+> same statement is at **`:1102`**, because that phase grew both `accept()`'s doc block and that same
+> comment. `2d-5-2a-A-notes.md:191-193` already prescribes the defence and it is applied here: the
+> quoted statement beside the number, so the citation survives the next edit that moves it.
 `runOneDrain` already records `'staleOpen'` for a `false`, which means *this batch's numbers cannot be
 attributed to the lifecycle now in force*.
 
@@ -79,6 +88,20 @@ ruling 10. This arm is a lifecycle that moved **under** the session.
 right that it can fire a second, redundant `reopenWorkspace` for a workspace that has just opened
 (`openRequest` holds the new request by then). That is wasteful and writes nothing; it is stated in the
 arm's comment and is not fixed here.
+
+> **Correction — Phase 2d-5-4-G, 2026-09-20, review finding 2.** ~~That is wasteful and writes
+> nothing~~ — **it writes three things and one of them is an injected call into the window.**
+> `recoverFromLostHistory` as this record left it wrote `lifecycle += 1`, wrote
+> `block = { kind: 'running' }` and called `host.reopenWorkspace(openRequest)`, all three below the
+> injected `host.openWriteSurfaces()` read that no comparison stood under. A registry read that
+> synchronously calls `dispose()` and *then* answers an **empty** list therefore had a **disposed**
+> coordinator ask the window to throw away and reload its whole workspace — the exact harm
+> `dispose()`'s own increment is documented as preventing, and the increment cannot prevent it because
+> that disposal lands *below* `accept()`'s only fence. The drain recorded `'accepted'`. **It was a
+> correctness defect in source, not waste**, and it is closed at 2d-5-4-G by a comparison inside
+> `recoverFromLostHistory` taken **below** the registry read and above the first write; the source
+> comment that carried the same false sentence is corrected in the same pass. **The conclusion of §2 is
+> unaffected**: the arm this section's own fix added is right and is untouched.
 
 ---
 
@@ -107,11 +130,32 @@ batch's four members from that one object into a plain snapshot. The epoch check
 snapshot, and `accept()` is handed the same snapshot, so its own four reads read data properties.
 **`accept()`'s signature is unchanged and its top fence is exactly where it was.**
 
+> **Correction — Phase 2d-5-4-G, 2026-09-20, this round's sweep.** ~~`:1339`~~ — **`:1343`**, and the
+> statement is `const delivered = answer.value;`. Off by the same four lines and for the same reason as
+> §2.2's; on the tree **Phase 2d-5-4-G** leaves it is at **`:1436`**. Two other citations in this record
+> were re-derived in the same pass and are **right**: §6.3's `:983`
+> (`const observationCount = observations.length;`) and §6.4's `observationTransitions.ts:1492`
+> (`const removeWhileOurs = (): void => {`). Both of those are above the rewritten comment block or in
+> the other module, which is why the offset missed them.
+>
+> The sentence *"`accept()`'s signature is unchanged and its top fence is exactly where it was"* was
+> re-derived and **stands**, at 2d-5-4-F and at 2d-5-4-G alike: the signature 2d-5-4-G changed is
+> `recoverFromLostHistory`'s, which gained a `lifecycleAt` parameter.
+
 **The consequence is written into the comment rather than discovered later.** The `value` getter and
 the four member getters now fire **above** the `staleEpoch` arm instead of below it. They are still
 below the `disposed` check and both generation checks, and still above `accept()`'s comparison — so a
 getter that ends the lifecycle is caught exactly as before, by `accept()` answering `false` and the
 drain recording `'staleOpen'`.
+
+> **Correction — Phase 2d-5-4-G, 2026-09-20, this round's sweep.** ~~caught exactly as before~~ — **caught
+> above every write, but not always by the same catcher.** Three of the four member getters used to fire
+> *inside* `accept()`, below the `staleEpoch` arm; they now fire above it. So when `expectedAdopted` is
+> `true` and the batch names an epoch this session is not showing, a getter that ends the lifecycle is
+> caught by the `staleEpoch` arm and the drain records **`'staleEpoch'`**, never reaching `accept()` at
+> all. Nothing is written on either path, so this is a **label** rather than a state defect — and §9 item
+> 5 of this record, which notes that the getters moved above that arm, is evidence the round held the fact
+> and did not carry it into this sentence. The source comment is bounded in the same pass.
 
 **What this does not close**, said here because the re-derivation asked for it if it was not: the
 `.epoch` **double read** is closed as a side effect — the snapshot's `epoch` is validated and the same
@@ -128,6 +172,25 @@ all** from the one caller that exists today, and the comparison stays because **
 `ReconciliationBatch` forces a caller to hand this function a plain object**. It is a comment change
 in a source file, so §10 counts it inside the same commissioned round and nothing about §7.1's
 consequence moves.
+
+> **Correction — Phase 2d-5-4-G, 2026-09-20, review finding 3.** ~~those five reads run **no caller
+> code at all** from the one caller that exists today~~ — **four of the five do; the fifth does not.**
+> The snapshot `runOneDrain` builds copies four members by value, but its `observations` member is a
+> copied **reference** to the array the injected `host.drain()` supplied, so `observations.length` — the
+> fifth read, and the one §6.3 hoisted — is a property read on the caller's own object. A `Proxy` `get`
+> trap or an own `length` accessor there runs caller code from the live caller. **A passing case in this
+> very commit drives exactly that path**: `reconciliationCoordinator.test.ts`'s *drops no count when the
+> observation list's own length reopened the workspace* hands `control.answer()` a `Proxy` whose
+> `length` trap calls `coordinator.workspaceOpened('/tmp/other')` and asserts the trap fired. So the
+> sentence asserted unreachable the path the case in the same commit proves reachable — and §9 item 7
+> of this record, which notes that on a `Proxy` the hoisted read is *"one more trap firing"*, is
+> evidence the round held the fact in one place and denied it in another.
+>
+> **Nothing behavioural was wrong**, and this is the point of the hoist rather than an argument against
+> it: the live read is **above** the comparison, which is why the comparison catches it. What is
+> corrected is the claim of inertness. The source comment is corrected in the same pass, splitting the
+> claim where the code splits it, and the *"nothing in `ReconciliationBatch` forces a caller to hand
+> this function a plain object"* half was re-derived and **stands**.
 
 ---
 
@@ -250,6 +313,25 @@ The fix is `removeWhileOurs` (`observationTransitions.ts:1492`): **one** `isNewe
 arm's writes under it, and the `removed` case reduced to a single call. One arbitration rather than
 two, so a later reader cannot split the two writes without deleting a fence rather than moving a line.
 
+> **Correction — Phase 2d-5-4-G, 2026-09-20, review finding 1.** ~~**one** `isNewest` call, both of the
+> arm's writes under it~~ — **one call cannot cover both writes, because `workspace.removeDocument()`
+> stands between them.** That member is injected — `ReconciliationWorkspace` is a parameter and
+> `reconciliationCoordinator.ts` passes its own `host` straight in — so the check taken above the removal
+> is **spent** before the status write below it runs, which is the same check-and-spend derivation this
+> very section states about `requestMembershipReload` and `holdsDocument`, and the derivation
+> `applyRemoval`'s own nine-line comment states about the identical pair of calls. So this fix **traded**
+> a fenced status write for a fenced removal rather than adding a fence: pre-fix, `noteWhileOurs` re-asked
+> after `removeDocument`; post-fix nothing did, and a `removeDocument` that admitted a newer observation
+> of this identity had the older `removed` **status** written over the newer observation's verdict,
+> permanently. It was a **regression in source**, and the sentence beginning *"One arbitration rather than
+> two"* is what bought it.
+>
+> 2d-5-4-G keeps **both** arbitrations — the pre-removal one this round added and the at-the-write one it
+> deleted — and pins the placement with `observationTransitions.test.ts`'s *writes no removal status when
+> the removal itself admitted a newer observation*, which traps the second injected call where this
+> round's case traps the first. **What this section got right stands**: the removal really did need a
+> fence, and `applyRemoval`'s rule really is untouched.
+
 **It does not contradict `applyRemoval`'s unconditional-transition rule**, and that rule is untouched.
 That rule is about an `Addressable` removal, whose `admit` and whose write have **no injected call
 between them**; here there are two.
@@ -274,6 +356,21 @@ slot is released and there is no unhandled rejection. What the corrected comment
 true — the two-arm handler is right for a **stronger** reason than the one given — and what it costs
 when a wire accessor throws: one drain missing from `drains()` entirely, because its reasons were
 spliced off `pendingReasons` before the await and no `record()` runs.
+
+> **Correction — Phase 2d-5-4-G, 2026-09-20, this round's sweep.** ~~the re-derivation found no
+> resulting defect~~ — **it found no *unhandled rejection*, which is narrower.** The cost enumeration
+> stopped one short: `accept()` writes `watermark = newestSequence` **above** the observation loop, so a
+> throw from any host member an arm calls — `noteDocumentStatus`, `removeDocument`, `addDocument`,
+> `rereadUnderGuard`, `creatorEligibility` — at observation *k* leaves the cursor already advanced past
+> the **whole** batch. The next drain asks `host.drain(watermark)`, so observations *k* … *n* are never
+> fetched again and nothing counts them as dropped. It is the same mechanism ruling 13 relies on for a
+> blocked session, without that ruling's whole-reload obligation behind it.
+>
+> **The two things this record got right stand**: `void running.then(release, release)` really does
+> handle both arms with no unhandled rejection, and a `try` added to make a sentence true really would
+> be machinery invented for prose. So 2d-5-4-G **names the third cost in the comment and adds no
+> `try`** — closing the partial-application window is a phase decision with its own acceptance
+> criteria, and it is carried as such rather than done inside a review tail.
 
 ### 6.7 W7 — the routing case pins one arm of six
 
@@ -412,6 +509,19 @@ file**, so none holds this step open.
    `openRequest` already holding the *new* open's request. Nothing is written and `accept()` returns
    `true`, so it is wasteful rather than corrupting. It is stated in the arm's comment; it is not
    fixed here and no case drives it.
+
+   > **Correction — Phase 2d-5-4-G, 2026-09-20, review finding 2.** ~~Nothing is written … so it is
+   > wasteful rather than corrupting~~, and ~~**recorded only**~~. Three things are written — `lifecycle`,
+   > `block`, and `host.reopenWorkspace()` into the window — and when the read that reopened is a
+   > `dispose()` instead, the third is a **disposed** coordinator asking the window to throw away and
+   > reload its whole workspace, with the drain recording `'accepted'`. That is a **correctness defect in
+   > a source file**, which `CLAUDE.md` §7.3 does not allow an item to carry: it is fix-now or the step
+   > is `BLOCKED`. The mark should have been **actionable**, and it is fixed at 2d-5-4-G by a comparison
+   > taken inside `recoverFromLostHistory` below the registry read and above the first write, pinned by
+   > `reconciliationCoordinator.test.ts`'s *reopens nothing when the registry read disposed the
+   > coordinator*. **The narrow case this item actually describes** — a read that reopens and then
+   > answers empty, with no disposal — is also refused by that comparison now, because
+   > `workspaceOpened()` moves the same counter, so the redundant reopen is gone with it.
 
 7. **recorded only** — **`observationCount` is now read for every batch, not only for a blocked one.**
    The `.length` read moved above the comparison, so it fires on the accepted path too. On a plain

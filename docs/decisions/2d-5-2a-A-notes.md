@@ -192,6 +192,35 @@ not about it. `2d-5-2a-notes.md` §3.8 named neither.
 > same phase is editing is exactly the shape this finding names, and the defence is the quoted text
 > beside the number rather than a promise to keep the number fresh.
 
+> **Correction to §3.1's derivation — Phase 2d-5-4-G, 2026-09-20, review finding 4.** **The two
+> sentences of §3.1 that are this record's own voice are false, and Phase 2d-5-2a-B's *"the claims are
+> unaffected"* above was true of the citations it answered and is not true of these.** The quotation of
+> the old source comment is left exactly as written — §3.1 is a *What it was* section and that sentence
+> really did stand in `workspace.svelte.ts` — but what this record derived from it does not follow:
+>
+> - ~~A registration that survives an `open()` therefore names a `DocumentId` that now denotes a
+>   **different file**~~ — **it cannot.** `identity_of` in
+>   `crates/espansoconfig-core/src/workspace/mod.rs` keys one process-wide `OnceLock<Mutex<…>>` table by
+>   **path** and returns the existing entry for a known path, and `SessionIdentities::next` is *"Never
+>   reused, so a removed file's identity cannot be inherited by another file"*. A `DocumentId` therefore
+>   names the same path for the life of the process — a deletion and recreation of the file at that path
+>   included — and no other file can ever be handed that number.
+> - ~~`competingSurfaceFor` refuses a restore of a file nobody has open, and `targetingSurfaceFor`
+>   attributes **that file** to a surface that is not about it~~ — **the file is the right one.** What
+>   an `open()` replaces is *document identity within a workspace*: membership and everything derived
+>   from it. The replacing `Workspace` may not hold that path at all, in which case
+>   `Workspace::document_context` answers `WorkspaceError::UnknownDocument` for the very number a
+>   surviving registration still names. `identity_of`'s own doc draws the line this record missed: *"An
+>   identity minted here is not an address in any particular `Workspace`."*
+>
+> **So the cost is narrower and still real, and it is about the same file**: `competingSurfaceFor` can
+> refuse a restore of the file the closed surface really *was* about, on the strength of a surface
+> belonging to a workspace this window is closing, and `targetingSurfaceFor` can attribute that same
+> file to that same dead surface. Both are refusals rather than permissions, so **a write is still
+> safe** — which is why §3.2's decision is unaffected even though its rationale is corrected below.
+> This is the same claim Phase 2d-5-4-F struck twelve lines earlier in §2.6 (*"`open()` reallocates
+> nothing"*); that sweep corrected §2.6 and the thin section's item 5 and left §3 standing.
+
 > **Correction — Phase 2d-5-2a-C, 2026-09-04, review 3 finding 1.** **`:1690-1721` in the bullet above
 > is off by one at its start**, and the fix that answered a stale-citation finding is what wrote it.
 > Re-derived on the tree 2d-5-2a-C leaves, with `rg -n` for the block's own first sentence and by
@@ -213,6 +242,24 @@ and the record — both now name reallocation and state the two costs, and both 
 **refusals rather than permissions**, so a *write* is still safe and the price is a **false refusal over
 an unrelated file**. Both also say the cost is **inert at 2d-5-2a**, where nothing registers and the
 registry is empty across an `open()` by construction, and **live at 2d-5-2b**, where hosts register.
+
+> **Correction — Phase 2d-5-4-G, 2026-09-20, review finding 4.** Two halves of the paragraph above are
+> false of the tree, for the reasons set out in the correction block under §3.1:
+>
+> - ~~both now name reallocation~~ — **no source comment names reallocation on this tree.** `rg -i
+>   reallocat` over `src/`, `crates/`, `src-tauri/`, `scripts/` and the root files finds nothing. What
+>   stands above `projectionGenerations.clear()` in `src/lib/browser/workspace.svelte.ts` is the
+>   opposite: *"The identities survive the load below — they are path-stable — so an entry kept here
+>   would be the* same *file's count."* The sentence above described what 2d-5-2a-A wrote; Phase
+>   2d-5-4-F's sweep replaced it.
+> - ~~the price is a **false refusal over an unrelated file**~~ — **the price is a false refusal over
+>   the same file**, the one the closed surface really was about. Identities are path-stable and never
+>   reused, so no other file can be the subject.
+>
+> **The decision this section records is unaffected and stands**, and so is the half of the sentence
+> that matters: the costs are refusals rather than permissions, so a *write* is still safe. **What is
+> corrected is the rationale, which is the half a later reader would reason from.** The *inert at
+> 2d-5-2a, live at 2d-5-2b* sentence is untouched and true.
 
 ### 3.3 What the fix does not force
 

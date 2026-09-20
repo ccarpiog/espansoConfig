@@ -405,8 +405,11 @@
    * `RestorePane.svelte:340` builds `surfaces: surfaces()` once inside `current`'s
    * `$derived.by`; `runRestore` captures `const now = current` (`:509`), hands
    * `now.context` to `confirmRestore` (`:510`) and `now.context.surfaces` onward
-   * (`:515`), and `workspace.svelte.ts:3328-3331` rebuilds a `RestoreContext` around
-   * that very array — only `observed` is the coordinator's own read. So what is true
+   * (`:515`), and `workspace.svelte.ts:4451-4454` rebuilds a `RestoreContext` around
+   * that very array — only `observed` is the coordinator's own read. **The number
+   * was `:3328-3331` until Phase 2d-5-4-G**, which is the sidebar snippet-count
+   * loop and names no `RestoreContext` at all; `:4451` is the file's only
+   * `RestoreContext` literal. So what is true
    * of `:2581` is that the *call* is not made from inside `current`'s derivation, not
    * that `current` is uninvolved: the list it judges came from there.
    *

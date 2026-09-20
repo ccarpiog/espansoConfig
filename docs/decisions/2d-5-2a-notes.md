@@ -265,6 +265,31 @@ mounted evidence is where disposal is established.
 >
 > **The claim itself is unaffected and stands.** Only the pointer was wrong.
 
+**Correction to both blocks above — Phase 2d-5-4-G, 2026-09-20, this round's sweep.** The 2d-5-2a-A
+block is quoted as that phase wrote it, and three clauses inside it are false; 2d-5-2a-B's closing
+sentence, *"The claim itself is unaffected and stands. Only the pointer was wrong"*, was **true of the
+citation finding it answered and is not true of the claim**, and it is on this record's own voice that
+the correction is owed.
+
+- ~~the identities of the documents it holds are **reallocated** by the load below it~~ — `open()`
+  **reallocates nothing.** `identity_of` in `crates/espansoconfig-core/src/workspace/mod.rs` mints from
+  one process-lifetime table keyed by **path**, and `SessionIdentities::next` is *"Never reused, so a
+  removed file's identity cannot be inherited by another file"*.
+- ~~names a `DocumentId` that now denotes a **different file**~~ — it denotes the **same path**, for the
+  life of the process, a deletion and recreation of the file at that path included.
+- ~~the cost is a false refusal over an unrelated file~~ — the cost is a false refusal over **the same
+  file**, the one the surviving registration's surface really was about. What an `open()` replaces is
+  *document identity within a workspace*: membership and everything derived from it, so the replacing
+  `Workspace` may not hold that path at all and `Workspace::document_context` then answers
+  `WorkspaceError::UnknownDocument` for the number the registration still names.
+
+**The decision is unaffected and stands**, and so is the half of the 2d-5-2a-A block that carries it:
+both consumers refuse rather than permit, so **a write is still safe**. Phase 2d-5-4-F's sweep wrote
+exactly this correction-to-the-correction for §7 item 4's copy of the same block and did not write it
+here; the same paragraph in `2d-5-2b-notes.md` §7 is corrected in this round too. **The word to sweep
+for is not *reallocate*** — it is the shape, an identity being renumbered, which this block states
+three different ways.
+
 ---
 
 ## 4. Two re-entrancy guards nothing asked for, and why they are in

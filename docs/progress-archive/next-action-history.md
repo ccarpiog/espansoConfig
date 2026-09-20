@@ -13336,3 +13336,123 @@ finding has lived in every tail this project has run:
 **Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-E-notes.md` §9 carries this round's marked items, all
 eight **recorded only**, and none of them names an unfixed correctness defect in a source file.
 
+
+---
+
+## Phase 2d-5-4-F's record and its Next-action block — archived 2026-09-20 at Phase 2d-5-4-G
+
+#### Phase 2d-5-4-F — the round `CLAUDE.md` §7.1 commissioned for 2d-5-4-E's fix
+
+**Taken and answered, and `SUPERSEDED BY 2d-5-4-G` rather than complete**, because its own fix changed
+source. Risk class **high**; worker model **opus** — **no implementation worker**: one read-only
+re-derivation worker, then one fix worker, exactly as the five rounds before it.
+
+**The review was Codex** — `autoclaude-review.sh` exited 0, so no agent was spawned, and this is the
+**eighth consecutive Codex round** of this chain. Verdict **`ship-with-fixes`, 2 blockers and 2
+SHOULD-FIX**. **The bodies arrived truncated for the seventh round running**, so nothing was accepted
+on the report's strength: a read-only worker derived each finding from the source alone, the
+orchestrator spot-checked the two blockers and the two swept items it acted on itself, and **all four
+review findings hold** — one (the first blocker) with its **anchor blunt**, naming `:981` where the
+cause is `host.openWriteSurfaces()` at `:888` and the harm is the two writes below. **Seven more were
+found by sweeping.**
+
+**Both blockers are the same shape, and it is the shape this chain keeps producing**: a comparison
+taken **above** an injected call, and a write performed **below** it.
+
+- **`accept()`'s blocked arm.** `recoverFromLostHistory()` opens with the injected
+  `host.openWriteSurfaces()`. A registry read that synchronously reaches `BrowserState.open()` — so
+  `workspaceOpened()`, `lifecycle += 1` and a zeroed cursor — and *then* answers a **non-empty** list
+  declines the recovery, and the arm falls through to `watermark = newestSequence` and
+  `observationsDroppedCount += observations.length`. Both put the closed lifecycle's numbers into the
+  replacing workspace's fresh cursor, after which `host.drain(watermark)` never fetches the new
+  epoch's early observations. **The top fence could not catch it: the call spent it.**
+- **The batch validated was not the batch accepted.** `runOneDrain` checked `answer.value.epoch` and
+  then read `answer.value` **again** to hand it to `accept()`. An accessor answering a second object
+  makes the epoch check vacuous, and **no lifecycle movement is required**, so no fence this chain
+  has built defends it. The suite's own case from the previous round already modelled a `value`
+  getter answering a fresh object per read.
+
+**The two SHOULD-FIX are a false comment and a false record, and both hold.** `dispose()`'s
+`lifecycle += 1` was documented — twice, at the increment and in the declaration block — as
+*redundant today* because `stillApplying()` reads `disposed` live. That is false of `accept()`, whose
+fence compares **only** the counter and never reads `disposed`: without the increment, a disposal
+fired from a wire getter would leave `accept()` writing the cursor and reaching
+`host.reopenWorkspace()`. And `2d-5-4-notes.md` still justified withholding a membership reload by
+asserting that `open()` **reallocates every identity**, which the Rust contradicts — identities are
+minted per path and live as long as the process. The review named two instances; the sweep found
+**seven live ones**, and all seven are corrected.
+
+**Seven swept findings, and one of them was a correctness defect in source.** `applyNamedRow`'s
+`removed` arm called `workspace.removeDocument(named)` **unconditionally**, outside the `isNewest`
+fence guarding the status write on the very next line, and below the two injected calls that
+function's own doc block names as the reason the fence exists. An older `removed` could therefore drop
+a row a newer observation had just claimed — permanently, the batch watermark having moved past the
+observation that carried it — while the status write correctly did nothing, so **the row vanished
+with no status and nothing recording why**. Under §7.3 an actionable item naming a correctness defect
+in a source file is fix-now-or-`BLOCKED`; it was fixed, by putting **both** writes of that arm under
+one arbitration so a later reader cannot split them again without deleting a fence rather than moving
+a line. The other six are comment and record corrections: the guard doc still said the epoch detects
+a replacement (it does not, at epoch `0`, as this round's own predicate doc says); `stillApplying`'s
+doc never learned about the new `lifecycleIsOurs` member; `lifecycleMovedUnder`'s doc claimed it is
+asked twice on **every** path when only the addition arm asks twice; `ensurePumping` claimed `pump()`
+catches everything a drain can throw, and it catches nothing; `accept()`'s doc and two record
+passages claimed a fence the code did not give, because `+=` **stores after** evaluating its operand;
+and the previous round's routing case pins one arm of six.
+
+**The fix is four behavioural changes, each pinned by a case confirmed to fail against the whole
+`git show HEAD:` tree** — never a partial revert — with every message recorded verbatim in
+`docs/decisions/2d-5-4-F-notes.md` §8.1: the blocked arm re-asks the same comparison before either
+write; `runOneDrain` reads `answer.value` once and materializes a **plain snapshot** that is both
+validated and accepted; `observations.length` is hoisted to sit with the other four materialized
+reads, above the comparison; and `removeWhileOurs` fences the `removed` arm's two writes together.
+**No new outcome arm was invented** — the caller already records `'staleOpen'` for a `false` — and
+the re-derivation's own proposal for the removal fence was **refused** and the refusal recorded,
+because `lifecycleMovedUnder` would not catch a sequence that moves no lifecycle.
+
+**One further comment the fix worker left behind was corrected by the orchestrator on the same tree**
+and is recorded in that file's §3.2: `accept()`'s fence comment still enumerated *“one of the **four**
+reads above”* after a fifth had been hoisted beside them, and still offered those reads as a way the
+workspace could be reopened — which the single live caller's plain snapshot makes impossible today
+and **nothing in `ReconciliationBatch` forbids tomorrow**, which is why the comparison stays.
+
+**Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-F-notes.md` §9 carries this round's marked items, all
+eight **recorded only**, and none of them names an unfixed correctness defect in a source file.
+
+#### The next action is **Phase 2d-5-4-G — the round §7.1 commissions for 2d-5-4-F's fix**
+
+**Scoped to that fix's diff**: `src/lib/browser/reconciliationCoordinator.ts`,
+`src/lib/browser/observationTransitions.ts` and two suites —
+`reconciliationCoordinator.test.ts` and `observationTransitions.test.ts` — plus
+`docs/decisions/2d-5-4-F-notes.md` in full and the correction blocks this round wrote into
+`2d-5-4-E-notes.md`, `2d-5-4-notes.md`, `2d-5-2b-notes.md`, `2d-5-2a-A-notes.md`, `2d-5-2a-notes.md`
+and `2c-3a-1-notes.md`. **This is a review round, not implementation**: it takes no implementation
+worker, and its own fix decides whether another round follows, by §7.1 and nothing else.
+
+**Five things to point it at first**, each because the fix that answered a finding is where the next
+finding has lived in every tail this project has run:
+
+1. **The blocked arm's second comparison.** It is above both writes — but is it above **every**
+   caller-controlled read those writes depend on, now that `observationCount` is hoisted? And the
+   arm above it: `recoverFromLostHistory()` returning `true` after its registry read already reopened
+   the workspace fires a **second** reopen with `openRequest` already holding the new open's request.
+   §9 item 6 calls that wasteful rather than corrupting. Re-derive that — it writes nothing, but it
+   also returns `true`, and `runOneDrain` records `'accepted'` for a batch refused whole.
+2. **The snapshot in `runOneDrain`.** Four getters now fire **above** the `staleEpoch` arm that used
+   to run below it (§9 item 5). Check what else moved with them: is anything still read off
+   `answer.value` rather than off `delivered`, is the snapshot's own construction order
+   consequential, and does `accept()` now read anything that is not a plain data property?
+3. **`removeWhileOurs` and the arm it fences.** It refuses by returning, and the arm still answers
+   `'pendingRow'` — the same shape `noteWhileOurs` has had since 2d-5-4-C. Is that outcome string
+   true of a refusal that wrote nothing, and does any counter or case distinguish them? Check too
+   that no third write of that arm was left outside.
+4. **The sixteen corrected sentences.** Six are in source comments and ten in six record files, and
+   they are **not one sentence repeated**, so no single sweep finds them again. Re-derive the Rust
+   contract (`Workspace::from_tree`, `identity_of`, `session_identities`) and check each corrected
+   passage against it — then sweep **by shape** for a narrower wording of what each one struck, which
+   is what every round of this tail has found.
+5. **The four new cases.** Check each pins the **fence** and not an outcome string, and check §8.1's
+   one recorded discrimination: case 3 was re-run against the whole fix minus only the
+   materialization and failed identically, which is what makes it evidence for the hoisted `.length`
+   rather than for the blocked arm's recheck.
+
+**Nothing is `BLOCKED`**, and §9's eight items are all **recorded only**.
