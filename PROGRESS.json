@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T11:26:20Z",
+ "updated": "2026-09-20T11:27:18Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Ship a macOS app that edits espanso YAML config without ever reformatting the parts of a file the user did not edit.",
  "phases": [
@@ -264,7 +264,8 @@
    "risk": "high",
    "summary": "The round CLAUDE.md 7.1 commissioned for 2d-5-3-M's fix: Codex, ship-with-fixes, 0 blockers, 2 Low findings both in the record; its own fix changed no source file, so 7.2 closes the tail at fourteen rounds.",
    "review": "docs/reviews/phase-2d-5-3-N.md",
-   "narrative": "docs/decisions/2d-5-3-N-notes.md"
+   "narrative": "docs/decisions/2d-5-3-N-notes.md",
+   "commit": "a8bb43f"
   },
   {
    "id": "2d-5-4",
