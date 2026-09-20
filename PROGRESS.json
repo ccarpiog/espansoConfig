@@ -1,8 +1,8 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T11:05:39Z",
+ "updated": "2026-09-20T11:06:56Z",
  "plan": "IMPLEMENTATION_PLAN.md",
- "goal": "Ship a macOS app that edits espanso YAML configuration without ever reformatting the parts of a file the user did not edit.",
+ "goal": "Ship a macOS app that edits espanso YAML config without ever reformatting the parts of a file the user did not edit.",
  "phases": [
   {
    "id": "0",
