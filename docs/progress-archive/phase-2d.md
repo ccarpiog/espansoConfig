@@ -4172,3 +4172,85 @@ without subtracting the instrument's known contribution**; `1320 / 438 / 2254 / 
 2d-5-2a-C, shared by 2d-5-2a-A and -B; `1320 / 438 / 2229 / 186` at 2d-5-2a; `1320 / 436 / 2205 / 185`
 at 2d-5-1-B, unmoved by 2d-5-1-C. The full per-round accounts of the closed rounds are in
 [`phase-2d.md`](docs/progress-archive/phase-2d.md).
+
+## Phase 2d-5-3-M's verification narrative and ladder section — archived 2026-09-20 at Phase 2d-5-3-N
+
+**Verbatim from `PROGRESS.md`, moved before a word of 2d-5-3-N's record was written.** Both blocks were
+true of the tree `1e80603` committed, and 2d-5-3-N re-measured the same four figures twice more — the
+rung did not move, as a record-only fix cannot move it. What replaced them in the live head is the
+closing round's own reading. **One sentence in the first block is corrected by 2d-5-3-N** and the
+correction travels here: *"the two findings … one in source and one in the record"* stands, but the
+tally sentence in the same round's notes — *"Twelve of the thirteen rounds … the one exception is still
+2d-5-3-F"* — is dropped as false (`2d-5-3-N-notes.md` §3). Nothing in either block below depends on it.
+
+**Also archived with them, from this file's own header:** *"2d-5-3-M took three narrative archives
+before a word of the record — 93 + 40 + 29 lines — and no status row, because the measurement taken
+after the record was written said none was needed; 2d-5-3-L had managed that on four. What M archived
+that no earlier round of this chain did is a list: the ladder's per-rung history went to `phase-2d.md`
+and only the live rung stayed, which is the cheapest room this file has left to give."* **2d-5-3-N took
+two narrative archives — 38 + 25 lines — plus the header paragraphs, and no status row.**
+
+### ⚠️ Two baselines are live at once, and only one of them is a measurement
+
+**With the instrument in the working tree the four commands answer `1320 / 441 / 2307 / 188`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-3-M twice — on the tree as inherited and again after the fix, both
+green** — which **restores the two-reading convention** that 2d-5-3-L's host finding had cost, and
+before it at 2d-5-3-L (once), 2d-5-3-K (twice), 2d-5-3-J (three times), 2d-5-3-I, -H, -G (twice each),
+2d-5-3-F (once), 2d-5-3-E, -D, -C (twice each), 2d-5-3-B and 2d-5-3-A. **Twenty-three complete full
+runs across thirteen phases, returning the same four figures every time** — 2d-5-3-L's recorded
+*twenty-one across twelve* plus this round's two, the per-round split written in the same sentence so a
+reader can re-derive the total rather than inherit it.
+
+**The stale-`target/` host finding of 2d-5-3-L did not recur.** That round lost both of its
+inherited-tree attempts to a build cache from the repository's previous location — tauri's build script
+first, then a `corpus_integrity` binary whose corpus root was baked in by
+`env!("CARGO_MANIFEST_DIR")` — and paid a full `cargo clean` and a rebuild from scratch for it. This
+round's inherited-tree run completed on the first attempt, so that cure is holding and a later round
+should meet neither failure. The reviewer was again told to run **no build, test or package command of
+any kind**.
+
+`cargo test --workspace -- --test-threads=1` was read **not through a pipe**, summed over **26**
+`test result` lines *and* checked by the complementary question — no line lacking `0 failed` — on both
+runs. `cargo clippy --workspace --all-targets -- -D warnings` (exit 0, read from a file),
+`cargo fmt --check` (exit 0) and `cargo tree -p espansoconfig-core | rg tauri` (finds nothing) are
+clean. `npm test` reports **60 files**. **Both bundle oracles were read and both lines are reported**:
+server-only markers **absent**, client-only markers **present (2)**.
+
+**Nothing moved at 2d-5-3-M, and nothing could have.** The source diff is **comment-only in the one
+file it touches** — `src/lib/browser/reconciliationCoordinator.ts`, 2 insertions and 1 deletion —
+proven mechanically: `git diff -U0` filtered to changed lines that are neither comment lines nor blank
+returns nothing. **No line in the edited file exceeds 90 characters**, checked with `awk`. **The
+instrument's pin was re-checked before the review and after the fix** and held at
+`5 insertions(+), 1 deletion(-)`. All three consequences of the `watch_check` scar were followed —
+serial form, redirected to a file, the complementary question — and each run was sequential end to
+end, so nothing ran concurrently with anything.
+
+**No gate reads prose.** Both findings were invisible to all four, and the Medium was invisible to two
+reviewers and two orchestrators before this round.
+
+### What moved this phase, and how the ladder now reads
+
+**No figure moved this phase, and none could have.** 2d-5-3-M's source diff is **comment-only in one
+file**, so no file entered or left the program, no new reachable `.ts` module, no new `.svelte`
+component and no new case. **No pristine-tree rebuild was needed to say so** — the only files this
+phase added are two `.md`, which are in no count. **A comment-only phase produces the one ladder rung
+that is a repeat**, and every phase of this tail has now produced it: 2d-5-3-L recorded *the twelfth*
+and this is the thirteenth. A rung that repeats proves the gates were run, never that they could catch
+what these rounds keep finding.
+
+**What this round adds to the oracle-gap record.** 2d-5-3-L's fix was a *tightening* — it answered a
+real finding about `workspaceReady()`'s body correctly — and the parenthesis it rewrote beside that
+answer widened a definite claim into a universal. **A replacement has to check what the replacement
+newly carries**, which is the mirror of 2d-5-3-H's *a removal has to check what else the removed clause
+was carrying*. No gate could see either.
+
+**The ladder's live rung**: `1320 / 441 / 2307 / 188` at 2d-5-3-M (measured **twice**), and at every
+phase from 2d-5-3-A to 2d-5-3-L — **the same rung measured twenty-three times across thirteen
+phases**. **The instrument landed at 2d-5-2c-1**, whose rung was `1320 / 439 / 2255 / 187`, so every
+rung at or before it is a *with-instrument* figure and every rung before that is not; the two groups
+may not be compared without subtracting the instrument's known contribution. **The full per-rung list,
+from `1320 / 436 / 2205 / 185` at 2d-5-1-B up to this one, is in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md)** under the 2d-5-3-M archive heading and the closed
+rounds' accounts beside it — archived rather than restated, because each rung was true of the tree that
+committed it and the live rung is the only one a later phase checks against.

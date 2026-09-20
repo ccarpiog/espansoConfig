@@ -12418,3 +12418,112 @@ later round meets neither failure.
 and the reviewer told to run none. The Rust reading this round has is **one** complete run, on the
 committed tree (§7 item 7 of the notes); the next round takes its inherited-tree reading as usual and
 that restores the convention.
+
+## Phase 2d-5-3-M's record and its Next-action prose — archived 2026-09-20 at Phase 2d-5-3-N
+
+**Verbatim from `PROGRESS.md`, moved to make room for 2d-5-3-N's own record.** The scoping prose of
+its second half is what Phase 2d-5-3-N's review brief was written from, so it is the record of what
+that round was asked to look at as well as of what M itself found.
+
+**Two of its sentences are corrected by 2d-5-3-N, and the correction travels here rather than being
+applied to the text.** *"Both numbers are dropped rather than renumbered"* is false of the fix it
+describes: the **range** was dropped and the **count** was corrected to eleven→**ten**, which the
+replacement sentence quoted beside it carries (`2d-5-3-M-notes.md` §3, as corrected). And *"Twelve of
+the thirteen rounds … the one exception is still 2d-5-3-F"* is **dropped rather than renumbered** —
+`2d-5-3-F-notes.md`'s own header says "**one is**" of its three findings, so F is no exception to the
+predicate that sentence states, and renumbering would assert a thirteen-round audit no round has
+performed. Everything else in the block stands, including both of M's findings and the account of the
+truncated Codex report.
+
+#### Phase 2d-5-3-M — the round §7.1 commissioned for 2d-5-3-L's fix
+
+**Complete as a round, every gate green on two full runs — and `SUPERSEDED BY 2d-5-3-N`, never
+complete.** Risk class **high**; worker model **none** (no implementation worker: the phase's product
+is a review and its fix, both taken by the orchestrator). Record:
+[`docs/decisions/2d-5-3-M-notes.md`](docs/decisions/2d-5-3-M-notes.md); review
+[`docs/reviews/phase-2d-5-3-M.md`](docs/reviews/phase-2d-5-3-M.md); brief
+[`docs/reviews/phase-2d-5-3-M.brief.md`](docs/reviews/phase-2d-5-3-M.brief.md).
+
+**The reviewer was Codex, and that is a second provider on the same tail.** `autoclaude-review.sh`
+was run first per the workflow's *Codex first, the agent as fallback, never both*, and it **exited 0**,
+so no agent was spawned; 2d-5-3-L is the round the script did not answer and the agent reviewed. **The
+report's finding bodies arrive truncated** — the script renders each to a fixed width and deletes its
+private state root on success, so the unabridged envelope does not survive the run. **Neither finding
+was accepted on the strength of the report**: both were re-derived from the code, and both hold
+(`2d-5-3-M-notes.md` §1.2).
+
+**Verdict `ship-with-fixes`, 0 blockers**, **2 SHOULD-FIX** — one Medium in source, one Low in the
+record. **Twelve of the thirteen rounds `2d-5-3-A` … `2d-5-3-M` have found a real defect in the
+previous round's fix**; the one exception is still 2d-5-3-F.
+
+**Finding 1 (Medium, in source): L's replacement parenthesis was a universal the code does not give.**
+*"a superseded open returns at a generation check and never reaches `workspaceReady()`"* replaced K's
+*"(the superseded one returns before it)"* — which had predicated that of **the** superseded open in
+one named test — with an indefinite that reads as a claim about the mechanism, and as such it is
+false. `open()` in `workspace.svelte.ts` holds three generation checks (`2604`, `2625`, `2661`), the
+third **inside** the per-document loop, and between the loop's end and `reconciliation.workspaceReady()`
+(`2687`) there is no check and **no await at all**; `report` is an injected parameter of
+`createBrowserState` (`1715`) called **inside** that loop (`2672`), so a host whose `report`
+synchronously re-enters `open()` on the **last** refused document supersedes the running open after
+its final check and that open goes on to call `workspaceReady()`. The **sited** half was read too, as
+the handoff asked: in `workspace.test.ts:1229` the losing open is parked on
+`await commands.openWorkspace(root)` and resumes at the generation check **directly under that await**,
+the first of the three and the only one it can reach. **Rewritten scoped to the test and to that
+check**, asserting nothing wider **in either direction** — the comment does not now claim that some
+superseded open *can* reach `workspaceReady()` either, because the paragraph does not need it and an
+unasserted universal cannot go stale (2d-5-3-E's shape). A correction block went into
+`2d-5-3-L-notes.md` §3, where that round wrote its replacement account.
+
+**Finding 2 (Low, in the record): the lifecycle suite holds ten tests, not eleven — and the end line
+was wrong too.** `2d-5-3-L-notes.md` §4 and §7 item 3 both said *"the eleven `the reconciliation
+lifecycle` tests at `workspace.test.ts:7535-7790`"*. The suite opens at 7535, closes at **7779** and
+holds **ten** `it(` blocks (7536, 7549, 7566, 7591, 7628, 7650, 7677, 7698, 7732, 7758). **Two
+numbers were wrong, not one**: the review named the count, and the end line — eleven lines past the
+block — came out of the orchestrator's re-derivation of it. **Both numbers are dropped rather than
+renumbered**, on 2d-5-3-K's precedent, the `describe` title left as what names the block. **The
+bounded absence claim survives the correction** and nothing in source depended on the figure.
+`docs/reviews/phase-2d-5-3-L.md:45` carries the same range and is **left as written**: the chain
+corrects notes and never rewrites a review.
+
+**The host finding of 2d-5-3-L did not recur.** The full `cargo clean` and rebuild that round took is
+holding, so the inherited-tree run completed and **the two-reading convention is restored** — two
+complete runs, both `1320 / 441 / 2307 / 188`, where L had one.
+
+**§7.1 commissions a round, so this phase is `SUPERSEDED`, not complete.** The fix changed **one
+source file** — `src/lib/browser/reconciliationCoordinator.ts`, comment-only, 2 insertions and 1
+deletion, proven mechanically, no line over 90 characters. Every other change is on §7's closed list:
+`PROGRESS.md`, `PROGRESS.json` and files under `docs/`.
+
+**Nothing is `BLOCKED`.** `2d-5-3-M-notes.md` §6 marks one item **actionable** and adoptable by a later
+phase (the citation checker, unchanged) and five **recorded only**. No item names an unfixed
+correctness defect in a source file.
+
+#### The next action is **Phase 2d-5-3-N — the round §7.1 commissioned for 2d-5-3-M's fix**
+
+Scope it to that fix and to nothing else: the one rewritten clause in
+`src/lib/browser/reconciliationCoordinator.ts` — *"the open this test supersedes returns at the
+generation check directly under its own `openWorkspace` await, so it never reaches
+`workspaceReady()`"* (lines 799–801) — together with `docs/decisions/2d-5-3-M-notes.md` in full and
+the three marked corrections it wrote into `docs/decisions/2d-5-3-L-notes.md` (§3's block and the two
+in §4 and §7 item 3). **Check the comments against the code, not the code against the comments.**
+
+**Where this fix is most likely to be wrong.** It swaps a universal for a **sited** claim, and a sited
+claim can be wrong about its site. *"the open this test supersedes"* presumes the cited test
+supersedes exactly one open — read `workspace.test.ts:1229` and check that. *"the generation check
+directly under its own `openWorkspace` await"* identifies a check by position rather than by number:
+confirm there is exactly one check directly under that await and that the parked open reaches it
+before anything else. And *"so it never reaches `workspaceReady()`"* is now an inference from where it
+returns rather than a claim about superseded opens in general — check that the inference is what the
+sentence says and that no clause left behind still reads as the universal.
+
+**Three things this round settled that the next should not re-derive** (`2d-5-3-M-notes.md` §4).
+`workspaceReady()`'s body is exactly `openInProgress = false;` then `requestDrain('workspaceOpened')`,
+in that order. *"Of the two tests cited here"* cites exactly two, and the two-witness attribution is
+the right way round — `reconciliationCoordinator.test.ts:749` lands an open while a drain is
+outstanding on the **injected** `controlledHost()` and asserts `staleOpen`, and `workspace.test.ts:1229`
+issues no drain at all. And the K-era mechanism propositions were spot-checked again and hold:
+unconditional construction, `workspaceOpened()` at `2569` before the first await, `openGeneration`
+written in one place only (`2554`), `drainMayStart()` false because the test never calls `start()`.
+
+**Run the gates as this round did**: one sequential script, each command redirected to its own file,
+the reviewer told to run none, and **both readings taken** — inherited tree and post-fix.

@@ -173,8 +173,11 @@ re-derived on `26fa26a`, whose three in-scope files are byte-identical to `aa025
   `workspace.test.ts`'s `the reconciliation lifecycle` suite *(2d-5-3-M: this read "the eleven
   `the reconciliation lifecycle` tests at `workspace.test.ts:7535-7790`". The suite holds **ten**
   `it(` blocks and closes at 7779, so the count was one too many and the end line lay past the
-  block. Both numbers are **dropped rather than renumbered**, on 2d-5-3-K's precedent; the `describe`
-  title is what names the block, and it is the count that is the checkable claim.)*, each of which
+  block. The **range** is dropped, on 2d-5-3-K's precedent for anchors that drift, and the **count**
+  is corrected to ten: the `describe` title is what names the block, and it is the count that is the
+  checkable claim. **2d-5-3-N**: this block first said "Both numbers are **dropped rather than
+  renumbered**", which the sentence it annotates disproves — that sentence carries the corrected
+  count.)*, each of which
   settles its drain before the next open. That is a bounded claim over a named block, and the source
   no longer needs the universal.
 

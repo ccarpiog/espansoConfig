@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T11:06:56Z",
+ "updated": "2026-09-20T11:26:20Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Ship a macOS app that edits espanso YAML config without ever reformatting the parts of a file the user did not edit.",
  "phases": [
@@ -114,7 +114,7 @@
    "title": "2d step 5 — live reconciliation, seven steps",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 and 2 of 7 are closed; step 3 is implemented and thirteen rounds into its review tail with the fourteenth queued; steps 4 to 7 are queued."
+   "summary": "Steps 1, 2 and 3 of 7 are closed; step 4, the observation state transitions, is next; steps 5 to 7 are queued."
   },
   {
    "id": "2d-5-1",
@@ -133,9 +133,9 @@
   {
    "id": "2d-5-3",
    "title": "The drain lifecycle coordinator",
-   "status": "in_progress",
+   "status": "done",
    "risk": "high",
-   "summary": "reconciliationCoordinator.ts and its suite are implemented; the review returned do-not-ship with 2 blockers, both fixed, and the fix opened a tail whose thirteenth round, M, is next.",
+   "summary": "The drain lifecycle coordinator, complete and closed: its review returned do-not-ship with 2 blockers, and the fix opened a fourteen-round tail that ended by rule at 2d-5-3-N.",
    "review": "docs/reviews/phase-2d-5-3.md"
   },
   {
@@ -260,9 +260,11 @@
   {
    "id": "2d-5-3-N",
    "title": "Review round for 2d-5-3-M's fix",
-   "status": "queued",
+   "status": "done",
    "risk": "high",
-   "summary": "The round CLAUDE.md 7.1 commissioned for 2d-5-3-M's comment-only source fix; not started. It is the checkpoint's next action."
+   "summary": "The round CLAUDE.md 7.1 commissioned for 2d-5-3-M's fix: Codex, ship-with-fixes, 0 blockers, 2 Low findings both in the record; its own fix changed no source file, so 7.2 closes the tail at fourteen rounds.",
+   "review": "docs/reviews/phase-2d-5-3-N.md",
+   "narrative": "docs/decisions/2d-5-3-N-notes.md"
   },
   {
    "id": "2d-5-4",
@@ -311,7 +313,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 4 are closed and step 5 is under way; steps 6 to 8 are queued."
+   "summary": "Steps 1 to 4 are closed and step 5 is under way at its fourth sub-step; steps 6 to 8 are queued."
   },
   {
    "id": "3",

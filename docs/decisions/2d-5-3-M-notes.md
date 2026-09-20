@@ -10,9 +10,17 @@ Review: [`docs/reviews/phase-2d-5-3-M.md`](../reviews/phase-2d-5-3-M.md), writte
 brief at [`docs/reviews/phase-2d-5-3-M.brief.md`](../reviews/phase-2d-5-3-M.brief.md). Verdict
 **`ship-with-fixes`, 0 blockers**, **2 SHOULD-FIX** — one Medium in source, one Low in the record.
 **Both were re-derived against the code by the orchestrator before any fix was applied, and both
-hold.** **Twelve of the thirteen rounds `2d-5-3-A` … `2d-5-3-M` have found a real defect in the
-previous round's fix**; the denominator is the letter sequence, and the one exception is still
-2d-5-3-F.
+hold.** **This round found a real defect in what 2d-5-3-L's fix wrote** — which is the claim this
+round can make about itself, and it asserts nothing about the tail's other rounds.
+*(2d-5-3-N: this read "**Twelve of the thirteen rounds `2d-5-3-A` … `2d-5-3-M` have found a real
+defect in the previous round's fix**; the denominator is the letter sequence, and the one exception is
+still 2d-5-3-F." **The tally is dropped rather than renumbered.** It is false as written:
+`2d-5-3-F-notes.md`'s own header says of its three findings "**one is**" in the previous round's fix,
+and its §2 shows why — 2d-5-3-E carried a stale paragraph count into its own §8 item 3 and **E's own
+fix added the sixth paragraph** that falsified it. So F is no exception to the predicate the sentence
+states. Renumbering it to thirteen would assert an audit of thirteen rounds that no round of this tail
+has performed, which is the inherited-figure failure `PROGRESS.md`'s header names; the sentence above
+claims only what this round re-derived.)*
 
 ---
 
@@ -104,9 +112,13 @@ suite`), and it holds **ten** `it(` blocks — 7536, 7549, 7566, 7591, 7628, 765
 end line lay eleven lines past the block. The review named the count; the end line came out of the
 orchestrator's re-derivation of it.
 
-**Fixed in both passages, and both numbers are dropped rather than renumbered**, on 2d-5-3-K's
-precedent for anchors that drift: the sentence now reads *"among the **ten** tests of
-`workspace.test.ts`'s `the reconciliation lifecycle` suite"*, with the correction marked in place. The
+**Fixed in both passages: the range is dropped and the count is corrected to ten.**
+*(2d-5-3-N: this read "**both numbers are dropped rather than renumbered**", which is false of the
+replacement quoted in the same sentence — **one** number was dropped, the range, and the other was
+renumbered from eleven to **ten**. 2d-5-3-K's precedent covers the anchor that drifts, which is the
+range; it never covered the count, and the sentence after this one says why the count stays.)* The
+sentence now reads *"among the **ten** tests of `workspace.test.ts`'s `the reconciliation lifecycle`
+suite"*, with the correction marked in place. The
 `describe` title is what names the block and cannot drift; the count is the claim a reader checks.
 **The bounded absence claim itself survives the correction** — no test in that suite drives an open
 during an in-flight drain, whether it holds ten or eleven — so nothing in source depended on the
@@ -189,8 +201,9 @@ nothing here holds the step open.
    general property, it needs a test, not a sentence.
 3. **actionable**, and a later phase may adopt it: nothing in this repository resolves a `file:line`
    citation in a comment or a record. This round found **two** wrong numbers in one citation of one
-   notes file and dropped both; the candidate corrective phase under *Next action* in `PROGRESS.md` is
-   unchanged, and this round added no citation to source.
+   notes file — dropping the range and correcting the count to ten *(2d-5-3-N: this read "and dropped
+   both", the same false claim §3 carried)*; the candidate corrective phase under *Next action* in
+   `PROGRESS.md` is unchanged, and this round added no citation to source.
 4. **recorded only.** The review's finding bodies reach the review file **truncated** (§1.2), and the
    script deletes the envelope that held them in full. A later round that needs a reviewer's full
    reasoning cannot recover it after the fact; re-derivation from the code is the only route, and it
