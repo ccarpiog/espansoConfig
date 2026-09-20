@@ -316,7 +316,8 @@
    "risk": "high",
    "summary": "Superseded by 2d-5-4-F: the round was taken, all three findings re-derived and fixed plus five the review missed, and its own fix changed four source files.",
    "review": "docs/reviews/phase-2d-5-4-E.md",
-   "narrative": "docs/decisions/2d-5-4-E-notes.md"
+   "narrative": "docs/decisions/2d-5-4-E-notes.md",
+   "commit": "fe7d61b"
   },
   {
    "id": "2d-5-4-F",
