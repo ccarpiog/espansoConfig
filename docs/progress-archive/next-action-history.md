@@ -12313,3 +12313,108 @@ citation checker is still unbuilt and **no count of what it would nominate is wr
 `commands.rs` beyond `open()`, its doc comment and `begin_epoch` is still unread by this tail, after
 the widest read any round of it has done (item 5). And 2d-5-3's able-to-fail residue is **still
 unreproduced after eight consecutive rounds**, having been in no round's scope (item 6).
+
+---
+
+## Phase 2d-5-3-L's record and its Next-action prose — archived 2026-09-20 at Phase 2d-5-3-M
+
+**Verbatim from `PROGRESS.md`, moved to make room for 2d-5-3-M's own record.** Two of its
+sentences are corrected by 2d-5-3-M and the correction travels here rather than being applied to
+the text: the parenthesis *"a superseded open returns at a generation check and never reaches
+`workspaceReady()`"* is a universal the code does not give (`2d-5-3-M-notes.md` §2), and the
+lifecycle suite it counts holds **ten** tests and closes at 7779, not eleven at 7790 (§3). What
+stands is everything else, including both of L's findings and the host-cache account of its §5.
+
+#### Phase 2d-5-3-L — the round §7.1 commissioned for 2d-5-3-K's fix
+
+**Complete as a round, every gate green on the tree it commits — and `SUPERSEDED BY 2d-5-3-M`, never
+complete.** Risk class **high**; worker model **none** (no implementation worker: the phase's product
+is a review and its fix, both taken by the orchestrator; the reviewer was the `autoclaude-reviewer`
+agent on **opus**). Record: [`docs/decisions/2d-5-3-L-notes.md`](docs/decisions/2d-5-3-L-notes.md);
+review [`docs/reviews/phase-2d-5-3-L.md`](docs/reviews/phase-2d-5-3-L.md); brief
+[`docs/reviews/phase-2d-5-3-L.brief.md`](docs/reviews/phase-2d-5-3-L.brief.md). **The first round of
+this tail run under `/autoclaude-fable`**, and the first with a phase summary beside this file:
+[`PROGRESS.json`](PROGRESS.json) exists as of this round, derived from this file and never read for a
+decision, and **`CLAUDE.md` §7's closed list of record entries now names it** — the one owner-visible
+change of the round (`2d-5-3-L-notes.md` §1.2 says why, and what reverting it would mean).
+
+**Four narrative archives were taken before a word of this record was written** — 2d-5-3-K's record
+and Next-action prose (**118 lines**) to
+[`next-action-history.md`](docs/progress-archive/next-action-history.md), and that round's
+verification narrative (**54**), the ladder narrative (**42**) and the header's headroom narrative
+(**22**) to [`phase-2d.md`](docs/progress-archive/phase-2d.md). **No status row followed, and that followed a measurement rather than a plan**: with the four taken and this record written, the file measured **689 lines and 119,264 bytes** against the 750 / 121,332 it inherited — under on both bounds, the first round of this chain whose narrative archives alone turned it. The superseded rows of 2d-5-3-J and -K stay in the table, in reserve.
+
+**Verdict `ship-with-fixes`, 0 blockers**, **2 SHOULD-FIX** — one Medium, one Low/Medium — **both
+re-derived against the code before any fix was applied, and both hold**, **both in source**, in the
+one sentence pair 2d-5-3-K rewrote. **Eleven of the twelve rounds `2d-5-3-A` … `2d-5-3-L` have found a
+real defect in the previous round's fix.** **The reviewer's arithmetic held this round** — every line
+number re-derived on `26fa26a` and matched — for the first time in three.
+
+**Finding 1 (Medium, in source): the two-witness sentence attributed *driving* to a test that issues no
+drain.** K wrote *"the two tests that come nearest drive that overlap somewhere other than Rust"* as
+*the claim the paragraph actually needs*, and its own next sentence says the first of those tests
+*"issues no drain at all"* — a test with no drain drives an open-during-drain overlap nowhere. The
+near-miss wording K replaced had predicated nothing of it; the rewrite did, and K's notes called it
+*pinned by the two derivations under it* when one of them contradicts it. **Replaced by a claim about
+the two tests the paragraph cites** — one drives that overlap and does so against an injected host,
+the other does not drive it at all, nothing wider is claimed — which also **retires the unpinnable
+"which two come nearest" half** K's §7 item 1 had recorded. Two correction blocks in the K notes; the
+archived K record carries the correction in its preamble.
+
+**Finding 2 (Low/Medium, in source): `workspaceReady()`'s body is two statements, and the omitted one
+is the gate.** *"whose body is a `requestDrain('workspaceOpened')`"* omits `openInProgress = false`,
+the clear the function's own comment calls what makes the request *the flush*; K's notes §2 had the
+body right, so source and record disagreed, and the short form also sat in K's first correction block
+in the J notes. Fixed in source, with the pronoun in the parenthesis that followed removed as well,
+and the J-notes block amended in place with the amendment marked.
+
+**A host finding, not a source one, and it cost the inherited-tree Rust reading.** The inherited-tree
+run failed `cargo test` and clippy at tauri's build script, which replayed a path from the
+repository's **previous location**; a per-crate clean fixed clippy, and then `corpus_integrity`'s 17
+tests panicked on the same old path, baked into a reused test binary by `env!("CARGO_MANIFEST_DIR")`.
+A full `cargo clean` (965,588 files, 103.4 GiB) and one rebuild from scratch gave the complete run the
+baseline below records. `2d-5-3-L-notes.md` §5 is the record and says what a later session should
+check first.
+
+**§7.1 commissions a round, so this phase is `SUPERSEDED`, not complete.** The fix changed **one source
+file** — `src/lib/browser/reconciliationCoordinator.ts` — comment-only, proven mechanically, no line
+over 90 characters. Every other change is on §7's closed list: `PROGRESS.md`, `PROGRESS.json`,
+`CLAUDE.md` and files under `docs/`.
+
+**Nothing is `BLOCKED`.** `2d-5-3-L-notes.md` §7 marks one item **actionable** and adoptable by a later
+phase (the citation checker) and seven **recorded only**. No item names an unfixed correctness defect
+in a source file.
+
+#### The next action is **Phase 2d-5-3-M — the round §7.1 commissioned for 2d-5-3-L's fix**
+
+Scope it to that fix and to nothing else: the one rewritten passage in
+`src/lib/browser/reconciliationCoordinator.ts` — the sentence *"Of the two tests cited here, one drives
+that overlap and does so against an injected host, and the other does not drive it at all; nothing
+wider is claimed here"*, the *"so it is the one that does not"* clause, and the two-statement body of
+`workspaceReady()` with the *"a superseded open returns at a generation check and never reaches
+`workspaceReady()`"* rewrite — together with `docs/decisions/2d-5-3-L-notes.md` in full, the two
+correction blocks it wrote into `docs/decisions/2d-5-3-K-notes.md`, and the amended block in
+`docs/decisions/2d-5-3-J-notes.md`. **Check the comments against the code, not the code against the
+comments.**
+
+**Where this fix is most likely to be wrong.** It replaces a claim about *nearness* with two claims
+about *the two tests cited*: that `reconciliationCoordinator.test.ts`'s *"installs nothing from a drain
+an open overtook"* drives an open landing during a drain against the injected host, and that
+`workspace.test.ts`'s *"lets the newer open win …"* does not drive it at all. Each is pinned by one test
+body and nothing else. **"Cited here"** is itself a claim — that the paragraph cites exactly two
+tests — and it should be checked against the paragraph, not the record. And **"a superseded open
+returns at a generation check"** is true of the losing open in the cited test; read the test to
+confirm which check it hits.
+
+**Two things this round settled that the next should not re-derive.** Every mechanism proposition of
+K's fix — unconditional construction, `workspaceOpened()` before the first await, the three kinds of
+early return, the winner reaching `workspaceReady()`, `requestDrain` remembering, `begin_epoch` once
+inside the swap block, both Rust quotations, K's §3 anchors and the four opening-words anchors — was
+re-derived by the reviewer and by the orchestrator and **holds** (`2d-5-3-L-notes.md` §4). And **the
+host cache of §5 is cleaned**: `target/` was rebuilt from scratch at this checkout's location, so a
+later round meets neither failure.
+
+**Run the gates as this round did**: one sequential script, each command redirected to its own file,
+and the reviewer told to run none. The Rust reading this round has is **one** complete run, on the
+committed tree (§7 item 7 of the notes); the next round takes its inherited-tree reading as usual and
+that restores the convention.

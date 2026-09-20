@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T10:40:28Z",
+ "updated": "2026-09-20T11:04:19Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Ship a macOS app that edits espanso YAML configuration without ever reformatting the parts of a file the user did not edit.",
  "phases": [
@@ -114,7 +114,7 @@
    "title": "2d step 5 — live reconciliation, seven steps",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 and 2 of 7 are closed; step 3 is implemented and twelve rounds into its review tail with the thirteenth queued; steps 4 to 7 are queued."
+   "summary": "Steps 1 and 2 of 7 are closed; step 3 is implemented and thirteen rounds into its review tail with the fourteenth queued; steps 4 to 7 are queued."
   },
   {
    "id": "2d-5-1",
@@ -250,9 +250,19 @@
   {
    "id": "2d-5-3-M",
    "title": "Review round for 2d-5-3-L's fix",
+   "status": "skipped",
+   "risk": "high",
+   "summary": "Superseded by 2d-5-3-N: the review round was taken (Codex, 2 SHOULD-FIX, one in source and one in the record, both fixed), and its own comment-only fix commissioned the next round.",
+   "review": "docs/reviews/phase-2d-5-3-M.md",
+   "narrative": "docs/decisions/2d-5-3-M-notes.md",
+   "commit": "PENDING"
+  },
+  {
+   "id": "2d-5-3-N",
+   "title": "Review round for 2d-5-3-M's fix",
    "status": "queued",
    "risk": "high",
-   "summary": "The round CLAUDE.md 7.1 commissioned for 2d-5-3-L's comment-only source fix; not started. It is the checkpoint's next action."
+   "summary": "The round CLAUDE.md 7.1 commissioned for 2d-5-3-M's comment-only source fix; not started. It is the checkpoint's next action."
   },
   {
    "id": "2d-5-4",

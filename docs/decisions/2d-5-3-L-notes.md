@@ -129,6 +129,18 @@ block in the J notes in place, with the amendment marked as this round's: the bl
 J's, so the chain's *leave the original, correct in a block* convention does not protect it, and a
 correction block that is itself wrong is better corrected than nested.
 
+> **Correction, 2d-5-3-M — the replacement parenthesis was a universal, and the code does not give
+> it.** *"a superseded open returns at a generation check and never reaches `workspaceReady()`"*
+> predicates that of **every** superseded open, where the *"(the superseded one returns before it)"*
+> it replaced had predicated it of the one in the cited test. `open()` reaches `workspaceReady()` with
+> no generation check between it and the end of the per-document loop, and `report` is an injected
+> parameter of `createBrowserState` called **inside** that loop, so a host whose `report` re-enters
+> `open()` on the **last** refused document supersedes the running open after its final check and that
+> open goes on to call `workspaceReady()`. 2d-5-3-M rewrote it as *"the open this test supersedes
+> returns at the generation check directly under its own `openWorkspace` await"* — the check the
+> losing open of `workspace.test.ts`'s *"lets the newer open win …"* actually hits, claimed of that
+> open alone. `2d-5-3-M-notes.md` §2 is the record.
+
 ---
 
 ## 4. What was checked and found sound
@@ -157,10 +169,14 @@ re-derived on `26fa26a`, whose three in-scope files are byte-identical to `aa025
 - **K's §3 anchors are as K says**: 797 / 818 / 812 on `3428cde`, 800 on `eec0b70`, `it(` on 749
   with its `describe` on 748.
 - **The four opening-words anchors** each resolve to exactly one paragraph (743, 752, 810, 842).
-- **No third frontend test drives an open during an in-flight drain** among the eleven
-  `the reconciliation lifecycle` tests at `workspace.test.ts:7535-7790`, each of which settles its
-  drain before the next open. That is a bounded claim over a named block, and the source no longer
-  needs the universal.
+- **No third frontend test drives an open during an in-flight drain** among the **ten** tests of
+  `workspace.test.ts`'s `the reconciliation lifecycle` suite *(2d-5-3-M: this read "the eleven
+  `the reconciliation lifecycle` tests at `workspace.test.ts:7535-7790`". The suite holds **ten**
+  `it(` blocks and closes at 7779, so the count was one too many and the end line lay past the
+  block. Both numbers are **dropped rather than renumbered**, on 2d-5-3-K's precedent; the `describe`
+  title is what names the block, and it is the count that is the checkable claim.)*, each of which
+  settles its drain before the next open. That is a bounded claim over a named block, and the source
+  no longer needs the universal.
 
 ---
 
@@ -246,8 +262,10 @@ nothing here holds the step open.
    citation in a comment or a record. This round added none to source and dropped none; the candidate
    corrective phase under *Next action* in `PROGRESS.md` is unchanged. No count of what a checker
    would nominate is asserted here.
-3. **recorded only.** The reviewer's *"no third test"* sweep covered the eleven lifecycle tests at
-   `workspace.test.ts:7535-7790` and the cited test; a test elsewhere in that file, or in another
+3. **recorded only.** The reviewer's *"no third test"* sweep covered the ten tests of the
+   `the reconciliation lifecycle` suite *(2d-5-3-M: written here as "the eleven lifecycle tests at
+   `workspace.test.ts:7535-7790`"; §4 above carries the correction)* and the cited test; a test
+   elsewhere in that file, or in another
    file, that drives an open during a drain would not have been seen. The source asserts nothing that
    needs the wider absence.
 4. **recorded only.** K's Rust-side sweep — *every `session.drain_external_changes(...)` call in

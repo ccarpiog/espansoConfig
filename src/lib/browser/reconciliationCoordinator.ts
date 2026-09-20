@@ -796,7 +796,8 @@ export function createReconciliationCoordinator(
       // it**: the host constructs one, every `open()` calls `workspaceOpened()`
       // synchronously, and the open that wins reaches `workspaceReady()`, whose
       // body is `openInProgress = false` and then `requestDrain('workspaceOpened')`;
-      // a superseded open returns at a generation check and never reaches
+      // the open this test supersedes returns at the generation check directly
+      // under its own `openWorkspace` await, so it never reaches
       // `workspaceReady()`. The test never calls `start()`, so `drainMayStart()` is
       // false and that reason is **remembered rather than issued**. What drives an
       // open landing during a drain is

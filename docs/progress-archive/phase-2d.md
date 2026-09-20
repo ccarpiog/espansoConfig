@@ -4091,3 +4091,84 @@ plan on a row rather than to hold one in reserve. **The measurement is taken aft
 predicted before it** — 2d-5-3-J's first draft claimed its four archives had already turned the file
 and the measurement falsified that; this round's claim was written the other way round, from the
 measurement.
+
+---
+
+## Phase 2d-5-3-L's verification narrative and the ladder narrative — archived 2026-09-20 at Phase 2d-5-3-M
+
+**Verbatim from `PROGRESS.md`'s *Verification baseline*, moved to make room for 2d-5-3-M's own
+two runs.** Both blocks were true of the tree `c39831f` committed. The figures are unchanged at
+2d-5-3-M — `1320 / 441 / 2307 / 188`, now measured twice rather than once, the two-reading
+convention restored — so nothing here is superseded except the count of runs and the *"one run
+rather than two"* reason, which was the stale-`target/` host finding that did not recur.
+
+### ⚠️ Two baselines are live at once, and only one of them is now a measurement
+
+**With the instrument in the working tree the four commands answer `1320 / 441 / 2307 / 188`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-3-L, once, on the tree this phase commits** — after a full
+`cargo clean` and a rebuild from scratch, for the reason the notes' §5 gives — and before it at
+2d-5-3-K (twice), 2d-5-3-J (three times), 2d-5-3-I (twice), 2d-5-3-H (twice), 2d-5-3-G (twice),
+2d-5-3-F (once), 2d-5-3-E (twice), 2d-5-3-D (twice), 2d-5-3-C (twice), 2d-5-3-B and 2d-5-3-A.
+**Twenty-one complete full runs across twelve phases, returning the same four figures every time** —
+2d-5-3-K's recorded *twenty across eleven* plus this round's one, the per-round split written in the
+same sentence so a reader can re-derive the total rather than inherit it.
+
+**One run rather than two, and the reason is a host finding.** The inherited-tree run was taken twice
+and completed neither time: tauri's build script replayed a path from the repository's previous
+location, and after a per-crate clean the `corpus_integrity` binary — compiled at that location, its
+corpus root fixed by `env!("CARGO_MANIFEST_DIR")` — panicked on the same path. The frontend gates of
+that first run passed (`441 / 2307 / 188`) ahead of the Rust failure and are not counted as a run.
+Rust source is byte-identical between the two trees except for the instrument's `main.rs`, so the
+committed tree's figure is a figure about the same Rust source; it is still one reading, and the next
+round's inherited-tree run restores the two. The reviewer was again told to run **no build, test or
+package command of any kind**.
+
+`cargo test --workspace -- --test-threads=1` was read **not through a pipe**, summed over **26**
+`test result` lines *and* checked by the complementary question — no line lacking `0 failed`.
+`cargo clippy --workspace --all-targets -- -D warnings` (exit 0, read from a file), `cargo fmt --check`
+(exit 0) and `cargo tree -p espansoconfig-core | rg tauri` (finds nothing) are clean. **Both bundle
+oracles were read and both lines are reported**: server-only markers **absent**, client-only markers
+**present (2)**.
+
+**Nothing moved at 2d-5-3-L, and nothing could have.** The source diff is **comment-only in the one
+file it touches** — `src/lib/browser/reconciliationCoordinator.ts`, 11 insertions and 9 deletions —
+proven mechanically: `git diff -U0` filtered to changed lines that are neither comment lines nor blank
+returns nothing. **No line in the edited file exceeds 90 characters**, checked with `awk`. **The
+instrument's pin was re-checked before the review and after the fix** and held at
+`5 insertions(+), 1 deletion(-)`. All three consequences of the `watch_check` scar were followed —
+serial form, redirected to a file, the complementary question — and the run was sequential end to
+end, so nothing ran concurrently with anything.
+
+**No gate reads prose.** Both findings were invisible to all four; the host finding was visible to two
+of them only as a failure to start.
+
+### What moved this phase, and how the ladder now reads
+
+**No figure moved this phase, and none could have.** 2d-5-3-L's source diff is **comment-only in one
+file**, so no file entered or left the program, no new reachable `.ts` module, no new `.svelte`
+component and no new case. **No pristine-tree rebuild was needed to say so** — the only files this
+phase added are three `.md` and one `.json`, which are in no count. **A comment-only phase produces
+the one ladder rung that is a repeat**, and every phase of this tail has now produced it — 2d-5-3-K
+recorded *the eleventh* and this is the twelfth, written with its derivation. A rung that repeats
+proves the gates were run, never that they could have caught what these rounds keep finding.
+
+**What this round adds to the oracle-gap record.** 2d-5-3-K's replacement sentence was written to be
+*the claim the paragraph actually needs* and was contradicted by the derivation directly under it; the
+gates could not see that and neither could K, whose notes called the sentence pinned by that very
+derivation. The instruction that found it is the one this tail has carried since 2d-5-3-A — read the
+code the sentence is about, and read the sentence to its end.
+
+**The ladder, so a later phase can check rather than accept**: `1320 / 441 / 2307 / 188` at 2d-5-3-L
+(this phase, measured **once**, on the committed tree after a full clean), at 2d-5-3-K (twice), at
+2d-5-3-J (three times), at 2d-5-3-I (twice), at 2d-5-3-H (twice), at 2d-5-3-G (twice), at 2d-5-3-F, at
+2d-5-3-E (twice), at 2d-5-3-D (twice), at 2d-5-3-C (twice), at 2d-5-3-B and at 2d-5-3-A, **the same
+rung measured twenty-one times across twelve phases**; `1320 / 441 / 2306 / 188` at 2d-5-3 after its
+fix round, `1320 / 441 / 2298 / 188` on its worker's tree; `1320 / 439 / 2255 / 187` at 2d-5-2c-1 and
+2d-5-2c-2 — **the instrument landed with that rung, so every rung listed at or before it is a
+*with-instrument* figure and every rung listed after it is not, and the two groups may not be compared
+without subtracting the instrument's known contribution**; `1320 / 438 / 2254 / 186` at 2d-5-2b-E, -D,
+-C, -B and -A; `1320 / 438 / 2253 / 186` at 2d-5-2b (2026-09-04); `1320 / 438 / 2235 / 186` at
+2d-5-2a-C, shared by 2d-5-2a-A and -B; `1320 / 438 / 2229 / 186` at 2d-5-2a; `1320 / 436 / 2205 / 185`
+at 2d-5-1-B, unmoved by 2d-5-1-C. The full per-round accounts of the closed rounds are in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md).
