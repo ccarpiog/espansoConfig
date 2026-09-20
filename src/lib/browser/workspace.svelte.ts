@@ -667,12 +667,18 @@ function ownedProjectionOf(view: DocumentView): DocumentView {
  * holds what `list_documents` answered and what an `Added` observation carried,
  * and everything that draws a sidebar row, picks the viewer's target or answers
  * a coordinator question reads its elements. Two of those readers are the reason
- * this function exists rather than a general tidy: `creatorEligibility` runs
- * **inside the coordinator's own guard**, and the host failure arm's membership
- * test runs *after* all three of its fence checks and immediately before its
- * write. Both are `held.id` reads, which on caller-supplied data is arbitrary
- * code by `CLAUDE.md`'s rule, so the fix is the one {@link ownedProjectionOf}
- * already sets: copy at ingress, not at the guard.
+ * this function exists rather than a general tidy, and both are `held.id` reads
+ * that the coordinator makes between an arbitration and a write: `creatorEligibility`
+ * runs **inside the coordinator's own guard**, and `holdsDocument` runs between
+ * `applyNamedRow`'s `admit` and every status write below it. On caller-supplied data
+ * a property read is arbitrary code by `CLAUDE.md`'s rule, so the fix is the one
+ * {@link ownedProjectionOf} already sets: copy at ingress, not at the guard.
+ *
+ * **A third reader is gone rather than answered.** Until Phase 2d-5-4-C the host's
+ * reread member had a failure arm whose last fence was a membership test over this
+ * list, run immediately before its write; that arm was deleted with the write it
+ * fenced (finding 2), so the case in `workspace.test.ts` written to pin it now
+ * measures something weaker. What is left above is the whole of the justification.
  *
  * **Field by field and explicitly typed**, for the same compile-time reason and
  * with the same caveat — required members only; {@link DocumentSummary}'s seven
@@ -706,20 +712,39 @@ function ownedSummaryOf(summary: DocumentSummary): DocumentSummary {
  * the document again are the only ones carrying anything; `unresolved` and
  * `unchanged` carry no projection, so they are answered as they are.
  *
- * {@link SelectedMatch} itself is not re-made: `reresolve` built it, and its own
- * fields are read by this module rather than by a command. Its `id` is the
- * command's object, exactly as {@link ownedProjectionOf} says of every value one
- * level down.
+ * **The kept selection is re-made too, and its `id` goes through
+ * {@link ownedMatchIdOf}.** `reresolve` builds the {@link SelectedMatch} wrapper
+ * in `./selection.ts`, so the wrapper's own fields are this project's data — but
+ * it fills `id` from `view.matches[position].id` of the projection it was handed,
+ * which on this path is `commands.reloadDocument`'s own answer. That identity is
+ * then *retained*, and it is read as the last conjunct of the three
+ * selection-follow guards — `adoptTheDocumentOnDisk`, `deleteMatch`'s
+ * `heldBefore` capture and `duplicateMatch`'s `intent` capture — immediately
+ * before the `replaceSelection` each of them justifies. {@link ownedMatchOf}'s
+ * header says the same thing of a projection's matches: **`id` is the one
+ * exception**, because it is the only value at that level whose own properties
+ * this module reads after a guard.
+ *
+ * **The copy happens here rather than at the guard**, which is where this
+ * function is called from: `select()` copies before its own staleness check, so
+ * the accessors run before the comparison instead of between it and the write it
+ * approves.
  *
  * @param repair - What {@link repairSelection} decided.
- * @returns The same decision, holding a projection this module wrote.
+ * @returns The same decision, holding a projection and an identity this module
+ *   wrote.
  */
 function ownedRepair(repair: SelectionRepair): SelectionRepair {
   switch (repair.kind) {
     case 'kept':
       return {
         kind: 'kept',
-        selected: repair.selected,
+        selected: {
+          id: ownedMatchIdOf(repair.selected.id),
+          document: repair.selected.document,
+          position: repair.selected.position,
+          fingerprint: repair.selected.fingerprint
+        },
         reloaded: ownedProjectionOf(repair.reloaded)
       };
     case 'cleared':
@@ -2370,51 +2395,54 @@ export function createBrowserState(
       holdsDocument: (document: DocumentId): boolean =>
         documents.some((held) => held.id === document),
       /**
-       * Reads one file again under the coordinator's guard, and says so if it
-       * fails.
+       * Reads one file again under the coordinator's guard, marking it stale for
+       * as long as that read is out.
        *
        * Fired rather than awaited: the coordinator's decision is complete and the
        * read's own three captures decide whether its answer is still wanted.
        *
-       * **The outcome is not discarded, and this is the one arm where discarding
-       * it hid something.** The `Changed`/`Projected` transition has *already*
-       * advanced the accepted sequence for this file and the batch watermark by the
-       * time it gets here, so the observation will never be delivered again — and a
-       * read that fails installs nothing. Ignoring the answer left the window
-       * showing the old projection while the arbitration key said the file was
-       * reconciled, with nothing anywhere recording that anything had gone wrong.
-       * `CLAUDE.md` names a consuming operation whose result is discarded as a shape
-       * this project has already shipped twice.
+       * **The file is marked `stale` before the read starts** — a true statement
+       * for the whole time the read is out, because the window *is* still showing
+       * the older projection — and the only thing that clears it is a successful
+       * installation, in the same synchronous block as `installView`. That mark is
+       * also what records a read that never landed: a failed read installs nothing,
+       * and before the mark existed the window went on showing the old projection
+       * while the arbitration key said the file was reconciled, with nothing
+       * anywhere recording that anything had gone wrong.
        *
-       * **So the file is marked `stale` before the read starts** — which is a true
-       * statement for the whole time the read is out, because the window *is* still
-       * showing the older projection — and the only thing that clears it is a
-       * successful installation, in the same synchronous block as `installView`.
+       * **`owns` is the caller's ownership question, asked in the same synchronous
+       * block as the mark** — Phase 2d-5-4-C's finding 4. The mark is a statement
+       * about *this file's status*, and between the arbitration that admitted the
+       * observation and this line `applyChange` runs two host members —
+       * `openWriteSurfaces()` and `creatorEligibility()`, the second of which walks
+       * this window's row list — and then `writeSurfaceGeneration()`. A host whose
+       * accessor admits a newer observation for the same file would make this write
+       * land over a typed `unavailable` that nothing re-derives, because the batch
+       * watermark has moved past the observation which carried the reason. The
+       * caller cannot fence it from where it stands, because the write is here; so
+       * the *question* travels instead of the write. **Nothing in this type forces
+       * the caller to hand over a question that is really about ownership** — it is
+       * a `() => boolean`, and a caller passing `() => true` would compile.
        *
-       * **The late write is fenced by ownership, and the sentence it used to carry
-       * was false.** That sentence said an overlapping reread may have cleared the
-       * mark in between and this read's failure is still the newest true thing about
-       * the file. The case it names is exactly the case where the failure is the
-       * *oldest* thing about the file: an overlapping reread clears the mark by
-       * **installing**, so the window is showing the newest bytes while this
-       * re-statement calls it stale. Three captures now stand between the answer and
-       * the write — the open generation, this file's status-write count
-       * ({@link statusWriteOf}) and whether the window still holds a row for it — and
-       * the write happens only while all three say this arm still owns what that
-       * file's status says.
+       * **The failure arm is gone, and deleting it is the fix rather than a
+       * regression** — Phase 2d-5-4-C's finding 2. It used to re-state `stale`
+       * behind three fences: the open generation, this file's status-write count
+       * and whether the window still holds a row. The fences were right, and what
+       * they proved is that the write could never change a value — a write they
+       * permit happens only when nothing has written this file's status since the
+       * mark above, so the entry there *is* this arm's own `stale`. What the write
+       * still did was advance {@link statusWriteOf}'s per-file token, which
+       * `noteDocumentStatus` bumps whether or not a value changes, and that token is
+       * the one an **overlapping** read captured in order to decide whether it may
+       * clear the mark. A superseded read's failure therefore took ownership away
+       * from a newer read that had already succeeded, and the newer read's clear was
+       * suppressed: the file stayed marked `stale` permanently, with the bytes now
+       * on disk on screen.
        *
-       * **What the fence makes of the write, stated rather than implied.** A write it
-       * permits can only ever restate this arm's own mark: if nothing has written
-       * that file's status since, the entry there *is* this arm's `stale`, so no
-       * value changes. What the fence removes is every case where the write would
-       * have changed one, and each of those was a write over a newer truth — a
-       * `removed` for a file the window no longer holds a row for, an `unavailable`
-       * carrying a typed reason nothing re-derives because the watermark has moved
-       * past the observation that carried it, or the cleared mark of an overlapping
-       * reread that installed the current bytes. The write is kept rather than
-       * deleted because what this arm promises is *a failed read leaves the file
-       * stale while this read owns its status*, and the fence is what makes the code
-       * say that instead of *a failed read leaves the file stale*.
+       * **So the answer is not handled here, and it is not discarded either.** The
+       * private helper below `report`s the failure on the one channel every other
+       * failure of this state uses, and the mark above is this window's record of
+       * it. What was removed is a second statement of something already true.
        *
        * **What it does not claim.** It does not retry, and it does not say *why* the
        * read failed — `report` is what carries the failure itself, and
@@ -2423,51 +2451,18 @@ export function createBrowserState(
        *
        * @param document - The file.
        * @param guard - Asked immediately before the installation.
+       * @param owns - Asked immediately before the initial mark; `false` writes no
+       *   status at all.
        */
-      rereadUnderGuard: (document: DocumentId, guard: () => boolean): void => {
-        const opened = openGeneration;
-        noteDocumentStatus(document, { kind: 'stale' });
-        // Captured **after** the mark, so it is this arm's own write that is being
-        // remembered and not whatever stood there before it.
-        const marked = statusWriteOf(document);
-        void rereadUnderGuard(document, guard).then(
-          /**
-           * Re-states the staleness when the read never landed and still owns it.
-           *
-           * @param failure - The read's refusal, or `null`.
-           */
-          (failure: IpcFailure | null): void => {
-            if (failure === null) {
-              return;
-            }
-            if (opened !== openGeneration) {
-              // A whole workspace was loaded meanwhile. `open()` cleared every status
-              // without going through `noteDocumentStatus`, and it reallocated every
-              // identity, so this number names another file now.
-              return;
-            }
-            if (marked !== statusWriteOf(document)) {
-              // Somebody else's transition has written this file's status since.
-              return;
-            }
-            if (!documents.some((held) => held.id === document)) {
-              // No row, so *the window is showing an older projection of it* is not
-              // a statement about anything this window holds.
-              //
-              // **This is the last read before the write, and every `held.id` in it
-              // is data this module wrote** — {@link ownedSummaryOf} at both of
-              // `documents`' ingresses. Until this round it was not: the rows came
-              // straight off `list_documents` and off an `Added` observation, so the
-              // third condition ran caller-controlled accessors *after* the two
-              // comparisons above had passed, and an accessor that wrote this file's
-              // status made the fence approve a write over its own newer truth. The
-              // check that can invalidate the checks above it has to be the one that
-              // runs no foreign code.
-              return;
-            }
-            noteDocumentStatus(document, { kind: 'stale' });
-          } // End of the callback that re-states the staleness
-        );
+      rereadUnderGuard: (
+        document: DocumentId,
+        guard: () => boolean,
+        owns: () => boolean
+      ): void => {
+        if (owns()) {
+          noteDocumentStatus(document, { kind: 'stale' });
+        }
+        void rereadUnderGuard(document, guard);
       }, // End of the coordinator-facing rereadUnderGuard member
       addDocument,
       /**
@@ -2832,11 +2827,21 @@ export function createBrowserState(
    */
   function addDocument(summary: DocumentSummary): void {
     // **The observation's row is copied before it is retained**, which is the
-    // second half of this round's ingress rule: `documents` is read inside the
-    // coordinator's guard and in the failure arm's membership test, so nothing it
-    // holds may be an object something outside this module built. The caller's
-    // spread of the wire value happens to produce own properties today; that is a
-    // fact about one call site, and this is the type-checked statement of it.
+    // second half of Phase 2d-5-4-B's ingress rule: `documents` is read inside the
+    // coordinator's guard — `creatorEligibility` and `holdsDocument` both walk it —
+    // so nothing it holds may be an object something outside this module built.
+    //
+    // **This copy is for `documents`' readers and it does not fence the write
+    // below** — Phase 2d-5-4-C's M5, which is the thing the sentence here used to
+    // blur. The check that entitles this row to be inserted is
+    // `sequences.admit(...)` in `applyChange`'s neighbour `applyAddition`, one
+    // module away; the assignment below is the spend. What keeps them atomic is
+    // that **`applyAddition` materializes the wire summary before it arbitrates**,
+    // so `summary` is already a plain own-property object by the time this runs and
+    // the seven reads here fire no accessor. That is a fact about the one caller
+    // and it is stated in that caller too; nothing in this function's type says the
+    // next caller has to do the same, and a caller handing a live wire value
+    // straight through would reopen the window without failing to compile.
     const row = ownedSummaryOf(summary);
     const index = documents.findIndex((held) => held.id === row.id);
     documents =
@@ -3052,10 +3057,15 @@ export function createBrowserState(
     const projection = projectionGenerationOf(document);
     // **The status capture, taken with the other three and compared only at the
     // clear.** On the coordinator's path the host member has already written its
-    // own `stale` before calling this function, so this number counts that write
-    // and a successful installation still clears it; what it catches is a *third
-    // party* — a newer observation's transition — speaking about this file while
-    // the read was out.
+    // own `stale` before calling this function — or deliberately written nothing,
+    // when the ownership question it was handed said a newer observation already
+    // speaks for this file — so this number counts that arm's own write where
+    // there was one and a successful installation still clears it. What it catches
+    // is a *third party*: a newer observation's transition speaking about this
+    // file while the read was out. **It is the only reader of this token now.**
+    // The member's failure arm captured it too, and Phase 2d-5-4-C deleted that
+    // arm, because the write it fenced could never change a value and could always
+    // take ownership away from an overlapping read holding this very capture.
     const statusAt = statusWriteOf(document);
     /**
      * Whether this read is still the one whose answer the window wants.
@@ -3599,6 +3609,24 @@ export function createBrowserState(
       for (const summary of listed.value) {
         rows.push(ownedSummaryOf(summary));
       } // End of the loop over the rows the workspace listed
+      // **The check the one above the loop cannot make** — Phase 2d-5-4-C's
+      // finding 3, and the same repair this file already makes after the
+      // projection loop below. Everything between that check and this line is
+      // caller code: `listed.ok`, `listed.value`, the iteration protocol
+      // `for…of` asks `listed.value` for, and seven field reads per row inside
+      // {@link ownedSummaryOf}. A getter on any of them can synchronously call
+      // `state.open(...)`, which blanks the window for a new root and suspends at
+      // its own first await — and the assignment below would then publish the
+      // *superseded* workspace's rows over the new open's cleared list, and the
+      // loop after it would issue a `get_document` for one of them.
+      //
+      // **The window this closes is older than the copy that made it wide.**
+      // Before the copy this line read `documents = listed.value`, with two
+      // caller-supplied reads between the check and the assignment rather than
+      // `2 + 7N` plus an iterator; the copy widened it, and did not introduce it.
+      if (generation !== openGeneration) {
+        return;
+      }
       documents = rows;
 
       // **Every file is projected up front, config profiles included.** The

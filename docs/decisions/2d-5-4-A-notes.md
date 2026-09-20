@@ -78,7 +78,10 @@ choice, each deliberate:
   install it approved.
 - **The depth is stated and bounded.** Two levels — this view's own fields and each match's own
   fields — because that is what this module reads after a guard. The JSDoc says in as many words that
-  **anything deeper is still the command's own object**, and names them.
+  **anything deeper is still the command's own object**, and names them. *(Read as a statement of what
+  this round did, which it is. The depth is now two levels plus each match's `id` — 2d-5-4-B's
+  `ownedMatchIdOf` — and 2d-5-4-C added the same copy to the one `SelectedMatch` ingress that had
+  none. Recorded here rather than struck, because the sentence was true of the code it describes.)*
 
 The two false claims are replaced: `rereadUnderGuard`'s JSDoc now says what actually bounds the two
 post-check calls, states that saying `replaceSelection` did was false, and enumerates `installView`'s
@@ -96,9 +99,28 @@ speak for a file.
 window no longer holds a row for, or the cleared mark of an overlapping reread that had installed the
 current bytes. Fixed by three captures compared at the write: the open generation, a per-document
 `statusWrites` token (`statusWriteOf`) captured **after** this arm's own mark, and whether the window
-still holds a row. **The JSDoc states what the fence makes of the write**: a permitted write can only
+still holds a row. ~~**The JSDoc states what the fence makes of the write**: a permitted write can only
 ever restate this arm's own mark, so no value changes — what the fence removes is every case where the
-write *would* have changed one, and each of those was a write over a newer truth.
+write *would* have changed one, and each of those was a write over a newer truth.~~
+
+> **Correction (Phase 2d-5-4-C, review finding 2).** The struck sentence is true of the **value** and
+> it is not true of the **effect**, and the step it leaves out is where the defect lived.
+> `noteDocumentStatus` bumps a per-file ownership token *unconditionally* — value change or not — and
+> that token is the only thing `rereadUnderGuard`'s clear compares. So a permitted write changed no
+> value and did take ownership away from whoever held it. The sequence, reachable in the shipped window
+> with no accessor at all: the coordinator's read A marks `stale` and captures token 1; a person's
+> explicit `rereadDocument` starts read B, which writes no mark of its own and so captures token 1 too;
+> A comes back a **failure**, the three fences all pass because B has written nothing, and the
+> re-statement advances the token to 2; B then succeeds, installs the bytes on disk, and finds
+> `statusAt (1) !== statusWriteOf (2)` — so its clear is suppressed and the file is left marked `stale`
+> **permanently**, because the batch watermark has moved past the observation that set it.
+>
+> The write is deleted rather than re-fenced, and with it the arm that carried it: the fences
+> themselves proved it could never change a value, so nothing is lost by removing it. What records a
+> failed read is the mark written **before** the read starts, which only an installation clears, and
+> `report` in the private helper is what carries the failure itself. The case is `workspace.test.ts` —
+> *lets a newer successful reread clear a mark an older failure cannot hold*. See
+> `docs/decisions/2d-5-4-C-notes.md` §2.
 
 **Finding 4 — the transitions guard's top two arms.** `sequences.isNewest(document, route.sequence)`
 is the only question that asks ownership and it is **third**, so `stillApplying`'s refusal and the
@@ -263,10 +285,18 @@ source file**, so none holds this step open.
 3. **recorded only** — `markStaleWhileOurs` calls `sequences.isNewest`, and the new comment calls that
    a pure read. It is a read of a `Map` this module owns today. Nothing in the type says it must stay
    one, and a future accepted-sequence store with a getter would put a callback back inside a guard.
-4. **actionable** — the fence in the host's failure arm permits only writes that restate its own mark,
+4. **actionable** — ~~the fence in the host's failure arm permits only writes that restate its own mark,
    which means **no test can distinguish the permitted write from no write at all**. The three cases
    that pin it all drive the *refusal*. The write is kept because of what the arm promises, not
-   because anything observes it.
+   because anything observes it.~~
+
+   > **Correction (Phase 2d-5-4-C, review finding 2).** The struck item is the reasoning that hid the
+   > defect, and it is wrong in one step: *no test can distinguish it by its **value*** is true, and
+   > *no test can distinguish it* does not follow. A test that asserts the file's status after a
+   > **second, overlapping** read sees the difference exactly — the permitted write advances the
+   > ownership token that second read is holding, and its clear is then suppressed. This item's own
+   > wording is what made the write look observationally inert, and two later rounds repeated it. The
+   > arm is gone; see the correction block in §3 above.
 5. **recorded only** — the clear's disclaimer about membership is a sentence, not a type. A blocked
    session's per-document marks are cleared by any successful explicit reread, and what stops that
    from meaning *reconciled* is that nothing draws per-document status yet. 2d-6 is where the

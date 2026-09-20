@@ -12867,3 +12867,103 @@ finding has lived in every tail this project has run:
 
 **Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-A-notes.md` §7 carries this round's marked items and
 none names an unfixed correctness defect in a source file.
+
+---
+
+## Phase 2d-5-4-B's record, and the Next-action prose Phase 2d-5-4-C executed — archived 2026-09-20 at Phase 2d-5-4-C
+
+#### Phase 2d-5-4-B — the round `CLAUDE.md` §7.1 commissioned for 2d-5-4-A's fix
+
+**Taken and answered, and `SUPERSEDED BY 2d-5-4-C` rather than complete**, because its own fix changed
+source. Risk class **high**; worker model **opus** — **no implementation worker**: one **read-only
+re-derivation** worker, then one fix worker, the shape this chain has settled on. Record
+[`docs/decisions/2d-5-4-B-notes.md`](docs/decisions/2d-5-4-B-notes.md); review
+[`docs/reviews/phase-2d-5-4-B.md`](docs/reviews/phase-2d-5-4-B.md); brief
+[`docs/reviews/phase-2d-5-4-B.brief.md`](docs/reviews/phase-2d-5-4-B.brief.md); the re-derivation
+[`docs/reviews/phase-2d-5-4-B.rederivation.md`](docs/reviews/phase-2d-5-4-B.rederivation.md).
+
+**The review was Codex**, through `autoclaude-review.sh`, which **exited 0** so no agent was spawned —
+**four consecutive Codex rounds**. **Verdict `ship-with-fixes`, 2 blockers and 4 SHOULD-FIX.** **The
+report's finding bodies arrive truncated again**, 180 characters each, so **not one was accepted on the
+report's strength**: all six were re-derived from the code by a read-only worker, and the orchestrator
+**spot-checked the decisive lines of five of them**. **All six held.** Five are defects in source; the
+sixth is arithmetic in the record. The re-derivation also found **three things the review missed**, each
+a generalization of a finding the review had already made.
+
+**Both blockers are the defect the previous round closed, one level down or one step later.** `open()`
+normalizes **after** its last generation check, and the final document has no next iteration:
+`ownedProjectionOf`'s field reads and the injected `report` both run between that check and
+`views = projected; status = 'ready'`, so an accessor that synchronously re-opened the workspace watched
+this function install the **superseded** configuration's projections and call `workspaceReady()` over
+them — the coordinator's drain gate opened for a lifecycle nothing on screen belongs to. Fixed by a
+**second generation check after the loop**, the one the per-iteration check cannot make. And
+`ownedMatchOf` wrote `id: match.id`, so the **identity object stayed the command's**: `positionOf` reads
+`match.id.node` at three adoption sites, between the selection-follow guard and the `replaceSelection`
+that guard justifies. Fixed by `ownedMatchIdOf`, and by `ownedIdentityOf` for the `target` and `moved`
+a save answer carries — copied at each adoption's first statement, before its only `await`.
+
+**Three SHOULD-FIX are one question asked too early, or not at all: does this writer still own what it
+is writing?** The explicit reread cleared a status **a newer `Unreadable` had set** —
+`BrowserState.rereadDocument` passes `ALWAYS_PERMITTED`, so nothing on that path asked, and the
+observation is never redelivered — fixed by capturing `statusWriteOf` beside the guard's other three and
+fencing **the clear alone**, the install deliberately left unfenced so the window shows older content
+under a mark that correctly says the file could not be read. The failure arm's last read before its
+write was `documents.some((held) => held.id === document)`, caller code **after** all three of its
+fences — fixed **at ingress** by `ownedSummaryOf`, because `DocumentSummary` was a whole unnormalized
+ingress class the review did not name, with four readers including one inside the observation guard.
+And the transitions guard's two lower arms were defended by a **positional** argument — *reaching this
+line means the ownership question two arms up already answered yes* — which host callbacks invalidate:
+`tellTheSurfaceAbout` runs `openWriteSurfaces()` and `creatorEligibility()` in between. Both writes now
+take the fenced writer as a parameter, and the two positional justifications are deleted, including the
+one claiming no test could tell the fence from its absence — two of this round's cases do.
+
+**The sixth is the record's arithmetic, and its fix separated four numbers that had been one**: nine
+tests added net, ten `it(` blocks added and one deleted, **eight** discriminating cases in a seven-row
+table, and two discarded candidates. Beside it, two correction blocks: a *recorded only* mark in
+`2d-5-4-notes.md` that sat on a **correctness defect in source** and under §7.3 should have been a
+blocker, and `2d-5-4-A-notes.md` §6's claim that a fence on the registry arm *"cannot discriminate"*,
+which finding 5 disproves.
+
+**Two things the round did not do, stated rather than glossed.** It added **no user-facing string in
+any language** and touched **no `.svelte` file**, so no window reading is owed. And it left
+`npm run build` at **189** modules: all three new normalizers live inside `workspace.svelte.ts`, so the
+ladder's *one module per new source module* rule predicts no movement and none happened.
+
+**One defect in this round's own record, found by the orchestrator before the commit and fixed in
+place.** `2d-5-4-B-notes.md` had a section for every finding **but finding 3**, whose fix and whose
+pinning case were both in the tree. It is now `§3a`, numbered that way because renumbering would
+falsify the twenty §N cross-references the file already carries.
+
+#### The next action is **Phase 2d-5-4-C — the round §7.1 commissions for 2d-5-4-B's fix**
+
+**Scoped to that fix's diff**: `src/lib/browser/workspace.svelte.ts`,
+`src/lib/browser/observationTransitions.ts` and their two suites, plus
+`docs/decisions/2d-5-4-B-notes.md` in full and the correction blocks this round wrote into
+`2d-5-4-notes.md` and `2d-5-4-A-notes.md`. **This is a review round, not implementation**: it takes no
+implementation worker, and its own fix decides whether another round follows, by §7.1 and nothing else.
+
+**Five things to point it at first**, each because the fix that answered a finding is where the next
+finding has lived in every tail this project has run:
+
+1. **The second generation check in `open()`.** It catches the last document's accessors — does it catch
+   everything between the loop and `workspaceReady()`? Four statements and a call run after it, and
+   `installView` is not the only writer on that path.
+2. **`ownedMatchIdOf`'s three fields against `MatchId`, and `ownedSummaryOf`'s against
+   `DocumentSummary`.** Both claim the compile-error property `ownedProjectionOf` claims, and both carry
+   the same optional-member caveat. Is a **fourth** ingress class still unnormalized — a `SaveResult`, a
+   `ConflictModel.source`, a restore-catalogue row? The re-derivation swept `DocumentView` and found
+   nine ingresses and no tenth; nobody has swept the others.
+3. **The clear's fence, and the install left unfenced.** The comment argues the window is never worse
+   off. Is that true when the newer observation is a `Removed` rather than an `Unreadable`, and when
+   `repairAfter(next)` runs immediately afterwards over a projection the newer truth contradicts?
+4. **`markStaleWhileOurs` passed as a parameter into `tellTheSurfaceAbout`.** It is now reached from two
+   functions and four arms. Does every arm that writes still hold the ownership answer it needs, and does
+   the hoisted closure capture the same `route.sequence` at both call sites?
+5. **The three correction blocks this round wrote**, plus `§3a`. One of them **re-marks an item from
+   *recorded only* to a blocker**; check that what replaced the struck text is true, and that no narrower
+   wording of the struck claim survives anywhere — 2c-4a-3a's round 2 found exactly that, and this
+   round's worker reports having swept for it in two further places.
+
+**Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-B-notes.md` §11 carries this round's marked items;
+one is **actionable** and it names a check to run rather than a correctness defect in a source file, so
+under §7.3 nothing holds the step open.

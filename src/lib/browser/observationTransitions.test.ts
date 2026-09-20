@@ -84,8 +84,16 @@ interface RecordedWorkspace {
   eligible: readonly DocumentId[];
   /** Which identities this window holds a row for. */
   rows: DocumentId[];
-  /** Every file a guarded reread was started for, with its guard. */
-  readonly reread: { document: DocumentId; guard: () => boolean }[];
+  /**
+   * Every file a guarded reread was started for, with its guard and its
+   * ownership question.
+   *
+   * `owns` is what the host asks immediately before the initial `stale` mark —
+   * Phase 2d-5-4-C's finding 4 — and it is recorded rather than asked here for
+   * the reason the guard is: this file drives neither, so a case that is about
+   * one calls it at the moment it wants to ask.
+   */
+  readonly reread: { document: DocumentId; guard: () => boolean; owns: () => boolean }[];
   /** Every row inserted or replaced. */
   readonly added: DocumentSummary[];
   /** Every file removed. */
@@ -157,13 +165,19 @@ function recordingWorkspace(): RecordedWorkspace {
        */
       holdsDocument: (document: DocumentId): boolean => recorded.rows.includes(document),
       /**
-       * Records the reread and its guard, and runs neither.
+       * Records the reread, its guard and its ownership question, and runs none
+       * of them.
        *
        * @param document - The file.
        * @param guard - Asked immediately before the installation.
+       * @param owns - Asked immediately before the initial `stale` mark.
        */
-      rereadUnderGuard: (document: DocumentId, guard: () => boolean): void => {
-        recorded.reread.push({ document, guard });
+      rereadUnderGuard: (
+        document: DocumentId,
+        guard: () => boolean,
+        owns: () => boolean
+      ): void => {
+        recorded.reread.push({ document, guard, owns });
       },
       /**
        * Records a row.
@@ -606,6 +620,96 @@ describe('a change of an addressable file', () => {
     // answer to the ownership question* — was a claim about the past.
     expect(workspace.statuses).toEqual([]);
   }); // End of the conflict-arm ownership case
+
+  it('hands the reread an ownership question that refuses after a host read', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    // **The path that does *not* refuse, which is the one the guard's fence never
+    // covered** — Phase 2d-5-4-C's finding 4. Nothing targets file 1, so
+    // `tellTheSurfaceAbout` answers `false` and this observation goes on to start a
+    // reread — but it consulted two host members on the way, and the host marks the
+    // file `stale` before that read starts. That mark is a status write standing on
+    // the far side of arbitrary code, and the host cannot ask the ownership question
+    // itself, so the question is handed over.
+    const hostile: ReconciliationWorkspace = {
+      ...workspace.workspace,
+      /**
+       * Answers the question, and admits a newer observation while doing it.
+       *
+       * @param document - The file.
+       * @returns Whatever the recording workspace would have answered.
+       */
+      creatorEligibility: (document: DocumentId): CreatorEligibility => {
+        sequences.admit(document, 9);
+        return workspace.workspace.creatorEligibility(document);
+      }
+    };
+
+    expect(
+      applyObservation(projectedChange(4, ADDRESSABLE_ONE), hostile, sequences, session.session)
+    ).toBe('reread');
+
+    // The reread itself still happens: whether the *answer* may be installed is
+    // the guard's question and it is asked later, against the state of that
+    // moment. What the host may no longer do is say `stale` about a file a newer
+    // observation is already speaking for.
+    expect(workspace.reread.map((entry) => entry.document)).toEqual([1]);
+    expect(workspace.reread[0]?.owns()).toBe(false);
+    expect(workspace.statuses).toEqual([]);
+  }); // End of the reread-ownership case
+
+  it('asks the same question of an ordinary reread and gets a yes', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+
+    expect(apply(projectedChange(4, ADDRESSABLE_ONE), workspace, session)).toBe('reread');
+    // **Non-discriminating on its own and kept anyway**: it passes whatever the
+    // question is, and what it establishes is that the case above measures a
+    // refusal rather than a question that always says no.
+    expect(workspace.reread[0]?.owns()).toBe(true);
+  });
+
+  it('writes no unavailable when the content read admitted a newer observation', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    // **A getter on the wire content**, which the drain's answer may perfectly well
+    // have: the batch is caller-controlled data and `readonly` freezes nothing at
+    // runtime. `applyChange`'s unreadable arm reads `route.content.Unreadable.reason`
+    // to build the status it writes, so before Phase 2d-5-4-C that read ran between
+    // `sequences.admit` and the write, and the record justified the write by saying
+    // nothing was checked before it.
+    let sprung = false;
+    const observation: ExternalObservation = {
+      Changed: {
+        sequence: 4,
+        document: ADDRESSABLE_ONE,
+        previous_revision: null,
+        disk_revision: 'rev-bytes',
+        content: {
+          /**
+           * Answers the content, and admits a newer observation while doing it.
+           *
+           * @returns The unreadable content.
+           */
+          get Unreadable(): { reason: typeof DENIED } {
+            if (!sprung) {
+              sprung = true;
+              sequences.admit(1, 9);
+            }
+            return { reason: DENIED };
+          }
+        }
+      }
+    };
+
+    expect(applyObservation(observation, workspace.workspace, sequences, session.session)).toBe(
+      'unavailable'
+    );
+    expect(sprung).toBe(true);
+    expect(workspace.statuses).toEqual([]);
+  }); // End of the unreadable-arm ownership case
 }); // End of the "change of an addressable file" suite
 
 describe('the guard the reread is run under', () => {
@@ -888,6 +992,39 @@ describe('a removal of an addressable file', () => {
     );
     expect(workspace.reread).toEqual([]);
   });
+
+  it('writes no removed status when the host removal admitted a newer observation', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    // **`removeDocument` is a host member and it does a great deal** — it clears a
+    // selection, drops a projection and re-reads the raw viewer's target — so
+    // arbitrary code stands between this arm's arbitration and its status write.
+    // A `removed` written over a newer verdict is permanent: the batch watermark
+    // has moved past the observation that carried it.
+    const hostile: ReconciliationWorkspace = {
+      ...workspace.workspace,
+      /**
+       * Removes the row, and admits a newer observation while doing it.
+       *
+       * @param document - The file.
+       */
+      removeDocument: (document: DocumentId): void => {
+        sequences.admit(document, 9);
+        workspace.workspace.removeDocument(document);
+      }
+    };
+
+    expect(
+      applyObservation(removal(6, ADDRESSABLE_ONE), hostile, sequences, session.session)
+    ).toBe('removed');
+
+    // The removal itself is unconditional: it is this arm's transition, and a row
+    // the watcher says is gone does not come back because something newer arrived.
+    // What is withheld is the *statement about status*.
+    expect(workspace.removed).toEqual([1]);
+    expect(workspace.statuses).toEqual([]);
+  }); // End of the removal-ownership case
 }); // End of the "removal of an addressable file" suite
 
 describe('an unreadable addressable file', () => {
@@ -954,6 +1091,61 @@ describe('an addition', () => {
     expect(apply(addition(8, 43), workspace, session, sequences)).toBe('added');
     expect(workspace.added.map((summary) => summary.id)).toEqual([42, 43]);
   });
+
+  it('refuses the addition when the summary’s own getter admitted a newer removal', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    let sprung = false;
+    // **A getter on the wire summary**, read by the spread that forces
+    // `loaded: false`. Until Phase 2d-5-4-C that spread ran *after*
+    // `sequences.admit`, so the accessor sat between this module's arbitration and
+    // the host's `documents = …` — and a re-entrant `Removed` for the same
+    // identity had its removal undone by the row this arm then inserted.
+    const summary: DocumentSummary = {
+      ...makeSummary({ id: 42, relativePath: 'match/new-42.yml' }),
+      /**
+       * Answers the path, and applies a newer removal of the same file.
+       *
+       * @returns The row's path.
+       */
+      get relative_path(): string {
+        if (!sprung) {
+          sprung = true;
+          apply(
+            removal(9, { Addressable: { document: 42, relative_path: 'match/new-42.yml' } }),
+            workspace,
+            session,
+            sequences
+          );
+        }
+        return 'match/new-42.yml';
+      }
+    };
+
+    expect(
+      apply(
+        {
+          Added: {
+            sequence: 3,
+            document_summary: summary,
+            content: { Unreadable: { reason: DENIED } }
+          }
+        },
+        workspace,
+        session,
+        sequences
+      )
+    ).toBe('superseded');
+
+    // The getter fired, so the trap is live rather than decorative — and the
+    // window is left as the *newer* observation left it: the row is gone, and it
+    // is statused `removed` rather than re-inserted and marked unavailable.
+    expect(sprung).toBe(true);
+    expect(workspace.added).toEqual([]);
+    expect(workspace.rows).toEqual([]);
+    expect(workspace.statuses).toEqual([{ document: 42, status: { kind: 'removed' } }]);
+  }); // End of the addition-ingress case
 }); // End of the "addition" suite
 
 describe('a Named identity the open workspace refuses', () => {
@@ -1028,6 +1220,38 @@ describe('a Named identity the open workspace refuses', () => {
     expect(apply(removal(3, NAMED_NINE), workspace, session, sequences)).toBe('superseded');
     expect(workspace.removed).toEqual([]);
   });
+
+  it('writes no status when the host row question admitted a newer observation', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    workspace.rows = [9];
+    // **Two injected calls stand between this arm’s arbitration and every write
+    // below it** — `session.requestMembershipReload()` and this one — and all three
+    // of the `Named` column’s writes are on the far side of them.
+    const hostile: ReconciliationWorkspace = {
+      ...workspace.workspace,
+      /**
+       * Answers the question, and admits a newer observation while doing it.
+       *
+       * @param document - The identity.
+       * @returns Whatever the recording workspace would have answered.
+       */
+      holdsDocument: (document: DocumentId): boolean => {
+        sequences.admit(document, 12);
+        return workspace.workspace.holdsDocument(document);
+      }
+    };
+
+    expect(
+      applyObservation(projectedChange(4, NAMED_NINE), hostile, sequences, session.session)
+    ).toBe('pendingRow');
+
+    // The membership reload is still requested: drift is drift whatever arrives
+    // next, and that request is not a statement about this file’s status.
+    expect(session.requests).toHaveLength(1);
+    expect(workspace.statuses).toEqual([]);
+  }); // End of the pending-row ownership case
 }); // End of the "Named identity" suite
 
 describe('an Unnamed path', () => {

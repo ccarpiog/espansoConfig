@@ -4385,3 +4385,39 @@ sixth was a sentence. **Nine cases now pin them, and each was confirmed to fail 
 code** — the fix worker reverted each change in the tree, ran the one suite, recorded the failure
 message and restored it; the messages are in `docs/decisions/2d-5-4-A-notes.md` §6. **Two candidate
 cases were discarded for passing both ways**, which is the check the confirmation exists to make.
+
+---
+
+## Phase 2d-5-4-B's verification narrative — archived 2026-09-20 at Phase 2d-5-4-C
+
+### The rung moved by six, and only by this round's own tests
+
+**With the instrument in the working tree the four commands answer `1320 / 443 / 2395 / 189`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-4-B**, on the post-fix tree, each command run on its own:
+
+| Gate | Was at 2d-5-4-A | Now | Why it moved, or did not |
+|---|---|---|---|
+| `cargo test --workspace` | 1320 | **1320** | no Rust changed — `git diff --numstat -- crates/ src-tauri/` names only the instrument's `main.rs` hook |
+| `npm run check` files | 443 | **443** | no file added or removed; the fix is inside four existing files |
+| `npm test` | 2389 | **2395** | +6, the six cases this round's five source fixes are pinned by |
+| `npm run build` modules | 189 | **189** | no new module: `ownedMatchIdOf`, `ownedIdentityOf` and `ownedSummaryOf` all live inside `workspace.svelte.ts` |
+
+`cargo test --workspace -- --test-threads=1` was read from a file rather than through a pipe, summed
+over **26** `test result` lines *and* checked by the complementary question — no line lacking
+`0 failed` — and it completed on the **first attempt**, so 2d-5-3-L's stale-`target/` host finding has
+now not recurred for five consecutive phases. `cargo clippy --workspace --all-targets -- -D warnings`
+(exit 0), `cargo fmt --check` (exit 0) and `cargo tree -p espansoconfig-core | rg tauri` (finds
+nothing) are clean. **Both bundle oracles were read and both lines are reported**: server-only markers
+**absent**, client-only markers **present (2)**. **The instrument's pin was re-checked** and holds at
+`5 insertions(+), 1 deletion(-)`.
+
+**No gate caught any of the six findings, and no gate could have.** Five were re-entrancy or ordering
+defects reachable only through an injected accessor, an injected host method or an interleaving no
+test had combined, and the sixth was arithmetic in a record. **Six cases now pin the five source
+fixes, and each was confirmed to fail against the pre-fix code** — the fix worker reverted each change
+in the tree, ran the one suite, recorded the failure message and restored it; the messages are in
+`docs/decisions/2d-5-4-B-notes.md` §10. **No candidate was run and found to pass both ways this
+round**, and that is a difference from 2d-5-4-A rather than an improvement on it: three shapes for
+finding 4 were rejected by argument before being written, which is a weaker check than running one,
+and the notes record the distinction rather than blurring it.

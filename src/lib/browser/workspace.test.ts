@@ -832,6 +832,70 @@ describe('the load', () => {
     expect(state.views.map((one) => one.id)).toEqual([1, 2, 3]);
   }); // End of the superseded-open publication case
 
+  it('publishes no row when a summary’s own getter opens another workspace', async () => {
+    // **The same check one loop earlier** — Phase 2d-5-4-C's finding 3. `open()`
+    // compares its generation once after `list_documents` answers, and everything
+    // between that comparison and `documents = rows` is caller code: `listed.ok`,
+    // `listed.value`, the iteration protocol and seven field reads per row inside
+    // the ingress copy. The projection loop below it got its own check at Phase
+    // 2d-5-4-B; the row loop did not.
+    let opens = 0;
+    let sprung = false;
+    let state: BrowserState | null = null;
+    // A getter on the **last** row `list_documents` answers, which an injected
+    // command surface may perfectly well hand back.
+    const trap: DocumentSummary = {
+      ...makeSummary({ id: 3, relativePath: 'match/other.yml' }),
+      get disabled(): boolean {
+        if (!sprung) {
+          sprung = true;
+          void state?.open('/second');
+        }
+        return false;
+      }
+    };
+    const base = scriptedCommands({
+      list: {
+        ok: true,
+        value: [
+          makeSummary({ id: 1, relativePath: 'config/default.yml', kind: 'ConfigProfile' }),
+          makeSummary({ id: 2, relativePath: 'match/base.yml' }),
+          trap
+        ]
+      }
+    });
+    // The second open is **refused**, so the window it leaves behind is the one a
+    // person would be looking at: a failure over whatever the sidebar holds.
+    const commands: BrowserCommands = {
+      ...base,
+      openWorkspace: vi.fn(async (): Promise<CommandResult<WorkspaceSummary>> => {
+        opens += 1;
+        if (opens === 1) {
+          return { ok: true as const, value: SUMMARY };
+        }
+        return {
+          ok: false as const,
+          failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+        };
+      })
+    };
+    state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await settleDrains();
+
+    // The getter fired, so the trap is live rather than decorative.
+    expect(sprung).toBe(true);
+    expect(opens).toBe(2);
+    expect(state.status).toBe('failed');
+    // **The two discriminating assertions.** Pre-fix the superseded load published
+    // the first workspace's three rows over the second open's cleared list — rows
+    // whose identities feed `rawTarget`, `creatorEligibility`, `holdsDocument` and
+    // the coordinator's membership test, with no pending marks to constrain them —
+    // and then sent one `get_document` for the first of them.
+    expect(state.documents).toEqual([]);
+    expect(commands.getDocument).not.toHaveBeenCalled();
+  }); // End of the summary-getter publication case
+
   it('says which file could not be read, so its own row can say so too', async () => {
     const failure: IpcFailure = {
       kind: 'command',
@@ -2725,6 +2789,120 @@ describe('moving a snippet', () => {
     expect(state.selected).toBeNull();
     expect(state.selectedMatch).toBeNull();
   }); // End of the identity-getter selection case
+
+  it('keeps no command identity when a repair keeps the selection', async () => {
+    // **The one ingress of a `SelectedMatch` that was not normalized** — Phase
+    // 2d-5-4-C's finding 1. `repairSelection` calls `reresolve` on the projection
+    // `commands.reloadDocument` answered with, and `reresolve` fills the kept
+    // selection's `id` from `view.matches[position].id` **by reference**, so what
+    // the window went on holding for the rest of the session was the command's own
+    // object. It is read as the last conjunct of three selection-follow guards,
+    // immediately before the `replaceSelection` each of them justifies.
+    let armed = false;
+    let fired = 0;
+    // The identity of the repaired snippet, as the reload answers it. Pre-fix this
+    // exact object ends up in `state.selected`.
+    const trapId: MatchId = {
+      document: 2,
+      revision: 'rev-b',
+      get node(): number {
+        if (armed) {
+          fired += 1;
+        }
+        return 30;
+      }
+    };
+    const reparsed = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-b',
+      matches: [
+        {
+          ...makeMatch({
+            node: 30,
+            document: 2,
+            revision: 'rev-b',
+            trigger: ':sig',
+            label: 'Signature'
+          }),
+          id: trapId
+        },
+        makeMatch({ node: 31, document: 2, revision: 'rev-b', trigger: ':date', label: 'Today' })
+      ]
+    });
+    // What the committed move leaves on disk: a third revision, and the moved
+    // snippet under an identity the save minted.
+    const afterMove = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-c',
+      matches: [
+        makeMatch({ node: 40, document: 2, revision: 'rev-c', trigger: ':date', label: 'Today' }),
+        makeMatch({ node: 41, document: 2, revision: 'rev-c', trigger: ':sig', label: 'Signature' })
+      ]
+    });
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-c',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: { document: 2, revision: 'rev-c', node: 41 }
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({
+      documents,
+      match: {
+        ok: false,
+        failure: {
+          kind: 'command',
+          error: { code: 'identityStaleRevision', expected: 'rev-b', found: 'rev-a' }
+        }
+      },
+      reload: { ok: true, value: reparsed },
+      moves: [saved]
+    });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(state.scopedMatches[0]!);
+
+    // The `kept` arm really ran, so the ingress this case is about was really
+    // reached.
+    expect(state.notice).toBe('kept');
+    expect(state.selected?.id.node).toBe(30);
+    // **The discriminating assertion, and it needs no trap at all**: what the
+    // window retains may not be the object the command built.
+    expect(state.selected?.id).not.toBe(trapId);
+
+    // Armed only now, so the ingress copy and the repair itself are taken of a
+    // truthful answer and only a *retained* read can fire this.
+    armed = true;
+    documents.set(2, { ok: true, value: afterMove });
+    await state.moveMatch(
+      { document: 2, revision: 'rev-b', node: 30 },
+      { document: 2, revision: 'rev-b', node: 31 },
+      'rev-b',
+      NOTHING_ACKNOWLEDGED
+    );
+
+    // **Nothing the adoption's guard read was a command-supplied accessor.**
+    // `isTheSameIdentity` reads `held.document`, `held.revision` and `held.node`
+    // on the retained identity, as the guard's last conjunct and after its first
+    // two have been answered — so pre-fix this counts at least one firing inside
+    // exactly the window `CLAUDE.md` names as not atomic.
+    expect(fired).toBe(0);
+    // And the move is followed, which is what that guard is for.
+    expect(state.selected?.id.node).toBe(41);
+    expect(state.notice).toBeNull();
+  }); // End of the kept-repair identity case
 }); // End of the "moving a snippet" suite
 
 /**
@@ -8810,9 +8988,18 @@ describe('the observation transitions', () => {
       ]
     });
     // **Two files, one held answer.** Both rereads are in flight together, so the
-    // case can show that the fence suppresses the write for the file whose truth
-    // moved and permits it for the file whose did not — which a single-document
-    // case cannot tell from a blanket suppression.
+    // case can show that a failure lands over neither the file whose truth moved
+    // nor the file whose did not — which a single-document case cannot tell from a
+    // blanket suppression.
+    //
+    // **What this case pins changed at Phase 2d-5-4-C, and it is stated rather than
+    // left to a reader.** It was written for the fence over the host member's
+    // failure arm, and that arm is gone: a failed read now writes nothing at all,
+    // because the mark it would have re-stated was already written before the read
+    // started and the re-statement could only ever advance the ownership token a
+    // newer read was holding (finding 2). So this case no longer tells a fence from
+    // its absence — nothing is left to fence. What it still pins is the outcome:
+    // neither file's status is disturbed by the failure.
     const commands: BrowserCommands = {
       ...base,
       reloadDocument: vi.fn(() => answer.promise)
@@ -8845,7 +9032,8 @@ describe('the observation transitions', () => {
 
     // `removed` survives: the window holds nothing for file 2, so *this window is
     // showing an older projection of it* would be a statement about nothing. File
-    // 3's own mark is restated, because nothing wrote its status in between.
+    // 3 is still `stale` — the mark its own read wrote before it started, which
+    // nothing has cleared, because only an installation clears one.
     expect(state.externalDocumentStatus(2)).toEqual({ kind: 'removed' });
     expect(state.externalDocumentStatus(3)).toEqual({ kind: 'stale' });
     expectNoSaveCommand(commands);
@@ -8963,6 +9151,70 @@ describe('the observation transitions', () => {
     state.dispose();
   }); // End of the explicit-recovery case
 
+  it('lets a newer successful reread clear a mark an older failure cannot hold', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const first = deferred<CommandResult<DocumentView>>();
+    const second = deferred<CommandResult<DocumentView>>();
+    let reads = 0;
+    const base = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    // Both reads are held, so the two really overlap: the coordinator's is first
+    // and fails, the person's is second and succeeds.
+    const commands: BrowserCommands = {
+      ...base,
+      reloadDocument: vi.fn(async (): Promise<CommandResult<DocumentView>> => {
+        reads += 1;
+        return reads === 1 ? first.promise : second.promise;
+      })
+    };
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    expect(reads).toBe(1);
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+
+    // **The recovery control, fired while the coordinator's read is still out.** It
+    // writes no mark of its own — only the host's coordinator-facing member does —
+    // so the token it captures is the one the coordinator's own mark established.
+    const recovery = state.rereadDocument(2);
+    expect(reads).toBe(2);
+
+    // The older read comes back a failure. Nothing it does may take ownership of
+    // this file's status away from the read that is still out: the mark it would
+    // re-state is already there, so the write could never change a value, and the
+    // only thing it could change was who owns it.
+    first.resolve({
+      ok: false,
+      failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
+    });
+    await settleDrains();
+
+    // Then the newer read succeeds and installs the bytes on disk.
+    second.resolve({ ok: true, value: rereadBaseDocument() });
+    expect(await recovery).toBeNull();
+    await settleDrains();
+
+    // **The discriminating assertion.** Pre-fix the failure arm's value-neutral
+    // re-statement had advanced the token, so this installation's clear was
+    // suppressed and the file stayed marked `stale` for the rest of the session —
+    // with the bytes now on disk on screen, and nothing to re-derive the mark
+    // because the batch watermark had moved past the observation that set it.
+    expect(state.externalDocumentStatus(2)).toBeNull();
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([77, 20]);
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the superseded-failure ownership case
+
   it('keeps a newer unreadable reason an explicit reread did not set', async () => {
     expectDrains(2);
     const events = testEvents();
@@ -9010,8 +9262,8 @@ describe('the observation transitions', () => {
     state.dispose();
   }); // End of the reread-over-a-newer-reason case
 
-  it('reads no summary of its own between the failure arm’s checks and its write', async () => {
-    expectDrains(2);
+  it('reads no summary of its own inside the coordinator’s guard', async () => {
+    expectDrains(3);
     const events = testEvents();
     const answer = deferred<CommandResult<DocumentView>>();
     let armed = false;
@@ -9019,18 +9271,26 @@ describe('the observation transitions', () => {
     let sprung = false;
     let state: BrowserState | null = null;
     // **A row whose `id` is an accessor**, which is what `list_documents` may
-    // perfectly well answer with: the command surface is injected. `documents` is
-    // read by the host failure arm's membership test *after* both of its fence
-    // comparisons and immediately before its write, so before this round that
-    // third condition was the one that could invalidate the two above it.
+    // perfectly well answer with: the command surface is injected, so its answer is
+    // caller-controlled data and `readonly` freezes nothing at runtime.
+    //
+    // **What this case points at changed at Phase 2d-5-4-C.** It was written for
+    // the host reread member's failure arm, whose last fence was a membership test
+    // over `documents` run immediately before its write; that arm was deleted with
+    // the write it fenced (finding 2), so pointing at it would now measure the
+    // absence of a code path rather than the ownership of a row. The reader it
+    // points at instead is the one `ownedSummaryOf`'s header names first and which
+    // is still there: `creatorEligibility` walks this list **inside the
+    // coordinator's guard**, between the arbitration that admitted an observation
+    // and the `stale` that observation writes.
     const trap: DocumentSummary = {
       ...makeSummary({ id: 2, relativePath: 'match/base.yml' }),
       get id(): DocumentId {
         reads += 1;
         if (armed && !sprung) {
           sprung = true;
-          // The largest thing arbitrary code can do from here, and the one that
-          // falsifies the check two lines above it: a whole new workspace.
+          // The largest thing arbitrary code can do from inside that guard: a
+          // whole new workspace, over the one the observation is about.
           void state?.open('/second');
         }
         return 2;
@@ -9047,12 +9307,15 @@ describe('the observation transitions', () => {
       },
       drains: [
         reconciliationBatch(),
+        reconciliationBatch(),
         reconciliationBatch({
           newest_sequence: 5,
           observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
         })
       ]
     });
+    // Held, so the reread this observation starts never lands and the window stays
+    // where the arbitration left it.
     const commands: BrowserCommands = { ...base, reloadDocument: vi.fn(() => answer.promise) };
     state = createBrowserState(commands, () => undefined, undefined, events.source);
     state.start();
@@ -9060,34 +9323,25 @@ describe('the observation transitions', () => {
     await state.open(null);
     await settleDrains();
 
-    // Armed only once the guarded reread is out, so the one read of `documents`
-    // left on this path is the fence's third condition. Everything before it —
-    // the load's own `get_document` loop, and the coordinator's eligibility
-    // question — is a truthful read of a truthful row.
+    // Armed only after the load, so the ingress copy is taken of a truthful answer
+    // and only a *retained* read can fire this.
     armed = true;
     reads = 0;
-    answer.resolve({
-      ok: false,
-      failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
-    });
+    events.wake(5, 5);
     await settleDrains();
 
-    // **Nothing read a command-supplied row after the checks**, because the rows
-    // are this module's own objects. Before the ingress copy the getter ran here
-    // and opened a second workspace, and the arm then wrote `stale` anyway — all
-    // three of its comparisons having been about a workspace that no longer
-    // existed by the time the write happened.
-    //
-    // **The status is asserted first and it discriminates nothing**, which is
-    // stated rather than left for a reader to discover: 2d-5-4-A §7 item 4 records
-    // that a write this fence permits can only restate the arm's own mark, so the
-    // value is `stale` either way. The two assertions under it are the case.
-    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+    // **Nothing the coordinator read was a command-supplied row**, because the
+    // rows are this module's own objects. Without the ingress copy the getter ran
+    // inside the guard and opened a second workspace, and the transition went on
+    // to mark a file of the workspace that had just been replaced.
     expect(reads).toBe(0);
     expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+    // The transition itself still ran, so the case is about *who was read* and not
+    // about an observation that never arrived.
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
     expectNoSaveCommand(commands);
     state.dispose();
-  }); // End of the unnormalized-summary fence case
+  }); // End of the unnormalized-summary ingress case
 
   it('sends document_text for the viewer’s file after an observation installs', async () => {
     expectDrains(3);

@@ -118,6 +118,16 @@ values of `trigger`, `content`, `options`, and the elements of the arrays — an
 any of this**. What makes the claim true is `ownedProjectionOf` running at every ingress, which is a
 review-enforced invariant over a list of call sites, not a compiler-enforced one.
 
+> **Correction (Phase 2d-5-4-C, review finding 1).** The paragraph above answers *how deep* and reads
+> as though it also answered *at which ingresses*, and the second question was open: one retained
+> `MatchId` was **not** reached by this round's copy. `ownedRepair` passed a kept selection repair's
+> `selected` through unchanged, and `reresolve` fills that value's `id` **by reference** from the
+> projection `commands.reloadDocument` answered with — so the identity the window then held for the
+> rest of the session was the command's own object, read by `isTheSameIdentity` as the last conjunct
+> of the three selection-follow guards this very section is about. The fix is one more call of this
+> round's own `ownedMatchIdOf`, at that ingress; see `docs/decisions/2d-5-4-C-notes.md` §1. The
+> sentence to carry forward is about the **list of ingresses**, which is what nothing enforces.
+
 ---
 
 ## 3a. Finding 3 — an explicit reread cleared a status a newer observation had set
@@ -255,8 +265,17 @@ check and a spend at three sites — so the correct mark was **blocker**: fixed 
 open and marked `BLOCKED`. Had it been marked correctly, 2d-5-4 could not have closed with it.
 
 A marked correction block now says so in that file and names §3's change as what closes it, and states
-the **narrower** thing that genuinely survives as *recorded only*: the **fourth** level and below is
-still the command's own object, and nothing this module reads after a guard goes that deep.
+~~the **narrower** thing that genuinely survives as *recorded only*: the **fourth** level and below is
+still the command's own object, and nothing this module reads after a guard goes that deep.~~
+
+> **Correction (Phase 2d-5-4-C, its M1).** The struck clause is this section's own finding recurring
+> one wording narrower: *nothing this module reads after a guard goes that deep* was false when it was
+> written, because `ownedRepair`'s kept arm retained a third-level `MatchId` that a guard reads. The
+> block this section wrote into `2d-5-4-notes.md` has been corrected there, and the same claim standing
+> in **source** — `workspace.svelte.ts:709-712`, which also misattributed `ownedMatchOf`'s *`id` is the
+> one exception* — is rewritten. Sweeping for the previous wording is what produced this instance, and
+> the sweep this round ran was by shape: every writer of `selected`, and every producer of a
+> `SelectedMatch`.
 
 Two neighbouring record defects the re-derivation found were corrected at the same time rather than
 left as narrower instances of a finding just closed:
@@ -335,8 +354,16 @@ the case itself so no reader mistakes it for the measurement:
   pre-fix code, which is how it is known the getter really fired there;
 - fix 4's `expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' })` — **measured** by placing
   it *above* the discriminating assertions and re-running the pre-fix tree: it passed, and the case
-  broke on `reads`. `2d-5-4-A-notes.md` §7 item 4 already records why it cannot discriminate — a write
-  this fence permits can only restate the arm's own mark.
+  broke on `reads`. ~~`2d-5-4-A-notes.md` §7 item 4 already records why it cannot discriminate — a write
+  this fence permits can only restate the arm's own mark.~~
+
+  > **Correction (Phase 2d-5-4-C, review finding 2).** The measurement stands; the cited reason is the
+  > incomplete one. A write that fence permits cannot change *this* file's status **value**, and it did
+  > change who owned it — `noteDocumentStatus` bumps the ownership token unconditionally — so a case
+  > with a **second, overlapping** read in it discriminates on a value after all. The arm is deleted at
+  > 2d-5-4-C, so this case no longer tells a fence from its absence; it has been re-pointed at
+  > `creatorEligibility`, the reader inside the coordinator's guard that `ownedSummaryOf`'s header
+  > names first and that is still there, and re-confirmed to fail without the ingress copy.
 
 **Candidates discarded, and how.** Three shapes for finding 4 were rejected **at design time, by
 reasoning and not by running them**, and that distinction is recorded rather than blurred: a
@@ -384,21 +411,49 @@ file**, so none holds this step open.
 4. **recorded only** — `rereadUnderGuard`'s new status capture fences **the clear and not the install**,
    deliberately, and the two claims differ in a way only prose states. Nothing tests the install half of
    that decision, because there is nothing to observe: the install is what it always was.
-5. **recorded only** — fix 4's discriminating assertions are a read count and a command count rather
+5. **recorded only** — ~~fix 4's discriminating assertions are a read count and a command count rather
    than a value, because the fence's permitted write cannot change a value (§10). A future edit that
    made the fence's third check read foreign data again *and* removed the trap's ability to re-enter
-   would pass this case. The case pins the shape that exists, not every shape that would be wrong.
+   would pass this case. The case pins the shape that exists, not every shape that would be wrong.~~
+
+   > **Correction (Phase 2d-5-4-C, review finding 2).** *The fence's permitted write cannot change a
+   > value* is the sentence that hid finding 2 through three rounds: it cannot change **this file's
+   > status value**, and it does advance the ownership token, which a second overlapping read then
+   > loses on. The arm and its fence are gone, and fix 4's case has been re-pointed at the coordinator's
+   > guard — see the correction in §10.
 6. **recorded only** — `applyChange`'s `markStaleWhileOurs` is now shared by the guard's three refusing
    arms and by `tellTheSurfaceAbout`, which two call sites reach, and nothing stops a further writer
    being added beside it rather than through it. `noteDocumentStatus` is on the
    `ReconciliationWorkspace` interface, so it is reachable directly from anywhere in this module; the
    single-writer property is a convention, not a type.
+
+   > **Correction (Phase 2d-5-4-C, review finding 4).** This item records the risk in the future tense
+   > and the **source comment beside the writer stated the convention as a fact** — *"this module has
+   > exactly one fenced status writer and a reader can see that every `stale` an admitted `Changed`
+   > produces goes through it"* — which was already false when it was written, in two ways:
+   > `workspace.svelte.ts`'s reread member wrote a `stale` for an admitted `Changed` and did not go
+   > through it, and `applyNamedRow` writes another from a different function. Both are closed rather
+   > than re-worded — the host's initial mark is now fenced by the ownership question `applyChange`
+   > hands it, and `applyNamedRow` carries its own fenced writer — and the comment now says what is
+   > true of the code. See `docs/decisions/2d-5-4-C-notes.md` §4 and §8.
 7. **recorded only** — this round changed no `.svelte` file and takes no window reading, but what it
    changed — when a file is marked stale, when the mark clears, and which of two overlapping truths
    wins — is exactly what 2d-6 draws. The first reading that draws it is the first evidence any of it is
    right on a screen.
 8. **recorded only** — the `Unreadable` arm of a `Changed` observation writes its status at
    `applyChange`'s second statement, after `'Unreadable' in route.content` — a read on the wire value
-   the drain supplied. It is not in scope here and it is not the same shape as findings 4 and 5, because
-   nothing is *checked* before it that the read could invalidate: it is the first write of that arm.
+   the drain supplied. ~~It is not in scope here and it is not the same shape as findings 4 and 5, because
+   nothing is *checked* before it that the read could invalidate: it is the first write of that arm.~~
    Named because a reader sweeping this module for property reads will meet it.
+
+   > **Correction (Phase 2d-5-4-C, its M4).** The struck justification is not true of the code.
+   > `sequences.admit(document, route.sequence)` **is** checked before it — it is the first statement of
+   > the function — and *the first write of that arm* is not the same thing as *the first statement
+   > after a check*. `'Unreadable' in route.content` is a `has` on a wire value and
+   > `route.content.Unreadable.reason` is a getter read on one, so both run between that check and this
+   > write. The exposure really was the narrowest on the table, and the stated reason was the wrong one,
+   > which made the item a record defect rather than the residual it presented itself as. Fixed: the
+   > reason is read first and the write goes through the same fenced writer as every other status this
+   > function records. The same sweep found and fixed three more of the shape — `applyAddition`,
+   > `applyRemoval` and `applyNamedRow` — and left `applyUnreadable` alone with a justification that is
+   > a statement about its code. See `docs/decisions/2d-5-4-C-notes.md` §8.

@@ -601,11 +601,27 @@ export interface ReconciliationWorkspace {
    * shape this project has shipped as a defect. What the read did is observable on
    * the window.
    *
+   * **The host marks the file `stale` for as long as the read is out, and `owns`
+   * is what entitles it to** — Phase 2d-5-4-C's finding 4. That mark is a write to
+   * this file's status, and the caller's own ownership question was answered
+   * *before* the two host members {@link tellTheSurfaceAbout} consults and before
+   * `writeSurfaceGeneration()`; `CLAUDE.md` says a check and a spend separated by
+   * any such read are not atomic. The write cannot move to the caller — it belongs
+   * with the read it describes — so the question travels to the write instead.
+   * **Nothing in this type says `owns` really asks about ownership**: it is a
+   * `() => boolean`, and a caller passing `() => true` would compile.
+   *
    * @param document - The file to read again.
    * @param guard - Asked immediately before the installation; `false` installs
    *   nothing.
+   * @param owns - Asked immediately before the initial `stale` mark, in the same
+   *   synchronous block as it; `false` writes no status at all.
    */
-  rereadUnderGuard(document: DocumentId, guard: () => boolean): void;
+  rereadUnderGuard(
+    document: DocumentId,
+    guard: () => boolean,
+    owns: () => boolean
+  ): void;
   /**
    * Inserts or replaces one sidebar row by identity.
    *
@@ -811,6 +827,15 @@ export function applyObservation(
  * `DocumentId` this process minted, so two additions of one path in one batch are
  * ordered by sequence exactly as two changes of one file are.
  *
+ * **Both wire values are read before the arbitration, not after it** — Phase
+ * 2d-5-4-C's M5. The spread and the `in` below run the wire summary's seven
+ * accessors and the content's `has` trap, all of which are caller-controlled code
+ * on an injected boundary; taken after `admit` they sit between that check and the
+ * host's `documents = …`, which is where a re-entrant `Removed` for the same
+ * identity got its removal undone. Read here they run *before* the question they
+ * would have to defeat, and an accessor that admits something newer makes `admit`
+ * itself refuse. The cost is that a superseded addition reads them too.
+ *
  * @param route - The addition.
  * @param workspace - The window.
  * @param sequences - The per-document accepted sequences.
@@ -821,15 +846,18 @@ function applyAddition(
   workspace: ReconciliationWorkspace,
   sequences: AcceptedSequences
 ): ObservationOutcome {
-  if (!sequences.admit(route.summary.id, route.sequence)) {
+  const row: DocumentSummary = { ...route.summary, loaded: false };
+  const reason = 'Unreadable' in route.content ? route.content.Unreadable.reason : null;
+  if (!sequences.admit(row.id, route.sequence)) {
     return 'superseded';
   }
-  workspace.addDocument({ ...route.summary, loaded: false });
-  if ('Unreadable' in route.content) {
-    workspace.noteDocumentStatus(route.summary.id, {
-      kind: 'unavailable',
-      reason: route.content.Unreadable.reason
-    });
+  workspace.addDocument(row);
+  // Fenced for the reason the whole of this module's status writing now is:
+  // `addDocument` is a host member, so a window whose row insertion admits a newer
+  // observation of the same file leaves this `unavailable` writing over a verdict
+  // nothing re-derives. The reason itself was read above, before `admit`.
+  if (reason !== null && sequences.isNewest(row.id, route.sequence)) {
+    workspace.noteDocumentStatus(row.id, { kind: 'unavailable', reason });
   }
   return 'added';
 } // End of function applyAddition()
@@ -869,13 +897,13 @@ function applyChange(
     return 'superseded';
   }
   /**
-   * Marks the file stale, but only while this observation still owns its status.
+   * Whether this observation is still the one entitled to speak for the file.
    *
-   * **Hoisted out of the guard at Phase 2d-5-4-B, because two writes outside the
-   * guard need it too.** It is handed to {@link tellTheSurfaceAbout} rather than
-   * duplicated there, so that this module has exactly one fenced status writer
-   * and a reader can see that every `stale` an admitted `Changed` produces goes
-   * through it.
+   * **The one ownership question of this function**, asked by every status write
+   * below and handed to the host as {@link ReconciliationWorkspace.rereadUnderGuard}'s
+   * `owns` so that the initial `stale` mark — which is written in the *other*
+   * module, after two host members have run — asks the same thing at the same
+   * depth.
    *
    * **What it asks is an injected interface method, not a pure read.**
    * `sequences` is a parameter of type {@link AcceptedSequences}, whose `isNewest`
@@ -884,18 +912,47 @@ function applyChange(
    * asking it fires no callback *as this program is assembled*. That is a
    * property of that implementation and not of the type, and a later store with a
    * getter behind `isNewest` would put a callback back inside a guard.
+   *
+   * @returns `true` while nothing newer for this file has been admitted.
    */
-  const markStaleWhileOurs = (): void => {
-    if (!sequences.isNewest(document, route.sequence)) {
+  const stillOurs = (): boolean => sequences.isNewest(document, route.sequence);
+  /**
+   * Writes this file's status, but only while this observation still owns it.
+   *
+   * **Every status an admitted `Changed` writes from this function goes through
+   * here** — the `unavailable` of the unreadable-content arm, and the `stale` of
+   * the four arms that refuse an installation — so a reader has one place to check
+   * rather than five. The host's initial mark is the one write it cannot carry,
+   * because that write is in the host; {@link stillOurs} travels there instead,
+   * as `rereadUnderGuard`'s `owns`.
+   *
+   * @param status - What to record.
+   */
+  const noteWhileOurs = (status: ExternalDocumentStatus): void => {
+    if (!stillOurs()) {
       return;
     }
-    workspace.noteDocumentStatus(document, { kind: 'stale' });
-  }; // End of function markStaleWhileOurs()
+    workspace.noteDocumentStatus(document, status);
+  }; // End of function noteWhileOurs()
+  /**
+   * The `stale` writer {@link tellTheSurfaceAbout} is handed.
+   *
+   * Passed as a parameter rather than rebuilt there, so that one fenced writer
+   * serves both of that function's call sites instead of two that can drift.
+   */
+  const markStaleWhileOurs = (): void => {
+    noteWhileOurs({ kind: 'stale' });
+  };
   if ('Unreadable' in route.content) {
-    workspace.noteDocumentStatus(document, {
-      kind: 'unavailable',
-      reason: route.content.Unreadable.reason
-    });
+    // **Read before the fence, written after it.** The `in` above and the two
+    // property reads below are on the wire value the drain supplied, so they are
+    // caller code and they run here, once, before the question that decides
+    // whether this arm may still speak for the file — Phase 2d-5-4-C's M4. The
+    // record used to justify this write by saying nothing was checked before it;
+    // `sequences.admit` above is, and a `has` trap that admits something newer is
+    // exactly what makes the difference.
+    const reason = route.content.Unreadable.reason;
+    noteWhileOurs({ kind: 'unavailable', reason });
     return 'unavailable';
   }
   if (tellTheSurfaceAbout(route, workspace, markStaleWhileOurs)) {
@@ -1002,7 +1059,13 @@ function applyChange(
     // happened and is the one place both of that helper's callers pass through.
     return true;
   }; // End of function guard()
-  workspace.rereadUnderGuard(document, guard);
+  // **The ownership question goes with the read** — Phase 2d-5-4-C's finding 4.
+  // The host marks the file `stale` before it starts the read, and that mark is a
+  // status write standing on the far side of `tellTheSurfaceAbout`'s two host
+  // members and of `writeSurfaceGeneration()` above. It cannot be hoisted to this
+  // module, because it belongs in the same synchronous block as the read it
+  // describes; so `stillOurs` is handed over and asked there.
+  workspace.rereadUnderGuard(document, guard, stillOurs);
   return 'reread';
 } // End of function applyChange()
 
@@ -1026,8 +1089,9 @@ function applyChange(
  * walks the window's row list; so arbitrary code runs between the caller's
  * ownership question and this write, whichever of the two call sites invoked it,
  * and a newer observation admitted there makes the write suppress itself. Taking
- * the writer as a parameter rather than rebuilding it here is what keeps one
- * fenced writer in this module instead of two that can drift.
+ * the writer as a parameter rather than rebuilding it here is what keeps
+ * `applyChange` to **one** fenced writer instead of two that can drift; it says
+ * nothing about the other transitions, which carry their own.
  *
  * @param route - The change.
  * @param workspace - The window.
@@ -1091,7 +1155,16 @@ function applyRemoval(
     return 'superseded';
   }
   workspace.removeDocument(route.document);
-  workspace.noteDocumentStatus(route.document, { kind: 'removed' });
+  // **Fenced, because `removeDocument` is a host member** — Phase 2d-5-4-C's M4.
+  // It clears a selection, drops a projection and re-reads the raw viewer's
+  // target, so a window whose removal admits a newer observation of the same
+  // identity — an `Added` re-inserting the path, say — would have this `removed`
+  // written over that newer verdict, permanently: the batch watermark has moved
+  // past the observation that carried it. The removal itself is unconditional,
+  // because it is this arm's transition and not a statement about status.
+  if (sequences.isNewest(route.document, route.sequence)) {
+    workspace.noteDocumentStatus(route.document, { kind: 'removed' });
+  }
   return 'removed';
 } // End of function applyRemoval()
 
@@ -1101,6 +1174,14 @@ function applyRemoval(
  * Q8's `Unreadable`/`Addressable` cell: the last projection and every surface are
  * preserved, the typed reason is recorded, and there is **no command and no
  * automatic install**.
+ *
+ * **The one status write in this module that carries no fence, and the reason is
+ * a property of the code rather than of its scope** (Phase 2d-5-4-C's M4): no
+ * statement stands between `admit` and the write, and both values the write reads
+ * — `route.document` and `route.reason` — are own data properties of the literal
+ * {@link routeObservation} built before the arbitration, so reading them fires
+ * nothing. A statement inserted between the two lines below would end that, and
+ * nothing in TypeScript would object.
  *
  * @param route - The unreadable observation.
  * @param workspace - The window.
@@ -1153,6 +1234,25 @@ function applyNamedRow(
   if (!sequences.admit(named, route.sequence)) {
     return 'superseded';
   }
+  /**
+   * Writes the pending row's status, but only while this observation owns it.
+   *
+   * **The same fence as {@link applyChange}'s, and this function needs its own**
+   * — Phase 2d-5-4-C's M4. Two injected calls stand between the arbitration above
+   * and every write below: `session.requestMembershipReload()` and
+   * `workspace.holdsDocument()`, and the `removed` arm adds
+   * `workspace.removeDocument()` on top of them. A `stale` this module wrote over
+   * a newer `removed` would be permanent, because the batch watermark has already
+   * moved past the observation that carried it.
+   *
+   * @param status - What to record.
+   */
+  const noteWhileOurs = (status: ExternalDocumentStatus): void => {
+    if (!sequences.isNewest(named, route.sequence)) {
+      return;
+    }
+    workspace.noteDocumentStatus(named, status);
+  }; // End of function noteWhileOurs()
   const detail = route.detail;
   if (detail.kind === 'changed') {
     session.requestMembershipReload();
@@ -1162,14 +1262,14 @@ function applyNamedRow(
   }
   switch (detail.kind) {
     case 'changed':
-      workspace.noteDocumentStatus(named, { kind: 'stale' });
+      noteWhileOurs({ kind: 'stale' });
       return 'pendingRow';
     case 'removed':
       workspace.removeDocument(named);
-      workspace.noteDocumentStatus(named, { kind: 'removed' });
+      noteWhileOurs({ kind: 'removed' });
       return 'pendingRow';
     case 'unreadable':
-      workspace.noteDocumentStatus(named, { kind: 'unavailable', reason: detail.reason });
+      noteWhileOurs({ kind: 'unavailable', reason: detail.reason });
       return 'pendingRow';
     default: {
       const unreachable: never = detail;

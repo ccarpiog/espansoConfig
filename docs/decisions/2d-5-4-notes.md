@@ -753,10 +753,31 @@ were written at delivery: three items moved, and the paragraph under each says w
     > at ingress, `ownedMatchOf` uses it, `ownedIdentityOf` normalizes the `target` and `moved`
     > identities a save answer carries at the top of each of the three adoptions, and
     > `workspace.test.ts` holds a case confirmed to fail against this record's own code
-    > (`docs/decisions/2d-5-4-B-notes.md` §3). What survives as *recorded only* is narrower and names no
+    > (`docs/decisions/2d-5-4-B-notes.md` §3). ~~What survives as *recorded only* is narrower and names no
     > defect: the **fourth** level and below — the values of `trigger`, `content`, `options` and the
     > element types of the arrays — is still the command's own object, and nothing this module reads
-    > after a guard goes that deep.
+    > after a guard goes that deep.~~
+
+    > **Correction (Phase 2d-5-4-C, review finding 1 and its M1).** The struck replacement is itself an
+    > overclaim, and it is the same claim one wording narrower — which is the failure mode this project
+    > has now recorded three times. Its second half, *nothing this module reads after a guard goes that
+    > deep*, is a statement about **depth** used to answer a question about **ingresses**, and it was
+    > false when it was written: a `MatchId` at the third level was still the command's own object at
+    > one ingress the round did not reach. `ownedRepair` passed `repair.selected` through unchanged, so
+    > the identity `reresolve` had copied **by reference** out of `commands.reloadDocument`'s answer was
+    > what the window retained — and `isTheSameIdentity` reads its `document`, `revision` and `node` as
+    > the last conjunct of three selection-follow guards, immediately before the `replaceSelection` each
+    > guard justifies. `src/lib/browser/workspace.svelte.ts:709-712` carried the same claim in source,
+    > and it also misattributed the rule it cited: `ownedMatchOf`'s own header says **`id` is the one
+    > exception**, which is the opposite of what that header claimed for it.
+    >
+    > Closed rather than re-marked: `ownedRepair` now rebuilds the kept `SelectedMatch` field by field
+    > with `ownedMatchIdOf`, and `workspace.test.ts` — *keeps no command identity when a repair keeps
+    > the selection* — is confirmed to fail against the code this correction block was written over.
+    > What survives is narrower still and is a statement about **which ingresses exist**, not about a
+    > depth: every projection, identity and row this module retains is copied at ingress, over a list of
+    > call sites held by review and by three JSDoc headers, and **no type expresses any of it**. A
+    > future ingress added beside them would not fail to compile.
 
 13. **`pendingAdditions` is cleared only by `open()` and by the removal transition — *recorded
     only*.** There is no *other* way for an invented identity to become addressable today, because the
