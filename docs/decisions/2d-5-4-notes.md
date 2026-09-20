@@ -172,10 +172,15 @@ identity registry, and that is §7 item 5.
 
 `BrowserState.rereadDocument`'s body moved into a private `rereadUnderGuard(document, guard)` — the
 private guarded helper the consult's Q5 permits — and `rereadDocument` is now one call of it with
-`ALWAYS_PERMITTED`. The three captures, their comparison and the
-forget → install → repair → re-read order are unchanged; **the one thing round 1 changed inside it**
-is that the command's answer is now copied into a local before the comparisons rather than read out of
-`fresh` after them (the correction two paragraphs below).
+`ALWAYS_PERMITTED`. The three captures and their comparison are unchanged; **the one thing round 1
+changed inside it** is that the command's answer is now copied into a local before the comparisons
+rather than read out of `fresh` after them (the correction two paragraphs below).
+
+> **Correction (review round 2).** The order is no longer
+> forget → install → repair → re-read: it is forget → install → **clear the status** → repair →
+> re-read. The clear used to live in the coordinator's guard, which reached one of this helper's two
+> callers; round 2's finding 5 moved it here, where an installation is known to have happened. See
+> §7 item 7 below, which it closes as a by-product.
 
 The coordinator's guard adds five questions on top of those three — ruling 18's list less the two the
 host already owns, plus the one round 1 found missing:
@@ -221,6 +226,40 @@ to install.
 > those runs there; what bounds that half is `replaceSelection`'s own discipline, and no type
 > expresses either half. `workspace.test.ts`'s *installs nothing when the answer's own getter opens a
 > surface* is the regression test, and it was confirmed to fail against the delivered code.
+
+> **Correction (review round 2), and it retracts both halves of the sentence above.** The paragraph
+> was wrong in two ways that round 2's findings 1 and 2 each name.
+>
+> **It enumerated `installView`'s caller-controlled reads as `next.id` alone, and there was a second
+> one.** `installView` also runs `views.findIndex((view) => view.id === next.id)` over every element
+> `views` already holds — and `open()` retained what `get_document` answered, so those elements were
+> objects the injected command built. That read happens *after* the final `stillCurrent()` and after
+> `invalidateProjectionOf(next.id)` has already been spent, so an accessor on one of them ran between
+> the check and the install. Two outcomes, both state-visible and both permanent: an install silently
+> dropped with the invalidation already spent, or `next` written into a slot naming another file. The
+> copy round 1 added was real and it was one level too shallow.
+>
+> **And `replaceSelection` does not bound the repair — that clause was simply false.**
+> `replaceSelection`'s whole body is `selectGeneration += 1; selected = next;`. It bumps the intent
+> counter in the same synchronous block as the write, which cancels lookups taken *earlier* and
+> asynchronously; it reads nothing, compares nothing, refuses nothing, and `repairAfter` does not
+> consult it about anything. Synchronous re-entry through a getter on `next.matches` — which
+> `reresolve` indexes, and whose candidate's `source_text` and `id` it reads — was bounded by nothing
+> at all. `CLAUDE.md` names a record claiming a guarantee the code does not give as this project's
+> worst defect class; this is an instance of it written into a **source** file's JSDoc and copied
+> here, one round after the round that introduced it.
+>
+> **What is guaranteed now.** `ownedProjectionOf` in `workspace.svelte.ts` copies a command's answer
+> field by field, and each of its matches field by field, at **every** ingress — `open()`, the
+> guarded reread, all five adoptions, the projection a selection repair carries and the disk snapshot
+> a conflict carries. So nothing `views` holds is an object a command built, and nothing `repairAfter`
+> reads one level down is either. **What is still not guaranteed, stated as narrowly as the code
+> allows:** the copy is two levels deep, so the *value* of `id`, of `trigger`, `content`, `options`,
+> `profile` and of every array's elements is still the command's own object, and a consumer that walks
+> one of those is reading caller-controlled data. The function's own header says that, and no type
+> does. The two regression cases are `workspace.test.ts`'s *installs into the slot the projection
+> names, whatever a retained view says* and *repairs the selection against the projection it read, not
+> a re-entrant one*, both confirmed to fail against the delivered code.
 
 **The guard's arms are ordered, and the order carries a rule.** The surface check comes before the
 bare generation check because it is the one arm that *re-arbitrates* rather than merely refusing: the
@@ -273,6 +312,39 @@ does not retry and it does not say why** — `report` carries the failure itself
 refusal. `workspace.test.ts`'s *leaves the file marked stale when the guarded reread fails* is the
 test, confirmed to fail against the delivered code.
 
+> **Correction (review round 2).** *A read that comes back a failure re-states it, which is not
+> redundant because an overlapping reread of the same file may have cleared it in between* — the case
+> that sentence names is exactly the case where re-stating is **wrong**. An overlapping reread clears
+> the mark by **installing**, so the window is showing the newest bytes on disk and this read's failure
+> is the oldest thing about the file, not the newest. The same sentence stood in the JSDoc at
+> `workspace.svelte.ts`'s host member. Worse, the write was unconditional: a newer `Removed`
+> observation records `removed` and drops the row, a newer `Unreadable` records `unavailable` with a
+> typed reason, and the late write overwrote either — permanently for the reason this whole arm
+> exists, that the watermark has already advanced past the observation that carried it.
+>
+> The write is now fenced by three captures the host can observe: the open generation, this file's
+> **status-write count** (`statusWriteOf`, bumped by `noteDocumentStatus` and by nothing else), and
+> whether the window still holds a row for the file. **What the fence makes of the write, stated
+> rather than implied:** a write it permits can only ever restate this arm's own mark, because an
+> unchanged count means the entry there *is* that mark — so no value changes today. What it removes is
+> every case where the write would have changed one, and each of those was a write over a newer truth.
+> It is kept rather than deleted because what the arm promises is *a failed read leaves the file stale
+> while this read owns its status*, and the fence is what makes the code say that rather than *a
+> failed read leaves the file stale*. Two cases pin it, both over two documents:
+> `workspace.test.ts`'s *keeps a newer removal over an older reread that came back a failure* and
+> *keeps an overlapping reread's installed status over an older failure*.
+>
+> **And the guard's own refusing arms are fenced the same way, which is round 2's finding 4.** Of the
+> three that write a status, `stillApplying` and the epoch check are asked **above**
+> `sequences.isNewest` — the one question that asks whether this read still owns the file — so either
+> could write `stale` over a newer `unavailable` and destroy a typed reason nothing re-derives. The
+> **order is unchanged** and `stillApplying` stays first, because the arm below it fires a component's
+> callback and round 1's blocker 2 is why. What changed is the write: those two arms go through
+> `markStaleWhileOurs`, which asks ownership at the write. The two arms *below* the ownership question
+> write directly, because reaching them is already the answer to it and a fence there would be a call
+> no test could tell from no call. **Decision order and write ownership are two different questions**,
+> and treating them as one is the whole of the defect.
+
 ### 3.4 The removal transition, and the notice it reuses
 
 `removeDocumentFromWindow` is ruling 31's synchronous transition, and it is **not** `repairAfter`:
@@ -318,6 +390,38 @@ The only open-workspace document command **`applyObservation` itself** can reach
 through `rereadUnderGuard`, from the `changed`/`Addressable`/`Projected` combination alone.
 `open_workspace`, `list_documents` and `get_document` are reachable only through the discarded
 recovery, which passes **no observed identity** — it passes the retained open request.
+
+> **Correction (review round 2).** The sentence above is false, and narrowing it from *the window* to
+> `applyObservation` at round 1 did not make it true. `rereadUnderGuard` is a host member and not a
+> command, so the claim is necessarily about commands reached **transitively** — and transitively
+> there are **two**, not one. With the raw viewer open, `applyObservation` → `applyChange` →
+> `rereadUnderGuard` ends, on a successful install, with the host's `readFileText()`, which sends
+> `document_text` for the viewer's target; and `applyObservation` → `applyRemoval` → the host's
+> `removeDocument` fires the same refresh, because a removal can take the viewer's file with it
+> (`applyNamedRow`'s `removed` arm reaches it too). The viewer's snapshot is dropped one line before
+> the install, so the identity comparison inside `readFileText` cannot short-circuit it: **that path
+> sends `document_text` every time it installs.**
+>
+> **What is true, in two sentences that say which is which.** The observation arms themselves request
+> exactly one document command, `reload_document`, from the `changed`/`Addressable`/`Projected`
+> combination alone. The host's own viewer refresh, which any projection replacement or removal
+> triggers, then sends `document_text` for the viewer's target when the viewer is open.
+>
+> **Ruling 28 is untouched and ruling 27 is untouched.** The identity that read is sent for is
+> `fileTextTarget()`'s answer, which filters `pendingAdditions` out of the candidate list, so no
+> unaddressable identity reaches a command by this route either — the route round 1 closed stays
+> closed. And no save command is reachable at all, because `ReconciliationWorkspace` has none. What
+> was wrong is an enumeration presented as exhaustive, in a source file's JSDoc and here.
+>
+> **Why no routing case could see it.** `documentCommandCounts` does compare `documentText` among its
+> six reading commands, and round 1's fix made both routing baselines honest — but every case in the
+> file runs with the viewer **closed**, so `readFileText` returns at its first line and
+> `document_text` is never sent. `workspace.test.ts`'s *sends document_text for the viewer's file
+> after an observation installs* turns the viewer on before delivering a `Changed` observation and
+> counts both commands, which makes the corrected sentence load-bearing. **It is not a regression
+> test**: this round changed no behaviour here, only two false sentences, so the case passes against
+> the delivered code as well. What it pins is the claim, against a future edit made to match the old
+> one.
 
 > **Correction (review round 1), and it has two halves.**
 >
@@ -579,6 +683,15 @@ were written at delivery: three items moved, and the paragraph under each says w
    happens inside the guard. What *did* shrink the exposure is the materialization: a caller getter can
    no longer move a generation between the clear and the install, because it has already run.
 
+   > **Correction (review round 2): this item is closed, and closing it was not its own fix.** Round
+   > 2's finding 5 moved the clear out of the guard and into `rereadUnderGuard`'s success block, in
+   > the same synchronous run as `installView` — for a different reason, that the guard reached only
+   > one of that helper's two callers and a successful `BrowserState.rereadDocument` therefore left a
+   > `stale` mark standing for the rest of the session. There is now nothing to clear before the
+   > third comparison: the clear is **after** it, after the installation, and every refusing arm
+   > returns above it. The three-ways-to-refuse argument this item rested on is no longer load-bearing
+   > and a fourth way would no longer invalidate anything.
+
 8. **An `Added` for an identity this window already holds a projection for would show *not read yet*
    beside a projection — *recorded only*.** `addDocument`'s replace arm exists for a second addition
    of one path, which is the only way the wire's own contract can reach it, and it does not look at
@@ -604,14 +717,25 @@ were written at delivery: three items moved, and the paragraph under each says w
     commissioned is `CLAUDE.md` §7.1's question and it reads the fix round's diff — which here
     changed source, so one is owed.
 
-12. **The install is shallow-copied and nothing deeper is — *recorded only*.** Round 1's first fix
-    materializes the command's answer into a plain own-property object before the comparisons, which
-    removes every top-level trap; `repairAfter` still walks `next.matches`, whose elements are the
-    command's own objects, and it runs *after* the installation. No type expresses that boundary, and
-    a deep clone was rejected as heavy, failure-prone on non-cloneable values and a change to the
-    identity of the installed projection. It is not a correctness defect in source: the installation
-    itself is now atomic against the final check, and the selection repair has `replaceSelection`'s own
-    discipline behind it.
+12. **The install is shallow-copied and nothing deeper is — ~~*recorded only*~~, and both reasons
+    given for that mark were false.** Round 1's first fix materialized the command's answer into a
+    plain own-property object before the comparisons; `repairAfter` still walked `next.matches`, whose
+    elements were the command's own objects, and it ran *after* the installation. A deep clone was
+    rejected as heavy, failure-prone on non-cloneable values and a change to the identity of the
+    installed projection — which remains the right reason not to use `structuredClone`.
+
+    > **Correction (review round 2).** The mark rested on two claims and round 2's findings 1 and 2
+    > falsify one each. *"The installation itself is now atomic against the final check"* was false:
+    > `installView` reads `view.id` on every element already in `views`, which `open()` had retained
+    > from the injected command, so a second caller-controlled read stood between the check and the
+    > install. *"The selection repair has `replaceSelection`'s own discipline behind it"* was false in
+    > a sharper way, because `replaceSelection` performs no check at all — its whole body is a counter
+    > bump and an assignment, it bounds asynchronous lookups taken earlier, and `repairAfter` never
+    > consults it. **This was a correctness defect in source**, so under `CLAUDE.md` §7.3 it was a
+    > blocker rather than something a later phase could adopt, and it is fixed here rather than
+    > carried: `ownedProjectionOf` normalizes at every ingress, two levels deep, and its own header
+    > states exactly where the guarantee stops. What survives as *recorded only* is the residue —
+    > **the third level and below is still the command's own object**, and no type says so.
 
 13. **`pendingAdditions` is cleared only by `open()` and by the removal transition — *recorded
     only*.** There is no *other* way for an invented identity to become addressable today, because the

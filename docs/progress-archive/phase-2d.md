@@ -4310,3 +4310,41 @@ checks against. **A rung that repeats proves the gates were run, never that they
 these rounds kept finding.**
 
 
+
+---
+
+## Phase 2d-5-4's verification narrative — archived 2026-09-20 at Phase 2d-5-4-A
+
+### ⚠️ Two baselines are live at once, and only one of them is a measurement
+
+**With the instrument in the working tree the four commands answer `1320 / 443 / 2380 / 189`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-4**, and it is the **first rung to move since 2d-5-2c-1**: fourteen
+phases of the 2d-5-3 tail held `1320 / 441 / 2307 / 188` across twenty-five full runs, because every
+one of them changed only comments. This phase wrote source, so three of the four moved, and **each
+moved by the amount the ladder's own rule predicts**:
+
+| Gate | Was | Now | Why it moved |
+|---|---|---|---|
+| `cargo test --workspace` | 1320 | **1320** | no Rust changed — `git diff --numstat -- crates/ src-tauri/` names only the instrument's `main.rs` hook |
+| `npm run check` files | 441 | **443** | +2, the two new `.ts` files (`observationTransitions.ts` and its suite) |
+| `npm test` | 2307 | **2380** | +73 — +66 from the phase, +7 from its fix round; 61 files, one new suite |
+| `npm run build` modules | 188 | **189** | +1, the one new **reachable** `.ts` module; a test file is not reachable from the entry, and no component was added |
+
+**The three frontend gates were read four times** — after the worker, after the orchestrator's
+`DetailPane.svelte` comment fix, and after the review's fix round, the middle pair returning the same
+three figures because that change was comment-only. `cargo test --workspace -- --test-threads=1` was
+read **not through a pipe**, summed over **26** `test result` lines *and* checked by the complementary
+question — no line lacking `0 failed` — and it completed on the **first attempt**, so 2d-5-3-L's
+stale-`target/` host finding has now not recurred for three consecutive phases. `cargo clippy
+--workspace --all-targets -- -D warnings` (exit 0), `cargo fmt --check` (exit 0) and `cargo tree -p
+espansoconfig-core | rg tauri` (finds nothing) are clean. **Both bundle oracles were read and both
+lines are reported**: server-only markers **absent**, client-only markers **present (2)**. **The
+instrument's pin was re-checked three times** and held at `5 insertions(+), 1 deletion(-)`.
+
+**No gate caught any of the five findings, and that is the point of the review.** Two were
+concurrency defects reachable only through an injected getter or a state no test had combined; one
+was a vacuous assertion that **passed while measuring nothing**. The narrative of the superseded
+rungs is archived in [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-5-3-N's
+verification narrative and the ladder narrative"*.
+

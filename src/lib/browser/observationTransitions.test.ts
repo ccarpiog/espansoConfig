@@ -564,13 +564,20 @@ describe('a change of an addressable file', () => {
 }); // End of the "change of an addressable file" suite
 
 describe('the guard the reread is run under', () => {
-  it('permits the install and clears the file’s status', () => {
+  it('permits the install and writes no status of its own', () => {
     const workspace = recordingWorkspace();
     const session = recordingSession();
     apply(projectedChange(4, ADDRESSABLE_ONE), workspace, session);
 
+    // **The clear used to be here and is not any more** — Phase 2d-5-4's second
+    // review, finding 5. This guard reached one of `rereadUnderGuard`'s two
+    // callers: `BrowserState.rereadDocument` passes a guard that always holds, so a
+    // person recovering a file this window had marked `stale` read it successfully
+    // and the mark stayed for the rest of the session. The clear now happens in the
+    // same synchronous block as `installView`, which is where an installation is
+    // known to have happened, and `workspace.test.ts` is what reads it.
     expect(workspace.reread[0]?.guard()).toBe(true);
-    expect(workspace.statuses).toEqual([{ document: 1, status: null }]);
+    expect(workspace.statuses).toEqual([]);
   });
 
   it('refuses and marks stale when the session has stopped applying', () => {
@@ -626,6 +633,87 @@ describe('the guard the reread is run under', () => {
     expect(workspace.statuses).toEqual([]);
     expect(workspace.reread[1]?.guard()).toBe(true);
   });
+
+  it('preserves a newer unreadable reason when the session has stopped applying', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    // **Two files, because the fence is per document and a blanket suppression
+    // would look identical over one.** Both get a change whose read is in flight.
+    apply(projectedChange(4, ADDRESSABLE_ONE), workspace, session, sequences);
+    apply(projectedChange(4, ADDRESSABLE_TWO), workspace, session, sequences);
+
+    // A newer `Unreadable` for file 1 alone. It records `unavailable` with its
+    // typed reason and — this is what makes the interleaving reachable — it
+    // installs nothing and invalidates no projection, so all three of the host's
+    // captures for the read in flight are still intact and that read still reaches
+    // its guard.
+    expect(apply(unreadable(5, ADDRESSABLE_ONE), workspace, session, sequences)).toBe(
+      'unavailable'
+    );
+
+    // Then the session stops applying — a `discarded` that blocked without
+    // recovering, or a disposal. `stillApplying` is the guard's *first* question
+    // and stays first, because the arm below it fires a component's callback; what
+    // changed is that its refusal no longer writes a status it does not own.
+    session.applying = false;
+    expect(workspace.reread[0]?.guard()).toBe(false);
+    expect(workspace.reread[1]?.guard()).toBe(false);
+
+    // File 1's reason survives: nothing appended `stale` over it, and it could
+    // never be recovered if it had been — a blocked session advances the watermark,
+    // so that observation is never delivered again. File 2 is marked, because no
+    // newer observation of *it* was admitted and the older read really does still
+    // own what its status says.
+    expect(workspace.statuses).toEqual([
+      { document: 1, status: { kind: 'unavailable', reason: DENIED } },
+      { document: 2, status: { kind: 'stale' } }
+    ]);
+  }); // End of the ownership-before-the-write case
+
+  it('preserves a newer status when the workspace epoch has moved', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    apply(projectedChange(4, ADDRESSABLE_ONE), workspace, session, sequences);
+    apply(projectedChange(4, ADDRESSABLE_TWO), workspace, session, sequences);
+    apply(unreadable(5, ADDRESSABLE_ONE), workspace, session, sequences);
+
+    // The same fence on the second arm. The epoch question is unreachable from the
+    // production host — `open()` bumps the open generation in its first statement,
+    // so the host's own pre-guard comparison refuses before this guard is asked —
+    // and the arm is fenced anyway, because *which arm is reachable today* is not
+    // the rule this is meant to encode.
+    session.live = EPOCH + 1;
+    expect(workspace.reread[0]?.guard()).toBe(false);
+    expect(workspace.reread[1]?.guard()).toBe(false);
+    expect(workspace.statuses).toEqual([
+      { document: 1, status: { kind: 'unavailable', reason: DENIED } },
+      { document: 2, status: { kind: 'stale' } }
+    ]);
+  }); // End of the epoch-arm fence case
+
+  it('reaches neither arm below the ownership question once it is answered', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    apply(projectedChange(4, ADDRESSABLE_ONE), workspace, session, sequences);
+    apply(unreadable(5, ADDRESSABLE_ONE), workspace, session, sequences);
+
+    // **Why only two arms carry the fence.** A surface is open *and* the registry
+    // moved, so both of the arms below the ownership question would fire if they
+    // were reached — the surface arm would deliver a conflict observation and the
+    // registry arm would write `stale`. Neither happens: the ownership question is
+    // asked before both, so their own writes need no fence and a fence on them
+    // would be a call that can never refuse.
+    workspace.surfaces = [{ kind: 'matchEditor', target: { kind: 'document', document: 1 } }];
+    workspace.bumped += 1;
+    expect(workspace.reread[0]?.guard()).toBe(false);
+    expect(workspace.told).toEqual([]);
+    expect(workspace.statuses).toEqual([
+      { document: 1, status: { kind: 'unavailable', reason: DENIED } }
+    ]);
+  }); // End of the arms-below-ownership case
 
   it('re-arbitrates onto the conflict path when a surface opened during the read', () => {
     const workspace = recordingWorkspace();

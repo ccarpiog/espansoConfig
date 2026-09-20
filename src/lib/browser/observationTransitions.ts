@@ -746,12 +746,23 @@ export type ObservationOutcome =
  * Applies one observation of an accepted batch.
  *
  * **Every arm of the consult's Q8 table, and no command outside the three
- * `Addressable` ones.** The only open-workspace document command reachable from
- * here is the reread of {@link ReconciliationWorkspace.rereadUnderGuard}, and it
- * is reachable from the `changed`/`Addressable`/`Projected` combination alone.
- * `Added` calls nothing (ruling 30); `Removed`, `Unreadable`, `Named` and
- * `Unnamed` call nothing; **no save command is reachable at all** (ruling 27),
- * because {@link ReconciliationWorkspace} has none.
+ * `Addressable` ones.** The one document command *this arbitration requests* is
+ * the reread of {@link ReconciliationWorkspace.rereadUnderGuard}, from the
+ * `changed`/`Addressable`/`Projected` combination alone. `Added` requests nothing
+ * (ruling 30); `Removed`, `Unreadable`, `Named` and `Unnamed` request nothing;
+ * **no save command is reachable at all** (ruling 27), because
+ * {@link ReconciliationWorkspace} has none.
+ *
+ * **That is not the same as the set of commands reachable transitively, and
+ * saying it was is a claim Phase 2d-5-4's second review falsified.** Two host
+ * members this module calls refresh the raw viewer afterwards, so with the viewer
+ * open a **second** command goes out — `document_text`, for the viewer's own
+ * target. `rereadUnderGuard` ends with the host's `readFileText()` once it has
+ * installed, and `removeDocument` fires the same refresh because a removal can
+ * take the viewer's file with it. Neither is a route around ruling 28: the
+ * identity that read is sent for is the viewer target's, which the host filters
+ * `pendingAdditions` out of, so no unaddressable identity reaches a command from
+ * here either way.
  *
  * @param observation - One observation, exactly as it crossed the boundary.
  * @param workspace - The window that owns it.
@@ -900,17 +911,47 @@ function applyChange(
    * **No refusing arm clears the status**, and that matters most on the first one:
    * a file left `stale` by a blocked session is the true statement, and clearing it
    * there would say *reconciled* about a window that cannot describe its own
-   * membership.
+   * membership. No arm here clears one at all any more — the clear moved to the
+   * installation itself, in `rereadUnderGuard`, because this guard reached one of
+   * that helper's two callers.
+   *
+   * **Decision order and write ownership are two different questions, and treating
+   * them as one is what Phase 2d-5-4's second review found.** The order above is
+   * about *which* arm gets to decide, and it is unchanged: `stillApplying` is first
+   * because the arm below it fires a component's callback. Ownership is about
+   * whether **this** read is still entitled to say anything about this file's
+   * status, and the only question that asks it is
+   * `sequences.isNewest(document, route.sequence)` — which, being third, could not
+   * stop the first two arms writing. A newer `Unreadable` for the same file records
+   * `unavailable` with a typed reason and moves none of the host's three captures,
+   * so the read still reached this guard, `stillApplying` refused first, and
+   * `stale` overwrote the reason — permanently, because a blocked session advances
+   * the watermark and the observation is never redelivered. So the **two arms above
+   * the ownership question** write through `markStaleWhileOurs`, which asks it at
+   * the write; the two below it are fenced by their position and write directly,
+   * because a call that can never refuse is one no test can tell from no call.
    *
    * @returns `true` when the read may be installed.
    */
   const guard = (): boolean => {
-    if (!session.stillApplying()) {
+    /**
+     * Marks the file stale, but only while this read still owns its status.
+     *
+     * A pure read of the accepted-sequence map, so asking it fires no callback and
+     * can only ever suppress a status write.
+     */
+    const markStaleWhileOurs = (): void => {
+      if (!sequences.isNewest(document, route.sequence)) {
+        return;
+      }
       workspace.noteDocumentStatus(document, { kind: 'stale' });
+    }; // End of function markStaleWhileOurs()
+    if (!session.stillApplying()) {
+      markStaleWhileOurs();
       return false;
     }
     if (session.epochNow() !== session.epoch) {
-      workspace.noteDocumentStatus(document, { kind: 'stale' });
+      markStaleWhileOurs();
       return false;
     }
     if (!sequences.isNewest(document, route.sequence)) {
@@ -919,16 +960,23 @@ function applyChange(
     if (tellTheSurfaceAbout(route, workspace)) {
       // A surface opened while the read was in flight. The consult's Q5 says to
       // re-run arbitration against the retained observation and put that surface
-      // on its conflict path, which is exactly what the call above did.
+      // on its conflict path, which is exactly what the call above did. Its own
+      // `stale` needs no fence: this arm is below the ownership question, so
+      // reaching it is already the answer to it.
       return false;
     }
     if (workspace.writeSurfaceGeneration() !== registryAt) {
+      // Unfenced, for the same reason the arm above it is: reaching this line means
+      // the ownership question two arms up already answered yes. A
+      // `markStaleWhileOurs()` here would be a call that can never refuse, and no
+      // test could tell it from this one.
       workspace.noteDocumentStatus(document, { kind: 'stale' });
       return false;
     }
-    // Nothing is stale any more: this read is about to replace the projection the
-    // observation described.
-    workspace.noteDocumentStatus(document, null);
+    // Nothing refused, so the answer may be installed. **The status is not cleared
+    // here**: `rereadUnderGuard` clears it in the same synchronous block as
+    // `installView`, which is the only place that knows an installation really
+    // happened and is the one place both of that helper's callers pass through.
     return true;
   }; // End of function guard()
   workspace.rereadUnderGuard(document, guard);

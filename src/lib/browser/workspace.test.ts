@@ -8477,6 +8477,360 @@ describe('the observation transitions', () => {
     } // End of the loop that releases whatever the getter registered
     state.dispose();
   }); // End of the value-getter case
+
+  it('installs into the slot the projection names, whatever a retained view says', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    let armed = false;
+    let reads = 0;
+    // **A retained view whose `id` is an accessor.** `open()` keeps what
+    // `get_document` answered, so before this step's second review every element of
+    // `views` was caller-controlled data — and `installView` compares `view.id` on
+    // every one of them *after* the guard and after `invalidateProjectionOf` has
+    // already been spent. This one answers `1` until the case arms it and `2`
+    // afterwards, which is the smallest thing arbitrary code behind a property read
+    // can do; the case below re-enters a public door instead.
+    const trap: DocumentView = {
+      ...profileDocument(),
+      get id(): DocumentId {
+        reads += 1;
+        return armed ? 2 : 1;
+      }
+    };
+    const commands = scriptedCommands({
+      documents: new Map<number, CommandResult<DocumentView>>([
+        [1, { ok: true, value: trap }],
+        [2, { ok: true, value: baseDocument() }],
+        [3, { ok: true, value: otherDocument() }]
+      ]),
+      reload: { ok: true, value: rereadBaseDocument() },
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    // Armed after the load, so the ingress copy is taken of a truthful answer and
+    // only the *retained* reads see the accessor lie.
+    armed = true;
+    await settleDrains();
+    await settleDrains();
+
+    // The accessor really was consulted, so the trap is live rather than decorative.
+    expect(reads).toBeGreaterThan(0);
+    // File 1's slot still holds file 1 and file 2's fresh projection replaced file
+    // 2's. Retained, the accessor made `findIndex` answer `0`, so the reread
+    // overwrote the profile's slot: `views` held two entries for file 2, file 1's
+    // projection was gone with nothing recording it, and the snippet list showed
+    // the replaced projection beside the one that replaced it.
+    expect(state.views.map((view) => view.id)).toEqual([1, 2, 3]);
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([77, 20]);
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the retained-view-accessor case
+
+  it('repairs the selection against the projection it read, not a re-entrant one', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    let fired = false;
+    let reads = 0;
+    let state: BrowserState | null = null;
+    const held = makeMatch({ node: 10, document: 2, trigger: ':sig', label: 'Signature' });
+    // **A getter on a *match* of the answer**, which is one level below the copy
+    // this step's first review added. `repairAfter` runs after the installation and
+    // after the final check, and `reresolve` reads `view.matches[position]` and then
+    // that candidate's `source_text` — so this runs inside the repair, between the
+    // decision and the write it justifies, and calls a door the person has.
+    const trap: MatchView = {
+      ...held,
+      get source_text(): string {
+        reads += 1;
+        if (!fired) {
+          fired = true;
+          state?.clearSelection();
+        }
+        return held.source_text;
+      }
+    };
+    const commands = scriptedCommands({
+      reload: {
+        ok: true,
+        value: makeDocument({ id: 2, relativePath: 'match/base.yml', matches: [trap] })
+      },
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    // The selection is made **before** the observation is fetched: the batch is
+    // delivered by the wake below, so nothing is in flight across `select()`.
+    await settleDrains();
+    const first = state.scopedMatches[0];
+    expect(first?.id.node).toBe(10);
+    if (first !== undefined) {
+      await state.select(first);
+    }
+    expect(state.selected?.document).toBe(2);
+
+    events.wake(5, 5);
+    await settleDrains();
+    await settleDrains();
+
+    // The getter fired, so the re-entry really happened. What it did is the
+    // person's own *Clear selection*, and it stands: the repair was computed from a
+    // selection that no longer existed, and committing it would have put back a
+    // selection the person had just dropped — with a `kept` notice claiming the
+    // window had preserved it for them.
+    expect(reads).toBeGreaterThan(0);
+    expect(state.selected).toBeNull();
+    expect(state.selectedMatch).toBeNull();
+    expect(state.notice).toBeNull();
+    // And the reread still installed: the re-entry is bounded, not the install.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 20]);
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the re-entrant-repair case
+
+  it('keeps a newer removal over an older reread that came back a failure', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const answer = deferred<CommandResult<DocumentView>>();
+    const base = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [
+            changedObservation(5, addressable(2, 'match/base.yml')),
+            changedObservation(5, addressable(3, 'match/other.yml'))
+          ]
+        }),
+        reconciliationBatch({
+          newest_sequence: 6,
+          observations: [removedObservation(6, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    // **Two files, one held answer.** Both rereads are in flight together, so the
+    // case can show that the fence suppresses the write for the file whose truth
+    // moved and permits it for the file whose did not — which a single-document
+    // case cannot tell from a blanket suppression.
+    const commands: BrowserCommands = {
+      ...base,
+      reloadDocument: vi.fn(() => answer.promise)
+    };
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+
+    // Both reads are out and both files are marked before they started, which is
+    // true for the whole time they are out.
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+    expect(state.externalDocumentStatus(3)).toEqual({ kind: 'stale' });
+
+    // A newer batch says file 2 is gone. The row, the projection and the viewer's
+    // snapshot go, and the status becomes `removed`.
+    events.wake(5, 6);
+    await settleDrains();
+    expect(state.documents.map((document) => document.id)).toEqual([1, 3]);
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'removed' });
+
+    // Only now does the older read come back, and it failed — which is the likely
+    // outcome, the file it names having just been deleted.
+    answer.resolve({
+      ok: false,
+      failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
+    });
+    await settleDrains();
+
+    // `removed` survives: the window holds nothing for file 2, so *this window is
+    // showing an older projection of it* would be a statement about nothing. File
+    // 3's own mark is restated, because nothing wrote its status in between.
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'removed' });
+    expect(state.externalDocumentStatus(3)).toEqual({ kind: 'stale' });
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the newer-removal case
+
+  it('keeps an overlapping reread’s installed status over an older failure', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const first = deferred<CommandResult<DocumentView>>();
+    let reads = 0;
+    const base = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        }),
+        reconciliationBatch({
+          newest_sequence: 6,
+          observations: [changedObservation(6, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    // The first read of file 2 is held; the second answers at once and succeeds.
+    const commands: BrowserCommands = {
+      ...base,
+      reloadDocument: vi.fn(async (): Promise<CommandResult<DocumentView>> => {
+        reads += 1;
+        if (reads === 1) {
+          return first.promise;
+        }
+        return { ok: true, value: rereadBaseDocument() };
+      })
+    };
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+
+    // The overlapping reread lands first and installs the bytes now on disk, which
+    // is what clears the mark.
+    events.wake(5, 6);
+    await settleDrains();
+    expect(reads).toBe(2);
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([77, 20]);
+    expect(state.externalDocumentStatus(2)).toBeNull();
+
+    // Then the older read fails. The sentence that used to defend re-marking here
+    // named exactly this case and got it backwards: an overlapping reread clears
+    // the mark by **installing**, so the window is showing the newest bytes and
+    // this failure is the oldest thing about the file, not the newest.
+    first.resolve({
+      ok: false,
+      failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
+    });
+    await settleDrains();
+
+    expect(state.externalDocumentStatus(2)).toBeNull();
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the overlapping-reread case
+
+  it('clears the mark when an explicit reread installs the file again', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    let reads = 0;
+    const base = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    // The guarded reread fails; the explicit one the recovery control fires
+    // succeeds.
+    const commands: BrowserCommands = {
+      ...base,
+      reloadDocument: vi.fn(async (): Promise<CommandResult<DocumentView>> => {
+        reads += 1;
+        if (reads === 1) {
+          return {
+            ok: false,
+            failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
+          };
+        }
+        return { ok: true, value: rereadBaseDocument() };
+      })
+    };
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    await settleDrains();
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+
+    // **The control `DetailPane` draws for the mover and the duplicator**, which is
+    // `rereadUnderGuard` with a guard that always holds — so until the clear moved
+    // out of the coordinator's guard and onto the installation, nothing on this
+    // path touched the status and the file stayed marked for the rest of the
+    // session.
+    expect(await state.rereadDocument(2)).toBeNull();
+
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([77, 20]);
+    expect(state.externalDocumentStatus(2)).toBeNull();
+    // What the clear claims is *this file's content is current as of this read*. It
+    // says nothing about file 3, which no read has been taken of.
+    expect(state.externalDocumentStatus(3)).toBeNull();
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the explicit-recovery case
+
+  it('sends document_text for the viewer’s file after an observation installs', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      reload: { ok: true, value: rereadBaseDocument() },
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    state.show({ kind: 'document', id: 2 });
+    await state.showFileText(true);
+    const before = documentCommandCounts(commands);
+
+    events.wake(5, 5);
+    await settleDrains();
+    await settleDrains();
+
+    // **What `applyObservation` can reach transitively, pinned.** The arbitration
+    // itself requests exactly one document command — `reload_document`. The host's
+    // own viewer refresh then sends a **second**, `document_text`, because
+    // `rereadUnderGuard` drops the viewer's snapshot with the projection it is
+    // replacing and reads it again. Every routing case in this file runs with the
+    // viewer closed, so `readFileText` returned at its first line and this was
+    // invisible; the claim that the reread is the only reachable command was false
+    // and is corrected in `observationTransitions.ts` and in the notes.
+    expect(commands.reloadDocument).toHaveBeenCalledWith(2);
+    expect(commands.documentText).toHaveBeenLastCalledWith(2);
+    // The whole six-command record against the baseline, never two chosen keys:
+    // exactly one more `reload_document`, exactly one more `document_text`, and
+    // nothing else moved at all.
+    expect(documentCommandCounts(commands)).toEqual({
+      ...before,
+      reloadDocument: (before.reloadDocument ?? 0) + 1,
+      documentText: (before.documentText ?? 0) + 1
+    });
+    // Ruling 28 is untouched: the identity it was sent for is the viewer target's,
+    // which the host filters pending additions out of.
+    expect(state.fileTextTarget?.id).toBe(2);
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the viewer-read reachability case
+
 }); // End of the "observation transitions" suite
 
 describe('the discarded-history recovery', () => {

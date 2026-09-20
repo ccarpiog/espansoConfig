@@ -12625,3 +12625,136 @@ corrections before treating `phase-2d-design.md` step 5 as the spec) and
 since 2d-5-3 — and its review is the phase's one review under the workflow, not a §7.1 round. §7.1
 applies to its **fix** as it does to any: a fix touching source commissions a round.
 
+
+---
+
+## Phase 2d-5-4's record and the Next-action prose Phase 2d-5-4-A executed — archived 2026-09-20 at Phase 2d-5-4-A
+
+#### Phase 2d-5-4 — the observation state transitions, step 4 of the seven
+
+**Complete.** Risk class **high**; worker model **opus** (an implementation worker for the build, a
+second for the review's fix round; both on opus). Record:
+[`docs/decisions/2d-5-4-notes.md`](docs/decisions/2d-5-4-notes.md); review
+[`docs/reviews/phase-2d-5-4.md`](docs/reviews/phase-2d-5-4.md); brief
+[`docs/reviews/phase-2d-5-4.brief.md`](docs/reviews/phase-2d-5-4.brief.md).
+
+**The first new implementation work since 2d-5-3, and the first phase in fifteen to change a line
+that is neither comment nor blank.** `src/lib/browser/observationTransitions.ts` is new (1084 lines):
+the routing boundary with its three `ObservedDocument` narrowings written out three times and `never`
+termini, `acceptedSequenceByDocument` as an atomic admit-and-record, and all eleven transition arms.
+`reconciliationCoordinator.ts` gained the retained open request (`workspaceOpened(request)`), the
+`discarded` recovery's two arms and the typed blocked state; `workspace.svelte.ts` gained
+`rereadUnderGuard`, the synchronous `removeDocumentFromWindow`, `addDocument`, `pendingAdditions` and
+four read-only `BrowserState` members. **`ReconciliationHost` now extends a writing-command-free
+`ReconciliationWorkspace`, required rather than defaulted**, so a missing wiring is a compile error —
+ruling 27's *no save command from watcher arbitration* expressed as a type rather than as a promise.
+
+**Components: none**, so no window reading is owed — **with one exception the phase did not plan
+and must not hide.** `src/lib/components/DetailPane.svelte`'s `tellNobodyYet` JSDoc claimed *"Nothing
+invokes a stored transition anywhere in this repository"*, and this phase falsified it:
+`tellTheSurfaceAbout()` in `observationTransitions.ts:917-919` now reads `transitionFor(kind)` and
+invokes what it returns. The worker was forbidden to touch `.svelte` and recorded it; **the
+orchestrator fixed it rather than shipping a false claim in source**, which is this project's named
+worst defect class and was the whole subject of the fourteen-round 2d-5-3 tail. **No window reading
+is owed for it**, and that is a measurement rather than an opinion: `git diff -U0` on that file,
+filtered to changed lines that are not JSDoc lines, **returns nothing**, so the component's output is
+unchanged. The corrected comment also says what the *type* now forbids — `WriteSurfaceTransition`
+takes the narrowed `Changed`/`Projected` snapshot, so a `Removed` or an `Unreadable` observation
+reaches no surface at all, which is 2d-5-5's to change.
+
+**The review was Codex**, through `autoclaude-review.sh`, which **exited 0** so no agent was spawned.
+**Verdict `ship-with-fixes`, 2 blockers and 3 SHOULD-FIX.** **The report's finding bodies arrive
+truncated again** — every one of the five breaks off mid-sentence — so **not one was accepted on the
+report's strength**; all five were re-derived from the code by the orchestrator before being handed
+to a fix worker, and **all five held**.
+
+**Blocker 1 (high) — a comment claiming an atomicity the code did not give.** `rereadUnderGuard`'s
+JSDoc said the three captures are compared "immediately before the installation, **with nothing
+between them**", and then the code read `fresh.value` **twice** after the final `stillCurrent()`.
+`commands` is injected, so that is a property read on caller-controlled data, and `CLAUDE.md` says in
+as many words that a check and a spend separated by any such read are not atomic — a getter or a
+proxy trap runs arbitrary code and `readonly` freezes nothing at runtime. A `value` getter could move
+the very generations the comparison had just approved. **Fixed by materializing the answer once,
+before both readings**, and the JSDoc now states what is guaranteed *and* what is not: the copy is
+**shallow**, so `next.matches` is still the command's own array and `repairAfter` — which runs after
+the installation — reads elements this module did not build. Pinned by a test whose injected getter
+opens a surface on read; reverted, it installs the wrong projection.
+
+**Blocker 2 (high) — the guard had four questions and needed a fifth.** `applyChange`'s guard asks the
+epoch, the newest sequence, a surface opening and the registry generation, and **none of them asks
+whether the coordinator is still applying observations at all**. Two ways it bit. When `discarded`
+rises and `recoverFromLostHistory()` returns **false** — deferred because surfaces are open — nothing
+moves: epoch, open generation and projection generation are all unchanged, so a reread already in
+flight passes the guard, installs, and **clears the stale mark**, telling the person the file is
+reconciled during the one state that means *this window cannot describe its own membership*. The
+blocked state's whole safety argument is the whole-reload obligation, and a piecemeal install lands
+underneath it. Second, `openGeneration` moves only in `open()`, so `dispose()` invalidates nothing and
+a reread in flight at disposal installs after reconciliation was stopped. **Fixed by
+`ObservationSession.stillApplying()`** — `!disposed && block.kind !== 'blockedByLostHistory'` — asked
+**first**, whose refusal marks `stale` and never clears it. Four tests, all four failing when reverted.
+
+**The three SHOULD-FIX, each a real gap rather than a style note.** *Pending `Added` identities escaped
+into document commands*: `addDocument` put the summary into `documents`, which feeds `rawTarget`, so
+selecting that row and enabling the raw viewer sent a document command for an identity the phase's own
+comment calls unresolvable — a route around **ruling 28**, now closed by an explicit `pendingAdditions`
+state that `fileTextTarget()` subtracts, never by an inference. *The reread outcome was discarded*:
+the `Changed`/`Projected` arm advances the accepted sequence and the watermark **before** a
+fire-and-forget `rereadUnderGuard`, so a failed read was never retried and nothing recorded it — the
+file keeps an old projection while the arbitration key calls it reconciled; the file is now marked
+stale before the read and only the success arm clears it. *And the evidence for ruling 28's negative
+half was partly vacuous*: `readsAtOpen` and `opensAtStart` were captured **after** the batch had
+already been processed, so an erroneous `getDocument` during it was inside the baseline and
+`toBe(readsAtOpen)` was trivially true. **The vacuity was measured, not argued** — an injected
+erroneous `get_document` **passes** under the old baseline placement and **fails** under the new one —
+and the sibling `Added` case had the same defect and was rewritten too.
+
+**Four rulings the split handed this step, answered rather than rediscovered.** The *may refresh
+automatically* permission is **exercised, not promoted**: the viewer refreshes as a consequence of
+ruling 17's delegation, and no code or test says it must. The blocked state's exit is **closing the
+last surface permits, the next accepted batch acts** — the consult's second condition, *their retained
+values have been explicitly dealt with*, is unobservable under R36, and **no predicate was invented
+for it**. The unbounded blocked-drop is **restated, not fixed**, and `observationsDropped()` now counts
+only blocked drops so the number that measures it is readable. And **no user-facing string was added
+in any language**: the removal reuses the existing `browser.notice.gone`, so the `not watched` state
+for `epoch: 0` still has no dictionary keys and is still 2d-6's to draw.
+
+**`CLAUDE.md` §7.1 commissions a round.** The fix round changed six source files, so the next action is
+that round and not a new step.
+
+#### The next action is **Phase 2d-5-4-A — the round §7.1 commissions for 2d-5-4's fix**
+
+**Scoped to the fix round's diff**, which is six source files:
+`src/lib/browser/observationTransitions.ts` and its suite, `src/lib/browser/reconciliationCoordinator.ts`
+and its suite, and `src/lib/browser/workspace.svelte.ts` and `workspace.test.ts` — plus
+`docs/decisions/2d-5-4-notes.md` in full, including its marked correction blocks and its §7 marks.
+**This is a review round, not implementation**: it takes no implementation worker, and its own fix
+decides whether another round follows, by `CLAUDE.md` §7.1 and nothing else.
+
+**Five things this round should be pointed at first**, each because the fix that answered a finding is
+where the next finding has lived in every tail this project has run:
+
+1. **The new fifth guard question.** `stillApplying()` is `!disposed && block.kind !==
+   'blockedByLostHistory'`. Does it answer correctly across an `open()` that *does* recover, where the
+   block is cleared and the open generation moves in the same step? And is asking it **first** right,
+   or does it mask a staler refusal that should have been reported?
+2. **The shallow copy `rereadUnderGuard` now takes.** The JSDoc says `repairAfter` still reads the
+   command's own array *after* the installation and that `replaceSelection`'s discipline is what bounds
+   it. **Check that claim against `replaceSelection`**, because it is exactly the shape of a record
+   claiming a guarantee the code does not give — and it is now written into source.
+3. **`pendingAdditions`.** It is a second piece of retained state beside `acceptedSequenceByDocument`
+   and `projectionGenerations`; ruling 6's warning was that **nothing enforces which one a transition
+   consults**. Is it cleared on every path that should clear it, and does any arm read the wrong map?
+4. **The stale mark's lifecycle.** Three fixes now write it — the guard's refusal, the reread's start,
+   and the failure arm — and one clears it. Is there a path that marks and never clears?
+5. **The record's corrections.** `2d-5-4-notes.md` was corrected in place in three claim families
+   (atomicity, command reachability, coverage). **A correction block is a source of new false claims in
+   this project's history**, and three of 2d-5-3-A's ten findings were regressions a previous round's
+   fix introduced.
+
+**Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-notes.md` §7 carries fourteen marked items; the
+orchestrator's reading of them is that none names an unfixed correctness defect in a source file. The
+sharpest **actionable** one is item 12 — the shallow copy of note 2 above.
+
+**The one thing this phase changed that its own plan said it would not** is the `DetailPane.svelte`
+comment, and the argument that it owes no window reading is in this phase's record above. A round that
+disagrees should say so: the remedy would be a reading, not a revert.

@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T12:42:10Z",
+ "updated": "2026-09-20T13:37:06Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -114,7 +114,7 @@
    "title": "2d step 5 — live reconciliation, seven steps",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 4 of 7 are complete; step 4's fix commissions review round 2d-5-4-A, which is next, then step 5, external conflicts and save arbitration."
+   "summary": "Steps 1 to 4 of 7 are complete; step 4's fix opened a round tail now at 2d-5-4-B, then step 5, external conflicts and save arbitration."
   },
   {
    "id": "2d-5-1",
@@ -271,15 +271,24 @@
    "id": "2d-5-4",
    "title": "The observation state transitions",
    "status": "done",
-   "summary": "The observation state transitions, complete: Codex returned ship-with-fixes with 2 blockers, all five findings were re-derived and fixed, and the fix commissions a round.",
+   "summary": "The observation state transitions, complete: Codex returned ship-with-fixes with 2 blockers, all five findings were re-derived and fixed, and the fix commissioned round 2d-5-4-A.",
    "risk": "high"
   },
   {
    "id": "2d-5-4-A",
    "title": "Review round for 2d-5-4's fix",
+   "status": "skipped",
+   "risk": "high",
+   "summary": "Superseded by 2d-5-4-B: the review round was taken and all six findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+   "review": "docs/reviews/phase-2d-5-4-A.md",
+   "narrative": "docs/decisions/2d-5-4-A-notes.md"
+  },
+  {
+   "id": "2d-5-4-B",
+   "title": "Review round for 2d-5-4-A's fix",
    "status": "queued",
    "risk": "high",
-   "summary": "Not started; the round CLAUDE.md 7.1 commissions because 2d-5-4's fix round changed six source files."
+   "summary": "Not started; the round CLAUDE.md 7.1 commissions because 2d-5-4-A's fix changed four source files."
   },
   {
    "id": "2d-5-5",

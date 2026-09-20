@@ -476,6 +476,154 @@ function positionInSameParse(view: DocumentView, id: MatchId): number | null {
 } // End of function positionInSameParse()
 
 /**
+ * Copies one match out of a command's answer into an object this module owns.
+ *
+ * **Field by field, and the return type is the check.** A field added to
+ * {@link MatchView} later is a compile error *in this function* rather than a
+ * field it silently stops copying, which is why it is neither a spread nor
+ * `structuredClone`: a spread gives no compile-time answer at all, and a
+ * structural clone throws on a function-valued property and answers nothing
+ * either.
+ *
+ * **It copies one level.** Every field is read here, once, and written into a
+ * plain own-property object; the *values* of those fields — `id`'s own
+ * properties, `trigger`, `content`, `options`, and the arrays `search_terms`,
+ * `vars`, `form_fields`, `badges` and `unknown_entries` along with their
+ * elements — are still the command's own objects, and a getter or a proxy trap
+ * on one of those runs whenever something reads it.
+ *
+ * @param match - One element of a command-supplied projection's match list.
+ * @returns A match whose own properties are data this module wrote.
+ */
+function ownedMatchOf(match: MatchView): MatchView {
+  return {
+    id: match.id,
+    source_node: match.source_node,
+    path: match.path,
+    span: match.span,
+    source_text: match.source_text,
+    trigger: match.trigger,
+    content: match.content,
+    label: match.label,
+    comment: match.comment,
+    search_terms: match.search_terms,
+    options: match.options,
+    vars: match.vars,
+    form_fields: match.form_fields,
+    badges: match.badges,
+    blocking_hazard: match.blocking_hazard,
+    safely_editable: match.safely_editable,
+    unknown_entries: match.unknown_entries,
+    search_text: match.search_text
+  };
+} // End of function ownedMatchOf()
+
+/**
+ * Copies one projection out of a command's answer into an object this module
+ * owns.
+ *
+ * **The ingress normalizer, and every command-supplied projection goes through
+ * it**: `open()`'s per-file `get_document`, the guarded reread's
+ * `reload_document`, all five adoptions' `get_document`, the projection a
+ * selection repair carries, and the disk snapshot a conflict carries. What that
+ * buys is one sentence — **nothing this module retains is an object a command
+ * built** — and the sentence matters because `views` is read *after* guards:
+ * `installView` compares `view.id` on every element it already holds, and a
+ * caller's accessor there would run between the final check and the install.
+ *
+ * **The getters run once, here, at ingress, before any guard is taken.**
+ * `commands` is injected, so every property read below is a read of
+ * caller-controlled data and an accessor or proxy trap behind one runs arbitrary
+ * code. Doing all of them in this function means they run *before* the
+ * comparisons that decide whether the answer may be installed, and never between
+ * one of those comparisons and the install it approved.
+ *
+ * **Exactly how deep it copies, and what it therefore does not promise.** Two
+ * levels and no more: this view's own fields, and each match's own fields
+ * ({@link ownedMatchOf}). That is the depth this module reads after a guard —
+ * `installView` reads `next.id` and the `id` of every element of `views`;
+ * `repairAfter` reads `view.id`, indexes `view.matches`, and `reresolve` reads a
+ * candidate's `source_text` and its `id`; `readFileText` reads a held view's
+ * `revision`. **Anything deeper is still the command's own object** — the value
+ * of `id`, of `trigger`, `content`, `options`, `profile`, and the elements of
+ * `top_level_keys`, `global_vars`, `imports`, `coverage`, `undescended`,
+ * `diagnostics`, `hazards` and `unknown_entries` — so a consumer that walks one
+ * of those is reading caller-controlled data, and no type says so.
+ *
+ * @param view - A projection exactly as a command answered it.
+ * @returns A projection whose own properties, and whose matches' own
+ *   properties, are data this module wrote.
+ */
+function ownedProjectionOf(view: DocumentView): DocumentView {
+  const matches: MatchView[] = [];
+  for (const match of view.matches) {
+    matches.push(ownedMatchOf(match));
+  } // End of the loop over the projection's matches
+  return {
+    id: view.id,
+    path: view.path,
+    relative_path: view.relative_path,
+    kind: view.kind,
+    disabled: view.disabled,
+    read_only: view.read_only,
+    revision: view.revision,
+    byte_len: view.byte_len,
+    line_ending: view.line_ending,
+    bom: view.bom,
+    parsed: view.parsed,
+    stream_documents: view.stream_documents,
+    shape: view.shape,
+    top_level_keys: view.top_level_keys,
+    matches,
+    global_vars: view.global_vars,
+    imports: view.imports,
+    profile: view.profile,
+    unknown_entries: view.unknown_entries,
+    coverage: view.coverage,
+    undescended: view.undescended,
+    diagnostics: view.diagnostics,
+    hazards: view.hazards,
+    safely_editable: view.safely_editable
+  };
+} // End of function ownedProjectionOf()
+
+/**
+ * Copies the projection a selection repair carries into one this module owns.
+ *
+ * **Taken where the repair lands rather than inside `applyRepair`**, so that the
+ * caller-controlled reads happen *before* `select()`'s own staleness check and
+ * not between that check and the installation it permits. The two arms that read
+ * the document again are the only ones carrying anything; `unresolved` and
+ * `unchanged` carry no projection, so they are answered as they are.
+ *
+ * {@link SelectedMatch} itself is not re-made: `reresolve` built it, and its own
+ * fields are read by this module rather than by a command. Its `id` is the
+ * command's object, exactly as {@link ownedProjectionOf} says of every value one
+ * level down.
+ *
+ * @param repair - What {@link repairSelection} decided.
+ * @returns The same decision, holding a projection this module wrote.
+ */
+function ownedRepair(repair: SelectionRepair): SelectionRepair {
+  switch (repair.kind) {
+    case 'kept':
+      return {
+        kind: 'kept',
+        selected: repair.selected,
+        reloaded: ownedProjectionOf(repair.reloaded)
+      };
+    case 'cleared':
+      return {
+        kind: 'cleared',
+        reason: repair.reason,
+        reloaded: repair.reloaded === null ? null : ownedProjectionOf(repair.reloaded)
+      };
+    default:
+      return repair;
+  } // End of the switch over the repair's four arms
+} // End of function ownedRepair()
+
+/**
  * What {@link BrowserState.saveRawDocument} answers.
  *
  * **Two arms, and the second is not "nothing happened".** The first version of
@@ -801,6 +949,14 @@ export interface BrowserState {
    * between them, and every refusal that follows releases the reservation so that a
    * refusal still spends nothing. Every caller-controlled read this method makes is
    * taken into a local **before** the reservation, so nothing can re-enter after it.
+   *
+   * **That last sentence became true at Phase 2d-5-4's second review and was an
+   * overclaim before it.** The installing branch ended with
+   * `installView(adoption.disk)` and `repairAfter(adoption.disk)` — two property
+   * reads on a value a surface assembled, and `repairAfter` then walked that view's
+   * `matches` — all of it after the reservation. The snapshot now goes through
+   * {@link ownedProjectionOf} in the same block as `conflict.source`, so the branch
+   * installs and repairs against an object this module built.
    *
    * **Step 6 is the confirmation pass's High, and the check is a generation rather
    * than `conflict.expected`.** The defect was real: a `rereadDocument` landing
@@ -1972,6 +2128,26 @@ export function createBrowserState(
   // `docs/decisions/2d-5-split-notes.md` section 6 item 6 puts the EN/ES entries on
   // the step that first names such a state to a person, and this step does not.
   let externalStatuses = $state<readonly ExternalDocumentStatusEntry[]>([]);
+  // **How many times each file's status has been written** — Phase 2d-5-4's second
+  // review. Not `$state`: nothing draws it and nothing derives from it. It exists
+  // so that an arm which wrote a status *before* an await can ask, afterwards,
+  // whether it still owns that file's status — which is a question neither the
+  // entry's value nor any generation this state already keeps can answer. A value
+  // comparison cannot: `stale` written by this arm and `stale` written by a newer
+  // transition are the same value. The projection and re-read generations cannot
+  // either: an `Unreadable` observation records a status and moves neither.
+  //
+  // **Bumped by `noteDocumentStatus` and by nothing else**, which is what makes it
+  // a fence rather than a decoration — and `open()`'s wholesale `externalStatuses =
+  // []` is deliberately *not* a bump, because the open generation is what catches
+  // that and identities are reallocated across it anyway.
+  //
+  // **Not cleared by `open()` either**, for `rereadGenerations`' reason one screen
+  // up: clearing would set a count back to zero while a capture taken in the closed
+  // workspace still held one, and monotonic counters cannot collide with a capture
+  // the open generation has already invalidated. So it grows with the identities
+  // this process mints, exactly as `rereadGenerations` does.
+  const statusWrites = new Map<DocumentId, number>();
   // **What was observed of a path this window holds no identity for** — Phase
   // 2d-5-4. Keyed by the lossy display path and **deduplicated by it**, which is
   // the only bound there is: an `Unnamed` observation carries no identity, so the
@@ -2102,11 +2278,33 @@ export function createBrowserState(
        *
        * **So the file is marked `stale` before the read starts** — which is a true
        * statement for the whole time the read is out, because the window *is* still
-       * showing the older projection — and the only thing that clears it is the
-       * guard's success arm, in the same synchronous block as the installation.
-       * Marking it again when the read fails is not redundant: an overlapping reread
-       * of the same file may have cleared it in between, and this read's failure is
-       * still the newest true thing about it.
+       * showing the older projection — and the only thing that clears it is a
+       * successful installation, in the same synchronous block as `installView`.
+       *
+       * **The late write is fenced by ownership, and the sentence it used to carry
+       * was false.** That sentence said an overlapping reread may have cleared the
+       * mark in between and this read's failure is still the newest true thing about
+       * the file. The case it names is exactly the case where the failure is the
+       * *oldest* thing about the file: an overlapping reread clears the mark by
+       * **installing**, so the window is showing the newest bytes while this
+       * re-statement calls it stale. Three captures now stand between the answer and
+       * the write — the open generation, this file's status-write count
+       * ({@link statusWriteOf}) and whether the window still holds a row for it — and
+       * the write happens only while all three say this arm still owns what that
+       * file's status says.
+       *
+       * **What the fence makes of the write, stated rather than implied.** A write it
+       * permits can only ever restate this arm's own mark: if nothing has written
+       * that file's status since, the entry there *is* this arm's `stale`, so no
+       * value changes. What the fence removes is every case where the write would
+       * have changed one, and each of those was a write over a newer truth — a
+       * `removed` for a file the window no longer holds a row for, an `unavailable`
+       * carrying a typed reason nothing re-derives because the watermark has moved
+       * past the observation that carried it, or the cleared mark of an overlapping
+       * reread that installed the current bytes. The write is kept rather than
+       * deleted because what this arm promises is *a failed read leaves the file
+       * stale while this read owns its status*, and the fence is what makes the code
+       * say that instead of *a failed read leaves the file stale*.
        *
        * **What it does not claim.** It does not retry, and it does not say *why* the
        * read failed — `report` is what carries the failure itself, and
@@ -2117,10 +2315,14 @@ export function createBrowserState(
        * @param guard - Asked immediately before the installation.
        */
       rereadUnderGuard: (document: DocumentId, guard: () => boolean): void => {
+        const opened = openGeneration;
         noteDocumentStatus(document, { kind: 'stale' });
+        // Captured **after** the mark, so it is this arm's own write that is being
+        // remembered and not whatever stood there before it.
+        const marked = statusWriteOf(document);
         void rereadUnderGuard(document, guard).then(
           /**
-           * Re-states the staleness when the read never landed.
+           * Re-states the staleness when the read never landed and still owns it.
            *
            * @param failure - The read's refusal, or `null`.
            */
@@ -2128,10 +2330,25 @@ export function createBrowserState(
             if (failure === null) {
               return;
             }
+            if (opened !== openGeneration) {
+              // A whole workspace was loaded meanwhile. `open()` cleared every status
+              // without going through `noteDocumentStatus`, and it reallocated every
+              // identity, so this number names another file now.
+              return;
+            }
+            if (marked !== statusWriteOf(document)) {
+              // Somebody else's transition has written this file's status since.
+              return;
+            }
+            if (!documents.some((held) => held.id === document)) {
+              // No row, so *the window is showing an older projection of it* is not
+              // a statement about anything this window holds.
+              return;
+            }
             noteDocumentStatus(document, { kind: 'stale' });
-          }
+          } // End of the callback that re-states the staleness
         );
-      },
+      }, // End of the coordinator-facing rereadUnderGuard member
       addDocument,
       /**
        * Drops one file, and moves the raw viewer off it if it was showing it.
@@ -2574,9 +2791,25 @@ export function createBrowserState(
     document: DocumentId,
     status: ExternalDocumentStatus | null
   ): void {
+    statusWrites.set(document, (statusWrites.get(document) ?? 0) + 1);
     const rest = externalStatuses.filter((entry) => entry.document !== document);
     externalStatuses = status === null ? rest : [...rest, { document, status }];
   } // End of function noteDocumentStatus()
+
+  /**
+   * How many times this file's status has been written.
+   *
+   * Captured by an arm before it awaits, and compared afterwards: an unchanged
+   * count means **the entry this arm wrote is still the one there**, so it still
+   * owns what the file's status says. A changed one means somebody else's
+   * transition has spoken since, and this arm's answer is the older statement.
+   *
+   * @param document - The file.
+   * @returns The count, `0` for a file whose status has never been written.
+   */
+  function statusWriteOf(document: DocumentId): number {
+    return statusWrites.get(document) ?? 0;
+  } // End of function statusWriteOf()
 
   /**
    * Records what was observed of a path this window holds no identity for.
@@ -2627,24 +2860,35 @@ export function createBrowserState(
    * a read that is already stale, which would let it clear a status or fire a
    * transition for an answer nobody is going to install.
    *
-   * **The answer is materialized before either of those two readings, and that is
+   * **The answer is normalized before either of those two readings, and that is
    * what makes the second one worth taking.** `commands` is injected, so
    * `fresh.value` is a property read on caller-controlled data: a getter or a proxy
    * trap behind it runs arbitrary code, and `readonly` does not freeze anything at
-   * runtime. Read after the final comparison — which is where it was until this
-   * step's review — such a getter could move the very generations that comparison
-   * had just approved, and the stale answer would be installed anyway. So the
-   * command's answer is copied into a plain own-property object **before** the
+   * runtime. Read after the final comparison — which is where it was until Phase
+   * 2d-5-4's first review — such a getter could move the very generations that
+   * comparison had just approved, and the stale answer would be installed anyway.
+   * So the command's answer goes through {@link ownedProjectionOf} **before** the
    * pre-guard reading, and the local is what is installed.
    *
-   * **Exactly what that guarantees, and what it does not.** Between the final
-   * `stillCurrent()` and `installView` there is now no read of `fresh` and no read
-   * of a property this module did not write: `installView` takes `next.id` off the
-   * copy, which is a data property of an object made here. It does **not** deep-copy
-   * — `next.matches` is still the command's own array, so `repairAfter`, which runs
-   * *after* the installation, reads elements this module did not build, and a getter
-   * on one of those could run there. What bounds that half is `replaceSelection`'s
-   * own discipline rather than this comparison, and no type expresses either.
+   * **Exactly what bounds the two things that run after the final check, corrected
+   * at that step's second review.** Both `installView` and `repairAfter` run after
+   * the last `stillCurrent()`, and both read more than the sentence here used to
+   * admit: `installView` reads `next.id` *and* the `id` of every element already in
+   * `views`, and `repairAfter` indexes `next.matches` and reads a candidate's
+   * `source_text` and `id`. What makes every one of those a data read is
+   * {@link ownedProjectionOf} at **every** ingress — this call's, `open()`'s, the
+   * adoptions' — so nothing `views` holds and nothing `next` holds one level down is
+   * an object a command built.
+   *
+   * **It is not `replaceSelection` that bounds the repair, and saying so was
+   * false.** `replaceSelection` bumps the intent counter in the same synchronous
+   * block as the write, which cancels lookups taken *earlier* and asynchronously; it
+   * checks nothing, refuses nothing, and `repairAfter` consults it about nothing. A
+   * synchronous re-entry from a caller's accessor was bounded by nothing at all,
+   * which is why the normalization is at ingress rather than here. **No type
+   * expresses any of it**, and the guarantee stops exactly where
+   * {@link ownedProjectionOf} says it does: two levels deep, with everything below
+   * that still the command's own object.
    *
    * @param document - The file to read again.
    * @param guard - Asked immediately before the installation; `false` installs
@@ -2675,11 +2919,12 @@ export function createBrowserState(
       report(fresh.failure);
       return fresh.failure;
     }
-    // **Read once, here, and never again.** Every later use is of this local: the
-    // spread copies the answer's own enumerable properties into a plain object, so
-    // whatever a getter behind `value` does it does *now* — before both comparisons
-    // below — and the two of them are what catch it.
-    const next: DocumentView = { ...fresh.value };
+    // **Read once, here, and never again.** Every later use is of this local:
+    // `ownedProjectionOf` copies the answer field by field, and each of its matches
+    // field by field, so whatever a getter behind `value` — or behind any field of
+    // the view, or of a match — does, it does *now*, before both comparisons below,
+    // and the two of them are what catch it.
+    const next: DocumentView = ownedProjectionOf(fresh.value);
     if (!stillCurrent()) {
       // Nothing is installed and nothing is forgotten. The caller is answered
       // `null` because this read did not fail — what happened is that the window
@@ -2699,6 +2944,26 @@ export function createBrowserState(
     // draws bytes from one revision beside a snippet list drawn from another.
     forgetFileText();
     installView(next);
+    // **The clear lives with the install** — Phase 2d-5-4's second review, and it
+    // used to live in the coordinator's guard. There it reached one caller of two:
+    // `BrowserState.rereadDocument` passes `ALWAYS_PERMITTED`, so a person using the
+    // recovery control on a file a failed guarded reread had marked `stale` read it
+    // successfully from disk and the mark stayed for the rest of the session.
+    //
+    // **What it claims is narrow, and both halves are load-bearing.** It claims
+    // *this file's content is current as of this read* — the projection now on
+    // screen came from the bytes `reload_document` just answered with. It does
+    // **not** claim that a session blocked by lost history has reconciled its
+    // *membership*: that is not a per-document fact, no per-document code could
+    // carry it, and 2d-6 is what draws it. The coordinator's guard refusing on
+    // `stillApplying` is what keeps a blocked session's own rereads from reaching
+    // this line at all; an explicit reread reaches it and says only the narrow
+    // thing.
+    //
+    // **No arm that refuses clears anything**, and moving the clear here is what
+    // makes that structural rather than argued: there is one clear, it is after the
+    // installation, and a refusal returns before it.
+    noteDocumentStatus(document, null);
     repairAfter(next);
     await readFileText();
     return null;
@@ -2977,7 +3242,12 @@ export function createBrowserState(
       // can run user code, and nothing after the spend can either until the install
       // itself, by which time the confirmation is gone.
       const source = conflict.source;
-      const diskDocument = adoption.disk.id;
+      // **And the snapshot itself, in this same block.** `adoption.disk` is a
+      // `DocumentView` a surface assembled, so it is caller-controlled exactly as
+      // `source` is; copying it here means the reads it costs happen before the
+      // reservation below rather than after the checks it authorises.
+      const disk = ownedProjectionOf(adoption.disk);
+      const diskDocument = disk.id;
       if (spentConfirmations.has(confirmation)) {
         // **One-shot.** A confirmation is a person's answer to one question, and
         // spending it twice would install a projection a second time — bumping the
@@ -3045,8 +3315,8 @@ export function createBrowserState(
       // `forgetTheReplacedDocument`'s reason: an asynchronous invalidation has a
       // window in which a getter can still read what it is replacing.
       forgetFileText();
-      installView(adoption.disk);
-      repairAfter(adoption.disk);
+      installView(disk);
+      repairAfter(disk);
       // The viewer's re-read is a separate step, exactly as it is after every other
       // projection replacement, and it is fired rather than returned — the answer
       // this method owes is *what became of the request*, which is already settled.
@@ -3186,7 +3456,10 @@ export function createBrowserState(
           return;
         }
         if (view.ok) {
-          projected.push(view.value);
+          // **Copied here, not retained.** Everything `views` holds has to be an
+          // object this module built, because `installView` compares the `id` of
+          // every element it already holds *after* its caller's last check.
+          projected.push(ownedProjectionOf(view.value));
         } else {
           // Both channels: the console for the developer, the state for the
           // user, who is otherwise reading a total that silently omits a file.
@@ -3281,7 +3554,11 @@ export function createBrowserState(
         return;
       }
       report(resolved.failure);
-      const repair = await repairSelection(next, resolved.failure, commands.reloadDocument);
+      // Copied before the check below, never between it and `applyRepair`: the
+      // projection this repair carries came from `commands.reloadDocument`.
+      const repair = ownedRepair(
+        await repairSelection(next, resolved.failure, commands.reloadDocument)
+      );
       if (selectionLookupIsStale(generation, document, projection)) {
         return;
       }
@@ -4183,7 +4460,8 @@ export function createBrowserState(
       report(fresh.failure);
       return fresh.failure;
     }
-    installView(fresh.value);
+    const next = ownedProjectionOf(fresh.value);
+    installView(next);
     if (
       moved !== null &&
       selected !== null &&
@@ -4193,9 +4471,9 @@ export function createBrowserState(
       // All three fields, against the projection just read: see
       // `positionInSameParse`. A `moved` from the save's revision must not be
       // resolved in a later parse that happens to reuse its node.
-      const position = positionInSameParse(fresh.value, moved);
+      const position = positionInSameParse(next, moved);
       if (position !== null) {
-        replaceSelection(selectMatch(fresh.value, position));
+        replaceSelection(selectMatch(next, position));
         notice = null;
         return null;
       }
@@ -4203,8 +4481,8 @@ export function createBrowserState(
     // The guard this function's JSDoc states: the requested attribution stands
     // only when this projection is the parse the write produced.
     const fromThisWrite =
-      moved !== null && fresh.value.id === moved.document && fresh.value.revision === moved.revision;
-    repairAfter(fresh.value, fromThisWrite ? attribution : 'externalChange');
+      moved !== null && next.id === moved.document && next.revision === moved.revision;
+    repairAfter(next, fromThisWrite ? attribution : 'externalChange');
     return null;
   } // End of function adoptTheDocumentOnDisk()
 
@@ -4249,21 +4527,22 @@ export function createBrowserState(
       report(fresh.failure);
       return fresh.failure;
     }
-    installView(fresh.value);
+    const next = ownedProjectionOf(fresh.value);
+    installView(next);
     const inScope = selection.kind === 'all' || selection.id === document;
     if (moved !== null && selected === heldBefore && inScope) {
       // The third condition, and it is about the *file* rather than the person:
       // `positionInSameParse` refuses a `moved` the fresh projection is not a
       // parse of, so a file another program rewrote between the write and the
       // read cannot hand this window an unrelated snippet as the one just made.
-      const position = positionInSameParse(fresh.value, moved);
+      const position = positionInSameParse(next, moved);
       if (position !== null) {
-        replaceSelection(selectMatch(fresh.value, position));
+        replaceSelection(selectMatch(next, position));
         notice = null;
         return null;
       }
     } // End of the arm that selects the snippet the person has just made
-    repairAfter(fresh.value);
+    repairAfter(next);
     return null;
   } // End of function adoptTheCreatedSnippet()
 
@@ -4321,7 +4600,8 @@ export function createBrowserState(
       report(fresh.failure);
       return fresh.failure;
     }
-    installView(fresh.value);
+    const next = ownedProjectionOf(fresh.value);
+    installView(next);
     // **The justification, at the write.** Both halves re-validated after the
     // await above — the only await on this path — and no await separates them
     // from the `replaceSelection` they justify.
@@ -4334,9 +4614,9 @@ export function createBrowserState(
       // All three fields, against the projection just read: a `moved` from the
       // save's revision must not be resolved in a later parse that happens to
       // reuse its node. See `positionInSameParse`.
-      const position = positionInSameParse(fresh.value, moved);
+      const position = positionInSameParse(next, moved);
       if (position !== null) {
-        replaceSelection(selectMatch(fresh.value, position));
+        replaceSelection(selectMatch(next, position));
         notice = null;
         return null;
       }
@@ -4344,8 +4624,8 @@ export function createBrowserState(
     // The guard `adoptTheDocumentOnDisk` states: the requested attribution
     // stands only when this projection is the parse the write produced.
     const fromThisWrite =
-      moved !== null && fresh.value.id === moved.document && fresh.value.revision === moved.revision;
-    repairAfter(fresh.value, fromThisWrite ? attribution : 'externalChange');
+      moved !== null && next.id === moved.document && next.revision === moved.revision;
+    repairAfter(next, fromThisWrite ? attribution : 'externalChange');
     return null;
   } // End of function adoptAfterTheDuplicate()
 
@@ -4386,18 +4666,19 @@ export function createBrowserState(
       report(fresh.failure);
       return fresh.failure;
     }
-    installView(fresh.value);
+    const next = ownedProjectionOf(fresh.value);
+    installView(next);
     if (deleted === null || selected !== deleted) {
       // Either the person was looking at another snippet all along, or they moved
       // the selection while the deletion was in flight. Both are ordinary repairs.
-      repairAfter(fresh.value);
+      repairAfter(next);
       return null;
     }
     // The former ordinal position, and the new last snippet when the deleted one
     // was last. `selectMatch` answers `null` for a file that now holds none, which
     // is the third case and needs no branch of its own.
-    const at = Math.min(deleted.position, fresh.value.matches.length - 1);
-    replaceSelection(at < 0 ? null : selectMatch(fresh.value, at));
+    const at = Math.min(deleted.position, next.matches.length - 1);
+    replaceSelection(at < 0 ? null : selectMatch(next, at));
     notice = 'deleted';
     return null;
   } // End of function adoptAfterTheDeletion()
@@ -4481,13 +4762,14 @@ export function createBrowserState(
       report(fresh.failure);
       return fresh.failure;
     }
-    installView(fresh.value);
+    const next = ownedProjectionOf(fresh.value);
+    installView(next);
     if (held !== null) {
       // Positional, and then checked. `reresolve` answers `differentMatch` when
       // the snippet at the held position is not the one that was selected, which
       // after a whole-text replacement is the expected answer rather than the
       // surprising one.
-      const found = reresolve(held, fresh.value);
+      const found = reresolve(held, next);
       if (found.outcome === 'sameMatch') {
         replaceSelection(found.selected);
         notice = 'kept';
