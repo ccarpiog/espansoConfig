@@ -512,8 +512,12 @@ export interface ReconciliationCoordinator {
    * per-document accepted sequences and the blocked state, so that nothing learned
    * about the workspace being closed is asked with, or compared against, in the
    * one replacing it. The accepted sequences go for a sharper reason than the
-   * others: `open()` **reallocates** the identities of the documents it loads, so
-   * an entry kept across one would be a sequence for a different file.
+   * others, and **it is not that the identities change**: a `DocumentId` is minted
+   * per path and is stable for the life of the process, so a retained entry names
+   * the same file. What makes keeping one wrong is that the epoch replacing this
+   * one restarts its observation sequences at the first, so the closed workspace's
+   * highest number would refuse that same file's first observations of the new
+   * epoch.
    *
    * **It also closes the open gate**, which is what stops a trigger arriving
    * between here and `ready` from adopting the epoch of the workspace being
@@ -662,8 +666,8 @@ export interface ReconciliationCoordinator {
    * safe membership reload*, cleared by
    * {@link ReconciliationCoordinator.workspaceOpened}, and read by 2d-6, which is
    * where a person gets a control. Performing it automatically would mean
-   * replacing the whole window — and reallocating every identity in it — because
-   * an unrelated file appeared beside the configuration.
+   * replacing the whole window — every projection, the selection and the viewer
+   * with it — because an unrelated file appeared beside the configuration.
    *
    * @returns `true` once such a request has been made in this session.
    */
@@ -1402,9 +1406,12 @@ export function createReconciliationCoordinator(
       // `lastDiscarded` is cumulative *within* the epoch — carrying any of them
       // into the next open would compare a new lifecycle's numbers with an old
       // one's. The consult's Q2 step 1 names a fourth thing, the accepted-sequence
-      // map, and it is cleared here for a sharper reason than the other three:
-      // `open()` reallocates every document identity, so a retained entry would be
-      // a sequence about a different file.
+      // map, and it is cleared here for a sharper reason than the other three —
+      // **not** because identities change, which they do not: they are minted per
+      // path and live as long as the process, so a retained entry is a sequence
+      // about the *same* file. It is because the epoch replacing this one restarts
+      // its observation sequences at the first, so a kept entry would refuse that
+      // file's earliest observations of the new epoch.
       adopted = false;
       epoch = 0;
       watermark = 0;

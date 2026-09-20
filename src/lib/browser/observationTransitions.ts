@@ -223,10 +223,20 @@ export interface AcceptedSequences {
   /**
    * Forgets every file's sequence.
    *
-   * Called at the entry of every `open()`, which is the consult's Q2 step 1: the
-   * identities of the documents a workspace holds are reallocated by the load that
-   * replaces it, so an entry kept across one would be a sequence for a different
-   * file.
+   * Called at the entry of every `open()`, which is the consult's Q2 step 1.
+   *
+   * **The reason is the epoch's sequence numbering, and not a change of identity**
+   * — Phase 2d-5-4-D. A `DocumentId` is minted per *path* from a table that lives
+   * as long as the process (`crates/espansoconfig-core/src/workspace/mod.rs`,
+   * `identity_of` and `Workspace::from_tree`'s own contract), so the same path
+   * answers the same number across any number of opens and a retained entry is
+   * never "a sequence for a different file": it is a sequence for the **same**
+   * file, or for a file the replacing workspace does not hold. What makes keeping
+   * one wrong is that a new epoch restarts its observations at
+   * `FIRST_OBSERVATION_SEQUENCE`, so an entry holding the closed workspace's
+   * highest number would refuse every early observation the new epoch delivers for
+   * that same file — the sharper reason, and the one
+   * {@link applyAddition}'s lifecycle fence exists to keep unreachable.
    */
   clear(): void;
 } // End of interface AcceptedSequences
@@ -751,6 +761,20 @@ export type ObservationOutcome =
   | 'removed'
   /** A newer observation for the same file has already been admitted. */
   | 'superseded'
+  /**
+   * The session that accepted the observation stopped applying, or the epoch it
+   * was accepted under is no longer the one showing, before the arm reached its
+   * arbitration.
+   *
+   * **Distinct from `superseded` because it says something else** — Phase
+   * 2d-5-4-D. A superseded observation lost an arbitration this session really
+   * ran; this one never reached one, and the record it lands in may already belong
+   * to the *replacing* workspace, because `workspaceOpened` in
+   * `./reconciliationCoordinator.ts` empties the outcome list. Recording it as
+   * `superseded` there would claim a newer observation of that file had been
+   * admitted by a session that has admitted nothing.
+   */
+  | 'lifecycleMoved'
   /** A locally pending row was marked, removed or annotated. */
   | 'pendingRow'
   /** There was no locally pending row to act on, so nothing was changed. */
@@ -796,7 +820,7 @@ export function applyObservation(
   const route = routeObservation(observation);
   switch (route.kind) {
     case 'added':
-      return applyAddition(route, workspace, sequences);
+      return applyAddition(route, workspace, sequences, session);
     case 'changed':
       return applyChange(route, workspace, sequences, session);
     case 'removedDocument':
@@ -836,28 +860,73 @@ export function applyObservation(
  * would have to defeat, and an accessor that admits something newer makes `admit`
  * itself refuse. The cost is that a superseded addition reads them too.
  *
+ * **And the lifecycle is re-asked between those reads and the arbitration** —
+ * Phase 2d-5-4-D's blocker. The two questions are the first two
+ * {@link applyChange}'s guard asks, asked here for that guard's own reason: the
+ * spread and the `in` above are caller code, and a getter that synchronously calls
+ * `BrowserState.open()` reaches `workspaceOpened`, which clears the
+ * accepted-sequence map before `admit` reads it. **A cleared map is the one thing
+ * `admit` cannot defend itself against**: its contract is *strictly greater than
+ * what is held*, and after a clear nothing is held — so where every `isNewest`
+ * fence in this module answers `false` across a lifecycle reset and therefore
+ * fails safe, `admit` answers `true` and writes the closed workspace's sequence
+ * into the replacing workspace's map, where it refuses that file's first
+ * observations of the new epoch. This arm is the only one that runs caller code
+ * above its own `admit`; the window is **older than M5**, which widened it from
+ * one `id` getter to seven accessors plus a `has` trap rather than introducing it.
+ *
+ * **What the types do not force.** Nothing makes this the only arm that could want
+ * the question, and **nothing re-asks it between two observations of one batch**:
+ * {@link applyRemoval} and {@link applyUnreadable} run nothing caller-supplied
+ * above their own `admit` and so are safe in isolation, but an earlier observation
+ * of the same batch that resets the lifecycle leaves every later one applying to
+ * the workspace that replaced it. {@link ObservationSession}'s type says nothing
+ * about how long an answer to it is good for, and an arm that never asks still
+ * compiles.
+ *
+ * **An admitted, newest addition states this file's status whole** — Phase
+ * 2d-5-4-D. This write used to happen only for unreadable content, so a `Removed`
+ * followed in a later batch by an `Added` of the same path left
+ * `{ kind: 'removed' }` standing over a row that is back in the sidebar:
+ * `addDocument` clears no status, an addition requests no reread (ruling 30), and
+ * the only clears are a successful reread and a whole `open()`. It is
+ * unconditional now, under the same `isNewest` fence, which is what
+ * {@link applyRemoval} and {@link applyUnreadable} already do. The fence is the
+ * whole of why it cannot wipe a newer observation's mark; what entitles it to
+ * speak at all is `admit`, which accepted this observation as strictly newer than
+ * anything that wrote before it.
+ *
  * @param route - The addition.
  * @param workspace - The window.
  * @param sequences - The per-document accepted sequences.
+ * @param session - The epoch this batch was accepted under, asked again here.
  * @returns Which arm ran.
  */
 function applyAddition(
   route: Extract<ObservationRoute, { kind: 'added' }>,
   workspace: ReconciliationWorkspace,
-  sequences: AcceptedSequences
+  sequences: AcceptedSequences,
+  session: ObservationSession
 ): ObservationOutcome {
   const row: DocumentSummary = { ...route.summary, loaded: false };
   const reason = 'Unreadable' in route.content ? route.content.Unreadable.reason : null;
+  if (!session.stillApplying() || session.epochNow() !== session.epoch) {
+    // Asked **after** the whole caller-controlled window above and **before**
+    // `admit`, in one synchronous block with it: both members are the
+    // coordinator's own closures over its own `let`s, so nothing between this line
+    // and the arbitration below runs anything a caller supplied.
+    return 'lifecycleMoved';
+  }
   if (!sequences.admit(row.id, route.sequence)) {
     return 'superseded';
   }
   workspace.addDocument(row);
   // Fenced for the reason the whole of this module's status writing now is:
   // `addDocument` is a host member, so a window whose row insertion admits a newer
-  // observation of the same file leaves this `unavailable` writing over a verdict
-  // nothing re-derives. The reason itself was read above, before `admit`.
-  if (reason !== null && sequences.isNewest(row.id, route.sequence)) {
-    workspace.noteDocumentStatus(row.id, { kind: 'unavailable', reason });
+  // observation of the same file leaves this writing over a verdict nothing
+  // re-derives. The reason itself was read above, before `admit`.
+  if (sequences.isNewest(row.id, route.sequence)) {
+    workspace.noteDocumentStatus(row.id, reason === null ? null : { kind: 'unavailable', reason });
   }
   return 'added';
 } // End of function applyAddition()

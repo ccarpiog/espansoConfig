@@ -12967,3 +12967,126 @@ finding has lived in every tail this project has run:
 **Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-B-notes.md` §11 carries this round's marked items;
 one is **actionable** and it names a check to run rather than a correctness defect in a source file, so
 under §7.3 nothing holds the step open.
+
+---
+
+## Phase 2d-5-4-C's record and its next-action prose — archived 2026-09-20 at Phase 2d-5-4-D
+
+_Lifted verbatim from `PROGRESS.md`, where the round that superseded it now stands. Nothing in it
+is superseded except its closing block, which named the next action this archive's phase has since
+taken: Phase 2d-5-4-D. The five things it pointed that round at are what the round read first, and
+the blocker it returned was found in the first of them._
+
+#### Phase 2d-5-4-C — the round `CLAUDE.md` §7.1 commissioned for 2d-5-4-B's fix
+
+**Taken and answered, and `SUPERSEDED BY 2d-5-4-D` rather than complete**, because its own fix changed
+source. Risk class **high**; worker model **opus** — **no implementation worker**: one **read-only
+re-derivation** worker, then one fix worker, the shape this chain has settled on. Record
+[`docs/decisions/2d-5-4-C-notes.md`](docs/decisions/2d-5-4-C-notes.md); review
+[`docs/reviews/phase-2d-5-4-C.md`](docs/reviews/phase-2d-5-4-C.md); brief
+[`docs/reviews/phase-2d-5-4-C.brief.md`](docs/reviews/phase-2d-5-4-C.brief.md); the re-derivation
+[`docs/reviews/phase-2d-5-4-C.rederivation.md`](docs/reviews/phase-2d-5-4-C.rederivation.md).
+
+**The review was Codex**, through `autoclaude-review.sh`, which **exited 0** so no agent was spawned —
+**five consecutive Codex rounds**. **Verdict `ship-with-fixes`, 1 blocker and 3 SHOULD-FIX.** **The
+report's finding bodies arrive truncated again**, ~180 characters each, so **not one was accepted on the
+report's strength**: all four were re-derived from the code by a read-only worker, and the orchestrator
+**spot-checked the decisive lines of all four and of the first thing the review missed**. **All four
+held**, one of them only **in part**, and the re-derivation corrected the review's anchor line for
+another (`2468`, not `3130`) and its mechanism for the blocker — the identity is **not** read after
+`select()`'s staleness check, which reads it nowhere; it is read as the last conjunct of three later
+selection-follow guards.
+
+**The blocker is the previous round's own fix one field deeper.** 2d-5-4-B taught `ownedMatchOf` to
+rebuild a `MatchId`, and `ownedRepair`'s `kept` arm still handed `repair.selected` through whole — so
+the `SelectedMatch` this window installs carries `commands.reloadDocument`'s object, and
+`isTheSameIdentity(selected.id, …)` is the **last thing** three adoption guards evaluate before the
+`replaceSelection` they justify. A getter there is arbitrary code inside the window the guard exists to
+close. Fixed by rebuilding the `SelectedMatch` field by field through `ownedMatchIdOf`, and the
+re-derivation established — by sweeping every writer of `selected` rather than by reading the finding —
+that this arm is the **only** unnormalized ingress into it.
+
+**One SHOULD-FIX is production-reachable and needs no injected accessor**, which makes it the first of
+this chain that a user could have met. `noteDocumentStatus` bumps its per-file write token whether or
+not the value changes. So a **superseded** reread's failure arm, re-stating a `stale` that was already
+there, advanced the token an **overlapping** newer read had captured in order to decide whether it might
+clear the mark — and that newer read had already succeeded. The clear was refused, permanently: the
+window showed the file's new bytes under a mark saying it was out of date, with nothing able to remove
+it. **The fix is to delete the arm**, and deleting it is the fix rather than a regression: the arm's own
+three fences proved the write could never change a *value* — they permit it only when nothing has
+written since the mark, so what stands there is already this arm's own `stale` — while the token it
+advanced was the whole of its effect. The failure is still reported, by the private reread at
+`workspace.svelte.ts:3084`, on the channel every other failure of this state uses.
+
+**The other two are the same question asked one step further out.** `open()` re-checks its generation
+after the projection loop — 2d-5-4-B's own blocker — and still published `documents = rows` with **no
+check** after `ownedSummaryOf`'s field reads and a caller-controlled iterator; that is `HOLDS IN PART`,
+because *"introduced by the summary copy"* is false: `documents = listed.value` already had the shape,
+and the copy widened the window from one read to 2 + 7N. And the **initial `stale` mark on the host
+reread path** was unfenced, with `ReconciliationWorkspace.rereadUnderGuard` carrying no predicate for a
+host to ask — so the *question* travels now, as `owns: () => boolean`, asked in the same synchronous
+block as the mark. **Nothing in that type forces the caller to hand over a question that is really about
+ownership**, and its header says so.
+
+**Five things the review missed, each found by the re-derivation sweeping by shape.** A **narrower
+wording of a claim struck last round survived in source** at `workspace.svelte.ts:709–712`, which made
+2d-5-4-B's own correction block in `2d-5-4-notes.md` an overclaim — the third time this project has
+closed a finding everywhere but one narrower instance. **Four passages** argue the failure-arm
+restatement is harmless, true of the value and false of the token, which is exactly why nobody saw it.
+**Four more status writers** in `observationTransitions.ts` run host members between the `admit` and
+their write; all four are now fenced, and the **one** left unfenced — `applyUnreadable` — is justified
+on the code (no statement stands between the two, and both values it reads are own data properties of a
+literal built before arbitration), with its header saying that inserting a statement would end that
+silently. `ownedSummaryOf`'s **second** ingress had no check of its own, and is closed at the cause
+rather than at the ingress: `applyAddition` materializes the wire summary **above** `admit`, so a
+re-entrant `Removed` can no longer have its removal undone. And the re-derivation's own writer table
+omitted one producer, `adoptAfterTheDeletion`, which the fix worker verified before recording.
+
+**Two things this round did not do, stated rather than glossed.** It added **no user-facing string in
+any language** and touched **no `.svelte` file**, so no window reading is owed. And it left
+`npm run build` at **189** modules: nothing new lives in a module of its own, so the ladder's *one
+module per new source module* rule predicts no movement and none happened.
+
+**One candidate case was discarded, and it was measured rather than reasoned.** The re-derivation's own
+recipe for the second finding settles the two overlapping reads in the order opposite to its failure
+sequence; written that way the case passed against **both** trees. The shipped case settles the older
+failure first. Beside it, deleting the failure arm removed what one of 2d-5-4-B's cases measured, so
+that case was **re-pointed** at `creatorEligibility` inside the coordinator's guard and re-confirmed to
+fail without the ingress copy.
+
+#### The next action is **Phase 2d-5-4-D — the round §7.1 commissions for 2d-5-4-C's fix**
+
+**Scoped to that fix's diff**: `src/lib/browser/workspace.svelte.ts`,
+`src/lib/browser/observationTransitions.ts` and their two suites, plus
+`docs/decisions/2d-5-4-C-notes.md` in full and the correction blocks this round wrote into
+`2d-5-4-notes.md`, `2d-5-4-A-notes.md` and `2d-5-4-B-notes.md`. **This is a review round, not
+implementation**: it takes no implementation worker, and its own fix decides whether another round
+follows, by §7.1 and nothing else.
+
+**Five things to point it at first**, each because the fix that answered a finding is where the next
+finding has lived in every tail this project has run:
+
+1. **The deleted failure arm.** It is the only fix of this chain that removed behaviour rather than
+   adding a check. The argument is that the arm could never change a value and that `report` already
+   carries the failure — **check both halves against the code**, and check what else the deleted clause
+   was carrying: `CLAUDE.md` records 2d-5-3-H as exactly that failure, a removal taking the only clause
+   that carried a time index with it.
+2. **`ownedRepair`'s rebuilt `SelectedMatch`.** It now claims the compile-error property the other four
+   normalizers claim, with the same optional-member caveat. Does `SelectedMatch` itself have an optional
+   member; is `ownedMatchIdOf` applied to *every* identity the arm carries; and is the swept claim —
+   *this is the only unnormalized ingress into `selected`* — still true after the sweep added a producer
+   the first table missed?
+3. **`owns` on the `ReconciliationWorkspace` interface.** A third `() => boolean` parameter beside
+   `guard`, distinguished only by its name and its header. Do the two call sites pass the right one; can
+   any caller reach the member without one; and does `stillOurs` answer the question the mark needs, at
+   the moment the mark is written rather than when the closure was built?
+4. **The four newly fenced writers in `observationTransitions.ts`, and the fifth left unfenced.** The
+   justification for `applyUnreadable` is positional in the precise sense this chain has twice found
+   false — *nothing stands between these two lines*. Is that true of every path into it, and does the
+   `routeObservation` literal really carry own data properties at both of the reads it makes?
+5. **The correction blocks, in three files now.** One of them corrects a correction. Check each against
+   the code it describes, and sweep for a **narrower wording** of what each one struck — that is what
+   this round found still standing from the last one, and what 2c-4a-3a's round 2 found before it.
+
+**Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-C-notes.md`'s closing section carries this round's
+marked items, and none of them names an unfixed correctness defect in a source file.

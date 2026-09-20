@@ -212,10 +212,18 @@ by the same sentence one arm up.
 
 **The fix routes both through the ownership question.** `markStaleWhileOurs` is hoisted out of the
 guard into `applyChange`'s body and **passed into `tellTheSurfaceAbout` as a parameter** rather than
-duplicated there, so this module has exactly one fenced status writer for an admitted `Changed` and a
-reader can see that every `stale` such an observation produces goes through it. Both positional
+duplicated there, ~~so this module has exactly one fenced status writer for an admitted `Changed` and a
+reader can see that every `stale` such an observation produces goes through it~~. Both positional
 justifications are deleted, including the claim that *a `markStaleWhileOurs()` here would be a call
 that can never refuse, and no test could tell it from this one* — §6's two new cases refuse it.
+
+> **Correction (Phase 2d-5-4-D).** The struck half was already false when it was written, in the two
+> ways §10 item 6's correction names: `workspace.svelte.ts`'s reread member wrote a `stale` for an
+> admitted `Changed` without going through this writer, and `applyNamedRow` writes another from a
+> different function. §10 item 6 retracted it for the **source comment** that stated the same thing;
+> this is the body sentence it came from, and it is struck here rather than reworded, because what is
+> true now is the narrower claim already recorded there — the host's initial mark is fenced by the
+> ownership question `applyChange` hands it, and `applyNamedRow` carries its own fenced writer.
 
 **`markStaleWhileOurs`'s own JSDoc is corrected with it.** It called `sequences.isNewest` *a pure read
 of the accepted-sequence map*. `AcceptedSequences` is an **interface** and `isNewest` is a declaration;
@@ -272,8 +280,9 @@ still the command's own object, and nothing this module reads after a guard goes
 > one wording narrower: *nothing this module reads after a guard goes that deep* was false when it was
 > written, because `ownedRepair`'s kept arm retained a third-level `MatchId` that a guard reads. The
 > block this section wrote into `2d-5-4-notes.md` has been corrected there, and the same claim standing
-> in **source** — `workspace.svelte.ts:709-712`, which also misattributed `ownedMatchOf`'s *`id` is the
-> one exception* — is rewritten. Sweeping for the previous wording is what produced this instance, and
+> in **source** — `ownedRepair`'s header in `workspace.svelte.ts`, at 709-712 until that rewrite
+> moved the text those lines hold, which also misattributed `ownedMatchOf`'s *`id` is the one
+> exception* — is rewritten. Sweeping for the previous wording is what produced this instance, and
 > the sweep this round ran was by shape: every writer of `selected`, and every producer of a
 > `SelectedMatch`.
 

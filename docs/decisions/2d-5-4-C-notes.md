@@ -229,8 +229,9 @@ caller-supplied runs between the arbitration and the mark.
 `docs/decisions/2d-5-4-notes.md` §7 item 12's 2d-5-4-B correction block struck *"the third level and
 below is still the command's own object"* and replaced it with *"the **fourth** level and below … is
 still the command's own object, and **nothing this module reads after a guard goes that deep**"*. The
-replacement is false, and `src/lib/browser/workspace.svelte.ts:709-712` carried the same claim in
-**source**:
+replacement is false, and `ownedRepair`'s header in `src/lib/browser/workspace.svelte.ts` carried
+the same claim in **source** — lines 709-712 of the pre-fix tree `f3ba2cd^`, which this round's own
+fix rewrote, so that number names an unrelated paragraph at HEAD:
 
 > *"{@link SelectedMatch} itself is not re-made: `reresolve` built it, and its own fields are read by
 > this module rather than by a command. Its `id` is the command's object, exactly as {@link

@@ -254,10 +254,17 @@ to install.
 > guarded reread, all five adoptions, the projection a selection repair carries and the disk snapshot
 > a conflict carries. So nothing `views` holds is an object a command built, and nothing `repairAfter`
 > reads one level down is either. **What is still not guaranteed, stated as narrowly as the code
-> allows:** the copy is two levels deep, so the *value* of `id`, of `trigger`, `content`, `options`,
-> `profile` and of every array's elements is still the command's own object, and a consumer that walks
-> one of those is reading caller-controlled data. The function's own header says that, and no type
-> does. The two regression cases are `workspace.test.ts`'s *installs into the slot the projection
+> allows:** the copy is two levels deep, so the *value* ~~of `id`,~~ of `trigger`, `content`,
+> `options`, `profile` and of every array's elements is still the command's own object, and a consumer
+> that walks one of those is reading caller-controlled data. The function's own header says that, and
+> no type does.
+>
+>    > **Correction (Phase 2d-5-4-D).** `id` has not been one of those values since 2d-5-4-B:
+>    > `ownedMatchOf` copies it through `ownedMatchIdOf` (`workspace.svelte.ts:545`), and that
+>    > function's own header names it *the one exception* for the reason this sentence would have
+>    > needed — it is the only one of those values whose own properties this module reads after a
+>    > guard. Struck rather than reworded, because the claim it belongs to was struck once already and
+>    > a third wording is what this chain keeps producing. The two regression cases are `workspace.test.ts`'s *installs into the slot the projection
 > names, whatever a retained view says* and *repairs the selection against the projection it read, not
 > a re-entrant one*, both confirmed to fail against the delivered code.
 
@@ -328,11 +335,20 @@ test, confirmed to fail against the delivered code.
 > rather than implied:** a write it permits can only ever restate this arm's own mark, because an
 > unchanged count means the entry there *is* that mark — so no value changes today. What it removes is
 > every case where the write would have changed one, and each of those was a write over a newer truth.
-> It is kept rather than deleted because what the arm promises is *a failed read leaves the file stale
-> while this read owns its status*, and the fence is what makes the code say that rather than *a
+> ~~It is kept rather than deleted because what the arm promises is *a failed read leaves the file
+> stale while this read owns its status*, and the fence is what makes the code say that rather than *a
 > failed read leaves the file stale*. Two cases pin it, both over two documents:
 > `workspace.test.ts`'s *keeps a newer removal over an older reread that came back a failure* and
-> *keeps an overlapping reread's installed status over an older failure*.
+> *keeps an overlapping reread's installed status over an older failure*.~~
+>
+>    > **Correction (Phase 2d-5-4-D).** The arm is **gone**. Phase 2d-5-4-C deleted it (its finding 2):
+>    > the fenced write could only ever restate this arm's own mark, so it changed no value, while the
+>    > ownership token it advanced was taken away from a second overlapping read holding the same
+>    > capture. A failed read now writes nothing at all, and the failure is carried by `report`, the
+>    > channel every other failure of this state uses. One of the two cases named above was re-pointed
+>    > rather than kept. Struck rather than reworded: `2d-5-4-A-notes.md` §7 item 4 already carries the
+>    > correction for the reasoning that kept it, and a third wording of *why it is kept* would be a
+>    > claim about code that no longer exists.
 >
 > **And the guard's own refusing arms are fenced the same way, which is round 2's finding 4.** Of the
 > three that write a status, `stillApplying` and the epoch check are asked **above**
@@ -340,10 +356,19 @@ test, confirmed to fail against the delivered code.
 > could write `stale` over a newer `unavailable` and destroy a typed reason nothing re-derives. The
 > **order is unchanged** and `stillApplying` stays first, because the arm below it fires a component's
 > callback and round 1's blocker 2 is why. What changed is the write: those two arms go through
-> `markStaleWhileOurs`, which asks ownership at the write. The two arms *below* the ownership question
-> write directly, because reaching them is already the answer to it and a fence there would be a call
-> no test could tell from no call. **Decision order and write ownership are two different questions**,
-> and treating them as one is the whole of the defect.
+> `markStaleWhileOurs`, which asks ownership at the write. ~~The two arms *below* the ownership
+> question write directly, because reaching them is already the answer to it and a fence there would be
+> a call no test could tell from no call.~~ **Decision order and write ownership are two different
+> questions**, and treating them as one is the whole of the defect.
+>
+>    > **Correction (Phase 2d-5-4-D).** The struck sentence is the same positional justification this
+>    > chain has twice found false, and it was struck once already at `2d-5-4-A-notes.md` §7 item 4's
+>    > correction and again in source. Every arm of `applyChange`'s guard that writes now goes through
+>    > `markStaleWhileOurs`, the lower two included: `tellTheSurfaceAbout` runs two host members
+>    > between the ownership question and those writes, so *reaching them* stopped being an answer to
+>    > it, and `observationTransitions.ts` names the *no test could tell it from no call* half false in
+>    > as many words, with a case in `observationTransitions.test.ts` that refuses it. Struck rather
+>    > than reworded.
 
 ### 3.4 The removal transition, and the notice it reuses
 
@@ -767,9 +792,10 @@ were written at delivery: three items moved, and the paragraph under each says w
     > the identity `reresolve` had copied **by reference** out of `commands.reloadDocument`'s answer was
     > what the window retained — and `isTheSameIdentity` reads its `document`, `revision` and `node` as
     > the last conjunct of three selection-follow guards, immediately before the `replaceSelection` each
-    > guard justifies. `src/lib/browser/workspace.svelte.ts:709-712` carried the same claim in source,
-    > and it also misattributed the rule it cited: `ownedMatchOf`'s own header says **`id` is the one
-    > exception**, which is the opposite of what that header claimed for it.
+    > guard justifies. `ownedRepair`'s header in `src/lib/browser/workspace.svelte.ts` carried the
+    > same claim in source — at 709-712 until that same fix rewrote those lines, so the number resolves
+    > only against `f3ba2cd^` — and it also misattributed the rule it cited: `ownedMatchOf`'s own header
+    > says **`id` is the one exception**, which is the opposite of what that header claimed for it.
     >
     > Closed rather than re-marked: `ownedRepair` now rebuilds the kept `SelectedMatch` field by field
     > with `ownedMatchIdOf`, and `workspace.test.ts` — *keeps no command identity when a repair keeps

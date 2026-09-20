@@ -998,10 +998,12 @@ describe('the pane as a write-surface host', () => {
   it('leaves a registration standing across an open(), which is the decided cost', async () => {
     // **`2d-5-2a-notes.md` section 3.8, re-taken at 2d-5-2b rather than restated.**
     // `open()` deliberately does not clear the registry, and this is what that
-    // costs when a host survives one: the entry stands, naming a `DocumentId` the
-    // load below `open()` has reallocated. Both consumers of that answer refuse
-    // rather than permit, so a write stays safe; what it costs is a false refusal
-    // over an unrelated file.
+    // costs when a host survives one: the entry stands, naming a surface about the
+    // workspace the load below `open()` replaced. The identity is path-stable, so
+    // what is stale is the projection behind it and whether the new workspace holds
+    // the file at all. Both consumers of that answer refuse rather than permit, so
+    // a write stays safe; what it costs is a false refusal over a file nobody is
+    // really editing.
     //
     // **In production no host survives an `open()`**, and that is why the decision
     // stands: `AppShell.svelte` draws this pane only in its `{:else}` arm, and

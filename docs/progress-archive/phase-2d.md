@@ -4421,3 +4421,49 @@ in the tree, ran the one suite, recorded the failure message and restored it; th
 round**, and that is a difference from 2d-5-4-A rather than an improvement on it: three shapes for
 finding 4 were rejected by argument before being written, which is a weaker check than running one,
 and the notes record the distinction rather than blurring it.
+
+---
+
+## Phase 2d-5-4-C's verification narrative — archived 2026-09-20 at Phase 2d-5-4-D
+
+_Lifted verbatim from `PROGRESS.md`. Its rung, `1320 / 443 / 2404 / 189`, is the one below the live
+one; its account of the `cargo test` filter that measured nothing while exiting 0 is the reason the
+live baseline now asks the `filtered out` question as well as the `0 failed` one._
+
+### The rung moved by nine, and only by this round's own cases
+
+**With the instrument in the working tree the four commands answer `1320 / 443 / 2404 / 189`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-4-C**, on the post-fix tree, each command run on its own:
+
+| Gate | Was at 2d-5-4-B | Now | Why it moved, or did not |
+|---|---|---|---|
+| `cargo test --workspace` | 1320 | **1320** | no Rust changed — `git diff --numstat -- crates/ src-tauri/` names only the instrument's `main.rs` hook |
+| `npm run check` files | 443 | **443** | no file added or removed; the fix is inside four existing files |
+| `npm test` | 2395 | **2404** | +9, the cases this round's fixes are pinned by, one of them re-pointed rather than new |
+| `npm run build` modules | 189 | **189** | no new module: every fix is inside a function that already existed |
+
+**The first `cargo test` run of this phase measured nothing, and the figure above is the second.** The
+command was issued with a stray argument after `--`, which `libtest` takes as a **filter**: all 26
+binaries answered `ok` with `0 passed` and everything *filtered out*, and the shell reported exit 0.
+**A zero-failure exit status is not a measurement** — the sum and the `filtered out` column are — and
+this is the same class as 2d-5-3-L's stale-`target/` reading, caught this time by asking what the 26
+lines actually said rather than by trusting the status. Re-run correctly, `cargo test --workspace --
+--test-threads=1` was read from a file, summed over **26** `test result` lines *and* checked by the
+complementary question — no line lacking `0 failed` — and it completed on the **first attempt**, so the
+stale-`target/` host finding has now not recurred for six consecutive phases. `cargo clippy --workspace
+--all-targets -- -D warnings` (exit 0), `cargo fmt --check` (exit 0) and `cargo tree -p
+espansoconfig-core | rg tauri` (finds nothing) are clean. **Both bundle oracles were read and both lines
+are reported**: server-only markers **absent**, client-only markers **present (2)**. **The instrument's
+pin was re-checked** and holds at `5 insertions(+), 1 deletion(-)`.
+
+**No gate caught any of the four findings, and three of the four no gate could have** — they are
+re-entrancy or ordering defects reachable only through an injected accessor. **The fourth is the
+exception, and it is the first of this chain that is production-reachable**: two overlapping rereads,
+no injected anything, and the suite had no case that combined them. **Nine cases now pin the fixes, and
+each was confirmed to fail against the pre-fix code** — the fix worker reverted each change in the tree,
+ran the one suite, recorded the message and restored it; the messages are in
+`docs/decisions/2d-5-4-C-notes.md`. **One candidate was run and found to pass both ways, and was
+discarded**: written in the re-derivation's own order it settles the newer read first, which is the
+order the defect does not need. That is a stronger check than the previous round's three rejected
+by argument, and the notes record the distinction rather than blurring it.

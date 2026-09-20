@@ -2196,14 +2196,17 @@ export function createBrowserState(
   // the direction taken here is the safe one.
   //
   // **It is not free, and what it costs is named rather than glossed.** `open()`
-  // clears `projectionGenerations` below because the identities of the documents it
-  // holds are *reallocated* by the load it runs, and a registration that survives an
-  // `open()` therefore names a `DocumentId` that now denotes a **different file**:
-  // `competingSurfaceFor` would refuse a restore of a file nobody has open, and
-  // `targetingSurfaceFor` would attribute that file to a surface that is not about
-  // it. Both are refusals rather than permissions, so a write is still safe; the
-  // price is a false refusal over an unrelated file until that host unregisters.
-  // Nothing enforces that it ever does.
+  // clears `projectionGenerations` below because every projection of the workspace
+  // being closed goes with it, and a registration that survives an `open()`
+  // therefore names a surface about a workspace this window is no longer showing.
+  // **Not a `DocumentId` that denotes a different file** — an identity is minted
+  // per path and is stable for the life of the process — but a file the replacing
+  // workspace may not hold at all, named by a host whose draft was built against
+  // bytes that are gone: `competingSurfaceFor` would refuse a restore on the
+  // strength of that surface, and `targetingSurfaceFor` would answer with it. Both
+  // are refusals rather than permissions, so a write is still safe; the price is a
+  // false refusal over a file nobody is really editing, until that host
+  // unregisters. Nothing enforces that it ever does.
   //
   // **Re-taken at Phase 2d-5-2b, when a host started registering, and measured
   // rather than restated.** The decision stands, and three things are now known
@@ -2217,7 +2220,7 @@ export function createBrowserState(
   // its first await, so the arm holding `DetailPane` is torn down and its leases come
   // back at the next flush. What that leaves open, said plainly: the window between
   // that synchronous assignment and the flush, in which the registry still answers
-  // surfaces over identities this load is about to reallocate. Nothing reads it there
+  // surfaces registered against the workspace this load replaces. Nothing reads it there
   // today, and 2d-5-4's discarded-history recovery — the third caller consult Q3
   // adds, now shipped — reads the registry **before** it decides, and refuses to
   // re-open while any surface is registered, which is the direction that window
@@ -2275,7 +2278,8 @@ export function createBrowserState(
   // **Bumped by `noteDocumentStatus` and by nothing else**, which is what makes it
   // a fence rather than a decoration — and `open()`'s wholesale `externalStatuses =
   // []` is deliberately *not* a bump, because the open generation is what catches
-  // that and identities are reallocated across it anyway.
+  // that: a capture taken in the closed workspace fails `stillCurrent()`'s first
+  // clause whatever this counter says.
   //
   // **Not cleared by `open()` either**, for `rereadGenerations`' reason one screen
   // up: clearing would set a count back to zero while a capture taken in the closed
@@ -2971,7 +2975,9 @@ export function createBrowserState(
    *
    * **Three captures of its own, taken before the await**, exactly as this
    * function has taken them since Phase 2c-3b step 2: the workspace generation,
-   * because a replaced workspace reallocates every document identity; a
+   * because a replaced workspace is a fresh projection of every file it holds, so
+   * an answer read in the closed one describes bytes this window is no longer
+   * showing; a
    * per-document re-read generation, so that of two overlapping reads of one file
    * the newer wins whichever order the answers arrive in; and that document's
    * projection generation, so a projection installed meanwhile by any other path is
@@ -3527,8 +3533,10 @@ export function createBrowserState(
       // globally, which is right because *every* projection is about to go.
       selectGeneration += 1;
       // And the per-document counters are about documents of the workspace being
-      // closed. Their identities are reallocated by the load below, so an entry
-      // kept here would be a count of replacements of a different file. Clearing
+      // closed. The identities survive the load below — they are path-stable — so
+      // an entry kept here would be the *same* file's count, taken in one lifecycle
+      // and compared in the next, which counts nothing the new workspace did.
+      // Clearing
       // cannot un-cancel anything: the bump above has already invalidated every
       // lookup that could have read one.
       projectionGenerations.clear();
@@ -3549,10 +3557,10 @@ export function createBrowserState(
       selected = null;
       notice = null;
       // **What the watcher told this window about the workspace being closed goes
-      // too** — Phase 2d-5-4. A status is keyed by a `DocumentId` this load is
-      // about to reallocate, and a path drift is a statement about which files
-      // *that* workspace held; carrying either would describe the new workspace
-      // with the old one's observations.
+      // too** — Phase 2d-5-4. A status says what the watcher reported about a file
+      // while *that* workspace was open, and a path drift is a statement about
+      // which files *that* workspace held; carrying either would describe the new
+      // workspace with the old one's observations.
       externalStatuses = [];
       pathDrift = [];
       // **And the pending marks, because this load is what ends them.** A row is
@@ -3563,10 +3571,10 @@ export function createBrowserState(
       // for the reason every early return has: a refused open leaves no rows, and
       // a mark about a row that no longer exists is not a mark about anything.
       pendingAdditions = [];
-      // The viewer closes with the workspace: it is showing one file's text,
-      // and every identity in the workspace being replaced is about to be
-      // reallocated. `forgetFileText` also invalidates the read in flight,
-      // which describes a file this state is about to stop knowing about.
+      // The viewer closes with the workspace: it is showing one file's text, read
+      // out of the workspace that is being replaced. `forgetFileText` also
+      // invalidates the read in flight, which describes a file this state is about
+      // to stop knowing about.
       fileTextShown = false;
       forgetFileText();
 
@@ -3602,8 +3610,8 @@ export function createBrowserState(
         return;
       }
       // **Copied at ingress, row by row**, for {@link ownedSummaryOf}'s reason:
-      // `documents` is read inside the coordinator's guard and in the host failure
-      // arm's last check before its write, and `listed.value` is an injected
+      // `documents` is read inside the coordinator's guard — `creatorEligibility`
+      // and `holdsDocument` both walk it — and `listed.value` is an injected
       // command's answer. Read once, here, into an array this module built.
       const rows: DocumentSummary[] = [];
       for (const summary of listed.value) {

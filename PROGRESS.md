@@ -22,8 +22,8 @@ file's header, and only a reviewer re-deriving it noticed. A derived figure outl
 derived from unless something re-derives it.
 
 **Where the headroom stands, re-derived on this file after this round's record was written — never
-before it, and never quoted from the header it replaces:** **705 lines and 129929 bytes**,
-which is **95 lines and 1,143 bytes under the hard bounds** (800 / 131,072) and over both soft
+before it, and never quoted from the header it replaces:** **696 lines and 130649 bytes**,
+which is **104 lines and 423 bytes under the hard bounds** (800 / 131,072) and over both soft
 ones (400 / 65,536). **The figure is a fixed point, not an estimate**: substituting it changes the
 file's size, so it was substituted and re-measured until it stopped moving, and it is re-derived once
 more in the SHA-record commit, which edits the git-state row **in place**.
@@ -108,9 +108,9 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-2** | The watcher lifecycle behind the workspace session, and the real-filesystem adapter | ✅ complete — READY at round 5 |
 | _**2d-3**, **2d-4a** with its five corrective phases, **2d-4a-C-1**, **2d-4a-C-2**, the **2d-4b design consult**, **2d-4b** with its seven, **2d-5-1** with its three, and **2d-5-2** with its three — **nine rows, every chain closed**_ | see the archive | ✅ **all complete and CLOSED**; rows archived 2026-09-05 at 2d-5-3-G to [`status-table.md`](docs/progress-archive/status-table.md) under *"The nine closed-chain status rows"*. 2d-4a (13 rounds), 2d-4b (8) and 2d-5-1 (4) are the three tails this project has ended **by rule** rather than by an owner ruling (`CLAUDE.md` §7.2); 2d-3 (14 rounds) and 2d-4a-C-2 (9) are the two a human stopped |
 | **2d-5 design consult** | 2d-5 put to a design consult before any line of it was written, per the standing rule since 2b-2c | ✅ complete (2026-08-31) — [`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md), **Codex at high effort**, the **second provider** to see this material since 2d-4a began. Verdict: cut 2d-5 into **seven** dependency-ordered steps; it overrides `phase-2d-design.md` in two places. The record is [`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) — 35 binding rulings and a 67-row citation audit — and its own review was `ship-with-fixes`, 0 blockers, 5 SHOULD-FIX, all five fixed in the record |
-| **2d-5** | The browser coordinator and the open-write-surface registry — seven steps, of which two touch components | 🔶 in progress — **steps 1, 2 and 3 of 7 are complete and CLOSED**, tails and all. **Step 3's tail ran fourteen rounds, `2d-5-3-A` … `2d-5-3-N`, each commissioned by its predecessor's fix, and it ended by rule**: 2d-5-3-N's fix changed no source file, so `CLAUDE.md` §7.1 commissioned nothing and §7.2 closed the step — **the fourth tail this project has ended by rule and the longest of them**, with no owner ruling and no human stopping it. Its last three rounds were **two providers**, the `autoclaude-reviewer` agent then Codex twice. **The executable product was written once**: `332a751` is the last commit to change a non-comment line of `reconciliationCoordinator.ts`, and all thirteen lettered rounds changed zero, so the tail was fourteen rounds about whether the comments tell the truth. Step 2 was split three ways and its third part split again. **Step 4 is complete as of 2d-5-4** — the first new implementation work since 2d-5-3 and the first phase in fifteen to change a line that is neither comment nor blank: `observationTransitions.ts` is new, and the rung moved off `1320 / 441 / 2307 / 188` for the first time since 2d-5-2c-1. Its review was **Codex, `ship-with-fixes`, 2 blockers and 3 SHOULD-FIX, all five re-derived and all five holding**; the two blockers were a comment claiming an atomicity the code did not give and a guard missing the question *is this coordinator still applying at all*. **Its fix changed six source files, so §7.1 commissions Phase 2d-5-4-A**, which is the next action |
-| _**2d-5-4**, **2d-5-4-A** and **2d-5-4-B** — the implementation step and the first two rounds of its tail_ | The observation state transitions, then two consecutive §7.1 rounds over the fix each one's predecessor left. **Components: none** | ✅ 2d-5-4 **complete**; 🔶 A and B each **`SUPERSEDED` by the next link and neither complete**. All three `ship-with-fixes` with **2 blockers** apiece, every finding re-derived before any was fixed and every one holding; the rungs are `1320 / 443 / 2380 / 189`, `… / 2389 / …` and `… / 2395 / …`. **Rows archived 2026-09-20 at 2d-5-4-C** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The rows of 2d-5-4 and of its first two rounds"*; the notes are `docs/decisions/2d-5-4{,-A,-B}-notes.md` and the reviews `docs/reviews/phase-2d-5-4{,-A,-B}.md` |
-| **2d-5-4-C** | The round `CLAUDE.md` §7.1 commissioned for 2d-5-4-B's fix — scoped to the four source files that fix changed and to its correction blocks in `2d-5-4-notes.md` and `2d-5-4-A-notes.md`. **Components: none** | 🔶 round taken and answered, every gate green at the new rung `1320 / 443 / 2404 / 189` on the tree it commits, and **`SUPERSEDED BY 2d-5-4-D`, never recorded as complete**. Risk class **high**; worker model **opus** (review by **Codex**, `autoclaude-review.sh` exiting 0 so no agent was spawned — **five consecutive Codex rounds**; one read-only re-derivation worker, then one fix worker). **Verdict `ship-with-fixes`, 1 blocker**, 3 SHOULD-FIX, **all four re-derived before any was fixed and all four holding**, one of them only **in part** — and **five more the review missed**. **The blocker is the previous round's own fix one field deeper**: `ownedRepair`'s `kept` arm passed `repair.selected` straight through, so the `SelectedMatch` this window installs keeps `commands.reloadDocument`'s own `MatchId`, and `isTheSameIdentity(selected.id, …)` is the **last conjunct** of three selection-follow guards, immediately before the `replaceSelection` each of them justifies; fixed by rebuilding the `SelectedMatch` field by field through `ownedMatchIdOf`. **One SHOULD-FIX needs no injected accessor and is production-reachable** — `noteDocumentStatus` bumps its per-file token whether or not a value changes, so a **superseded** reread's failure arm, re-stating a `stale` that was already there, took status ownership away from a newer read that had already succeeded and **suppressed its clear**: the file stayed marked stale permanently with the new bytes on screen. Fixed by **deleting that arm** — its own three fences proved the write could never change a value, and the private reread `report`s the failure itself. The other two: `open()` published `documents = rows` with **no generation re-check** after `ownedSummaryOf`'s reads and a caller-controlled iterator (in part — *"introduced by the summary copy"* is false, `documents = listed.value` already had the shape and the copy widened the window from one read to 2 + 7N), and the **initial `stale` mark on the host reread path was unfenced** with `ReconciliationWorkspace.rereadUnderGuard` carrying no predicate for the host to ask, fixed by an `owns: () => boolean` asked in the same synchronous block as the mark. The five the review missed: a **narrower wording of a struck claim surviving in source**, four further passages arguing the restatement harmless, **four more unfenced status writers** in `observationTransitions.ts`, `ownedSummaryOf`'s second ingress left uncovered — closed at the cause, by materializing the wire summary above `admit` — and one producer the re-derivation's own table omitted. **The fix changed four source files, so §7.1 commissions a round.** Notes `docs/decisions/2d-5-4-C-notes.md`; review `docs/reviews/phase-2d-5-4-C.md` |
+| **2d-5** | The browser coordinator and the open-write-surface registry — seven steps, of which two touch components | 🔶 in progress — **steps 1, 2 and 3 of 7 are complete and CLOSED**, tails and all. **Step 3's tail ran fourteen rounds, `2d-5-3-A` … `2d-5-3-N`, each commissioned by its predecessor's fix, and it ended by rule**: 2d-5-3-N's fix changed no source file, so `CLAUDE.md` §7.1 commissioned nothing and §7.2 closed the step — **the fourth tail this project has ended by rule and the longest of them**, with no owner ruling and no human stopping it. Its last three rounds were **two providers**, the `autoclaude-reviewer` agent then Codex twice. **The executable product was written once**: `332a751` is the last commit to change a non-comment line of `reconciliationCoordinator.ts`, and all thirteen lettered rounds changed zero, so the tail was fourteen rounds about whether the comments tell the truth. Step 2 was split three ways and its third part split again. **Step 4 is complete as of 2d-5-4** — the first new implementation work since 2d-5-3 and the first phase in fifteen to change a line that is neither comment nor blank: `observationTransitions.ts` is new, and the rung moved off `1320 / 441 / 2307 / 188` for the first time since 2d-5-2c-1. Its review was **Codex, `ship-with-fixes`, 2 blockers and 3 SHOULD-FIX, all five re-derived and all five holding**; the two blockers were a comment claiming an atomicity the code did not give and a guard missing the question *is this coordinator still applying at all*. **Its fix changed six source files, so §7.1 commissioned Phase 2d-5-4-A** — the first link of a tail now at **2d-5-4-D**, whose own fix commissions **2d-5-4-E**, the next action |
+| _**2d-5-4**, **2d-5-4-A**, **2d-5-4-B** and **2d-5-4-C** — the implementation step and the first three rounds of its tail_ | The observation state transitions, then three §7.1 rounds over the fix each one's predecessor left. **Components: none** | ✅ 2d-5-4 **complete**; 🔶 A, B and C each **`SUPERSEDED` by the next link and none complete**. All four `ship-with-fixes` — 2 blockers apiece, 1 for C — every finding re-derived before any was fixed and every one holding, C's fourth only **in part**; the rungs are `1320 / 443 / 2380 / 189`, `… / 2389 / …`, `… / 2395 / …` and `… / 2404 / …`. **Rows archived 2026-09-20**, the first three at 2d-5-4-C and C's own at 2d-5-4-D, to [`status-table.md`](docs/progress-archive/status-table.md); the notes are `docs/decisions/2d-5-4{,-A,-B,-C}-notes.md` and the reviews `docs/reviews/phase-2d-5-4{,-A,-B,-C}.md` |
+| **2d-5-4-D** | The round `CLAUDE.md` §7.1 commissioned for 2d-5-4-C's fix — scoped to the four source files that fix changed and to its correction blocks in `2d-5-4-notes.md`, `2d-5-4-A-notes.md` and `2d-5-4-B-notes.md`. **Components: none** | 🔶 round taken and answered, every gate green at the new rung `1320 / 443 / 2406 / 189` on the tree it commits, and **`SUPERSEDED BY 2d-5-4-E`, never recorded as complete**. Risk class **high**; worker model **opus** (review by **Codex**, `autoclaude-review.sh` exiting 0 so no agent was spawned — **six consecutive Codex rounds**; one read-only re-derivation worker, then one fix worker). **Verdict `ship-with-fixes`, 1 blocker and 0 SHOULD-FIX** — the shortest finding list this chain has had — **re-derived before it was fixed and holding in part**, and **five more found by sweeping**. **The blocker is the previous round's own fix, and the asymmetry it turns on is new**: `applyAddition` materializes the wire summary above `admit`, so seven caller-supplied getters and a `has` trap run before the arbitration — and while a `clear()` of the accepted-sequence map makes every `isNewest` fence answer `false`, **`admit` is the one operation a cleared map answers permissively**. A getter that re-opens the workspace therefore writes the closed epoch's sequence into the replacing one's map, and because a `DocumentId` is minted per path and lives as long as the process, that entry refuses *that same file's* first five hundred observations of the new epoch, silently. Fixed by asking `applyChange`'s own two lifecycle questions between the materialization and `admit`. **The half that does not hold is the attribution**: the window is older than the reordering the review blamed, which widened it from one getter to eight and closed the other side of `admit`. **The five the review missed**: **sixteen source comments in seven files claimed `open()` reallocates every document identity** and the Rust contract says the opposite — `Workspace::from_tree` mints per path, stable for the life of the process — which is the worst defect class here and was **load-bearing for the blocker's cost**; a **narrower wording of a claim this very phase struck** survived in `workspace.svelte.ts`, still naming the deleted host failure arm as a live reader; an `Added` after a `Removed` left a `removed` status standing over a present row, **production-reachable and fixed** because it closed inside the arm's own fence and decided nothing between two truths; and four record-only survivors. **The fix changed eight source files, so §7.1 commissions a round.** Notes `docs/decisions/2d-5-4-D-notes.md`; review `docs/reviews/phase-2d-5-4-D.md` |
 | **2d-5-3**, **2d-5-3-A** and **2d-5-3-B** | The drain lifecycle coordinator (`src/lib/browser/reconciliationCoordinator.ts`, `start()`/`dispose()` on `BrowserState`, the single-flight pump, all four triggers, the `{ epoch, watermark, lastDiscarded }` cursor and the registration/disposal race), then two review rounds over it. **Components: none** | 🔶 **each is `SUPERSEDED` by the next link and none is complete.** 2d-5-3's review returned `do-not-ship` — the first of the 2d-5 chain — with **2 blockers, both concurrency defects no gate could catch** and both re-derived by the orchestrator: a request stranded in the single-flight release window, and an epoch adopted from a drain taken **before** the open reached `ready`, which poisoned the cursor and silently killed reconciliation for the session. 2d-5-3-A (`ship-with-fixes`, 0 blockers) **re-derived both and they hold**, and found four more — two source comments claiming what the code does not give. 2d-5-3-B (`ship-with-fixes`, 0 blockers) found that 2d-5-3-A had replaced one unstated ordering with another. Each fix was comment-only and each changed source, so each commissioned the next. **Rows archived at 2d-5-3-C** to [`docs/progress-archive/status-table.md`](docs/progress-archive/status-table.md) under *"The three superseded rows of the 2d-5-3 chain"*; the notes are `docs/decisions/2d-5-3{,-A,-B}-notes.md` |
 | _**2d-5-3-C**, **2d-5-3-D**, **2d-5-3-E** and **2d-5-3-F** — four rounds, each `SUPERSEDED` by the next_ | Four consecutive §7.1 rounds over the same comment block. **Components: none** | 🔶 **each `SUPERSEDED`, none complete**; all four `ship-with-fixes`, **0 blockers**, every gate green at `1320 / 441 / 2307 / 188` throughout. Between them they established the tail's recurring shapes: a justification naming an ordering that does not exhaust the cases (C), **a correction that shipped stale in its own commit** (C), a coverage citation naming a case that drives neither the state nor any Rust (D), a false *absence* written to replace a false *coverage* claim (E), and **the first round whose findings were not all in its predecessor's fix**, whose *0 Medium* was read as convergence and was not (F). **Rows archived 2026-09-05 at 2d-5-3-J** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The four superseded rows of the 2d-5-3 chain, C through F"*, with the later rounds' corrections travelling inline; the notes are `docs/decisions/2d-5-3-{C,D,E,F}-notes.md` and the reviews `docs/reviews/phase-2d-5-3-{C,D,E,F}.md` |
 | _**2d-5-3-G** and **2d-5-3-H** — two rounds, each `SUPERSEDED` by the next_ | Two consecutive §7.1 rounds over the same comment block. **Components: none** | 🔶 **each `SUPERSEDED`, neither complete**; both `ship-with-fixes`, **0 blockers**, every gate green at `1320 / 441 / 2307 / 188` throughout. Between them they established two of the tail's recurring shapes: **a comment block asserting a proposition and its negation** ten lines apart, which had sat inside the edited block for two rounds past two reviewers and all four gates (G), and **a claim true only at an instant written as true now**, where the clause a fix deleted was the only one carrying the time index — so **a removal has to check what else the removed clause was carrying** (H). **Rows archived 2026-09-05 at 2d-5-3-K** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The two superseded rows of the 2d-5-3 chain, G and H"*, with the later rounds' corrections travelling inline; the notes are `docs/decisions/2d-5-3-{G,H}-notes.md` and the reviews `docs/reviews/phase-2d-5-3-{G,H}.md` |
@@ -245,8 +245,8 @@ any of them anything.
 ---
 ## Next action
 
-### Phase 2d-5-4-C — the round §7.1 commissioned for 2d-5-4-B's fix — is **taken and answered** and is **`SUPERSEDED BY 2d-5-4-D`**: Codex at `ship-with-fixes` with **1 blocker and 3 SHOULD-FIX**, all four re-derived and all four holding — one only in part — and five more found that the review missed.
-### The next action is **Phase 2d-5-4-D**, the review round `CLAUDE.md` §7.1 commissions because that fix changed four source files.
+### Phase 2d-5-4-D — the round §7.1 commissioned for 2d-5-4-C's fix — is **taken and answered** and is **`SUPERSEDED BY 2d-5-4-E`**: Codex at `ship-with-fixes` with **1 blocker and 0 SHOULD-FIX**, the blocker re-derived and **holding in part**, and five more found by sweeping that the review missed — one of them sixteen source comments claiming a guarantee the Rust contract denies.
+### The next action is **Phase 2d-5-4-E**, the review round `CLAUDE.md` §7.1 commissions because that fix changed eight source files.
 
 > **⚠️ ARCHIVE BEFORE YOU WRITE ANYTHING.** A record of this chain has cost between 16 and 132 lines,
 > and the **byte** bound is the one that binds. Move the closing phase's record and Next-action prose
@@ -254,10 +254,11 @@ any of them anything.
 > narrative to [`phase-2d.md`](docs/progress-archive/phase-2d.md), **before writing a word** — then
 > measure, then take rows if you still need them, and **measure again after the git-state row**, which
 > alone costs some 2,800 bytes. **A row the chain has itself superseded *may* move; the chain's head
-> may not**, and a *closed* phase's row may move as well. **2d-5-4-C is the measurement to plan
-> against**: two narrative archives freed 10,376 bytes, the record and this round's own row spent
-> 15,619, and it took **three status rows** — 2d-5-4's, closed, and 2d-5-4-A's and -B's, superseded —
-> replaced by one summary row, to come back under. Narrative alone has not been enough since 2d-5-4.
+> may not**, and a *closed* phase's row may move as well. **2d-5-4-D is the measurement to plan
+> against**: two narrative archives and **one** superseded status row — 2d-5-4-C's, folded into the
+> summary row that already carried 2d-5-4, -A and -B — freed enough for the record, the new head row
+> and the git-state row together. Narrative alone has not been enough since 2d-5-4, and one row was
+> enough here only because the round's finding list was short.
 > **What is left of the 2d-5-3 chain is N's row alone**, which is not superseded and may not move.
 > The figures are in the header, and **re-derive them on this file, never quote them.**
 
@@ -291,120 +292,116 @@ load-bearing for a claim in a file it does. The round-by-round account is in
 [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"The 2d-5-3 chain's per-round staging
 history"*.
 
-#### Phase 2d-5-4-C — the round `CLAUDE.md` §7.1 commissioned for 2d-5-4-B's fix
+#### Phase 2d-5-4-D — the round `CLAUDE.md` §7.1 commissioned for 2d-5-4-C's fix
 
-**Taken and answered, and `SUPERSEDED BY 2d-5-4-D` rather than complete**, because its own fix changed
+**Taken and answered, and `SUPERSEDED BY 2d-5-4-E` rather than complete**, because its own fix changed
 source. Risk class **high**; worker model **opus** — **no implementation worker**: one **read-only
 re-derivation** worker, then one fix worker, the shape this chain has settled on. Record
-[`docs/decisions/2d-5-4-C-notes.md`](docs/decisions/2d-5-4-C-notes.md); review
-[`docs/reviews/phase-2d-5-4-C.md`](docs/reviews/phase-2d-5-4-C.md); brief
-[`docs/reviews/phase-2d-5-4-C.brief.md`](docs/reviews/phase-2d-5-4-C.brief.md); the re-derivation
-[`docs/reviews/phase-2d-5-4-C.rederivation.md`](docs/reviews/phase-2d-5-4-C.rederivation.md).
+[`docs/decisions/2d-5-4-D-notes.md`](docs/decisions/2d-5-4-D-notes.md); review
+[`docs/reviews/phase-2d-5-4-D.md`](docs/reviews/phase-2d-5-4-D.md); brief
+[`docs/reviews/phase-2d-5-4-D.brief.md`](docs/reviews/phase-2d-5-4-D.brief.md); the re-derivation
+[`docs/reviews/phase-2d-5-4-D.rederivation.md`](docs/reviews/phase-2d-5-4-D.rederivation.md).
 
 **The review was Codex**, through `autoclaude-review.sh`, which **exited 0** so no agent was spawned —
-**five consecutive Codex rounds**. **Verdict `ship-with-fixes`, 1 blocker and 3 SHOULD-FIX.** **The
-report's finding bodies arrive truncated again**, ~180 characters each, so **not one was accepted on the
-report's strength**: all four were re-derived from the code by a read-only worker, and the orchestrator
-**spot-checked the decisive lines of all four and of the first thing the review missed**. **All four
-held**, one of them only **in part**, and the re-derivation corrected the review's anchor line for
-another (`2468`, not `3130`) and its mechanism for the blocker — the identity is **not** read after
-`select()`'s staleness check, which reads it nowhere; it is read as the last conjunct of three later
-selection-follow guards.
+**six consecutive Codex rounds**. **Verdict `ship-with-fixes`, 1 blocker and 0 SHOULD-FIX**, the
+shortest finding list of this chain. **The body arrived truncated for the fifth round running**, so it
+was **not** accepted on the report's strength: a read-only worker re-derived it from the code and swept
+by shape for what the review had missed, and the orchestrator spot-checked six decisive lines —
+`applyAddition`'s parameter list, the materialization window, `applyChange`'s two lifecycle arms,
+`accepted.clear()`'s stated justification, the surviving mention of the deleted host failure arm, and
+the Rust identity contract.
 
-**The blocker is the previous round's own fix one field deeper.** 2d-5-4-B taught `ownedMatchOf` to
-rebuild a `MatchId`, and `ownedRepair`'s `kept` arm still handed `repair.selected` through whole — so
-the `SelectedMatch` this window installs carries `commands.reloadDocument`'s object, and
-`isTheSameIdentity(selected.id, …)` is the **last thing** three adoption guards evaluate before the
-`replaceSelection` they justify. A getter there is arbitrary code inside the window the guard exists to
-close. Fixed by rebuilding the `SelectedMatch` field by field through `ownedMatchIdOf`, and the
-re-derivation established — by sweeping every writer of `selected` rather than by reading the finding —
-that this arm is the **only** unnormalized ingress into it.
+**The blocker HOLDS IN PART, and the asymmetry it turns on had not been seen before.** Every
+`isNewest` fence in `observationTransitions.ts` fails **safe** when the accepted-sequence map is
+cleared — a cleared map holds nothing, so nothing is newest. **`admit` is the one operation a cleared
+map answers permissively**, and `applyAddition` was the only arm running caller code above its own
+`admit`: the spread `{ ...route.summary, loaded: false }` runs one accessor per own enumerable key of a
+wire object with seven required members, and `'Unreadable' in route.content` runs a `Proxy` `has` trap.
+A getter there can call `BrowserState.open()`, which reaches `workspaceOpened` — and its
+`accepted.clear()` — before its own first await. The closed epoch's sequence is then written into the
+**replacing** epoch's map. **The cost is worse than the review said**, and it is worse for a reason the
+review could not have known: a `DocumentId` is minted per path and lives as long as the process, so the
+poisoned entry names the *same file*, and the new epoch numbers its observations from the first — its
+next five hundred statements about that file are refused as `superseded`, with nothing recording the
+refusal. **The half that does not hold is the attribution.** The review called it *introduced by M5's
+reordered reads*; the window is older — `route.summary.id` was already an argument evaluated before
+`admit` — and M5 **widened** it from one getter to eight while **closing** the other side, which is what
+its own JSDoc claims. **Not production-reachable**: wire values are JSON-parsed plain objects, and the
+one production re-entrancy candidate, `WriteSurfaceTransition`, is registered as a no-op.
 
-**One SHOULD-FIX is production-reachable and needs no injected accessor**, which makes it the first of
-this chain that a user could have met. `noteDocumentStatus` bumps its per-file write token whether or
-not the value changes. So a **superseded** reread's failure arm, re-stating a `stale` that was already
-there, advanced the token an **overlapping** newer read had captured in order to decide whether it might
-clear the mark — and that newer read had already succeeded. The clear was refused, permanently: the
-window showed the file's new bytes under a mark saying it was out of date, with nothing able to remove
-it. **The fix is to delete the arm**, and deleting it is the fix rather than a regression: the arm's own
-three fences proved the write could never change a *value* — they permit it only when nothing has
-written since the mark, so what stands there is already this arm's own `stale` — while the token it
-advanced was the whole of its effect. The failure is still reported, by the private reread at
-`workspace.svelte.ts:3084`, on the channel every other failure of this state uses.
+**The fix is the two questions `applyChange` already asks**, asked between the materialization and
+`admit` in one synchronous block with it, and **the review's own proposal — a lifecycle token carried
+on the batch — was refused** as machinery this round has no evidence for. The outcome value was
+**derived rather than assumed**: `'superseded'` would claim an arbitration that never ran, and
+`workspaceOpened` empties the outcome records in the same block as the clear, so that entry would land
+as the *replacing* workspace's first record. A ninth arm, **`'lifecycleMoved'`**, says what is true —
+and the record states plainly that it buys **no** compile-time check, because nothing switches over
+that union. That correction is to the re-derivation, not to the review.
 
-**The other two are the same question asked one step further out.** `open()` re-checks its generation
-after the projection loop — 2d-5-4-B's own blocker — and still published `documents = rows` with **no
-check** after `ownedSummaryOf`'s field reads and a caller-controlled iterator; that is `HOLDS IN PART`,
-because *"introduced by the summary copy"* is false: `documents = listed.value` already had the shape,
-and the copy widened the window from one read to 2 + 7N. And the **initial `stale` mark on the host
-reread path** was unfenced, with `ReconciliationWorkspace.rereadUnderGuard` carrying no predicate for a
-host to ask — so the *question* travels now, as `owns: () => boolean`, asked in the same synchronous
-block as the mark. **Nothing in that type forces the caller to hand over a question that is really about
-ownership**, and its header says so.
-
-**Five things the review missed, each found by the re-derivation sweeping by shape.** A **narrower
-wording of a claim struck last round survived in source** at `workspace.svelte.ts:709–712`, which made
-2d-5-4-B's own correction block in `2d-5-4-notes.md` an overclaim — the third time this project has
-closed a finding everywhere but one narrower instance. **Four passages** argue the failure-arm
-restatement is harmless, true of the value and false of the token, which is exactly why nobody saw it.
-**Four more status writers** in `observationTransitions.ts` run host members between the `admit` and
-their write; all four are now fenced, and the **one** left unfenced — `applyUnreadable` — is justified
-on the code (no statement stands between the two, and both values it reads are own data properties of a
-literal built before arbitration), with its header saying that inserting a statement would end that
-silently. `ownedSummaryOf`'s **second** ingress had no check of its own, and is closed at the cause
-rather than at the ingress: `applyAddition` materializes the wire summary **above** `admit`, so a
-re-entrant `Removed` can no longer have its removal undone. And the re-derivation's own writer table
-omitted one producer, `adoptAfterTheDeletion`, which the fix worker verified before recording.
+**Five things the review missed, each found by sweeping by shape.** **Sixteen source comments in seven
+files** said `open()` reallocates every document identity; `Workspace::from_tree`'s own contract says
+identities come from the session's path table and are stable across opens, and `identity_of` mints per
+path into a process-wide table. It is this project's worst defect class, and it was **load-bearing**:
+the justification for `accepted.clear()` rested on it, and the true justification is the one the
+blocker's cost turns on. Every instance was rewritten to what is true **of its site** — the word
+*reallocat* now appears nowhere under `src/`, `crates/`, `src-tauri/` or `scripts/`. A **narrower
+wording of a claim this very phase struck** still named the deleted host failure arm as a live reader
+of `documents` at `workspace.svelte.ts`, the fourth round running in which the survivor shape has
+produced a finding. An **`Added` after a `Removed`** left `{ kind: 'removed' }` standing over a present
+row until the next `Changed` — *delete a file, recreate it* — because neither `addDocument` nor the
+removal touches `externalStatuses` and an addition requests no reread; it is **production-reachable**
+and it was fixed, because it closed inside `applyAddition`'s own `isNewest` fence and decided nothing
+between two truths, which is what would have made it 2d-5-5's. And four record-only survivors were
+struck rather than reworded.
 
 **Two things this round did not do, stated rather than glossed.** It added **no user-facing string in
-any language** and touched **no `.svelte` file**, so no window reading is owed. And it left
-`npm run build` at **189** modules: nothing new lives in a module of its own, so the ladder's *one
-module per new source module* rule predicts no movement and none happened.
+any language** and touched **no `.svelte` file**, so no window reading is owed. And it left `npm run
+build` at **189** modules: nothing new lives in a module of its own.
 
-**One candidate case was discarded, and it was measured rather than reasoned.** The re-derivation's own
-recipe for the second finding settles the two overlapping reads in the order opposite to its failure
-sequence; written that way the case passed against **both** trees. The shipped case settles the older
-failure first. Beside it, deleting the failure arm removed what one of 2d-5-4-B's cases measured, so
-that case was **re-pointed** at `creatorEligibility` inside the coordinator's guard and re-confirmed to
-fail without the ingress copy.
+**What it deliberately left standing.** The same false identity claim stands **23 times across ten
+files under `docs/`** — record, so no round, and §9 item 3 carries it as a sweep to run rather than a
+number to trust. And the blocker's class is not closed, only its driver is: the batch loop re-asks no
+lifecycle question **between** observations, which is not a defect today and stops being about an
+injected boundary the moment 2d-5-5 gives `WriteSurfaceTransition` a body.
 
-#### The next action is **Phase 2d-5-4-D — the round §7.1 commissions for 2d-5-4-C's fix**
+#### The next action is **Phase 2d-5-4-E — the round §7.1 commissions for 2d-5-4-D's fix**
 
-**Scoped to that fix's diff**: `src/lib/browser/workspace.svelte.ts`,
-`src/lib/browser/observationTransitions.ts` and their two suites, plus
-`docs/decisions/2d-5-4-C-notes.md` in full and the correction blocks this round wrote into
-`2d-5-4-notes.md`, `2d-5-4-A-notes.md` and `2d-5-4-B-notes.md`. **This is a review round, not
+**Scoped to that fix's diff**: `src/lib/browser/observationTransitions.ts`,
+`src/lib/browser/reconciliationCoordinator.ts`, `src/lib/browser/workspace.svelte.ts`,
+`src/lib/browser/writeSurfaceRegistry.ts` and four suites — `observationTransitions.test.ts`,
+`workspace.test.ts`, `reconciliationCoordinator.test.ts` and `src/lib/components/DetailPane.test.ts` —
+plus `docs/decisions/2d-5-4-D-notes.md` in full and the correction blocks this round wrote into
+`2d-5-4-notes.md`, `2d-5-4-B-notes.md` and `2d-5-4-C-notes.md`. **This is a review round, not
 implementation**: it takes no implementation worker, and its own fix decides whether another round
 follows, by §7.1 and nothing else.
 
 **Five things to point it at first**, each because the fix that answered a finding is where the next
 finding has lived in every tail this project has run:
 
-1. **The deleted failure arm.** It is the only fix of this chain that removed behaviour rather than
-   adding a check. The argument is that the arm could never change a value and that `report` already
-   carries the failure — **check both halves against the code**, and check what else the deleted clause
-   was carrying: `CLAUDE.md` records 2d-5-3-H as exactly that failure, a removal taking the only clause
-   that carried a time index with it.
-2. **`ownedRepair`'s rebuilt `SelectedMatch`.** It now claims the compile-error property the other four
-   normalizers claim, with the same optional-member caveat. Does `SelectedMatch` itself have an optional
-   member; is `ownedMatchIdOf` applied to *every* identity the arm carries; and is the swept claim —
-   *this is the only unnormalized ingress into `selected`* — still true after the sweep added a producer
-   the first table missed?
-3. **`owns` on the `ReconciliationWorkspace` interface.** A third `() => boolean` parameter beside
-   `guard`, distinguished only by its name and its header. Do the two call sites pass the right one; can
-   any caller reach the member without one; and does `stillOurs` answer the question the mark needs, at
-   the moment the mark is written rather than when the closure was built?
-4. **The four newly fenced writers in `observationTransitions.ts`, and the fifth left unfenced.** The
-   justification for `applyUnreadable` is positional in the precise sense this chain has twice found
-   false — *nothing stands between these two lines*. Is that true of every path into it, and does the
-   `routeObservation` literal really carry own data properties at both of the reads it makes?
-5. **The correction blocks, in three files now.** One of them corrects a correction. Check each against
-   the code it describes, and sweep for a **narrower wording** of what each one struck — that is what
-   this round found still standing from the last one, and what 2c-4a-3a's round 2 found before it.
+1. **The lifecycle fence in `applyAddition`.** Does it sit above **every** caller-controlled statement
+   of that arm, and does anything between it and `admit` run caller code? Are `stillApplying` and
+   `epochNow` really closures over the coordinator's own `let`s at both of this module's call sites,
+   and is `session.epoch` an own data property? And the discrimination claim: `workspaceOpened` sets
+   `epoch = 0` **before** the clear, and an adopted epoch is non-zero — check both halves, including
+   what happens when no epoch has been adopted yet.
+2. **`'lifecycleMoved'`, a ninth arm of a union nothing switches over.** The record says it buys no
+   compile-time check. Check that, and check the two docs it leans on — `'superseded'`'s and
+   `observationsDropped`'s — still say what the record quotes. Does any counter, test helper or
+   assertion treat an unknown outcome as a failure or as an admission?
+3. **The sixteen rewritten comments.** They are now six distinct justifications rather than one
+   sentence repeated, so **no single sweep finds them again**. Re-derive the Rust contract for
+   yourself (`Workspace::from_tree`, `identity_of`, `session_identities`) and check each rewritten
+   sentence against it — and sweep by shape for a seventeenth instance and for any **narrower
+   wording** left behind, which is what the last four rounds each found.
+4. **The unconditional status write in `applyAddition`.** It now writes `null` where the content
+   projected. Is the `isNewest` fence around it the same fence `applyRemoval` uses; can it clear a
+   mark a **newer** observation wrote; and is *"there is one newest truth at that moment"* true of
+   every path that reaches it, including a same-batch `Named` row and an in-flight reread's capture?
+5. **The correction blocks, in three record files, one of which corrects a correction.** Check each
+   against the code it describes, and sweep for a narrower wording of what each one struck.
 
-**Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-C-notes.md`'s closing section carries this round's
-marked items, and none of them names an unfixed correctness defect in a source file.
-
+**Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-D-notes.md` §9 carries this round's marked items, and
+none of them names an unfixed correctness defect in a source file.
 #### The candidate corrective phase this chain produced, still not discharged
 
 **Four cross-file `file:line` citations in comments under `src/` are stale right now.** `src/` holds 10
@@ -477,44 +474,37 @@ pristine tree, never from the total.**
 ---
 ## Verification baseline
 
-### The rung moved by nine, and only by this round's own cases
+### The rung moved by two, and only by this round's own cases
 
-**With the instrument in the working tree the four commands answer `1320 / 443 / 2404 / 189`** —
+**With the instrument in the working tree the four commands answer `1320 / 443 / 2406 / 189`** —
 `cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
-full by the orchestrator at 2d-5-4-C**, on the post-fix tree, each command run on its own:
+full by the orchestrator at 2d-5-4-D**, on the post-fix tree, each command run on its own and nothing
+run concurrently with `cargo`:
 
-| Gate | Was at 2d-5-4-B | Now | Why it moved, or did not |
+| Gate | Was at 2d-5-4-C | Now | Why it moved, or did not |
 |---|---|---|---|
 | `cargo test --workspace` | 1320 | **1320** | no Rust changed — `git diff --numstat -- crates/ src-tauri/` names only the instrument's `main.rs` hook |
-| `npm run check` files | 443 | **443** | no file added or removed; the fix is inside four existing files |
-| `npm test` | 2395 | **2404** | +9, the cases this round's fixes are pinned by, one of them re-pointed rather than new |
+| `npm run check` files | 443 | **443** | no file added or removed; the fix is inside eight existing files |
+| `npm test` | 2404 | **2406** | +2, the two cases this round's two behavioural fixes are pinned by |
 | `npm run build` modules | 189 | **189** | no new module: every fix is inside a function that already existed |
 
-**The first `cargo test` run of this phase measured nothing, and the figure above is the second.** The
-command was issued with a stray argument after `--`, which `libtest` takes as a **filter**: all 26
-binaries answered `ok` with `0 passed` and everything *filtered out*, and the shell reported exit 0.
-**A zero-failure exit status is not a measurement** — the sum and the `filtered out` column are — and
-this is the same class as 2d-5-3-L's stale-`target/` reading, caught this time by asking what the 26
-lines actually said rather than by trusting the status. Re-run correctly, `cargo test --workspace --
---test-threads=1` was read from a file, summed over **26** `test result` lines *and* checked by the
-complementary question — no line lacking `0 failed` — and it completed on the **first attempt**, so the
-stale-`target/` host finding has now not recurred for six consecutive phases. `cargo clippy --workspace
---all-targets -- -D warnings` (exit 0), `cargo fmt --check` (exit 0) and `cargo tree -p
-espansoconfig-core | rg tauri` (finds nothing) are clean. **Both bundle oracles were read and both lines
-are reported**: server-only markers **absent**, client-only markers **present (2)**. **The instrument's
-pin was re-checked** and holds at `5 insertions(+), 1 deletion(-)`.
+**Both complementary questions were asked of the Rust gate**, not one: the sum over **26** `test
+result` lines, no line lacking `0 failed`, **and no line lacking `0 filtered out`** — the last because
+2d-5-4-C's first run measured nothing while exiting 0, a stray argument after `--` having filtered
+every test out. It completed on the first attempt, so the stale-`target/` host finding has not
+recurred for seven phases. Clippy (exit 0), `cargo fmt --check` (exit 0) and `cargo tree -p
+espansoconfig-core | rg tauri` (finds nothing) are clean. **Both bundle oracles were read and both lines are reported**: server-only markers
+**absent**, client-only markers **present (2)**. **The instrument's pin was re-checked** and holds at
+`5 insertions(+), 1 deletion(-)`.
 
-**No gate caught any of the four findings, and three of the four no gate could have** — they are
-re-entrancy or ordering defects reachable only through an injected accessor. **The fourth is the
-exception, and it is the first of this chain that is production-reachable**: two overlapping rereads,
-no injected anything, and the suite had no case that combined them. **Nine cases now pin the fixes, and
-each was confirmed to fail against the pre-fix code** — the fix worker reverted each change in the tree,
-ran the one suite, recorded the message and restored it; the messages are in
-`docs/decisions/2d-5-4-C-notes.md`. **One candidate was run and found to pass both ways, and was
-discarded**: written in the re-derivation's own order it settles the newer read first, which is the
-order the defect does not need. That is a stronger check than the previous round's three rejected
-by argument, and the notes record the distinction rather than blurring it.
-
+**No gate caught the blocker and none could have** — it is reachable only through an injected
+accessor. **The `Added`-after-`Removed` status residue is the exception and it needed no accessor at
+all**: two batches, a watcher removal and a recreation, and no case in either suite had combined them.
+**Two cases now pin the two behavioural fixes, and each was confirmed to fail against the pre-fix
+code** — reverted, run, message recorded, restored; the messages are in `2d-5-4-D-notes.md` §8, with
+**two further measurements** taken by suspending the blocker case's first assertion so the two it masks
+could be read. **Nothing was discarded**: no candidate passed against both trees. The three
+comment-only fixes have no case and the record says so rather than implying one.
 ### The ladder's live rung
 
 **`1320 / 443 / 2404 / 189`**, at 2d-5-4-C. The three rungs below it are `1320 / 443 / 2395 / 189` at 2d-5-4-B, `1320 / 443 / 2389 / 189` at 2d-5-4-A and `1320 / 443 / 2380 / 189` at 2d-5-4. Below them is `1320 / 441 / 2307 / 188`, held from
@@ -697,6 +687,7 @@ all of it is in `git log`._
 | **2d-5-4-A — the round §7.1 commissioned for 2d-5-4's fix.** Verdict `ship-with-fixes`, **2 blockers and 4 SHOULD-FIX**, reviewed by **Codex** (`autoclaude-review.sh` exited 0, so no agent was spawned — three consecutive Codex rounds), bodies **truncated again**, so **all six were re-derived from the code by a read-only worker and five of them spot-checked by the orchestrator; all six held** — five in source, one in the record **and** in source. The two blockers were one defect: `open()` retained the commands' own projection objects, so `installView`'s `id` comparison over `views` and `repairAfter`'s reads of `next.matches` ran caller-controlled accessors **after** the final guard, and 2d-5-4's own fix had written into source that `replaceSelection` bounds the repair — which it does not, it bumps a counter. Fixed at **ingress**: `ownedProjectionOf` copies field by field at all nine of them, typed so a new required field is a compile error, and its JSDoc names the two-level depth and what is still the command's object below it. Three SHOULD-FIX were a second single defect — a status write that never asks whether it still owns the status — fixed by a per-document write token, by fencing the two guard arms above the ownership question **without touching the decision order**, and by moving the clear into the installation block so an explicit reread can clear a mark that had been permanent. The fourth was a reachability claim false in the record **and** in source: `readFileText()` sends `document_text` after a reread installs. Every gate green on the post-fix tree: `1320 / 443 / 2389 / 189`, 26 `test result` lines with none lacking `0 failed`, both bundle oracles read, the instrument's pin holding at `5 insertions(+), 1 deletion(-)`. Nine cases pin the six fixes and **each was confirmed to fail against the pre-fix code**; two candidates were discarded for passing both ways. Stages `PROGRESS.md`, `PROGRESS.json`, `docs/` and `src/lib/browser/` by path; nothing under `src-tauri/` and no `.svelte` file; the four harness paths stay uncommitted. Two narrative archives (128 + 33 lines) before a word of the record, no status row moved. **The fix changed four source files, so §7.1 commissions Phase 2d-5-4-B. `SUPERSEDED BY 2d-5-4-B`** | **`ee78429`** | ✅ pushed to `origin/main` |
 | **2d-5-4-B — the round §7.1 commissioned for 2d-5-4-A's fix.** Verdict `ship-with-fixes`, **2 blockers and 4 SHOULD-FIX** by **Codex** (four consecutive Codex rounds), bodies truncated, so all six were re-derived from the code and all six held — five in source, one in the record — plus three the review missed. Both blockers were 2d-5-4-A's own fix one level down or one step later: `open()` normalizing after its last generation check, and `ownedMatchOf` keeping `id: match.id`. Every gate green at `1320 / 443 / 2395 / 189`, six cases pinning five source fixes, each confirmed against the pre-fix code. **Row compressed 2026-09-20 at 2d-5-4-C**; the narrative is in [`next-action-history.md`](docs/progress-archive/next-action-history.md) and the record is `docs/decisions/2d-5-4-B-notes.md`. **`SUPERSEDED BY 2d-5-4-C`** | **`834ed1b`** | ✅ pushed to `origin/main` |
 | **2d-5-4-C — the round §7.1 commissioned for 2d-5-4-B's fix.** Verdict `ship-with-fixes`, **1 blocker and 3 SHOULD-FIX**, reviewed by **Codex** (`autoclaude-review.sh` exited 0, so no agent was spawned — **five consecutive Codex rounds**), bodies **truncated again**, so **all four were re-derived from the code by a read-only worker and all four spot-checked by the orchestrator; all four held**, one only in part, **and the re-derivation found five the review missed**. The blocker: `ownedRepair`'s `kept` arm passed `repair.selected` through, so the installed `SelectedMatch` kept the command's `MatchId` and `isTheSameIdentity` reads it as the **last conjunct** of three selection-follow guards; fixed by rebuilding it through `ownedMatchIdOf`. The one SHOULD-FIX that needs **no injected accessor**: a superseded reread's failure arm re-stated a `stale` already there and so advanced the per-file token an overlapping newer read had captured, **suppressing that read's clear permanently**; fixed by deleting the arm, whose own fences proved it could never change a value. The other two: a generation re-check before `documents = rows`, and an `owns: () => boolean` on `rereadUnderGuard` asked in the same synchronous block as the initial mark. The five missed: a narrower wording of a struck claim surviving in source, four passages arguing the restatement harmless, four more unfenced status writers (all fixed; the fifth is justified on the code), `ownedSummaryOf`'s second ingress closed at the cause, and one producer the re-derivation's own table omitted. Every gate green on the post-fix tree: `1320 / 443 / 2404 / 189`, 26 `test result` lines with none lacking `0 failed` — **the first `cargo test` run of the phase measured nothing and was caught by reading the lines rather than the exit status** — both bundle oracles read, the instrument's pin holding at `5 insertions(+), 1 deletion(-)`. Nine cases pin the fixes, each confirmed to fail against the pre-fix code, and **one candidate was run and discarded for passing both ways**. Stages `PROGRESS.md`, `PROGRESS.json`, `docs/` and `src/lib/browser/` by path; nothing under `src-tauri/` and no `.svelte` file; the four harness paths stay uncommitted. Two narrative archives, **three status rows** — 2d-5-4's, closed, and 2d-5-4-A's and -B's, superseded — and one row compressed in place. **The fix changed four source files, so §7.1 commissions Phase 2d-5-4-D. `SUPERSEDED BY 2d-5-4-D`** | **`f3ba2cd`** | ✅ pushed to `origin/main` |
+| **2d-5-4-D — the round §7.1 commissioned for 2d-5-4-C's fix.** Verdict `ship-with-fixes`, **1 blocker and 0 SHOULD-FIX**, reviewed by **Codex** (`autoclaude-review.sh` exited 0, so no agent was spawned — six consecutive Codex rounds), body truncated, so it was re-derived from the code by a read-only worker and spot-checked by the orchestrator: **HOLDS IN PART**, the attribution being the half that fails. `applyAddition` ran eight caller-supplied reads above its own `admit`, and `admit` is the one operation a cleared accepted-sequence map answers **permissively** while every `isNewest` fence answers `false` — so a getter that re-opened the workspace poisoned the replacing epoch's map for a **path-stable** identity. Fixed with `applyChange`'s own two lifecycle questions and a ninth outcome arm, `lifecycleMoved`, whose record says in as many words that it buys no compile-time check. **Five more found by sweeping**: sixteen source comments in seven files claiming `open()` reallocates document identities, which `Workspace::from_tree` denies and which was load-bearing for the blocker's cost; a narrower wording of a claim this phase struck, still live in `workspace.svelte.ts`; a **production-reachable** `removed` status left standing over a recreated file, fixed inside the arm's own fence; and four record-only survivors. Gates `1320 / 443 / 2406 / 189`, each command run on its own, both bundle oracles read, the instrument's pin re-checked. **Eight source files changed, so §7.1 commissions 2d-5-4-E. `SUPERSEDED BY 2d-5-4-E`** | `pending` | ⏳ |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed

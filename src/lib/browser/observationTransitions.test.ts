@@ -1146,6 +1146,98 @@ describe('an addition', () => {
     expect(workspace.rows).toEqual([]);
     expect(workspace.statuses).toEqual([{ document: 42, status: { kind: 'removed' } }]);
   }); // End of the addition-ingress case
+
+  it('refuses the addition when the summary’s own getter reopened the workspace', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    let sprung = false;
+    // **The other half of the same seam, and the opposite answer.** The case above
+    // drives a getter that admits something *newer*, which makes `admit` refuse.
+    // This one resets the lifecycle, which makes `admit` **accept**: its contract
+    // is strictly greater than what is held, and a cleared map holds nothing. Every
+    // `isNewest` fence in the module fails safe across the same event; `admit` is
+    // the one operation that does not, which is why this arm asks the session
+    // before it.
+    const summary: DocumentSummary = {
+      ...makeSummary({ id: 42, relativePath: 'match/new-42.yml' }),
+      /**
+       * Answers the path, and reopens the workspace on the way.
+       *
+       * Exactly what `BrowserState.open()` does synchronously before its first
+       * await: `workspaceOpened` clears the accepted-sequence map and drops the
+       * adopted epoch, both while this spread is still running.
+       *
+       * @returns The row's path.
+       */
+      get relative_path(): string {
+        if (!sprung) {
+          sprung = true;
+          sequences.clear();
+          session.live = EPOCH + 1;
+        }
+        return 'match/new-42.yml';
+      }
+    };
+
+    expect(
+      apply(
+        {
+          Added: {
+            sequence: 500,
+            document_summary: summary,
+            content: {
+              Projected: {
+                disk: makeDocument({ id: 42, relativePath: 'match/new-42.yml' }),
+                findings: []
+              }
+            }
+          }
+        },
+        workspace,
+        session,
+        sequences
+      )
+    ).toBe('lifecycleMoved');
+
+    expect(sprung).toBe(true);
+    // The superseded workspace's row does not land in the one replacing it.
+    expect(workspace.added).toEqual([]);
+    expect(workspace.rows).toEqual([]);
+    // **The assertion that measures the finding rather than its symptom.** An
+    // admitted 500 here would sit in the *new* epoch's map, and that epoch numbers
+    // its own observations from one — so the first five hundred things it ever said
+    // about this file, whose identity is path-stable and therefore the same number,
+    // would be refused as `superseded` with nothing anywhere recording it.
+    expect(sequences.sequenceFor(42)).toBe(0);
+  }); // End of the addition-lifecycle case
+
+  it('clears a removal’s status when the file comes back', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+
+    expect(
+      apply(
+        removal(7, { Addressable: { document: 42, relative_path: 'match/new-42.yml' } }),
+        workspace,
+        session,
+        sequences
+      )
+    ).toBe('removed');
+    expect(workspace.statuses).toEqual([{ document: 42, status: { kind: 'removed' } }]);
+
+    // A later batch, so the same-batch ordering `applyRemoval`'s own fence handles
+    // is not what is being measured here: the path is simply back. `addDocument`
+    // clears no status and an addition requests no reread (ruling 30), so the only
+    // thing that can retract the `removed` is this arm.
+    expect(apply(addition(8, 42), workspace, session, sequences)).toBe('added');
+    expect(workspace.added.map((summary) => summary.id)).toEqual([42]);
+    expect(workspace.statuses).toEqual([
+      { document: 42, status: { kind: 'removed' } },
+      { document: 42, status: null }
+    ]);
+  }); // End of the addition-after-removal status case
 }); // End of the "addition" suite
 
 describe('a Named identity the open workspace refuses', () => {

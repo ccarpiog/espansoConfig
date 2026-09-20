@@ -75,11 +75,13 @@
  *   registered target, which is what lets {@link WriteSurfaceRegistry.generation}
  *   count every change to what a reader sees.
  * - **What that copy does not force is that the values stay meaningful.** A
- *   `DocumentId` is session-local and `open()` in `./workspace.svelte.ts`
- *   reallocates the identities of the documents it reloads, so a registration that
- *   survives a workspace replacement names a `DocumentId` that now denotes a
- *   different file. Copying the value freezes the *number*, never what it denotes,
- *   and no operation here moves for a reallocation.
+ *   `DocumentId` is session-local, and although the identity itself is stable — it
+ *   is minted per path and lives as long as the process — `open()` in
+ *   `./workspace.svelte.ts` replaces every projection behind it, so a registration
+ *   that survives a workspace replacement names a surface about a workspace this
+ *   application no longer shows, over a file the replacing one may not hold at
+ *   all. Copying the value freezes the *number*, never what this session still
+ *   knows about it, and no operation here moves for a workspace replacement.
  * - **A pairing the union cannot represent is refused, not coerced**, and the
  *   refusal is a thrown `TypeError`; {@link WriteSurfaceRegistry.registerWriteSurface}
  *   says which pairing and why that answer.
@@ -343,9 +345,10 @@ export interface WriteSurfaceRegistry {
    * that nothing relevant changed. **Nothing forces a host to register at all**, so
    * an unmoved counter over an empty registry says that nobody registered and not
    * that no write surface is open — `competingSurfaceFor`'s own limitation,
-   * inherited. And a `DocumentId` a stored surface names can be reallocated by
-   * `open()` in `./workspace.svelte.ts` with no registry operation at all, so this
-   * counter does not promise that a surface still names the file it named.
+   * inherited. And a stored surface can be left naming a workspace `open()` in
+   * `./workspace.svelte.ts` has replaced, with no registry operation at all, so
+   * this counter does not promise that a surface is still about a file this
+   * application holds.
    *
    * @returns The current generation; zero for a registry nothing has registered
    *   with.

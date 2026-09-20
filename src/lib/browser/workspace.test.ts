@@ -1962,10 +1962,10 @@ describe('reading one file again', () => {
     // projection had never been replaced compares equal across two workspaces;
     // `rereadGenerations` is monotonic and `open()` leaves it alone, so it counts
     // straight through the replacement without ever encoding which workspace a read
-    // belonged to. Meanwhile the identities themselves are reallocated by the load,
-    // so an answer from the closed workspace installed into the open one describes a
-    // file this state is not showing. `openGeneration` is the only capture that
-    // catches it.
+    // belonged to. Meanwhile the load replaces every projection behind those
+    // identities — which are themselves path-stable — so an answer from the closed
+    // workspace installed into the open one describes bytes this state is not
+    // showing. `openGeneration` is the only capture that catches it.
     const reload = deferred<CommandResult<DocumentView>>();
     const commands: BrowserCommands = {
       ...scriptedCommands(),

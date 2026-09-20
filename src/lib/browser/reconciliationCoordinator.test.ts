@@ -1587,7 +1587,7 @@ describe('the per-document accepted sequences', () => {
     coordinator.dispose();
   }); // End of the two-sequence-states case
 
-  it('is cleared by an open, because identities are reallocated by one', async () => {
+  it('is cleared by an open, because the next epoch restarts its sequences', async () => {
     const control = controlledHost();
     const events = controlledEvents(true);
     const coordinator = createReconciliationCoordinator(control.host, events.source);

@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T15:32:42Z",
+ "updated": "2026-09-20T16:30:21Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -114,7 +114,7 @@
    "title": "2d step 5 — live reconciliation, seven steps",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Seven steps; 1 to 3 closed, step 4 closed and its review tail is at its fourth link, 2d-5-4-D."
+   "summary": "Seven steps; 1 to 3 closed, step 4 closed and its review tail is at its fifth link, 2d-5-4-E."
   },
   {
    "id": "2d-5-1",
@@ -303,9 +303,17 @@
   {
    "id": "2d-5-4-D",
    "title": "The round §7.1 commissions for 2d-5-4-C's fix",
+   "status": "skipped",
+   "risk": "high",
+   "summary": "Superseded by 2d-5-4-E: the round was taken, its one blocker re-derived and fixed plus five more found by sweeping, and its own fix changed eight source files.",
+   "review": "docs/reviews/phase-2d-5-4-D.md"
+  },
+  {
+   "id": "2d-5-4-E",
+   "title": "The round §7.1 commissions for 2d-5-4-D's fix",
    "status": "queued",
    "risk": "high",
-   "summary": "Not started; the round CLAUDE.md 7.1 commissions because 2d-5-4-C's fix changed four source files."
+   "summary": "Not started; the round CLAUDE.md 7.1 commissions because 2d-5-4-D's fix changed eight source files."
   },
   {
    "id": "2d-5-5",
