@@ -1609,6 +1609,108 @@ describe('the per-document accepted sequences', () => {
     expect(coordinator.observationOutcomes()).toEqual([]);
     coordinator.dispose();
   }); // End of the cleared-by-open case
+
+  it('writes nothing when the batch’s own getter reopened the workspace', async () => {
+    const control = controlledHost();
+    const coordinator = createReconciliationCoordinator(
+      control.host,
+      controlledEvents(true).source
+    );
+    coordinator.start();
+    await flush();
+
+    // **The lifecycle capture, from the one side only a coordinator case can drive**
+    // — Phase 2d-5-4-E. `accept()` used to read the batch's own members *above* the
+    // session it builds, so a getter that reopened the workspace from inside one of
+    // those reads left `session.epoch` holding the **post-reset** value: every fence
+    // in `observationTransitions.ts` then compared the replacement with itself and
+    // passed.
+    let sprung = false;
+    const trap: ReconciliationBatch = {
+      epoch: EPOCH,
+      discarded: 0,
+      observations: [addition(500, 42)],
+      /**
+       * Answers the watermark, and reopens the workspace on the way.
+       *
+       * Exactly what `BrowserState.open()` does synchronously before its first
+       * await — and it is this coordinator's own door, so nothing is simulated.
+       *
+       * @returns The batch's newest sequence.
+       */
+      get newest_sequence(): number {
+        if (!sprung) {
+          sprung = true;
+          coordinator.workspaceOpened('/tmp/other');
+        }
+        return 500;
+      }
+    };
+    control.answer({ ok: true, value: trap });
+    await flush();
+
+    expect(sprung).toBe(true);
+    // The closed lifecycle's row does not land in the workspace replacing it, and
+    // its sequence does not land in that workspace's map — where it would refuse
+    // the new epoch's first five hundred observations of this same path-stable
+    // identity, each answering `superseded` with nothing recording the refusal.
+    expect(control.added).toEqual([]);
+    expect(coordinator.acceptedSequence(42)).toBe(0);
+    // Nothing of the batch was written at all, the cursor included: the reads that
+    // feed it now happen above the comparison rather than interleaved with it.
+    expect(coordinator.cursor()).toEqual({ epoch: 0, watermark: 0, lastDiscarded: 0 });
+    expect(coordinator.drains()[0]?.outcome).toBe('staleOpen');
+    // Nothing reached an arm, so nothing was recorded — and `workspaceOpened`
+    // emptied the list in the same synchronous block as the map.
+    expect(coordinator.observationOutcomes()).toEqual([]);
+    coordinator.dispose();
+  }); // End of the reopened-mid-read case
+
+  it('writes nothing when the command answer’s own getter reopened the workspace', async () => {
+    const control = controlledHost();
+    const coordinator = createReconciliationCoordinator(
+      control.host,
+      controlledEvents(true).source
+    );
+    coordinator.start();
+    await flush();
+
+    // **Where the capture is taken, which the case above cannot tell.** That one
+    // passes with the lifecycle captured anywhere above the batch's own members —
+    // including as `accept()`'s first statement. This one moves the lifecycle from
+    // a getter on the **`CommandResult`**, which `runOneDrain` reads on the line
+    // that calls `accept`, so only a capture taken before that line survives it.
+    let sprung = false;
+    const answer: CommandResult<ReconciliationBatch> = {
+      ok: true,
+      /**
+       * Answers the batch, and reopens the workspace on the way.
+       *
+       * @returns The batch this drain is answering with.
+       */
+      get value(): ReconciliationBatch {
+        if (!sprung) {
+          sprung = true;
+          coordinator.workspaceOpened('/tmp/other');
+        }
+        return {
+          epoch: EPOCH,
+          discarded: 0,
+          newest_sequence: 500,
+          observations: [addition(500, 42)]
+        };
+      }
+    };
+    control.answer(answer);
+    await flush();
+
+    expect(sprung).toBe(true);
+    expect(control.added).toEqual([]);
+    expect(coordinator.acceptedSequence(42)).toBe(0);
+    expect(coordinator.cursor()).toEqual({ epoch: 0, watermark: 0, lastDiscarded: 0 });
+    expect(coordinator.drains()[0]?.outcome).toBe('staleOpen');
+    coordinator.dispose();
+  }); // End of the reopened-by-the-answer case
 }); // End of the "per-document accepted sequences" suite
 
 describe('the discarded-history recovery', () => {

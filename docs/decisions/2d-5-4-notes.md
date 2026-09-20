@@ -522,7 +522,16 @@ unnamed paths record a thousand.
 
 Both are `$state` arrays rather than `Map`s, because a `Map` in `$state` is not reactive without
 Svelte's own wrapper and 2d-6 draws them. Both are cleared by `open()`, for `projectionGenerations`'
-reason: a status is keyed by an identity the load is about to reallocate.
+reason: ~~a status is keyed by an identity the load is about to reallocate~~ — **struck at 2d-5-4-E,
+and it is an instance of the false identity claim rather than a quotation of one**. `open()`
+reallocates nothing: `Workspace::from_tree` in `crates/espansoconfig-core/src/workspace/mod.rs` takes
+identities from the **session's path table**, `identity_of` returns the existing entry for a known
+path, and `identity_already_issued`'s doc says the same path answers the same number for as long as
+the process runs, a recreation at that path included. The true reason is the one the source comment
+now carries at `src/lib/browser/workspace.svelte.ts`, inside `open()`: a status is what the watcher
+said about a file **while the closed workspace was open**, and a path drift is a statement about
+which files *that* workspace held — so both describe a lifecycle that is ending, whatever the
+identities do.
 
 `reconciliationBlock()` and `membershipReloadWanted()` are **not** mirrored into signals. Nothing
 draws them at this step, and a mirror added before there is a consumer would be a second copy of the

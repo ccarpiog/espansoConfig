@@ -254,6 +254,16 @@ interface RecordedSession {
    * dispose the coordinator while a read is in flight.
    */
   applying: boolean;
+  /**
+   * Whether the lifecycle this batch was read in is still in force; assignable,
+   * so a case can reopen the workspace from inside a wire accessor.
+   *
+   * **Separate from {@link applying} and from {@link live} on purpose** — Phase
+   * 2d-5-4-E. The coordinator answers all three from different state, and a case
+   * that moved only the epoch could not tell a fence that asks two questions from
+   * one that asks three.
+   */
+  lifecycleOurs: boolean;
   /** How many membership reloads were asked for. */
   readonly requests: number[];
 }
@@ -274,6 +284,12 @@ function recordingSession(): RecordedSession {
        */
       epochNow: (): number => recorded.live,
       /**
+       * Whether this batch's lifecycle is still the one in force.
+       *
+       * @returns Whatever the case last assigned.
+       */
+      lifecycleIsOurs: (): boolean => recorded.lifecycleOurs,
+      /**
        * Whether this session is still applying observations.
        *
        * @returns Whatever the case last assigned.
@@ -288,6 +304,7 @@ function recordingSession(): RecordedSession {
     },
     live: EPOCH,
     applying: true,
+    lifecycleOurs: true,
     requests: []
   };
   return recorded;
@@ -1211,6 +1228,57 @@ describe('an addition', () => {
     // would be refused as `superseded` with nothing anywhere recording it.
     expect(sequences.sequenceFor(42)).toBe(0);
   }); // End of the addition-lifecycle case
+
+  it('refuses a removal whose own routing reopened the workspace', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    workspace.rows = [42];
+    let sprung = false;
+    // **The arm the previous case's fix did not reach** — Phase 2d-5-4-E.
+    // `applyRemoval` runs nothing caller-supplied above its own `admit`, which is
+    // what its doc used to call *safe in isolation*; but `applyObservation` routes
+    // first, and `routeObservation` is nothing but property reads on this value.
+    // A getter here reopens the workspace **before the arm is entered at all**, so
+    // the arm admits against a cleared map, removes the row from the workspace
+    // that replaced the one this observation is about, and statuses it `removed`
+    // there.
+    const observation: ExternalObservation = {
+      Removed: {
+        /**
+         * Answers the sequence, and reopens the workspace on the way.
+         *
+         * `workspaceOpened` clears the accepted-sequence map and moves the
+         * coordinator's lifecycle counter, both while routing is still reading
+         * this observation.
+         *
+         * @returns The sequence.
+         */
+        get sequence(): number {
+          if (!sprung) {
+            sprung = true;
+            sequences.clear();
+            session.lifecycleOurs = false;
+          }
+          return 500;
+        },
+        document: { Addressable: { document: 42, relative_path: 'match/base.yml' } },
+        previous_revision: null
+      }
+    };
+
+    expect(apply(observation, workspace, session, sequences)).toBe('lifecycleMoved');
+
+    expect(sprung).toBe(true);
+    // Nothing of the closed workspace's removal lands in the one replacing it.
+    expect(workspace.removed).toEqual([]);
+    expect(workspace.rows).toEqual([42]);
+    expect(workspace.statuses).toEqual([]);
+    // The measurement rather than the symptom, as the case above: an admitted 500
+    // would stand in the replacing epoch's map, whose own observations of this
+    // path-stable identity start at one.
+    expect(sequences.sequenceFor(42)).toBe(0);
+  }); // End of the routing-lifecycle case
 
   it('clears a removal’s status when the file comes back', () => {
     const workspace = recordingWorkspace();

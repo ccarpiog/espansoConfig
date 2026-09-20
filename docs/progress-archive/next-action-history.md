@@ -13090,3 +13090,126 @@ finding has lived in every tail this project has run:
 
 **Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-C-notes.md`'s closing section carries this round's
 marked items, and none of them names an unfixed correctness defect in a source file.
+
+---
+
+## Phase 2d-5-4-D's record and its Next-action block — archived 2026-09-20 at Phase 2d-5-4-E
+
+**Verbatim, nothing superseded except by the round that followed it.** 2d-5-4-D was the fourth
+link of the 2d-5-4 tail; its fix changed eight source files, so `CLAUDE.md` §7.1 commissioned
+2d-5-4-E, whose own record is `docs/decisions/2d-5-4-E-notes.md`. The *next action* half below was written before that round ran and is history: what 2d-5-4-E actually
+found is in `PROGRESS.md`'s live head and in its notes. **2d-5-4-E's A2 supersedes one sentence**
+of the block below — *“this arm is the only one that runs caller code above its own `admit`”* is
+false, because `routeObservation()` runs caller-controlled reads above **every** arm.
+
+#### Phase 2d-5-4-D — the round `CLAUDE.md` §7.1 commissioned for 2d-5-4-C's fix
+
+**Taken and answered, and `SUPERSEDED BY 2d-5-4-E` rather than complete**, because its own fix changed
+source. Risk class **high**; worker model **opus** — **no implementation worker**: one **read-only
+re-derivation** worker, then one fix worker, the shape this chain has settled on. Record
+[`docs/decisions/2d-5-4-D-notes.md`](docs/decisions/2d-5-4-D-notes.md); review
+[`docs/reviews/phase-2d-5-4-D.md`](docs/reviews/phase-2d-5-4-D.md); brief
+[`docs/reviews/phase-2d-5-4-D.brief.md`](docs/reviews/phase-2d-5-4-D.brief.md); the re-derivation
+[`docs/reviews/phase-2d-5-4-D.rederivation.md`](docs/reviews/phase-2d-5-4-D.rederivation.md).
+
+**The review was Codex**, through `autoclaude-review.sh`, which **exited 0** so no agent was spawned —
+**six consecutive Codex rounds**. **Verdict `ship-with-fixes`, 1 blocker and 0 SHOULD-FIX**, the
+shortest finding list of this chain. **The body arrived truncated for the fifth round running**, so it
+was **not** accepted on the report's strength: a read-only worker re-derived it from the code and swept
+by shape for what the review had missed, and the orchestrator spot-checked six decisive lines —
+`applyAddition`'s parameter list, the materialization window, `applyChange`'s two lifecycle arms,
+`accepted.clear()`'s stated justification, the surviving mention of the deleted host failure arm, and
+the Rust identity contract.
+
+**The blocker HOLDS IN PART, and the asymmetry it turns on had not been seen before.** Every
+`isNewest` fence in `observationTransitions.ts` fails **safe** when the accepted-sequence map is
+cleared — a cleared map holds nothing, so nothing is newest. **`admit` is the one operation a cleared
+map answers permissively**, and `applyAddition` was the only arm running caller code above its own
+`admit`: the spread `{ ...route.summary, loaded: false }` runs one accessor per own enumerable key of a
+wire object with seven required members, and `'Unreadable' in route.content` runs a `Proxy` `has` trap.
+A getter there can call `BrowserState.open()`, which reaches `workspaceOpened` — and its
+`accepted.clear()` — before its own first await. The closed epoch's sequence is then written into the
+**replacing** epoch's map. **The cost is worse than the review said**, and it is worse for a reason the
+review could not have known: a `DocumentId` is minted per path and lives as long as the process, so the
+poisoned entry names the *same file*, and the new epoch numbers its observations from the first — its
+next five hundred statements about that file are refused as `superseded`, with nothing recording the
+refusal. **The half that does not hold is the attribution.** The review called it *introduced by M5's
+reordered reads*; the window is older — `route.summary.id` was already an argument evaluated before
+`admit` — and M5 **widened** it from one getter to eight while **closing** the other side, which is what
+its own JSDoc claims. **Not production-reachable**: wire values are JSON-parsed plain objects, and the
+one production re-entrancy candidate, `WriteSurfaceTransition`, is registered as a no-op.
+
+**The fix is the two questions `applyChange` already asks**, asked between the materialization and
+`admit` in one synchronous block with it, and **the review's own proposal — a lifecycle token carried
+on the batch — was refused** as machinery this round has no evidence for. The outcome value was
+**derived rather than assumed**: `'superseded'` would claim an arbitration that never ran, and
+`workspaceOpened` empties the outcome records in the same block as the clear, so that entry would land
+as the *replacing* workspace's first record. A ninth arm, **`'lifecycleMoved'`**, says what is true —
+and the record states plainly that it buys **no** compile-time check, because nothing switches over
+that union. That correction is to the re-derivation, not to the review.
+
+**Five things the review missed, each found by sweeping by shape.** **Sixteen source comments in seven
+files** said `open()` reallocates every document identity; `Workspace::from_tree`'s own contract says
+identities come from the session's path table and are stable across opens, and `identity_of` mints per
+path into a process-wide table. It is this project's worst defect class, and it was **load-bearing**:
+the justification for `accepted.clear()` rested on it, and the true justification is the one the
+blocker's cost turns on. Every instance was rewritten to what is true **of its site** — the word
+*reallocat* now appears nowhere under `src/`, `crates/`, `src-tauri/` or `scripts/`. A **narrower
+wording of a claim this very phase struck** still named the deleted host failure arm as a live reader
+of `documents` at `workspace.svelte.ts`, the fourth round running in which the survivor shape has
+produced a finding. An **`Added` after a `Removed`** left `{ kind: 'removed' }` standing over a present
+row until the next `Changed` — *delete a file, recreate it* — because neither `addDocument` nor the
+removal touches `externalStatuses` and an addition requests no reread; it is **production-reachable**
+and it was fixed, because it closed inside `applyAddition`'s own `isNewest` fence and decided nothing
+between two truths, which is what would have made it 2d-5-5's. And four record-only survivors were
+struck rather than reworded.
+
+**Two things this round did not do, stated rather than glossed.** It added **no user-facing string in
+any language** and touched **no `.svelte` file**, so no window reading is owed. And it left `npm run
+build` at **189** modules: nothing new lives in a module of its own.
+
+**What it deliberately left standing.** The same false identity claim stands **23 times across ten
+files under `docs/`** — record, so no round, and §9 item 3 carries it as a sweep to run rather than a
+number to trust. And the blocker's class is not closed, only its driver is: the batch loop re-asks no
+lifecycle question **between** observations, which is not a defect today and stops being about an
+injected boundary the moment 2d-5-5 gives `WriteSurfaceTransition` a body.
+
+#### The next action is **Phase 2d-5-4-E — the round §7.1 commissions for 2d-5-4-D's fix**
+
+**Scoped to that fix's diff**: `src/lib/browser/observationTransitions.ts`,
+`src/lib/browser/reconciliationCoordinator.ts`, `src/lib/browser/workspace.svelte.ts`,
+`src/lib/browser/writeSurfaceRegistry.ts` and four suites — `observationTransitions.test.ts`,
+`workspace.test.ts`, `reconciliationCoordinator.test.ts` and `src/lib/components/DetailPane.test.ts` —
+plus `docs/decisions/2d-5-4-D-notes.md` in full and the correction blocks this round wrote into
+`2d-5-4-notes.md`, `2d-5-4-B-notes.md` and `2d-5-4-C-notes.md`. **This is a review round, not
+implementation**: it takes no implementation worker, and its own fix decides whether another round
+follows, by §7.1 and nothing else.
+
+**Five things to point it at first**, each because the fix that answered a finding is where the next
+finding has lived in every tail this project has run:
+
+1. **The lifecycle fence in `applyAddition`.** Does it sit above **every** caller-controlled statement
+   of that arm, and does anything between it and `admit` run caller code? Are `stillApplying` and
+   `epochNow` really closures over the coordinator's own `let`s at both of this module's call sites,
+   and is `session.epoch` an own data property? And the discrimination claim: `workspaceOpened` sets
+   `epoch = 0` **before** the clear, and an adopted epoch is non-zero — check both halves, including
+   what happens when no epoch has been adopted yet.
+2. **`'lifecycleMoved'`, a ninth arm of a union nothing switches over.** The record says it buys no
+   compile-time check. Check that, and check the two docs it leans on — `'superseded'`'s and
+   `observationsDropped`'s — still say what the record quotes. Does any counter, test helper or
+   assertion treat an unknown outcome as a failure or as an admission?
+3. **The sixteen rewritten comments.** They are now six distinct justifications rather than one
+   sentence repeated, so **no single sweep finds them again**. Re-derive the Rust contract for
+   yourself (`Workspace::from_tree`, `identity_of`, `session_identities`) and check each rewritten
+   sentence against it — and sweep by shape for a seventeenth instance and for any **narrower
+   wording** left behind, which is what the last four rounds each found.
+4. **The unconditional status write in `applyAddition`.** It now writes `null` where the content
+   projected. Is the `isNewest` fence around it the same fence `applyRemoval` uses; can it clear a
+   mark a **newer** observation wrote; and is *"there is one newest truth at that moment"* true of
+   every path that reaches it, including a same-batch `Named` row and an in-flight reread's capture?
+5. **The correction blocks, in three record files, one of which corrects a correction.** Check each
+   against the code it describes, and sweep for a narrower wording of what each one struck.
+
+**Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-D-notes.md` §9 carries this round's marked items, and
+none of them names an unfixed correctness defect in a source file.
+

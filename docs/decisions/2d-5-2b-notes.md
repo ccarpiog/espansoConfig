@@ -357,8 +357,14 @@ holding an open surface the registry no longer reports, and *"no surface is open
 permits a silent reload.
 
 **What that leaves open**, and it is the honest residue: the window between the synchronous
-`status = 'loading'` and the flush, in which the registry still answers surfaces over identities the
-load is about to reallocate. Nothing reads it there today. **2d-5-4's discarded-history recovery is the
+`status = 'loading'` and the flush, in which the registry still answers surfaces over identities
+~~the load is about to reallocate~~ **that belong to the workspace being replaced** — struck and
+corrected at 2d-5-4-E, which found this as the second live instance of the false identity claim.
+`open()` reallocates nothing: `Workspace::from_tree` in
+`crates/espansoconfig-core/src/workspace/mod.rs` mints identities from the session's path table, so
+the same path answers the same number for the life of the process. What makes the registry's answer
+stale in that window is not a renumbering but that it is about a workspace this window is closing,
+which may not hold that file at all once the load lands. Nothing reads it there today. **2d-5-4's discarded-history recovery is the
 third caller of `open()`**, and consult Q3 already forbids it to re-open while any surface is open, so
 the obligation lands in the step that adds it rather than here.
 

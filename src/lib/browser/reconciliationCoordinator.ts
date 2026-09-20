@@ -297,7 +297,17 @@ export interface DrainRecord {
 export type DrainOutcome =
   /** The batch was for this open and this epoch, and the cursor moved. */
   | 'accepted'
-  /** An `open()` landed while the call was in flight, so it installed nothing. */
+  /**
+   * An `open()` landed while the call was in flight, so it installed nothing.
+   *
+   * **Or ended the applying lifecycle while the answer's own values were being
+   * read** — Phase 2d-5-4-E. The three rechecks above `accept` catch an open that
+   * landed during the await; this arm is also what `accept` answering `false`
+   * records, which is a getter on the injected answer or on the batch reopening the
+   * workspace from inside the reads. Both are the same fact — the batch's numbers
+   * cannot be attributed to the lifecycle now in force — and neither moved
+   * anything.
+   */
   | 'staleOpen'
   /** The batch named an epoch this session is not showing. */
   | 'staleEpoch'
@@ -755,6 +765,26 @@ export function createReconciliationCoordinator(
   let block: ReconciliationBlock = { kind: 'running' };
   let membershipReloadRequested = false;
 
+  // **The applying lifecycle: the one value here that is never reset** — Phase
+  // 2d-5-4-E. Every other number in this factory is either cleared by
+  // `workspaceOpened()` or scoped to one epoch, so none of them can separate *this
+  // lifecycle is still the one in force* from *a replacement reset it back to the
+  // value I captured*: `workspaceOpened()` sets `epoch = 0`, and `accept()` adopts
+  // `0` exactly like any other value, which its own comment says in as many words.
+  // A monotonic counter can be captured before any caller-controlled read and
+  // compared with afterwards, which is the only shape that survives a getter on an
+  // injected batch reopening the workspace mid-read.
+  //
+  // **What no type forces.** It is a plain `let` and nothing makes a new reset site
+  // increment it. The three sites that do are `workspaceOpened()`, `dispose()` and
+  // `recoverFromLostHistory()` — see each for why — and a fourth added without a
+  // `lifecycle += 1` would compile and silently widen every fence built on it.
+  // `dispose()`'s increment is **redundant today**, because `stillApplying()` reads
+  // `disposed` live; it is there so the rule is *every site that ends the applying
+  // lifecycle moves this*, rather than *every site except the ones another live
+  // read happens to cover*.
+  let lifecycle = 0;
+
   // The open gate. `true` from the `workspaceOpened()` of an `open()` until the
   // `workspaceReady()` of one, and `false` before any open has been announced at
   // all — which is the state a coordinator built beside a state that never opens
@@ -858,6 +888,15 @@ export function createReconciliationCoordinator(
     if (host.openWriteSurfaces().length > 0) {
       return false;
     }
+    // **The applying lifecycle ends here**, because this is the one place this
+    // coordinator asks for the workspace it is applying to be replaced. It is
+    // moved *before* the call below rather than left to the announcement, so that
+    // a host which reopens without calling `workspaceOpened()` — which nothing in
+    // TypeScript forces it to do, as that call's own comment says — still leaves
+    // every session built after this point unable to claim this lifecycle. It does
+    // **not** rescue the batch being applied right now: `accept()` returns
+    // immediately below, having already compared its own capture.
+    lifecycle += 1;
     block = { kind: 'running' };
     // **Fired, never awaited, and the host owns everything after it.** A
     // production `open()` announces itself through `workspaceOpened()` in its
@@ -872,6 +911,24 @@ export function createReconciliationCoordinator(
   /**
    * Accounts for a batch that is for this open and this epoch.
    *
+   * **Every value the batch carries is read once, at the top, and nothing is
+   * written until the lifecycle has been re-asked** — Phase 2d-5-4-E. `batch`
+   * crossed an injected boundary, so each of the four reads below can run caller
+   * code through a getter or a `Proxy` trap, and one that synchronously calls
+   * `BrowserState.open()` in `./workspace.svelte.ts` reaches `workspaceOpened()`
+   * before that function's first await — which clears the cursor, the
+   * accepted-sequence map and the outcome record. Before this, those reads were
+   * interleaved with the writes they fed, so such a getter left this function
+   * putting a closed lifecycle's epoch, watermark and observations into the
+   * workspace that replaced it, with `session.epoch` captured *after* the reset and
+   * therefore comparing that replacement with itself.
+   *
+   * **The comparison here is not the whole defence, and cannot be.** It is taken
+   * once, before anything is written; the observations are applied after it, and
+   * each of them reads caller-controlled properties of its own. That is what
+   * {@link ObservationSession.lifecycleIsOurs} carries into every arm, and what
+   * `./observationTransitions.ts` re-asks after routing.
+   *
    * **`discarded` is handled before the observations** (ruling 10), because a
    * per-document reread is not a recovery from a hole in the history: the lost
    * entry may have been the only observation of an addition or a removal, so no
@@ -883,8 +940,27 @@ export function createReconciliationCoordinator(
    * {@link ReconciliationBlock}.
    *
    * @param batch - The accepted batch.
+   * @param lifecycleAt - The applying lifecycle its caller captured **before** it
+   *   read anything at all of the command's answer. Nothing in TypeScript forces a
+   *   caller to capture it there, and one that captured it later would hand this
+   *   function a value a getter had already moved.
+   * @returns `true` when the batch was accounted for, and `false` when the
+   *   lifecycle moved under it and nothing whatever was written.
    */
-  function accept(batch: ReconciliationBatch): void {
+  function accept(batch: ReconciliationBatch, lifecycleAt: number): boolean {
+    const batchEpoch = batch.epoch;
+    const batchDiscarded = batch.discarded;
+    const newestSequence = batch.newest_sequence;
+    const observations = batch.observations;
+    if (lifecycle !== lifecycleAt) {
+      // Something between the caller's capture and this line ended the lifecycle
+      // this batch was drained in — one of the four reads above reopened the
+      // workspace, or an `open()` or a disposal landed while the drain was in
+      // flight. Nothing of a closed lifecycle's queue may be written into the one
+      // that replaced it, and the cursor is the half no per-observation fence
+      // below could protect.
+      return false;
+    }
     if (!adopted) {
       // **The shown epoch is learned here and nowhere else** (ruling 8):
       // `open_workspace` answers a root and counts, so the first successful drain
@@ -892,29 +968,32 @@ export function createReconciliationCoordinator(
       // supply one. Epoch `0` is adopted exactly like any other; what it means is
       // `watchState()`'s business.
       adopted = true;
-      epoch = batch.epoch;
+      epoch = batchEpoch;
     }
-    if (batch.discarded > lastDiscarded) {
+    if (batchDiscarded > lastDiscarded) {
       // Strictly greater, never merely non-zero: `discarded` is cumulative and
       // monotonic within the epoch, so a repeated batch carries the value that was
       // already acted on and must not be acted on again (ruling 13).
-      lastDiscarded = batch.discarded;
+      lastDiscarded = batchDiscarded;
       discardedNoticeCount += 1;
-      block = { kind: 'blockedByLostHistory', discarded: batch.discarded, epoch };
+      block = { kind: 'blockedByLostHistory', discarded: batchDiscarded, epoch };
     }
     if (block.kind === 'blockedByLostHistory') {
       if (recoverFromLostHistory()) {
         // The `open()` that recovery started has already cleared this cursor.
         // Writing a watermark here would put a closed lifecycle's number back.
-        return;
+        // **`true` rather than `false`**: this batch was accounted for — by being
+        // refused whole under ruling 10 — and the recovery is this session's own
+        // act, not a lifecycle that moved under it.
+        return true;
       }
-      watermark = batch.newest_sequence;
-      observationsDroppedCount += batch.observations.length;
-      return;
+      watermark = newestSequence;
+      observationsDroppedCount += observations.length;
+      return true;
     }
     // **Advanced for an empty batch too** (ruling 7) — that is what stops the
     // retained queue being read again.
-    watermark = batch.newest_sequence;
+    watermark = newestSequence;
     const session: ObservationSession = {
       epoch,
       /**
@@ -923,6 +1002,20 @@ export function createReconciliationCoordinator(
        * @returns The adopted epoch, or zero.
        */
       epochNow: (): number => epoch,
+      /**
+       * Whether the lifecycle this batch was read in is still the one in force.
+       *
+       * **A closure over the capture the caller took above every read of the
+       * command's answer**, compared against a counter no site resets — which is
+       * what makes it answer where the epoch cannot: `workspaceOpened()` sets the
+       * epoch to `0` and `accept()` adopts `0` like any other value, so two
+       * lifecycles can legitimately show one epoch. That is a property of *this*
+       * implementation and not of {@link ObservationSession}, whose member is a
+       * declaration a caller may satisfy with a constant.
+       *
+       * @returns `true` while no site has ended this lifecycle.
+       */
+      lifecycleIsOurs: (): boolean => lifecycle === lifecycleAt,
       /**
        * Whether this coordinator is still applying observations at all.
        *
@@ -943,20 +1036,26 @@ export function createReconciliationCoordinator(
         membershipReloadRequested = true;
       }
     };
-    for (const observation of batch.observations) {
+    for (const observation of observations) {
       // **In sequence order, which is the order the wire promises** — the batch's
       // own comment says its observations are ordered by sequence — and the
       // per-document map is what makes that promise unnecessary: an older
       // observation of one file is refused by `admit` whatever order it arrives in.
+      //
+      // **The lifecycle is re-asked inside, once per observation**, because the
+      // iteration itself runs a caller-supplied `Symbol.iterator` and every arm
+      // reads caller-controlled properties of the observation it was handed: the
+      // comparison above is a fact about the moment before the first of them.
       observationOutcomeRecords.push(applyObservation(observation, host, accepted, session));
     } // End of the loop over every observation of the accepted batch
+    return true;
   } // End of function accept()
 
   /**
-   * Makes one physical drain, with the four captures around its await.
+   * Makes one physical drain, with the five captures around its await.
    *
    * Single-flight removes drain-versus-drain reordering and **nothing else**
-   * (ruling 15), so all four captures are still taken: an `open()` or a disposal
+   * (ruling 15), so all five captures are still taken: an `open()` or a disposal
    * can make the only drain stale. The shape is
    * `workspace.svelte.ts`'s `rereadDocument` — capture, await, recheck, and only
    * then change anything.
@@ -968,9 +1067,22 @@ export function createReconciliationCoordinator(
    * capture on the line above it, and an equality that can never fail is a claim
    * no test can fail either.
    *
+   * **The fifth is the applying lifecycle, and it is taken first of all** — Phase
+   * 2d-5-4-E. It is not a stronger form of the generation capture: that one asks an
+   * **injected host**, so a host that reopens without moving the number it reports
+   * defeats it, and the gate below asks only what this coordinator was *told*. This
+   * one compares a `let` nothing outside this factory can reach. It is captured
+   * above `host.openGeneration()` rather than beside it because that call is itself
+   * caller code, and it is handed to {@link accept} rather than re-read there
+   * because every property of the command's answer — `ok` and `value` included — is
+   * caller-controlled too. **Nothing in TypeScript forces this order**; a capture
+   * written one line lower would be a value a getter had already moved, and would
+   * compile.
+   *
    * @returns Nothing; every answer is recorded rather than returned.
    */
   async function runOneDrain(): Promise<void> {
+    const lifecycleAt = lifecycle;
     const reasons = pendingReasons.splice(0, pendingReasons.length);
     const openedAt = host.openGeneration();
     const expectedAdopted = adopted;
@@ -1159,7 +1271,16 @@ export function createReconciliationCoordinator(
       record(afterSequence, reasons, 'staleEpoch');
       return;
     }
-    accept(answer.value);
+    if (!accept(answer.value, lifecycleAt)) {
+      // The lifecycle this drain was issued in ended before the batch could be
+      // accounted for — including inside the `answer.value` read on this line, or
+      // inside `accept`'s own reads of the batch. Nothing moved, so this is the
+      // same outcome as the two rechecks above and for the same reason: the
+      // number this batch carries cannot be attributed to the lifecycle now in
+      // force.
+      record(afterSequence, reasons, 'staleOpen');
+      return;
+    }
     record(afterSequence, reasons, 'accepted');
   } // End of function runOneDrain()
 
@@ -1381,6 +1502,12 @@ export function createReconciliationCoordinator(
         return;
       }
       disposed = true;
+      // **Redundant with the line above, and kept for the rule rather than for an
+      // effect.** `stillApplying()` reads `disposed` live, so every fence already
+      // refuses after this point; what this keeps true is *every site that ends the
+      // applying lifecycle moves the counter*, so the next reader does not have to
+      // re-derive which of the two values covers which site.
+      lifecycle += 1;
       // **Synchronously**, before anything can await: ruling 16 says foreground
       // listeners are removed synchronously, and there is no reason for the wake
       // listener to be different when its unlisten is already held.
@@ -1401,6 +1528,13 @@ export function createReconciliationCoordinator(
     requestDrain,
 
     workspaceOpened(request: string | null): void {
+      // **First, before any of the clearing below**, so that caller code re-entering
+      // part-way through the reset — a `$effect` on `documents`, say — already sees
+      // a lifecycle it cannot claim rather than a half-cleared one it can. It is
+      // the increment the whole of Phase 2d-5-4-E's fence rests on: `accepted` is
+      // emptied in the block below, and `admit` is the one operation an empty map
+      // answers permissively.
+      lifecycle += 1;
       // **Everything learned about the workspace being closed goes.** The epoch
       // is a property of that lifecycle, the watermark indexes its queue, and
       // `lastDiscarded` is cumulative *within* the epoch — carrying any of them

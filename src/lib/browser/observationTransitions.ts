@@ -235,8 +235,10 @@ export interface AcceptedSequences {
    * one wrong is that a new epoch restarts its observations at
    * `FIRST_OBSERVATION_SEQUENCE`, so an entry holding the closed workspace's
    * highest number would refuse every early observation the new epoch delivers for
-   * that same file — the sharper reason, and the one
-   * {@link applyAddition}'s lifecycle fence exists to keep unreachable.
+   * that same file — the sharper reason, and the one this module's two lifecycle
+   * fences exist to keep unreachable: {@link applyObservation}'s, above every
+   * arm's dispatch, and {@link applyAddition}'s, below its own materialization
+   * window.
    */
   clear(): void;
 } // End of interface AcceptedSequences
@@ -696,6 +698,35 @@ export interface ObservationSession {
    */
   epochNow(): number;
   /**
+   * Whether the lifecycle this batch was read in is still the one in force.
+   *
+   * **The question neither {@link epoch} nor {@link stillApplying} can answer** —
+   * Phase 2d-5-4-E. A re-open sets the coordinator's epoch to `0` and its `accept`
+   * adopts `0` exactly like any other value, so two lifecycles may legitimately
+   * show one epoch and the comparison beside this one is then vacuous;
+   * `stillApplying` reports disposal and the blocked state, and a re-open sets
+   * neither. What is left over is precisely the event every fence in this module
+   * exists for: `workspaceOpened` emptying the accepted-sequence map, which is the
+   * one thing {@link AcceptedSequences.admit} answers **permissively**.
+   *
+   * **What it is good for is the interval, not the instant.** The coordinator
+   * answers it by comparing a counter it never resets against a capture taken
+   * before it read anything at all of the command's answer — so a `false` means
+   * *something ended that lifecycle at some point since*, and a `true` means
+   * nothing had, as of this call. Asking it twice across caller code is therefore
+   * not the same as asking it once.
+   *
+   * **What no type forces.** This is a declaration on an interface: a caller may
+   * implement it as a constant `true`, and `readonly` on {@link epoch} does not
+   * make that member a data property either. The monotonic counter, the capture
+   * point and the closure are properties of `./reconciliationCoordinator.ts`'s
+   * implementation alone, and an arm of this module that never asks still
+   * compiles.
+   *
+   * @returns `true` while nothing has ended the lifecycle this batch belongs to.
+   */
+  lifecycleIsOurs(): boolean;
+  /**
    * Whether the coordinator is **still applying observations at all**.
    *
    * **The question the other three could not ask, and the reason it exists.** The
@@ -783,6 +814,47 @@ export type ObservationOutcome =
   | 'pathDrift';
 
 /**
+ * Whether the lifecycle an observation was accepted in has moved under it.
+ *
+ * **One producer for the three questions, so two fences cannot drift** — Phase
+ * 2d-5-4-E. It is asked twice on every observation's path: once by
+ * {@link applyObservation} the moment routing returns, and once by
+ * {@link applyAddition} after its own materialization window. Written out at each
+ * site instead, a later fence could be added with two of the three clauses and
+ * compile.
+ *
+ * **What each clause discriminates, and what it does not.**
+ *
+ * - {@link ObservationSession.stillApplying} answers disposal and the blocked
+ *   state, and **nothing about a replaced workspace** — its own doc says so.
+ * - {@link ObservationSession.lifecycleIsOurs} answers a replacement, a disposal
+ *   and a self-requested reopen, and **nothing about the epoch's identity**: it is
+ *   a counter, so it says *something ended that lifecycle*, never which one is
+ *   showing now.
+ * - The epoch comparison answers *a different workspace epoch is showing*, and is
+ *   **vacuous for a session that adopted `0`** — which `./reconciliationCoordinator.ts`
+ *   supports deliberately, and which the Rust side happens to keep out of
+ *   production (`FIRST_WORKSPACE_EPOCH` is `1`) rather than the wire type
+ *   forbidding it. It is kept as the cheap, specific question, not as the load-
+ *   bearing one.
+ *
+ * **None of the three is forced by a type.** All three are members of an injected
+ * interface, so this function answers what the *session it was handed* says, and
+ * `session.epoch` is a `readonly` declaration rather than a frozen value — a
+ * caller may put an accessor behind it, and `readonly` does not freeze at runtime.
+ *
+ * @param session - The session the batch was accepted under.
+ * @returns `true` when this observation may no longer be acted on.
+ */
+function lifecycleMovedUnder(session: ObservationSession): boolean {
+  return (
+    !session.stillApplying() ||
+    !session.lifecycleIsOurs() ||
+    session.epochNow() !== session.epoch
+  );
+} // End of function lifecycleMovedUnder()
+
+/**
  * Applies one observation of an accepted batch.
  *
  * **Every arm of the consult's Q8 table, and no command outside the three
@@ -804,6 +876,25 @@ export type ObservationOutcome =
  * `pendingAdditions` out of, so no unaddressable identity reaches a command from
  * here either way.
  *
+ * **Routing is caller code, and the fence below it is what covers every arm** —
+ * Phase 2d-5-4-E. {@link routeObservation} is nothing but property reads and `in`
+ * checks on the wire value: for a `Removed`/`Addressable` observation it reads
+ * `observation.Removed`, `removed.document`, `removed.sequence` and two more,
+ * every one of which a caller can make a getter or a `Proxy` trap. So **any**
+ * observation, of any arm, can reset the lifecycle inside its own routing, before
+ * the arm is entered at all — and the arm then arbitrates against an
+ * accepted-sequence map `workspaceOpened` has just emptied, which is the one state
+ * {@link AcceptedSequences.admit} answers permissively while every `isNewest`
+ * fence in this module fails safe. Until this round the doc of
+ * {@link applyAddition} said the other arms were *safe in isolation*, which was
+ * true of their bodies and false of the path that reaches them.
+ *
+ * **It is asked once, here, and the arms are not made redundant by it.** The route
+ * it returns is a plain literal of own data properties, so nothing between this
+ * fence and an arm's own `admit` runs caller code — for every arm except
+ * {@link applyAddition}, whose materialization window is below it and which
+ * therefore asks again.
+ *
  * @param observation - One observation, exactly as it crossed the boundary.
  * @param workspace - The window that owns it.
  * @param sequences - The per-document accepted sequences.
@@ -818,6 +909,13 @@ export function applyObservation(
   session: ObservationSession
 ): ObservationOutcome {
   const route = routeObservation(observation);
+  if (lifecycleMovedUnder(session)) {
+    // **Below the routing and above every arm**: the reads that built `route` are
+    // the caller's, and an arm entered after one of them reopened the workspace
+    // would admit against a cleared map. `route` itself is an own-data-property
+    // literal, so the dispatch below adds no caller code of its own.
+    return 'lifecycleMoved';
+  }
   switch (route.kind) {
     case 'added':
       return applyAddition(route, workspace, sequences, session);
@@ -861,8 +959,11 @@ export function applyObservation(
  * itself refuse. The cost is that a superseded addition reads them too.
  *
  * **And the lifecycle is re-asked between those reads and the arbitration** —
- * Phase 2d-5-4-D's blocker. The two questions are the first two
- * {@link applyChange}'s guard asks, asked here for that guard's own reason: the
+ * Phase 2d-5-4-D's blocker. The three questions are {@link lifecycleMovedUnder}'s,
+ * two of which are the first two {@link applyChange}'s guard asks — that guard is
+ * **not** widened to the third, because what catches a replacement across its await
+ * is the host's own open-generation capture inside `rereadUnderGuard`, which its
+ * own doc names. They are asked here for that guard's own reason: the
  * spread and the `in` above are caller code, and a getter that synchronously calls
  * `BrowserState.open()` reaches `workspaceOpened`, which clears the
  * accepted-sequence map before `admit` reads it. **A cleared map is the one thing
@@ -871,18 +972,28 @@ export function applyObservation(
  * fence in this module answers `false` across a lifecycle reset and therefore
  * fails safe, `admit` answers `true` and writes the closed workspace's sequence
  * into the replacing workspace's map, where it refuses that file's first
- * observations of the new epoch. This arm is the only one that runs caller code
- * above its own `admit`; the window is **older than M5**, which widened it from
- * one `id` getter to seven accessors plus a `has` trap rather than introducing it.
+ * observations of the new epoch. The window is **older than M5**, which widened it
+ * from one `id` getter to seven accessors plus a `has` trap rather than
+ * introducing it.
  *
- * **What the types do not force.** Nothing makes this the only arm that could want
- * the question, and **nothing re-asks it between two observations of one batch**:
- * {@link applyRemoval} and {@link applyUnreadable} run nothing caller-supplied
- * above their own `admit` and so are safe in isolation, but an earlier observation
- * of the same batch that resets the lifecycle leaves every later one applying to
- * the workspace that replaced it. {@link ObservationSession}'s type says nothing
- * about how long an answer to it is good for, and an arm that never asks still
- * compiles.
+ * **This is the only arm with caller code above its `admit` *inside its own body*,
+ * and that is a much narrower claim than the one this paragraph used to make** —
+ * Phase 2d-5-4-E. It said this arm was the only one that ran caller code above its
+ * `admit` at all, and that {@link applyRemoval} and {@link applyUnreadable} were
+ * *safe in isolation*. Both sentences were true of the function bodies and false
+ * of the path that reaches them: {@link applyObservation} runs
+ * {@link routeObservation} — caller-controlled property reads, every one of them —
+ * before it dispatches anything. The fence that covers that is now in
+ * `applyObservation`, above the switch; what keeps **this** one is the
+ * materialization window below, which runs after routing has already returned.
+ *
+ * **What the types do not force.** {@link ObservationSession}'s type says nothing
+ * about how long an answer to it is good for, so *asked once per batch* and *asked
+ * once per observation* are the same to the compiler; an arm that never asks still
+ * compiles; and `session.epoch` is a `readonly` declaration, which does not stop a
+ * caller putting an accessor behind it. **Nothing re-asks the question between the
+ * arbitration below and the host writes under it** either — `isNewest` is what
+ * defends those, and it fails safe across a reset where `admit` does not.
  *
  * **An admitted, newest addition states this file's status whole** — Phase
  * 2d-5-4-D. This write used to happen only for unreadable content, so a `Removed`
@@ -910,11 +1021,19 @@ function applyAddition(
 ): ObservationOutcome {
   const row: DocumentSummary = { ...route.summary, loaded: false };
   const reason = 'Unreadable' in route.content ? route.content.Unreadable.reason : null;
-  if (!session.stillApplying() || session.epochNow() !== session.epoch) {
+  if (lifecycleMovedUnder(session)) {
     // Asked **after** the whole caller-controlled window above and **before**
-    // `admit`, in one synchronous block with it: both members are the
-    // coordinator's own closures over its own `let`s, so nothing between this line
-    // and the arbitration below runs anything a caller supplied.
+    // `admit`, in one synchronous block with it. Under the coordinator's own
+    // session nothing between this line and the arbitration below runs anything a
+    // caller supplied, because there all three members are closures over its own
+    // `let`s and `epoch` is an own data property of the literal it builds — **but
+    // that is a property of that implementation and not of
+    // {@link ObservationSession}**, whose members are declarations and whose
+    // `readonly epoch` does not exclude an accessor or freeze anything at runtime.
+    // A caller may put code behind any of the three, and it would run between the
+    // halves of the comparison this fence is made of. The same disclaimer is
+    // written out in full above {@link ObservationSession.lifecycleIsOurs} and in
+    // {@link applyChange}'s `stillOurs`.
     return 'lifecycleMoved';
   }
   if (!sequences.admit(row.id, route.sequence)) {

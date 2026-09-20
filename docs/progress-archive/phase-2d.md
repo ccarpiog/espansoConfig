@@ -4467,3 +4467,44 @@ ran the one suite, recorded the message and restored it; the messages are in
 discarded**: written in the re-derivation's own order it settles the newer read first, which is the
 order the defect does not need. That is a stronger check than the previous round's three rejected
 by argument, and the notes record the distinction rather than blurring it.
+
+---
+
+## Phase 2d-5-4-D's verification narrative — archived 2026-09-20 at Phase 2d-5-4-E
+
+**Verbatim.** Its rung — `1320 / 443 / 2406 / 189` — is one below the live one, and the ladder
+section in `PROGRESS.md` still carries it as a rung. Nothing in it is superseded: every figure was
+true of the tree that committed it.
+
+### The rung moved by two, and only by this round's own cases
+
+**With the instrument in the working tree the four commands answer `1320 / 443 / 2406 / 189`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-4-D**, on the post-fix tree, each command run on its own and nothing
+run concurrently with `cargo`:
+
+| Gate | Was at 2d-5-4-C | Now | Why it moved, or did not |
+|---|---|---|---|
+| `cargo test --workspace` | 1320 | **1320** | no Rust changed — `git diff --numstat -- crates/ src-tauri/` names only the instrument's `main.rs` hook |
+| `npm run check` files | 443 | **443** | no file added or removed; the fix is inside eight existing files |
+| `npm test` | 2404 | **2406** | +2, the two cases this round's two behavioural fixes are pinned by |
+| `npm run build` modules | 189 | **189** | no new module: every fix is inside a function that already existed |
+
+**Both complementary questions were asked of the Rust gate**, not one: the sum over **26** `test
+result` lines, no line lacking `0 failed`, **and no line lacking `0 filtered out`** — the last because
+2d-5-4-C's first run measured nothing while exiting 0, a stray argument after `--` having filtered
+every test out. It completed on the first attempt, so the stale-`target/` host finding has not
+recurred for seven phases. Clippy (exit 0), `cargo fmt --check` (exit 0) and `cargo tree -p
+espansoconfig-core | rg tauri` (finds nothing) are clean. **Both bundle oracles were read and both lines are reported**: server-only markers
+**absent**, client-only markers **present (2)**. **The instrument's pin was re-checked** and holds at
+`5 insertions(+), 1 deletion(-)`.
+
+**No gate caught the blocker and none could have** — it is reachable only through an injected
+accessor. **The `Added`-after-`Removed` status residue is the exception and it needed no accessor at
+all**: two batches, a watcher removal and a recreation, and no case in either suite had combined them.
+**Two cases now pin the two behavioural fixes, and each was confirmed to fail against the pre-fix
+code** — reverted, run, message recorded, restored; the messages are in `2d-5-4-D-notes.md` §8, with
+**two further measurements** taken by suspending the blocker case's first assertion so the two it masks
+could be read. **Nothing was discarded**: no candidate passed against both trees. The three
+comment-only fixes have no case and the record says so rather than implying one.
+

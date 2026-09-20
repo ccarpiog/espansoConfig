@@ -65,9 +65,20 @@ accepts and writes the **closed** workspace's sequence into the **replacing** wo
 
 **The asymmetry is the finding in one sentence.** A `clear()` makes every `isNewest` fence in this
 module answer `false`, so every fence fails safe across a lifecycle reset; `admit` is the one
-operation a clear answers **permissively**. `applyAddition` was the only arm running caller code above
-its own `admit` — `applyChange`, `applyRemoval`, `applyUnreadable` and `applyNamedRow` all admit on an
-own data property of the literal `routeObservation` built.
+operation a clear answers **permissively**. ~~`applyAddition` was the only arm running caller code
+above its own `admit`~~ — `applyChange`, `applyRemoval`, `applyUnreadable` and `applyNamedRow` all
+admit on an own data property of the literal `routeObservation` built.
+
+**The struck clause is corrected at 2d-5-4-E (its A2), and the clause after the dash is not.** It
+stays true: those four arms really do admit on own data properties of the route literal, so nothing
+caller-supplied runs *inside their bodies* above their `admit`. What does not follow — and what this
+record concluded from it — is that `applyAddition` was the only **exposed** arm. `applyObservation`
+runs `routeObservation` before it dispatches anything, and that function is nothing but
+caller-controlled property reads and `in` checks on the wire value, so any observation of any arm can
+reset the lifecycle inside its own routing and reach a cleared map. The asymmetry sentence itself is
+what made that matter, and it reaches five arms rather than one. 2d-5-4-E's fence sits above the
+switch, and `applyAddition` keeps its own because its materialization window runs after routing has
+returned.
 
 **The half that does not hold is *"Source defect introduced by M5's reordered reads"*.** The window is
 **older than M5**. Before it, the same function read `route.summary.id` as an argument to `admit`, and
@@ -99,10 +110,25 @@ if (!session.stillApplying() || session.epochNow() !== session.epoch) {
 ```
 
 - It is asked **after** the whole caller-controlled window and **before** `admit`, and nothing between
-  it and `admit` runs anything a caller supplied: `stillApplying` and `epochNow` are closures the
-  coordinator builds over its own `let`s, and `session.epoch` is an own data property of that literal.
-- It discriminates. `workspaceOpened` sets `epoch = 0` **before** `accepted.clear()`, and an adopted
-  epoch is non-zero, so `epochNow() !== session.epoch` is true the instant a re-open begins.
+  it and `admit` runs anything a caller supplied *under the coordinator's own session*:
+  `stillApplying` and `epochNow` are closures the coordinator builds over its own `let`s, and
+  `session.epoch` is an own data property of that literal. **Corrected at 2d-5-4-E (its S1): that is a
+  property of that implementation and not of `ObservationSession`**, whose members are declarations
+  and whose `readonly epoch` neither excludes an accessor nor freezes anything at runtime — and the
+  injected boundary is the only place this fence matters at all.
+- ~~It discriminates. `workspaceOpened` sets `epoch = 0` **before** `accepted.clear()`, and an adopted
+  epoch is non-zero, so `epochNow() !== session.epoch` is true the instant a re-open begins.~~
+  **Struck at 2d-5-4-E; both halves fail.** The first clause is true and the conclusion does not
+  follow, because `accept()` read the batch's own members *above* the session literal, so a getter
+  that reopened the workspace from inside one of those reads left `session.epoch` holding the
+  post-reset value and the comparison comparing the replacement with itself (2d-5-4-E's A1). And *an
+  adopted epoch is non-zero* is a **Rust invariant that does not reach this boundary**:
+  `accept()`'s own comment says *"Epoch `0` is adopted exactly like any other"*, so a session that
+  adopted `0` reduces this fence to `stillApplying()` alone. What keeps `0` out of production is
+  `src-tauri/src/watch.rs`'s `FIRST_WORKSPACE_EPOCH = 1` and `NO_EPOCH = 0`, and an injected batch is
+  bound by neither. 2d-5-4-E adds the discriminator that does not depend on the epoch — a monotonic
+  lifecycle counter captured before any caller-controlled read — and keeps the epoch comparison as
+  the cheap, specific question beside it.
 - **The review's own fix — *carry a lifecycle token from the accepted batch* — was not taken.** It
   invents a value where two existing members answer the question, and this round has no evidence for
   the machinery. The shape it was reaching for is what the two lines above do.
@@ -214,8 +240,11 @@ first, so the two passages agree.
 check|third reader|re-state|restate` over `src/**/*.ts` and `src/**/*.svelte`. Every other mention of
 that arm is in the **past** tense and correct — `ownedSummaryOf`'s header, the member's own JSDoc, the
 private helper's `statusAt` comment, and three comment blocks in `workspace.test.ts`. One near miss
-was checked and left: `workspace.svelte.ts:3682` says *"the injected `report` on the failure arm"*,
-which is the projection loop's own `view.failure` arm and not the deleted one.
+was checked and left: `workspace.svelte.ts:3690` — ~~`3682`~~, corrected at 2d-5-4-E, which
+re-derived the number rather than trusting either; `3682` sits inside the projection loop's body, and
+`3690` is where the phrase is, at this tree and at the one this record was committed with — says
+*"the injected `report` on the failure arm"*, which is the projection loop's own `view.failure` arm
+and not the deleted one. The substance of the near miss was right; only the citation was wrong.
 
 **This is a comment-only fix. It has no case and does not pretend to one.**
 
