@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T11:04:19Z",
+ "updated": "2026-09-20T11:05:39Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Ship a macOS app that edits espanso YAML configuration without ever reformatting the parts of a file the user did not edit.",
  "phases": [
@@ -255,7 +255,7 @@
    "summary": "Superseded by 2d-5-3-N: the review round was taken (Codex, 2 SHOULD-FIX, one in source and one in the record, both fixed), and its own comment-only fix commissioned the next round.",
    "review": "docs/reviews/phase-2d-5-3-M.md",
    "narrative": "docs/decisions/2d-5-3-M-notes.md",
-   "commit": "PENDING"
+   "commit": "1e80603"
   },
   {
    "id": "2d-5-3-N",
