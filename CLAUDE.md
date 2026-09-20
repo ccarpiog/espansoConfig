@@ -356,10 +356,11 @@ the third review pass was commissioned for that reason alone, scoped to one chan
 produced the next round's finding. **That is the only thing that commissions a round, and a step
 closes as soon as it commissions none** — so a fix round changing no source file ends the tail, whatever
 the severity of what it answered, and a fix round changing one is owed a round even when the finding
-was a Low. **"Source" is everything the repository holds except a closed list of five record entries**
-(`PROGRESS.md`, `CLAUDE.md`, `IMPLEMENTATION_PLAN.md`, any `README*`, and `docs/`), so a config file or
-a manifest is source. **The source bound is what is new here.** The sentence this replaces had none —
-any fix was a change, the record's own sentences included — and unbounded it ran a fourteen-round tail
+was a Low. **"Source" is everything the repository holds except a closed list of six record entries**
+(`PROGRESS.md`, `PROGRESS.json`, `CLAUDE.md`, `IMPLEMENTATION_PLAN.md`, any `README*`, and `docs/`), so a
+config file or a manifest is source. **The source bound is what is new here.** The sentence this
+replaces had none — any fix was a change, the record's own sentences included — and unbounded it ran a
+fourteen-round tail
 on 2d-3 and a nine-round tail on 2d-4a-C step 2, each round finding its whole list in the previous
 round's own words, with a human as the only thing that stopped either. Rounds 4-9 of that second tail
 changed no source file at all, so the bound would have ended it after round 4: those tails are the
@@ -607,6 +608,10 @@ fix went unreviewed. There is one counter now, so there is nothing left to disag
 **"The record" is a closed list.** It is exactly these:
 
 - `PROGRESS.md`
+- `PROGRESS.json` — the phase summary the autoclaude workflow rewrites from `PROGRESS.md` after every
+  phase and never reads for a decision. It is on this list for the reason `PROGRESS.md` is: a
+  bookkeeping file that every phase rewrites would otherwise commission a round from every phase's
+  own paperwork, which is the tail the rule exists to end, not to generate (added at 2d-5-3-L)
 - `CLAUDE.md`
 - `IMPLEMENTATION_PLAN.md`
 - any `README*` (a README file anywhere in the tree; this repository has two, both prose)

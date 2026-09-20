@@ -12184,3 +12184,132 @@ and that is exactly what turned finding 2's derivation around. **2d-5-3's able-t
 that no round has had it in scope. **The citation checker is still unbuilt**, and no count of its
 nominations is written here, per 2d-5-3-H's finding 4.
 
+
+## Phase 2d-5-3-K's record and its Next-action prose — archived 2026-09-20 at Phase 2d-5-3-L
+
+**Two claims in the blocks below are corrected by 2d-5-3-L and the correction travels with
+them.** The narrowed sentence *"the two tests that come nearest drive that overlap somewhere other
+than Rust"*, which the blocks call *the claim the paragraph actually needs*, over-attributes: the
+first of those tests issues no drain, so it drives an open-during-drain overlap nowhere, and
+2d-5-3-L restated it as a claim about the two cited tests. And *"whose body is
+`requestDrain('workspaceOpened')`"* omits `openInProgress = false`, the gate clear that is the first
+of `workspaceReady()`'s two statements. `docs/decisions/2d-5-3-L-notes.md` §2 and §3 are the record.
+
+#### Phase 2d-5-3-K — the round §7.1 commissioned for 2d-5-3-J's fix
+
+**Complete as a round, both gate runs green — and `SUPERSEDED BY 2d-5-3-L`, never complete.** Risk
+class **high**; worker model **opus** (no implementation worker: the phase's product is a review and
+its fix, both taken by the orchestrator). Record:
+[`docs/decisions/2d-5-3-K-notes.md`](docs/decisions/2d-5-3-K-notes.md); review
+[`docs/reviews/phase-2d-5-3-K.md`](docs/reviews/phase-2d-5-3-K.md). **Four archives were taken, every
+one of them before a word of this record was written** — 2d-5-3-J's record and Next-action prose
+(**124 lines**) to [`next-action-history.md`](docs/progress-archive/next-action-history.md), and that
+round's verification narrative (**62**), the ladder narrative (**50**) and this header's own headroom
+narrative (**19**) to [`phase-2d.md`](docs/progress-archive/phase-2d.md). **Three status rows
+followed, and they followed measurements rather than a plan**: with the four taken and the record written, the file
+measured **122,316 bytes against the 122,212 it inherited** — above it, with this header's own
+headroom paragraph still an unwritten placeholder — so the **superseded status rows of 2d-5-3-G, -H
+and -I** went to [`status-table.md`](docs/progress-archive/status-table.md), leaving two summary rows.
+**Three rather than two, because the first two were measured and were still not enough** once this
+round's own git-state row went in. That is rule 2 exactly — all three had been superseded for rounds,
+and the chain's head stayed put. **The narrative archives did not turn the file on their own**, which is now the second
+consecutive round of which that is true, and it is the strongest argument the header has for taking a
+superseded row early rather than at the bound. The figures are re-derived in the header, after this
+record was written.
+
+**Verdict `ship-with-fixes`, 0 blockers**, **3 SHOULD-FIX**. **All three were re-derived against the
+code before any fix was applied, and all three hold** — one of them with a correction to the review's
+own arithmetic. **One is in source and two are in the record**, which ends the two-round run of
+all-source finding lists 2d-5-3-I and -J produced. **Ten of the eleven rounds `2d-5-3-A` …
+`2d-5-3-K` have found a real defect in the previous round's fix**, the denominator pinned by the
+letter sequence.
+
+**The sharpest thing this round produced is not in the review's list: it found a defect in its own
+fix before committing it.** Finding 1's replacement sentence first said that *every* `open()` in the
+cited test reaches `workspaceReady()`. It does not — `open()`'s own comment at that call site
+enumerates three early returns that leave it unreached, and *a superseded generation* is the first of
+them, which is exactly what happens to the losing open in that test. Corrected to *"the open that wins
+reaches `workspaceReady()`"* **before any gate ran**, which is also why this round needed two gate
+runs where 2d-5-3-J needed three.
+
+**Finding 1 (in source): *"no coordinator runs in it"* is a false attribution.** 2d-5-3-J wrote *"it
+never calls `start()`, so no coordinator runs in it"* of `workspace.test.ts`'s *"lets the newer open
+win, however late the older one answers"*. **Coordinator code runs in that test throughout**:
+`createBrowserState` constructs one unconditionally, every `open()` calls
+`reconciliation.workspaceOpened()` **synchronously before its first await**, and the winning open
+reaches `reconciliation.workspaceReady()`, whose body is `requestDrain('workspaceOpened')` — which
+then **remembers** the reason rather than dropping it, because `drainMayStart()` is
+`started && !disposed && !awaitingReady()` and `started` is false. **The conclusion holds and the
+reason does not**: what `start()` gates is the *drain*. `2d-5-3-J-notes.md` §4 carried the same error
+in its strong form — *"`start()` is the only route to the coordinator"* — and is corrected in place.
+**The repository-wide absence claim beside it was narrowed rather than carried**: the reviewer
+returned *"no test in this repository drives that overlap against Rust"* as `NOT-VERIFIED`, it was
+chased as far as a grep goes (every `session.drain_external_changes(...)` in the Rust tests is
+synchronous, no `thread::spawn` among them), and then **replaced by the claim the paragraph actually
+needs** — *"the two tests that come nearest drive that overlap somewhere other than Rust, and nothing
+wider is claimed here"* — which the two derivations under it pin. The universal is now asserted in
+neither direction, which is what 2d-5-3-E's shape requires.
+
+**Finding 2 (in the record): three line anchors in `2d-5-3-J-notes.md` do not resolve.** Re-derived on
+`3428cde`, the tree that round committed, because an anchor is a claim about a tree: §5's `:798` is
+**797** and its `:819` is **818**, and §7 item 8's `:800-801` is where that sentence sat in `eec0b70`,
+the tree the round *inherited* — **stale inside the commit that wrote it**, which is 2d-5-3-C's shape,
+cited by that same file's §7 item 3 three items above the instance. **A fourth was found by the sweep
+and not by the review**: §4's `reconciliationCoordinator.test.ts:750` names a line one below the
+`it(...)` it quotes, which is on **749**. **The numbers are dropped rather than corrected** — each
+citation already quotes a phrase unique in its file — and this round has the demonstration for that
+remedy: **its own fix moved three of those four phrases again**, so a replacement figure would have
+been stale in the commit writing it.
+
+**Finding 3 (in the record): §5's *"Three positional phrases stay"* is not a count of what stayed.**
+Re-running that section's own widened sweep finds two matches outside its three. *"The case-2 sentence
+above is not a second site for it"* **stays**, on §5's own criterion — it cites a **sentence**, and the
+convention the block declares is about **paragraph** citations — so only the enumeration was wrong. And
+*"reached only inside the swap block below it"*, which **2d-5-3-J's own fix had added**, has *"any
+sentence"* as its nearest antecedent rather than the early return it means; it is **rewritten in
+source** to *"the swap block that early return skips"*, removing phrase and pronoun together. **The
+review's arithmetic on the first was corrected rather than accepted**: its *"one line below the third
+survivor"* is measured from that survivor's **stale** anchor, and from where the survivor actually is
+the two sit in the **same paragraph**. **No figure replaces "three"** (2d-5-3-H's finding 3); the
+criterion is recorded instead.
+
+**§7.1 commissions a round, so this phase is `SUPERSEDED`, not complete.** The fix changed **one
+source file** — `src/lib/browser/reconciliationCoordinator.ts` — comment-only, proven mechanically
+twice. The only other changes are `PROGRESS.md` and files under `docs/`, all on §7's closed list.
+
+**Nothing is `BLOCKED`.** `2d-5-3-K-notes.md` §7 marks one item **actionable** and adoptable by a later
+phase (the citation checker, which names no unfixed defect) and six **recorded only**. No item names an
+unfixed correctness defect in a source file.
+
+#### The next action is **Phase 2d-5-3-L — the round §7.1 commissioned for 2d-5-3-K's fix**
+
+Scope it to that fix and to nothing else: the two rewritten passages in
+`src/lib/browser/reconciliationCoordinator.ts` — the `workspace.test.ts` sentence that now describes
+what the coordinator *does* do in that test, with the narrowed two-witness claim above it, and the
+*"swap block that early return skips"* rewrite — together with `docs/decisions/2d-5-3-K-notes.md` in
+full and the four correction blocks this round wrote into `docs/decisions/2d-5-3-J-notes.md`. **Check
+the comments against the code, not the code against the comments** — the instruction that has found the
+substantive finding of every round of this tail.
+
+**Where this fix is most likely to be wrong.** It adds a **mechanism** description where the previous
+text asserted an absence, and a mechanism has more surfaces: that `createBrowserState` constructs the
+coordinator unconditionally, that `workspaceOpened()` precedes the first await, that the **winning**
+open reaches `workspaceReady()` while a superseded one returns above it, that `requestDrain` remembers
+rather than drops, and that `drainMayStart()` is false because `started` is false. **Nothing pins any
+of them**, and a refactor of `open()` falsifies several at once with every gate green. Read
+`workspace.svelte.ts`'s `open()` in full rather than the lines this record quotes — **this round found
+its own error in exactly the sentence it had not yet read to the end of**.
+
+**Two things this round did that the next should not have to re-derive.** The `commands.rs`
+quotations, the `# Errors` attribution, the single `reconciliation.begin_epoch` call site, all four
+opening-words anchors and both test bodies were re-checked and **hold** (`2d-5-3-K-notes.md` §5) — so a
+round re-deriving them is spending its budget on settled ground. And the review's own arithmetic was
+wrong once again, in a different place from last time: **re-derive, do not accept**, applies to the
+reviewer's line numbers as much as to its conclusions.
+
+**What this round did not reach is marked item by item in `2d-5-3-K-notes.md` §7.** The narrowed
+two-witness sentence now rests on *which two tests come nearest*, which nothing pins (item 1). The
+citation checker is still unbuilt and **no count of what it would nominate is written here** (item 2).
+`commands.rs` beyond `open()`, its doc comment and `begin_epoch` is still unread by this tail, after
+the widest read any round of it has done (item 5). And 2d-5-3's able-to-fail residue is **still
+unreproduced after eight consecutive rounds**, having been in no round's scope (item 6).

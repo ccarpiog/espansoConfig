@@ -85,6 +85,18 @@ that overlap somewhere other than Rust, and nothing wider is claimed here"*. Tha
 derivations immediately under it. **It is not a false absence written to replace a false coverage
 claim** (2d-5-3-E's shape): the universal is not asserted anywhere, in either direction.
 
+> **Correction, 2d-5-3-L — the narrowed sentence over-attributed, and it was not pinned by the
+> derivations under it; one of them contradicts it.** *"The two tests that come nearest drive that
+> overlap somewhere other than Rust"* predicates *driving that overlap* — an open landing while a
+> drain is in flight — of both tests, and the derivation directly under it says the first,
+> `workspace.test.ts`'s *"lets the newer open win …"*, issues no drain at all, so it drives that overlap
+> nowhere. The near-miss wording this round replaced had not attributed driving to it; the rewrite did.
+> 2d-5-3-L restates it as a claim about the two tests the paragraph cites — one drives that overlap and
+> does so against an injected host, the other does not drive it at all, and nothing wider is claimed —
+> which also retires the *"which two come nearest"* half that §7 item 1 records as unpinnable. What
+> stands of this paragraph is the chase and the refusal to assert the universal in either direction.
+> `2d-5-3-L-notes.md` §2 is the record.
+
 **Fixed in source** (the false reason replaced by the true one, the absence claim scoped) and **in the
 record** (a correction block on `2d-5-3-J-notes.md` §4).
 
@@ -218,6 +230,11 @@ nothing here holds the step open.
    pins. A third test that drove the overlap closer would falsify it with every gate green. It is
    weaker than the universal it replaced and is checkable by reading two named tests, which is why it
    was preferred — but it is still prose.
+   > **Correction, 2d-5-3-L.** The sentence this item is about is gone from source: 2d-5-3-L replaced
+   > it with a claim about the two tests the paragraph cites rather than about which tests come
+   > nearest, so the unpinnable half this item records no longer exists there. The half it did not
+   > record — that the sentence attributed *driving* to a test that issues no drain — was 2d-5-3-L's
+   > Medium (`2d-5-3-L-notes.md` §2).
 2. **actionable**, and a later phase may adopt it: nothing in this repository resolves a `file:line`
    citation in a comment or a record. This round found **four** stale ones in a single notes file and
    fixed them by deleting the numbers; the candidate corrective phase under *Next action* in

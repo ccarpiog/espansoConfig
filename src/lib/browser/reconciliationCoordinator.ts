@@ -787,17 +787,19 @@ export function createReconciliationCoordinator(
       // and none is claimed. **The time index is load-bearing and is the whole of
       // the claim.** This arm runs after the await, a further successful open may
       // have installed another lifecycle and emptied the queue by then — nothing
-      // stops one. **The two tests that come nearest drive that overlap somewhere
-      // other than Rust, and nothing wider is claimed here.**
+      // stops one. **Of the two tests cited here, one drives that overlap and does
+      // so against an injected host, and the other does not drive it at all;
+      // nothing wider is claimed here.**
       // `./workspace.test.ts`'s *"lets the newer open win, however late the older
       // one answers"* overlaps two **opens** with each other and issues no drain at
-      // all — but **coordinator code does run in it**: the host constructs one,
-      // every `open()` calls `workspaceOpened()` synchronously, and the open that
-      // wins reaches `workspaceReady()`, whose body is a
-      // `requestDrain('workspaceOpened')` (the superseded one returns before it).
-      // The test never calls `start()`, so `drainMayStart()` is false and that
-      // reason is **remembered rather than issued**. What drives an open landing
-      // during a drain is
+      // all, so it is the one that does not — but **coordinator code does run in
+      // it**: the host constructs one, every `open()` calls `workspaceOpened()`
+      // synchronously, and the open that wins reaches `workspaceReady()`, whose
+      // body is `openInProgress = false` and then `requestDrain('workspaceOpened')`;
+      // a superseded open returns at a generation check and never reaches
+      // `workspaceReady()`. The test never calls `start()`, so `drainMayStart()` is
+      // false and that reason is **remembered rather than issued**. What drives an
+      // open landing during a drain is
       // `./reconciliationCoordinator.test.ts`'s *"installs nothing from a drain an
       // open overtook"*, and it moves the generation on the **injected** host — so
       // it reaches this arm and says nothing about Rust either. Nothing here

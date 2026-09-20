@@ -53,8 +53,12 @@ each other** and pins nothing about an open overlapping a drain.
 > coordinator runs in it"*. Coordinator code runs in that test throughout. `createBrowserState`
 > constructs one unconditionally; every `open()` calls `reconciliation.workspaceOpened()`
 > **synchronously, before its first await**; and the open that wins reaches
-> `reconciliation.workspaceReady()`, whose body is `requestDrain('workspaceOpened')` — the superseded
-> open returns above it, at the generation check, which `open()`'s own comment states. That request is
+> `reconciliation.workspaceReady()`, whose body is `openInProgress = false` and then
+> `requestDrain('workspaceOpened')` *(2d-5-3-L: this block first read "whose body is
+> `requestDrain('workspaceOpened')`", omitting the gate clear that is the first of the two statements
+> and the one `workspaceReady()`'s own comment calls what makes the request the flush)* — the
+> superseded open returns above it, at the generation check, which `open()`'s own comment states. That
+> request is
 > then **remembered rather than dropped**, because `drainMayStart()` is `started && !disposed &&
 > !awaitingReady()` and `started` is false. **The conclusion holds and the reason does not**: what
 > `start()` gates is the *drain*, so no drain is issued and the test still pins nothing about an open

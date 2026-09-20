@@ -3964,3 +3964,130 @@ bytes up**; the rows are what turned it, and rule 2 below is the correction that
 **The first draft of this paragraph claimed the four had already turned it, and the measurement that
 followed falsified that** — which is why the figure is re-derived after writing rather than predicted
 before it.
+
+## Phase 2d-5-3-K's verification narrative — archived 2026-09-20 at Phase 2d-5-3-L
+
+### ⚠️ Two baselines are live at once, and only one of them is now a measurement
+
+**With the instrument in the working tree the four commands answer `1320 / 441 / 2307 / 188`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-3-K, twice** — on the inherited tree before the review was acted on,
+and on the tree this phase commits — and at 2d-5-3-J (three times), 2d-5-3-I (twice), 2d-5-3-H (twice),
+2d-5-3-G (twice), 2d-5-3-F (once), 2d-5-3-E (twice), 2d-5-3-D (twice), 2d-5-3-C (twice), 2d-5-3-B and
+2d-5-3-A before it. **Twenty independent full runs across eleven phases, returning the same four
+figures every time** — 2d-5-3-J's recorded *eighteen across ten* plus this round's two, with the
+per-round split written in the same sentence so a reader can re-derive the total rather than inherit
+it.
+
+**Two runs rather than three, and the difference from 2d-5-3-J is the point.** That round needed a
+third because its sweep edited the file **after** a green reading, and a green figure is about the tree
+that produced it. Here the second source edit — the `workspaceReady()` correction §2 of the notes
+describes — was made **before** any gate ran, so the tree the gates measured is the tree that commits.
+The way to keep a green figure true is to finish editing first, not to re-run afterwards. **The
+inherited-tree run is still taken every round rather than inherited**, for 2d-5-3-F's reason: that
+round ran the gates once, correctly reasoning its inherited tree *was* the tree 2d-5-3-E measured — but
+its reviewer re-ran nothing either, so no figure on that tree had been confirmed by a second party for
+a full round. This round's reviewer was again told to run **no build, test or package command of any
+kind**, because the host scar below makes even a run concurrent with the frontend gates corrupt both
+readings. One party measures, and it measures more than once.
+
+`cargo test --workspace -- --test-threads=1` was read **not through a pipe**, summed over **26**
+`test result` lines *and* checked by the complementary question — no line lacking `0 failed` — because
+a sum can be right while a binary is silent. `cargo clippy --workspace --all-targets -- -D warnings`
+(exit 0, read from a file rather than a pipe), `cargo fmt --check` (exit 0) and
+`cargo tree -p espansoconfig-core | rg tauri` (finds nothing) are all clean on both runs. **Both bundle
+oracles were read on both builds and both lines are reported**, the second because it proves the search
+can match at all: server-only markers **absent**, client-only markers **present (2)**.
+
+**Nothing moved at 2d-5-3-K, and nothing could have.** The source diff is **comment-only in the one
+file it touches** — `src/lib/browser/reconciliationCoordinator.ts` — so no file entered or left the
+program, no new reachable module, no new component and no new case. **It was proven comment-only
+mechanically rather than by eye**, twice: `git diff -U0` filtered to changed lines that are neither
+comment lines nor blank returns nothing, after the first edit and again after the correction. **Every
+figure was run rather than inferred**, `cargo test` included — this phase changed no Rust source at
+all, which is precisely the shape that tempts an inference, and this round again had an excuse for one:
+its findings turn on reading `src-tauri/src/commands.rs`, a file it did not touch. The three
+consequences of the host scar were followed on **both** runs — serial form, redirected to a file rather
+than read through a pipe, and the complementary question asked of every one of the 26 `test result`
+lines. **The instrument's pin was re-checked before the fix and after it** and held at
+`5 insertions(+), 1 deletion(-)`. **No line in the edited file exceeds 90 characters**, checked with
+`awk` after each of the two edits.
+
+**What no gate in this project can do, stated here because four green figures invite the opposite
+reading.** **No gate reads prose.** Every finding of this tail has been invisible to all four, and this
+round's are no exception: a false reason attached to a true conclusion, three line anchors that do not
+resolve, and an enumeration that omits two of its own sweep's matches. **The one this round is most
+pleased to have caught, the gates could not see either** — its own first draft claiming that *every*
+`open()` reaches `workspaceReady()`, when the superseded one returns above it. `svelte-check`,
+`vitest`, `vite` and `cargo test` are evidence about code and evidence about **nothing this round
+changed**.
+
+## The ladder narrative as it stood at 2d-5-3-K — archived 2026-09-20 at Phase 2d-5-3-L
+
+### What moved this phase, and how the ladder now reads
+
+**No figure moved this phase, and none could have.** 2d-5-3-K's source diff is **comment-only in one
+file**, so no file entered or left the program, no new reachable `.ts` module, no new `.svelte`
+component and no new case — neither the one-per-module rung nor the two-per-styled-component rung has
+anything to apply to. **No pristine-tree rebuild was needed to say so** — a rebuild is what
+distinguishes *"the count did not move"* from *"a file moved it and another moved it back"*, and the
+only file this phase added is one `.md` (plus its review), which are in no count. **A comment-only
+phase produces the one ladder rung that is a repeat**, and that is the expected shape rather than a
+missing measurement: the figures were re-run in full, not carried forward. **Every phase of this tail
+has now produced it** — 2d-5-3-J recorded *ten such phases running* and this is the eleventh, written
+with its derivation rather than as a bare ordinal, which is what 2d-5-3-H's findings 3 and 4 were
+about. It is worth naming as a risk rather than as reassurance: a rung that repeats proves the gates
+were run, never that they could have caught what these rounds keep finding.
+
+**The oracle gap is the point, and this round is the first to close an instance of it without a
+reviewer.** 2d-5-3-G's instance was a comment block asserting **a proposition and its negation** ten
+lines apart; 2d-5-3-H found the same class in the record; 2d-5-3-I found it **four lines apart in
+source**; 2d-5-3-J's spanned **two files**, a TypeScript comment crediting a Rust doc comment with a
+sentence it does not contain. **This round's own worst addition never reached a commit**: the claim
+that every `open()` reaches `workspaceReady()` was falsified by reading the eleven lines of comment
+directly above that call, during the writing. No gate would have caught it, no reviewer had seen it,
+and the only thing that did was reading the code the sentence was about — which is the instruction
+this tail has carried since 2d-5-3-A.
+
+**The ladder, so a later phase can check rather than accept**: `1320 / 441 / 2307 / 188` at 2d-5-3-K
+(this phase, measured **twice** — inherited tree and committed tree), at 2d-5-3-J (three times), at
+2d-5-3-I (twice), at 2d-5-3-H (also twice), at 2d-5-3-G (also twice), at 2d-5-3-F, at 2d-5-3-E
+(twice), at 2d-5-3-D (also twice), at 2d-5-3-C (also twice), at 2d-5-3-B and at 2d-5-3-A, **the same
+rung measured twenty times across eleven phases** — 2d-5-3-J's *eighteen across ten* plus this round's
+two, the per-phase split written out so the total can be re-derived rather than inherited;
+`1320 / 441 / 2306 / 188` at 2d-5-3 after its fix round, `1320 / 441 / 2298 / 188` on its worker's
+tree; `1320 / 439 / 2255 / 187` at 2d-5-2c-1 and 2d-5-2c-2 — **the instrument landed with that rung, so
+every rung listed at or before it is a *with-instrument* figure and every rung listed after it is not,
+and the two groups may not be compared without subtracting the instrument's known contribution**;
+*(2d-5-3-K corrects the direction: this sentence read "every rung from here down", which names the
+pre-instrument group.)* `1320 / 438 / 2254 / 186` at 2d-5-2b-E, at 2d-5-2b-D, at
+2d-5-2b-C, at 2d-5-2b-B and at 2d-5-2b-A; `1320 / 438 / 2253 / 186` at 2d-5-2b (2026-09-04);
+`1320 / 438 / 2235 / 186` at 2d-5-2a-C, shared by 2d-5-2a-A and -B; `1320 / 438 / 2229 / 186` at
+2d-5-2a; `1320 / 436 / 2205 / 185` at 2d-5-1-B, unmoved by 2d-5-1-C. The full per-round accounts of
+the closed rounds are in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md).
+
+## `PROGRESS.md`'s headroom narrative as it stood at 2d-5-3-K — archived 2026-09-20 at Phase 2d-5-3-L
+
+**Where the headroom stands, re-derived on this file after this round's record was written — never
+before it, and never quoted from the header it replaces:** **750 lines and 121,332 bytes**,
+which is **50 lines and 9,740 bytes under the hard bounds** (800 / 131,072) and over both soft
+ones (400 / 65,536). **The figure is a fixed point, not an estimate**: substituting it changes the
+file's size, so it was substituted and re-measured until it stopped moving, and it is re-derived once
+more in the SHA-record commit, which edits the git-state row **in place**. That commit's own handful of
+bytes is why 2d-5-3-I's header said **7,441** where its commit message said 7,427 — both true of their
+own tree, measured at 2d-5-3-J and not a defect.
+
+**⛔️ The byte bound binds first; the line bound does not.** The status and git-state rows are single
+lines of two to four thousand bytes each, so a session watching only lines will misjudge the room.
+**Measure both, on this file, after writing.** **2d-5-3-K took five archives, four of them narrative
+and all before a word of the record** — 124 + 62 + 50 + 19 lines — **and the four were again not
+enough**: with the record written and this paragraph still a placeholder, the file measured
+**122,316 bytes against the 122,212 it inherited**, and the **superseded status rows of G, H and I**
+are what turned it — the third of them only after the git-state row below had been written and
+measured, which is the second time in one round that a figure was re-derived rather than predicted. That is the second consecutive round in
+which the narrative archives alone did not, which is why the warning under *Next action* now says to
+plan on a row rather than to hold one in reserve. **The measurement is taken after the writing, never
+predicted before it** — 2d-5-3-J's first draft claimed its four archives had already turned the file
+and the measurement falsified that; this round's claim was written the other way round, from the
+measurement.
