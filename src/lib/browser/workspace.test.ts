@@ -42,6 +42,7 @@ import type {
   ReapplyResolution,
   ReconciliationBatch,
   SaveResult,
+  UnreadableReason,
   WorkspaceSummary
 } from '../ipc/types';
 import {
@@ -767,6 +768,69 @@ describe('the load', () => {
     expect(state.views.map((one) => one.id)).toEqual([1, 2]);
     expect(state.views.find((one) => one.id === 2)?.revision).toBe('rev-a');
   });
+
+  it('publishes nothing when the last file’s own getter opens another workspace', async () => {
+    // **The check the per-iteration one cannot make.** `open()` compares its
+    // generation at the top of every iteration, so the caller code that iteration
+    // *i* runs — the ingress copy's twenty-four field reads, each match's, and the
+    // injected `report` on the other arm — is caught by iteration *i+1*. The final
+    // iteration has no *i+1*: before this round, nothing at all stood between its
+    // reads and `views = projected; status = 'ready'`.
+    const second = deferred<CommandResult<WorkspaceSummary>>();
+    let opens = 0;
+    let sprung = false;
+    let state: BrowserState | null = null;
+    // A `value` getter on the answer for the **last** identity `list_documents`
+    // returns, which a `CommandResult` may perfectly well have: the command
+    // surface is injected, so the answer is caller-controlled data and `readonly`
+    // freezes nothing at runtime.
+    const trap: CommandResult<DocumentView> = {
+      ok: true as const,
+      get value(): DocumentView {
+        if (!sprung) {
+          sprung = true;
+          void state?.open('/second');
+        }
+        return otherDocument();
+      }
+    };
+    const base = scriptedCommands({
+      documents: new Map<number, CommandResult<DocumentView>>([
+        [1, { ok: true, value: profileDocument() }],
+        [2, { ok: true, value: baseDocument() }],
+        [3, trap]
+      ])
+    });
+    // The second open is **held**, so the window it left behind is readable. Let
+    // it finish and it would overwrite everything, which is exactly why a case
+    // that only inspects the settled state cannot see this defect at all.
+    const commands: BrowserCommands = {
+      ...base,
+      openWorkspace: vi.fn(async (): Promise<CommandResult<WorkspaceSummary>> => {
+        opens += 1;
+        return opens === 1 ? { ok: true as const, value: SUMMARY } : second.promise;
+      })
+    };
+    state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    // The getter fired, so the trap is live rather than decorative, and the
+    // superseded load published nothing: the window is the second open's, still
+    // loading, and not the first open's three projections presented as the new
+    // workspace's.
+    expect(sprung).toBe(true);
+    expect(opens).toBe(2);
+    expect(state.status).toBe('loading');
+    expect(state.views).toEqual([]);
+    expect(state.documents).toEqual([]);
+
+    // And the second open finishes normally, so nothing here leaves a load stuck.
+    second.resolve({ ok: true, value: SUMMARY });
+    await settleDrains();
+    await settleDrains();
+    expect(state.status).toBe('ready');
+    expect(state.views.map((one) => one.id)).toEqual([1, 2, 3]);
+  }); // End of the superseded-open publication case
 
   it('says which file could not be read, so its own row can say so too', async () => {
     const failure: IpcFailure = {
@@ -2563,6 +2627,104 @@ describe('moving a snippet', () => {
     expect(state.selected).toBeNull();
     expect(state.notice).toBe('differentMatch');
   }); // End of the "re-read from another parse" case
+
+  it('does not follow the move past a selection an identity’s own getter dropped', async () => {
+    // **A getter on a `MatchId` — the third level**, one below where the ingress
+    // copy stopped before Phase 2d-5-4-B. `positionOf` in `./selection.ts` reads
+    // `match.id.node` on every element of the projection it is looking in, and
+    // `positionInSameParse` calls it **between the selection-follow guard and the
+    // `replaceSelection` that guard justifies**. `CLAUDE.md` names a check and a
+    // spend separated by any property read as not atomic, and this is one.
+    let fired = false;
+    let reads = 0;
+    let state: BrowserState | null = null;
+    const before = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      matches: [
+        makeMatch({ node: 10, document: 2, trigger: ':sig', label: 'Signature' }),
+        makeMatch({ node: 11, document: 2, trigger: ':date', label: 'Today' })
+      ]
+    });
+    const shifted = makeMatch({
+      node: 30,
+      document: 2,
+      revision: 'rev-b',
+      trigger: ':date',
+      label: 'Today'
+    });
+    const clone = makeMatch({
+      node: 31,
+      document: 2,
+      revision: 'rev-b',
+      trigger: ':sig',
+      label: 'Signature'
+    });
+    // The trap sits on the **first** match's identity, so the lookup for the moved
+    // snippet has to read it before it finds what it is looking for at index 1.
+    // What it does is the person's own *Clear selection*.
+    const trap: MatchView = {
+      ...shifted,
+      id: {
+        document: 2,
+        revision: 'rev-b',
+        get node(): number {
+          reads += 1;
+          if (!fired) {
+            fired = true;
+            state?.clearSelection();
+          }
+          return 30;
+        }
+      }
+    };
+    const after = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-b',
+      matches: [trap, clone]
+    });
+    const saved: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: clone.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: before }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, moves: [saved] });
+    state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(before.matches[0]!);
+    expect(state.selected?.id.node).toBe(10);
+
+    documents.set(2, { ok: true, value: after });
+    await state.moveMatch(
+      before.matches[0]!.id,
+      before.matches[1]!.id,
+      OPEN_REVISION,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    // The getter fired, so the re-entry really happened, and what it did stands:
+    // the person cleared their selection while the adoption was running, and the
+    // move does not put one back. Before the identity copy, the guard had already
+    // passed when the getter ran, so `replaceSelection` re-pointed the selection at
+    // the moved snippet — a selection hijacked after the person had dropped it,
+    // which is 2c-3c step 2's High in its third-level form.
+    expect(reads).toBeGreaterThan(0);
+    expect(state.selected).toBeNull();
+    expect(state.selectedMatch).toBeNull();
+  }); // End of the identity-getter selection case
 }); // End of the "moving a snippet" suite
 
 /**
@@ -7834,6 +7996,28 @@ function removedObservation(
   return { Removed: { sequence, document, previous_revision: null } };
 } // End of function removedObservation()
 
+/** What a `PermissionDenied` looks like on the wire. */
+const DENIED: UnreadableReason = { PermissionDenied: {} };
+
+/**
+ * One `Unreadable` observation.
+ *
+ * **The one arm that moves none of the host's three reread captures**, which is
+ * what makes it the arm an in-flight read can overwrite: it installs nothing and
+ * invalidates no projection, so a read that was already out still reaches its
+ * installation block with every capture intact.
+ *
+ * @param sequence - The sequence it was admitted under.
+ * @param document - Which document arm.
+ * @returns The observation.
+ */
+function unreadableObservation(
+  sequence: number,
+  document: ObservedDocument
+): ExternalObservation {
+  return { Unreadable: { sequence, document, reason: DENIED } };
+} // End of function unreadableObservation()
+
 /**
  * The projection `reload_document` answers with when a case wants a visible
  * change.
@@ -8778,6 +8962,132 @@ describe('the observation transitions', () => {
     expectNoSaveCommand(commands);
     state.dispose();
   }); // End of the explicit-recovery case
+
+  it('keeps a newer unreadable reason an explicit reread did not set', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const held = deferred<CommandResult<DocumentView>>();
+    const base = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [unreadableObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    // The recovery control's read is held, so the observation lands in the middle
+    // of it.
+    const commands: BrowserCommands = { ...base, reloadDocument: vi.fn(() => held.promise) };
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    // Fired before the batch is drained: `open()` requests the drain and the pump
+    // yields, so this read is out by the time the observation is applied.
+    const recovery = state.rereadDocument(2);
+    await settleDrains();
+
+    // The watcher's last word about the file, with its typed reason. **It moves
+    // none of the read's three captures** — it installs nothing and invalidates no
+    // projection — so the read in flight still reaches its installation block.
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'unavailable', reason: DENIED });
+
+    held.resolve({ ok: true, value: rereadBaseDocument() });
+    expect(await recovery).toBeNull();
+    await settleDrains();
+
+    // **The install stands**, and deliberately: the bytes this answer carries are
+    // the bytes that file held when the read was answered, which a status written
+    // meanwhile does not contradict.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([77, 20]);
+    // **And the mark stands too**, because this read did not set it. Clearing it
+    // would say *there is nothing to report about this file* over the watcher's
+    // *unreadable*, permanently — the batch watermark has moved past the
+    // observation that carried the reason, so nothing re-derives it.
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'unavailable', reason: DENIED });
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the reread-over-a-newer-reason case
+
+  it('reads no summary of its own between the failure arm’s checks and its write', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const answer = deferred<CommandResult<DocumentView>>();
+    let armed = false;
+    let reads = 0;
+    let sprung = false;
+    let state: BrowserState | null = null;
+    // **A row whose `id` is an accessor**, which is what `list_documents` may
+    // perfectly well answer with: the command surface is injected. `documents` is
+    // read by the host failure arm's membership test *after* both of its fence
+    // comparisons and immediately before its write, so before this round that
+    // third condition was the one that could invalidate the two above it.
+    const trap: DocumentSummary = {
+      ...makeSummary({ id: 2, relativePath: 'match/base.yml' }),
+      get id(): DocumentId {
+        reads += 1;
+        if (armed && !sprung) {
+          sprung = true;
+          // The largest thing arbitrary code can do from here, and the one that
+          // falsifies the check two lines above it: a whole new workspace.
+          void state?.open('/second');
+        }
+        return 2;
+      }
+    };
+    const base = scriptedCommands({
+      list: {
+        ok: true,
+        value: [
+          makeSummary({ id: 1, relativePath: 'config/default.yml', kind: 'ConfigProfile' }),
+          trap,
+          makeSummary({ id: 3, relativePath: 'match/other.yml' })
+        ]
+      },
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    const commands: BrowserCommands = { ...base, reloadDocument: vi.fn(() => answer.promise) };
+    state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+
+    // Armed only once the guarded reread is out, so the one read of `documents`
+    // left on this path is the fence's third condition. Everything before it —
+    // the load's own `get_document` loop, and the coordinator's eligibility
+    // question — is a truthful read of a truthful row.
+    armed = true;
+    reads = 0;
+    answer.resolve({
+      ok: false,
+      failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
+    });
+    await settleDrains();
+
+    // **Nothing read a command-supplied row after the checks**, because the rows
+    // are this module's own objects. Before the ingress copy the getter ran here
+    // and opened a second workspace, and the arm then wrote `stale` anyway — all
+    // three of its comparisons having been about a workspace that no longer
+    // existed by the time the write happened.
+    //
+    // **The status is asserted first and it discriminates nothing**, which is
+    // stated rather than left for a reader to discover: 2d-5-4-A §7 item 4 records
+    // that a write this fence permits can only restate the arm's own mark, so the
+    // value is `stale` either way. The two assertions under it are the case.
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+    expect(reads).toBe(0);
+    expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the unnormalized-summary fence case
 
   it('sends document_text for the viewer’s file after an observation installs', async () => {
     expectDrains(3);

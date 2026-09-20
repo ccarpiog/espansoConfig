@@ -868,6 +868,29 @@ function applyChange(
   if (!sequences.admit(document, route.sequence)) {
     return 'superseded';
   }
+  /**
+   * Marks the file stale, but only while this observation still owns its status.
+   *
+   * **Hoisted out of the guard at Phase 2d-5-4-B, because two writes outside the
+   * guard need it too.** It is handed to {@link tellTheSurfaceAbout} rather than
+   * duplicated there, so that this module has exactly one fenced status writer
+   * and a reader can see that every `stale` an admitted `Changed` produces goes
+   * through it.
+   *
+   * **What it asks is an injected interface method, not a pure read.**
+   * `sequences` is a parameter of type {@link AcceptedSequences}, whose `isNewest`
+   * is a declaration; the only implementation today — the closure
+   * {@link createAcceptedSequences} returns — is a `Map` lookup and is pure, so
+   * asking it fires no callback *as this program is assembled*. That is a
+   * property of that implementation and not of the type, and a later store with a
+   * getter behind `isNewest` would put a callback back inside a guard.
+   */
+  const markStaleWhileOurs = (): void => {
+    if (!sequences.isNewest(document, route.sequence)) {
+      return;
+    }
+    workspace.noteDocumentStatus(document, { kind: 'stale' });
+  }; // End of function markStaleWhileOurs()
   if ('Unreadable' in route.content) {
     workspace.noteDocumentStatus(document, {
       kind: 'unavailable',
@@ -875,7 +898,7 @@ function applyChange(
     });
     return 'unavailable';
   }
-  if (tellTheSurfaceAbout(route, workspace)) {
+  if (tellTheSurfaceAbout(route, workspace, markStaleWhileOurs)) {
     return 'conflicted';
   }
   // Ruling 18's registry capture, taken **before** the read and rechecked inside
@@ -926,26 +949,27 @@ function applyChange(
    * `unavailable` with a typed reason and moves none of the host's three captures,
    * so the read still reached this guard, `stillApplying` refused first, and
    * `stale` overwrote the reason — permanently, because a blocked session advances
-   * the watermark and the observation is never redelivered. So the **two arms above
-   * the ownership question** write through `markStaleWhileOurs`, which asks it at
-   * the write; the two below it are fenced by their position and write directly,
-   * because a call that can never refuse is one no test can tell from no call.
+   * the watermark and the observation is never redelivered.
+   *
+   * **Every arm that writes does so through `markStaleWhileOurs`** — the
+   * `isNewest` arm itself writes nothing at all, deliberately — **and the two
+   * below the ownership question do so because position is not an answer.** They used to
+   * write directly, defended by the sentence *reaching this line means the
+   * ownership question two arms up already answered yes*. It answered yes **then**:
+   * between `isNewest` and either write, `tellTheSurfaceAbout` calls
+   * `workspace.openWriteSurfaces()` and `workspace.creatorEligibility(document)`,
+   * which are host members — the second one reads this window's row list — and
+   * `CLAUDE.md` says a check and a spend separated by any such read are not atomic.
+   * A host whose accessor admits a newer observation for the same file makes the
+   * lower two arms write `stale` over a newer transition's verdict, which is
+   * exactly what the fence was introduced to stop for the upper two. The companion
+   * claim, that such a call *can never refuse and no test could tell it from no
+   * call*, is false for the same reason and
+   * `observationTransitions.test.ts` now holds the case that refuses it.
    *
    * @returns `true` when the read may be installed.
    */
   const guard = (): boolean => {
-    /**
-     * Marks the file stale, but only while this read still owns its status.
-     *
-     * A pure read of the accepted-sequence map, so asking it fires no callback and
-     * can only ever suppress a status write.
-     */
-    const markStaleWhileOurs = (): void => {
-      if (!sequences.isNewest(document, route.sequence)) {
-        return;
-      }
-      workspace.noteDocumentStatus(document, { kind: 'stale' });
-    }; // End of function markStaleWhileOurs()
     if (!session.stillApplying()) {
       markStaleWhileOurs();
       return false;
@@ -957,20 +981,19 @@ function applyChange(
     if (!sequences.isNewest(document, route.sequence)) {
       return false;
     }
-    if (tellTheSurfaceAbout(route, workspace)) {
+    if (tellTheSurfaceAbout(route, workspace, markStaleWhileOurs)) {
       // A surface opened while the read was in flight. The consult's Q5 says to
       // re-run arbitration against the retained observation and put that surface
       // on its conflict path, which is exactly what the call above did. Its own
-      // `stale` needs no fence: this arm is below the ownership question, so
-      // reaching it is already the answer to it.
+      // `stale` is written through the fenced writer handed in, because the two
+      // host members it consults first are caller code.
       return false;
     }
     if (workspace.writeSurfaceGeneration() !== registryAt) {
-      // Unfenced, for the same reason the arm above it is: reaching this line means
-      // the ownership question two arms up already answered yes. A
-      // `markStaleWhileOurs()` here would be a call that can never refuse, and no
-      // test could tell it from this one.
-      workspace.noteDocumentStatus(document, { kind: 'stale' });
+      // Fenced, and the ownership question is asked *here* rather than inferred
+      // from the fact that it was asked above: `tellTheSurfaceAbout` ran two host
+      // members in between, and one of them reads this window's rows.
+      markStaleWhileOurs();
       return false;
     }
     // Nothing refused, so the answer may be installed. **The status is not cleared
@@ -992,18 +1015,29 @@ function applyChange(
  * observe it (R36). Over-refusing costs one file left showing an older projection;
  * under-refusing is somebody's work reloaded out from under them.
  *
- * **It marks the file stale whether or not a transition was found.** A surface
- * whose kind the registry answers and whose transition it does not is a race the
+ * **It offers the mark whether or not a transition was found.** A surface whose
+ * kind the registry answers and whose transition it does not is a race the
  * registry's own comment describes, and the file is still not being reloaded, so
  * the state is the same either way.
  *
+ * **Offers rather than writes, because the mark goes through the caller's fenced
+ * writer — Phase 2d-5-4-B's finding 5.** The call above it reads two host
+ * members, `openWriteSurfaces()` and `creatorEligibility()`, the second of which
+ * walks the window's row list; so arbitrary code runs between the caller's
+ * ownership question and this write, whichever of the two call sites invoked it,
+ * and a newer observation admitted there makes the write suppress itself. Taking
+ * the writer as a parameter rather than rebuilding it here is what keeps one
+ * fenced writer in this module instead of two that can drift.
+ *
  * @param route - The change.
  * @param workspace - The window.
+ * @param markStale - The caller's fenced `stale` writer, asked at the write.
  * @returns Whether a surface may be about the file.
  */
 function tellTheSurfaceAbout(
   route: Extract<ObservationRoute, { kind: 'changed' }>,
-  workspace: ReconciliationWorkspace
+  workspace: ReconciliationWorkspace,
+  markStale: () => void
 ): boolean {
   const kind = targetingSurfaceFor(
     route.document,
@@ -1013,7 +1047,7 @@ function tellTheSurfaceAbout(
   if (kind === null) {
     return false;
   }
-  workspace.noteDocumentStatus(route.document, { kind: 'stale' });
+  markStale();
   const narrowed = externalConflictObservationOf(route);
   const transition = workspace.transitionFor(kind);
   if (narrowed !== null && transition !== null) {

@@ -12758,3 +12758,112 @@ sharpest **actionable** one is item 12 — the shallow copy of note 2 above.
 **The one thing this phase changed that its own plan said it would not** is the `DetailPane.svelte`
 comment, and the argument that it owes no window reading is in this phase's record above. A round that
 disagrees should say so: the remedy would be a reading, not a revert.
+
+## Phase 2d-5-4-A's record — archived 2026-09-20 at Phase 2d-5-4-B
+
+_Moved verbatim from `PROGRESS.md`'s Next-action section, unedited. Its Next-action prose — the
+directive Phase 2d-5-4-B executed — stays in the live head until that phase closes, as every link of
+this chain has._
+
+#### Phase 2d-5-4-A — the round `CLAUDE.md` §7.1 commissioned for 2d-5-4's fix
+
+**Taken and answered, and `SUPERSEDED BY 2d-5-4-B` rather than complete**, because its own fix
+changed source. Risk class **high**; worker model **opus** — **no implementation worker**: one
+**read-only re-derivation** worker, then one fix worker. Record:
+[`docs/decisions/2d-5-4-A-notes.md`](docs/decisions/2d-5-4-A-notes.md); review
+[`docs/reviews/phase-2d-5-4-A.md`](docs/reviews/phase-2d-5-4-A.md); brief
+[`docs/reviews/phase-2d-5-4-A.brief.md`](docs/reviews/phase-2d-5-4-A.brief.md); the re-derivation
+[`docs/reviews/phase-2d-5-4-A.rederivation.md`](docs/reviews/phase-2d-5-4-A.rederivation.md).
+
+**The review was Codex**, through `autoclaude-review.sh`, which **exited 0** so no agent was spawned
+— three consecutive Codex rounds. **Verdict `ship-with-fixes`, 2 blockers and 4 SHOULD-FIX.** **The
+report's finding bodies arrive truncated again** — the script renders each to 180 characters and
+deletes its state root on success — so **not one was accepted on the report's strength**. All six
+were re-derived from the code by a read-only worker whose analysis is the file above, and the
+orchestrator then **spot-checked the decisive lines of five of them** against the source. **All six
+held.** Five are defects in source; the sixth is a false sentence standing in **both** the record and
+source, so the reviewer's own "record-only" label was wrong.
+
+**Blockers 1 and 2 are one defect with two faces: this module retained objects the *commands* built.**
+`open()` did `projected.push(view.value)`, so every element of `views` was caller-supplied — and both
+things that run after the final guard read them. `installView` compares `view.id` over every element
+it already holds, and `repairAfter` indexes `next.matches` and reads a candidate's `source_text`, so
+**an accessor behind any of those runs arbitrary code between the check and the install**, with
+`invalidateProjectionOf` already spent. 2d-5-4's own fix had materialized `fresh.value` once and then
+written into its JSDoc that *"what bounds that half is `replaceSelection`'s own discipline"* — **which
+is false**: `replaceSelection` is `selectGeneration += 1; selected = next;`, it refuses nothing, and
+`repairAfter` consults it about nothing. **Fixed at ingress rather than at the guard**:
+`ownedProjectionOf` copies a command's answer field by field, and each match field by field, at **all
+nine** ingresses; its explicit construction is typed `DocumentView`, so a field added to that type
+later is a **compile error in that function**. Its JSDoc names the depth — **two levels** — and says
+in as many words that everything below that is still the command's own object.
+
+**Findings 3, 4 and 5 are one defect too: a status write that does not ask whether it still owns the
+status.** The host's failure arm re-marked `stale` after an await with **no check at all**, over a
+newer `removed` or over an overlapping reread's cleared mark; the transitions guard's two top arms
+wrote `stale` over a newer `unavailable`, because `isNewest` — the only question that asks ownership
+— is **third** and returns silently; and **nothing on the explicit-reread path cleared anything**, so
+a person using the recovery control on a file a failed guarded reread had marked read it successfully
+from disk and the mark stayed for the session. Fixed by a per-document `statusWrites` token plus the
+open generation and a held row (3), by `markStaleWhileOurs` fencing the two arms **above** the
+ownership question while leaving the decision order untouched (4), and by **moving the clear out of
+the guard and into the installation block** (5), where it reaches both callers. **Decision order and
+write ownership are two different questions**, and treating them as one is what this round found;
+`stillApplying` is still asked first, because the arm below it fires a component's callback.
+
+**Finding 6 was mislabelled by the reviewer and the re-derivation caught it.** §3.5 of the notes said
+`reload_document` is the only document command `applyObservation` can reach — and **the identical
+sentence was in source**, at `observationTransitions.ts:747`. It is false either way:
+`rereadUnderGuard` ends with `await readFileText()`, which sends `document_text` when the raw viewer
+has a target, and `removeDocument` fires the same refresh. Both are corrected, and both now separate
+*the command this arbitration requests* from *what is reachable transitively*. Ruling 27's **no save
+command at all** is untouched, and ruling 28 is not circumvented: the identity that read is sent for
+is the viewer target's, which `fileTextTarget()` subtracts `pendingAdditions` from.
+
+**Two things this round did not do, stated rather than glossed.** It added **no user-facing string in
+any language** and touched **no `.svelte` file**, so no window reading is owed. And it left `npm run
+build` at **189** modules: `ownedProjectionOf` lives in `workspace.svelte.ts` rather than in a module
+of its own, so the ladder's *one module per new source module* rule predicts no movement and none
+happened.
+
+**`CLAUDE.md` §7.1 commissions a round.** The fix changed **four source files** —
+`src/lib/browser/workspace.svelte.ts`, `src/lib/browser/observationTransitions.ts` and their two
+suites — so the next action is that round and not 2d-5-5.
+
+## The Next-action prose Phase 2d-5-4-B executed — archived 2026-09-20 at Phase 2d-5-4-B
+
+_Moved verbatim from `PROGRESS.md`, unedited, beside Phase 2d-5-4-A's record above it. What it asked
+for was done: all six findings were re-derived before any was fixed, and the five things it named
+were the round's first sweeps — items 1, 2 and 3 each produced a finding, and item 5 produced two._
+
+#### The next action is **Phase 2d-5-4-B — the round §7.1 commissions for 2d-5-4-A's fix**
+
+**Scoped to that fix's diff**, which is four source files plus `docs/decisions/2d-5-4-notes.md`'s six
+new correction blocks and `docs/decisions/2d-5-4-A-notes.md` in full. **This is a review round, not
+implementation**: it takes no implementation worker, and its own fix decides whether another round
+follows, by §7.1 and nothing else.
+
+**Five things to point it at first**, each because the fix that answered a finding is where the next
+finding has lived in every tail this project has run:
+
+1. **`ownedProjectionOf`'s depth claim.** Its JSDoc says two levels is *"the depth this module reads
+   after a guard"* and enumerates the readers. **Check that enumeration against the code**, not
+   against the sentence: one reader it missed is a defect of exactly the class this round closed. The
+   nine ingresses are a second half of the same question — is any ingress of a command-supplied
+   projection still unnormalized?
+2. **Whether a field-by-field copy is the compile-time check it claims to be.** An **optional**
+   property omitted from an object literal is not an error, so the guarantee holds for required
+   fields and may not hold for the rest. Nothing in the JSDoc says which.
+3. **`markStaleWhileOurs`, and the two arms deliberately left unfenced.** The argument is positional:
+   reaching them means `isNewest` already answered yes. Is that true of **every** path into them,
+   including one entered after `tellTheSurfaceAbout` has run a component callback? And is
+   `sequences.isNewest` really the pure read the new comment calls it?
+4. **The clear's new home.** It now fires for any successful install inside `rereadUnderGuard`,
+   explicit rereads included. The JSDoc claims content currency and explicitly disclaims membership
+   reconciliation. Is the disclaimer enough, and is there still a path that marks and never clears?
+5. **The record's six correction blocks.** A correction block is a source of new false claims in this
+   project's history. §7 item 12's *recorded only* mark was struck this round; check that what
+   replaced it is true.
+
+**Nothing is `BLOCKED`.** `docs/decisions/2d-5-4-A-notes.md` §7 carries this round's marked items and
+none names an unfixed correctness defect in a source file.

@@ -734,8 +734,29 @@ were written at delivery: three items moved, and the paragraph under each says w
     > consults it. **This was a correctness defect in source**, so under `CLAUDE.md` §7.3 it was a
     > blocker rather than something a later phase could adopt, and it is fixed here rather than
     > carried: `ownedProjectionOf` normalizes at every ingress, two levels deep, and its own header
-    > states exactly where the guarantee stops. What survives as *recorded only* is the residue —
-    > **the third level and below is still the command's own object**, and no type says so.
+    > states exactly where the guarantee stops. ~~What survives as *recorded only* is the residue —
+    > **the third level and below is still the command's own object**, and no type says so.~~
+
+    > **Correction (Phase 2d-5-4-B).** The struck sentence carries the **wrong mark**, and it is the one
+    > place in this record where the mark decides whether a known defect closes with the step. Under
+    > `CLAUDE.md` §7.3 an item is a **blocker** when it names a correctness defect in a source file, and
+    > the residue named exactly one: the third level is a `MatchId`, `positionOf` in
+    > `src/lib/browser/selection.ts` reads `match.id.node` on every element of the projection it walks,
+    > and `positionInSameParse` calls it at three adoption sites **between the selection-follow guard
+    > and the `replaceSelection` that guard justifies** (`adoptTheDocumentOnDisk`,
+    > `adoptTheCreatedSnippet` and `adoptAfterTheDuplicate` in
+    > `src/lib/browser/workspace.svelte.ts`). A getter there is arbitrary code inside a check-and-spend
+    > window, which is 2c-3c step 2's High in its third-level form. *Recorded only* is for a residual
+    > risk that names no defect in a source file, and this named one; the correct mark was **blocker**.
+    >
+    > It is closed rather than re-marked and carried: `ownedMatchIdOf` copies the identity field by field
+    > at ingress, `ownedMatchOf` uses it, `ownedIdentityOf` normalizes the `target` and `moved`
+    > identities a save answer carries at the top of each of the three adoptions, and
+    > `workspace.test.ts` holds a case confirmed to fail against this record's own code
+    > (`docs/decisions/2d-5-4-B-notes.md` §3). What survives as *recorded only* is narrower and names no
+    > defect: the **fourth** level and below — the values of `trigger`, `content`, `options` and the
+    > element types of the arrays — is still the command's own object, and nothing this module reads
+    > after a guard goes that deep.
 
 13. **`pendingAdditions` is cleared only by `open()` and by the removal transition — *recorded
     only*.** There is no *other* way for an invented identity to become addressable today, because the

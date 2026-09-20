@@ -106,9 +106,19 @@ epoch refusal wrote `stale` over a newer `unavailable` — permanently, because 
 advances the watermark and the observation is never redelivered. **The decision order is unchanged**:
 `stillApplying` is still first, because the arm below it fires a component's callback and that is
 2d-5-4's blocker 2. What changed is that those two arms write through `markStaleWhileOurs`, which asks
-the ownership question at the write. The two arms **below** `isNewest` write directly and are fenced by
+the ownership question at the write. ~~The two arms **below** `isNewest` write directly and are fenced by
 position: a call that can never refuse is one no test can tell from no call, and a draft case written
-against one of them passed both ways, which is how that was established rather than argued.
+against one of them passed both ways, which is how that was established rather than argued.~~
+
+> **Correction (Phase 2d-5-4-B, review finding 5).** The struck sentences are false and are the same
+> claim §6's discarded-candidate paragraph makes; both are corrected, because a fix that closes one
+> wording and leaves the other standing is this project's recorded failure mode. Position is not an
+> answer to an ownership question: `tellTheSurfaceAbout` calls `workspace.openWriteSurfaces()` and
+> `workspace.creatorEligibility(document)` — host members, the second of which reads the window's rows —
+> **between** `isNewest` and each of the two writes below it, so the question is answered about a moment
+> that has passed by the time either write happens. All four arms go through `markStaleWhileOurs` as of
+> 2d-5-4-B, the writer is passed into `tellTheSurfaceAbout` rather than duplicated there, and two cases
+> pin it. See `docs/decisions/2d-5-4-B-notes.md` §5.
 
 **Finding 5 — nothing on the explicit-reread path cleared anything.** The only clear lived in the
 coordinator's guard, and `BrowserState.rereadDocument` is `rereadUnderGuard(document,
@@ -169,8 +179,26 @@ Measured in full by the orchestrator on the post-fix tree, each command run on i
 - The instrument's pin: `git diff --stat` over `src-tauri/src/main.rs` and `src/main.ts` is
   `5 insertions(+), 1 deletion(-)`.
 
-**The nine cases and the failure each produced against the pre-fix code.** Every one was confirmed by
+**~~The nine cases~~ and the failure each produced against the pre-fix code.** Every one was confirmed by
 reverting the change in the tree, running the one suite, recording the message and restoring it:
+
+> **Correction (Phase 2d-5-4-B, review finding 6).** *"The nine cases"* is a caption this table cannot
+> support, and the count it names is a different quantity from the one the rows enumerate. Four numbers
+> were collapsed into one; they are, each derived independently by counting `git show ee78429`'s diff
+> and reading the rows rather than by trusting this sentence:
+>
+> - **10 `it(` blocks added** — 6 in `workspace.test.ts`, 4 in `observationTransitions.test.ts`;
+> - **1 `it(` block deleted** — *permits the install and clears the file's status*, which *permits the
+>   install and writes no status of its own* **replaces**, so it is a rewrite and not a new case;
+> - **net +9 tests**, which is 10 minus 1 and is corroborated by the `npm test` line above: 2380 → 2389;
+> - **8 discriminating cases in the table below**, over **7 rows** — the `4` row names two, *preserves a
+>   newer unreadable reason when the session has stopped applying* and the same for a moved epoch.
+>
+> Beside those, **2 candidate cases were discarded for passing both ways** (next paragraph) and **2 of
+> the additions are non-discriminating by construction** — *reaches neither arm below the ownership
+> question once it is answered* and *sends document_text for the viewer's file after an observation
+> installs*. "Nine" is a true statement about the **suite's size** and was used as a caption for a table
+> of eight, which makes the count unverifiable from the table it captions.
 
 | Fix | The case | What it said before the fix |
 |---|---|---|
@@ -183,11 +211,25 @@ reverting the change in the tree, running the one suite, recording the message a
 | 5 | `observationTransitions.test.ts` — *permits the install and writes no status of its own* | `expected [ { document: 1, status: null } ] to deeply equal []` |
 
 **Two candidate cases were discarded for passing both ways**, and that is the check the confirmation
-exists to make rather than an inconvenience: a fence on the guard's registry arm cannot discriminate,
-because `isNewest` returns first — which is the positional argument of §3 stated as a measurement —
+exists to make rather than an inconvenience: ~~a fence on the guard's registry arm cannot discriminate,
+because `isNewest` returns first — which is the positional argument of §3 stated as a measurement~~ —
 and finding 6 has **no behavioural delta** at all, being two false sentences. The case that replaced
 the first is labelled non-discriminating by construction; finding 6's is stated as pinning the
 corrected claim, not as a regression test.
+
+> **Correction (Phase 2d-5-4-B, review finding 5).** The struck sentence is false, and it is false in
+> the direction that matters: it promoted *this draft case did not discriminate* into *no case can*, and
+> then offered that as a measurement supporting §3's positional argument. A fence on the registry arm
+> **does** discriminate. `isNewest` returning `true` at the third question is a fact about that moment,
+> and `tellTheSurfaceAbout` runs two host members between it and either write below it —
+> `workspace.openWriteSurfaces()` and `workspace.creatorEligibility(document)`, the second of which
+> walks the window's row list. A host whose `creatorEligibility` admits a newer observation for the same
+> file makes the registry arm write `stale` over that newer transition's verdict, and
+> `applyChange` takes both the workspace **and** the sequence map as parameters, so
+> `observationTransitions.test.ts` can inject exactly that without any private hook. Phase 2d-5-4-B adds
+> the two cases and both were confirmed to fail against this record's own code
+> (`docs/decisions/2d-5-4-B-notes.md` §6). **What the discarded candidate measured was the absence of
+> such a host in the test, not the absence of the case.**
 
 ---
 
@@ -199,13 +241,25 @@ source file**, so none holds this step open.
 
 1. **actionable** — `ownedProjectionOf`'s JSDoc enumerates what this module reads after a guard, and
    the two-level depth is justified *by* that enumeration. The enumeration was derived by reading the
-   three call sites; nothing checks it. A reader added later — a fourth thing running after a guard —
-   makes the sentence false without making any test fail. The check that would bite is a sweep of
+   three call sites; nothing checks it. ~~A reader added later — a fourth thing running after a guard —
+   makes the sentence false without making any test fail.~~ The check that would bite is a sweep of
    every statement between a `stillCurrent()` and the end of its block.
+
+   > **Correction (Phase 2d-5-4-B, review finding 2).** The struck clause puts the risk in the future
+   > and the enumeration was **already incomplete when it was written**: `positionInSameParse` was a
+   > fifth reader, and it reads a level deeper than the four the enumeration names. The sweep this item
+   > asks for was run at 2d-5-4-B and is what found it. Both are fixed —
+   > `ownedProjectionOf`'s JSDoc now lists five readers including `positionOf`, and the depth sentence
+   > matches what the code copies.
 2. **actionable** — a field-by-field copy makes a **required** field's omission a compile error and an
    **optional** field's omission nothing at all. `DocumentView` and `MatchView` are wire types; if
    either ever gains an optional field, `ownedProjectionOf` will silently stop copying it. The JSDoc
    does not draw that distinction.
+
+   > **Adopted (Phase 2d-5-4-B).** It does now: `ownedProjectionOf`'s header states the
+   > required/optional distinction, says that neither wire type has an optional member today — which is
+   > why the claim holds as written — and says that nothing enforces that. The item stays here because
+   > the *enforcement* half is still absent; only the overclaim is gone.
 3. **recorded only** — `markStaleWhileOurs` calls `sequences.isNewest`, and the new comment calls that
    a pure read. It is a read of a `Map` this module owns today. Nothing in the type says it must stay
    one, and a future accepted-sequence store with a getter would put a callback back inside a guard.

@@ -561,6 +561,51 @@ describe('a change of an addressable file', () => {
     );
     expect(workspace.reread.map((entry) => entry.document)).toEqual([1, 2]);
   });
+
+  it('writes no stale when the host read that chose the surface admitted a newer one', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    workspace.surfaces = [{ kind: 'matchEditor', target: { kind: 'document', document: 1 } }];
+    // **A host whose own member advances the accepted sequence.** `applyChange`
+    // is handed both the workspace and the map, so this is the module's ordinary
+    // injection rather than a private hook: `creatorEligibility` is read
+    // *between* the question that admitted this observation and the `stale` the
+    // conflict arm writes, and in the production host it walks the window's row
+    // list. Anything that can deliver an observation synchronously from there
+    // makes this observation no longer the newest.
+    const hostile: ReconciliationWorkspace = {
+      ...workspace.workspace,
+      /**
+       * Answers the question, and admits a newer observation while doing it.
+       *
+       * @param document - The file.
+       * @returns Whatever the recording workspace would have answered.
+       */
+      creatorEligibility: (document: DocumentId): CreatorEligibility => {
+        sequences.admit(document, 9);
+        return workspace.workspace.creatorEligibility(document);
+      }
+    };
+
+    expect(
+      applyObservation(
+        projectedChange(4, ADDRESSABLE_ONE),
+        hostile,
+        sequences,
+        session.session
+      )
+    ).toBe('conflicted');
+
+    // The surface is still told — the delivery is not what the fence is about,
+    // and refusing it would drop a conflict a component is entitled to see.
+    expect(workspace.told.map((entry) => entry.kind)).toEqual(['matchEditor']);
+    // The status is not written, because by the time this line is reached a newer
+    // observation of the same file owns what that file's status says. The
+    // sentence that used to defend this write — *reaching it is already the
+    // answer to the ownership question* — was a claim about the past.
+    expect(workspace.statuses).toEqual([]);
+  }); // End of the conflict-arm ownership case
 }); // End of the "change of an addressable file" suite
 
 describe('the guard the reread is run under', () => {
@@ -700,12 +745,18 @@ describe('the guard the reread is run under', () => {
     apply(projectedChange(4, ADDRESSABLE_ONE), workspace, session, sequences);
     apply(unreadable(5, ADDRESSABLE_ONE), workspace, session, sequences);
 
-    // **Why only two arms carry the fence.** A surface is open *and* the registry
-    // moved, so both of the arms below the ownership question would fire if they
-    // were reached — the surface arm would deliver a conflict observation and the
-    // registry arm would write `stale`. Neither happens: the ownership question is
-    // asked before both, so their own writes need no fence and a fence on them
-    // would be a call that can never refuse.
+    // **What the ownership question does when it is the one that refuses.** A
+    // surface is open *and* the registry moved, so both of the arms below it would
+    // fire if they were reached — the surface arm would deliver a conflict
+    // observation and the registry arm would write `stale`. Neither happens,
+    // because the question is asked before both.
+    //
+    // **This case says nothing about whether those two arms need a fence of their
+    // own, and the comment it used to carry claimed the opposite.** It said a
+    // fence there would be a call that can never refuse and that no test could
+    // tell it from no call. Both halves are false: `tellTheSurfaceAbout` runs two
+    // host members between the question and either write, and the two cases added
+    // at Phase 2d-5-4-B drive exactly that and discriminate.
     workspace.surfaces = [{ kind: 'matchEditor', target: { kind: 'document', document: 1 } }];
     workspace.bumped += 1;
     expect(workspace.reread[0]?.guard()).toBe(false);
@@ -714,6 +765,47 @@ describe('the guard the reread is run under', () => {
       { document: 1, status: { kind: 'unavailable', reason: DENIED } }
     ]);
   }); // End of the arms-below-ownership case
+
+  it('writes no stale on the registry arm when a host read admitted a newer one', () => {
+    const workspace = recordingWorkspace();
+    const session = recordingSession();
+    const sequences = createAcceptedSequences();
+    let hostile = false;
+    // The same injected host as the conflict-arm case above, armed later: the
+    // first arbitration has to be ordinary, because it is the one that admits
+    // this observation and records the reread whose guard the case then asks.
+    const injected: ReconciliationWorkspace = {
+      ...workspace.workspace,
+      /**
+       * Answers the question, and admits a newer observation once armed.
+       *
+       * @param document - The file.
+       * @returns Whatever the recording workspace would have answered.
+       */
+      creatorEligibility: (document: DocumentId): CreatorEligibility => {
+        if (hostile) {
+          sequences.admit(document, 9);
+        }
+        return workspace.workspace.creatorEligibility(document);
+      }
+    };
+    applyObservation(projectedChange(4, ADDRESSABLE_ONE), injected, sequences, session.session);
+
+    // A surface opened and closed again while the read was in flight, so the
+    // registry arm is the one that refuses — and `tellTheSurfaceAbout` runs two
+    // host members before it is reached, the second of which is the one armed
+    // here. Nothing targets the file, so no conflict is delivered and the
+    // registry generation is the only thing left to catch it.
+    workspace.bumped += 2;
+    hostile = true;
+    expect(workspace.reread[0]?.guard()).toBe(false);
+
+    // The arm still refuses the install. What it no longer does is write `stale`
+    // over a newer transition's verdict on the strength of a question that was
+    // answered before the host ran.
+    expect(workspace.statuses).toEqual([]);
+    expect(workspace.told).toEqual([]);
+  }); // End of the registry-arm ownership case
 
   it('re-arbitrates onto the conflict path when a surface opened during the read', () => {
     const workspace = recordingWorkspace();

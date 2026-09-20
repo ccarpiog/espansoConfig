@@ -476,6 +476,49 @@ function positionInSameParse(view: DocumentView, id: MatchId): number | null {
 } // End of function positionInSameParse()
 
 /**
+ * Copies one match identity out of a command's answer into an object this
+ * module owns.
+ *
+ * **The third level the copy used to stop above.** A {@link MatchId} is what
+ * `positionOf` in `./selection.ts` compares — `match.id.node`, one level below
+ * where {@link ownedMatchOf} stopped — and {@link positionInSameParse} calls it
+ * at all three adoption sites **between the selection-follow guard and the
+ * `replaceSelection` that guard justifies**. A getter on a retained `id` runs
+ * arbitrary code inside exactly that window, and `CLAUDE.md` records a check and
+ * a spend separated by any property read as not atomic.
+ *
+ * **Field by field, and the return type is the check**, for
+ * {@link ownedMatchOf}'s reason. The caveat that claim carries is stated once,
+ * in {@link ownedProjectionOf}: it holds for *required* members. `MatchId`'s
+ * three are all required today.
+ *
+ * @param id - An identity as a command answered it, or as a save minted it.
+ * @returns An identity whose own properties are data this module wrote.
+ */
+function ownedMatchIdOf(id: MatchId): MatchId {
+  return {
+    document: id.document,
+    revision: id.revision,
+    node: id.node
+  };
+} // End of function ownedMatchIdOf()
+
+/**
+ * The same copy for an identity that may be absent.
+ *
+ * **Its callers are the three adoptions**, whose `target` and `moved` come from
+ * a command's save answer — the same ingress class as a projection, and `null`
+ * for every operation that has no such identity. Each of them calls this before
+ * its only `await`, so the accessors run before the guard rather than inside it.
+ *
+ * @param id - The identity, or `null`.
+ * @returns A copy this module owns, or `null` for `null`.
+ */
+function ownedIdentityOf(id: MatchId | null): MatchId | null {
+  return id === null ? null : ownedMatchIdOf(id);
+} // End of function ownedIdentityOf()
+
+/**
  * Copies one match out of a command's answer into an object this module owns.
  *
  * **Field by field, and the return type is the check.** A field added to
@@ -485,19 +528,21 @@ function positionInSameParse(view: DocumentView, id: MatchId): number | null {
  * structural clone throws on a function-valued property and answers nothing
  * either.
  *
- * **It copies one level.** Every field is read here, once, and written into a
- * plain own-property object; the *values* of those fields — `id`'s own
- * properties, `trigger`, `content`, `options`, and the arrays `search_terms`,
+ * **It copies one level, and `id` one level further.** Every field is read here,
+ * once, and written into a plain own-property object; the *values* of those
+ * fields — `trigger`, `content`, `options`, and the arrays `search_terms`,
  * `vars`, `form_fields`, `badges` and `unknown_entries` along with their
  * elements — are still the command's own objects, and a getter or a proxy trap
- * on one of those runs whenever something reads it.
+ * on one of those runs whenever something reads it. **`id` is the one
+ * exception**, through {@link ownedMatchIdOf}, because it is the only one of
+ * those values whose *own* properties this module reads after a guard.
  *
  * @param match - One element of a command-supplied projection's match list.
  * @returns A match whose own properties are data this module wrote.
  */
 function ownedMatchOf(match: MatchView): MatchView {
   return {
-    id: match.id,
+    id: ownedMatchIdOf(match.id),
     source_node: match.source_node,
     path: match.path,
     span: match.span,
@@ -539,16 +584,43 @@ function ownedMatchOf(match: MatchView): MatchView {
  * one of those comparisons and the install it approved.
  *
  * **Exactly how deep it copies, and what it therefore does not promise.** Two
- * levels and no more: this view's own fields, and each match's own fields
- * ({@link ownedMatchOf}). That is the depth this module reads after a guard —
- * `installView` reads `next.id` and the `id` of every element of `views`;
- * `repairAfter` reads `view.id`, indexes `view.matches`, and `reresolve` reads a
- * candidate's `source_text` and its `id`; `readFileText` reads a held view's
- * `revision`. **Anything deeper is still the command's own object** — the value
- * of `id`, of `trigger`, `content`, `options`, `profile`, and the elements of
+ * levels, plus one field at the third: this view's own fields, each match's own
+ * fields ({@link ownedMatchOf}), and each match's `id`
+ * ({@link ownedMatchIdOf}). That is the depth this module reads after a guard,
+ * and the readers are these five:
+ *
+ * - `installView` reads `next.id` and the `id` of every element of `views`;
+ * - `repairAfter` reads `view.id` and indexes `view.matches`, and `reresolve`
+ *   reads a candidate's `source_text` and its `id`;
+ * - `readFileText` reads a held view's `revision`;
+ * - {@link positionInSameParse} reads `view.id`, `view.revision` and the
+ *   candidate identity's `document` and `revision`;
+ * - `positionOf` in `./selection.ts`, which that one calls, reads **every
+ *   match's `id.node`** — the third-level read, and the reason the identity copy
+ *   exists. The three adoptions call it between the selection-follow guard and
+ *   the `replaceSelection` that guard justifies.
+ *
+ * **`select()` below reads `match.id.document` too, and that one needs no
+ * copy**: it takes its intent and projection captures *after* the read rather
+ * than before it, so an accessor firing there runs before the comparison it
+ * would have to defeat instead of between that comparison and the write. The
+ * order is the whole difference, and it is stated here so that changing it is a
+ * decision rather than an accident.
+ *
+ * **Anything deeper is still the command's own object** — the value of
+ * `trigger`, `content`, `options`, `profile`, and the elements of
  * `top_level_keys`, `global_vars`, `imports`, `coverage`, `undescended`,
  * `diagnostics`, `hazards` and `unknown_entries` — so a consumer that walks one
  * of those is reading caller-controlled data, and no type says so.
+ *
+ * **What the compile-time claim covers, and what it silently does not.** A
+ * *required* member added to {@link DocumentView}, {@link MatchView} or
+ * {@link MatchId} is a compile error in the function that copies it. An
+ * **optional** member is not — an object literal that omits a `?` property
+ * still satisfies the type — so the moment one of those types gains one, the
+ * copy stops covering it with nothing failing. **None of the three has an
+ * optional member today**, which is why the claim holds as written, and nothing
+ * enforces that they never gain one.
  *
  * @param view - A projection exactly as a command answered it.
  * @returns A projection whose own properties, and whose matches' own
@@ -586,6 +658,44 @@ function ownedProjectionOf(view: DocumentView): DocumentView {
     safely_editable: view.safely_editable
   };
 } // End of function ownedProjectionOf()
+
+/**
+ * Copies one sidebar row out of a command's answer into an object this module
+ * owns.
+ *
+ * **The second ingress class, and it was whole and unnormalized.** `documents`
+ * holds what `list_documents` answered and what an `Added` observation carried,
+ * and everything that draws a sidebar row, picks the viewer's target or answers
+ * a coordinator question reads its elements. Two of those readers are the reason
+ * this function exists rather than a general tidy: `creatorEligibility` runs
+ * **inside the coordinator's own guard**, and the host failure arm's membership
+ * test runs *after* all three of its fence checks and immediately before its
+ * write. Both are `held.id` reads, which on caller-supplied data is arbitrary
+ * code by `CLAUDE.md`'s rule, so the fix is the one {@link ownedProjectionOf}
+ * already sets: copy at ingress, not at the guard.
+ *
+ * **Field by field and explicitly typed**, for the same compile-time reason and
+ * with the same caveat — required members only; {@link DocumentSummary}'s seven
+ * are all required today.
+ *
+ * **One level is the whole type.** Every member is a `number`, a `string` or a
+ * `boolean`, so there is no second level for a getter to hide in, and this
+ * function needs no depth disclaimer of the kind `ownedProjectionOf` carries.
+ *
+ * @param summary - A row exactly as a command or an observation supplied it.
+ * @returns A row whose properties are data this module wrote.
+ */
+function ownedSummaryOf(summary: DocumentSummary): DocumentSummary {
+  return {
+    id: summary.id,
+    path: summary.path,
+    relative_path: summary.relative_path,
+    kind: summary.kind,
+    disabled: summary.disabled,
+    read_only: summary.read_only,
+    loaded: summary.loaded
+  };
+} // End of function ownedSummaryOf()
 
 /**
  * Copies the projection a selection repair carries into one this module owns.
@@ -2343,6 +2453,16 @@ export function createBrowserState(
             if (!documents.some((held) => held.id === document)) {
               // No row, so *the window is showing an older projection of it* is not
               // a statement about anything this window holds.
+              //
+              // **This is the last read before the write, and every `held.id` in it
+              // is data this module wrote** — {@link ownedSummaryOf} at both of
+              // `documents`' ingresses. Until this round it was not: the rows came
+              // straight off `list_documents` and off an `Added` observation, so the
+              // third condition ran caller-controlled accessors *after* the two
+              // comparisons above had passed, and an accessor that wrote this file's
+              // status made the fence approve a write over its own newer truth. The
+              // check that can invalidate the checks above it has to be the one that
+              // runs no foreign code.
               return;
             }
             noteDocumentStatus(document, { kind: 'stale' });
@@ -2711,13 +2831,20 @@ export function createBrowserState(
    * @param summary - The row, with `loaded` already forced false by the caller.
    */
   function addDocument(summary: DocumentSummary): void {
-    const index = documents.findIndex((held) => held.id === summary.id);
+    // **The observation's row is copied before it is retained**, which is the
+    // second half of this round's ingress rule: `documents` is read inside the
+    // coordinator's guard and in the failure arm's membership test, so nothing it
+    // holds may be an object something outside this module built. The caller's
+    // spread of the wire value happens to produce own properties today; that is a
+    // fact about one call site, and this is the type-checked statement of it.
+    const row = ownedSummaryOf(summary);
+    const index = documents.findIndex((held) => held.id === row.id);
     documents =
       index === -1
-        ? [...documents, summary]
-        : documents.map((held, at) => (at === index ? summary : held));
-    if (!pendingAdditions.includes(summary.id)) {
-      pendingAdditions = [...pendingAdditions, summary.id];
+        ? [...documents, row]
+        : documents.map((held, at) => (at === index ? row : held));
+    if (!pendingAdditions.includes(row.id)) {
+      pendingAdditions = [...pendingAdditions, row.id];
     }
   } // End of function addDocument()
 
@@ -2887,8 +3014,29 @@ export function createBrowserState(
    * synchronous re-entry from a caller's accessor was bounded by nothing at all,
    * which is why the normalization is at ingress rather than here. **No type
    * expresses any of it**, and the guarantee stops exactly where
-   * {@link ownedProjectionOf} says it does: two levels deep, with everything below
-   * that still the command's own object.
+   * {@link ownedProjectionOf} says it does: two levels deep plus each match's
+   * `id`, with everything below that still the command's own object.
+   *
+   * **A fourth capture, and it fences the clear alone.** The three above are about
+   * *the projection*: they answer whether this read's answer is still the one the
+   * window wants to install. The file's **status** is a separate thing that a
+   * separate transition can own, and none of the three moves when it changes — an
+   * `Unreadable` observation admitted while this read is in flight writes
+   * `unavailable` with a typed reason and touches no generation, so before this
+   * round the held answer landed, installed, and **cleared a mark it did not set**,
+   * permanently: the batch watermark has moved past the observation that carried
+   * the reason, so nothing re-derives it. {@link statusWriteOf} is captured beside
+   * the other three and compared at the clear.
+   *
+   * **Why the install is not fenced by it and the clear is.** They claim different
+   * things. The install claims *these are the bytes this file held when the read
+   * was answered*, which a status written meanwhile does not contradict; the clear
+   * claims *there is nothing to report about this file*, which is precisely what
+   * such a status contradicts. Refusing the clear leaves the window showing the
+   * older content under a mark that correctly says the file could not be read,
+   * which is never worse than the state today — and refusing the install as well
+   * would strand a file on an older projection because something wrote its status,
+   * which is a different and larger claim than this capture can support.
    *
    * @param document - The file to read again.
    * @param guard - Asked immediately before the installation; `false` installs
@@ -2902,6 +3050,13 @@ export function createBrowserState(
     const opened = openGeneration;
     const reread = nextRereadOf(document);
     const projection = projectionGenerationOf(document);
+    // **The status capture, taken with the other three and compared only at the
+    // clear.** On the coordinator's path the host member has already written its
+    // own `stale` before calling this function, so this number counts that write
+    // and a successful installation still clears it; what it catches is a *third
+    // party* — a newer observation's transition — speaking about this file while
+    // the read was out.
+    const statusAt = statusWriteOf(document);
     /**
      * Whether this read is still the one whose answer the window wants.
      *
@@ -2962,8 +3117,19 @@ export function createBrowserState(
     //
     // **No arm that refuses clears anything**, and moving the clear here is what
     // makes that structural rather than argued: there is one clear, it is after the
-    // installation, and a refusal returns before it.
-    noteDocumentStatus(document, null);
+    // installation, and a refusal returns before it. Both properties survive the
+    // fence below — the clear is still inside the installation block, and the
+    // condition can only ever *suppress* it, never move it to an arm that refused.
+    //
+    // **And it is fenced on the status rather than on the projection**, which the
+    // header states at length: an `Unreadable` admitted while this read was out
+    // moves none of the three captures above, so without this comparison the held
+    // answer cleared a mark somebody else had set and nothing could ever restore
+    // it. The install above is deliberately left unfenced; the header says why the
+    // two claims differ.
+    if (statusAt === statusWriteOf(document)) {
+      noteDocumentStatus(document, null);
+    }
     repairAfter(next);
     await readFileText();
     return null;
@@ -3425,7 +3591,15 @@ export function createBrowserState(
         fail(listed.failure);
         return;
       }
-      documents = listed.value;
+      // **Copied at ingress, row by row**, for {@link ownedSummaryOf}'s reason:
+      // `documents` is read inside the coordinator's guard and in the host failure
+      // arm's last check before its write, and `listed.value` is an injected
+      // command's answer. Read once, here, into an array this module built.
+      const rows: DocumentSummary[] = [];
+      for (const summary of listed.value) {
+        rows.push(ownedSummaryOf(summary));
+      } // End of the loop over the rows the workspace listed
+      documents = rows;
 
       // **Every file is projected up front, config profiles included.** The
       // sidebar's counts and the "All" list are both statements about the whole
@@ -3459,6 +3633,11 @@ export function createBrowserState(
           // **Copied here, not retained.** Everything `views` holds has to be an
           // object this module built, because `installView` compares the `id` of
           // every element it already holds *after* its caller's last check.
+          //
+          // The copy itself runs caller code — that is what it is for — and it
+          // runs *after* the comparison above. What covers it is the comparison
+          // after the loop, not this one; the arm below is caller code too,
+          // because `report` is injected.
           projected.push(ownedProjectionOf(view.value));
         } else {
           // Both channels: the console for the developer, the state for the
@@ -3469,6 +3648,20 @@ export function createBrowserState(
           report(view.failure);
         }
       } // End of the loop over every document of the workspace
+      // **The check the per-iteration one cannot make, and it is about the last
+      // document only.** For any earlier file, the caller code this loop runs —
+      // `ownedProjectionOf`'s twenty-four field reads and each match's, or the
+      // injected `report` on the failure arm — is caught by the *next* iteration's
+      // comparison at the top. The final iteration has no next one: between its
+      // reads and the publication below there was nothing at all, so an accessor
+      // that synchronously called `state.open(...)` blanked the window for a new
+      // root, returned at that call's first await, and then watched this function
+      // install the superseded workspace's projections and say `ready` over it —
+      // with `workspaceReady()` opening the coordinator's drain gate for a
+      // lifecycle that is not the one on screen.
+      if (generation !== openGeneration) {
+        return;
+      }
       views = projected;
       loadFailures = refused;
       status = 'ready';
@@ -3600,11 +3793,20 @@ export function createBrowserState(
     rereadDocument(document: DocumentId): Promise<IpcFailure | null> {
       // **The whole body moved to `rereadUnderGuard` at Phase 2d-5-4**, which is
       // the private guarded helper the design consult's Q5 permits, and this is now
-      // one call of it with a guard that always holds. The three captures, their
+      // one call of it with a guard that always holds. The captures, their
       // comparison and the install-forget-repair-reread order are unchanged and are
-      // documented there; what a person's own recovery does **not** have is a
-      // coordinator guard, because nothing has to arbitrate a read somebody asked
-      // for against an observation nobody has seen.
+      // documented there.
+      //
+      // **What `ALWAYS_PERMITTED` means, corrected.** It used to say that nothing
+      // has to arbitrate a read somebody asked for against an observation nobody
+      // has seen. That is false about the window this read lands in: an
+      // `Unreadable` observation can be admitted and acted on *while this read is
+      // in flight*, and by the time the answer arrives it has been seen. What the
+      // absent guard really means is narrower — **a person's own recovery is not
+      // arbitrated away by a surface opening or by the registry moving**, which is
+      // all the coordinator's guard decides. Ownership of the file's *status* is a
+      // different question, and `rereadUnderGuard` answers it for both callers with
+      // its own capture rather than with a guard.
       return rereadUnderGuard(document, ALWAYS_PERMITTED);
     }, // End of function rereadDocument()
 
@@ -4455,6 +4657,14 @@ export function createBrowserState(
     moved: MatchId | null,
     attribution: RepairAttribution = 'externalChange'
   ): Promise<IpcFailure | null> {
+    // **Both identities copied before the await**, and the locals below are what
+    // the rest of this function uses — never the parameters. `target` is read by
+    // the guard's last conjunct and `moved` by `positionInSameParse` *after* that
+    // guard and before the `replaceSelection` it justifies, so a getter on either
+    // would be arbitrary code inside exactly the window 2c-3c step 2's High was
+    // closed to protect. Both arrive from a command's save answer.
+    const ownedTarget = ownedIdentityOf(target);
+    const ownedMoved = ownedIdentityOf(moved);
     const fresh = await commands.getDocument(document);
     if (!fresh.ok) {
       report(fresh.failure);
@@ -4463,15 +4673,15 @@ export function createBrowserState(
     const next = ownedProjectionOf(fresh.value);
     installView(next);
     if (
-      moved !== null &&
+      ownedMoved !== null &&
       selected !== null &&
       selected.document === document &&
-      isTheSameIdentity(selected.id, target)
+      isTheSameIdentity(selected.id, ownedTarget)
     ) {
       // All three fields, against the projection just read: see
       // `positionInSameParse`. A `moved` from the save's revision must not be
       // resolved in a later parse that happens to reuse its node.
-      const position = positionInSameParse(next, moved);
+      const position = positionInSameParse(next, ownedMoved);
       if (position !== null) {
         replaceSelection(selectMatch(next, position));
         notice = null;
@@ -4481,7 +4691,9 @@ export function createBrowserState(
     // The guard this function's JSDoc states: the requested attribution stands
     // only when this projection is the parse the write produced.
     const fromThisWrite =
-      moved !== null && next.id === moved.document && next.revision === moved.revision;
+      ownedMoved !== null &&
+      next.id === ownedMoved.document &&
+      next.revision === ownedMoved.revision;
     repairAfter(next, fromThisWrite ? attribution : 'externalChange');
     return null;
   } // End of function adoptTheDocumentOnDisk()
@@ -4522,6 +4734,10 @@ export function createBrowserState(
     heldBefore: SelectedMatch | null,
     moved: MatchId | null
   ): Promise<IpcFailure | null> {
+    // Copied before the await, for `adoptTheDocumentOnDisk`'s reason: `moved` is
+    // a command's object, and `positionInSameParse` reads it between the guard
+    // below and the `replaceSelection` that guard justifies.
+    const ownedMoved = ownedIdentityOf(moved);
     const fresh = await commands.getDocument(document);
     if (!fresh.ok) {
       report(fresh.failure);
@@ -4530,12 +4746,12 @@ export function createBrowserState(
     const next = ownedProjectionOf(fresh.value);
     installView(next);
     const inScope = selection.kind === 'all' || selection.id === document;
-    if (moved !== null && selected === heldBefore && inScope) {
+    if (ownedMoved !== null && selected === heldBefore && inScope) {
       // The third condition, and it is about the *file* rather than the person:
       // `positionInSameParse` refuses a `moved` the fresh projection is not a
       // parse of, so a file another program rewrote between the write and the
       // read cannot hand this window an unrelated snippet as the one just made.
-      const position = positionInSameParse(next, moved);
+      const position = positionInSameParse(next, ownedMoved);
       if (position !== null) {
         replaceSelection(selectMatch(next, position));
         notice = null;
@@ -4595,6 +4811,8 @@ export function createBrowserState(
     moved: MatchId | null,
     attribution: RepairAttribution
   ): Promise<IpcFailure | null> {
+    // Copied before the await, for `adoptTheDocumentOnDisk`'s reason.
+    const ownedMoved = ownedIdentityOf(moved);
     const fresh = await commands.getDocument(document);
     if (!fresh.ok) {
       report(fresh.failure);
@@ -4605,8 +4823,17 @@ export function createBrowserState(
     // **The justification, at the write.** Both halves re-validated after the
     // await above — the only await on this path — and no await separates them
     // from the `replaceSelection` they justify.
+    //
+    // **And no *property read on caller data* separates them either, which the
+    // sentence above does not say and which is the half that was false.**
+    // `CLAUDE.md` says a check and a spend separated by any property read are not
+    // atomic, because a getter runs arbitrary code; `positionInSameParse` sits
+    // between the conditions below and the write, and it walks every match's
+    // `id.node`. Those are module-owned now — `ownedMatchIdOf` at the projection's
+    // ingress and `ownedIdentityOf` above for the clone's own identity — so the
+    // reads between the check and the spend run no code a command supplied.
     if (
-      moved !== null &&
+      ownedMoved !== null &&
       intent !== null &&
       selected === intent.held &&
       selectGeneration === intent.generation
@@ -4614,7 +4841,7 @@ export function createBrowserState(
       // All three fields, against the projection just read: a `moved` from the
       // save's revision must not be resolved in a later parse that happens to
       // reuse its node. See `positionInSameParse`.
-      const position = positionInSameParse(next, moved);
+      const position = positionInSameParse(next, ownedMoved);
       if (position !== null) {
         replaceSelection(selectMatch(next, position));
         notice = null;
@@ -4624,7 +4851,9 @@ export function createBrowserState(
     // The guard `adoptTheDocumentOnDisk` states: the requested attribution
     // stands only when this projection is the parse the write produced.
     const fromThisWrite =
-      moved !== null && next.id === moved.document && next.revision === moved.revision;
+      ownedMoved !== null &&
+      next.id === ownedMoved.document &&
+      next.revision === ownedMoved.revision;
     repairAfter(next, fromThisWrite ? attribution : 'externalChange');
     return null;
   } // End of function adoptAfterTheDuplicate()

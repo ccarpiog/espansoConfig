@@ -4348,3 +4348,40 @@ was a vacuous assertion that **passed while measuring nothing**. The narrative o
 rungs is archived in [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-5-3-N's
 verification narrative and the ladder narrative"*.
 
+
+## Phase 2d-5-4-A's verification narrative — archived 2026-09-20 at Phase 2d-5-4-B
+
+_Moved verbatim from `PROGRESS.md`'s Verification baseline, unedited. Its rung `1320 / 443 / 2389 /
+189` is the one below 2d-5-4-B's `1320 / 443 / 2395 / 189`, and its nine-case sentence is the one
+2d-5-4-B's finding 6 corrected: **eight** discriminating cases in a seven-row table, nine tests added
+net. The correction travels with `docs/decisions/2d-5-4-A-notes.md` §6, which carries it as a marked
+block._
+
+### The rung is unmoved except by this round's own tests
+
+**With the instrument in the working tree the four commands answer `1320 / 443 / 2389 / 189`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-4-A**, on the post-fix tree, each command run on its own:
+
+| Gate | Was at 2d-5-4 | Now | Why it moved, or did not |
+|---|---|---|---|
+| `cargo test --workspace` | 1320 | **1320** | no Rust changed — `git diff --numstat -- crates/ src-tauri/` names only the instrument's `main.rs` hook |
+| `npm run check` files | 443 | **443** | no file added or removed; the fix is inside four existing files |
+| `npm test` | 2380 | **2389** | +9, the nine cases this round's six fixes are pinned by |
+| `npm run build` modules | 189 | **189** | no new **reachable** module: `ownedProjectionOf` lives inside `workspace.svelte.ts`, and no component was added |
+
+`cargo test --workspace -- --test-threads=1` was read from a file rather than through a pipe, summed
+over **26** `test result` lines *and* checked by the complementary question — no line lacking
+`0 failed` — and it completed on the **first attempt**, so 2d-5-3-L's stale-`target/` host finding has
+now not recurred for four consecutive phases. `cargo clippy --workspace --all-targets -- -D warnings`
+(exit 0), `cargo fmt --check` (exit 0) and `cargo tree -p espansoconfig-core | rg tauri` (finds
+nothing) are clean. **Both bundle oracles were read and both lines are reported**: server-only markers
+**absent**, client-only markers **present (2)**. **The instrument's pin was re-checked** and holds at
+`5 insertions(+), 1 deletion(-)`.
+
+**No gate caught any of the six findings, and no gate could have.** Five were re-entrancy or ordering
+defects reachable only through an injected accessor or an interleaving no test had combined, and the
+sixth was a sentence. **Nine cases now pin them, and each was confirmed to fail against the pre-fix
+code** — the fix worker reverted each change in the tree, ran the one suite, recorded the failure
+message and restored it; the messages are in `docs/decisions/2d-5-4-A-notes.md` §6. **Two candidate
+cases were discarded for passing both ways**, which is the check the confirmation exists to make.
