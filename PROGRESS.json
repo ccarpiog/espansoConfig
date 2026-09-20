@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T16:30:21Z",
+ "updated": "2026-09-20T16:30:54Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -306,7 +306,8 @@
    "status": "skipped",
    "risk": "high",
    "summary": "Superseded by 2d-5-4-E: the round was taken, its one blocker re-derived and fixed plus five more found by sweeping, and its own fix changed eight source files.",
-   "review": "docs/reviews/phase-2d-5-4-D.md"
+   "review": "docs/reviews/phase-2d-5-4-D.md",
+   "commit": "4f7c500"
   },
   {
    "id": "2d-5-4-E",
