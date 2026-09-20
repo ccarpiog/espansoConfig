@@ -1,6 +1,6 @@
 /**
  * When a drain fires, and what a drained batch does to the session cursor —
- * Phase 2d-5-3.
+ * Phase 2d-5-3, extended at 2d-5-4.
  *
  * ## What it is
  *
@@ -13,6 +13,13 @@
  * `BrowserCommands.drainExternalChanges` is the authority a batch comes back
  * from; this module is the thing that decides *when* to ask and what the answer
  * means for the next question.
+ *
+ * **Since 2d-5-4 it also decides what an accepted batch's observations do.** The
+ * `discarded` recovery of rulings 10 to 13 is here, because it is a decision about
+ * the whole session and about the retained open request; every per-observation
+ * transition is `./observationTransitions.ts`'s, and this module's whole part in
+ * one is to hand it the per-document accepted sequences and the epoch it was
+ * accepted under.
  *
  * ## Where it lives, and why it is not in `./workspace.svelte.ts`
  *
@@ -33,23 +40,28 @@
  * `BrowserState`, where `openWriteSurfaces()`'s mirror already lives, and not
  * here.
  *
- * ## What this step deliberately does **not** do
+ * ## What this module deliberately does **not** do
  *
- * - **It applies no observation.** `Added`, `Removed` and `Unreadable`, the
- *   per-document `acceptedSequenceByDocument` map, the guarded reread and
- *   `applyExternalObservation` are all **2d-5-4's**. A drained batch's
- *   observations are counted by {@link ReconciliationCoordinator.observationsDropped}
- *   and otherwise dropped.
- * - **It performs no `discarded` recovery.** No re-run of `open()`, no
- *   blocked-reconciliation policy, no synthetic conflict. The cursor tracks
- *   `lastDiscarded` and counts the times it strictly rose; rulings 11 and 12's
- *   recovery is **2d-5-4's**.
+ * - **It applies no observation itself.** `./observationTransitions.ts` holds the
+ *   routing boundary and every arm; this module holds the
+ *   `acceptedSequenceByDocument` map those arms arbitrate with, hands it over, and
+ *   records what each one answered on
+ *   {@link ReconciliationCoordinator.observationOutcomes}.
+ * - **It generalizes no conflict.** A write surface is told about a change through
+ *   the transition the registry holds for it, and what a surface *does* with one —
+ *   the six conflict registrations, the reapply evidence, the same-revision
+ *   coalescing and the in-flight-write barrier — is **2d-5-5's**. Every registered
+ *   transition is a no-op today.
+ * - **It performs no membership reload.**
+ *   {@link ReconciliationCoordinator.membershipReloadWanted} is a request the
+ *   `Named` and `Unnamed` arms raise and **nothing here acts on it**; only a
+ *   `discarded` loss reopens a workspace.
  * - **It reaches nothing in the shipped window.** `createBrowserState` defaults
  *   both injected sources to the inert ones declared below, no production module
  *   imports `src/lib/ipc/events.ts`, and no production caller invokes
  *   {@link ReconciliationCoordinator.start} — `AppShell.svelte` is **2d-5-7's** to
- *   change. That unreachability is exactly what makes dropping observations safe
- *   at this step: nothing on a screen is derived from anything this module holds.
+ *   change. So although this module now *changes* a window when it runs, no
+ *   shipped window runs it.
  *
  * ## What it cannot force
  *
@@ -83,7 +95,14 @@
 import type { CommandResult } from '../ipc/commands';
 import type { IpcFailure } from '../ipc/errors';
 import type { ReconciliationEventSource, ReconciliationUnlisten } from '../ipc/events';
-import type { ReconciliationBatch, ReconciliationWake } from '../ipc/types';
+import type { DocumentId, ReconciliationBatch, ReconciliationWake } from '../ipc/types';
+import {
+  applyObservation,
+  createAcceptedSequences,
+  type ObservationOutcome,
+  type ObservationSession,
+  type ReconciliationWorkspace
+} from './observationTransitions';
 
 /**
  * Why a drain was asked for.
@@ -99,9 +118,13 @@ export type DrainReason = 'registration' | 'workspaceOpened' | 'foreground' | 'w
  * said.
  *
  * Exactly the three fields the consult's Q2 names. **It is not the per-document
- * accepted-sequence map**, which is 2d-5-4's and does not exist yet: ruling 6
- * keeps the two apart precisely because they answer different questions and may
- * legitimately hold different numbers.
+ * accepted-sequence map**, which since 2d-5-4 exists beside it and is read
+ * through {@link ReconciliationCoordinator.acceptedSequence}: ruling 6 keeps the
+ * two apart precisely because they answer different questions and may
+ * legitimately hold different numbers. A disagreement between them is not a bug —
+ * a watermark advanced by an empty batch moves while every accepted sequence
+ * stands still, and a batch dropped while reconciliation is blocked moves the
+ * watermark past observations no document ever accepted.
  */
 export interface ReconciliationCursor {
   /**
@@ -153,6 +176,65 @@ export type ReconciliationWatchState =
       /** A real epoch was adopted from the first successful post-open drain. */
       readonly kind: 'watching';
       /** The adopted epoch. */
+      readonly epoch: number;
+    };
+
+/**
+ * Whether this session is still reconciling, or is holding everything it has.
+ *
+ * Ruling 12's state, typed. `blockedByLostHistory` means this epoch's observation
+ * history has a hole in it **and** at least one write surface was open when that
+ * was discovered, so nothing may be reloaded and nothing may be manufactured: no
+ * `open()`, no synthetic per-surface conflict, every draft and candidate
+ * preserved, and every later observation of this epoch dropped rather than
+ * applied.
+ *
+ * ## Its exit, which the consult describes and does not type
+ *
+ * `docs/decisions/2d-5-split-notes.md` section 6 item 4 leaves this to 2d-5-4, and
+ * the answer is: **closing the last write surface *permits* the reload and does
+ * not *trigger* it.** Nothing in this application observes the registry emptying —
+ * a lease's unregister moves a counter and calls nobody — and nothing observes the
+ * consult's second condition at all, because *"their retained values have been
+ * explicitly dealt with"* is a fact about a draft inside a component's own session
+ * that R36 says no coordinator can see. So the permission is re-evaluated at the
+ * **next accepted batch**, which is an event that already exists: a wake, a
+ * foreground signal or an open. A window that receives no further trigger stays
+ * blocked, and 2d-6 is where a person gets a control that asks.
+ *
+ * ## What no type expresses
+ *
+ * **Nothing bounds how many observations a blocked coordinator drops** (section 6
+ * item 5). The watermark advances while blocked so the retained queue is not
+ * refetched, which means every observation of this epoch after the loss is gone;
+ * that is safe **only** because incremental reconciliation does not resume until a
+ * successful whole open establishes a new epoch, and no type in this module ties
+ * the dropping to that obligation.
+ * {@link ReconciliationCoordinator.observationsDropped} counts them, which is a
+ * measurement and not a bound.
+ *
+ * **What the block *does* reach is a read already in flight**, and it reaches it
+ * through one function rather than through a type. A clean reread started before
+ * the loss moves none of the numbers a guard compares — not the epoch, not the
+ * open generation, not any projection generation — so until
+ * `ObservationSession.stillApplying` existed such a read passed its guard and
+ * installed underneath the whole-reload obligation, clearing the file's status on
+ * the way. The guard now asks this session whether it is still applying at all and
+ * refuses while this arm holds, leaving the file marked `stale`. Nothing in
+ * TypeScript ties that refusal to this state either; what ties them is that the
+ * one producer of the answer is the same closure that owns this value.
+ */
+export type ReconciliationBlock =
+  | {
+      /** Observations of this epoch are being applied. */
+      readonly kind: 'running';
+    }
+  | {
+      /** This epoch's history has a hole and a write surface was open. */
+      readonly kind: 'blockedByLostHistory';
+      /** The cumulative `discarded` that put this session here. */
+      readonly discarded: number;
+      /** The epoch it happened in. */
       readonly epoch: number;
     };
 
@@ -229,12 +311,21 @@ export type DrainOutcome =
 /**
  * Everything the coordinator needs from the state that owns it.
  *
- * Three members, so a model test supplies three functions and no `BrowserState`.
- * It is deliberately **not** `BrowserCommands`: the only command this step calls
+ * **Three members of its own, plus every member of
+ * {@link ReconciliationWorkspace}**, which is what an admitted observation needs.
+ * One interface rather than a second constructor parameter, and that is the
+ * deliberate choice: a fourth parameter with an inert default would let
+ * `createBrowserState` forget to pass one and go on compiling, and a coordinator
+ * that silently applies nothing is the failure this whole step exists to end. A
+ * required member is a compile error at every construction site instead.
+ *
+ * It is deliberately **not** `BrowserCommands`: the only command this module calls
  * is the drain, and taking the whole surface would let a later edit here reach a
  * writing command, which watcher arbitration may never initiate (ruling 27).
+ * {@link ReconciliationWorkspace} carries no writing command either, for the same
+ * reason and by the same construction.
  */
-export interface ReconciliationHost {
+export interface ReconciliationHost extends ReconciliationWorkspace {
   /**
    * Asks for everything above `afterSequence`.
    *
@@ -379,6 +470,14 @@ export interface ReconciliationCoordinator {
    *
    * Idempotent for the same reason `start()` is, and because ruling 16's "exactly
    * once" has to survive a host that disposes twice.
+   *
+   * **It also makes every observation this coordinator has already applied stop
+   * being actionable**, which the drain rechecks alone could not do: a guarded
+   * reread started by an earlier batch is a read the *host* owns, and nothing it
+   * captures moves when a coordinator is disposed. `ObservationSession.stillApplying`
+   * is what a guard asks, and it answers `false` from here on. What that does not
+   * do is *cancel* the read — the command is already out and its answer will
+   * arrive; what it stops is the installation.
    */
   dispose(): void;
   /**
@@ -409,17 +508,30 @@ export interface ReconciliationCoordinator {
   /**
    * Told at the entry of every `open()`, before its first command.
    *
-   * Clears the expected epoch, the watermark and the handled-discard count, so
-   * that nothing learned about the workspace being closed is asked with, or
-   * compared against, in the one replacing it.
+   * Clears the expected epoch, the watermark, the handled-discard count, the
+   * per-document accepted sequences and the blocked state, so that nothing learned
+   * about the workspace being closed is asked with, or compared against, in the
+   * one replacing it. The accepted sequences go for a sharper reason than the
+   * others: `open()` **reallocates** the identities of the documents it loads, so
+   * an entry kept across one would be a sequence for a different file.
    *
    * **It also closes the open gate**, which is what stops a trigger arriving
    * between here and `ready` from adopting the epoch of the workspace being
    * replaced: Rust still holds that workspace until the open succeeds, so a drain
    * taken in this window answers for the wrong lifecycle while every generation
    * capture in the pump legitimately passes.
+   *
+   * **And it retains the request, which is what ruling 11's recovery re-runs.**
+   * Never `summary.root`: a wire path is a lossy rendering and is not
+   * round-trippable as a command argument, so re-opening from one would be a
+   * different request that happened to look like the same one. **Nothing in
+   * TypeScript forces a host to pass the argument its own `open()` was called
+   * with**, and a host that passed something else would make the recovery open a
+   * workspace nobody asked for.
+   *
+   * @param request - Exactly what this `open()` was called with.
    */
-  workspaceOpened(): void;
+  workspaceOpened(request: string | null): void;
   /**
    * Told once an `open()` has reached `ready`.
    *
@@ -486,20 +598,76 @@ export interface ReconciliationCoordinator {
    *
    * The observable that says a loss was *acted on* rather than merely seen
    * again: a repeated batch carrying the same non-zero value must not move it
-   * (ruling 13). **Acting is all it counts** — the recovery itself is 2d-5-4's.
+   * (ruling 13).
+   *
+   * **It counts the losses, never the recoveries**, and since 2d-5-4 the two are
+   * different numbers: one rise puts the session in
+   * {@link ReconciliationBlock}'s blocked arm or re-runs the retained open, and a
+   * session that blocks and later takes the permitted reload has moved this once
+   * and reopened once, while a session blocked forever has moved it once and
+   * reopened not at all.
    *
    * @returns The count, reset by {@link ReconciliationCoordinator.workspaceOpened}.
    */
   discardedNotices(): number;
   /**
-   * How many observations this step has accounted for and thrown away.
+   * How many observations this session dropped without arbitrating them.
    *
-   * There to make the dropping *visible*, so that 2d-5-4 replacing it with a
-   * transition is a change to something a test already reads.
+   * **Since 2d-5-4 this counts one thing only: what a *blocked* coordinator threw
+   * away.** An observation that reaches a transition is not dropped, whatever that
+   * transition decided — one superseded by a newer sequence is on
+   * {@link ReconciliationCoordinator.observationOutcomes} as `superseded`, which
+   * is arbitration rather than loss.
+   *
+   * It is a **measurement, not a bound**: nothing limits how many a blocked
+   * coordinator may drop, and what makes that safe is the whole-reload obligation
+   * {@link ReconciliationBlock} describes.
    *
    * @returns The running total since the last `open()`.
    */
   observationsDropped(): number;
+  /**
+   * What each applied observation's transition answered, oldest first.
+   *
+   * **A record of which arm ran, never of what it achieved.** Every member of
+   * {@link ReconciliationWorkspace} answers `void`, so a host that does nothing
+   * produces the same outcomes as one that changes the window;
+   * `./workspace.test.ts` asserts the window.
+   *
+   * @returns The outcomes, reset by
+   *   {@link ReconciliationCoordinator.workspaceOpened}.
+   */
+  observationOutcomes(): readonly ObservationOutcome[];
+  /**
+   * The highest observation sequence one document has accepted a transition for.
+   *
+   * The consult's Q2 `acceptedSequenceByDocument`, read. **Not the watermark**:
+   * ruling 6 keeps the two apart, and they legitimately hold different numbers.
+   *
+   * @param document - The file.
+   * @returns Its accepted sequence, or zero.
+   */
+  acceptedSequence(document: DocumentId): number;
+  /**
+   * Whether this session is still reconciling, or holding everything it has.
+   *
+   * @returns The typed state of ruling 12.
+   */
+  block(): ReconciliationBlock;
+  /**
+   * Whether a `Named` or an `Unnamed` observation has asked for a safe membership
+   * reload.
+   *
+   * **Nothing acts on it.** It is set by the arms the consult's Q8 says *request a
+   * safe membership reload*, cleared by
+   * {@link ReconciliationCoordinator.workspaceOpened}, and read by 2d-6, which is
+   * where a person gets a control. Performing it automatically would mean
+   * replacing the whole window — and reallocating every identity in it — because
+   * an unrelated file appeared beside the configuration.
+   *
+   * @returns `true` once such a request has been made in this session.
+   */
+  membershipReloadWanted(): boolean;
   /**
    * Whether {@link ReconciliationCoordinator.dispose} has been called.
    *
@@ -570,6 +738,18 @@ export function createReconciliationCoordinator(
   let lastDiscarded = 0;
   let discardedNoticeCount = 0;
   let observationsDroppedCount = 0;
+  // **The second sequence state, and deliberately not part of the cursor above.**
+  // The cursor is the drain acknowledgement; this is the arbitration key, and
+  // ruling 6 says a disagreement between the two numbers is not a bug.
+  const accepted = createAcceptedSequences();
+  const observationOutcomeRecords: ObservationOutcome[] = [];
+  // **The retained original open request** (ruling 11). `null` is a legitimate
+  // value — it is what `open(null)` means, *discover the configuration root* — so
+  // this is not "no request has been retained"; before the first
+  // `workspaceOpened()` it is simply the same thing `AppShell.svelte` opens with.
+  let openRequest: string | null = null;
+  let block: ReconciliationBlock = { kind: 'running' };
+  let membershipReloadRequested = false;
 
   // The open gate. `true` from the `workspaceOpened()` of an `open()` until the
   // `workspaceReady()` of one, and `false` before any open has been announced at
@@ -648,12 +828,55 @@ export function createReconciliationCoordinator(
   } // End of function record()
 
   /**
+   * Whether a lost-history recovery can be run right now, and runs it if so.
+   *
+   * **Ruling 11 and ruling 12 are one decision with two arms, and the registry is
+   * the whole of what decides between them.** With nothing registered, recovery is
+   * a true `open()` with the **retained request** — which clears documents,
+   * projections, selection, viewer state and every per-document generation, and is
+   * exactly the identity reset a hole in the membership history requires. With any
+   * write surface open — **an unknown-target creator included**, because it counts
+   * as open — nothing is reloaded and nothing is manufactured.
+   *
+   * **An empty registry does not mean no surface is open.** Nothing in TypeScript
+   * forces a component to register, so an unregistered surface is invisible here
+   * and would be reloaded under; that is `competingSurfaceFor`'s standing
+   * limitation, inherited whole, and this function is the sharpest place in the
+   * application where it costs something.
+   *
+   * **It must be called before anything in this batch is believed**, because a
+   * hole in the history means the batch's own observations may be describing a
+   * membership this window can no longer reconstruct.
+   *
+   * @returns `true` when a whole `open()` was started, so no cursor may be written.
+   */
+  function recoverFromLostHistory(): boolean {
+    if (host.openWriteSurfaces().length > 0) {
+      return false;
+    }
+    block = { kind: 'running' };
+    // **Fired, never awaited, and the host owns everything after it.** A
+    // production `open()` announces itself through `workspaceOpened()` in its
+    // first statements, which clears this cursor synchronously — so the caller
+    // must write nothing after this returns. **Nothing in TypeScript forces a host
+    // to announce**, and one that did not would leave this session comparing a new
+    // lifecycle's batches against an old lifecycle's epoch.
+    host.reopenWorkspace(openRequest);
+    return true;
+  } // End of function recoverFromLostHistory()
+
+  /**
    * Accounts for a batch that is for this open and this epoch.
    *
-   * **`discarded` is handled before the observations**, which is ruling 10's
-   * order and is kept here even though this step only counts both: 2d-5-4 puts a
-   * recovery in the first half and transitions in the second, and writing the
-   * order now is what stops that step having to re-derive it.
+   * **`discarded` is handled before the observations** (ruling 10), because a
+   * per-document reread is not a recovery from a hole in the history: the lost
+   * entry may have been the only observation of an addition or a removal, so no
+   * observation in this batch can be trusted to describe the membership.
+   *
+   * **A blocked session still advances the watermark** (ruling 13), so the
+   * retained queue is not fetched again — which means those observations are gone.
+   * That is safe only under the whole-reload obligation, and no type says so; see
+   * {@link ReconciliationBlock}.
    *
    * @param batch - The accepted batch.
    */
@@ -673,18 +896,56 @@ export function createReconciliationCoordinator(
       // already acted on and must not be acted on again (ruling 13).
       lastDiscarded = batch.discarded;
       discardedNoticeCount += 1;
+      block = { kind: 'blockedByLostHistory', discarded: batch.discarded, epoch };
+    }
+    if (block.kind === 'blockedByLostHistory') {
+      if (recoverFromLostHistory()) {
+        // The `open()` that recovery started has already cleared this cursor.
+        // Writing a watermark here would put a closed lifecycle's number back.
+        return;
+      }
+      watermark = batch.newest_sequence;
+      observationsDroppedCount += batch.observations.length;
+      return;
     }
     // **Advanced for an empty batch too** (ruling 7) — that is what stops the
-    // retained queue being read again — and advanced while a loss is outstanding,
-    // which ruling 13 requires and which is safe only because incremental
-    // reconciliation does not resume until a new epoch is established. **This step
-    // establishes neither half of that: 2d-5-4 owns the recovery**, so what is
-    // written here is the accounting alone.
+    // retained queue being read again.
     watermark = batch.newest_sequence;
-    // Counted, then dropped. 2d-5-4 replaces this line with the per-document
-    // arbitration and the guarded reread; until then nothing on any screen is
-    // derived from an observation, because nothing in production runs this pump.
-    observationsDroppedCount += batch.observations.length;
+    const session: ObservationSession = {
+      epoch,
+      /**
+       * The epoch this session is showing now.
+       *
+       * @returns The adopted epoch, or zero.
+       */
+      epochNow: (): number => epoch,
+      /**
+       * Whether this coordinator is still applying observations at all.
+       *
+       * **Read live, never captured.** Both states it reports are entered *after*
+       * a transition has already started a read and before that read's answer
+       * comes back — a `discarded` that blocks without recovering leaves every
+       * generation a guard compares exactly where it was, and so does `dispose()`.
+       * A stored boolean would be the value taken at the moment the batch was
+       * applied, which is precisely the moment both of them are still `true`.
+       *
+       * @returns `true` while this session's decisions may still be acted on.
+       */
+      stillApplying: (): boolean => !disposed && block.kind !== 'blockedByLostHistory',
+      /**
+       * Records that a safe membership reload has been asked for.
+       */
+      requestMembershipReload: (): void => {
+        membershipReloadRequested = true;
+      }
+    };
+    for (const observation of batch.observations) {
+      // **In sequence order, which is the order the wire promises** — the batch's
+      // own comment says its observations are ordered by sequence — and the
+      // per-document map is what makes that promise unnecessary: an older
+      // observation of one file is refused by `admit` whatever order it arrives in.
+      observationOutcomeRecords.push(applyObservation(observation, host, accepted, session));
+    } // End of the loop over every observation of the accepted batch
   } // End of function accept()
 
   /**
@@ -1135,21 +1396,32 @@ export function createReconciliationCoordinator(
 
     requestDrain,
 
-    workspaceOpened(): void {
+    workspaceOpened(request: string | null): void {
       // **Everything learned about the workspace being closed goes.** The epoch
       // is a property of that lifecycle, the watermark indexes its queue, and
       // `lastDiscarded` is cumulative *within* the epoch — carrying any of them
       // into the next open would compare a new lifecycle's numbers with an old
-      // one's. The consult's Q2 step 1 names a fourth thing to clear, the
-      // accepted-sequence map; **that map is 2d-5-4's and does not exist yet**, so
-      // this function will gain a line there rather than having one that pretends
-      // now.
+      // one's. The consult's Q2 step 1 names a fourth thing, the accepted-sequence
+      // map, and it is cleared here for a sharper reason than the other three:
+      // `open()` reallocates every document identity, so a retained entry would be
+      // a sequence about a different file.
       adopted = false;
       epoch = 0;
       watermark = 0;
       lastDiscarded = 0;
       discardedNoticeCount = 0;
       observationsDroppedCount = 0;
+      accepted.clear();
+      observationOutcomeRecords.length = 0;
+      // The blocked state and the membership-reload request both describe the
+      // workspace being closed. A whole open is exactly what each of them was
+      // asking for, so neither may survive one.
+      block = { kind: 'running' };
+      membershipReloadRequested = false;
+      // **Retained for ruling 11's recovery**, and overwritten by every open so
+      // that the recovery re-runs the request that produced the workspace on
+      // screen rather than the first one this session ever made.
+      openRequest = request;
       // **And the gate closes.** A drain issued between here and `ready` answers
       // for whichever lifecycle reached the session mutex first — Rust holds the
       // workspace being replaced until `WorkspaceSession::open`'s swap block runs,
@@ -1214,6 +1486,22 @@ export function createReconciliationCoordinator(
 
     observationsDropped(): number {
       return observationsDroppedCount;
+    },
+
+    observationOutcomes(): readonly ObservationOutcome[] {
+      return [...observationOutcomeRecords];
+    },
+
+    acceptedSequence(document: DocumentId): number {
+      return accepted.sequenceFor(document);
+    },
+
+    block(): ReconciliationBlock {
+      return block;
+    },
+
+    membershipReloadWanted(): boolean {
+      return membershipReloadRequested;
     },
 
     isDisposed(): boolean {

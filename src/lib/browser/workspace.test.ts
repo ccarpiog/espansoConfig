@@ -31,12 +31,14 @@ import type {
   DocumentId,
   DocumentSummary,
   DocumentView,
+  ExternalObservation,
   Finding,
   MatchDraft,
   MatchId,
   MatchView,
   NewMatch,
   NewMatchPosition,
+  ObservedDocument,
   ReapplyResolution,
   ReconciliationBatch,
   SaveResult,
@@ -7777,3 +7779,832 @@ describe('the reconciliation lifecycle', () => {
     state.dispose();
   }); // End of the inert-default case
 }); // End of the "reconciliation lifecycle" suite
+
+/**
+ * One document arm naming a file the open workspace resolves.
+ *
+ * @param document - The identity.
+ * @param relativePath - Its path, for display.
+ * @returns The arm.
+ */
+function addressable(document: DocumentId, relativePath: string): ObservedDocument {
+  return { Addressable: { document, relative_path: relativePath } };
+} // End of function addressable()
+
+/**
+ * One `Changed` observation whose bytes projected.
+ *
+ * @param sequence - The sequence it was admitted under.
+ * @param document - Which document arm.
+ * @returns The observation.
+ */
+function changedObservation(
+  sequence: number,
+  document: ObservedDocument
+): ExternalObservation {
+  return {
+    Changed: {
+      sequence,
+      document,
+      previous_revision: 'rev-before',
+      disk_revision: 'rev-disk',
+      content: {
+        Projected: {
+          disk_text: 'matches: []\n',
+          disk: baseDocument(),
+          findings: [],
+          correspondences: null
+        }
+      }
+    }
+  };
+} // End of function changedObservation()
+
+/**
+ * One `Removed` observation.
+ *
+ * @param sequence - The sequence it was admitted under.
+ * @param document - Which document arm.
+ * @returns The observation.
+ */
+function removedObservation(
+  sequence: number,
+  document: ObservedDocument
+): ExternalObservation {
+  return { Removed: { sequence, document, previous_revision: null } };
+} // End of function removedObservation()
+
+/**
+ * The projection `reload_document` answers with when a case wants a visible
+ * change.
+ *
+ * One snippet nothing else in this file mints, so "the reread installed" is an
+ * assertion about a node number rather than about a length.
+ *
+ * @returns A projection of `match/base.yml` holding one new snippet.
+ */
+function rereadBaseDocument(): DocumentView {
+  return makeDocument({
+    id: 2,
+    relativePath: 'match/base.yml',
+    matches: [makeMatch({ node: 77, document: 2, trigger: ':fresh', label: 'From disk' })]
+  });
+} // End of function rereadBaseDocument()
+
+/**
+ * Asserts that nothing this batch did reached a command that writes a file.
+ *
+ * **The explicit zero-save-command assertion Phase 2d-5-4 owes.** Ruling 27 says
+ * no save command may ever be initiated by watcher arbitration, and the type of
+ * `ReconciliationWorkspace` is what makes that structural — this is the negative
+ * spy that establishes it anyway, because a type says nothing about a future edit
+ * that widens it.
+ *
+ * @param commands - The scripted surface the state was built over.
+ */
+function expectNoSaveCommand(commands: BrowserCommands): void {
+  expect(commands.saveMatch).not.toHaveBeenCalled();
+  expect(commands.createMatch).not.toHaveBeenCalled();
+  expect(commands.deleteMatch).not.toHaveBeenCalled();
+  expect(commands.moveMatch).not.toHaveBeenCalled();
+  expect(commands.duplicateMatch).not.toHaveBeenCalled();
+  expect(commands.saveRawDocument).not.toHaveBeenCalled();
+} // End of function expectNoSaveCommand()
+
+/**
+ * How many times each reading command of the open workspace has been called.
+ *
+ * **Every one of the six, never a chosen two.** Ruling 28's negative half is that
+ * *no* open-workspace document command is reached from an identity the workspace
+ * does not resolve, and a case that names `get_document` and `open_workspace`
+ * leaves the other four able to grow a route silently. This is the whole set the
+ * boundary offers; the writing six are {@link expectNoSaveCommand}'s.
+ *
+ * @param commands - The scripted surface the state was built over.
+ * @returns One count per command.
+ */
+function documentCommandCounts(commands: BrowserCommands): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const name of [
+    'openWorkspace',
+    'listDocuments',
+    'getDocument',
+    'getMatch',
+    'reloadDocument',
+    'documentText'
+  ] as const) {
+    counts[name] = (commands[name] as ReturnType<typeof vi.fn>).mock.calls.length;
+  } // End of the loop over every reading command of the open workspace
+  return counts;
+} // End of function documentCommandCounts()
+
+/**
+ * Asserts that not one reading command has been called since a baseline.
+ *
+ * **The baseline has to be taken before the observations are delivered**, which
+ * is what a controlled wake is for: a count snapshotted *after* the batch has been
+ * processed already contains any erroneous call the batch made, and comparing it
+ * with itself is an assertion that cannot fail.
+ *
+ * @param commands - The scripted surface.
+ * @param baseline - What {@link documentCommandCounts} answered before the batch.
+ */
+function expectNoDocumentCommandSince(
+  commands: BrowserCommands,
+  baseline: Record<string, number>
+): void {
+  expect(documentCommandCounts(commands)).toEqual(baseline);
+} // End of function expectNoDocumentCommandSince()
+
+describe('the observation transitions', () => {
+  it('rereads a changed file no open surface may be about', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      reload: { ok: true, value: rereadBaseDocument() },
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    await settleDrains();
+
+    // The clean path of the consult's Q5: the reread installed, and what is on
+    // screen is the projection `reload_document` answered rather than the one the
+    // batch carried.
+    expect(commands.reloadDocument).toHaveBeenCalledWith(2);
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([77, 20]);
+    expect(state.externalDocumentStatus(2)).toBeNull();
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the clean-reread case
+
+  it('tells the open surface instead, and installs nothing', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const told: number[] = [];
+    const commands = scriptedCommands({
+      reload: { ok: true, value: rereadBaseDocument() },
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    // **Registered before the batch carrying the observation arrives**, which is
+    // the case this is: a surface already open when the watcher reports a change.
+    // The race in which one opens *during* the read is its own case below.
+    const lease = state.registerWriteSurface(
+      { kind: 'matchEditor', target: { kind: 'document', document: 2 } },
+      (observation) => {
+        told.push(observation.sequence);
+      }
+    );
+    await state.open(null);
+    await settleDrains();
+    await settleDrains();
+
+    // Ruling 19's conservative sentence, as behaviour: a surface capable of
+    // writing this file is open, and this window cannot tell whether it has been
+    // edited, so nothing is reloaded.
+    expect(commands.reloadDocument).not.toHaveBeenCalled();
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11, 20]);
+    expect(told).toEqual([5]);
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+    expectNoSaveCommand(commands);
+    lease();
+    state.dispose();
+  }); // End of the surface-open case
+
+  it('rereads one file and conflicts the other in the same batch', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const told: number[] = [];
+    const commands = scriptedCommands({
+      reload: { ok: true, value: rereadBaseDocument() },
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 9,
+          observations: [
+            changedObservation(8, addressable(2, 'match/base.yml')),
+            changedObservation(9, addressable(3, 'match/other.yml'))
+          ]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    // **Two documents, never one.** The surface is over file 3 only, so file 2
+    // must still reload — which a per-document rule gives and a global one does
+    // not.
+    const lease = state.registerWriteSurface(
+      { kind: 'rawEditor', target: { kind: 'document', document: 3 } },
+      (observation) => {
+        told.push(observation.sequence);
+      }
+    );
+    await state.open(null);
+    await settleDrains();
+    await settleDrains();
+
+    expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+    expect(commands.reloadDocument).toHaveBeenCalledWith(2);
+    expect(told).toEqual([9]);
+    expect(state.externalDocumentStatus(2)).toBeNull();
+    expect(state.externalDocumentStatus(3)).toEqual({ kind: 'stale' });
+    expectNoSaveCommand(commands);
+    lease();
+    state.dispose();
+  }); // End of the two-document case
+
+  it('installs nothing when a surface opens while the reread is in flight', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const told: number[] = [];
+    const held = deferred<CommandResult<DocumentView>>();
+    const base = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    const commands: BrowserCommands = {
+      ...base,
+      reloadDocument: vi.fn(async () => held.promise)
+    };
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    await settleDrains();
+    expect(commands.reloadDocument).toHaveBeenCalledWith(2);
+
+    // The race: the read is out, and the person opens an editor over that file
+    // before it comes back.
+    const lease = state.registerWriteSurface(
+      { kind: 'matchEditor', target: { kind: 'document', document: 2 } },
+      (observation) => {
+        told.push(observation.sequence);
+      }
+    );
+    held.resolve({ ok: true, value: rereadBaseDocument() });
+    await settleDrains();
+
+    // Nothing installed, and the retained observation was re-arbitrated onto the
+    // surface's conflict path rather than dropped.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11, 20]);
+    expect(told).toEqual([5]);
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+    expectNoSaveCommand(commands);
+    lease();
+    state.dispose();
+  }); // End of the surface-open race
+
+  it('inserts an added file as a row and reads nothing for it', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 6,
+          observations: [
+            {
+              Added: {
+                sequence: 6,
+                document_summary: makeSummary({ id: 42, relativePath: 'match/new.yml' }),
+                content: {
+                  Projected: {
+                    disk: makeDocument({ id: 42, relativePath: 'match/new.yml' }),
+                    findings: []
+                  }
+                }
+              }
+            }
+          ]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    // **The baseline is read before the addition is fetched**, and the wake is what
+    // fetches it. Taken after the batch had already been applied it would have held
+    // any erroneous read the batch itself made, which is the vacuity this step's
+    // review found in the sibling case below.
+    await settleDrains();
+    const before = documentCommandCounts(commands);
+
+    events.wake(5, 6);
+    await settleDrains();
+    await settleDrains();
+
+    // Ruling 30: the row is there and truthfully unloaded, nothing went into the
+    // projections, and not one reading command was issued for an identity the open
+    // workspace does not resolve.
+    expect(state.documents.map((document) => document.id)).toEqual([1, 2, 3, 42]);
+    expect(state.documents.find((document) => document.id === 42)?.loaded).toBe(false);
+    // The row is drawn as *not read yet* — `pending`, never a count of zero
+    // snippets, which would invite the reader to expect that it could hold some.
+    expect(state.sidebar.pending).toBe(1);
+    expect(state.sidebar.total).toBe(3);
+    expectNoDocumentCommandSince(commands, before);
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the addition case
+
+  it('clears the selection with the gone notice when the selected file is removed', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 7,
+          observations: [removedObservation(7, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    // **The two drains the lifecycle owes are taken before the selection is
+    // made**, and the observation arrives on a wake afterwards. Letting the
+    // observation batch land inside `select()`'s own await is a different case —
+    // a removal invalidating a lookup in flight — and it would make this one's
+    // subject unobservable.
+    await settleDrains();
+    state.show({ kind: 'document', id: 2 });
+    const target = state.scopedMatches[0];
+    expect(target?.id.node).toBe(10);
+    await state.select(target!);
+    expect(state.selectedMatch?.id.node).toBe(10);
+
+    events.wake(5, 7);
+    await settleDrains();
+    await settleDrains();
+
+    // Ruling 31's synchronous transition: the row, the projection and the
+    // selection all go, and the notice is the one that claims no more than this
+    // window can see.
+    expect(state.documents.map((document) => document.id)).toEqual([1, 3]);
+    expect(state.selectedMatch).toBeNull();
+    expect(state.notice).toBe('gone');
+    // Two snippets went with the file, so the "All" total is the one remaining.
+    expect(state.sidebar.total).toBe(1);
+    // And the sidebar filter that named the removed file was reset: still scoped
+    // to it, this list would be empty rather than the one snippet left.
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([20]);
+    expect(state.scopedDocument).toBeNull();
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'removed' });
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the removed-selected case
+
+  it('leaves a selection in another file alone when one file is removed', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 7,
+          observations: [removedObservation(7, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    // The snippet of `match/other.yml`, which is the third row of the "All" list.
+    const target = state.scopedMatches[2];
+    expect(target?.id.node).toBe(20);
+    await state.select(target!);
+    expect(state.selectedMatch?.id.node).toBe(20);
+
+    events.wake(5, 7);
+    await settleDrains();
+    await settleDrains();
+
+    // The second document, which is what a one-document case cannot say anything
+    // about: removing file 2 says nothing about a selection in file 3.
+    expect(state.documents.map((document) => document.id)).toEqual([1, 3]);
+    expect(state.selectedMatch?.id.node).toBe(20);
+    expect(state.notice).toBeNull();
+    expect(state.externalDocumentStatus(3)).toBeNull();
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the removed-other case
+
+  it('keeps the projection of an unreadable file and marks it unavailable', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 8,
+          observations: [
+            {
+              Unreadable: {
+                sequence: 8,
+                document: addressable(2, 'match/base.yml'),
+                reason: { NotUtf8: { offset: 12 } }
+              }
+            }
+          ]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    await settleDrains();
+
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11, 20]);
+    expect(state.documents.map((document) => document.id)).toEqual([1, 2, 3]);
+    expect(commands.reloadDocument).not.toHaveBeenCalled();
+    expect(state.externalDocumentStatus(2)).toEqual({
+      kind: 'unavailable',
+      reason: { NotUtf8: { offset: 12 } }
+    });
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the unreadable case
+
+  it('routes a Named and an Unnamed observation to no command at all', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 12,
+          observations: [
+            {
+              Changed: {
+                sequence: 10,
+                document: { Named: { document: 55, relative_path: 'match/pending.yml' } },
+                previous_revision: null,
+                disk_revision: 'rev-named',
+                content: { Unreadable: { reason: { PermissionDenied: {} } } }
+              }
+            },
+            {
+              Removed: {
+                sequence: 12,
+                document: { Unnamed: { relative_path: 'match/stranger.yml' } },
+                previous_revision: null
+              }
+            }
+          ]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    // **The two drains the lifecycle owes are taken first, and the baseline is
+    // read while the observation batch is still unfetched.** Capturing it after a
+    // `settleDrains()` that has already processed the batch was this case's own
+    // defect: an erroneous `get_document` made *while* the observations were being
+    // applied would have been inside the baseline, and comparing that number with
+    // itself is an assertion nothing can fail.
+    await settleDrains();
+    const before = documentCommandCounts(commands);
+
+    events.wake(5, 12);
+    await settleDrains();
+    await settleDrains();
+
+    // Ruling 28's negative half, which only a spy can establish: neither arm
+    // reached **any** open-workspace document command, and neither invented a row.
+    expectNoDocumentCommandSince(commands, before);
+    expect(state.documents.map((document) => document.id)).toEqual([1, 2, 3]);
+    expect(state.externalPathDrift()).toEqual([
+      { relativePath: 'match/stranger.yml', detail: { kind: 'removed' } }
+    ]);
+    expect(state.membershipReloadWanted()).toBe(true);
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the Named-and-Unnamed case
+
+  it('sends no document command for the row an addition invented', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 6,
+          observations: [
+            {
+              Added: {
+                sequence: 6,
+                document_summary: makeSummary({ id: 42, relativePath: 'match/new.yml' }),
+                content: {
+                  Projected: {
+                    disk: makeDocument({ id: 42, relativePath: 'match/new.yml' }),
+                    findings: []
+                  }
+                }
+              }
+            }
+          ]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+
+    events.wake(5, 6);
+    await settleDrains();
+    await settleDrains();
+    const before = documentCommandCounts(commands);
+
+    // **The route ruling 28 does not close by itself**: `documents` is what the
+    // sidebar draws *and* what `rawTarget` picks the viewer's file from, so
+    // selecting the invented row and opening the viewer would have sent
+    // `document_text` for an identity the open workspace refuses.
+    state.show({ kind: 'document', id: 42 });
+    await state.showFileText(true);
+    await settleDrains();
+
+    expectNoDocumentCommandSince(commands, before);
+    expect(state.fileTextTarget).toBeNull();
+    expect(state.fileText).toBeNull();
+    // And the row is still drawn, as *not read yet*: keeping the identity out of
+    // the command targets is not the same as hiding the file.
+    expect(state.documents.map((document) => document.id)).toEqual([1, 2, 3, 42]);
+    expect(state.sidebar.pending).toBe(1);
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the pending-addition viewer case
+
+  it('leaves the file marked stale when the guarded reread fails', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      reload: {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
+      },
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    await settleDrains();
+
+    // The transition advanced this file's accepted sequence and the batch
+    // watermark before the read was even issued, so this observation will never be
+    // delivered again. A read that fails installs nothing — and until the outcome
+    // was handled, nothing anywhere said so: the window kept the old projection
+    // while the arbitration key said the file was reconciled.
+    expect(commands.reloadDocument).toHaveBeenCalledWith(2);
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11, 20]);
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the failed-reread case
+
+  it('installs nothing when the answer’s own getter opens a surface', async () => {
+    expectDrains(2);
+    const events = testEvents();
+    const told: number[] = [];
+    let sprung = false;
+    // An array rather than a nullable local: the assignment happens inside a
+    // getter, so a `let` would be narrowed to `null` by control-flow analysis that
+    // cannot see the getter running.
+    const leases: (() => void)[] = [];
+    let state: BrowserState | null = null;
+    const base = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 5,
+          observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    // **A `value` getter, which a `CommandResult` may perfectly well have.** The
+    // command surface is injected, so the answer is caller-controlled data and
+    // `readonly` freezes nothing at runtime: reading `.value` runs this, and this
+    // opens an editor over the very file the guard has just been asked about. Read
+    // *after* the guard — which is where it was read until this step's review — it
+    // would spring inside `installView`'s own argument and the file would be
+    // reloaded under an editor that was open by then.
+    const commands: BrowserCommands = {
+      ...base,
+      reloadDocument: vi.fn(async () => ({
+        ok: true as const,
+        get value(): DocumentView {
+          if (!sprung) {
+            sprung = true;
+            const lease = state?.registerWriteSurface(
+              { kind: 'matchEditor', target: { kind: 'document', document: 2 } },
+              (observation) => {
+                told.push(observation.sequence);
+              }
+            );
+            if (lease !== undefined) {
+              leases.push(lease);
+            }
+          }
+          return rereadBaseDocument();
+        }
+      }))
+    };
+    state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    await settleDrains();
+
+    // The getter fired — so the trap was really sprung — and the installation the
+    // guard approved is still the one that happened: none. The retained
+    // observation went onto the new surface's conflict path instead.
+    expect(sprung).toBe(true);
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11, 20]);
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+    expect(told).toEqual([5]);
+    expectNoSaveCommand(commands);
+    for (const release of leases) {
+      release();
+    } // End of the loop that releases whatever the getter registered
+    state.dispose();
+  }); // End of the value-getter case
+}); // End of the "observation transitions" suite
+
+describe('the discarded-history recovery', () => {
+  it('re-runs the original open request when no surface is open', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({
+          newest_sequence: 9,
+          discarded: 1,
+          observations: [removedObservation(9, addressable(2, 'match/base.yml'))]
+        }),
+        reconciliationBatch({ epoch: 6 })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open('/tmp/espanso');
+    await settleDrains();
+    await settleDrains();
+    await settleDrains();
+
+    // Ruling 11: a true `open()` with the **retained request**, and the batch's
+    // own observations were refused rather than applied — the removal in it never
+    // reached the window, which is what "the lost entry may have been the only
+    // observation of an addition or a removal" means in practice.
+    expect(commands.openWorkspace).toHaveBeenCalledTimes(2);
+    expect(commands.openWorkspace).toHaveBeenNthCalledWith(2, '/tmp/espanso');
+    expect(state.status).toBe('ready');
+    expect(state.documents.map((document) => document.id)).toEqual([1, 2, 3]);
+    expect(state.reconciliationBlock()).toEqual({ kind: 'running' });
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the empty-registry recovery case
+
+  it('reloads nothing while a surface is open, and preserves the window', async () => {
+    expectDrains(3);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({ newest_sequence: 9, discarded: 1 }),
+        reconciliationBatch({
+          newest_sequence: 14,
+          discarded: 1,
+          observations: [removedObservation(14, addressable(2, 'match/base.yml'))]
+        })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    // Open **before** the batch that reports the loss, which is the arm this case
+    // is about: ruling 12's *with any write surface open*.
+    const lease = state.registerWriteSurface(
+      { kind: 'matchEditor', target: { kind: 'document', document: 2 } },
+      () => undefined
+    );
+    await state.open('/tmp/espanso');
+    await settleDrains();
+    const target = state.scopedMatches[0];
+    await state.select(target!);
+    expect(state.selectedMatch?.id.node).toBe(10);
+
+    // Ruling 12: no `open()`, no synthetic conflict, and the draft's own document
+    // untouched on screen.
+    expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+    expect(state.selectedMatch?.id.node).toBe(10);
+    expect(state.documents.map((document) => document.id)).toEqual([1, 2, 3]);
+    expect(state.reconciliationBlock()).toEqual({
+      kind: 'blockedByLostHistory',
+      discarded: 1,
+      epoch: 5
+    });
+
+    // And ruling 13's cost: the next batch's observations are dropped rather than
+    // applied, so the removal in it never reaches the window.
+    events.wake(5, 15);
+    await settleDrains();
+    await settleDrains();
+    expect(state.documents.map((document) => document.id)).toEqual([1, 2, 3]);
+    expect(state.selectedMatch?.id.node).toBe(10);
+    expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+    expectNoSaveCommand(commands);
+    lease();
+    state.dispose();
+  }); // End of the blocked case
+
+  it('takes the permitted reload at the next batch once the surface closes', async () => {
+    expectDrains(4);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch({ newest_sequence: 9, discarded: 2 }),
+        reconciliationBatch({ newest_sequence: 10 }),
+        reconciliationBatch({ epoch: 6 })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    const lease = state.registerWriteSurface(
+      { kind: 'matchDuplicator', target: { kind: 'document', document: 3 } },
+      () => undefined
+    );
+    await state.open('/tmp/espanso');
+    await settleDrains();
+    expect(state.reconciliationBlock().kind).toBe('blockedByLostHistory');
+    expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+
+    // **Closing it triggers nothing**: nothing in this application observes the
+    // registry emptying, so the permission is taken at the next batch.
+    lease();
+    expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+
+    events.wake(5, 10);
+    await settleDrains();
+    await settleDrains();
+    await settleDrains();
+
+    expect(commands.openWorkspace).toHaveBeenCalledTimes(2);
+    expect(commands.openWorkspace).toHaveBeenNthCalledWith(2, '/tmp/espanso');
+    expect(state.reconciliationBlock()).toEqual({ kind: 'running' });
+    expectNoSaveCommand(commands);
+    state.dispose();
+  }); // End of the permitted-reload case
+}); // End of the "discarded-history recovery" suite

@@ -1,6 +1,14 @@
 /**
  * The drain lifecycle: when a drain fires, and what one answer does to the next
- * question — Phase 2d-5-3.
+ * question — Phase 2d-5-3, extended at 2d-5-4.
+ *
+ * **What Phase 2d-5-4 added here is the session half of an accepted batch**: the
+ * per-document accepted sequences, the `discarded` recovery's two arms and the
+ * blocked state's exit. The arms of an observation themselves are
+ * `observationTransitions.test.ts`'s, and what they do to a window is
+ * `workspace.test.ts`'s — this file's host records the calls and changes nothing,
+ * which is exactly why an assertion here is about the coordinator's decision and
+ * never about a window.
  *
  * Every case here drives `createReconciliationCoordinator` directly, over a host
  * whose drains are promises this file settles and over two fake transports. That
@@ -29,7 +37,13 @@ import type {
   ReconciliationUnlisten,
   ReconciliationWakeHandler
 } from '../ipc/events';
-import type { ExternalObservation, ReconciliationBatch } from '../ipc/types';
+import type {
+  DocumentId,
+  DocumentSummary,
+  ExternalObservation,
+  ObservedDocument,
+  ReconciliationBatch
+} from '../ipc/types';
 import {
   createReconciliationCoordinator,
   INERT_FOREGROUND_EVENTS,
@@ -38,6 +52,13 @@ import {
   type ForegroundSource,
   type ReconciliationHost
 } from './reconciliationCoordinator';
+import type {
+  ExternalDocumentStatus,
+  ExternalPathDrift
+} from './observationTransitions';
+import type { CreatorEligibility, OpenWriteSurface, OpenWriteSurfaceKind } from './restore';
+import type { WriteSurfaceTransition } from './writeSurfaceRegistry';
+import { makeDocument, makeSummary } from './fixtures';
 
 /** The epoch every batch below carries unless a case is about a mismatch. */
 const EPOCH = 7;
@@ -75,6 +96,30 @@ interface ControlledHost {
   readonly reported: IpcFailure[];
   /** The workspace-open generation the coordinator reads. */
   generation: number;
+  /** What the live registry answers. Assignable, so a case can open a surface. */
+  surfaces: readonly OpenWriteSurface[];
+  /** Every request a recovery re-ran, in order. `null` is a legitimate one. */
+  readonly reopened: (string | null)[];
+  /** Every file a guarded reread was started for, in order. */
+  readonly reread: DocumentId[];
+  /**
+   * The guard of every one of those rereads, in the same order.
+   *
+   * **Retained rather than run**, exactly as `observationTransitions.test.ts` does
+   * it: a guard is asked after a real command answers, which this file has none
+   * of, so a case that is about what the guard decides calls it itself at the
+   * moment it wants to ask. That is the only way to put the coordinator into a
+   * state — blocked, or disposed — *between* the transition and the installation.
+   */
+  readonly guards: (() => boolean)[];
+  /** Every row that was inserted or replaced, in order. */
+  readonly added: DocumentSummary[];
+  /** Every file that was removed, in order. */
+  readonly removed: DocumentId[];
+  /** Every status that was recorded, in order; `null` means one was cleared. */
+  readonly statuses: { document: DocumentId; status: ExternalDocumentStatus | null }[];
+  /** Every path drift that was recorded, in order. */
+  readonly drift: ExternalPathDrift[];
   /**
    * Settles the oldest unanswered drain.
    *
@@ -98,6 +143,13 @@ function controlledHost(): ControlledHost {
   const asked: number[] = [];
   const reported: IpcFailure[] = [];
   const waiting: ((result: CommandResult<ReconciliationBatch>) => void)[] = [];
+  const reopened: (string | null)[] = [];
+  const reread: DocumentId[] = [];
+  const guards: (() => boolean)[] = [];
+  const added: DocumentSummary[] = [];
+  const removed: DocumentId[] = [];
+  const statuses: { document: DocumentId; status: ExternalDocumentStatus | null }[] = [];
+  const drift: ExternalPathDrift[] = [];
   const control: ControlledHost = {
     host: {
       /**
@@ -125,6 +177,116 @@ function controlledHost(): ControlledHost {
        */
       report: (failure: IpcFailure): void => {
         reported.push(failure);
+      },
+      /**
+       * Whatever this file last assigned.
+       *
+       * @returns The live set.
+       */
+      openWriteSurfaces: (): readonly OpenWriteSurface[] => control.surfaces,
+      /**
+       * A generation derived from the set, so that assigning it moves this too.
+       *
+       * **Length, not a counter**: a case that replaces the set with one of the
+       * same size and expects the guard to refuse is testing the *registry's*
+       * contract rather than the coordinator's, and the registry's own suite owns
+       * that. What this file needs is that opening a surface moves it.
+       *
+       * @returns The number of live surfaces.
+       */
+      writeSurfaceGeneration: (): number => control.surfaces.length,
+      /**
+       * Every file is creator-eligible here.
+       *
+       * The widest answer, so that an unknown-target creator in `surfaces` really
+       * does cover every document a case names. `restore.test.ts` owns the
+       * eligibility rule itself.
+       *
+       * @returns `creatorEligible`.
+       */
+      creatorEligibility: (): CreatorEligibility => 'creatorEligible',
+      /**
+       * No surface here has a transition.
+       *
+       * **`null` rather than a spy on purpose**: what a surface is told is
+       * `observationTransitions.test.ts`'s, and this file's subject is the
+       * coordinator's decision to tell one at all — which it records as a `stale`
+       * status either way.
+       *
+       * @returns `null`.
+       */
+      transitionFor: (_kind: OpenWriteSurfaceKind): WriteSurfaceTransition | null => null,
+      /**
+       * Whether a row was added in this session.
+       *
+       * @param document - The identity.
+       * @returns Whether an `Added` observation inserted it and nothing removed it.
+       */
+      holdsDocument: (document: DocumentId): boolean =>
+        added.some((summary) => summary.id === document) && !removed.includes(document),
+      /**
+       * Records that a guarded reread was started, and never runs one.
+       *
+       * The guard is deliberately **not** called here: what it decides is asked
+       * after a real command answers, which this file has none of. It is kept
+       * beside the file so a case can ask it at the moment it chooses.
+       *
+       * @param document - The file.
+       * @param guard - Asked immediately before the installation.
+       */
+      rereadUnderGuard: (document: DocumentId, guard: () => boolean): void => {
+        reread.push(document);
+        guards.push(guard);
+      },
+      /**
+       * Records a row.
+       *
+       * @param summary - The row.
+       */
+      addDocument: (summary: DocumentSummary): void => {
+        added.push(summary);
+      },
+      /**
+       * Records a removal.
+       *
+       * @param document - The file.
+       */
+      removeDocument: (document: DocumentId): void => {
+        removed.push(document);
+      },
+      /**
+       * Records a status.
+       *
+       * @param document - The file.
+       * @param status - The code, or `null`.
+       */
+      noteDocumentStatus: (
+        document: DocumentId,
+        status: ExternalDocumentStatus | null
+      ): void => {
+        statuses.push({ document, status });
+      },
+      /**
+       * Records a path drift.
+       *
+       * @param entry - The path and what was observed of it.
+       */
+      notePathDrift: (entry: ExternalPathDrift): void => {
+        drift.push(entry);
+      },
+      /**
+       * Records the request a recovery re-ran, and opens nothing.
+       *
+       * **It does not call `workspaceOpened()` back**, unlike the production host,
+       * so the cursor this file reads after a recovery is the one the coordinator
+       * left rather than the one a real open would have cleared. That is the
+       * difference between this file's evidence and `workspace.test.ts`'s, and it
+       * is why the recovery's *effect* is asserted there.
+       *
+       * @param request - Exactly what the retained open was called with.
+       */
+      reopenWorkspace: (request: string | null): void => {
+        reopened.push(request);
       }
     },
     asked,
@@ -132,6 +294,16 @@ function controlledHost(): ControlledHost {
     // One rather than zero: every case here is about a workspace that has been
     // opened, and zero is what a state that has never opened one holds.
     generation: 1,
+    // Empty, so the `discarded` recovery's default arm is the reopen. A case that
+    // wants the blocked arm assigns one.
+    surfaces: [],
+    reopened,
+    reread,
+    guards,
+    added,
+    removed,
+    statuses,
+    drift,
     answer(result: CommandResult<ReconciliationBatch>): void {
       const settle = waiting.shift();
       if (settle === undefined) {
@@ -332,6 +504,73 @@ function removal(sequence: number): ExternalObservation {
   };
 } // End of function removal()
 
+/** Document `1`, as the open workspace resolves it. */
+const ADDRESSABLE_ONE: ObservedDocument = {
+  Addressable: { document: 1, relative_path: 'match/base.yml' }
+};
+
+/** Document `2`, as the open workspace resolves it. */
+const ADDRESSABLE_TWO: ObservedDocument = {
+  Addressable: { document: 2, relative_path: 'match/other.yml' }
+};
+
+/**
+ * One addition of a file this workspace did not hold — Phase 2d-5-4.
+ *
+ * @param sequence - The sequence it was admitted under.
+ * @param id - The identity this process minted for the path.
+ * @returns The observation.
+ */
+function addition(sequence: number, id: number): ExternalObservation {
+  return {
+    Added: {
+      sequence,
+      document_summary: makeSummary({ id, relativePath: `match/new-${id}.yml` }),
+      content: { Unreadable: { reason: { PermissionDenied: {} } } }
+    }
+  };
+} // End of function addition()
+
+/**
+ * One change of an addressable file whose bytes projected — Phase 2d-5-4.
+ *
+ * The only arm that starts a guarded reread, which is what the two
+ * still-applying cases need: a read in flight when the session stops.
+ *
+ * @param sequence - The sequence it was admitted under.
+ * @param document - Which addressable file.
+ * @returns The observation.
+ */
+function projectedChange(sequence: number, document: ObservedDocument): ExternalObservation {
+  return {
+    Changed: {
+      sequence,
+      document,
+      previous_revision: 'rev-before',
+      disk_revision: 'rev-disk',
+      content: {
+        Projected: {
+          disk_text: 'matches: []\n',
+          disk: makeDocument({ id: 2, relativePath: 'match/other.yml' }),
+          findings: [],
+          correspondences: null
+        }
+      }
+    }
+  };
+} // End of function projectedChange()
+
+/**
+ * One write surface over document `1`, so a case can take the blocked arm.
+ *
+ * The match editor rather than the creator, because the creator is the one kind
+ * whose target may be unknown and this value is about a surface that names a file.
+ */
+const SURFACE_OVER_ONE: OpenWriteSurface = {
+  kind: 'matchEditor',
+  target: { kind: 'document', document: 1 }
+};
+
 /** What a refused drain answers. */
 const REFUSAL: CommandResult<ReconciliationBatch> = {
   ok: false,
@@ -441,7 +680,7 @@ describe('the four triggers', () => {
     const events = controlledEvents();
     const coordinator = createReconciliationCoordinator(control.host, events.source);
     coordinator.start();
-    coordinator.workspaceOpened();
+    coordinator.workspaceOpened(null);
     coordinator.workspaceReady();
     await flush();
 
@@ -614,7 +853,13 @@ describe('the epoch', () => {
   it('moves neither sequence state for a batch naming another epoch', async () => {
     const control = controlledHost();
     const events = controlledEvents(true);
+    // **A surface is open, so the loss below blocks rather than reopening.** That
+    // is ruling 13's arm and the one this case needs: a blocked session still
+    // advances its watermark, so there is a number here for the stale batch to
+    // fail to move. With an empty registry the same `discarded` would re-run the
+    // retained open instead, and a reopened session has no watermark to compare.
     const coordinator = createReconciliationCoordinator(control.host, events.source);
+    control.surfaces = [SURFACE_OVER_ONE];
     coordinator.start();
     await flush();
     control.answer(batch({ newest_sequence: 6, discarded: 2 }));
@@ -663,7 +908,7 @@ describe('the epoch', () => {
     await flush();
 
     control.generation += 1;
-    coordinator.workspaceOpened();
+    coordinator.workspaceOpened(null);
     expect(coordinator.cursor()).toEqual({ epoch: 0, watermark: 0, lastDiscarded: 0 });
     expect(coordinator.watchState()).toEqual({ kind: 'notObserved' });
     expect(coordinator.discardedNotices()).toBe(0);
@@ -697,7 +942,15 @@ describe('the watermark and the loss count', () => {
     coordinator.dispose();
   }); // End of the empty-batch case
 
-  it('counts the observations it drops and installs nothing', async () => {
+  it('applies the observations it used to drop, and drops none of them', async () => {
+    /*
+     * **The case Phase 2d-5-3 wrote as its dropping evidence, turned over.** It
+     * asserted that two observations were counted and thrown away, which was that
+     * step's whole boundary; 2d-5-4 is where a transition runs instead, and
+     * `observationsDropped()` now counts only what a *blocked* session drops. Two
+     * removals of one file, so the second is the newer and both are applied in
+     * arrival order.
+     */
     const control = controlledHost();
     const coordinator = createReconciliationCoordinator(
       control.host,
@@ -708,7 +961,10 @@ describe('the watermark and the loss count', () => {
     control.answer(batch({ newest_sequence: 2, observations: [removal(1), removal(2)] }));
     await flush();
 
-    expect(coordinator.observationsDropped()).toBe(2);
+    expect(coordinator.observationsDropped()).toBe(0);
+    expect(coordinator.observationOutcomes()).toEqual(['removed', 'removed']);
+    expect(control.removed).toEqual([1, 1]);
+    expect(coordinator.acceptedSequence(1)).toBe(2);
     expect(coordinator.cursor().watermark).toBe(2);
     coordinator.dispose();
   }); // End of the observations-dropped case
@@ -756,7 +1012,7 @@ describe('the four captures around the await', () => {
 
     // The workspace is replaced while the only drain is in flight.
     control.generation += 1;
-    coordinator.workspaceOpened();
+    coordinator.workspaceOpened(null);
     control.answer(batch({ newest_sequence: 77, discarded: 5 }));
     await flush();
 
@@ -873,7 +1129,7 @@ describe('the open gate', () => {
     // coordinator is told. Rust still holds the workspace being replaced from here
     // until the open succeeds.
     control.generation += 1;
-    coordinator.workspaceOpened();
+    coordinator.workspaceOpened(null);
 
     coordinator.requestDrain('foreground');
     await flush();
@@ -916,7 +1172,7 @@ describe('the open gate', () => {
     await flush();
 
     control.generation += 1;
-    coordinator.workspaceOpened();
+    coordinator.workspaceOpened(null);
     // `workspaceOpened()` cleared `adopted`, so `onWake`'s epoch check passes
     // whatever epoch this names — which is why a wake, and not only a foreground
     // signal, could reach a drain in this window.
@@ -949,7 +1205,7 @@ describe('the open gate', () => {
     // The fourth capture on its own: the coordinator is told an open began while
     // the only drain is in flight, and the host's generation is left alone, so the
     // recheck that refuses this batch is the gate rather than the number.
-    coordinator.workspaceOpened();
+    coordinator.workspaceOpened(null);
     control.answer(batch({ newest_sequence: 41, discarded: 2 }));
     await flush();
 
@@ -973,7 +1229,7 @@ describe('the open gate', () => {
     // failed open leaves the previous workspace in place on the Rust side while
     // the window shows nothing.
     control.generation += 1;
-    coordinator.workspaceOpened();
+    coordinator.workspaceOpened(null);
     coordinator.requestDrain('foreground');
     events.wake(EPOCH, 2);
     await flush();
@@ -985,7 +1241,7 @@ describe('the open gate', () => {
     // The retry is the exit, and it is a real one: the gate is not stuck, it is
     // waiting for the only event that puts a workspace on screen.
     control.generation += 1;
-    coordinator.workspaceOpened();
+    coordinator.workspaceOpened(null);
     coordinator.workspaceReady();
     await flush();
 
@@ -1012,9 +1268,9 @@ describe('the open gate', () => {
     // and returns at its own generation check, calling nothing — so the gate the
     // second one set is the only one left, and the second one's `ready` opens it.
     control.generation += 1;
-    coordinator.workspaceOpened();
+    coordinator.workspaceOpened(null);
     control.generation += 1;
-    coordinator.workspaceOpened();
+    coordinator.workspaceOpened(null);
     coordinator.requestDrain('foreground');
     await flush();
 
@@ -1161,6 +1417,29 @@ describe('start and dispose', () => {
     expect(control.asked).toEqual([]);
     expect(coordinator.registration()).toEqual({ kind: 'idle' });
   }); // End of the start-after-disposal case
+
+  it('refuses a reread already in flight at disposal', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    control.answer(
+      batch({ newest_sequence: 4, observations: [projectedChange(4, ADDRESSABLE_TWO)] })
+    );
+    await flush();
+    expect(control.reread).toEqual([2]);
+
+    // **Disposal moves nothing a guard compares.** The epoch is where it was, no
+    // newer observation was admitted, the registry never changed and the host's own
+    // three captures belong to a window this file does not have — so the read that
+    // was already out would install after reconciliation was stopped.
+    coordinator.dispose();
+    expect(control.guards[0]?.()).toBe(false);
+    expect(control.statuses).toEqual([{ document: 2, status: { kind: 'stale' } }]);
+  }); // End of the disposed-reread case
 }); // End of the "start and dispose" suite
 
 describe('a registration that fails', () => {
@@ -1224,3 +1503,428 @@ describe('a registration that fails', () => {
     coordinator.dispose();
   }); // End of the inert-default case
 }); // End of the "registration that fails" suite
+
+describe('the per-document accepted sequences', () => {
+  it('keeps one number per document, and two documents do not share one', async () => {
+    const control = controlledHost();
+    const coordinator = createReconciliationCoordinator(
+      control.host,
+      controlledEvents(true).source
+    );
+    coordinator.start();
+    await flush();
+    control.answer(
+      batch({
+        newest_sequence: 9,
+        observations: [
+          { Removed: { sequence: 4, document: ADDRESSABLE_ONE, previous_revision: null } },
+          { Removed: { sequence: 9, document: ADDRESSABLE_TWO, previous_revision: null } }
+        ]
+      })
+    );
+    await flush();
+
+    // **Two documents, never one.** A single-document case cannot tell a
+    // per-document map from one global number, and this project has shipped that
+    // confusion before — the selection machinery's two counters.
+    expect(coordinator.acceptedSequence(1)).toBe(4);
+    expect(coordinator.acceptedSequence(2)).toBe(9);
+    expect(control.removed).toEqual([1, 2]);
+    coordinator.dispose();
+  }); // End of the two-document case
+
+  it('refuses an older observation of one file and leaves the other alone', async () => {
+    const control = controlledHost();
+    const coordinator = createReconciliationCoordinator(
+      control.host,
+      controlledEvents(true).source
+    );
+    coordinator.start();
+    await flush();
+    control.answer(
+      batch({
+        newest_sequence: 12,
+        observations: [
+          { Removed: { sequence: 12, document: ADDRESSABLE_ONE, previous_revision: null } },
+          // Older, for the same file: refused, and it is refused by the map rather
+          // than by the order it arrived in.
+          { Removed: { sequence: 3, document: ADDRESSABLE_ONE, previous_revision: null } },
+          // Older than document 1's, and the newest this file has: applied.
+          { Removed: { sequence: 3, document: ADDRESSABLE_TWO, previous_revision: null } }
+        ]
+      })
+    );
+    await flush();
+
+    expect(coordinator.observationOutcomes()).toEqual(['removed', 'superseded', 'removed']);
+    expect(control.removed).toEqual([1, 2]);
+    expect(coordinator.acceptedSequence(1)).toBe(12);
+    expect(coordinator.acceptedSequence(2)).toBe(3);
+    coordinator.dispose();
+  }); // End of the superseded case
+
+  it('disagrees with the watermark, which is not a bug', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.start();
+    await flush();
+    control.answer(
+      batch({
+        newest_sequence: 40,
+        observations: [
+          { Removed: { sequence: 7, document: ADDRESSABLE_ONE, previous_revision: null } }
+        ]
+      })
+    );
+    await flush();
+
+    // Ruling 6 in one assertion: the cursor is the drain acknowledgement and the
+    // map is the arbitration key, and the wire lets a batch carry a
+    // `newest_sequence` above every observation in it.
+    expect(coordinator.cursor().watermark).toBe(40);
+    expect(coordinator.acceptedSequence(1)).toBe(7);
+    coordinator.dispose();
+  }); // End of the two-sequence-states case
+
+  it('is cleared by an open, because identities are reallocated by one', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.start();
+    await flush();
+    control.answer(
+      batch({
+        newest_sequence: 7,
+        observations: [
+          { Removed: { sequence: 7, document: ADDRESSABLE_ONE, previous_revision: null } }
+        ]
+      })
+    );
+    await flush();
+    expect(coordinator.acceptedSequence(1)).toBe(7);
+
+    coordinator.workspaceOpened('/tmp/other');
+    expect(coordinator.acceptedSequence(1)).toBe(0);
+    expect(coordinator.observationOutcomes()).toEqual([]);
+    coordinator.dispose();
+  }); // End of the cleared-by-open case
+}); // End of the "per-document accepted sequences" suite
+
+describe('the discarded-history recovery', () => {
+  it('re-runs the retained open request when nothing is registered', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    control.answer(batch({ newest_sequence: 5, discarded: 1, observations: [removal(2)] }));
+    await flush();
+
+    // **The retained request, never `summary.root`** (ruling 11), and the whole
+    // batch is refused rather than reconciled: the lost entry may have been the
+    // only observation of an addition or a removal.
+    expect(control.reopened).toEqual(['/tmp/espanso']);
+    expect(control.removed).toEqual([]);
+    expect(coordinator.observationOutcomes()).toEqual([]);
+    expect(coordinator.discardedNotices()).toBe(1);
+    // Nothing was written to the cursor after the recovery: a production `open()`
+    // clears it synchronously, and this host does not, so what stands is what the
+    // coordinator left.
+    expect(coordinator.cursor().watermark).toBe(0);
+    coordinator.dispose();
+  }); // End of the empty-registry recovery case
+
+  it('retains null, which is a request and not the absence of one', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.workspaceOpened(null);
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    control.answer(batch({ newest_sequence: 1, discarded: 1 }));
+    await flush();
+
+    expect(control.reopened).toEqual([null]);
+    coordinator.dispose();
+  }); // End of the null-request case
+
+  it('reopens nothing while a write surface is open, and drops what follows', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    control.surfaces = [SURFACE_OVER_ONE];
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    control.answer(batch({ newest_sequence: 5, discarded: 1, observations: [removal(2)] }));
+    await flush();
+
+    // Ruling 12: no `open()`, no synthetic conflict, nothing reloaded — and ruling
+    // 13: the watermark still advances, so the retained queue is not refetched and
+    // those observations are gone.
+    expect(control.reopened).toEqual([]);
+    expect(control.removed).toEqual([]);
+    expect(coordinator.block()).toEqual({
+      kind: 'blockedByLostHistory',
+      discarded: 1,
+      epoch: EPOCH
+    });
+    expect(coordinator.cursor().watermark).toBe(5);
+    expect(coordinator.observationsDropped()).toBe(1);
+
+    // And the next batch is dropped too, without a second notice.
+    events.wake(EPOCH, 6);
+    await flush();
+    control.answer(batch({ newest_sequence: 8, discarded: 1, observations: [removal(7)] }));
+    await flush();
+    expect(coordinator.discardedNotices()).toBe(1);
+    expect(coordinator.observationsDropped()).toBe(2);
+    expect(coordinator.cursor().watermark).toBe(8);
+    coordinator.dispose();
+  }); // End of the blocked case
+
+  it('permits the reload once the last surface closes, at the next batch', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    control.surfaces = [SURFACE_OVER_ONE];
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    control.answer(batch({ newest_sequence: 5, discarded: 1 }));
+    await flush();
+    expect(coordinator.block().kind).toBe('blockedByLostHistory');
+
+    // **Closing the surface triggers nothing**, and that is the decision rather
+    // than an omission: nothing in this application observes the registry
+    // emptying, so the permission is taken at the next batch — an event that
+    // already exists.
+    control.surfaces = [];
+    expect(control.reopened).toEqual([]);
+    expect(coordinator.block().kind).toBe('blockedByLostHistory');
+
+    events.wake(EPOCH, 6);
+    await flush();
+    control.answer(batch({ newest_sequence: 6 }));
+    await flush();
+
+    expect(control.reopened).toEqual(['/tmp/espanso']);
+    expect(coordinator.block()).toEqual({ kind: 'running' });
+    coordinator.dispose();
+  }); // End of the blocked-exit case
+
+  it('treats an unknown-target creator as open, so it blocks too', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    // Ruling 12's last sentence: an unknown-target creator counts as open and
+    // therefore blocks the reload.
+    control.surfaces = [{ kind: 'matchCreator', target: { kind: 'unknown' } }];
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    control.answer(batch({ newest_sequence: 5, discarded: 4 }));
+    await flush();
+
+    expect(control.reopened).toEqual([]);
+    expect(coordinator.block().kind).toBe('blockedByLostHistory');
+    coordinator.dispose();
+  }); // End of the unknown-creator case
+
+  it('does not recover twice for one cumulative value', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    control.answer(batch({ newest_sequence: 4, discarded: 3 }));
+    await flush();
+    expect(control.reopened).toEqual(['/tmp/espanso']);
+
+    // The same cumulative value again. `discarded` is monotonic within the epoch,
+    // so this is the loss already acted on and must not be acted on twice.
+    events.wake(EPOCH, 5);
+    await flush();
+    control.answer(batch({ newest_sequence: 5, discarded: 3 }));
+    await flush();
+    expect(control.reopened).toEqual(['/tmp/espanso']);
+    expect(coordinator.discardedNotices()).toBe(1);
+    coordinator.dispose();
+  }); // End of the repeated-discarded case
+
+  it('refuses a reread already in flight when the block is entered', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    // **Open before anything, and over a file no observation below names.** It has
+    // to be open when the loss arrives, so that the recovery is deferred rather
+    // than run — and it has to target a *different* document, so that the change of
+    // document 2 still takes the clean path and the registry generation this host
+    // derives from the set never moves. Every other question the guard asks is
+    // therefore unmoved when it is finally called.
+    control.surfaces = [SURFACE_OVER_ONE];
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    control.answer(
+      batch({ newest_sequence: 4, observations: [projectedChange(4, ADDRESSABLE_TWO)] })
+    );
+    await flush();
+    expect(control.reread).toEqual([2]);
+    expect(control.statuses).toEqual([]);
+
+    // The loss lands while that read is out, and the recovery is deferred because
+    // the surface is open. Nothing the guard compares has moved.
+    events.wake(EPOCH, 5);
+    await flush();
+    control.answer(batch({ newest_sequence: 9, discarded: 1 }));
+    await flush();
+    expect(coordinator.block().kind).toBe('blockedByLostHistory');
+    expect(control.reopened).toEqual([]);
+
+    // Now the read comes back. Installing here would land a piecemeal answer
+    // underneath the whole-reload obligation, and clearing the status would say
+    // *reconciled* about a session that cannot describe its own membership.
+    expect(control.guards[0]?.()).toBe(false);
+    expect(control.statuses).toEqual([{ document: 2, status: { kind: 'stale' } }]);
+    coordinator.dispose();
+  }); // End of the blocked-reread case
+}); // End of the "discarded-history recovery" suite
+
+describe('the membership-reload request', () => {
+  it('is raised by an unnamed change and acted on by nothing', async () => {
+    const control = controlledHost();
+    const coordinator = createReconciliationCoordinator(
+      control.host,
+      controlledEvents(true).source
+    );
+    coordinator.start();
+    await flush();
+    expect(coordinator.membershipReloadWanted()).toBe(false);
+
+    control.answer(
+      batch({
+        newest_sequence: 3,
+        observations: [
+          {
+            Changed: {
+              sequence: 3,
+              document: { Unnamed: { relative_path: 'match/stranger.yml' } },
+              previous_revision: null,
+              disk_revision: 'rev-stranger',
+              content: { Unreadable: { reason: { PermissionDenied: {} } } }
+            }
+          }
+        ]
+      })
+    );
+    await flush();
+
+    expect(coordinator.membershipReloadWanted()).toBe(true);
+    expect(control.drift).toEqual([
+      { relativePath: 'match/stranger.yml', detail: { kind: 'changed' } }
+    ]);
+    // **Nothing acts on it**: no open, no command, no reread.
+    expect(control.reopened).toEqual([]);
+    expect(control.reread).toEqual([]);
+    coordinator.dispose();
+  }); // End of the membership-request case
+
+  it('is cleared by an open', async () => {
+    const control = controlledHost();
+    const coordinator = createReconciliationCoordinator(
+      control.host,
+      controlledEvents(true).source
+    );
+    coordinator.start();
+    await flush();
+    control.answer(
+      batch({
+        newest_sequence: 2,
+        observations: [
+          {
+            Removed: {
+              sequence: 2,
+              document: { Unnamed: { relative_path: 'match/stranger.yml' } },
+              previous_revision: null
+            }
+          }
+        ]
+      })
+    );
+    await flush();
+    expect(coordinator.membershipReloadWanted()).toBe(true);
+
+    coordinator.workspaceOpened(null);
+    expect(coordinator.membershipReloadWanted()).toBe(false);
+    coordinator.dispose();
+  }); // End of the cleared-request case
+}); // End of the "membership-reload request" suite
+
+describe('what no observation ever reaches', () => {
+  it('routes an addition to no command at all', async () => {
+    const control = controlledHost();
+    const coordinator = createReconciliationCoordinator(
+      control.host,
+      controlledEvents(true).source
+    );
+    coordinator.start();
+    await flush();
+    control.answer(batch({ newest_sequence: 6, observations: [addition(6, 42)] }));
+    await flush();
+
+    // Ruling 30: the row goes in, nothing goes into `views`, and `getDocument` is
+    // not called — which here means no reread was started for it either.
+    expect(control.added.map((summary) => summary.id)).toEqual([42]);
+    expect(control.added[0]?.loaded).toBe(false);
+    expect(control.reread).toEqual([]);
+    expect(coordinator.observationOutcomes()).toEqual(['added']);
+    coordinator.dispose();
+  }); // End of the addition case
+
+  it('never passes a Named identity anywhere but the row it minted', async () => {
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.start();
+    await flush();
+    control.answer(batch({ newest_sequence: 6, observations: [addition(6, 42)] }));
+    await flush();
+
+    events.wake(EPOCH, 7);
+    await flush();
+    control.answer(
+      batch({
+        newest_sequence: 7,
+        observations: [
+          {
+            Removed: {
+              sequence: 7,
+              document: { Named: { document: 42, relative_path: 'match/new-42.yml' } },
+              previous_revision: null
+            }
+          }
+        ]
+      })
+    );
+    await flush();
+
+    // The locally pending row goes, and no command was reached: ruling 28's
+    // negative half, which only a spy can establish.
+    expect(control.removed).toEqual([42]);
+    expect(control.reread).toEqual([]);
+    expect(control.reopened).toEqual([]);
+    expect(coordinator.observationOutcomes()).toEqual(['added', 'pendingRow']);
+    coordinator.dispose();
+  }); // End of the named-row case
+}); // End of the "what no observation ever reaches" suite

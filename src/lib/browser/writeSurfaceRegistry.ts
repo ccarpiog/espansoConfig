@@ -35,17 +35,19 @@
  *
  * ## What this module does **not** ship, said plainly
  *
- * **No transition stored here has ever been called.** {@link
- * WriteSurfaceRegistry.transitionFor} is the only reader of one and it has no
- * caller; 2d-5-4 is where an admitted observation is routed to the surface a
- * reload would strand, and 2d-5-5 is where the six existing conflict
- * registrations are generalized. What Phase 2d-5-2b added is on the other side:
- * `src/lib/components/DetailPane.svelte` now registers all seven kinds from one
+ * **A transition stored here is now called, and every one of them is still a
+ * no-op.** The sentence this replaces said no stored transition had ever been
+ * called, which was true until Phase 2d-5-4:
+ * `./observationTransitions.ts` reads one through {@link
+ * WriteSurfaceRegistry.transitionFor} and invokes it when an observation names a
+ * file an open surface may be about. What has **not** changed is the other end —
+ * `src/lib/components/DetailPane.svelte` registers all seven kinds from one
  * `satisfies Record<OpenWriteSurfaceKind, …>` assembly, `MatchCreator.svelte`
  * reports its chosen destination through {@link
- * UnregisterWriteSurface.replaceTarget}, and every one of those surfaces
- * registers the same **no-op** transition — so a stored transition is still a
- * value nothing produces an effect from at either end.
+ * UnregisterWriteSurface.replaceTarget}, and every one of those surfaces registers
+ * the same **no-op** transition, so nothing on a screen is derived from one yet.
+ * 2d-5-5 is where the six existing conflict registrations are generalized and a
+ * surface does something with what it is told.
  *
  * **This module deliberately contains no exhaustive assembly**, and that has not
  * changed: an exhaustiveness check that lives anywhere but the composition file
@@ -95,13 +97,20 @@ import type {
 /**
  * What one live write surface is told when the file it is about changed on disk.
  *
- * **No caller invokes this yet, and that is the step's shape rather than an
- * oversight.** 2d-5-4 is where an admitted observation is routed to the surface a
- * reload would strand — the consult's Q5, *"send the observation to that surface's
+ * **Called since Phase 2d-5-4, by one caller.** `./observationTransitions.ts`
+ * invokes it when an admitted observation names a file an open surface may be
+ * about — the consult's Q5, *"send the observation to that surface's
  * external-conflict transition and install no projection"*
- * (`docs/reviews/phase-2d-5-design.md:149-152`) — and 2d-5-5 is where the six
- * existing conflict registrations are generalized onto `ConflictSource`. Until
- * then the registry stores one per entry and calls none.
+ * (`docs/reviews/phase-2d-5-design.md:149-152`). **Every transition registered in
+ * production is still a no-op**, so being called changes nothing on a screen;
+ * 2d-5-5 is where the six existing conflict registrations are generalized onto
+ * `ConflictSource` and a surface answers by raising one.
+ *
+ * **Only a `Changed`/`Addressable`/`Projected` observation can be delivered
+ * through it**, because that is what its parameter is. A removal and an unreadable
+ * file therefore reach no surface at all: what 2d-5-4 does for those is preserve
+ * the registration and record a status, which is the state half of the consult's
+ * *removed-target* requirement and not the telling half.
  *
  * **The narrowest honest type, in both directions.** The parameter is
  * {@link ExternalConflictObservation} because that is the value the consult says is
@@ -346,10 +355,13 @@ export interface WriteSurfaceRegistry {
   /**
    * The transition of the live surface of one kind, or `null`.
    *
-   * **The lookup 2d-5-4 will need, and the only way the stored transition can be
-   * read at all.** `targetingSurfaceFor` answers a *kind*, so this is keyed to
-   * match it. It has no production caller at 2d-5-2a and is not on `BrowserState`
-   * yet — 2d-5-4 lifts it there when it has one.
+   * **The only way the stored transition can be read at all**, and since Phase
+   * 2d-5-4 it has one caller: the observation transitions, through the
+   * coordinator's host. `targetingSurfaceFor` answers a *kind*, so this is keyed to
+   * match it. **It is deliberately not on `BrowserState`** — the earlier sentence
+   * here expected 2d-5-4 to lift it there, and that step instead reached the
+   * registry through `ReconciliationHost`, so no window-facing door exposes a
+   * component's callback to another component.
    *
    * **Two answers from two reads are two facts.** The kind a snapshot of
    * {@link openWriteSurfaces} justified may have been displaced or unregistered by

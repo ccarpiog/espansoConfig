@@ -642,20 +642,29 @@
   /**
    * What a registered surface is told about an external observation of its file.
    *
-   * **A no-op, and the same one for all seven kinds** — Phase 2d-5-2b. Nothing
-   * invokes a stored transition anywhere in this repository: `transitionFor` is the
-   * only reader and it has no caller until 2d-5-4 routes an admitted observation to
-   * the surface a reload would strand. Writing seven different bodies now would be
-   * seven claims about a protocol that does not exist, and any body that *did*
-   * something would be inventing it.
+   * **A no-op, and the same one for all seven kinds** — Phase 2d-5-2b. **It is
+   * now called**, which it was not when it was written: since 2d-5-4
+   * `tellTheSurfaceAbout()` in `src/lib/browser/observationTransitions.ts` reads
+   * `transitionFor(kind)` and invokes what it returns, so the inertness is this
+   * body's and no longer the absence of a caller. The sentence here used to say
+   * that nothing in the repository invoked a stored transition; 2d-5-4 falsified
+   * it by routing an admitted observation to the surface a reload would strand.
    *
-   * **What it will do when it stops being inert, said now rather than discovered
-   * later.** Under consult Q5 the coordinator installs no projection when a surface
-   * may target the document and hands the observation to that surface instead — so
-   * with this body the person's draft survives and they are never told the file
-   * moved. That is the conservative half of the rule and the wrong half of the
-   * answer, and replacing it is 2d-5-4's and 2d-5-5's work rather than a defect
+   * **What being called and doing nothing means, said here rather than discovered
+   * on screen.** Under consult Q5 the coordinator installs no projection when a
+   * surface may target the document and hands the observation to that surface
+   * instead — so with this body the person's draft survives and they are never
+   * told the file moved. That is the conservative half of the rule and the wrong
+   * half of the answer, and replacing it is 2d-5-5's work rather than a defect
    * here.
+   *
+   * **Two of the three arms cannot reach this function at all**, which is a
+   * property of the type rather than of this body: `WriteSurfaceTransition` takes
+   * the narrowed `Changed`/`Projected` snapshot that
+   * `externalConflictObservationOf()` builds, so a `Removed` or an `Unreadable`
+   * observation — and a `Changed` one whose content is not `Projected` — is
+   * decided without any surface being told. Telling a surface its file is gone is
+   * 2d-5-5's too.
    */
   const tellNobodyYet: WriteSurfaceTransition = () => undefined;
 

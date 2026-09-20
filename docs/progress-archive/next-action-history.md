@@ -12527,3 +12527,101 @@ written in one place only (`2554`), `drainMayStart()` false because the test nev
 
 **Run the gates as this round did**: one sequential script, each command redirected to its own file,
 the reviewer told to run none, and **both readings taken** — inherited tree and post-fix.
+
+
+---
+
+## The closing record of Phase 2d-5-3-N, and the Next-action prose Phase 2d-5-4 executed — archived 2026-09-20 at Phase 2d-5-4
+
+Both are moved verbatim from `PROGRESS.md`, unedited. The first is the record of the round that
+closed the fourteen-round 2d-5-3 tail; the second is the Next-action section that defined 2d-5-4,
+which this phase has now carried out. **Neither is an instruction**: the only live next action is
+the one in `PROGRESS.md`.
+
+#### Phase 2d-5-3-N — the round §7.1 commissioned for 2d-5-3-M's fix, and the round that closes the tail
+
+**Complete, and the first phase of this chain that is not `SUPERSEDED`: its fix changed no source
+file, so `CLAUDE.md` §7.1 commissions no round and §7.2 closes the step.** Risk class **high**; worker
+model **none** (no implementation worker — the phase's product is a review and its fix, both taken by
+the orchestrator). Record:
+[`docs/decisions/2d-5-3-N-notes.md`](docs/decisions/2d-5-3-N-notes.md); review
+[`docs/reviews/phase-2d-5-3-N.md`](docs/reviews/phase-2d-5-3-N.md); brief
+[`docs/reviews/phase-2d-5-3-N.brief.md`](docs/reviews/phase-2d-5-3-N.brief.md).
+
+**The reviewer was Codex.** `autoclaude-review.sh` was run first per the workflow's *Codex first, the
+agent as fallback, never both*, and it **exited 0**, so no agent was spawned. **The report's finding
+bodies arrive truncated again** — finding 2's breaks off mid-sentence — and **neither finding was
+accepted on the report's strength**: finding 1 was re-derived by reading the two passages it names,
+and finding 2 was re-derived from `2d-5-3-F-notes.md` without the reviewer's unrecoverable reasoning.
+
+**Verdict `ship-with-fixes`, 0 blockers**, **2 SHOULD-FIX, both Low and both in the record**.
+
+**Finding 1: "both numbers are dropped rather than renumbered" is disproved by the sentence beside
+it.** `2d-5-3-M-notes.md` §3 claimed both numbers of the `workspace.test.ts:7535-7790` citation were
+dropped and then quoted the replacement it had written — *"among the **ten** tests of …"* — which
+**carries a count**. One number was dropped, the range; the other was **renumbered**, eleven → ten,
+in both L passages (`:172`, `:265`). 2d-5-3-K's precedent covers an anchor that drifts and never
+covered a count, and M's own next sentence says why the count stays. **The suite figures M asserted
+are right** and were re-counted: the `describe` opens at 7535, closes at **7779**, and holds **ten**
+`it(` blocks at exactly the lines M listed — **what was false is only the description of the fix**.
+Corrected in five places with the correction marked in place, and in the archive entry's header for
+the sixth; `docs/reviews/phase-2d-5-3-M.md` is left as written.
+
+**Finding 2: the tally named an exception its own record contradicts.** *"Twelve of the thirteen
+rounds `2d-5-3-A` … `2d-5-3-M` have found a real defect in the previous round's fix; the one exception
+is still 2d-5-3-F"* is false as written. `2d-5-3-F-notes.md`'s own header says of its three findings
+*"**one is**"* in the previous round's fix, and its §2 shows which: 2d-5-3-E carried a stale paragraph
+count into its own §8 item 3 and **E's own fix added the sixth paragraph** that falsified it. **The
+tally is dropped rather than renumbered** — renumbering would assert a thirteen-round audit no round
+has performed, which is this file's own inherited-figure failure. One neighbouring case was
+spot-checked rather than assumed (2d-5-3-G is not a second exception: F's fix wrote the negating half
+of the contradiction G found), and **one spot-check is not an audit**. The replacement claims only
+what this round re-derived about itself.
+
+**The source fix holds, re-derived rather than inherited from the reviewer's "holds".** The cited test
+supersedes **exactly one** open; `open()` has `await commands.openWorkspace(root)` at **2603** and its
+generation check at **2604** with nothing between them, so *"directly under its own `openWorkspace`
+await"* names one check and it is the one the parked open reaches; the return at 2604 precedes
+`workspaceReady()` at 2687, so the inference is what the sentence says; and no clause left in 787-812
+still reads as the universal M rejected.
+
+**Measured, not recalled: the last commit to change a line of `reconciliationCoordinator.ts` that is
+neither comment nor blank is `332a751` — Phase 2d-5-3 itself, 324 such lines.** Each of the thirteen
+rounds A … M changed **zero**. The step's executable product has been unchanged since the phase that
+wrote it, and the whole tail was about whether its comments tell the truth.
+
+**Nothing is `BLOCKED`.** `2d-5-3-N-notes.md` §9 marks one item **actionable** and adoptable by a later
+phase — the same tally sentence stands in `2d-5-3-L-notes.md:14-16` and three archived copies, a
+defect in the **record**, never in source — and four **recorded only**.
+
+
+#### The next action is **Phase 2d-5-4 — the observation state transitions**
+
+**Step 4 of the seven-step 2d-5 split, and the first new implementation work since 2d-5-3.** Its
+definition is `docs/decisions/2d-5-split-notes.md` §"2d-5-4 — observation state transitions", and it
+**delivers** the per-document accepted-sequence map, the guarded reread, the `Added` / `Removed` /
+`Unreadable` arms, the selected-document removal transition, `Addressable`-only command routing, and
+the discarded-history recovery that re-runs the coordinator's **retained original open request**.
+**Evidence it owes:** model and workspace tests across every observation-by-document-arm combination,
+two documents, surface-open races, lost additions and removals, and an **explicit zero-save-command
+assertion**. **Components: none**, so no window reading is owed.
+
+**Four rulings of the split bind it specifically**, and its record should answer them rather than
+rediscover them: the *may refresh automatically* permission is a **permission**, handed to this step
+explicitly and never promoted to an obligation (`2d-5-split-notes.md` §"corrections" row 4); the
+blocked-reconciliation state's **exit** is described but not typed, and what observes "their retained
+values have been explicitly dealt with" is this step's to decide (§ *where it is thin* item 4);
+**nothing bounds how many observations a blocked coordinator may drop**, which is safe only under the
+whole-reload obligation and is expressed in no type (item 5); and the `not watched` state for
+`epoch: 0` has **no dictionary keys**, owed by whichever step first names it (item 6) — 2d-6 draws it.
+
+**Read in this order before starting**:
+[`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md) (**the consult; it binds**),
+[`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) (the record — its §5
+corrections before treating `phase-2d-design.md` step 5 as the spec) and
+[`docs/decisions/2d-5-design-brief.md`](docs/decisions/2d-5-design-brief.md).
+
+**This step is implementation, not a review round, so it takes an implementation worker** — the first
+since 2d-5-3 — and its review is the phase's one review under the workflow, not a §7.1 round. §7.1
+applies to its **fix** as it does to any: a fix touching source commissions a round.
+

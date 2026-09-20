@@ -107,22 +107,30 @@ import type { ConflictModel, DiskAdoptionOutcome, ReloadConfirmation } from './s
 import { documentTextState, rawTarget, type RawDocumentText } from './rawDocument';
 import {
   applyRestore,
+  creatorEligibilityOf,
   restoreConfirmationWithdrawn,
   restoreCouldNotBeSent,
   revisionInProjection,
   sendRestore,
+  type CreatorEligibility,
   type InvalidateEverySurface,
   type OpenWriteSurface,
+  type OpenWriteSurfaceKind,
   type RestoreContext,
   type RestoreSession,
   type StartedRestore,
   type WriteSurfaceDocumentTarget
 } from './restore';
+import type {
+  ExternalDocumentStatus,
+  ExternalPathDrift
+} from './observationTransitions';
 import {
   createReconciliationCoordinator,
   INERT_FOREGROUND_EVENTS,
   INERT_RECONCILIATION_EVENTS,
   type ForegroundSource,
+  type ReconciliationBlock,
   type ReconciliationCoordinator
 } from './reconciliationCoordinator';
 import { filterMatches } from './search';
@@ -1605,8 +1613,10 @@ export interface BrowserState {
    * await and recheck before it installs** (`docs/reviews/phase-2d-5-design.md`
    * lines 157-163). Moving means the set was mutated since the capture; it says
    * nothing about *what* changed, nothing about any particular document, and does
-   * not imply the set now differs from the capture. **No caller in production
-   * captures it yet**: 2d-5-4 is the step that does. The callers it has today are
+   * not imply the set now differs from the capture. **That capture exists since
+   * Phase 2d-5-4 and it does not go through this door**: the observation
+   * transitions take it from the registry through `ReconciliationHost`, which is
+   * deliberately outside every reactive mirror. The callers *this* member has are
    * cases in `DetailPane.test.ts`, which assert the number itself — the earlier
    * wording here said "nothing calls it", which was wider than the code and is
    * Phase 2d-5-2b-A's review, finding 3.
@@ -1667,6 +1677,53 @@ export interface BrowserState {
    * exact unlisten count is asserted by test.
    */
   dispose(): void;
+
+  /**
+   * What this window can say about one file it did not reload — Phase 2d-5-4.
+   *
+   * **A code, and nothing renders it.** 2d-6 draws these states and owes their
+   * EN/ES entries and their accessor in `src/lib/i18n/codes.ts`; this step names
+   * none of them to a person, which is
+   * `docs/decisions/2d-5-split-notes.md` section 6 item 6's rule.
+   *
+   * **A `removed` status outlives the row it is about**, deliberately: a write
+   * surface over a removed file is preserved rather than closed, so the state that
+   * describes its target has to survive the removal.
+   *
+   * @param document - The file.
+   * @returns The status, or `null` when there is nothing to report.
+   */
+  externalDocumentStatus(document: DocumentId): ExternalDocumentStatus | null;
+
+  /**
+   * What was observed of paths this window holds no identity for — Phase 2d-5-4.
+   *
+   * The `Unnamed` arm's whole product. **No identity is invented and no row is
+   * matched by path**, because a wire path is lossy; a consumer holds the display
+   * path and nothing a command would accept.
+   *
+   * @returns One entry per path, the most recent observation of each.
+   */
+  externalPathDrift(): readonly ExternalPathDrift[];
+
+  /**
+   * Whether reconciliation is running or is held by a hole in the history —
+   * Phase 2d-5-4.
+   *
+   * @returns The coordinator's typed state.
+   */
+  reconciliationBlock(): ReconciliationBlock;
+
+  /**
+   * Whether an observation has asked for a safe membership reload — Phase 2d-5-4.
+   *
+   * **Nothing acts on it**, here or in the coordinator: it is raised by the arms
+   * that saw a file the open workspace does not resolve, and 2d-6 is where a
+   * person gets a control that asks for one.
+   *
+   * @returns `true` once such a request has been made in this session.
+   */
+  membershipReloadWanted(): boolean;
 }
 
 /**
@@ -1689,6 +1746,30 @@ interface DuplicateIntent {
   /** The global `selectGeneration` at the same instant. */
   readonly generation: number;
 }
+
+/**
+ * One file, and what this window can say about it without having reloaded it.
+ *
+ * A pair rather than a `Map`, because it is `$state` and a `Map` in `$state` is
+ * not reactive without Svelte's own wrapper. Phase 2d-5-4.
+ */
+interface ExternalDocumentStatusEntry {
+  /** The file. **Kept after the row is gone** for a `removed` status. */
+  readonly document: DocumentId;
+  /** What this window can say about it. */
+  readonly status: ExternalDocumentStatus;
+}
+
+/**
+ * The guard a re-read somebody asked for is run under.
+ *
+ * **A named constant rather than an inline `() => true`**, so that the one call
+ * site which passes no coordinator guard says which of the two it is at the call
+ * rather than in a comment. Phase 2d-5-4.
+ *
+ * @returns `true`, always.
+ */
+const ALWAYS_PERMITTED = (): boolean => true;
 
 /**
  * Builds the browser state over a set of commands.
@@ -1847,7 +1928,10 @@ export function createBrowserState(
   // that synchronous assignment and the flush, in which the registry still answers
   // surfaces over identities this load is about to reallocate. Nothing reads it there
   // today, and 2d-5-4's discarded-history recovery — the third caller consult Q3
-  // adds — is required by that ruling not to re-open while any surface is open.
+  // adds, now shipped — reads the registry **before** it decides, and refuses to
+  // re-open while any surface is registered, which is the direction that window
+  // fails safe in: a lease that has not come back yet is a surface the recovery
+  // sees, so it blocks rather than reopening.
   const writeSurfaces = createWriteSurfaceRegistry();
   // **The registry's own generation, mirrored into a signal** — Phase 2d-5-2b's
   // review, finding 1. The registry is deliberately not reactive and stays that
@@ -1878,6 +1962,43 @@ export function createBrowserState(
   // a fourth written without a `noticeWriteSurfaces()` would leave this number
   // behind the registry with nothing failing.
   let surfaceGeneration = $state(0);
+  // **What this window can say about a file it did not reload** — Phase 2d-5-4.
+  // One entry per document at most, replaced rather than appended, and `$state`
+  // because 2d-6 draws these: a `Map` in `$state` is not reactive without Svelte's
+  // own wrapper, and a configuration is tens of files, so a scanned array is the
+  // same argument `viewOf` makes one screen up.
+  //
+  // **Nothing renders it today and no dictionary key exists for any of its arms.**
+  // `docs/decisions/2d-5-split-notes.md` section 6 item 6 puts the EN/ES entries on
+  // the step that first names such a state to a person, and this step does not.
+  let externalStatuses = $state<readonly ExternalDocumentStatusEntry[]>([]);
+  // **What was observed of a path this window holds no identity for** — Phase
+  // 2d-5-4. Keyed by the lossy display path and **deduplicated by it**, which is
+  // the only bound there is: an `Unnamed` observation carries no identity, so the
+  // accepted-sequence map cannot arbitrate one and a watcher flapping on one path
+  // would otherwise append without limit. Latest wins, and nothing orders two
+  // observations of two different paths.
+  let pathDrift = $state<readonly ExternalPathDrift[]>([]);
+  // **Which rows this window invented rather than listed** — Phase 2d-5-4, and the
+  // one thing that keeps ruling 28 true of the *viewer* as well as of the
+  // transitions. An `Added` observation's identity is by definition not an address
+  // the open workspace resolves, so every open-workspace document command refuses
+  // it — but `documents` is also what `rawTarget` picks the raw viewer's file from,
+  // so a person selecting that new row and opening the viewer would have sent
+  // `document_text` for exactly such an identity. The row is drawn; it is simply
+  // not a target.
+  //
+  // **Explicit retained state rather than an inference from `loaded`.** `loaded`
+  // is a wire field about whether the *engine* has read the file, and a listed
+  // document can legitimately carry `false` for it — inferring addressability from
+  // it would refuse a file the workspace really does resolve. What makes an
+  // identity addressable is a successful `open()`, which replaces `documents`
+  // wholesale from `list_documents`, so this list is cleared there and nowhere
+  // else but the removal transition.
+  //
+  // **`$state` because `fileTextTarget` is read from markup**: the toggle's
+  // condition has to re-run when a row stops being pending.
+  let pendingAdditions = $state<readonly DocumentId[]>([]);
   // **The drain lifecycle, as a value beside this file** — Phase 2d-5-3. It owns
   // when a drain fires and what a batch does to the session cursor; this state owns
   // the two facts it cannot see for itself, which are the injected command surface
@@ -1908,7 +2029,138 @@ export function createBrowserState(
        * @returns The number `open()` last took.
        */
       openGeneration: () => openGeneration,
-      report
+      report,
+      /**
+       * Every write surface this window has open.
+       *
+       * **The registry directly, not `state.openWriteSurfaces()`.** That door
+       * exists to make a `$derived` re-run, and reading its mirror here would put
+       * a reactive dependency inside a coordinator that is deliberately not
+       * reactive. The answer is the same object either way.
+       *
+       * @returns The live set.
+       */
+      openWriteSurfaces: (): readonly OpenWriteSurface[] => writeSurfaces.openWriteSurfaces(),
+      /**
+       * How many times that set has changed.
+       *
+       * @returns The registry's own generation, never the mirror — the mirror can
+       *   only be behind it.
+       */
+      writeSurfaceGeneration: (): number => writeSurfaces.generation(),
+      /**
+       * Whether the new-snippet form would offer one file as a destination.
+       *
+       * **A file this window holds no row for is `notCreatorEligible`**, which is
+       * the safe direction here and the unsafe one nowhere: a `false` makes an
+       * unknown-target creator *stop* covering that file, so the effect is that a
+       * document nothing names may be reloaded. That is exactly right for a file
+       * this window is not showing, since no form could have offered it.
+       *
+       * @param document - The file.
+       * @returns Whether an unknown-target creator may be about it.
+       */
+      creatorEligibility: (document: DocumentId): CreatorEligibility => {
+        const summary = documents.find((held) => held.id === document);
+        if (summary === undefined) {
+          return 'notCreatorEligible';
+        }
+        return creatorEligibilityOf(summary, viewOf(document) ?? null);
+      },
+      /**
+       * The transition of the live surface of one kind.
+       *
+       * @param kind - Which kind.
+       * @returns Its transition, or `null`.
+       */
+      transitionFor: (kind: OpenWriteSurfaceKind): WriteSurfaceTransition | null =>
+        writeSurfaces.transitionFor(kind),
+      /**
+       * Whether this window holds a row for one identity.
+       *
+       * @param document - The identity.
+       * @returns Whether a row with it exists.
+       */
+      holdsDocument: (document: DocumentId): boolean =>
+        documents.some((held) => held.id === document),
+      /**
+       * Reads one file again under the coordinator's guard, and says so if it
+       * fails.
+       *
+       * Fired rather than awaited: the coordinator's decision is complete and the
+       * read's own three captures decide whether its answer is still wanted.
+       *
+       * **The outcome is not discarded, and this is the one arm where discarding
+       * it hid something.** The `Changed`/`Projected` transition has *already*
+       * advanced the accepted sequence for this file and the batch watermark by the
+       * time it gets here, so the observation will never be delivered again — and a
+       * read that fails installs nothing. Ignoring the answer left the window
+       * showing the old projection while the arbitration key said the file was
+       * reconciled, with nothing anywhere recording that anything had gone wrong.
+       * `CLAUDE.md` names a consuming operation whose result is discarded as a shape
+       * this project has already shipped twice.
+       *
+       * **So the file is marked `stale` before the read starts** — which is a true
+       * statement for the whole time the read is out, because the window *is* still
+       * showing the older projection — and the only thing that clears it is the
+       * guard's success arm, in the same synchronous block as the installation.
+       * Marking it again when the read fails is not redundant: an overlapping reread
+       * of the same file may have cleared it in between, and this read's failure is
+       * still the newest true thing about it.
+       *
+       * **What it does not claim.** It does not retry, and it does not say *why* the
+       * read failed — `report` is what carries the failure itself, and
+       * {@link ExternalDocumentStatus} is a code about this window's knowledge, not
+       * about the engine's refusal. Nothing draws either today; 2d-6 does.
+       *
+       * @param document - The file.
+       * @param guard - Asked immediately before the installation.
+       */
+      rereadUnderGuard: (document: DocumentId, guard: () => boolean): void => {
+        noteDocumentStatus(document, { kind: 'stale' });
+        void rereadUnderGuard(document, guard).then(
+          /**
+           * Re-states the staleness when the read never landed.
+           *
+           * @param failure - The read's refusal, or `null`.
+           */
+          (failure: IpcFailure | null): void => {
+            if (failure === null) {
+              return;
+            }
+            noteDocumentStatus(document, { kind: 'stale' });
+          }
+        );
+      },
+      addDocument,
+      /**
+       * Drops one file, and moves the raw viewer off it if it was showing it.
+       *
+       * The invalidation itself is **synchronous** (ruling 31); the re-read that
+       * follows is the viewer's, and is the same fire-and-forget every other place
+       * that can move the viewer's target performs.
+       *
+       * @param document - The file that is gone.
+       */
+      removeDocument: (document: DocumentId): void => {
+        removeDocumentFromWindow(document);
+        void readFileText();
+      },
+      noteDocumentStatus,
+      notePathDrift,
+      /**
+       * Re-runs the retained original open request.
+       *
+       * **`state.open` rather than a private helper**, because the recovery ruling
+       * 11 asks for is *a true open* — the one that clears documents, projections,
+       * selection, viewer state and every per-document generation — and a second
+       * path to it would be a second rule that can drift from the first.
+       *
+       * @param request - Exactly what the original `open()` was called with.
+       */
+      reopenWorkspace: (request: string | null): void => {
+        void state.open(request);
+      }
     },
     events,
     foreground
@@ -2214,6 +2466,245 @@ export function createBrowserState(
   } // End of function installView()
 
   /**
+   * Puts one sidebar row in place, by identity — Phase 2d-5-4.
+   *
+   * The `Added` arm's whole effect (ruling 30). **Nothing goes into `views`**: an
+   * addition's identity is by definition not an address the open workspace
+   * resolves, so `getDocument` would refuse it and the projection the observation
+   * carries is deliberately dropped. The row is therefore drawn as *not read yet*,
+   * which is what `loaded: false` means everywhere else in this state and is true
+   * of it.
+   *
+   * **The replace arm is for a second addition of one path, and nothing else.**
+   * A summary already in `documents` whose projection this window holds cannot
+   * reach here under the wire's own contract; if one ever did, the row would say
+   * *not read yet* beside a projection that exists, and this function would not
+   * notice. `docs/decisions/2d-5-4-notes.md` records that as a residual.
+   *
+   * **The identity is recorded as pending in the same statement that draws it**,
+   * and that is ruling 28's other half. The row is a thing to *look* at; it is not
+   * a thing to *address*, and `documents` is read by `rawTarget` as well as by the
+   * sidebar. Recording it here rather than inferring it later is what stops a
+   * selection of that row sending `document_text` for an identity the open
+   * workspace refuses — `pendingAdditions`' own comment says why the list is
+   * explicit. Nothing in TypeScript makes the two assignments one: a future arm
+   * that wrote `documents` without writing this list would reopen the route, and
+   * only `workspace.test.ts`'s negative command-spy case would notice.
+   *
+   * @param summary - The row, with `loaded` already forced false by the caller.
+   */
+  function addDocument(summary: DocumentSummary): void {
+    const index = documents.findIndex((held) => held.id === summary.id);
+    documents =
+      index === -1
+        ? [...documents, summary]
+        : documents.map((held, at) => (at === index ? summary : held));
+    if (!pendingAdditions.includes(summary.id)) {
+      pendingAdditions = [...pendingAdditions, summary.id];
+    }
+  } // End of function addDocument()
+
+  /**
+   * Drops one file and everything this window derived from it — Phase 2d-5-4.
+   *
+   * **The synchronous removal transition ruling 31 asks for, and it is not
+   * `repairAfter`**: that repairs the selection against a supplied `DocumentView`,
+   * and a removed file has none to supply. So the projection is invalidated and
+   * dropped, the row goes, the load failure goes, and a selection inside the file
+   * is cleared with the external-gone notice — all before any `await`, because a
+   * getter read between two of those would describe a file that is half gone.
+   *
+   * **`gone` is reused rather than a new notice added**, and what it says is
+   * weaker than what happened rather than stronger: *espansoConfig can no longer
+   * point at the snippet that was selected… nothing here searched this file for
+   * it*. Both clauses are true of a removed file, and a sentence claiming the file
+   * was deleted would be this window asserting something about a path from an
+   * observation that says the watcher stopped seeing it.
+   *
+   * **The sidebar filter is reset when it names this file.** The row it filters by
+   * is gone from the list, so nothing on screen could take the person back out of
+   * an empty scope; leaving it there is a filter that cannot be changed by
+   * clicking anything.
+   *
+   * **Any write surface over the file is left exactly as it is** (Q8): its
+   * registration stands, nothing is reloaded under it, and the file's
+   * {@link ExternalDocumentStatus} says `removed`. Nothing here *tells* the
+   * surface — `WriteSurfaceTransition` takes the narrowed `Changed`/`Projected`
+   * snapshot, so a removal cannot be delivered through it at all, and widening
+   * that protocol is 2d-5-5's.
+   *
+   * @param document - The file that is gone.
+   */
+  function removeDocumentFromWindow(document: DocumentId): void {
+    // First, because everything below reads or drops something minted from it.
+    invalidateProjectionOf(document);
+    views = views.filter((view) => view.id !== document);
+    documents = documents.filter((held) => held.id !== document);
+    // The row is gone, so its pending mark goes with it. Left behind it would be a
+    // statement about a row nothing draws, and an addition of the same path
+    // afterwards re-records it anyway.
+    pendingAdditions = pendingAdditions.filter((held) => held !== document);
+    loadFailures = loadFailures.filter((held) => held.document !== document);
+    if (selected !== null && selected.document === document) {
+      // Through `replaceSelection`, so the intent generation moves in the same
+      // synchronous block as the write — this state's standing invariant, which
+      // nothing in TypeScript enforces.
+      replaceSelection(null);
+      notice = 'gone';
+    }
+    if (selection.kind === 'document' && selection.id === document) {
+      selection = ALL_DOCUMENTS;
+    }
+    if (fileTextDocument === document) {
+      forgetFileText();
+    }
+  } // End of function removeDocumentFromWindow()
+
+  /**
+   * Records what this window can say about a file it did not reload.
+   *
+   * At most one entry per file: the previous one is dropped whether or not a new
+   * one replaces it, so `null` is how a clean reread says *there is nothing to
+   * report about this file any more*.
+   *
+   * @param document - The file.
+   * @param status - The code, or `null` to clear it.
+   */
+  function noteDocumentStatus(
+    document: DocumentId,
+    status: ExternalDocumentStatus | null
+  ): void {
+    const rest = externalStatuses.filter((entry) => entry.document !== document);
+    externalStatuses = status === null ? rest : [...rest, { document, status }];
+  } // End of function noteDocumentStatus()
+
+  /**
+   * Records what was observed of a path this window holds no identity for.
+   *
+   * **Keyed by the path and deduplicated by it**, latest wins. That is the whole
+   * bound on how much this can grow, and it is a bound on *paths* rather than on
+   * observations: a watcher flapping on one file records one entry, and a thousand
+   * unnamed paths record a thousand.
+   *
+   * @param drift - The path and what was observed of it.
+   */
+  function notePathDrift(drift: ExternalPathDrift): void {
+    const rest = pathDrift.filter((held) => held.relativePath !== drift.relativePath);
+    pathDrift = [...rest, drift];
+  } // End of function notePathDrift()
+
+  /**
+   * Reads one file again and installs it only while both guards hold.
+   *
+   * **The private guarded helper the consult's Q5 permits**
+   * (`docs/reviews/phase-2d-5-design.md:147-163`), and `BrowserState.rereadDocument`
+   * is now one call of it with a guard that always holds. Assigning an
+   * observation's own `disk` projection instead is what the consult forbids: the
+   * batch's projection is snapshot-exact and installing it directly would bypass
+   * `installView`'s invalidation and the selection discipline. The extra disk read
+   * is the accepted cost.
+   *
+   * **Three captures of its own, taken before the await**, exactly as this
+   * function has taken them since Phase 2c-3b step 2: the workspace generation,
+   * because a replaced workspace reallocates every document identity; a
+   * per-document re-read generation, so that of two overlapping reads of one file
+   * the newer wins whichever order the answers arrive in; and that document's
+   * projection generation, so a projection installed meanwhile by any other path is
+   * not overwritten. **Neither per-document counter can stand in for the workspace
+   * one, and they fail for opposite reasons** — `open()` clears
+   * `projectionGenerations`, so a file whose projection was never replaced compares
+   * equal across two workspaces, while `rereadGenerations` is deliberately
+   * monotonic and survives an `open()` untouched.
+   *
+   * **The caller's guard is asked between two readings of those same three, and
+   * that is not belt and braces.** A guard is caller-supplied code: the
+   * coordinator's asks the registry, computes an eligibility and — on the arm where
+   * a surface opened during the read — calls that surface's transition, which is a
+   * component's callback. `CLAUDE.md` names a check and a spend separated by any
+   * such read as this project's repeated defect class, so the three captures are
+   * compared again **after** the guard has run and immediately before the
+   * installation. The pre-guard reading is what stops a guard being consulted about
+   * a read that is already stale, which would let it clear a status or fire a
+   * transition for an answer nobody is going to install.
+   *
+   * **The answer is materialized before either of those two readings, and that is
+   * what makes the second one worth taking.** `commands` is injected, so
+   * `fresh.value` is a property read on caller-controlled data: a getter or a proxy
+   * trap behind it runs arbitrary code, and `readonly` does not freeze anything at
+   * runtime. Read after the final comparison — which is where it was until this
+   * step's review — such a getter could move the very generations that comparison
+   * had just approved, and the stale answer would be installed anyway. So the
+   * command's answer is copied into a plain own-property object **before** the
+   * pre-guard reading, and the local is what is installed.
+   *
+   * **Exactly what that guarantees, and what it does not.** Between the final
+   * `stillCurrent()` and `installView` there is now no read of `fresh` and no read
+   * of a property this module did not write: `installView` takes `next.id` off the
+   * copy, which is a data property of an object made here. It does **not** deep-copy
+   * — `next.matches` is still the command's own array, so `repairAfter`, which runs
+   * *after* the installation, reads elements this module did not build, and a getter
+   * on one of those could run there. What bounds that half is `replaceSelection`'s
+   * own discipline rather than this comparison, and no type expresses either.
+   *
+   * @param document - The file to read again.
+   * @param guard - Asked immediately before the installation; `false` installs
+   *   nothing and answers `null`.
+   * @returns The failure of the read, or `null` when it did not fail.
+   */
+  async function rereadUnderGuard(
+    document: DocumentId,
+    guard: () => boolean
+  ): Promise<IpcFailure | null> {
+    const opened = openGeneration;
+    const reread = nextRereadOf(document);
+    const projection = projectionGenerationOf(document);
+    /**
+     * Whether this read is still the one whose answer the window wants.
+     *
+     * @returns `true` while all three captures still hold.
+     */
+    const stillCurrent = (): boolean =>
+      opened === openGeneration &&
+      reread === rereadGenerations.get(document) &&
+      projection === projectionGenerationOf(document);
+    const fresh = await commands.reloadDocument(document);
+    if (!fresh.ok) {
+      // Answered and reported whether or not this read is still the wanted one: a
+      // failed read installs nothing, so there is no state to protect here, and
+      // the failure is a true statement about the attempt the caller made.
+      report(fresh.failure);
+      return fresh.failure;
+    }
+    // **Read once, here, and never again.** Every later use is of this local: the
+    // spread copies the answer's own enumerable properties into a plain object, so
+    // whatever a getter behind `value` does it does *now* — before both comparisons
+    // below — and the two of them are what catch it.
+    const next: DocumentView = { ...fresh.value };
+    if (!stillCurrent()) {
+      // Nothing is installed and nothing is forgotten. The caller is answered
+      // `null` because this read did not fail — what happened is that the window
+      // moved on, and it moved on by reading this file again or by dropping the
+      // workspace whole, so nobody is left holding the parse this answer would
+      // have replaced.
+      return null;
+    }
+    if (!guard()) {
+      return null;
+    }
+    if (!stillCurrent()) {
+      return null;
+    }
+    // The viewer's snapshot goes with the projection, for `installView`'s own
+    // reason one level down: a snapshot taken against the parse being replaced
+    // draws bytes from one revision beside a snippet list drawn from another.
+    forgetFileText();
+    installView(next);
+    repairAfter(next);
+    await readFileText();
+    return null;
+  } // End of function rereadUnderGuard()
+
+  /**
    * The file the raw viewer would show right now.
    *
    * A function rather than a copy of the same call at every use: the getter, the
@@ -2222,10 +2713,23 @@ export function createBrowserState(
    * the same answer, and the decision itself is `rawTarget`'s in
    * `./rawDocument.ts`.
    *
+   * **Pending-added rows are not candidates** — Phase 2d-5-4, ruling 28. The list
+   * handed to `rawTarget` is the addressable one, so a row an `Added` observation
+   * invented answers `null` here however it was selected, and `document_text` is
+   * never sent for an identity the open workspace refuses. Filtering the
+   * *candidates* rather than the answer is deliberate: `rawTarget` falls back from
+   * the sidebar to the selected snippet's file, and a filter applied to its answer
+   * would suppress that fallback instead of letting it run over the files that
+   * remain.
+   *
    * @returns The file, or `null` when nothing names one.
    */
   function fileTextTarget(): DocumentSummary | null {
-    return rawTarget(selection, documents, selected);
+    const addressable =
+      pendingAdditions.length === 0
+        ? documents
+        : documents.filter((held) => !pendingAdditions.includes(held.id));
+    return rawTarget(selection, addressable, selected);
   } // End of function fileTextTarget()
 
   /**
@@ -2566,7 +3070,12 @@ export function createBrowserState(
       // here and `ready` would drain *that* lifecycle — and every generation
       // capture in the pump would pass, because the bump above has already
       // happened. Those reasons are recorded and issued by `workspaceReady()`.
-      reconciliation.workspaceOpened();
+      //
+      // **The request is handed over rather than the summary's root** — Phase
+      // 2d-5-4, ruling 11. `summary.root` is a lossy rendering of a path and is not
+      // round-trippable as a command argument, so the discarded-history recovery
+      // re-runs *this argument*, whatever it was, including `null`.
+      reconciliation.workspaceOpened(root);
       // A selection into the workspace being replaced can never be applied to
       // the one replacing it, so every pending `select()` is invalidated here —
       // globally, which is right because *every* projection is about to go.
@@ -2593,6 +3102,21 @@ export function createBrowserState(
       query = '';
       selected = null;
       notice = null;
+      // **What the watcher told this window about the workspace being closed goes
+      // too** — Phase 2d-5-4. A status is keyed by a `DocumentId` this load is
+      // about to reallocate, and a path drift is a statement about which files
+      // *that* workspace held; carrying either would describe the new workspace
+      // with the old one's observations.
+      externalStatuses = [];
+      pathDrift = [];
+      // **And the pending marks, because this load is what ends them.** A row is
+      // pending exactly while the open workspace does not resolve its identity;
+      // `list_documents` below is what decides which identities it resolves, so a
+      // mark carried across would say *unaddressable* about a file this workspace
+      // really does hold. Cleared with `documents` rather than after the listing
+      // for the reason every early return has: a refused open leaves no rows, and
+      // a mark about a row that no longer exists is not a mark about anything.
+      pendingAdditions = [];
       // The viewer closes with the workspace: it is showing one file's text,
       // and every identity in the workspace being replaced is about to be
       // reallocated. `forgetFileText` also invalidates the read in flight,
@@ -2796,58 +3320,15 @@ export function createBrowserState(
       await readFileText();
     }, // End of function showFileText()
 
-    async rereadDocument(document: DocumentId): Promise<IpcFailure | null> {
-      // **Three captures, taken before the await, exactly as every other
-      // asynchronous path in this module takes its own.** The first review of step
-      // 2 found this call awaiting with none of them, which is how an older read
-      // installs a projection over newer state:
-      //
-      // - `openGeneration`, because a workspace that has been replaced reallocates
-      //   every document identity, and a projection from the closed one installed
-      //   into the open one describes a file this state is not showing.
-      //   **Neither per-document counter can stand in for it, and they fail for
-      //   opposite reasons**: `open()` *clears* `projectionGenerations`, so a file
-      //   whose projection had never been replaced compares equal across the two
-      //   workspaces; while `rereadGenerations` is deliberately monotonic and
-      //   `open()` leaves it alone (its own comment at its declaration says so),
-      //   so it goes on counting through a replacement and never encodes which
-      //   workspace a read belonged to. Only `openGeneration` separates them;
-      // - the re-read generation, so that of two overlapping reads of this file the
-      //   **newer** one wins whichever order the answers arrive in;
-      // - the projection generation, so that a projection installed by any other
-      //   path meanwhile — an adoption after a save, a repair inside `select()` —
-      //   is not overwritten by a read that started before it.
-      const opened = openGeneration;
-      const reread = nextRereadOf(document);
-      const projection = projectionGenerationOf(document);
-      const fresh = await commands.reloadDocument(document);
-      if (!fresh.ok) {
-        // Answered and reported whether or not this read is still the wanted one: a
-        // failed read installs nothing, so there is no state to protect here, and
-        // the failure is a true statement about the attempt the caller made.
-        report(fresh.failure);
-        return fresh.failure;
-      }
-      if (
-        opened !== openGeneration ||
-        reread !== rereadGenerations.get(document) ||
-        projection !== projectionGenerationOf(document)
-      ) {
-        // Nothing is installed and nothing is forgotten. The caller is answered
-        // `null` because this read did not fail — what happened is that the window
-        // moved on, and it moved on by reading this file again or by dropping the
-        // workspace whole, so nobody is left holding the parse this answer would
-        // have replaced.
-        return null;
-      }
-      // The viewer's snapshot goes with the projection, for `installView`'s own
-      // reason one level down: a snapshot taken against the parse being replaced
-      // draws bytes from one revision beside a snippet list drawn from another.
-      forgetFileText();
-      installView(fresh.value);
-      repairAfter(fresh.value);
-      await readFileText();
-      return null;
+    rereadDocument(document: DocumentId): Promise<IpcFailure | null> {
+      // **The whole body moved to `rereadUnderGuard` at Phase 2d-5-4**, which is
+      // the private guarded helper the design consult's Q5 permits, and this is now
+      // one call of it with a guard that always holds. The three captures, their
+      // comparison and the install-forget-repair-reread order are unchanged and are
+      // documented there; what a person's own recovery does **not** have is a
+      // coordinator guard, because nothing has to arbitrate a read somebody asked
+      // for against an observation nobody has seen.
+      return rereadUnderGuard(document, ALWAYS_PERMITTED);
     }, // End of function rereadDocument()
 
     async moveMatch(
@@ -3550,10 +4031,12 @@ export function createBrowserState(
       // make this door *under-report* if a later method of this state ever moved
       // the registry without calling `noticeWriteSurfaces()`: it would answer
       // "nothing changed" while `openWriteSurfaces()`, which reads the registry,
-      // answered the new set in the same block — and the Q5 guard 2d-5-4 captures
-      // across an await is precisely the caller that would believe it. Reading the
-      // registry cannot fail *that* way: this door's answer is never behind the
-      // registry, whoever asks.
+      // answered the new set in the same block. Reading the registry cannot fail
+      // *that* way: this door's answer is never behind the registry, whoever asks.
+      // **The Q5 guard this sentence used to name as that caller is not one**: the
+      // guard Phase 2d-5-4 shipped captures `writeSurfaces.generation()` through
+      // `ReconciliationHost`, not through this door, so the argument above stands
+      // on its own merits and on no consumer this repository holds.
       //
       // **What such a path would still cost depends on who is asking, and Phase
       // 2d-5-2b-B's finding 2 is that the old sentence here named only half of
@@ -3575,7 +4058,31 @@ export function createBrowserState(
       // item 9 of this step's "where it is thin", not a claim made here.
       void surfaceGeneration;
       return writeSurfaces.generation();
-    } // End of function writeSurfaceGeneration()
+    }, // End of function writeSurfaceGeneration()
+
+    externalDocumentStatus(document: DocumentId): ExternalDocumentStatus | null {
+      // Reading the `$state` array is the dependency, exactly as
+      // `openWriteSurfaces()` reads its mirror: a `$derived` that asks this
+      // re-runs when a status is recorded or cleared.
+      return externalStatuses.find((entry) => entry.document === document)?.status ?? null;
+    }, // End of function externalDocumentStatus()
+
+    externalPathDrift(): readonly ExternalPathDrift[] {
+      return pathDrift;
+    },
+
+    reconciliationBlock(): ReconciliationBlock {
+      // **Straight through, and deliberately not mirrored into a signal.** Nothing
+      // draws it at this step, and a mirror added before there is a consumer would
+      // be a second copy of the coordinator's answer that this file would have to
+      // keep in step. 2d-6 is where a window derives from it, and mirroring is that
+      // step's decision to take the way `surfaceGeneration` was taken.
+      return reconciliation.block();
+    }, // End of function reconciliationBlock()
+
+    membershipReloadWanted(): boolean {
+      return reconciliation.membershipReloadWanted();
+    }
   };
 
   return state;

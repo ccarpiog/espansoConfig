@@ -4254,3 +4254,59 @@ from `1320 / 436 / 2205 / 185` at 2d-5-1-B up to this one, is in
 [`phase-2d.md`](docs/progress-archive/phase-2d.md)** under the 2d-5-3-M archive heading and the closed
 rounds' accounts beside it — archived rather than restated, because each rung was true of the tree that
 committed it and the live rung is the only one a later phase checks against.
+
+
+---
+
+## Phase 2d-5-3-N's verification narrative and the ladder narrative — archived 2026-09-20 at Phase 2d-5-4
+
+Both are moved verbatim from `PROGRESS.md`, unedited. The figures in them are `1320 / 441 / 2307 /
+188`, which was **true of the tree 2d-5-3-N committed** and is superseded by the rung 2d-5-4
+measured. The live rung is in `PROGRESS.md` and nowhere else.
+
+### ⚠️ Two baselines are live at once, and only one of them is a measurement
+
+**With the instrument in the working tree the four commands answer `1320 / 441 / 2307 / 188`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-3-N twice — on the tree as inherited and again after the fix, both
+green** — and at every phase from 2d-5-3-A to 2d-5-3-M before it. **Twenty-five complete full runs
+across fourteen phases, returning the same four figures every time**: 2d-5-3-M's recorded
+*twenty-three across thirteen* plus this round's two.
+
+`cargo test --workspace -- --test-threads=1` was read **not through a pipe**, summed over **26**
+`test result` lines *and* checked by the complementary question — no line lacking `0 failed` — on both
+runs. `cargo clippy --workspace --all-targets -- -D warnings` (exit 0, read from a file),
+`cargo fmt --check` (exit 0) and `cargo tree -p espansoconfig-core | rg tauri` (finds nothing) are
+clean. `npm test` reports **60 files**. **Both bundle oracles were read and both lines are reported**:
+server-only markers **absent**, client-only markers **present (2)**. **The instrument's pin was
+re-checked before the review and after the fix** and held at `5 insertions(+), 1 deletion(-)`.
+
+**Nothing moved at 2d-5-3-N, and the reason is stronger than a comment-only diff: this round changed
+no source file at all.** `git status --short` after its fix names `PROGRESS.md`, files under `docs/`
+and nothing else — every one on `CLAUDE.md` §7's closed list, and none of them read by `svelte-check`,
+by `vitest` or by the Vite build. **The second reading was taken anyway**, because the convention is
+two readings and a reading not taken is not a figure. All three consequences of the `watch_check` scar
+were followed — serial form, redirected to a file, the complementary question — and each run was
+sequential end to end.
+
+**2d-5-3-L's stale-`target/` host finding did not recur**, for the second consecutive round: the
+inherited-tree run completed on the first attempt, so the `cargo clean` cure is holding. The reviewer
+was again told to run **no build, test or package command of any kind**.
+
+**No gate reads prose.** Both of this round's findings were invisible to all four, and one of them —
+a sentence disproved by its own next clause — had survived the round that wrote it and a reviewer.
+
+
+### The ladder's live rung
+
+**`1320 / 441 / 2307 / 188`**, at 2d-5-3-N and at every phase from 2d-5-3-A to 2d-5-3-M — **the same
+rung measured twenty-five times across fourteen phases**. **The instrument landed at 2d-5-2c-1**,
+whose rung was `1320 / 439 / 2255 / 187`, so every rung at or after it is a *with-instrument* figure
+and every rung before it is not; the two groups may not be compared without subtracting the
+instrument's known contribution. **The full per-rung list, from `1320 / 436 / 2205 / 185` at 2d-5-1-B,
+is in [`phase-2d.md`](docs/progress-archive/phase-2d.md)** — archived rather than restated, because
+each rung was true of the tree that committed it and the live rung is the only one a later phase
+checks against. **A rung that repeats proves the gates were run, never that they could catch what
+these rounds kept finding.**
+
+

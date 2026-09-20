@@ -1,0 +1,1137 @@
+/**
+ * What one admitted external observation does to this window — Phase 2d-5-4.
+ *
+ * ## What it is
+ *
+ * The design consult's Q8 as a value: the **routing boundary** that narrows one
+ * {@link ExternalObservation} into this module's own vocabulary
+ * (`docs/reviews/phase-2d-5-design.md:246-256`), the **per-document accepted
+ * sequences** its Q2 names as the arbitration key, and the application of each
+ * arm to a {@link ReconciliationWorkspace}. `./reconciliationCoordinator.ts`
+ * decides *when* to drain and what a batch does to the session cursor; this
+ * module decides what one observation inside an accepted batch does to the
+ * documents, the projections and the selection.
+ *
+ * ## Where it lives, and why it is not in `./reconciliationCoordinator.ts`
+ *
+ * `docs/decisions/2d-5-split-notes.md` section 6 item 2 leaves *where the
+ * coordinator lives* to the steps, and this step follows the precedent 2d-5-2a
+ * set with `./writeSurfaceRegistry.ts` and 2d-5-3 set with
+ * `./reconciliationCoordinator.ts`: a **plain TypeScript** module — no runes,
+ * hence `.ts` — beside `./workspace.svelte.ts` rather than more lines inside it.
+ * `./workspace.svelte.ts` was 4 083 lines when this step began and
+ * `./reconciliationCoordinator.ts` 1 227; the routing table, the sequence map and
+ * the eleven arms below are a subject of their own, and a module with no runes in
+ * it is drivable by a model test with nothing mounted.
+ *
+ * ## The two sequence states are deliberately two
+ *
+ * {@link AcceptedSequences} is **not** the session cursor. Ruling 6 keeps them
+ * apart because they answer different questions — the cursor's watermark is the
+ * drain acknowledgement, and this map is what makes an *older* observation inert
+ * even when the watermark has advanced past it — and it says in as many words
+ * that treating a disagreement between the two numbers as a bug would be the
+ * design error. **Nothing in the types says they should agree, and nothing
+ * enforces that a transition consults the right one.**
+ *
+ * ## What it cannot force
+ *
+ * - **Nothing here stops a caller passing a `Named` identity to a command.**
+ *   {@link routeObservation} narrows the three {@link ObservedDocument} arms into
+ *   three different route arms and never produces *the identity, where there is
+ *   one* — ruling 29's forbidden accessor — but a consumer that has narrowed to
+ *   {@link ObservationRoute}'s `namedRow` arm still holds a `DocumentId`, and only
+ *   the negative command-spy tests in `./workspace.test.ts` establish that no
+ *   open-workspace document command is reached from it. That is ruling 28 read
+ *   exactly: the `never` terminus forces a future fourth arm to be handled and
+ *   cannot force the narrowed branch not to call a command.
+ * - **Nothing here forces a {@link ReconciliationWorkspace} to be the one that
+ *   owns the window.** Every member is a function this module calls and none of
+ *   them answers whether it did anything; a host whose `removeDocument` does
+ *   nothing produces the same outcome value as one that removes the file.
+ * - **No user-facing string is produced here and none is owed yet.**
+ *   {@link ExternalDocumentStatus} and {@link ExternalPathDrift} are codes, and
+ *   `docs/decisions/2d-5-split-notes.md` section 6 item 6 puts the EN/ES entries
+ *   and the `src/lib/i18n/codes.ts` accessor on the step that first names such a
+ *   state *to a person* — 2d-6, which draws them. Nothing on a screen reads either
+ *   type today.
+ */
+
+import type {
+  AddedContent,
+  ChangedContent,
+  ContentRevision,
+  DocumentId,
+  DocumentSummary,
+  ExternalObservation,
+  UnreadableReason
+} from '../ipc/types';
+import type { ExternalConflictObservation } from './conflictSource';
+import {
+  targetingSurfaceFor,
+  type CreatorEligibility,
+  type OpenWriteSurface,
+  type OpenWriteSurfaceKind
+} from './restore';
+import type { WriteSurfaceTransition } from './writeSurfaceRegistry';
+
+/**
+ * What kind of external event one observation reported, without its operands.
+ *
+ * **Three members, not four**: `Added` never reaches this type, because it is the
+ * one observation with no {@link ObservedDocument} arm and therefore no arm of
+ * {@link ObservationRoute} that needs a detail beside an identity it does not
+ * have.
+ *
+ * The `unreadable` arm carries its reason so that no consumer has to hold a
+ * nullable one beside a discriminant that already decides whether there is a
+ * reason at all.
+ */
+export type ObservationDetail =
+  | {
+      /** The file's bytes changed. */
+      readonly kind: 'changed';
+    }
+  | {
+      /** The file is gone. */
+      readonly kind: 'removed';
+    }
+  | {
+      /** The file is there and this application cannot read it. */
+      readonly kind: 'unreadable';
+      /** Why, exactly as the engine reported it. */
+      readonly reason: UnreadableReason;
+    };
+
+/**
+ * What this window can truthfully say about a file it did **not** reload.
+ *
+ * **A code, never a sentence** (`CLAUDE.md` section 2), and nothing renders one
+ * today. 2d-6 draws these and owes their dictionary keys; naming one on a screen
+ * before then would be this step claiming a state it has no words for.
+ *
+ * Every arm is a statement about *this window's knowledge*, never about the file:
+ * `stale` says this window did not install what the watcher saw, `unavailable`
+ * says the engine could not read the bytes, and `removed` says the file this
+ * window held is gone. None of them says a write surface over that file has been
+ * edited — `isDirty` is derived inside each surface's own session and no
+ * coordinator can observe it (R36).
+ */
+export type ExternalDocumentStatus =
+  | {
+      /**
+       * The file changed on disk and this window is still showing the older
+       * projection.
+       *
+       * Either because a write surface that may be about it is open — the
+       * conservative sentence of ruling 19 — or because the guard refused an
+       * installation after the read. **It does not say which**, and a consumer that
+       * needs to know asks the registry rather than this value.
+       */
+      readonly kind: 'stale';
+    }
+  | {
+      /** The engine reported the bytes unreadable. */
+      readonly kind: 'unavailable';
+      /** Why, exactly as it reported it. */
+      readonly reason: UnreadableReason;
+    }
+  | {
+      /**
+       * The file was removed, and this window has dropped everything derived
+       * from it.
+       *
+       * **Kept after the row is gone on purpose**: a write surface over that file
+       * is preserved rather than closed (Q8), so the state that describes its
+       * target has to outlive the row. Nothing here tells the surface — see
+       * {@link ReconciliationWorkspace.transitionFor}.
+       */
+      readonly kind: 'removed';
+    };
+
+/**
+ * One path this window holds no identity for, and what was observed of it.
+ *
+ * The `Unnamed` arm's whole product. **No identity is invented** (Q8), so this
+ * value carries the lossy display path and nothing that could be passed to a
+ * command — `src/lib/ipc/types.ts` says a wire path is never round-trippable as a
+ * command argument, which is the same reason ruling 11 refuses `summary.root`.
+ */
+export interface ExternalPathDrift {
+  /** The path, for display. Lossy — see `DocumentView.path`. */
+  readonly relativePath: string;
+  /** What was observed of it. */
+  readonly detail: ObservationDetail;
+}
+
+/**
+ * The highest observation sequence each document has accepted a transition for.
+ *
+ * **The arbitration key of the consult's Q2**, and deliberately a *second*
+ * sequence state beside the session cursor: the cursor says what the next drain
+ * asks with, and this says which observation of one file is the newest one this
+ * window has acted on. The two may legitimately hold different numbers (ruling 6).
+ *
+ * **Keyed by `DocumentId` across the `Addressable` and `Named` arms both**, and
+ * that is a decision rather than an accident: this process mints one identity per
+ * path, so the same file observed while the open workspace resolves it and after
+ * it stops resolving it is one key. What the map cannot do is arbitrate an
+ * `Unnamed` observation, which carries no identity at all — those are appended to
+ * {@link ExternalPathDrift} with no ordering of any kind.
+ */
+export interface AcceptedSequences {
+  /**
+   * Records this observation as the newest for one file, if it is.
+   *
+   * **The check and the record are one call, deliberately.** `CLAUDE.md` names a
+   * check and a spend separated by any property read as this project's repeated
+   * defect: a property read runs arbitrary code through a getter or a proxy trap,
+   * so `if (sequence > sequenceFor(d)) { … }` followed by a write is not atomic in
+   * a way any type expresses. Answering the question *and* moving the number in
+   * one call removes the window.
+   *
+   * **Strictly greater, never greater-or-equal.** Two observations of one file
+   * admitted under one sequence would be one observation delivered twice, and
+   * applying the second is what makes a transition run against state the first
+   * already moved.
+   *
+   * @param document - The file.
+   * @param sequence - The sequence the observation was admitted under.
+   * @returns `true` when this is the newest and the map now says so.
+   */
+  admit(document: DocumentId, sequence: number): boolean;
+  /**
+   * Whether one already-admitted observation is still the newest for its file.
+   *
+   * The recheck half of ruling 18's guard, asked after an await. **It reads and
+   * changes nothing**, so a caller that asks it twice gets the same answer for the
+   * same state — which is what lets it sit inside a guard that may be called more
+   * than once.
+   *
+   * @param document - The file.
+   * @param sequence - The sequence captured before the await.
+   * @returns `true` while nothing newer for that file has been admitted.
+   */
+  isNewest(document: DocumentId, sequence: number): boolean;
+  /**
+   * The highest sequence admitted for one file.
+   *
+   * @param document - The file.
+   * @returns The sequence, or zero for a file nothing has been admitted for.
+   */
+  sequenceFor(document: DocumentId): number;
+  /**
+   * Forgets every file's sequence.
+   *
+   * Called at the entry of every `open()`, which is the consult's Q2 step 1: the
+   * identities of the documents a workspace holds are reallocated by the load that
+   * replaces it, so an entry kept across one would be a sequence for a different
+   * file.
+   */
+  clear(): void;
+} // End of interface AcceptedSequences
+
+/**
+ * Builds an empty accepted-sequence map.
+ *
+ * A plain `Map`, not `$state`: nothing renders it, and a coordinator reads it
+ * immediately before it decides something.
+ *
+ * @returns The map, holding nothing.
+ */
+export function createAcceptedSequences(): AcceptedSequences {
+  const highest = new Map<DocumentId, number>();
+  return {
+    admit(document: DocumentId, sequence: number): boolean {
+      const held = highest.get(document) ?? 0;
+      if (sequence <= held) {
+        return false;
+      }
+      highest.set(document, sequence);
+      return true;
+    }, // End of function admit()
+
+    isNewest(document: DocumentId, sequence: number): boolean {
+      return (highest.get(document) ?? 0) === sequence;
+    },
+
+    sequenceFor(document: DocumentId): number {
+      return highest.get(document) ?? 0;
+    },
+
+    clear(): void {
+      highest.clear();
+    }
+  };
+} // End of function createAcceptedSequences()
+
+/**
+ * One observation, narrowed into the arm this window acts on.
+ *
+ * **Six arms over the thirteen cells of the consult's Q8 table.** Three of them
+ * carry an identity the **open workspace resolves** and are the only three a
+ * document command may be reached from; one is the addition, which has no
+ * `ObservedDocument` arm at all; and two are the `Named` and `Unnamed` arms, which
+ * produce state-only transitions and notices (ruling 28).
+ *
+ * **The `Named` arm's identity is called `namedDocument` on purpose.** It is a
+ * `DocumentId` and it is **not an address** — `document_context` refuses it, which
+ * is the whole difference between the two numbered arms — so it is not spelled
+ * `document` anywhere a reader could mistake the two while skimming. Nothing in
+ * TypeScript enforces that reading; the name is a convention and the tests are the
+ * check.
+ */
+export type ObservationRoute =
+  | {
+      /** The file's bytes changed, and the open workspace resolves it. */
+      readonly kind: 'changed';
+      /** The sequence it was admitted under. */
+      readonly sequence: number;
+      /** The file, as the open workspace resolves it. */
+      readonly document: DocumentId;
+      /** The last stable revision the engine held, or `null`. */
+      readonly previousRevision: ContentRevision | null;
+      /** The revision of the exact bytes now on disk. */
+      readonly diskRevision: ContentRevision;
+      /** The projection of those bytes, or why there is none. */
+      readonly content: ChangedContent;
+    }
+  | {
+      /** The file is gone, and the open workspace resolved it. */
+      readonly kind: 'removedDocument';
+      /** The sequence it was admitted under. */
+      readonly sequence: number;
+      /** The file, as the open workspace resolves it. */
+      readonly document: DocumentId;
+    }
+  | {
+      /** The file is unreadable, and the open workspace resolves it. */
+      readonly kind: 'unreadableDocument';
+      /** The sequence it was admitted under. */
+      readonly sequence: number;
+      /** The file, as the open workspace resolves it. */
+      readonly document: DocumentId;
+      /** Why the text is not available. */
+      readonly reason: UnreadableReason;
+    }
+  | {
+      /** A file this workspace did not hold has appeared. */
+      readonly kind: 'added';
+      /** The sequence it was admitted under. */
+      readonly sequence: number;
+      /** The row a sidebar draws. Its identity is **not** an address. */
+      readonly summary: DocumentSummary;
+      /** The projection of the stabilized bytes, or why there is none. */
+      readonly content: AddedContent;
+    }
+  | {
+      /**
+       * This process minted an identity for the path and the open workspace does
+       * **not** hold it.
+       */
+      readonly kind: 'namedRow';
+      /** The sequence it was admitted under. */
+      readonly sequence: number;
+      /** The identity, which no open-workspace command accepts. */
+      readonly namedDocument: DocumentId;
+      /** What was observed. */
+      readonly detail: ObservationDetail;
+    }
+  | {
+      /** No identity for the path has ever been minted anywhere. */
+      readonly kind: 'unnamedPath';
+      /** The sequence it was admitted under. */
+      readonly sequence: number;
+      /** The path, for display. Lossy, and never an address. */
+      readonly relativePath: string;
+      /** What was observed. */
+      readonly detail: ObservationDetail;
+    };
+
+/**
+ * Narrows one observation into the arm this window acts on.
+ *
+ * **The routing boundary, and the `never` terminus is the point.** A fifth
+ * {@link ExternalObservation} arm added in Rust, or a fourth
+ * {@link ObservedDocument} arm, becomes a compile error here — in the one function
+ * that decides which transition runs. What it cannot do is stop a consumer of the
+ * answer treating `namedRow` as addressable; ruling 28 says so and the negative
+ * command-spy tests are what establish it.
+ *
+ * **The three-arm narrowing is written out three times rather than extracted.**
+ * Ruling 29 forbids a common identity helper: one would answer *the identity,
+ * where there is one*, which collapses `Addressable` and `Named` into one answer
+ * with a `?` and destroys the only thing that value carries. Three exhaustive
+ * switches that each keep the arm in their own answer is what the repetition buys,
+ * and the consult asks for exactly that shape.
+ *
+ * @param observation - One observation, exactly as it crossed the boundary.
+ * @returns The arm, with only the operands that arm has.
+ */
+export function routeObservation(observation: ExternalObservation): ObservationRoute {
+  if ('Changed' in observation) {
+    const changed = observation.Changed;
+    const document = changed.document;
+    if ('Addressable' in document) {
+      return {
+        kind: 'changed',
+        sequence: changed.sequence,
+        document: document.Addressable.document,
+        previousRevision: changed.previous_revision,
+        diskRevision: changed.disk_revision,
+        content: changed.content
+      };
+    }
+    if ('Named' in document) {
+      return {
+        kind: 'namedRow',
+        sequence: changed.sequence,
+        namedDocument: document.Named.document,
+        detail: { kind: 'changed' }
+      };
+    }
+    if ('Unnamed' in document) {
+      return {
+        kind: 'unnamedPath',
+        sequence: changed.sequence,
+        relativePath: document.Unnamed.relative_path,
+        detail: { kind: 'changed' }
+      };
+    }
+    const unreachableDocument: never = document;
+    return unreachableDocument;
+  }
+  if ('Added' in observation) {
+    // **No `ObservedDocument` arm at all** (ruling 30): an addition's identity is
+    // by definition not an address the open workspace resolves, so there is
+    // nothing here to narrow and nothing to decide.
+    return {
+      kind: 'added',
+      sequence: observation.Added.sequence,
+      summary: observation.Added.document_summary,
+      content: observation.Added.content
+    };
+  }
+  if ('Removed' in observation) {
+    const removed = observation.Removed;
+    const document = removed.document;
+    if ('Addressable' in document) {
+      return {
+        kind: 'removedDocument',
+        sequence: removed.sequence,
+        document: document.Addressable.document
+      };
+    }
+    if ('Named' in document) {
+      return {
+        kind: 'namedRow',
+        sequence: removed.sequence,
+        namedDocument: document.Named.document,
+        detail: { kind: 'removed' }
+      };
+    }
+    if ('Unnamed' in document) {
+      return {
+        kind: 'unnamedPath',
+        sequence: removed.sequence,
+        relativePath: document.Unnamed.relative_path,
+        detail: { kind: 'removed' }
+      };
+    }
+    const unreachableDocument: never = document;
+    return unreachableDocument;
+  }
+  if ('Unreadable' in observation) {
+    const unreadable = observation.Unreadable;
+    const document = unreadable.document;
+    if ('Addressable' in document) {
+      return {
+        kind: 'unreadableDocument',
+        sequence: unreadable.sequence,
+        document: document.Addressable.document,
+        reason: unreadable.reason
+      };
+    }
+    if ('Named' in document) {
+      return {
+        kind: 'namedRow',
+        sequence: unreadable.sequence,
+        namedDocument: document.Named.document,
+        detail: { kind: 'unreadable', reason: unreadable.reason }
+      };
+    }
+    if ('Unnamed' in document) {
+      return {
+        kind: 'unnamedPath',
+        sequence: unreadable.sequence,
+        relativePath: document.Unnamed.relative_path,
+        detail: { kind: 'unreadable', reason: unreadable.reason }
+      };
+    }
+    const unreachableDocument: never = document;
+    return unreachableDocument;
+  }
+  const unreachable: never = observation;
+  return unreachable;
+} // End of function routeObservation()
+
+/**
+ * The narrowed `Changed`/`Addressable`/`Projected` snapshot a write surface is
+ * told about, or `null`.
+ *
+ * **The only producer of an {@link ExternalConflictObservation} in this
+ * repository**, and it is deliberately narrow: `./conflictSource.ts` declares the
+ * value as the already-narrowed snapshot carrying its own sequence, revision, disk
+ * text, projection and correspondence table, and every one of those operands
+ * exists only on that one combination of arms.
+ *
+ * **It copies nothing and pairs nothing.** The five operands come out of one wire
+ * snapshot; this function reassembles them under this window's own names and
+ * cannot check that they belong together — that is a fact about the Rust that
+ * built them, which `src/lib/ipc/types.ts` says TypeScript does not express.
+ *
+ * @param route - A route, of any arm.
+ * @returns The snapshot, or `null` when this route is not that combination.
+ */
+export function externalConflictObservationOf(
+  route: ObservationRoute
+): ExternalConflictObservation | null {
+  if (route.kind !== 'changed') {
+    return null;
+  }
+  const content = route.content;
+  if (!('Projected' in content)) {
+    return null;
+  }
+  const projected = content.Projected;
+  return {
+    sequence: route.sequence,
+    document: route.document,
+    previousRevision: route.previousRevision,
+    diskRevision: route.diskRevision,
+    diskText: projected.disk_text,
+    disk: projected.disk,
+    findings: projected.findings,
+    correspondences: projected.correspondences
+  };
+} // End of function externalConflictObservationOf()
+
+/**
+ * Everything an observation needs from the window that owns it.
+ *
+ * **Eleven members, and none of them answers whether it did anything.** That is
+ * the honest shape rather than a convenience: this module decides, the host acts,
+ * and the outcome value below records what was decided. A host whose
+ * `removeDocument` is a no-op produces the identical outcome to one that removes
+ * the file, so the workspace tests assert the *window*, never this value alone.
+ *
+ * **No member of this interface writes a file, and there is deliberately no
+ * member that could.** Ruling 27 forbids watcher arbitration initiating any save
+ * command, and the narrowest way to say so is to hand this module a surface with
+ * no writing command on it at all — the same argument `ReconciliationHost` makes
+ * for taking a `drain` rather than the whole `BrowserCommands`.
+ */
+export interface ReconciliationWorkspace {
+  /**
+   * Every write surface this window has open.
+   *
+   * @returns The live set, in the registry's own order.
+   */
+  openWriteSurfaces(): readonly OpenWriteSurface[];
+  /**
+   * How many times that live set has changed.
+   *
+   * Ruling 18's registry capture. **An unmoved generation means no registry
+   * operation happened between the capture and the recheck**; it does not say the
+   * set is the same, and it does not say a surface still names the file it named.
+   *
+   * @returns The generation.
+   */
+  writeSurfaceGeneration(): number;
+  /**
+   * Whether the new-snippet form would offer one file as a destination.
+   *
+   * `creatorEligibilityOf` in `./restore.ts` is what answers it honestly; this
+   * member exists because the answer needs the window's own summary and
+   * projection, which this module does not hold.
+   *
+   * @param document - The file.
+   * @returns Whether an unknown-target creator may be about it.
+   */
+  creatorEligibility(document: DocumentId): CreatorEligibility;
+  /**
+   * The transition of the live surface of one kind, or `null`.
+   *
+   * **It is the only way an observation reaches a component**, and what a surface
+   * does with one is that surface's business — `WriteSurfaceTransition` answers
+   * `void`, so nothing here learns whether a conflict was raised. Today every
+   * registered transition is a no-op, which 2d-5-5 changes.
+   *
+   * @param kind - Which kind of surface.
+   * @returns Its transition, or `null` when no surface of that kind is live.
+   */
+  transitionFor(kind: OpenWriteSurfaceKind): WriteSurfaceTransition | null;
+  /**
+   * Whether this window holds a row for one identity.
+   *
+   * The *locally pending row* the consult's Q8 names in its `Named` column: the
+   * only way this window can hold a row the open workspace does not resolve is
+   * that an earlier `Added` inserted one.
+   *
+   * @param document - The identity.
+   * @returns Whether a row with it exists.
+   */
+  holdsDocument(document: DocumentId): boolean;
+  /**
+   * Reads one file again and installs it **only while the guard holds**.
+   *
+   * Ruling 17: the clean path delegates to the existing reread machinery rather
+   * than installing the batch's own projection, because the batch's projection is
+   * snapshot-exact and installing it directly would bypass `installView`'s
+   * invalidation and the selection discipline. The extra disk read is the accepted
+   * cost.
+   *
+   * **The guard is checked immediately before the installation and in the same
+   * synchronous block as it** (ruling 18), and the host owns that ordering —
+   * nothing in this type expresses it.
+   *
+   * **It answers nothing, and that is not a discarded result.** The read is
+   * asynchronous and the decision this module made is already complete; a promise
+   * answered here would be one every caller would have to ignore, which is the
+   * shape this project has shipped as a defect. What the read did is observable on
+   * the window.
+   *
+   * @param document - The file to read again.
+   * @param guard - Asked immediately before the installation; `false` installs
+   *   nothing.
+   */
+  rereadUnderGuard(document: DocumentId, guard: () => boolean): void;
+  /**
+   * Inserts or replaces one sidebar row by identity.
+   *
+   * Ruling 30. The caller has already forced `loaded: false`; this member does not
+   * check it.
+   *
+   * @param summary - The row.
+   */
+  addDocument(summary: DocumentSummary): void;
+  /**
+   * Drops one file and everything this window derived from it.
+   *
+   * Ruling 31's synchronous transition. **Not `repairAfter`**, which repairs only
+   * against a supplied projection and a removed file has none.
+   *
+   * @param document - The file that is gone.
+   */
+  removeDocument(document: DocumentId): void;
+  /**
+   * Records what this window can say about a file it did not reload.
+   *
+   * @param document - The file.
+   * @param status - The code, or `null` to say there is nothing to report.
+   */
+  noteDocumentStatus(document: DocumentId, status: ExternalDocumentStatus | null): void;
+  /**
+   * Records what was observed of a path this window holds no identity for.
+   *
+   * @param drift - The path and what was observed of it.
+   */
+  notePathDrift(drift: ExternalPathDrift): void;
+  /**
+   * Re-runs the retained original open request.
+   *
+   * Ruling 11: **the retained request, never `summary.root`**, which is a lossy
+   * rendering and is not round-trippable as a command argument. Only the
+   * discarded-history recovery calls it, and only with no write surface open.
+   *
+   * @param request - Exactly what the original `open()` was called with.
+   */
+  reopenWorkspace(request: string | null): void;
+} // End of interface ReconciliationWorkspace
+
+/**
+ * What the coordinator lends one observation for the length of its transition.
+ *
+ * Three of the four members are about the session itself, which lives in
+ * `./reconciliationCoordinator.ts` and is not this module's to hold; the fourth is
+ * where a membership-reload request goes.
+ */
+export interface ObservationSession {
+  /** The epoch the batch carrying this observation was accepted under. */
+  readonly epoch: number;
+  /**
+   * The epoch the coordinator is showing **now**, read at the moment of asking.
+   *
+   * A function rather than a number because ruling 18's guard asks it *after* an
+   * await: an `open()` that landed meanwhile has cleared the adopted epoch, and a
+   * stored number could not see that.
+   *
+   * @returns The adopted epoch, or zero when none is adopted.
+   */
+  epochNow(): number;
+  /**
+   * Whether the coordinator is **still applying observations at all**.
+   *
+   * **The question the other three could not ask, and the reason it exists.** The
+   * epoch, the accepted sequence, the registry generation and the host's own three
+   * captures all compare one number taken before an await with the same number
+   * after it — so every one of them is unmoved by a coordinator that has *stopped*
+   * without replacing the workspace. Two such states exist and both are reachable
+   * while a clean reread is in flight:
+   *
+   * - **A hole in the observation history that could not be recovered from.**
+   *   `ReconciliationBlock`'s `blockedByLostHistory` arm is entered when `discarded`
+   *   rises, and the recovery is *deferred* whenever a write surface is open — so
+   *   the epoch, the open generation and every projection generation stay exactly
+   *   where the in-flight read left them. Installing under that block would land a
+   *   piecemeal answer underneath the whole-reload obligation that is the blocked
+   *   state's entire safety argument, and clearing the file's status would tell the
+   *   person the file is reconciled while the session is in the state that means
+   *   *I cannot describe this workspace's membership*.
+   * - **Disposal.** Nothing a guard compares moves when a coordinator is disposed,
+   *   so a read in flight at `dispose()` would install after reconciliation was
+   *   stopped.
+   *
+   * **What it does not cover.** It is a fact about the *coordinator*, not about the
+   * window: it says nothing about whether the workspace was replaced (the epoch and
+   * the host's open-generation capture say that), nothing about whether a newer
+   * observation of the file was admitted, and nothing about whether a surface has
+   * unsaved edits (R36). A recovery that *runs* answers `true` again immediately —
+   * it clears the block before firing `reopenWorkspace` — and what catches the read
+   * in flight across that is the host's own open-generation capture, not this.
+   *
+   * @returns `true` while this session's decisions may still be acted on.
+   */
+  stillApplying(): boolean;
+  /**
+   * Asks for a safe membership reload.
+   *
+   * The `Named` and `Unnamed` arms' only outward effect beside a notice. **It is a
+   * request and nothing acts on it** — see
+   * `docs/decisions/2d-5-4-notes.md` for why this step records it rather than
+   * performing it.
+   */
+  requestMembershipReload(): void;
+} // End of interface ObservationSession
+
+/**
+ * What one observation's transition did.
+ *
+ * **A record for tests, never a claim about the window.** Every host member this
+ * module calls answers `void`, so these names say which arm ran and not what it
+ * achieved; `./workspace.test.ts` asserts the documents, the projections and the
+ * selection.
+ */
+export type ObservationOutcome =
+  /** A row was inserted or replaced (ruling 30). */
+  | 'added'
+  /** A guarded reread was started for a file no open surface may be about. */
+  | 'reread'
+  /** A write surface may be about the file, so it was told and nothing installed. */
+  | 'conflicted'
+  /** The bytes are unreadable; the old projection and every surface stay. */
+  | 'unavailable'
+  /** The file is gone and everything derived from it was dropped. */
+  | 'removed'
+  /** A newer observation for the same file has already been admitted. */
+  | 'superseded'
+  /** A locally pending row was marked, removed or annotated. */
+  | 'pendingRow'
+  /** There was no locally pending row to act on, so nothing was changed. */
+  | 'noPendingRow'
+  /** A path this window holds no identity for was recorded. */
+  | 'pathDrift';
+
+/**
+ * Applies one observation of an accepted batch.
+ *
+ * **Every arm of the consult's Q8 table, and no command outside the three
+ * `Addressable` ones.** The only open-workspace document command reachable from
+ * here is the reread of {@link ReconciliationWorkspace.rereadUnderGuard}, and it
+ * is reachable from the `changed`/`Addressable`/`Projected` combination alone.
+ * `Added` calls nothing (ruling 30); `Removed`, `Unreadable`, `Named` and
+ * `Unnamed` call nothing; **no save command is reachable at all** (ruling 27),
+ * because {@link ReconciliationWorkspace} has none.
+ *
+ * @param observation - One observation, exactly as it crossed the boundary.
+ * @param workspace - The window that owns it.
+ * @param sequences - The per-document accepted sequences.
+ * @param session - The epoch this batch was accepted under, and where a
+ *   membership-reload request goes.
+ * @returns Which arm ran.
+ */
+export function applyObservation(
+  observation: ExternalObservation,
+  workspace: ReconciliationWorkspace,
+  sequences: AcceptedSequences,
+  session: ObservationSession
+): ObservationOutcome {
+  const route = routeObservation(observation);
+  switch (route.kind) {
+    case 'added':
+      return applyAddition(route, workspace, sequences);
+    case 'changed':
+      return applyChange(route, workspace, sequences, session);
+    case 'removedDocument':
+      return applyRemoval(route, workspace, sequences);
+    case 'unreadableDocument':
+      return applyUnreadable(route, workspace, sequences);
+    case 'namedRow':
+      return applyNamedRow(route, workspace, sequences, session);
+    case 'unnamedPath':
+      return applyUnnamedPath(route, workspace, session);
+    default: {
+      const unreachable: never = route;
+      return unreachable;
+    }
+  } // End of the switch over the route's arm
+} // End of function applyObservation()
+
+/**
+ * Inserts or replaces one sidebar row, and calls no command.
+ *
+ * Ruling 30 in three statements: the summary goes into the rows by identity,
+ * **`loaded: false` is forced rather than trusted** — the wire promises it and
+ * this function does not have to believe the wire to keep the ruling true — and
+ * the supplied projection is dropped rather than put into `views`, because an
+ * addition's identity is by definition not an address `getDocument` would accept.
+ *
+ * **The addition is arbitrated like every other observation.** Its identity is a
+ * `DocumentId` this process minted, so two additions of one path in one batch are
+ * ordered by sequence exactly as two changes of one file are.
+ *
+ * @param route - The addition.
+ * @param workspace - The window.
+ * @param sequences - The per-document accepted sequences.
+ * @returns Which arm ran.
+ */
+function applyAddition(
+  route: Extract<ObservationRoute, { kind: 'added' }>,
+  workspace: ReconciliationWorkspace,
+  sequences: AcceptedSequences
+): ObservationOutcome {
+  if (!sequences.admit(route.summary.id, route.sequence)) {
+    return 'superseded';
+  }
+  workspace.addDocument({ ...route.summary, loaded: false });
+  if ('Unreadable' in route.content) {
+    workspace.noteDocumentStatus(route.summary.id, {
+      kind: 'unavailable',
+      reason: route.content.Unreadable.reason
+    });
+  }
+  return 'added';
+} // End of function applyAddition()
+
+/**
+ * Reloads one file, or tells the surface that may be about it.
+ *
+ * The consult's Q5 in one function: arbitrate, read the live registry, and either
+ * hand the observation to a surface's transition and install nothing, or run the
+ * guarded reread.
+ *
+ * **Unreadable content installs nothing and calls nothing** (Q8): the old
+ * projection and every open surface are preserved and the file is marked
+ * unavailable with the engine's own reason.
+ *
+ * **The raw viewer refreshes as a consequence of the clean path, and that is a
+ * permission being exercised rather than an obligation.** Ruling 20 says the
+ * read-only viewer *may* refresh automatically, and `2d-5-split-notes.md` section
+ * 5 correction 4 hands that freedom to this step; the reread machinery drops the
+ * viewer's snapshot and reads it again, so it does. A later step may stop it
+ * without contradicting anything here.
+ *
+ * @param route - The change.
+ * @param workspace - The window.
+ * @param sequences - The per-document accepted sequences.
+ * @param session - The epoch and the membership-reload door.
+ * @returns Which arm ran.
+ */
+function applyChange(
+  route: Extract<ObservationRoute, { kind: 'changed' }>,
+  workspace: ReconciliationWorkspace,
+  sequences: AcceptedSequences,
+  session: ObservationSession
+): ObservationOutcome {
+  const document = route.document;
+  if (!sequences.admit(document, route.sequence)) {
+    return 'superseded';
+  }
+  if ('Unreadable' in route.content) {
+    workspace.noteDocumentStatus(document, {
+      kind: 'unavailable',
+      reason: route.content.Unreadable.reason
+    });
+    return 'unavailable';
+  }
+  if (tellTheSurfaceAbout(route, workspace)) {
+    return 'conflicted';
+  }
+  // Ruling 18's registry capture, taken **before** the read and rechecked inside
+  // the guard. It is not the whole guard: the open generation, the per-document
+  // re-read generation and the projection generation are the host's own three
+  // captures, taken inside `rereadUnderGuard` because they are its to compare.
+  const registryAt = workspace.writeSurfaceGeneration();
+  /**
+   * Whether the answer of that read may still be installed.
+   *
+   * **Asked immediately before the installation, in the same synchronous block**
+   * (ruling 18). Five questions, in an order that matters: whether this session is
+   * still applying observations at all, which is the broadest and is therefore
+   * first; the epoch, because a workspace replaced meanwhile is a different
+   * lifecycle; whether this is still the newest observation for the file; whether a
+   * surface can now be about it, which is the one arm that *re-arbitrates* rather
+   * than merely refusing; and whether the registry moved at all, which catches a
+   * surface that opened and closed again while the read was in flight.
+   *
+   * **`stillApplying` is first because the arm below it calls a component's
+   * callback.** `tellTheSurfaceAbout` fires the registered
+   * {@link WriteSurfaceTransition}, and a session that has been blocked by lost
+   * history or disposed must not raise a conflict on a surface on the strength of
+   * an observation it is no longer entitled to act on. Being first also means the
+   * other four questions say nothing about what it covers: it is not a generation
+   * comparison and there is no number it could be folded into — see
+   * {@link ObservationSession.stillApplying} for the two states it names and for
+   * what it deliberately does not cover.
+   *
+   * **A refusal marks the file stale**, except when a newer observation has
+   * already been admitted — that one is somebody else's transition to finish, and
+   * saying `stale` about it would describe a state this window is about to leave.
+   * **No refusing arm clears the status**, and that matters most on the first one:
+   * a file left `stale` by a blocked session is the true statement, and clearing it
+   * there would say *reconciled* about a window that cannot describe its own
+   * membership.
+   *
+   * @returns `true` when the read may be installed.
+   */
+  const guard = (): boolean => {
+    if (!session.stillApplying()) {
+      workspace.noteDocumentStatus(document, { kind: 'stale' });
+      return false;
+    }
+    if (session.epochNow() !== session.epoch) {
+      workspace.noteDocumentStatus(document, { kind: 'stale' });
+      return false;
+    }
+    if (!sequences.isNewest(document, route.sequence)) {
+      return false;
+    }
+    if (tellTheSurfaceAbout(route, workspace)) {
+      // A surface opened while the read was in flight. The consult's Q5 says to
+      // re-run arbitration against the retained observation and put that surface
+      // on its conflict path, which is exactly what the call above did.
+      return false;
+    }
+    if (workspace.writeSurfaceGeneration() !== registryAt) {
+      workspace.noteDocumentStatus(document, { kind: 'stale' });
+      return false;
+    }
+    // Nothing is stale any more: this read is about to replace the projection the
+    // observation described.
+    workspace.noteDocumentStatus(document, null);
+    return true;
+  }; // End of function guard()
+  workspace.rereadUnderGuard(document, guard);
+  return 'reread';
+} // End of function applyChange()
+
+/**
+ * Tells the write surface that may be about this file, if there is one.
+ *
+ * **The conservative sentence of ruling 19 in code**: an answer here means *a
+ * surface capable of writing this file is open*, never *there are unsaved edits* —
+ * `isDirty` is derived inside each surface's own session and no coordinator can
+ * observe it (R36). Over-refusing costs one file left showing an older projection;
+ * under-refusing is somebody's work reloaded out from under them.
+ *
+ * **It marks the file stale whether or not a transition was found.** A surface
+ * whose kind the registry answers and whose transition it does not is a race the
+ * registry's own comment describes, and the file is still not being reloaded, so
+ * the state is the same either way.
+ *
+ * @param route - The change.
+ * @param workspace - The window.
+ * @returns Whether a surface may be about the file.
+ */
+function tellTheSurfaceAbout(
+  route: Extract<ObservationRoute, { kind: 'changed' }>,
+  workspace: ReconciliationWorkspace
+): boolean {
+  const kind = targetingSurfaceFor(
+    route.document,
+    workspace.openWriteSurfaces(),
+    workspace.creatorEligibility(route.document)
+  );
+  if (kind === null) {
+    return false;
+  }
+  workspace.noteDocumentStatus(route.document, { kind: 'stale' });
+  const narrowed = externalConflictObservationOf(route);
+  const transition = workspace.transitionFor(kind);
+  if (narrowed !== null && transition !== null) {
+    transition(narrowed);
+  }
+  return true;
+} // End of function tellTheSurfaceAbout()
+
+/**
+ * Drops one file and everything this window derived from it.
+ *
+ * Q8's `Removed`/`Addressable` cell. The summary, the projection, the load
+ * failure and the raw snapshot all go, the projection is invalidated, and a
+ * selection inside the file is cleared **synchronously** with the external-gone
+ * notice — all of that is the host's `removeDocument`, because every one of those
+ * values lives on the window.
+ *
+ * **The write surface is preserved rather than told.** Q8 asks for a
+ * removed-target state, and what this step can express is the state and not the
+ * telling: `WriteSurfaceTransition` takes an
+ * {@link ExternalConflictObservation} — the narrowed `Changed`/`Projected`
+ * snapshot — so a removal cannot be delivered through it at all. The surface keeps
+ * its registration, nothing is reloaded under it, and the file's status says
+ * `removed`.
+ *
+ * **The accepted sequence is kept, not forgotten.** An addition of the same path
+ * afterwards may carry the identity this process already minted, and a map that
+ * forgot would let an older observation of it be admitted again.
+ *
+ * @param route - The removal.
+ * @param workspace - The window.
+ * @param sequences - The per-document accepted sequences.
+ * @returns Which arm ran.
+ */
+function applyRemoval(
+  route: Extract<ObservationRoute, { kind: 'removedDocument' }>,
+  workspace: ReconciliationWorkspace,
+  sequences: AcceptedSequences
+): ObservationOutcome {
+  if (!sequences.admit(route.document, route.sequence)) {
+    return 'superseded';
+  }
+  workspace.removeDocument(route.document);
+  workspace.noteDocumentStatus(route.document, { kind: 'removed' });
+  return 'removed';
+} // End of function applyRemoval()
+
+/**
+ * Marks one file unavailable, and calls nothing.
+ *
+ * Q8's `Unreadable`/`Addressable` cell: the last projection and every surface are
+ * preserved, the typed reason is recorded, and there is **no command and no
+ * automatic install**.
+ *
+ * @param route - The unreadable observation.
+ * @param workspace - The window.
+ * @param sequences - The per-document accepted sequences.
+ * @returns Which arm ran.
+ */
+function applyUnreadable(
+  route: Extract<ObservationRoute, { kind: 'unreadableDocument' }>,
+  workspace: ReconciliationWorkspace,
+  sequences: AcceptedSequences
+): ObservationOutcome {
+  if (!sequences.admit(route.document, route.sequence)) {
+    return 'superseded';
+  }
+  workspace.noteDocumentStatus(route.document, { kind: 'unavailable', reason: route.reason });
+  return 'unavailable';
+} // End of function applyUnreadable()
+
+/**
+ * Acts on a locally pending row, or on nothing.
+ *
+ * Q8's whole `Named` column. **The identity is never passed to a command** — it is
+ * one the open workspace refuses, which is what `Named` means — so every arm here
+ * is a state-only transition over the row an earlier `Added` inserted.
+ *
+ * - `changed`: the row is marked stale and a safe membership reload is requested.
+ * - `removed`: the row is removed if present, and nothing is requested. Q8 asks
+ *   for no reload here, and that is not an omission: a row this window invented
+ *   going away leaves the open workspace exactly as it was.
+ * - `unreadable`: the reason is attached to the row where there is one.
+ *
+ * **A membership reload is requested even when there is no row**, for the
+ * `changed` arm alone: an identity this process minted for a file the open
+ * workspace does not hold is drift whether or not this window happens to be
+ * showing a row for it.
+ *
+ * @param route - The observation.
+ * @param workspace - The window.
+ * @param sequences - The per-document accepted sequences.
+ * @param session - Where a membership-reload request goes.
+ * @returns Which arm ran.
+ */
+function applyNamedRow(
+  route: Extract<ObservationRoute, { kind: 'namedRow' }>,
+  workspace: ReconciliationWorkspace,
+  sequences: AcceptedSequences,
+  session: ObservationSession
+): ObservationOutcome {
+  const named = route.namedDocument;
+  if (!sequences.admit(named, route.sequence)) {
+    return 'superseded';
+  }
+  const detail = route.detail;
+  if (detail.kind === 'changed') {
+    session.requestMembershipReload();
+  }
+  if (!workspace.holdsDocument(named)) {
+    return 'noPendingRow';
+  }
+  switch (detail.kind) {
+    case 'changed':
+      workspace.noteDocumentStatus(named, { kind: 'stale' });
+      return 'pendingRow';
+    case 'removed':
+      workspace.removeDocument(named);
+      workspace.noteDocumentStatus(named, { kind: 'removed' });
+      return 'pendingRow';
+    case 'unreadable':
+      workspace.noteDocumentStatus(named, { kind: 'unavailable', reason: detail.reason });
+      return 'pendingRow';
+    default: {
+      const unreachable: never = detail;
+      return unreachable;
+    }
+  } // End of the switch over what was observed of the pending row
+} // End of function applyNamedRow()
+
+/**
+ * Records a path this window holds no identity for.
+ *
+ * Q8's whole `Unnamed` column. **No identity is invented and no path is matched**
+ * — a wire path is lossy, so matching a row by one would be this window guessing
+ * which file an observation was about.
+ *
+ * **There is no sequence arbitration here, and there cannot be**: the
+ * accepted-sequence map is keyed by identity and an `Unnamed` observation carries
+ * none. What bounds the drift instead is the host, which keys its record by path.
+ *
+ * A `changed` or a `removed` asks for a safe membership reload; an `unreadable`
+ * does not, because a path this window cannot read says nothing about which files
+ * the workspace holds.
+ *
+ * @param route - The observation.
+ * @param workspace - The window.
+ * @param session - Where a membership-reload request goes.
+ * @returns Which arm ran.
+ */
+function applyUnnamedPath(
+  route: Extract<ObservationRoute, { kind: 'unnamedPath' }>,
+  workspace: ReconciliationWorkspace,
+  session: ObservationSession
+): ObservationOutcome {
+  workspace.notePathDrift({ relativePath: route.relativePath, detail: route.detail });
+  switch (route.detail.kind) {
+    case 'changed':
+    case 'removed':
+      session.requestMembershipReload();
+      return 'pathDrift';
+    case 'unreadable':
+      return 'pathDrift';
+    default: {
+      const unreachable: never = route.detail;
+      return unreachable;
+    }
+  } // End of the switch over what was observed of the path
+} // End of function applyUnnamedPath()

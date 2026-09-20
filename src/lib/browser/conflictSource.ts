@@ -19,10 +19,12 @@
  * per wire value** so identity-keyed bookkeeping keeps working, and it names the
  * origin-specific line a conflict panel will show. It arbitrates nothing, installs
  * nothing and routes nothing: which observations become conflicts at all is
- * 2d-5-4's, and generalizing the six existing conflict registrations onto
- * {@link ConflictSource} is 2d-5-5's. **No production caller reads a
- * {@link ConflictSource} yet** — only this module's own suite does — and that is the
- * step's shape rather than an oversight.
+ * `./observationTransitions.ts`'s (2d-5-4), and generalizing the six existing
+ * conflict registrations onto {@link ConflictSource} is 2d-5-5's. **No production
+ * caller reads a {@link ConflictSource} yet** — only this module's own suite does —
+ * and that is still true after 2d-5-4: that step produces an
+ * {@link ExternalConflictObservation} and hands it straight to a surface's
+ * transition, without wrapping it in a source.
  *
  * **Two things this module does not touch, and may not.** `conflictChoicesFor` in
  * `./saveOutcome.ts` stays the only producer of a choice list — what is exported
@@ -58,7 +60,8 @@ import type {
  * `Addressable` identity below a `DocumentId` rather than a question. What it costs
  * is that **nothing in TypeScript ties a value of this type back to the observation
  * it was narrowed from** — the narrowing lives in whichever function performs it
- * (2d-5-4's routing boundary), and a caller may assemble one of these by hand from
+ * (`externalConflictObservationOf` in `./observationTransitions.ts`, which is the
+ * only producer in this repository), and a caller may assemble one of these by hand from
  * loose fields, exactly as `ConflictModel` could be assembled from loose fields
  * before `source` carried the wire value whole.
  *
