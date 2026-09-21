@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T09:26:43Z",
+ "updated": "2026-09-21T09:27:11Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -394,7 +394,8 @@
    "risk": "high",
    "summary": "AppShell passes the real event source and starts and disposes the coordinator, the capability holds exactly the two event permissions with dispatcher evidence, and the rung is 1323 / 444 / 2474 / 191.",
    "review": "docs/reviews/phase-2d-5-7a.md",
-   "narrative": "docs/decisions/2d-5-7a-notes.md"
+   "narrative": "docs/decisions/2d-5-7a-notes.md",
+   "commit": "094da04"
   },
   {
    "id": "2d-5-7b",
