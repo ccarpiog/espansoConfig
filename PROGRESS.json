@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T11:44:29Z",
+ "updated": "2026-09-21T11:44:53Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -436,7 +436,8 @@
    "risk": "high",
    "summary": "Adds the delivery envelope value, the shared revision description and reload-guard primitives, and the EN/ES reconciliation sentences; no component, no BrowserState member; rung 1323/447/2520/192.",
    "review": "docs/reviews/phase-2d-6-1a.md — Codex, ship-with-fixes, 0 blockers, 3 SHOULD-FIX, all fixed",
-   "narrative": "docs/decisions/2d-6-1a-notes.md"
+   "narrative": "docs/decisions/2d-6-1a-notes.md",
+   "commit": "e88498d"
   },
   {
    "id": "2d-6-1b",
