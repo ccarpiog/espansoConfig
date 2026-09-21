@@ -466,7 +466,8 @@
    "summary": "Gives the match editor its external-conflict session, the submission block at canSave and beginSave, the seven-arm receiver with an arrival-order replay queue and the full-identity reapply lookup.",
    "risk": "high",
    "review": "docs/reviews/phase-2d-6-2.md — Codex, ship-with-fixes, 2 blockers, 0 SHOULD-FIX, both fixed",
-   "narrative": "docs/decisions/2d-6-2-notes.md"
+   "narrative": "docs/decisions/2d-6-2-notes.md",
+   "commit": "a9dec80"
   },
   {
    "id": "2d-6-3",
