@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T18:51:40Z",
+ "updated": "2026-09-21T18:52:12Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -486,7 +486,8 @@
    "summary": "Gives the delete, move and duplicate sessions external-conflict handling: seven-arm receivers, the block at every door with an installed-session reader, the exact subject and anchor lookup.",
    "risk": "high",
    "review": "docs/reviews/phase-2d-6-4.md",
-   "narrative": "docs/decisions/2d-6-4-notes.md"
+   "narrative": "docs/decisions/2d-6-4-notes.md",
+   "commit": "60585fc"
   },
   {
    "id": "2d-6-5",
