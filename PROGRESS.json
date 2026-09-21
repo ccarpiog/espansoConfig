@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T11:03:09Z",
+ "updated": "2026-09-21T11:03:34Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -414,7 +414,8 @@
    "risk": "high",
    "summary": "Puts 2d-6 to a Codex design consult: brief, consult, a binding record of 43 rulings and a 114-row audit, one review of the record; cuts 2d-6 into eleven steps.",
    "review": "docs/reviews/phase-2d-6-design-record-review.md",
-   "narrative": "docs/decisions/2d-6-split-notes.md"
+   "narrative": "docs/decisions/2d-6-split-notes.md",
+   "commit": "2de66e2"
   },
   {
    "id": "2d-6",
