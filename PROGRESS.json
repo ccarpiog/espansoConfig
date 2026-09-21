@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T20:40:58Z",
+ "updated": "2026-09-20T20:53:26Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -331,18 +331,19 @@
   {
    "id": "2d-5-4-G",
    "title": "The round §7.1 commissions for 2d-5-4-F's fix",
-   "status": "skipped",
+   "status": "done",
    "risk": "high",
-   "summary": "Superseded by 2d-5-4-H: the round was taken, all four findings re-derived and fixed plus eleven the review missed, and its own fix commissions the next round.",
+   "summary": "Closes the 2d-5-4 chain: all four findings re-derived and fixed plus eleven found by sweeping, committed at ff183e1 and verified; 2d-5-4-H was withdrawn.",
    "review": "docs/reviews/phase-2d-5-4-G.md",
-   "narrative": "docs/decisions/2d-5-4-G-notes.md"
+   "narrative": "docs/decisions/2d-5-4-G-notes.md",
+   "commit": "ff183e1"
   },
   {
    "id": "2d-5-4-H",
    "title": "The round §7.1 commissions for 2d-5-4-G's fix",
-   "status": "queued",
+   "status": "skipped",
    "risk": "high",
-   "summary": "Not started; the round CLAUDE.md 7.1 commissions because 2d-5-4-G's fix changed five source files."
+   "summary": "Withdrawn 2026-09-20 with the CLAUDE.md 7.1 rule that commissioned it; 2d-5-4-G's fix is committed and verified, so no round is owed."
   },
   {
    "id": "2d-5-5",

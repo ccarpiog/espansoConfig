@@ -30,6 +30,7 @@ above a `---` rule; everything below that rule is the original text.
 | [`2d-4a-c-closure.md`](2d-4a-c-closure.md) | 304 | The 2d-4a-C closure narrative: why the owner ended the nine-round tail, and the record reorganization that answered §22.6. |
 | [`phase-m2.md`](phase-m2.md) | 32 | Phase M2 — the review-tail termination rule (`CLAUDE.md` §7): its two review rounds, what each found, and why no third was owed. |
 | [`next-action-history.md`](next-action-history.md) | 9147 | Every superseded "Next action" handoff, newest first. Each was the live instruction once. **They are kept for the record they carry, never as an instruction** — read them as history only. |
+| [`claude-md-2026-09-20.md`](claude-md-2026-09-20.md) | 825 | `CLAUDE.md` as it stood before the §7 review rules and the §6 narrative were removed on 2026-09-20. History only. |
 
 ## How to find a phase
 
