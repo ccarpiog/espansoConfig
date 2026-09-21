@@ -68,6 +68,7 @@ import {
   externalEvidenceRefusalKey,
   reapplyOutcomeKey,
   sharedReapplyObstacleKey,
+  SUPERSEDED_EVIDENCE_KEY,
   type ExternalEvidenceRefusal,
   type ReapplyOutcomeCode,
   type SharedReapplyObstacle
@@ -1436,6 +1437,37 @@ export function describeExternalEvidenceRefusal(
 export function tExternalEvidenceRefusal(reason: ExternalEvidenceRefusal): string {
   return describeExternalEvidenceRefusal(locale.current, reason);
 } // End of function tExternalEvidenceRefusal()
+
+/**
+ * Renders that a conflict's disk side was replaced by a later reading, in one
+ * language.
+ *
+ * The accessor over `SUPERSEDED_EVIDENCE_KEY` in `../browser/reapply`, and the one
+ * sentence the `superseded` arm of `ReapplyEvidenceAccess` owes. It takes no
+ * operand and names no revision, for the reason the three refusals above do not: a
+ * content revision is a hex digest, and showing one beside a refusal invites a
+ * person to compare two strings that carry no order.
+ *
+ * **Nothing draws it yet**, exactly as nothing draws the three above: ruling 26 is
+ * Phase 2d-5-5b's and the panel that shows one of these is 2d-6's. A code with no
+ * string is worse than a code with no caller, which is why it exists now.
+ *
+ * @param locale - The dictionary to read from.
+ * @returns The translated sentence.
+ */
+export function describeSupersededEvidence(locale: Locale): string {
+  return translate(locale, SUPERSEDED_EVIDENCE_KEY);
+} // End of function describeSupersededEvidence()
+
+/**
+ * Renders that a conflict's disk side was replaced by a later reading, in the
+ * current language.
+ *
+ * @returns The translated sentence.
+ */
+export function tSupersededEvidence(): string {
+  return describeSupersededEvidence(locale.current);
+} // End of function tSupersededEvidence()
 
 /**
  * One obstacle's own sentence followed by the wire code's, as one string.

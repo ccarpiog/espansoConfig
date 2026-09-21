@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T06:23:07Z",
+ "updated": "2026-09-21T07:31:00Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -350,7 +350,7 @@
    "title": "External conflicts and save arbitration",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Seven steps; 1 to 4 closed, step 5 split on 2026-09-21 into 2d-5-5a (closed) and 2d-5-5b (next)."
+   "summary": "Seven steps; step 5 was split on 2026-09-21 and both halves are closed, so five are done and 2d-5-6 is next."
   },
   {
    "id": "2d-5-5a",
@@ -364,8 +364,11 @@
   {
    "id": "2d-5-5b",
    "title": "Save arbitration — coalescing, supersession and the in-flight write barrier",
-   "status": "queued",
-   "summary": "Not started; it needs 2d-5-5a's origin union before it can arbitrate between a save conflict and a watcher observation."
+   "status": "done",
+   "risk": "high",
+   "summary": "A save conflict beats an equal-revision observation, a higher-sequence different revision supersedes it, and an in-flight write retains observations behind a per-file barrier.",
+   "review": "docs/reviews/phase-2d-5-5b.md",
+   "narrative": "docs/decisions/2d-5-5b-notes.md"
   },
   {
    "id": "2d-5-6",

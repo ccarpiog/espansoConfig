@@ -15,20 +15,27 @@
  *
  * ## What this module is, and what it is not
  *
- * It is vocabulary. It declares the two origins, it hands out **one stable object
- * per wire value** so identity-keyed bookkeeping keeps working, and it names the
- * origin-specific line a conflict panel will show. It arbitrates nothing, installs
- * nothing and routes nothing: which observations become conflicts at all is
- * `./observationTransitions.ts`'s (2d-5-4).
+ * It is vocabulary **and, since Phase 2d-5-5b, the arbitration between the two
+ * origins as a set of pure decisions**. It declares the two origins, it hands out
+ * **one stable object per wire value** so identity-keyed bookkeeping keeps working,
+ * it names the origin-specific line a conflict panel will show, and
+ * {@link arbitrateObservation} and {@link releaseBarrier} say which origin stands
+ * for one file and what a barrier does with what it held. **It still installs
+ * nothing, registers nothing, holds no state and routes nothing**: which
+ * observations reach a surface at all is `./observationTransitions.ts`'s (2d-5-4),
+ * and the tables those decisions are made against live on `BrowserState` in
+ * `./workspace.svelte.ts`, which is the only thing that writes one.
  *
  * **Phase 2d-5-5a gave it its first production readers.** `ConflictModel.source` in
  * `./saveOutcome.ts` is a {@link ConflictSource}, the six conflict registrations in
  * `./workspace.svelte.ts` go through {@link saveConflictSource}, and both
  * identity-keyed maps — that module's `conflictOrigins` and this one's sibling, the
- * reapply authorization memo — are keyed on a {@link ConflictSource}. What still has
- * no production caller is {@link externalConflictSource}'s half of the arbitration:
- * choosing between a save conflict and a watcher observation for one document is
- * 2d-5-5b's, and drawing either origin is 2d-6's.
+ * reapply authorization memo — are keyed on a {@link ConflictSource}. Phase 2d-5-5b
+ * added the second half: `BrowserState.observeExternalChange` drives
+ * {@link arbitrateObservation}, so {@link externalConflictSource} now has a
+ * production caller too. What still has none is a **component** — drawing either
+ * origin is 2d-6's, and nothing in this repository shows a person which of the two
+ * a panel is about.
  *
  * **Two things this module does not touch, and may not.** `conflictChoicesFor` in
  * `./saveOutcome.ts` stays the only producer of a choice list — what is exported
@@ -304,3 +311,371 @@ export function conflictOriginMessageKey(message: ConflictOriginMessage): Transl
     }
   }
 } // End of function conflictOriginMessageKey()
+
+/**
+ * What one standing conflict says about the file it is about, captured once.
+ *
+ * **Every operand read exactly once, off the origin, before anything is
+ * compared** — {@link standingConflictOf} is the only producer, and it exists so
+ * that {@link arbitrateObservation} can be a pure comparison over numbers and
+ * hashes rather than a walk over a value some caller assembled. A property read
+ * runs arbitrary code through a getter or a `Proxy` trap and `readonly` freezes
+ * nothing at runtime, so an arbitration that read `source.conflict.disk_revision`
+ * twice could decide one thing and report another.
+ *
+ * **The sequence is `null` on the save arm and that is a fact rather than a
+ * default.** A refused write attempt carries no observation sequence, because it
+ * was not observed — it was attempted. Ruling 26 orders two observations by
+ * sequence and nothing else, so against a save conflict there is no order to
+ * compare and the revision is the whole of what decides.
+ */
+export interface StandingConflict {
+  /** The origin standing for the file, as the object every map is keyed by. */
+  readonly source: ConflictSource;
+  /** The disk revision that origin is about. */
+  readonly diskRevision: ContentRevision;
+  /** The observation sequence it was admitted under, or `null` on the save arm. */
+  readonly sequence: number | null;
+}
+
+/**
+ * The two facts one standing origin is arbitrated by, read once and frozen.
+ *
+ * **A `switch` with a `never` terminus**, so a third arm of
+ * {@link ConflictSource} is a compile error here rather than an origin that
+ * silently arbitrates as a save. What it does **not** force is that a caller
+ * arbitrate at all, or that the origin it passes is the one any state registered:
+ * this function reads an ordinary object and can vouch for nothing about where it
+ * came from.
+ *
+ * @param source - The origin standing for one file.
+ * @returns Its two arbitration operands, captured once.
+ */
+export function standingConflictOf(source: ConflictSource): StandingConflict {
+  switch (source.kind) {
+    case 'save':
+      return Object.freeze({
+        source,
+        diskRevision: source.conflict.disk_revision,
+        sequence: null
+      });
+    case 'externalChange': {
+      const observation = source.observation;
+      return Object.freeze({
+        source,
+        diskRevision: observation.diskRevision,
+        sequence: observation.sequence
+      });
+    }
+    default: {
+      const unreachable: never = source;
+      return unreachable;
+    }
+  }
+} // End of function standingConflictOf()
+
+/**
+ * What one window did with a watcher observation of a file it holds a conflict
+ * about.
+ *
+ * **The answers of rulings 25, 26 and 27 as one value.** Only
+ * `BrowserState.observeExternalChange` in `./workspace.svelte.ts` answers the
+ * `retained` arm — it is the only thing that knows whether a write is in flight,
+ * and the only thing that can tell that its own tables moved while a verdict was
+ * being decided — and {@link arbitrateObservation} produces every other one.
+ *
+ * **Not one of these arms installs anything, and none may.** Ruling 23 keeps
+ * `BrowserState.adoptDiskVersion` the only confirmed-install door and
+ * `conflictChoicesFor` in `./saveOutcome.ts` the only producer of a choice list,
+ * and ruling 27 forbids watcher arbitration initiating any save command at all;
+ * this is a verdict about *which origin stands*, and nothing else.
+ */
+export type ObservationVerdict =
+  | {
+      /**
+       * Ruling 27: a write this window started is still in flight for the file,
+       * so the observation is held and coalesced rather than applied.
+       *
+       * **A second thing answers it, and it is not a second meaning**: since this
+       * phase's review, `BrowserState.observeExternalChange` also holds an
+       * observation whose arbitration found the state it was decided against
+       * changed underneath it — a re-entrant registration through a getter on the
+       * value it was reading. *Held, and nobody has acted on it* is the whole of
+       * what this arm says either way; what it never says is that the observation
+       * will be looked at again, which only a later settlement does.
+       */
+      readonly kind: 'retained';
+    }
+  | {
+      /** Nothing stood for the file, so this observation is its conflict now. */
+      readonly kind: 'raised';
+      /** The memoized origin to register and to build a model from. */
+      readonly source: ExternalChangeConflictSource;
+    }
+  | {
+      /**
+       * Ruling 27's uncertainty: the observation stands as the file's conflict,
+       * and **no automatic reload may be made from it**, because a write from
+       * this window may or may not have produced the bytes it read.
+       */
+      readonly kind: 'raisedWithoutReload';
+      /** The memoized origin to register and to build a model from. */
+      readonly source: ExternalChangeConflictSource;
+      /** The origin it replaced, or `null` when nothing stood. */
+      readonly superseded: ConflictSource | null;
+    }
+  | {
+      /** Ruling 26: a strictly later observation of different bytes. */
+      readonly kind: 'supersedes';
+      /** The origin whose disk side this replaces. */
+      readonly superseded: ConflictSource;
+      /** The memoized origin to register and to build a model from. */
+      readonly source: ExternalChangeConflictSource;
+    }
+  | {
+      /**
+       * Ruling 25: the same bytes the standing conflict is already about, so the
+       * standing conflict keeps the model, its messages and its source identity.
+       */
+      readonly kind: 'coalesced';
+      /** The origin that stands, unchanged. */
+      readonly standing: ConflictSource;
+    }
+  | {
+      /**
+       * The observation is not strictly later than the standing external
+       * conflict, so it says nothing this window has not already acted on.
+       */
+      readonly kind: 'notLater';
+      /** The origin that stands, unchanged. */
+      readonly standing: ConflictSource;
+    };
+
+/**
+ * Every verdict an arbitration that really ran can answer.
+ *
+ * **`retained` is the one arm this excludes**, and the exclusion is the type
+ * saying what the prose would otherwise have to: {@link arbitrateObservation} is
+ * pure and holds no barrier, so it cannot answer that a write is in flight.
+ */
+export type ArbitrationOutcome = Exclude<ObservationVerdict, { readonly kind: 'retained' }>;
+
+/**
+ * Which origin stands for one file, given what stood before and what was observed.
+ *
+ * **Rulings 25 and 26 in one function, and the order of its questions is the
+ * ruling.**
+ *
+ * 1. **Not strictly later** — asked first and only of a standing *external*
+ *    conflict, because that is the only origin carrying a sequence. An
+ *    observation at or below the standing one's sequence is the same observation
+ *    delivered twice or an older one arriving late, and acting on it would run a
+ *    transition against state a newer one already moved.
+ * 2. **The same disk revision** (ruling 25) — the standing conflict wins. Against
+ *    a save origin it carries the stronger fact, a locked write attempt that was
+ *    refused, plus operation-specific evidence; against an external origin the
+ *    two readings are of identical bytes and replacing one with the other would
+ *    change the source identity every map is keyed by for no change at all.
+ *    **Revision equality proves identical bytes and never origin or chronology.**
+ * 3. **Ruling 27's uncertainty, if the last settled write for this file may have
+ *    written** — the observation stands as the conflict so the person is told,
+ *    and no automatic reload may be made from it.
+ * 4. **A different revision** (ruling 26) — the observation supersedes the
+ *    standing conflict's disk side.
+ *
+ * **What "later" rests on, stated rather than implied.** Between two observations
+ * it is the sequence and nothing else: a content revision is a hash and hashes
+ * carry no order. Between a **save conflict** and an observation there is no
+ * order at all — the refusal carries no sequence, and this function cannot tell
+ * whether the watcher read the file before or after the locked read did. What
+ * bounds that is ruling 27's barrier, which keeps an observation delivered
+ * *during* this window's own write out of this function until the write settles;
+ * an observation that was queued before a refusal and drained after it is not
+ * bounded by anything here, and superseding on a different revision is what the
+ * consult ruled for that case.
+ *
+ * **It decides and does not act.** It registers nothing, installs nothing, spends
+ * no confirmation, calls no command and reads no state; the memoized origin on
+ * three of its arms comes from {@link externalConflictSource}, which is a lookup
+ * and not a registration. Nothing in TypeScript forces a caller to act on the arm
+ * it is given, and `./workspace.svelte.ts` is the only caller that does.
+ *
+ * @param standing - What stands for the file, or `null` when nothing does.
+ * @param observation - The narrowed observation that arrived.
+ * @param writeOutcomeUncertain - Whether the last settled write this window made
+ *   for the file may have written (ruling 27). A caller that always passes
+ *   `false` compiles, and `BrowserState` is what answers it honestly.
+ * @returns Which origin stands now.
+ */
+export function arbitrateObservation(
+  standing: StandingConflict | null,
+  observation: ExternalConflictObservation,
+  writeOutcomeUncertain: boolean
+): ArbitrationOutcome {
+  // **Both operands off the observation, read once and before any comparison.**
+  // It is a value a caller assembled, so either could be a getter that answers
+  // one thing to the test and another to the arm that reports it.
+  const sequence = observation.sequence;
+  const diskRevision = observation.diskRevision;
+  const source = externalConflictSource(observation);
+  if (standing === null) {
+    return writeOutcomeUncertain
+      ? { kind: 'raisedWithoutReload', source, superseded: null }
+      : { kind: 'raised', source };
+  }
+  const standingSequence = standing.sequence;
+  if (standingSequence !== null && sequence <= standingSequence) {
+    return { kind: 'notLater', standing: standing.source };
+  }
+  if (diskRevision === standing.diskRevision) {
+    return { kind: 'coalesced', standing: standing.source };
+  }
+  return writeOutcomeUncertain
+    ? { kind: 'raisedWithoutReload', source, superseded: standing.source }
+    : { kind: 'supersedes', superseded: standing.source, source };
+} // End of function arbitrateObservation()
+
+/**
+ * What one settled write promise says about the file it was aimed at.
+ *
+ * **Three answers, because that is how many the wrappers can really give.** The
+ * six writing wrappers in `./workspace.svelte.ts` end in a transaction outcome,
+ * in a refusal, or in a failure whose `mayHaveWritten` in `../ipc/errors` decides
+ * which of the last two this is.
+ */
+export type WriteSettlement =
+  | {
+      /**
+       * The transaction ended, and these are the bytes it ended on.
+       *
+       * **Not the same as "it wrote"**: `committed: false` is a documented
+       * success, and the revision is what the file holds either way. What the
+       * revision is for is ruling 27's coalescing — an observation of exactly
+       * these bytes is a reading of a write this window already knows about.
+       */
+      readonly kind: 'ended';
+      /** The revision the transaction ended on. */
+      readonly revision: ContentRevision;
+    }
+  | {
+      /**
+       * The attempt is over and nothing was written — a refusal, a conflict, or
+       * a failure this application can establish wrote nothing.
+       */
+      readonly kind: 'nothingWritten';
+    }
+  | {
+      /**
+       * The write may or may not have written (`mayHaveWritten`), so what is on
+       * disk cannot be attributed.
+       */
+      readonly kind: 'uncertain';
+    };
+
+/**
+ * What to do with the observation a barrier held, once the write settled.
+ *
+ * **Three arms and no verdict**, deliberately: the arbitration that follows is
+ * {@link arbitrateObservation}'s, and folding the two together would give this
+ * function a second way to answer ruling 25.
+ */
+export type BarrierRelease =
+  | {
+      /** The barrier held nothing, so there is nothing to apply. */
+      readonly kind: 'nothingRetained';
+    }
+  | {
+      /**
+       * Ruling 27's coalescing: the held observation is a reading of exactly the
+       * bytes this window's own write ended on, so it is not news about a change
+       * and is dropped.
+       *
+       * **It says the revisions are equal and never that this window wrote
+       * them** — another program may have produced byte-identical content, and no
+       * watcher snapshot can say who wrote anything.
+       */
+      readonly kind: 'writtenHere';
+      /** The observation that was held, for a caller that wants to record it. */
+      readonly observation: ExternalConflictObservation;
+    }
+  | {
+      /** The held observation is news; arbitrate it as an ordinary arrival. */
+      readonly kind: 'arbitrate';
+      /** The observation that was held. */
+      readonly observation: ExternalConflictObservation;
+    };
+
+/**
+ * What the per-document write barrier does with what it held (ruling 27).
+ *
+ * **The barrier's only decision is whether the held observation is news**, and
+ * exactly one settlement can answer no: a transaction that ended on the very
+ * revision the observation read. A refusal, a definite failure and an uncertain
+ * outcome all leave the observation to be arbitrated normally — the uncertainty
+ * is *not* expressed by dropping it, but by
+ * {@link arbitrateObservation}'s `writeOutcomeUncertain` operand, so that one
+ * fact lives in one place and a released observation is never silently lost.
+ *
+ * **No arm of this reaches a command.** Ruling 27's last sentence is that no save
+ * command may ever be initiated by watcher arbitration, and the narrowest way to
+ * say so is that neither this function nor its answer can name one.
+ *
+ * @param settlement - What the write promise settled as.
+ * @param retained - The newest observation the barrier held, or `null`.
+ * @returns What to do with it.
+ */
+export function releaseBarrier(
+  settlement: WriteSettlement,
+  retained: ExternalConflictObservation | null
+): BarrierRelease {
+  if (retained === null) {
+    return { kind: 'nothingRetained' };
+  }
+  switch (settlement.kind) {
+    case 'ended':
+      // **Read once from each side.** The settlement is this module's caller's
+      // and the observation is a value someone assembled; comparing one read of
+      // each is what keeps the answer about the pair that was compared.
+      return retained.diskRevision === settlement.revision
+        ? { kind: 'writtenHere', observation: retained }
+        : { kind: 'arbitrate', observation: retained };
+    case 'nothingWritten':
+      return { kind: 'arbitrate', observation: retained };
+    case 'uncertain':
+      // Held observations are not dropped by uncertainty — they are arbitrated
+      // under it. See this function's own doc.
+      return { kind: 'arbitrate', observation: retained };
+    default: {
+      const unreachable: never = settlement;
+      return unreachable;
+    }
+  }
+} // End of function releaseBarrier()
+
+/**
+ * Which of two observations of one file a barrier keeps (ruling 27's coalescing).
+ *
+ * **Coalescing is keeping the newest, never merging two readings.** Two snapshots
+ * of one file are two whole readings — text, projection, findings and
+ * correspondence table each bound to their own revision — so anything built from
+ * halves of both would name a state that never existed.
+ *
+ * **Strictly greater, so an equal sequence keeps what is held.** Two observations
+ * admitted under one sequence would be one observation delivered twice, and
+ * swapping the held object for an equal one would change the identity
+ * `externalConflictSource` memoizes on and therefore the origin any later
+ * registration writes down.
+ *
+ * @param held - What the barrier holds, or `null` when it holds nothing.
+ * @param arriving - The observation that just arrived.
+ * @returns The one to keep.
+ */
+export function newestObservationOf(
+  held: ExternalConflictObservation | null,
+  arriving: ExternalConflictObservation
+): ExternalConflictObservation {
+  if (held === null) {
+    return arriving;
+  }
+  return arriving.sequence > held.sequence ? arriving : held;
+} // End of function newestObservationOf()

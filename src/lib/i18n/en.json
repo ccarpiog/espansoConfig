@@ -152,6 +152,7 @@
   "browser.reapply.externalEvidence.noCorrespondence": "The reading that told espansoConfig this file had changed carried no correspondence for it, so there is nothing here to match what you kept against. Nothing was written.",
   "browser.reapply.externalEvidence.baseRevisionMoved": "The correspondence that reading carried was worked out from a different version of this file than the one you started from, so it says nothing about what you kept. Nothing was written.",
   "browser.reapply.externalEvidence.diskRevisionMoved": "The correspondence that reading carried was worked out against a different version on disk than the one shown here, so it is evidence about a state you were not shown. Nothing was written.",
+  "browser.reapply.supersededConflict": "This file changed again after the version shown here was read, so what this panel was comparing against is no longer what the file holds. There is nothing here to match what you kept against. Nothing was written.",
 
   "browser.saveOutcome.fileWritten": "The file was written. What is on disk now is exactly the text that was sent.",
   "browser.saveOutcome.nothingToWrite": "The text was already exactly what the file held, so nothing was written. Both checks still ran; this is a save with nothing to do.",

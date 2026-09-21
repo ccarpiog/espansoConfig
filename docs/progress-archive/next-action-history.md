@@ -13629,3 +13629,92 @@ when a file is merely *added* under the scanned roots — **re-derive a test cou
 pristine tree, never from the total.**
 
 ---
+
+---
+
+### ⚠️ HISTORICAL — the handoff that commissioned **Phase 2d-5-5b**, archived 2026-09-21 when that phase closed.
+
+_Verbatim from `PROGRESS.md`. 2d-5-5b is implemented, reviewed once by Codex (`ship-with-fixes`, 3 blockers and 1 SHOULD-FIX, all four re-derived, all four held, all four fixed) and closed; the live handoff is now Phase 2d-5-6. The three rulings restated below are still the binding ones and are unchanged._
+
+### Phase 2d-5-5a is complete and CLOSED. The next action is **Phase 2d-5-5b — coalescing, supersession and the in-flight-write barrier**.
+
+**Step 5 of the consult was split on 2026-09-21, and the split is the plan now.** The design consult
+`docs/reviews/phase-2d-5-design.md` cut 2d-5 into seven steps; its step 5 bundled five deliverables
+over `saveOutcome.ts`, `workspace.svelte.ts`, `reapply.ts` and the i18n layer, which is more than one
+worker finishes coherently. The orchestrator split it in two, in dependency order:
+
+- **2d-5-5a — done.** The `ConflictSource` origin union, the memoized save source, the six
+  registrations re-keyed, and origin-switched reapply evidence — binding rulings **21, 22, 23 and 24**
+  of [`2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) §3.
+- **2d-5-5b — next.** Same-revision coalescing, different-revision supersession, and the per-document
+  in-flight-write barrier — binding rulings **25, 26 and 27**. It needs 2d-5-5a's union before it can
+  arbitrate between a save conflict and a watcher observation.
+
+The split adds rows to `PROGRESS.json` and changes no ruling. **Neither half is a review round**, and
+neither supersedes the other: 2d-5-5a is complete on its own terms, reviewed once and closed.
+
+#### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
+
+`git status --short --untracked-files=all` shows **four uncommitted instrument paths**:
+
+```
+ M src-tauri/src/main.rs      two hook lines — `mod probe;` and `probe::register_with_probe(…)`
+ M src/main.ts                two hook lines — the `startProbe` import and its call
+?? src-tauri/src/probe.rs     the four probe IPC commands and the two external writers
+?? src/probe.ts               the Svelte-driving plan driver
+```
+
+**Do not commit them, do not revert them, and do not treat them as unaccounted-for work.** They are the
+temporary window-reading instrument (`docs/decisions/2c-5-5a-instrument-rebuild.md` §1); it is never
+committed, and 2d-8 deletes it. `git diff --stat` over the two hook files is `5 insertions(+), 1
+deletion(-)` and must stay that way. **Stage by path**: `PROGRESS.md`, `PROGRESS.json`, `docs/`,
+`src/lib/browser/`, `src/lib/i18n/`, and any `src-tauri/` or `src/lib/components/` file **by name** —
+never `src-tauri/src/` as a directory, which would sweep `probe.rs` and `main.rs` in.
+
+#### Phase 2d-5-5b — coalescing, supersession and the in-flight-write barrier
+
+**Spec:** the second half of step 5 of [`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md)
+— its **Q7** in full. The binding rulings are [`2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md)
+§3 entries **25, 26 and 27**, restated here only so a step is not invented from memory:
+
+- **25 — at the same document and the same `disk_revision`, the save conflict wins.** It carries the
+  stronger fact (a locked write attempt was refused) plus operation-specific evidence. The watcher
+  observation is **still accepted for sequence and watermark accounting** and must not replace the
+  model, its messages or its source identity. Revision equality proves identical bytes, never origin
+  or chronology.
+- **26 — a strictly higher observation sequence with a different revision supersedes the conflict's
+  disk side.** Draft preserved; disk text, projection, revision, findings and origin replaced; the save
+  conflict's `found` never rendered as the current disk revision; any pending reload confirmation
+  withdrawn; old reapply evidence invalidated. **Hashes carry no order** — only the observation
+  sequence defines "later".
+- **27 — an in-flight write is a per-document arbitration barrier.** Observations for that document are
+  retained and coalesced, not applied, until the write promise settles; a `mayHaveWritten` outcome
+  forbids automatic reload, because a later watcher snapshot can establish what is on disk but never
+  who wrote it. **No save command may ever be initiated by watcher arbitration.**
+
+**Evidence the consult asks for:** model and workspace tests for save-conflict versus watcher arrival
+in **both** orders, a later different revision, stale evidence, all three adoption answers
+(`installed | alreadyThere | refused`), a committed save, a definite failure and a `mayHaveWritten`
+one. **Components: none** — drawing the new origin is 2d-6's.
+
+**Starting points:** `src/lib/browser/conflictSource.ts` (the union and both memos),
+`src/lib/browser/saveOutcome.ts` (`SaveConflictModel` / `ExternalConflictModel`, `describeConflict`,
+`describeExternalConflict`, `conflictChoicesFor` — still the only producer of a choice list),
+`src/lib/browser/workspace.svelte.ts` (`rememberTheConflict`, `rememberExternalConflict`,
+`conflictOrigins`, `adoptDiskVersion` — still the only confirmed-install door),
+`src/lib/browser/reapply.ts` (`reapplyEvidenceFor`), `src/lib/browser/observationTransitions.ts`
+(`externalConflictObservationOf`, the only producer of a narrowed observation) and
+`src/lib/browser/reconciliationCoordinator.ts`. The authoritative account of what 2d-5-5a built is
+[`docs/decisions/2d-5-5a-notes.md`](docs/decisions/2d-5-5a-notes.md); its §8 is the newest
+*where it is thin* list.
+
+**One obligation 2d-5-5a hands it, stated so it is not discovered late** (`2d-5-5a-notes.md` §8 item
+11). `rememberTheConflict` is now **first-registration-wins**: re-registering an origin already in
+`conflictOrigins` returns without writing, so repeated registration cannot renew a stale conflict's
+authority. Supersession under ruling 26 must therefore **register the newer observation as its own
+origin** rather than re-register the old one and expect the generation to move. The fix that
+established this is the blocker of 2d-5-5a's review and is pinned by `workspace.test.ts:6617`.
+
+**Closure:** the workflow's — one review, blockers fixed, verification re-run, phase closed. A fix
+answers the findings the review named, in the files it named; anything else noticed on the way is an
+open item in the phase's notes, not a fix in the same phase.

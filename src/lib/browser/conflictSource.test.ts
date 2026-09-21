@@ -26,10 +26,14 @@ import { DICTIONARIES, translate, type TranslationKey } from '../i18n/dictionari
 import { DEFAULT_LOCALE, LOCALES } from '../i18n/locale';
 import type { ConflictResult, ContentRevision } from '../ipc/types';
 import {
+  arbitrateObservation,
   conflictOriginMessage,
   conflictOriginMessageKey,
   externalConflictSource,
+  newestObservationOf,
+  releaseBarrier,
   saveConflictSource,
+  standingConflictOf,
   type ConflictOriginMessage,
   type ConflictSource,
   type ExternalConflictObservation
@@ -237,3 +241,197 @@ describe('the origin line', () => {
     );
   }); // End of the "no save was attempted" case
 }); // End of the "origin line" suite
+
+describe('arbitrating a watcher observation against what stands', () => {
+  /** A third revision, for the observation that supersedes. */
+  const LATER: ContentRevision = 'c'.repeat(64);
+
+  /**
+   * One observation of other bytes than {@link DISK}.
+   *
+   * @param sequence - The sequence it was admitted under.
+   * @returns The observation.
+   */
+  function laterObservation(sequence: number): ExternalConflictObservation {
+    return {
+      ...observation(sequence),
+      diskRevision: LATER,
+      disk: makeDocument({ id: TARGET, revision: LATER })
+    };
+  } // End of function laterObservation()
+
+  it('raises an observation when nothing stands for the file', () => {
+    const arriving = observation();
+    expect(arbitrateObservation(null, arriving, false)).toEqual({
+      kind: 'raised',
+      source: externalConflictSource(arriving)
+    });
+  });
+
+  it('lets the standing conflict win at the same disk revision, for either origin', () => {
+    // **Ruling 25.** Revision equality proves identical bytes and never origin or
+    // chronology, so there is nothing for the arrival to replace — and replacing the
+    // source identity alone would re-key every map this window holds for the file.
+    const save = saveConflictSource(refusal());
+    expect(arbitrateObservation(standingConflictOf(save), observation(99), false)).toEqual({
+      kind: 'coalesced',
+      standing: save
+    });
+    const external = externalConflictSource(observation(3));
+    expect(arbitrateObservation(standingConflictOf(external), observation(99), false)).toEqual({
+      kind: 'coalesced',
+      standing: external
+    });
+  }); // End of the "same revision coalesces" case
+
+  it('supersedes a standing conflict on a strictly later observation of other bytes', () => {
+    // **Ruling 26**, and the two halves of its premise are both required: strictly
+    // later by sequence, and a different revision.
+    const standing = externalConflictSource(observation(3));
+    const arriving = laterObservation(4);
+    expect(arbitrateObservation(standingConflictOf(standing), arriving, false)).toEqual({
+      kind: 'supersedes',
+      superseded: standing,
+      source: externalConflictSource(arriving)
+    });
+  }); // End of the "different revision supersedes" case
+
+  it('refuses an observation that is not strictly later than the standing one', () => {
+    // **Hashes carry no order, so only the sequence defines "later".** An equal
+    // sequence is one observation delivered twice and a lower one arrived late;
+    // acting on either runs a transition against state a newer one already moved.
+    const standing = externalConflictSource(observation(7));
+    for (const sequence of [7, 6]) {
+      expect(arbitrateObservation(standingConflictOf(standing), laterObservation(sequence), false))
+        .toEqual({ kind: 'notLater', standing });
+    } // End of the loop over the equal and the lower sequence
+  }); // End of the "not strictly later" case
+
+  it('has no sequence to compare a save conflict by, so different bytes supersede it', () => {
+    // A refused write attempt was not observed, it was attempted, so it carries no
+    // observation sequence and `standingConflictOf` says `null` rather than zero.
+    // What decides against it is therefore the revision alone — including for an
+    // observation whose sequence is the lowest this window could admit.
+    const standing = saveConflictSource(refusal());
+    expect(standingConflictOf(standing).sequence).toBeNull();
+    expect(standingConflictOf(standing).diskRevision).toBe(DISK);
+    const arriving = laterObservation(1);
+    expect(arbitrateObservation(standingConflictOf(standing), arriving, false)).toEqual({
+      kind: 'supersedes',
+      superseded: standing,
+      source: externalConflictSource(arriving)
+    });
+  }); // End of the "a save conflict carries no sequence" case
+
+  it('forbids an automatic reload while the last write may have written', () => {
+    // **Ruling 27's uncertainty.** A later watcher snapshot can establish what is on
+    // disk and never who put it there, so the observation still becomes the file's
+    // conflict — the person is told — and the arm it comes back on is the one that
+    // says no reload may be made from it. It carries what it replaced, or `null`.
+    const arriving = observation();
+    expect(arbitrateObservation(null, arriving, true)).toEqual({
+      kind: 'raisedWithoutReload',
+      source: externalConflictSource(arriving),
+      superseded: null
+    });
+    const standing = externalConflictSource(observation(3));
+    const later = laterObservation(4);
+    expect(arbitrateObservation(standingConflictOf(standing), later, true)).toEqual({
+      kind: 'raisedWithoutReload',
+      source: externalConflictSource(later),
+      superseded: standing
+    });
+    // **Uncertainty does not override ruling 25 or the sequence.** The same bytes are
+    // still the same bytes, and an older observation is still older.
+    expect(arbitrateObservation(standingConflictOf(standing), observation(9), true)).toEqual({
+      kind: 'coalesced',
+      standing
+    });
+    expect(arbitrateObservation(standingConflictOf(standing), laterObservation(2), true)).toEqual({
+      kind: 'notLater',
+      standing
+    });
+  }); // End of the "uncertainty forbids an automatic reload" case
+
+  it('reads each operand of the arrival exactly once', () => {
+    // **This project\'s named check-and-spend class** (`CLAUDE.md` section 6): a
+    // property read runs arbitrary code through a getter, and `readonly` freezes
+    // nothing at runtime. Both operands are taken before anything is compared, so a
+    // getter cannot answer one thing to the comparison and another to the arm.
+    let sequenceReads = 0;
+    let revisionReads = 0;
+    const base = observation(4);
+    const shifting: ExternalConflictObservation = {
+      ...base,
+      get sequence() {
+        sequenceReads += 1;
+        return sequenceReads === 1 ? 4 : 1;
+      },
+      get diskRevision() {
+        revisionReads += 1;
+        return revisionReads === 1 ? LATER : DISK;
+      }
+    };
+    const standing = externalConflictSource(observation(3));
+    expect(arbitrateObservation(standingConflictOf(standing), shifting, false).kind).toBe(
+      'supersedes'
+    );
+    expect(sequenceReads).toBe(1);
+    expect(revisionReads).toBe(1);
+  }); // End of the "each operand read once" case
+}); // End of the arbitration suite
+
+describe('what the write barrier does with what it held', () => {
+  it('has nothing to release when it held nothing', () => {
+    expect(releaseBarrier({ kind: 'nothingWritten' }, null)).toEqual({ kind: 'nothingRetained' });
+    expect(releaseBarrier({ kind: 'ended', revision: DISK }, null)).toEqual({
+      kind: 'nothingRetained'
+    });
+    expect(releaseBarrier({ kind: 'uncertain' }, null)).toEqual({ kind: 'nothingRetained' });
+  });
+
+  it('drops a held reading of exactly the bytes the transaction ended on', () => {
+    // **Ruling 27\'s coalescing.** The observation is a reading of the revision this
+    // window\'s own write ended on, so it is not news about a change. What it says is
+    // that the two revisions are equal — never that this window wrote them.
+    const held = observation();
+    expect(releaseBarrier({ kind: 'ended', revision: DISK }, held)).toEqual({
+      kind: 'writtenHere',
+      observation: held
+    });
+  }); // End of the "coalesced with the write" case
+
+  it('arbitrates anything else it held, including what an uncertain write left', () => {
+    // A transaction that ended on other bytes, a refusal or a definite failure, and
+    // an uncertain outcome all leave the observation to be arbitrated: the
+    // uncertainty is carried by `arbitrateObservation`\'s own operand, so a held
+    // observation is never silently lost.
+    const held = observation();
+    const other: ContentRevision = 'd'.repeat(64);
+    expect(releaseBarrier({ kind: 'ended', revision: other }, held)).toEqual({
+      kind: 'arbitrate',
+      observation: held
+    });
+    expect(releaseBarrier({ kind: 'nothingWritten' }, held)).toEqual({
+      kind: 'arbitrate',
+      observation: held
+    });
+    expect(releaseBarrier({ kind: 'uncertain' }, held)).toEqual({
+      kind: 'arbitrate',
+      observation: held
+    });
+  }); // End of the "arbitrates what it held" case
+
+  it('coalesces two held observations by keeping the newest, never by merging them', () => {
+    const first = observation(3);
+    const second = observation(9);
+    expect(newestObservationOf(null, first)).toBe(first);
+    expect(newestObservationOf(first, second)).toBe(second);
+    expect(newestObservationOf(second, first)).toBe(second);
+    // **Strictly greater, so an equal sequence keeps what is held**: swapping one
+    // object for an equal one would change the identity `externalConflictSource`
+    // memoizes on, and therefore the origin any later registration writes down.
+    const equal = observation(9);
+    expect(newestObservationOf(second, equal)).toBe(second);
+  }); // End of the "newest, never merged" case
+}); // End of the barrier suite

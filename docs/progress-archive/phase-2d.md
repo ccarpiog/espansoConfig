@@ -4632,3 +4632,60 @@ fails instead on `expected 'running' to be 'blockedByLostHistory'`, and the pre-
 **passes** the new case while failing 2d-5-4-F's own — so the **pair** of cases pins both fences and
 neither alone does. **Nothing was discarded**: no candidate passed against both trees. The thirteen
 comment and record fixes have no case and the record says so rather than implying one.
+
+---
+
+### Phase 2d-5-5a's verification narrative and ladder section — archived 2026-09-21 at Phase 2d-5-5b
+
+_Verbatim from `PROGRESS.md`. Its rung `1320 / 443 / 2433 / 189` is now the rung below the live one; nothing in it is superseded, and its account of the eighteen cases and of why the Rust figure could not move is the model 2d-5-5b followed._
+
+### The rung moved by eighteen, and every one of the eighteen is a new case
+
+**With the instrument in the working tree the four commands answer `1320 / 443 / 2433 / 189`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-5a**, each command run on its own and **nothing run concurrently with
+`cargo`**. The frontend three were measured **twice**: on the worker's tree, then again on the
+post-review-fix tree.
+
+| Gate | Was at 2d-5-4-G | Now | Why it moved, or did not |
+|---|---|---|---|
+| `cargo test --workspace` | 1320 | **1320** | no Rust source changed — `git diff --numstat -- crates/ src-tauri/` names only the instrument's `main.rs`, at `2 1` |
+| `npm run check` files | 443 | **443** | no file added or removed; `conflictSource.ts` and `conflictSource.test.ts` already existed (2d-5-1 shipped the vocabulary), so this phase added no module |
+| `npm test` | 2415 | **2433** | +18 — sixteen for the implementation (6 in `saveOutcome.test.ts`, 6 in `reapply.test.ts`, 4 in `workspace.test.ts`) and two for the review's two behavioural fixes |
+| `npm run build` modules | 189 | **189** | no new `.ts` module and no new styled component; no `.svelte` file changed at all |
+
+**Both complementary questions were asked of the Rust gate**, not one: the sum over **26**
+`test result` lines, **no line lacking `0 failed`** and **no line lacking `0 filtered out`**. It
+completed on the first attempt, so the stale-`target/` host finding has not recurred for **eleven**
+phases. Clippy (`cargo clippy --workspace --all-targets -- -D warnings`, exit 0), `cargo fmt --check`
+(exit 0) and `cargo tree -p espansoconfig-core | rg tauri` (finds nothing, `rg` exiting 1) are clean.
+`npm run check` → **443 files, 0 errors, 0 warnings** on both runs; `npm test` → **2433 passed in 61
+files**; `npm run build` → **189 modules**, and **both bundle oracles were read and both lines are
+reported**: server-only markers **absent**, client-only markers **present (2)**. **The instrument's pin
+was re-checked** twice and holds at `5 insertions(+), 1 deletion(-)`.
+
+**The Rust half was proven untouched rather than assumed, and then measured anyway.** `cargo test`,
+clippy and `fmt` were run in full on the worker's tree; the review fix that followed changed
+`workspace.svelte.ts`, `reapply.ts`, `saveOutcome.ts`, two suites and the record, so
+`git diff --numstat -- crates/ src-tauri/` was re-asked and again named only the instrument. **1320
+therefore could not have moved**, and that is an argument from the diff, not from the earlier run.
+
+**No gate caught either of the review's two behavioural findings, and none could have.** The blocker
+is reachable only by registering one conflict origin twice, and the check-and-spend window only
+through a caller-controlled getter — this chain's standing coverage bound. **Both fixes are pinned by
+a case confirmed to fail against the pre-fix shape**, with the messages verbatim in
+`2d-5-5a-notes.md` §9: `AssertionError: expected 'installed' to be 'refused'` for
+first-registration-wins (`workspace.test.ts:6617`), and `AssertionError: expected 'rev-z' to be
+'rev-a'` for the captured-operand snapshot (`reapply.test.ts:354`). The review's other two findings
+are false sentences in a record and in a source comment; they have no case and the record says so
+rather than implying one.
+
+### The ladder's live rung
+
+**`1320 / 443 / 2433 / 189`**, at 2d-5-5a — the first rung of the 2d-5-5 step, and the first since
+2d-5-2c-1 whose `npm test` figure moved by more than five. The rung below it is
+`1320 / 443 / 2415 / 189` at 2d-5-4-G, and the seven below that are `1320 / 443 / 2413 / 189` at 2d-5-4-F, `1320 / 443 / 2409 / 189` at 2d-5-4-E, `1320 / 443 / 2406 / 189` at 2d-5-4-D, `1320 / 443 / 2404 / 189` at 2d-5-4-C, `1320 / 443 / 2395 / 189` at 2d-5-4-B, `1320 / 443 / 2389 / 189` at 2d-5-4-A and `1320 / 443 / 2380 / 189` at 2d-5-4. Below them is `1320 / 441 / 2307 / 188`, held from
+2d-5-3-A to 2d-5-3-N. **The instrument landed at 2d-5-2c-1**, whose rung was `1320 / 439 / 2255 /
+187`, so every rung at or after it is a *with-instrument* figure and the two groups may not be
+compared without subtracting the instrument's known contribution. The full per-rung list is in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md).

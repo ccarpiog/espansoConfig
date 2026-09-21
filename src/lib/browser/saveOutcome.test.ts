@@ -57,6 +57,7 @@ import {
   copyOfDraft,
   describeEditSave,
   describeExternalConflict,
+  supersedeConflict,
   describeWholeDocumentSave,
   draftFieldStatusKey,
   invalidationFailureMessage,
@@ -691,6 +692,68 @@ describe('the two conflict origins', () => {
     expect(model.draft).toBe(draft);
     expect(copyOfDraft(model)).toBe(draft.value);
   });
+
+  it('supersedes a save conflict by keeping its draft and taking everything else', () => {
+    // **Ruling 26's five replacements and its one preservation**, as the function
+    // that performs them. The draft is preserved; the disk text, the projection, the
+    // disk revision, the findings and the origin all come from the later
+    // observation — the last four because they are the observation's, carried inside
+    // the source rather than copied out beside it.
+    const draft = draftInHand();
+    const superseded = describeWholeDocumentSave(conflictWith(), draft, RAW_EDITOR);
+    if (superseded.kind !== 'conflict') {
+      throw new Error('the conflict arm is what this case is about');
+    }
+    const later = observation();
+    const replacing = supersedeConflict(superseded, later, RAW_EDITOR);
+    expect(replacing.draft).toBe(draft);
+    expect(replacing.source).toBe(externalConflictSource(later));
+    expect(replacing.diskRevision).toBe(later.diskRevision);
+    expect(replacing.diskText).toBe(later.diskText);
+    expect(replacing.disk).toBe(later.disk);
+    expect(replacing.source.observation.findings).toBe(later.findings);
+    // **The superseded conflict's `found` cannot be rendered as the current disk
+    // revision, by type rather than by care**: the replacement is an
+    // `ExternalConflictModel` and has no such field for a panel to read.
+    expect(Object.hasOwn(replacing, 'found')).toBe(false);
+    // And the superseded model is untouched — supersession builds, it does not
+    // mutate what a surface is holding.
+    expect(superseded.found).toBe(AFTER);
+  }); // End of the "supersedes a save conflict" case
+
+  it('supersedes an external conflict the same way, and keeps the surface declaration', () => {
+    // The origin being replaced makes no difference: what the arbitration decided is
+    // that this observation is strictly later, and what a reload would do to *this*
+    // surface is a fact about the surface. The mover's declaration still chooses the
+    // two operation lines after a supersession.
+    const draft = draftInHand();
+    const first = describeExternalConflict(observation(), draft, MOVER);
+    const later = observation();
+    const replacing = supersedeConflict(first, later, MOVER);
+    expect(replacing.source).not.toBe(first.source);
+    expect(replacing.draft).toBe(draft);
+    expect(replacing.messages).toContainEqual({ kind: 'operationKeptInMemory' });
+    expect(replacing.messages).toContainEqual({ kind: 'reloadAbandonsOperation' });
+  }); // End of the "supersedes an external conflict" case
+
+  it('reads the draft of the conflict it replaces exactly once', () => {
+    // **This project's named check-and-spend class** (`CLAUDE.md` section 6): the
+    // superseded model is a value a surface is holding, so `draft` can be a getter.
+    // It is read once and the result is handed on, so the model that comes back
+    // carries the draft this call looked at.
+    const draft = draftInHand();
+    let reads = 0;
+    const holding = describeExternalConflict(observation(), draft, RAW_EDITOR);
+    const shifting = {
+      ...holding,
+      get draft() {
+        reads += 1;
+        return draft;
+      }
+    };
+    expect(supersedeConflict(shifting, observation(), RAW_EDITOR).draft).toBe(draft);
+    expect(reads).toBe(1);
+  }); // End of the "reads the draft once" case
 }); // End of the "two conflict origins" suite
 
 describe('the one authority that decides what a conflict offers', () => {

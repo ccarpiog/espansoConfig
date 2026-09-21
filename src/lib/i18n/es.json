@@ -152,6 +152,7 @@
   "browser.reapply.externalEvidence.noCorrespondence": "La lectura que avisó a espansoConfig de que este archivo había cambiado no traía ninguna correspondencia, así que aquí no hay nada con lo que comparar lo que has conservado. No se ha escrito nada.",
   "browser.reapply.externalEvidence.baseRevisionMoved": "La correspondencia que traía esa lectura se calculó a partir de una versión de este archivo distinta de aquella desde la que empezaste, así que no dice nada sobre lo que has conservado. No se ha escrito nada.",
   "browser.reapply.externalEvidence.diskRevisionMoved": "La correspondencia que traía esa lectura se calculó frente a una versión en disco distinta de la que se muestra aquí, así que es evidencia sobre un estado que no se te ha mostrado. No se ha escrito nada.",
+  "browser.reapply.supersededConflict": "Este archivo ha vuelto a cambiar después de que se leyera la versión que se muestra aquí, así que aquello con lo que este panel comparaba ya no es lo que contiene el archivo. Aquí no hay nada con lo que comparar lo que has conservado. No se ha escrito nada.",
 
   "browser.saveOutcome.fileWritten": "Se ha escrito el archivo. Lo que hay ahora en el disco es exactamente el texto que se envió.",
   "browser.saveOutcome.nothingToWrite": "El texto ya era exactamente el que tenía el archivo, así que no se ha escrito nada. Las dos comprobaciones se han hecho igualmente; es un guardado que no tenía nada que hacer.",

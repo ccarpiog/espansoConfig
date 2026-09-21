@@ -92,7 +92,7 @@ import type {
   ReapplyEvidence,
   ReapplyRefusal
 } from '../ipc/types';
-import type { SaveConflictSource } from './conflictSource';
+import type { ConflictSource, SaveConflictSource } from './conflictSource';
 import type { AdoptTheDiskVersion } from './editorSave';
 import {
   reapplyAuthorizationFor,
@@ -352,9 +352,10 @@ export type ExternalEvidenceRefusal =
 /**
  * Where one conflict's reapply evidence comes from, and whether it may be used.
  *
- * **Three arms for two origins**, because the external origin can answer *no
- * evidence* for a reason the save origin cannot have: its table is snapshot-bound
- * and the snapshot may not be this conflict's.
+ * **Four arms for two origins.** The external origin can answer *no evidence* for
+ * a reason the save origin cannot have — its table is snapshot-bound and the
+ * snapshot may not be this conflict's — and since Phase 2d-5-5b **either** origin
+ * can answer that the conflict it would come from no longer stands for its file.
  */
 export type ReapplyEvidenceAccess =
   | {
@@ -389,7 +390,50 @@ export type ReapplyEvidenceAccess =
       readonly kind: 'refused';
       /** Which of the three negative claims about the table this is. */
       readonly reason: ExternalEvidenceRefusal;
+    }
+  | {
+      /**
+       * A strictly later observation replaced this conflict's disk side, so
+       * nothing it carries is evidence about the file any more (ruling 26).
+       *
+       * **An arm of its own rather than a fourth {@link ExternalEvidenceRefusal}**,
+       * because it is true of both origins: a refused save's `ConflictResult.reapply`
+       * was resolved against a disk snapshot the file has moved on from exactly as
+       * an observation's table can have been. It carries no operand, because the
+       * only thing it could carry is a revision, and a content revision is a hex
+       * digest that a person cannot compare against another (`2d-5-5a-notes.md` §3).
+       */
+      readonly kind: 'superseded';
     };
+
+/**
+ * The dictionary key holding the superseded-conflict sentence.
+ *
+ * **A constant rather than a key function**, because the arm it belongs to
+ * carries no operand to switch on; the `TranslationKey` annotation is what makes
+ * a renamed key a compile error here, which is the whole job the sibling key
+ * functions do with a `switch`.
+ */
+export const SUPERSEDED_EVIDENCE_KEY: TranslationKey = 'browser.reapply.supersededConflict';
+
+/**
+ * Asks what origin stands for one file **now**.
+ *
+ * **A guard rather than a value, and the difference is the whole of what it buys**
+ * (this phase's review, finding 4). A `ConflictSource | null` operand is read by
+ * the caller before {@link reapplyEvidenceFor} runs, so every property read the
+ * evidence costs — the observation's table, the draft's base, the conflict's disk
+ * revision, the iteration of the row array — happens *after* the answer was taken,
+ * and any one of them can run a getter or a `Proxy` trap that registers a strictly
+ * later observation. A function is asked at the end instead, so the answer and the
+ * return are the same instant.
+ *
+ * **What it still cannot force is who answers it.** It is an ordinary closure:
+ * `() => state.standingConflictFor(document)` is the honest one,
+ * `() => conflict.source` defeats the check, and nothing in TypeScript tells the
+ * two apart.
+ */
+export type StandingOriginGuard = () => ConflictSource | null;
 
 /**
  * Which evidence one conflict's reapply may work from, switched on its origin.
@@ -427,12 +471,62 @@ export type ReapplyEvidenceAccess =
  * list and `BrowserState.adoptDiskVersion` the only confirmed-install door
  * (ruling 23).
  *
+ * **The supersession check is last, and it is ruling 26's "old reapply evidence
+ * invalidated" in code.** A conflict whose disk side a strictly later observation
+ * replaced describes a state the file has moved on from, whichever origin it has,
+ * so no arm of {@link evidenceOf} is answered for one. **Last rather than first,
+ * and this phase's review is why**: every read that builds the evidence crosses
+ * into a value a caller assembled, so a getter or a `Proxy` trap among them can
+ * register a strictly later observation *after* a supersession check made first
+ * had already passed. The evidence is therefore assembled whole — including the
+ * row array, which is iterated into this function's own copy — and only then is
+ * the live standing origin asked for; nothing caller-controlled runs between that
+ * question and this function's return.
+ *
+ * **What that forces is only that two objects are the same object**, and the
+ * operand is a *guard* rather than a value precisely so the question is asked at
+ * the end rather than answered at the start: `BrowserState.standingConflictFor` in
+ * `./workspace.svelte.ts` is what answers it honestly, a caller that hands back a
+ * closure over `conflict.source` defeats the check without writing anything a type
+ * could refuse, and `() => null` is the conservative direction — nothing stands,
+ * so nothing is evidence.
+ *
  * @typeParam T - The drafted value the conflict retained.
  * @param conflict - The conflict a reapply would work from, of either origin.
- * @returns Which evidence is available, or why the external table is refused.
+ * @param standing - Asks what origin currently stands for that file, or `null`.
+ *   Called **once**, after every operand has been read.
+ * @returns Which evidence is available, or why it is refused.
  */
-export function reapplyEvidenceFor<T>(conflict: ConflictModel<T>): ReapplyEvidenceAccess {
+export function reapplyEvidenceFor<T>(
+  conflict: ConflictModel<T>,
+  standing: StandingOriginGuard
+): ReapplyEvidenceAccess {
   const source = conflict.source;
+  // **Assembled before the live question is asked.** Every caller-controlled read
+  // this function makes happens inside the call below; what comes back is built
+  // from values already captured, so the guard's answer and this function's answer
+  // are about the same instant.
+  const access = evidenceOf(conflict, source);
+  return standing() === source ? access : { kind: 'superseded' };
+} // End of function reapplyEvidenceFor()
+
+/**
+ * Which evidence one conflict's origin carries, with no question of supersession.
+ *
+ * **Split out of {@link reapplyEvidenceFor} so that every caller-controlled read
+ * is inside one call**, which is what lets the supersession question be asked
+ * afterwards and answered against the same instant this returned at. It performs
+ * no state lookup of its own and it cannot: it is handed the origin it must read.
+ *
+ * @typeParam T - The drafted value the conflict retained.
+ * @param conflict - The conflict a reapply would work from.
+ * @param source - That conflict's origin, read once by the caller.
+ * @returns Which evidence its origin carries, never `superseded`.
+ */
+function evidenceOf<T>(
+  conflict: ConflictModel<T>,
+  source: ConflictSource
+): Exclude<ReapplyEvidenceAccess, { readonly kind: 'superseded' }> {
   switch (source.kind) {
     case 'save':
       return { kind: 'saveEvidence', evidence: saveReapplyEvidence(source) };
@@ -487,7 +581,7 @@ export function reapplyEvidenceFor<T>(conflict: ConflictModel<T>): ReapplyEviden
       return unreachable;
     }
   }
-} // End of function reapplyEvidenceFor()
+} // End of function evidenceOf()
 
 /**
  * The dictionary key holding one external-evidence refusal's sentence.

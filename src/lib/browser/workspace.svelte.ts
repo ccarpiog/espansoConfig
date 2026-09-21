@@ -95,11 +95,20 @@ import type {
   SaveResult,
   WorkspaceSummary
 } from '../ipc/types';
-import { externalConflictSource, saveConflictSource } from './conflictSource';
+import {
+  arbitrateObservation,
+  externalConflictSource,
+  newestObservationOf,
+  releaseBarrier,
+  saveConflictSource,
+  standingConflictOf
+} from './conflictSource';
 import type {
   ConflictSource,
   ExternalChangeConflictSource,
-  ExternalConflictObservation
+  ExternalConflictObservation,
+  ObservationVerdict,
+  WriteSettlement
 } from './conflictSource';
 import {
   sealWholeDocumentSave,
@@ -1066,15 +1075,19 @@ export interface BrowserState {
    *    *second* `BrowserState` — whose
    *    session-local `DocumentId` may collide with one of this state's — installs
    *    nothing. That is the confirmation pass's residual half of the brand finding;
-   * 4. the document is still projected here;
-   * 5. **the projection already holds the requested revision** — in which case the
+   * 4. **that conflict still stands for that file** — Phase 2d-5-5b, ruling 26. A
+   *    strictly later observation supersedes a conflict's disk side without
+   *    installing anything, so no projection generation moves and step 7 below
+   *    cannot see it; this is the check that can;
+   * 5. the document is still projected here;
+   * 6. **the projection already holds the requested revision** — in which case the
    *    request is satisfied, the confirmation is spent, and the answer is
    *    `alreadyThere`;
-   * 6. **that projection has not been replaced since the conflict arrived**, which
+   * 7. **that projection has not been replaced since the conflict arrived**, which
    *    is asked only of what is left: the branch that is about to install.
    *
-   * So the first four precede **every** successful answer, and the generation
-   * comparison guards **only** the installing branch — because step 5 has already
+   * So the first five precede **every** successful answer, and the generation
+   * comparison guards **only** the installing branch — because step 6 has already
    * returned, and spent the token, for a window that holds those bytes.
    *
    * **Step 2 is a reservation, and the 2c-5-4b confirmation review is why.** The
@@ -1114,9 +1127,10 @@ export interface BrowserState {
    * **A window already holding the disk revision is `alreadyThere`, not a
    * refusal** — the request is satisfied, and the surface may finish. Reporting it
    * as a failure left a confirm control that could never succeed. That arm is step
-   * 5 above and not an aside: a window that reprojected to those exact bytes is
+   * 6 above and not an aside: a window that reprojected to those exact bytes is
    * answered before the generation is inspected at all, so it is *never* refused for
-   * having moved.
+   * having moved — **but it is answered after step 4**, so a conflict a later
+   * observation superseded is refused rather than told it is already there.
    *
    * **What none of this forces**: that a surface honours the answer. Nor can this
    * method know which conflict a surface is *currently* resolving; what closes that
@@ -1190,6 +1204,87 @@ export interface BrowserState {
   rememberExternalConflict(
     observation: ExternalConflictObservation
   ): ExternalChangeConflictSource;
+  /**
+   * Arbitrates one watcher observation against this window's own state — Phase
+   * 2d-5-5b, rulings 25, 26 and 27.
+   *
+   * **The door the coordinator's write-surface transition will call**, and the only
+   * one that applies all three rulings together: ruling 27's barrier first, because
+   * a write of this window's own that is still in flight makes every question below
+   * it unanswerable; then ruling 25, at the same disk revision the standing conflict
+   * wins; then ruling 26, a strictly later observation of different bytes replaces
+   * the standing conflict's disk side. The decisions themselves are
+   * `arbitrateObservation` and `releaseBarrier` in `./conflictSource.ts`; what this
+   * adds is the four tables they are asked about.
+   *
+   * **It registers, and it installs nothing.** A verdict that names a new origin
+   * goes through the same private registration the six save wrappers use, so the
+   * projection generation it is written at is this window's current one and
+   * {@link adoptDiskVersion} stays the only confirmed-install door. Nothing here
+   * replaces a projection, moves the selection, reads a file or calls any command —
+   * **no save command may ever be initiated by watcher arbitration** (ruling 27),
+   * and the narrowest way to say so is that this method reaches no command at all.
+   *
+   * **What it deliberately does not do is accounting.** Ruling 25 requires the
+   * coalesced observation to be accepted for sequence and watermark accounting all
+   * the same; that is `AcceptedSequences.admit` in `./observationTransitions.ts` and
+   * the cursor in `./reconciliationCoordinator.ts`, neither of which this method
+   * touches, so a `coalesced` answer here says nothing about whether the batch was
+   * acknowledged.
+   *
+   * **Nothing forces a caller to have narrowed the observation from a wire
+   * snapshot**, exactly as {@link rememberExternalConflict} cannot: the interface is
+   * ordinary and this state trusts the caller it is given.
+   *
+   * @param observation - The narrowed observation, exactly as this window narrowed
+   *   it.
+   * @returns What was decided about it, including whether it is merely being held.
+   */
+  observeExternalChange(observation: ExternalConflictObservation): ObservationVerdict;
+  /**
+   * Which conflict origin currently speaks for one file, or `null`.
+   *
+   * **The operand ruling 26's "old reapply evidence invalidated" is checked
+   * against**: `reapplyEvidenceFor` in `./reapply.ts` refuses evidence taken from a
+   * conflict that is not this, and it is a parameter there rather than a lookup, so
+   * a caller that never asks this compiles.
+   *
+   * @param document - The file.
+   * @returns The standing origin, or `null` when this state holds no conflict for
+   *   it.
+   */
+  standingConflictFor(document: DocumentId): ConflictSource | null;
+  /**
+   * Whether a write this state started is still in flight for one file
+   * (ruling 27).
+   *
+   * @param document - The file.
+   * @returns Whether the barrier is closed for it.
+   */
+  writeInFlight(document: DocumentId): boolean;
+  /**
+   * The observation the barrier is holding for one file, or `null` (ruling 27).
+   *
+   * **At most one, and it is the newest**: coalescing keeps the latest reading
+   * rather than a queue, because two readings of one file are two whole snapshots.
+   *
+   * @param document - The file.
+   * @returns What is held, or `null`.
+   */
+  retainedObservationFor(document: DocumentId): ExternalConflictObservation | null;
+  /**
+   * Whether the last settled write this state made for one file may have written
+   * (ruling 27).
+   *
+   * **It is preserved rather than resolved.** A later watcher snapshot can
+   * establish what is on disk and never who wrote it, so no observation clears
+   * this; a later write of this window's own that *ended* does, and so does
+   * `open()`.
+   *
+   * @param document - The file.
+   * @returns Whether what is on disk for it cannot be attributed.
+   */
+  writeOutcomeUncertain(document: DocumentId): boolean;
   /**
    * Opens a configuration directory and loads every file that holds matches.
    *
@@ -2101,6 +2196,53 @@ interface ExternalDocumentStatusEntry {
 }
 
 /**
+ * One observation ruling 27's barrier is holding, and the window it arrived at.
+ *
+ * **The generation is not decoration.** A conflict is registered with the
+ * projection generation it *arrived* at, because that is the fact
+ * `BrowserState.adoptDiskVersion` compares against to refuse a disk snapshot the
+ * window has since moved past. A retained observation arrives while a write is in
+ * flight and is registered after it settles, and a committing write replaces that
+ * file's projection in between — so reading the generation at release rather than
+ * at arrival hands the observation a freshness it never had. Phase 2d-5-5b's
+ * review, finding 1.
+ */
+interface RetainedObservation {
+  /** The observation the barrier is holding. */
+  readonly observation: ExternalConflictObservation;
+  /** That file's projection generation when this observation arrived. */
+  readonly generation: number;
+}
+
+/**
+ * One in-flight write's hold on ruling 27's barrier.
+ *
+ * **Two methods because a write establishes its outcome before it has finished
+ * acting on it.** A wrapper learns what the transaction did the moment the command
+ * answers, and then spends several awaits adopting what it produced; an exception
+ * in that stretch must still release the barrier, and must release it on what was
+ * already known rather than on a guess. So the knowing and the releasing are two
+ * calls: {@link WriteLease.expect} records, {@link WriteLease.close} releases.
+ */
+interface WriteLease {
+  /**
+   * Records what this write has established, releasing nothing.
+   *
+   * Called as soon as the command answers, and overwritten rather than merged.
+   *
+   * @param settlement - What the answer establishes about the file.
+   */
+  expect(settlement: WriteSettlement): void;
+  /**
+   * Releases the barrier on what was last expected, or on `uncertain`.
+   *
+   * One-shot: a second call does nothing. Called from a `finally`, so it runs on
+   * every exit a wrapper has.
+   */
+  close(): void;
+}
+
+/**
  * The guard a re-read somebody asked for is run under.
  *
  * **A named constant rather than an inline `() => true`**, so that the one call
@@ -2234,6 +2376,50 @@ export function createBrowserState(
     ConflictSource,
     { readonly document: DocumentId; readonly generation: number }
   >();
+  // **Which origin currently speaks for each file** — Phase 2d-5-5b, rulings 25
+  // and 26. It is not a second copy of `conflictOrigins` above: that map answers
+  // *did this state register this origin, and against which projection*, keyed by
+  // the origin; this one answers *which of the origins it registered is the current
+  // one for this file*, keyed by the file. The two are written in one place —
+  // {@link rememberTheConflict} — so they cannot be updated apart, and a registration
+  // that is refused there writes neither.
+  //
+  // **Last registration wins here, while `conflictOrigins` is first-wins**, and the
+  // difference is the point. A re-registration of an origin already known returns
+  // above without reaching either map, so a stale conflict cannot make itself
+  // standing again; a *new* origin — a refused save, or an observation
+  // {@link arbitrateObservation} ruled strictly later — is by definition the newest
+  // fact this state has about that file. Nothing in TypeScript keeps the two maps in
+  // step; one function writing both is the whole of what does.
+  const standingConflicts = new Map<DocumentId, ConflictSource>();
+  // **Ruling 27's barrier: how many writes this state started are still in flight
+  // for each file.** A count rather than a flag because two surfaces could write one
+  // file at once — `busy` keeps the seven surfaces mutually exclusive today, which is
+  // a fact about the components and not about this type — and a flag the first
+  // settlement cleared would open the barrier while the second write was still out.
+  // A file with no entry has nothing in flight.
+  const writesInFlight = new Map<DocumentId, number>();
+  // **What the barrier is holding for each file**, which is at most one observation:
+  // ruling 27 coalesces by keeping the newest rather than by queuing, because two
+  // readings of one file are two whole snapshots and nothing can be built from halves
+  // of both. `newestObservationOf` in `./conflictSource.ts` is the choice.
+  //
+  // **The projection generation it arrived at travels with it**, which is this
+  // phase's review, finding 1: a write that commits invalidates this file's
+  // projection *before* its barrier releases, so an observation registered at the
+  // generation it is released at would claim to have arrived at a window it never
+  // saw — and {@link BrowserState.adoptDiskVersion}'s generation comparison, whose
+  // whole job is to refuse a snapshot older than what the window now holds, would
+  // find the two equal and install it.
+  const retainedObservations = new Map<DocumentId, RetainedObservation>();
+  // **Every file whose last settled write may have written** (ruling 27). It is
+  // preserved rather than resolved: a later watcher snapshot can establish what is on
+  // disk but never who put it there, so nothing a watcher says can clear this. What
+  // clears it is a later write of this window's own that *ended* — a transaction
+  // outcome names the revision the file holds — and `open()`, which replaces the
+  // workspace the uncertainty was about. **Nothing else does, and no gate would
+  // notice if a file stayed in here for the life of a session.**
+  const uncertainWrites = new Set<DocumentId>();
   // **Every write surface this window has told this state about** — Phase 2d-5-2a.
   // One registry per state, created here rather than at module level for the reason
   // `./writeSurfaceRegistry.ts` gives: two windows are two registries, and a
@@ -2688,21 +2874,312 @@ export function createBrowserState(
    * change be recognised — two narrowings of one wire snapshot are two keys and the
    * second gets its own entry, as it always has.
    *
+   * **The generation is the one the conflict *arrived* at, and a caller that omits
+   * it says "now".** All six save wrappers do omit it, and that is honest for them:
+   * a refusal is registered in the same synchronous block the answer arrived in.
+   * A **retained** observation is the one case where the two differ — it arrived
+   * while a write was in flight and is registered after that write settled, with a
+   * committing write's own projection replacement in between — so
+   * {@link beginWrite} passes the generation it recorded when it took the
+   * observation in. Nothing in TypeScript distinguishes an honest generation from a
+   * convenient one; the default is what a caller with nothing to say gets.
+   *
    * @param document - The file the conflict is about.
    * @param source - Where the conflict came from, as the memoized origin object.
+   * @param generation - That file's projection generation when this conflict
+   *   arrived. Defaults to the current one.
    */
-  function rememberTheConflict(document: DocumentId, source: ConflictSource): void {
+  function rememberTheConflict(
+    document: DocumentId,
+    source: ConflictSource,
+    generation: number = projectionGenerationOf(document)
+  ): void {
     if (conflictOrigins.has(source)) {
       // Already registered, at the generation it really arrived at. `WeakMap.has`
       // on an object key runs no user code, so nothing can run between this test
-      // and the write below.
+      // and the two writes below.
       return;
     }
-    conflictOrigins.set(source, {
-      document,
-      generation: projectionGenerationOf(document)
-    });
+    conflictOrigins.set(source, { document, generation });
+    // **And this origin is the one that speaks for the file now** — Phase 2d-5-5b.
+    // Written here rather than at the call sites so that the two maps cannot be
+    // updated apart, and written *after* the first-registration test so that
+    // re-registering an outlived origin cannot make it standing again: that is the
+    // same defect first-registration-wins exists for, one map along.
+    standingConflicts.set(document, source);
   } // End of function rememberTheConflict()
+
+  /**
+   * What this state currently says speaks for one file, or `null`.
+   *
+   * @param document - The file.
+   * @returns The standing origin, or `null` when this state holds no conflict for
+   *   it.
+   */
+  function standingConflictFor(document: DocumentId): ConflictSource | null {
+    return standingConflicts.get(document) ?? null;
+  } // End of function standingConflictFor()
+
+  /**
+   * Arbitrates one observation against what stands, and registers what wins.
+   *
+   * **The one place a verdict becomes a registration**, and every arm that names a
+   * new origin goes through {@link rememberTheConflict}, so the origin map, the
+   * standing map and the generation an origin arrived at are written by one
+   * function. `coalesced` and `notLater` register nothing: ruling 25 says the
+   * watcher observation must not replace the standing conflict's model, its
+   * messages **or its source identity**, and registering it would replace the last
+   * of the three.
+   *
+   * **The uncertainty operand is read here and once**, from this state's own set,
+   * so the arbitration is made against the same answer the verdict reports.
+   *
+   * **Every state operand is captured before the arbitration and re-read after
+   * it** (this phase's review, finding 2). Deciding costs two kinds of
+   * caller-controlled read — `standingConflictOf` walks the standing origin, and
+   * `arbitrateObservation` walks the arriving observation — and a property read
+   * runs arbitrary code through a getter or a `Proxy` trap, which can re-enter this
+   * state through any of its methods: register a newer conflict, open a write
+   * barrier, replace the projection. Registering afterwards without looking would
+   * overwrite that newer origin with this older verdict, and last-registration-wins
+   * means nothing would refuse it. So the four facts this verdict was decided
+   * against are compared with the four that hold at the spend, and a verdict
+   * decided against a state that is gone registers nothing.
+   *
+   * **What it does then is retain the observation and answer `retained`**, which is
+   * the conservative direction and not a dropped reading: an observation held is an
+   * observation no one has acted on, and the next settlement of a write for that
+   * file releases it. **If no write is ever made for that file again, it stays
+   * held** — `open()` is the only other thing that clears the table, and nothing in
+   * TypeScript says a held observation will be looked at.
+   *
+   * @param document - The file, read off the observation by the caller and taken
+   *   once.
+   * @param observation - The narrowed observation.
+   * @param arrival - That file's projection generation when this observation
+   *   arrived, which is what a registration records.
+   * @returns What was decided.
+   */
+  function arbitrateHere(
+    document: DocumentId,
+    observation: ExternalConflictObservation,
+    arrival: number
+  ): ObservationVerdict {
+    const standing = standingConflicts.get(document);
+    const uncertain = uncertainWrites.has(document);
+    const generation = projectionGenerationOf(document);
+    const verdict = arbitrateObservation(
+      standing === undefined ? null : standingConflictOf(standing),
+      observation,
+      uncertain
+    );
+    if (
+      standingConflicts.get(document) !== standing ||
+      uncertainWrites.has(document) !== uncertain ||
+      projectionGenerationOf(document) !== generation ||
+      (writesInFlight.get(document) ?? 0) > 0
+    ) {
+      // **The state this verdict was decided against moved while it was being
+      // decided**, so the verdict is about a window that is gone: a newer origin
+      // may stand, a write may now be in flight, or the projection this observation
+      // would be registered against may have been replaced. All four reads here are
+      // of this state's own tables — a `Map` keyed by a `DocumentId` and a `Set` of
+      // them — so nothing can run between them and the registration below.
+      retainObservation(document, observation, arrival);
+      return { kind: 'retained' };
+    }
+    switch (verdict.kind) {
+      case 'raised':
+      case 'raisedWithoutReload':
+      case 'supersedes':
+        // **The newer observation is registered as its own origin**, which is the
+        // obligation Phase 2d-5-5a's first-registration-wins rule hands this one:
+        // re-registering the origin it replaces would write nothing, so a
+        // supersession that expected the standing entry to move would silently
+        // leave the outlived one in place. **At the generation this observation
+        // arrived at**, never at today's: see {@link rememberTheConflict}.
+        rememberTheConflict(document, verdict.source, arrival);
+        return verdict;
+      case 'coalesced':
+      case 'notLater':
+        return verdict;
+      default: {
+        const unreachable: never = verdict;
+        return unreachable;
+      }
+    }
+  } // End of function arbitrateHere()
+
+  /**
+   * Takes one observation into ruling 27's barrier, keeping the newer of the two.
+   *
+   * **The only writer of `retainedObservations`**, so the rule that an arrival
+   * generation travels with the observation it belongs to cannot be written down in
+   * two places and differ. Coalescing is `newestObservationOf`'s: a strictly
+   * greater sequence replaces what is held, and an equal or lower one leaves it —
+   * **with the generation it was held at**, because that reading is the one that is
+   * still being kept.
+   *
+   * @param document - The file.
+   * @param observation - The observation that arrived.
+   * @param arrival - That file's projection generation at this arrival.
+   */
+  function retainObservation(
+    document: DocumentId,
+    observation: ExternalConflictObservation,
+    arrival: number
+  ): void {
+    const held = retainedObservations.get(document) ?? null;
+    const kept = newestObservationOf(held === null ? null : held.observation, observation);
+    retainedObservations.set(
+      document,
+      held !== null && kept === held.observation
+        ? held
+        : { observation: kept, generation: arrival }
+    );
+  } // End of function retainObservation()
+
+  /**
+   * Opens ruling 27's barrier for one file and hands back the one way to close it.
+   *
+   * **A lease rather than a bare count**, for `writeSurfaceRegistry.ts`'s reason:
+   * the lease is one-shot, so a wrapper that somehow closed it twice closes the
+   * barrier once, and two overlapping writes each hold their own.
+   *
+   * **Two methods, and the split is this phase's review, finding 3.** `expect`
+   * records what the write has established without releasing anything; `close`
+   * releases, and is what the six wrappers call from a `finally`. The barrier is
+   * therefore closed on **every** exit a wrapper has, including an exception — a
+   * rejected command, a reporter that threw, a re-read that threw — where the
+   * previous shape left the file barriered for the life of the session and its
+   * reconciliation silently dead.
+   *
+   * **What `close` settles on when nothing was expected is `uncertain`, and that is
+   * a decision rather than a default.** An exception before the command answered
+   * leaves this application unable to say whether the file was written, and
+   * `uncertain` is what "cannot be attributed" is called; it forbids automatic
+   * reload for that file until a later write of this window's own ends on a named
+   * revision or `open()` replaces the workspace. An exception *after* the answer
+   * settles on what the answer established, because that is known and losing it
+   * would mark a file unattributable for a failure that has nothing to do with the
+   * disk.
+   *
+   * **Nothing in TypeScript forces a caller to close at all**, and a wrapper that
+   * dropped the lease would still leave the barrier open; the `finally` at each of
+   * the six call sites is the whole of what closes it.
+   *
+   * @param document - The file being written.
+   * @returns The lease: `expect` records, `close` releases exactly once.
+   */
+  function beginWrite(document: DocumentId): WriteLease {
+    writesInFlight.set(document, (writesInFlight.get(document) ?? 0) + 1);
+    let settled = false;
+    // What this write has established so far, or `null` while it has established
+    // nothing. Overwritten rather than merged: a later reading of one write's own
+    // outcome supersedes an earlier one.
+    let expected: WriteSettlement | null = null;
+    return {
+      /**
+       * Records what this write established; see {@link WriteLease.expect}.
+       *
+       * @param settlement - What the answer establishes about the file.
+       */
+      expect(settlement: WriteSettlement): void {
+        expected = settlement;
+      },
+      /** Releases the barrier once; see {@link WriteLease.close}. */
+      close(): void {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        const settlement: WriteSettlement = expected ?? { kind: 'uncertain' };
+        // **The uncertainty is recorded before anything is released**, so a release
+        // that arbitrates a held observation arbitrates it under what this write
+        // just established. An `ended` outcome names the revision the file holds and
+        // therefore ends an earlier uncertainty; `nothingWritten` establishes
+        // nothing new and leaves one standing.
+        if (settlement.kind === 'uncertain') {
+          uncertainWrites.add(document);
+        } else if (settlement.kind === 'ended') {
+          uncertainWrites.delete(document);
+        }
+        const held = (writesInFlight.get(document) ?? 1) - 1;
+        if (held > 0) {
+          // Another write of this file is still out, so the barrier stays closed
+          // and what it holds is left for that one's settlement to release.
+          writesInFlight.set(document, held);
+          return;
+        }
+        writesInFlight.delete(document);
+        const retained = retainedObservations.get(document) ?? null;
+        // The window the held observation arrived at, or — when nothing is held and
+        // the arms below reach no arbitration — this one.
+        const arrival =
+          retained === null ? projectionGenerationOf(document) : retained.generation;
+        const release = releaseBarrier(
+          settlement,
+          retained === null ? null : retained.observation
+        );
+        switch (release.kind) {
+          case 'nothingRetained':
+            return;
+          case 'writtenHere':
+            // A reading of exactly the bytes this transaction ended on, so it is
+            // not news about a change. It is dropped rather than arbitrated —
+            // arbitrating it would supersede nothing and coalesce into whatever
+            // stands, which is an answer about a conflict rather than about a
+            // write.
+            retainedObservations.delete(document);
+            return;
+          case 'arbitrate':
+            retainedObservations.delete(document);
+            // **Arbitrated at the generation it arrived at, not at this one.** A
+            // committing write replaced this file's projection before this release
+            // ran — the wrappers close after their own adoption, deliberately — so
+            // registering at today's generation would tell `adoptDiskVersion` that
+            // this observation had seen a window it never saw (finding 1).
+            arbitrateHere(document, release.observation, arrival);
+            return;
+          default: {
+            const unreachable: never = release;
+            return unreachable;
+          }
+        } // End of the switch over what the barrier released
+      } // End of function close()
+    };
+  } // End of function beginWrite()
+
+  /**
+   * What one of the six writing wrappers' answers settled as (ruling 27).
+   *
+   * **One mapping for all six**, so a wrapper cannot invent a fourth reading of its
+   * own outcome. `saved` names the revision the transaction ended on whether or not
+   * it committed — `committed: false` is a documented success and the file holds
+   * that revision either way — and both `refused` and `conflict` wrote nothing.
+   *
+   * @param outcome - The transaction's own arm and the revision a `saved` carries.
+   * @returns The settlement.
+   */
+  function settlementOfOutcome(
+    outcome:
+      | { readonly outcome: 'saved'; readonly revision: ContentRevision }
+      | { readonly outcome: 'refused' | 'conflict' }
+  ): WriteSettlement {
+    return outcome.outcome === 'saved'
+      ? { kind: 'ended', revision: outcome.revision }
+      : { kind: 'nothingWritten' };
+  } // End of function settlementOfOutcome()
+
+  /**
+   * What a rejected command settled as (ruling 27).
+   *
+   * @param written - `mayHaveWritten` of the failure, taken by the caller.
+   * @returns The settlement.
+   */
+  function settlementOfFailure(written: boolean): WriteSettlement {
+    return written ? { kind: 'uncertain' } : { kind: 'nothingWritten' };
+  } // End of function settlementOfFailure()
 
   /**
    * Takes the next re-read generation for one document.
@@ -3555,6 +4032,24 @@ export function createBrowserState(
         // since; either way this window has no business installing it.
         return releaseReservation();
       }
+      if (standingConflicts.get(origin.document) !== source) {
+        // **Superseded, which is ruling 26's "any pending reload confirmation
+        // withdrawn"** — Phase 2d-5-5b. A strictly later observation replaced this
+        // conflict's disk side, so the snapshot it carries is a reading the file has
+        // moved on from and installing it would move the window onto older bytes and
+        // report success for it. That is the same failure the generation comparison
+        // below refuses, in the one shape it cannot see: a supersession installs
+        // nothing, so no projection generation moves.
+        //
+        // **Placed before the `alreadyThere` arm deliberately.** A window that
+        // happens to hold exactly these bytes would be told *you are already
+        // there* about a file a later reading says has changed again, which is a
+        // true sentence that leaves a false impression; a refusal is the
+        // conservative answer and the person may act on the conflict that stands.
+        // `Map.get` on a `DocumentId` runs no user code, and `source` was read once
+        // above, so nothing runs between this comparison and the two operands.
+        return releaseReservation();
+      }
       const held = viewOf(origin.document);
       if (held === undefined) {
         // The document is no longer projected here at all — a replaced workspace,
@@ -3606,6 +4101,45 @@ export function createBrowserState(
       return source;
     }, // End of function rememberExternalConflict()
 
+    observeExternalChange(observation: ExternalConflictObservation): ObservationVerdict {
+      // **The caller-controlled read taken first, and once**, the same idiom
+      // `rememberExternalConflict` above and `adoptDiskVersion` use: `observation`
+      // is a value a caller assembled, so `document` can be a getter that answers
+      // one file to the barrier test and another to the arbitration.
+      const document = observation.document;
+      // **The window this observation arrives at, read here and carried from
+      // here**, whichever of the two paths below it takes: a registration records
+      // the generation a conflict arrived at, and for a retained observation that
+      // is this one and not the one its release will run at (finding 1).
+      const arrival = projectionGenerationOf(document);
+      if ((writesInFlight.get(document) ?? 0) > 0) {
+        // **Ruling 27's barrier.** A write this window started is still out, so what
+        // is on disk cannot be attributed yet: it is held and coalesced with
+        // whatever was already held, and nothing is applied until the write settles.
+        retainObservation(document, observation, arrival);
+        return { kind: 'retained' };
+      }
+      return arbitrateHere(document, observation, arrival);
+    }, // End of function observeExternalChange()
+
+    standingConflictFor(document: DocumentId): ConflictSource | null {
+      return standingConflictFor(document);
+    },
+
+    writeInFlight(document: DocumentId): boolean {
+      return (writesInFlight.get(document) ?? 0) > 0;
+    },
+
+    retainedObservationFor(document: DocumentId): ExternalConflictObservation | null {
+      // The generation the barrier keeps beside it is this module's bookkeeping and
+      // no reader's business: what a caller can ask is *which reading is held*.
+      return retainedObservations.get(document)?.observation ?? null;
+    },
+
+    writeOutcomeUncertain(document: DocumentId): boolean {
+      return uncertainWrites.has(document);
+    },
+
     async open(root: string | null): Promise<void> {
       const generation = ++openGeneration;
       // **The reconciliation cursor goes with the workspace, and it goes first.**
@@ -3640,6 +4174,21 @@ export function createBrowserState(
       // cannot un-cancel anything: the bump above has already invalidated every
       // lookup that could have read one.
       projectionGenerations.clear();
+      // **And what this state had arbitrated about the workspace being closed** —
+      // Phase 2d-5-5b. A standing conflict names bytes of a file *that* workspace
+      // held, a retained observation is a reading admitted under an epoch that is
+      // ending, and an uncertain write is uncertainty about a file this window is
+      // about to stop describing; carrying any of the three would arbitrate the new
+      // workspace's observations against the old one's facts.
+      //
+      // **`writesInFlight` is deliberately not cleared**, because a promise that is
+      // still out will settle and decrement it: zeroing the count here would open a
+      // barrier while its write was still running, which is the unsafe direction.
+      // The maps it protects are empty by then, so a settlement that lands after
+      // this releases nothing.
+      standingConflicts.clear();
+      retainedObservations.clear();
+      uncertainWrites.clear();
 
       // *Everything* the previous workspace decided goes, not only the parts
       // that obviously belong to a file: a sidebar filter naming document 3 and
@@ -3964,101 +4513,126 @@ export function createBrowserState(
         // claiming it.
         return { kind: 'notAttempted' };
       }
-      const answer = await commands.moveMatch(
-        match,
-        after,
-        // **The caller's, unchanged**, and never `view.revision`: see this method's
-        // JSDoc. Reading the projection here rebases a move the window has moved on
-        // from, and turns the conflict that should stop it into a commit.
-        baseRevision,
-        acknowledgement
-      );
-      if (!answer.ok) {
-        // A save that failed is not a workspace that failed, so the window keeps
-        // showing the configuration it was showing — but *which* bytes it is
-        // showing of this one file is a different question, and `mayHaveWritten`
-        // is the only thing that answers it. A failure after the rename means the
-        // file may already hold the moved snippet: the command layer drops its own
-        // cached parse in exactly that case, and a window that did not do the same
-        // would go on drawing the pre-save order and the pre-save text over a file
-        // that has moved on.
-        //
-        // **The answer carries it**, which is the 2c-2 review's first finding
-        // applied here at 2c-3b-1: a bare `null` was indistinguishable from
-        // `noWorkspaceOpen`, and a screen that renders both as *nothing was
-        // written* states the opposite of what the disk may hold.
-        report(answer.failure);
-        const written = mayHaveWritten(answer.failure);
-        if (written) {
-          forgetFileText();
-          await adoptTheDocumentOnDisk(match.document, null, null);
-          await readFileText();
-        }
-        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
-      }
-
-      let adoption: InvalidationStatus = { kind: 'notOwed' };
-      if (answer.value.outcome === 'saved') {
-        // **A `Saved` does not mean the bytes changed.** `committed: false` is a
-        // documented success: a candidate byte-identical to what the file already
-        // held is not written, because every rename installs a new inode for
-        // nothing — and moving one of two identical snippets produces exactly
-        // that. What makes this screen out of date is therefore not the arm but
-        // one of two facts: the file was rewritten, or the revision the
-        // transaction ended on is not the one this state was projecting, which is
-        // a file some other program changed under the lock's two reads.
-        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
-        if (outOfDate) {
-          // The viewer's snapshot is of bytes that have just been replaced. There
-          // is one text cache to drop since 2c-4a-2; there were two, and forgetting
-          // only this one left a conflict capture for this same file behind.
-          forgetFileText();
-          // **The one adoption that passes an attribution**, which is the fix
-          // `docs/decisions/2c-3b-2-window-reading.md` section 7.1 prescribes: a
-          // repair after a committed move must not tell the person their file
-          // changed on disk when the reorder is the write they asked for. It is
-          // passed only for a commit — `committed: false` here means the move
-          // wrote nothing and this screen is out of date because the *revision*
-          // moved, which is another writer's doing — and this method's
-          // `mayHaveWritten` path above keeps the default for the same reason:
-          // an uncertain write cannot claim the reorder, and the sentence that
-          // claims less wins.
-          const stale = await adoptTheDocumentOnDisk(
-            match.document,
-            match,
-            answer.value.moved,
-            answer.value.committed ? 'requestedMove' : 'externalChange'
-          );
-          if (stale === null) {
-            adoption = { kind: 'done' };
-          } else {
-            // **The commit happened and this window could not read the file back.**
-            // Everything it holds for that file was minted from bytes that have
-            // been replaced, so it is dropped rather than left on screen: a stale
-            // projection is not a smaller problem than an unprojected file, it is
-            // the same problem told as a fact. The failure travels back beside the
-            // committed outcome, never in place of it (`PROGRESS.md` D2).
-            forgetTheReplacedDocument(match.document);
-            adoption = { kind: 'failed', failure: stale };
+      // **Ruling 27's barrier opens here and closes in the `finally` below.**
+      // While it is open, a watcher observation of this file is held rather than
+      // applied, because what is on disk cannot be attributed to a writer until
+      // this promise settles. See `beginWrite`.
+      const write = beginWrite(match.document);
+      try {
+        const answer = await commands.moveMatch(
+          match,
+          after,
+          // **The caller's, unchanged**, and never `view.revision`: see this method's
+          // JSDoc. Reading the projection here rebases a move the window has moved on
+          // from, and turns the conflict that should stop it into a commit.
+          baseRevision,
+          acknowledgement
+        );
+        if (!answer.ok) {
+          // A save that failed is not a workspace that failed, so the window keeps
+          // showing the configuration it was showing — but *which* bytes it is
+          // showing of this one file is a different question, and `mayHaveWritten`
+          // is the only thing that answers it. A failure after the rename means the
+          // file may already hold the moved snippet: the command layer drops its own
+          // cached parse in exactly that case, and a window that did not do the same
+          // would go on drawing the pre-save order and the pre-save text over a file
+          // that has moved on.
+          //
+          // **The answer carries it**, which is the 2c-2 review's first finding
+          // applied here at 2c-3b-1: a bare `null` was indistinguishable from
+          // `noWorkspaceOpen`, and a screen that renders both as *nothing was
+          // written* states the opposite of what the disk may hold.
+          const written = mayHaveWritten(answer.failure);
+          // **What this failure establishes, recorded before anything is done about
+          // it**: `uncertain` when the write may have written, nothing-written
+          // otherwise. It is the `finally` below that releases the barrier, so a
+          // reporter or a re-read that throws still closes it on this settlement.
+          write.expect(settlementOfFailure(written));
+          report(answer.failure);
+          if (written) {
+            forgetFileText();
+            await adoptTheDocumentOnDisk(match.document, null, null);
+            await readFileText();
           }
-          await readFileText();
+          return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
         }
-      } else if (answer.value.outcome === 'conflict') {
-        // **A conflict installs nothing here, and that is 2c-4a-2's central
-        // change.** Nothing was written; the command layer refreshed its own cache
-        // and handed back what it read, and this state deliberately does not take
-        // it. Installing it re-ordered the snippet list and moved the selection for
-        // a save that changed no byte, leaving the person's draft beside a
-        // projection that no longer described it (consult Q2).
-        // `BrowserState.adoptDiskVersion` is the one transition that installs it,
-        // and only a confirmed reload can reach it.
-        //
-        // What this arm does do is **write down** which projection the conflict
-        // describes, which is what lets that adoption refuse a window that has
-        // moved on since. Registering is not adopting.
-        rememberTheConflict(match.document, saveConflictSource(answer.value));
+
+        // **What the transaction established, recorded before the adoption below**,
+        // and released by the `finally` after it (ruling 27): a commit completes its
+        // own projection invalidation first, so an observation released then is
+        // arbitrated against the window the commit left rather than the one it found.
+        // Recording it here rather than beside that release is what keeps an
+        // exception in between from settling a known outcome as `uncertain`.
+        write.expect(settlementOfOutcome(answer.value));
+
+        let adoption: InvalidationStatus = { kind: 'notOwed' };
+        if (answer.value.outcome === 'saved') {
+          // **A `Saved` does not mean the bytes changed.** `committed: false` is a
+          // documented success: a candidate byte-identical to what the file already
+          // held is not written, because every rename installs a new inode for
+          // nothing — and moving one of two identical snippets produces exactly
+          // that. What makes this screen out of date is therefore not the arm but
+          // one of two facts: the file was rewritten, or the revision the
+          // transaction ended on is not the one this state was projecting, which is
+          // a file some other program changed under the lock's two reads.
+          const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+          if (outOfDate) {
+            // The viewer's snapshot is of bytes that have just been replaced. There
+            // is one text cache to drop since 2c-4a-2; there were two, and forgetting
+            // only this one left a conflict capture for this same file behind.
+            forgetFileText();
+            // **The one adoption that passes an attribution**, which is the fix
+            // `docs/decisions/2c-3b-2-window-reading.md` section 7.1 prescribes: a
+            // repair after a committed move must not tell the person their file
+            // changed on disk when the reorder is the write they asked for. It is
+            // passed only for a commit — `committed: false` here means the move
+            // wrote nothing and this screen is out of date because the *revision*
+            // moved, which is another writer's doing — and this method's
+            // `mayHaveWritten` path above keeps the default for the same reason:
+            // an uncertain write cannot claim the reorder, and the sentence that
+            // claims less wins.
+            const stale = await adoptTheDocumentOnDisk(
+              match.document,
+              match,
+              answer.value.moved,
+              answer.value.committed ? 'requestedMove' : 'externalChange'
+            );
+            if (stale === null) {
+              adoption = { kind: 'done' };
+            } else {
+              // **The commit happened and this window could not read the file back.**
+              // Everything it holds for that file was minted from bytes that have
+              // been replaced, so it is dropped rather than left on screen: a stale
+              // projection is not a smaller problem than an unprojected file, it is
+              // the same problem told as a fact. The failure travels back beside the
+              // committed outcome, never in place of it (`PROGRESS.md` D2).
+              forgetTheReplacedDocument(match.document);
+              adoption = { kind: 'failed', failure: stale };
+            }
+            await readFileText();
+          }
+        } else if (answer.value.outcome === 'conflict') {
+          // **A conflict installs nothing here, and that is 2c-4a-2's central
+          // change.** Nothing was written; the command layer refreshed its own cache
+          // and handed back what it read, and this state deliberately does not take
+          // it. Installing it re-ordered the snippet list and moved the selection for
+          // a save that changed no byte, leaving the person's draft beside a
+          // projection that no longer described it (consult Q2).
+          // `BrowserState.adoptDiskVersion` is the one transition that installs it,
+          // and only a confirmed reload can reach it.
+          //
+          // What this arm does do is **write down** which projection the conflict
+          // describes, which is what lets that adoption refuse a window that has
+          // moved on since. Registering is not adopting.
+          rememberTheConflict(match.document, saveConflictSource(answer.value));
+        }
+        return { kind: 'answered', result: answer.value, adoption };
+      } finally {
+        // **Ruling 27's barrier closes here, on every exit this wrapper has** —
+        // including an exception: `close` releases it on whatever the answer above
+        // established, or on `uncertain` when nothing did. See `beginWrite`.
+        write.close();
       }
-      return { kind: 'answered', result: answer.value, adoption };
     }, // End of function moveMatch()
 
     async saveMatch(
@@ -4078,79 +4652,104 @@ export function createBrowserState(
         // a comment claiming it.
         return { kind: 'notAttempted' };
       }
-      const answer = await commands.saveMatch(
-        id,
-        draft,
-        // **The caller's, unchanged**, and never `view.revision`: see this method's
-        // JSDoc. Reading the projection here rebases a draft the window has moved
-        // on from, and turns the conflict that should stop it into a commit. The
-        // `view` lookup above stays, because without a projection this state can
-        // neither adopt what a commit produces nor tell whether its own projection
-        // went out of date.
-        baseRevision,
-        acknowledgement
-      );
-      if (!answer.ok) {
-        // A save that failed is not a workspace that failed, so the window keeps
-        // showing the configuration it was showing — but `mayHaveWritten` is the
-        // only thing that says whether it is still showing this *file* correctly. A
-        // failure at or after the rename means the file may already hold the edited
-        // snippet, and a window that went on drawing the pre-save projection and the
-        // pre-save text would be describing bytes that are no longer there.
-        //
-        // **The answer carries it**, which is the 2c-2 review's first finding: a
-        // bare `null` here is indistinguishable from `noWorkspaceOpen`, and a screen
-        // that renders both as *nothing was written* states the opposite of what the
-        // disk may hold.
-        report(answer.failure);
-        const written = mayHaveWritten(answer.failure);
-        if (written) {
-          forgetFileText();
-          await adoptTheDocumentOnDisk(id.document, null, null);
-          await readFileText();
-        }
-        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
-      }
-
-      let adoption: InvalidationStatus = { kind: 'notOwed' };
-      if (answer.value.outcome === 'saved') {
-        // **A `Saved` does not mean the bytes changed.** `committed: false` is a
-        // documented success — a draft whose every field already held the value it
-        // asked for derives no edit — so what makes this screen out of date is one
-        // of two facts: the file was rewritten, or the revision the transaction
-        // ended on is not the one this state was projecting, which is a file some
-        // other program changed under the lock's two reads.
-        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
-        if (outOfDate) {
-          forgetFileText();
-          // **The adoption the consult's Q6 asks for**, performed here so that a
-          // caller cannot obtain this result without it. `moved` is the snippet's
-          // identity in the new revision, and the selection follows it — but only
-          // when the selection is still the snippet that was saved, which is the
-          // review's fourth finding: a person who clicked another snippet while the
-          // save was in flight must not be dragged back to this one.
-          const stale = await adoptTheDocumentOnDisk(id.document, id, answer.value.moved);
-          if (stale === null) {
-            adoption = { kind: 'done' };
-          } else {
-            // **The commit happened and this window could not read the file back.**
-            // Everything it holds for that file was minted from bytes that have been
-            // replaced, so it is dropped rather than left on screen: a stale
-            // projection is not a smaller problem than an unprojected file, it is
-            // the same problem told as a fact. The failure travels back beside the
-            // committed outcome, never in place of it (`PROGRESS.md` D2).
-            forgetTheReplacedDocument(id.document);
-            adoption = { kind: 'failed', failure: stale };
+      // **Ruling 27's barrier opens here and closes in the `finally` below.**
+      // While it is open, a watcher observation of this file is held rather than
+      // applied, because what is on disk cannot be attributed to a writer until
+      // this promise settles. See `beginWrite`.
+      const write = beginWrite(id.document);
+      try {
+        const answer = await commands.saveMatch(
+          id,
+          draft,
+          // **The caller's, unchanged**, and never `view.revision`: see this method's
+          // JSDoc. Reading the projection here rebases a draft the window has moved
+          // on from, and turns the conflict that should stop it into a commit. The
+          // `view` lookup above stays, because without a projection this state can
+          // neither adopt what a commit produces nor tell whether its own projection
+          // went out of date.
+          baseRevision,
+          acknowledgement
+        );
+        if (!answer.ok) {
+          // A save that failed is not a workspace that failed, so the window keeps
+          // showing the configuration it was showing — but `mayHaveWritten` is the
+          // only thing that says whether it is still showing this *file* correctly. A
+          // failure at or after the rename means the file may already hold the edited
+          // snippet, and a window that went on drawing the pre-save projection and the
+          // pre-save text would be describing bytes that are no longer there.
+          //
+          // **The answer carries it**, which is the 2c-2 review's first finding: a
+          // bare `null` here is indistinguishable from `noWorkspaceOpen`, and a screen
+          // that renders both as *nothing was written* states the opposite of what the
+          // disk may hold.
+          const written = mayHaveWritten(answer.failure);
+          // **What this failure establishes, recorded before anything is done about
+          // it**: `uncertain` when the write may have written, nothing-written
+          // otherwise. It is the `finally` below that releases the barrier, so a
+          // reporter or a re-read that throws still closes it on this settlement.
+          write.expect(settlementOfFailure(written));
+          report(answer.failure);
+          if (written) {
+            forgetFileText();
+            await adoptTheDocumentOnDisk(id.document, null, null);
+            await readFileText();
           }
-          await readFileText();
+          return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
         }
-      } else if (answer.value.outcome === 'conflict') {
-        // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
-        // says why, and the rule is one rule for all six writing wrappers. What is
-        // written down is which projection the conflict describes.
-        rememberTheConflict(id.document, saveConflictSource(answer.value));
+
+        // **What the transaction established, recorded before the adoption below**,
+        // and released by the `finally` after it (ruling 27): a commit completes its
+        // own projection invalidation first, so an observation released then is
+        // arbitrated against the window the commit left rather than the one it found.
+        // Recording it here rather than beside that release is what keeps an
+        // exception in between from settling a known outcome as `uncertain`.
+        write.expect(settlementOfOutcome(answer.value));
+
+        let adoption: InvalidationStatus = { kind: 'notOwed' };
+        if (answer.value.outcome === 'saved') {
+          // **A `Saved` does not mean the bytes changed.** `committed: false` is a
+          // documented success — a draft whose every field already held the value it
+          // asked for derives no edit — so what makes this screen out of date is one
+          // of two facts: the file was rewritten, or the revision the transaction
+          // ended on is not the one this state was projecting, which is a file some
+          // other program changed under the lock's two reads.
+          const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+          if (outOfDate) {
+            forgetFileText();
+            // **The adoption the consult's Q6 asks for**, performed here so that a
+            // caller cannot obtain this result without it. `moved` is the snippet's
+            // identity in the new revision, and the selection follows it — but only
+            // when the selection is still the snippet that was saved, which is the
+            // review's fourth finding: a person who clicked another snippet while the
+            // save was in flight must not be dragged back to this one.
+            const stale = await adoptTheDocumentOnDisk(id.document, id, answer.value.moved);
+            if (stale === null) {
+              adoption = { kind: 'done' };
+            } else {
+              // **The commit happened and this window could not read the file back.**
+              // Everything it holds for that file was minted from bytes that have been
+              // replaced, so it is dropped rather than left on screen: a stale
+              // projection is not a smaller problem than an unprojected file, it is
+              // the same problem told as a fact. The failure travels back beside the
+              // committed outcome, never in place of it (`PROGRESS.md` D2).
+              forgetTheReplacedDocument(id.document);
+              adoption = { kind: 'failed', failure: stale };
+            }
+            await readFileText();
+          }
+        } else if (answer.value.outcome === 'conflict') {
+          // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
+          // says why, and the rule is one rule for all six writing wrappers. What is
+          // written down is which projection the conflict describes.
+          rememberTheConflict(id.document, saveConflictSource(answer.value));
+        }
+        return { kind: 'answered', result: answer.value, adoption };
+      } finally {
+        // **Ruling 27's barrier closes here, on every exit this wrapper has** —
+        // including an exception: `close` releases it on whatever the answer above
+        // established, or on `uncertain` when nothing did. See `beginWrite`.
+        write.close();
       }
-      return { kind: 'answered', result: answer.value, adoption };
     }, // End of function saveMatch()
 
     async createMatch(
@@ -4174,60 +4773,89 @@ export function createBrowserState(
       // the person moved the selection while the create was in flight, and after
       // the `await` there is no way to tell.
       const heldBefore = selected;
-      const answer = await commands.createMatch(
-        document,
-        newMatch,
-        position,
-        // **The caller's, unchanged**, and never `view.revision`: see this method's
-        // JSDoc. Reading the projection here rebases a form the window has moved
-        // on from, and turns the conflict that should stop it into a commit.
-        baseRevision,
-        acknowledgement
-      );
-      if (!answer.ok) {
-        // The same rule a failed field save follows: a save that failed is not a
-        // workspace that failed, and `mayHaveWritten` is the only thing that says
-        // whether this window is still describing the file correctly.
-        report(answer.failure);
-        const written = mayHaveWritten(answer.failure);
-        if (written) {
-          forgetFileText();
-          await adoptTheDocumentOnDisk(document, null, null);
-          await readFileText();
-        }
-        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
-      }
-
-      let adoption: InvalidationStatus = { kind: 'notOwed' };
-      if (answer.value.outcome === 'saved') {
-        // A `committed: false` is a documented success and is very nearly
-        // unreachable for an insertion; the second half of the test is the one
-        // that matters here, as it does for a move: a revision the transaction
-        // ended on that is not the one this state was projecting is a file some
-        // other program changed under the lock's two reads.
-        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
-        if (outOfDate) {
-          forgetFileText();
-          const stale = await adoptTheCreatedSnippet(document, heldBefore, answer.value.moved);
-          if (stale === null) {
-            adoption = { kind: 'done' };
-          } else {
-            // The commit happened and this window could not read the file back, so
-            // everything it holds for that file was minted from bytes that have
-            // been replaced. It is dropped rather than left on screen, and the
-            // failure travels back beside the committed outcome (`PROGRESS.md` D2).
-            forgetTheReplacedDocument(document);
-            adoption = { kind: 'failed', failure: stale };
+      // **Ruling 27's barrier opens here and closes in the `finally` below.**
+      // While it is open, a watcher observation of this file is held rather than
+      // applied, because what is on disk cannot be attributed to a writer until
+      // this promise settles. See `beginWrite`.
+      const write = beginWrite(document);
+      try {
+        const answer = await commands.createMatch(
+          document,
+          newMatch,
+          position,
+          // **The caller's, unchanged**, and never `view.revision`: see this method's
+          // JSDoc. Reading the projection here rebases a form the window has moved
+          // on from, and turns the conflict that should stop it into a commit.
+          baseRevision,
+          acknowledgement
+        );
+        if (!answer.ok) {
+          // The same rule a failed field save follows: a save that failed is not a
+          // workspace that failed, and `mayHaveWritten` is the only thing that says
+          // whether this window is still describing the file correctly.
+          const written = mayHaveWritten(answer.failure);
+          // **What this failure establishes, recorded before anything is done about
+          // it**: `uncertain` when the write may have written, nothing-written
+          // otherwise. It is the `finally` below that releases the barrier, so a
+          // reporter or a re-read that throws still closes it on this settlement.
+          write.expect(settlementOfFailure(written));
+          report(answer.failure);
+          if (written) {
+            forgetFileText();
+            await adoptTheDocumentOnDisk(document, null, null);
+            await readFileText();
           }
-          await readFileText();
+          return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
         }
-      } else if (answer.value.outcome === 'conflict') {
-        // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
-        // says why, and the rule is one rule for all six writing wrappers. What is
-        // written down is which projection the conflict describes.
-        rememberTheConflict(document, saveConflictSource(answer.value));
+
+        // **What the transaction established, recorded before the adoption below**,
+        // and released by the `finally` after it (ruling 27): a commit completes its
+        // own projection invalidation first, so an observation released then is
+        // arbitrated against the window the commit left rather than the one it found.
+        // Recording it here rather than beside that release is what keeps an
+        // exception in between from settling a known outcome as `uncertain`.
+        write.expect(settlementOfOutcome(answer.value));
+
+        let adoption: InvalidationStatus = { kind: 'notOwed' };
+        if (answer.value.outcome === 'saved') {
+          // A `committed: false` is a documented success and is very nearly
+          // unreachable for an insertion; the second half of the test is the one
+          // that matters here, as it does for a move: a revision the transaction
+          // ended on that is not the one this state was projecting is a file some
+          // other program changed under the lock's two reads.
+          const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+          if (outOfDate) {
+            forgetFileText();
+            const stale = await adoptTheCreatedSnippet(
+              document,
+              heldBefore,
+              answer.value.moved
+            );
+            if (stale === null) {
+              adoption = { kind: 'done' };
+            } else {
+              // The commit happened and this window could not read the file back, so
+              // everything it holds for that file was minted from bytes that have
+              // been replaced. It is dropped rather than left on screen, and the
+              // failure travels back beside the committed outcome (`PROGRESS.md` D2).
+              forgetTheReplacedDocument(document);
+              adoption = { kind: 'failed', failure: stale };
+            }
+            await readFileText();
+          }
+        } else if (answer.value.outcome === 'conflict') {
+          // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
+          // says why, and the rule is one rule for all six writing wrappers. What is
+          // written down is which projection the conflict describes.
+          rememberTheConflict(document, saveConflictSource(answer.value));
+        }
+        return { kind: 'answered', result: answer.value, adoption };
+      } finally {
+        // **Ruling 27's barrier closes here, on every exit this wrapper has** —
+        // including an exception: `close` releases it on whatever the answer above
+        // established, or on `uncertain` when nothing did. See `beginWrite`.
+        write.close();
       }
-      return { kind: 'answered', result: answer.value, adoption };
     }, // End of function createMatch()
 
     async deleteMatch(
@@ -4255,39 +4883,64 @@ export function createBrowserState(
       // deletion resolves an identity to a *position*, so a base that is not the
       // parse the session was opened against is the one thing standing between a
       // stale confirmation and the removal of whatever now sits there.
-      const answer = await commands.deleteMatch(id, baseRevision, acknowledgement);
-      if (!answer.ok) {
-        report(answer.failure);
-        const written = mayHaveWritten(answer.failure);
-        if (written) {
-          forgetFileText();
-          await adoptTheDocumentOnDisk(id.document, null, null);
-          await readFileText();
-        }
-        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
-      }
-
-      let adoption: InvalidationStatus = { kind: 'notOwed' };
-      if (answer.value.outcome === 'saved') {
-        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
-        if (outOfDate) {
-          forgetFileText();
-          const stale = await adoptAfterTheDeletion(id.document, heldBefore);
-          if (stale === null) {
-            adoption = { kind: 'done' };
-          } else {
-            forgetTheReplacedDocument(id.document);
-            adoption = { kind: 'failed', failure: stale };
+      // **Ruling 27's barrier opens here and closes in the `finally` below.**
+      // While it is open, a watcher observation of this file is held rather than
+      // applied, because what is on disk cannot be attributed to a writer until
+      // this promise settles. See `beginWrite`.
+      const write = beginWrite(id.document);
+      try {
+        const answer = await commands.deleteMatch(id, baseRevision, acknowledgement);
+        if (!answer.ok) {
+          const written = mayHaveWritten(answer.failure);
+          // **What this failure establishes, recorded before anything is done about
+          // it**: `uncertain` when the write may have written, nothing-written
+          // otherwise. It is the `finally` below that releases the barrier, so a
+          // reporter or a re-read that throws still closes it on this settlement.
+          write.expect(settlementOfFailure(written));
+          report(answer.failure);
+          if (written) {
+            forgetFileText();
+            await adoptTheDocumentOnDisk(id.document, null, null);
+            await readFileText();
           }
-          await readFileText();
+          return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
         }
-      } else if (answer.value.outcome === 'conflict') {
-        // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
-        // says why, and the rule is one rule for all six writing wrappers. What is
-        // written down is which projection the conflict describes.
-        rememberTheConflict(id.document, saveConflictSource(answer.value));
+
+        // **What the transaction established, recorded before the adoption below**,
+        // and released by the `finally` after it (ruling 27): a commit completes its
+        // own projection invalidation first, so an observation released then is
+        // arbitrated against the window the commit left rather than the one it found.
+        // Recording it here rather than beside that release is what keeps an
+        // exception in between from settling a known outcome as `uncertain`.
+        write.expect(settlementOfOutcome(answer.value));
+
+        let adoption: InvalidationStatus = { kind: 'notOwed' };
+        if (answer.value.outcome === 'saved') {
+          const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+          if (outOfDate) {
+            forgetFileText();
+            const stale = await adoptAfterTheDeletion(id.document, heldBefore);
+            if (stale === null) {
+              adoption = { kind: 'done' };
+            } else {
+              forgetTheReplacedDocument(id.document);
+              adoption = { kind: 'failed', failure: stale };
+            }
+            await readFileText();
+          }
+        } else if (answer.value.outcome === 'conflict') {
+          // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
+          // says why, and the rule is one rule for all six writing wrappers. What is
+          // written down is which projection the conflict describes.
+          rememberTheConflict(id.document, saveConflictSource(answer.value));
+        }
+        return { kind: 'answered', result: answer.value, adoption };
+      } finally {
+        // **Ruling 27's barrier closes here, on every exit this wrapper has** —
+        // including an exception: `close` releases it on whatever the answer above
+        // established, or on `uncertain` when nothing did. See `beginWrite`.
+        write.close();
       }
-      return { kind: 'answered', result: answer.value, adoption };
     }, // End of function deleteMatch()
 
     async duplicateMatch(
@@ -4331,86 +4984,111 @@ export function createBrowserState(
         isTheSameIdentity(selected.id, match)
           ? { held: selected, generation: selectGeneration }
           : null;
-      const answer = await commands.duplicateMatch(
-        match,
-        // **The caller's, unchanged**, and never `view.revision`: see this
-        // method's JSDoc. Reading the projection here rebases a duplicate the
-        // window has moved on from, and turns the conflict that should stop it
-        // into a commit.
-        baseRevision,
-        acknowledgement
-      );
-      if (!answer.ok) {
-        // A save that failed is not a workspace that failed, so the window
-        // keeps showing the configuration it was showing — but `mayHaveWritten`
-        // is the only thing that says whether it is still showing this *file*
-        // correctly. A failure at or after the rename means the file may
-        // already hold the clone, and the cautious re-read below is attempted
-        // **without asserting that the duplicate exists** (consult Q8): the
-        // adoption is given no target and no `moved`, so nothing is selected on
-        // its account and the repair keeps the external sentences — an
-        // uncertain write cannot claim the copy.
-        report(answer.failure);
-        const written = mayHaveWritten(answer.failure);
-        if (written) {
-          forgetFileText();
-          await adoptTheDocumentOnDisk(match.document, null, null);
-          await readFileText();
-        }
-        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
-      }
-
-      let adoption: InvalidationStatus = { kind: 'notOwed' };
-      if (answer.value.outcome === 'saved') {
-        // **A `Saved` does not mean the bytes changed.** `committed: false` is
-        // a documented success and is practically unreachable for an insertion
-        // — a duplicate always changes the document — so the half that matters
-        // here is the second: a revision the transaction ended on that is not
-        // the one this state was projecting is a file some other program
-        // changed under the lock's two reads.
-        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
-        if (outOfDate) {
-          // The viewer's snapshot, which is the one text cache this window keeps
-          // since 2c-4a-2 — the same rule every writing wrapper follows.
-          forgetFileText();
-          // **The duplicate's own adoption, and the intent capture goes in
-          // whole** (the confirmation pass's finding): the decision to follow
-          // the clone is taken inside `adoptAfterTheDuplicate`, after its own
-          // await, in the same synchronous block that writes the selection —
-          // never here, where a value computed between the two awaits goes
-          // stale the moment the re-read yields. It also passes the duplicate's
-          // own attribution rather than the move's: `requestedDuplicate`'s
-          // sentences name the person's copy, where `requestedMove`'s say
-          // *reordered* — a claim an insertion would make false. Passed only
-          // for a commit; a `committed: false` here means the revision moved on
-          // its own, which is another writer's doing, and the external
-          // sentences are the accurate ones there.
-          const stale = await adoptAfterTheDuplicate(
-            match.document,
-            intent,
-            answer.value.moved,
-            answer.value.committed ? 'requestedDuplicate' : 'externalChange'
-          );
-          if (stale === null) {
-            adoption = { kind: 'done' };
-          } else {
-            // **The commit happened and this window could not read the file
-            // back.** Everything it holds for that file was minted from bytes
-            // that have been replaced, so it is dropped rather than left on
-            // screen, and the failure travels back beside the committed
-            // outcome, never in place of it (`PROGRESS.md` D2).
-            forgetTheReplacedDocument(match.document);
-            adoption = { kind: 'failed', failure: stale };
+      // **Ruling 27's barrier opens here and closes in the `finally` below.**
+      // While it is open, a watcher observation of this file is held rather than
+      // applied, because what is on disk cannot be attributed to a writer until
+      // this promise settles. See `beginWrite`.
+      const write = beginWrite(match.document);
+      try {
+        const answer = await commands.duplicateMatch(
+          match,
+          // **The caller's, unchanged**, and never `view.revision`: see this
+          // method's JSDoc. Reading the projection here rebases a duplicate the
+          // window has moved on from, and turns the conflict that should stop it
+          // into a commit.
+          baseRevision,
+          acknowledgement
+        );
+        if (!answer.ok) {
+          // A save that failed is not a workspace that failed, so the window
+          // keeps showing the configuration it was showing — but `mayHaveWritten`
+          // is the only thing that says whether it is still showing this *file*
+          // correctly. A failure at or after the rename means the file may
+          // already hold the clone, and the cautious re-read below is attempted
+          // **without asserting that the duplicate exists** (consult Q8): the
+          // adoption is given no target and no `moved`, so nothing is selected on
+          // its account and the repair keeps the external sentences — an
+          // uncertain write cannot claim the copy.
+          const written = mayHaveWritten(answer.failure);
+          // **What this failure establishes, recorded before anything is done about
+          // it**: `uncertain` when the write may have written, nothing-written
+          // otherwise. It is the `finally` below that releases the barrier, so a
+          // reporter or a re-read that throws still closes it on this settlement.
+          write.expect(settlementOfFailure(written));
+          report(answer.failure);
+          if (written) {
+            forgetFileText();
+            await adoptTheDocumentOnDisk(match.document, null, null);
+            await readFileText();
           }
-          await readFileText();
+          return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
         }
-      } else if (answer.value.outcome === 'conflict') {
-        // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
-        // says why, and the rule is one rule for all six writing wrappers. What is
-        // written down is which projection the conflict describes.
-        rememberTheConflict(match.document, saveConflictSource(answer.value));
+
+        // **What the transaction established, recorded before the adoption below**,
+        // and released by the `finally` after it (ruling 27): a commit completes its
+        // own projection invalidation first, so an observation released then is
+        // arbitrated against the window the commit left rather than the one it found.
+        // Recording it here rather than beside that release is what keeps an
+        // exception in between from settling a known outcome as `uncertain`.
+        write.expect(settlementOfOutcome(answer.value));
+
+        let adoption: InvalidationStatus = { kind: 'notOwed' };
+        if (answer.value.outcome === 'saved') {
+          // **A `Saved` does not mean the bytes changed.** `committed: false` is
+          // a documented success and is practically unreachable for an insertion
+          // — a duplicate always changes the document — so the half that matters
+          // here is the second: a revision the transaction ended on that is not
+          // the one this state was projecting is a file some other program
+          // changed under the lock's two reads.
+          const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+          if (outOfDate) {
+            // The viewer's snapshot, which is the one text cache this window keeps
+            // since 2c-4a-2 — the same rule every writing wrapper follows.
+            forgetFileText();
+            // **The duplicate's own adoption, and the intent capture goes in
+            // whole** (the confirmation pass's finding): the decision to follow
+            // the clone is taken inside `adoptAfterTheDuplicate`, after its own
+            // await, in the same synchronous block that writes the selection —
+            // never here, where a value computed between the two awaits goes
+            // stale the moment the re-read yields. It also passes the duplicate's
+            // own attribution rather than the move's: `requestedDuplicate`'s
+            // sentences name the person's copy, where `requestedMove`'s say
+            // *reordered* — a claim an insertion would make false. Passed only
+            // for a commit; a `committed: false` here means the revision moved on
+            // its own, which is another writer's doing, and the external
+            // sentences are the accurate ones there.
+            const stale = await adoptAfterTheDuplicate(
+              match.document,
+              intent,
+              answer.value.moved,
+              answer.value.committed ? 'requestedDuplicate' : 'externalChange'
+            );
+            if (stale === null) {
+              adoption = { kind: 'done' };
+            } else {
+              // **The commit happened and this window could not read the file
+              // back.** Everything it holds for that file was minted from bytes
+              // that have been replaced, so it is dropped rather than left on
+              // screen, and the failure travels back beside the committed
+              // outcome, never in place of it (`PROGRESS.md` D2).
+              forgetTheReplacedDocument(match.document);
+              adoption = { kind: 'failed', failure: stale };
+            }
+            await readFileText();
+          }
+        } else if (answer.value.outcome === 'conflict') {
+          // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
+          // says why, and the rule is one rule for all six writing wrappers. What is
+          // written down is which projection the conflict describes.
+          rememberTheConflict(match.document, saveConflictSource(answer.value));
+        }
+        return { kind: 'answered', result: answer.value, adoption };
+      } finally {
+        // **Ruling 27's barrier closes here, on every exit this wrapper has** —
+        // including an exception: `close` releases it on whatever the answer above
+        // established, or on `uncertain` when nothing did. See `beginWrite`.
+        write.close();
       }
-      return { kind: 'answered', result: answer.value, adoption };
     }, // End of function duplicateMatch()
 
     async saveRawDocument(
@@ -4434,69 +5112,97 @@ export function createBrowserState(
       const invalidate: ReloadAfterRawSave = async (invalidation) => {
         reprojection = await adoptTheReplacedDocument(invalidation.document);
       };
-      const answer = await commands.saveRawDocument(
-        document,
-        baseRevision,
-        text,
-        acknowledgement,
-        invalidate
-      );
-      if (!answer.ok) {
-        // Same rule as a failed move: a save that failed is not a workspace that
-        // failed, but `mayHaveWritten` decides whether this window is still
-        // describing the file correctly. A replacement that failed after its
-        // rename means the file may already hold a *whole new text*, so nothing
-        // cached for it can be vouched for — and the caller is told, because a
-        // screen that renders this as "nothing was written" states the opposite of
-        // what the disk may hold.
-        report(answer.failure);
-        const written = mayHaveWritten(answer.failure);
-        if (written) {
-          await adoptTheReplacedDocument(document);
+      // **Ruling 27's barrier opens here and closes in the `finally` below.**
+      // While it is open, a watcher observation of this file is held rather than
+      // applied, because what is on disk cannot be attributed to a writer until
+      // this promise settles. See `beginWrite`.
+      const write = beginWrite(document);
+      try {
+        const answer = await commands.saveRawDocument(
+          document,
+          baseRevision,
+          text,
+          acknowledgement,
+          invalidate
+        );
+        if (!answer.ok) {
+          // Same rule as a failed move: a save that failed is not a workspace that
+          // failed, but `mayHaveWritten` decides whether this window is still
+          // describing the file correctly. A replacement that failed after its
+          // rename means the file may already hold a *whole new text*, so nothing
+          // cached for it can be vouched for — and the caller is told, because a
+          // screen that renders this as "nothing was written" states the opposite of
+          // what the disk may hold.
+          const written = mayHaveWritten(answer.failure);
+          // **What this failure establishes, recorded before anything is done about
+          // it**: `uncertain` when the write may have written, nothing-written
+          // otherwise. It is the `finally` below that releases the barrier, so a
+          // reporter or a re-read that throws still closes it on this settlement.
+          write.expect(settlementOfFailure(written));
+          report(answer.failure);
+          if (written) {
+            await adoptTheReplacedDocument(document);
+          }
+          return { kind: 'failed', mayHaveWritten: written };
         }
-        return { kind: 'failed', mayHaveWritten: written };
+
+        // **What the transaction established, recorded before the adoption below**,
+        // and released by the `finally` after it (ruling 27): a commit completes its
+        // own projection invalidation first, so an observation released then is
+        // arbitrated against the window the commit left rather than the one it found.
+        // Recording it here rather than beside that release is what keeps an
+        // exception in between from settling a known outcome as `uncertain`.
+        write.expect(settlementOfOutcome(answer.value));
+        // **The write committed and the window could not be brought back into
+        // step.** It is reported rather than turned into a failed save, because the
+        // bytes really are on disk and telling the caller otherwise would invite a
+        // retry of a write that already happened (D2). Everything cached for the
+        // file has already been forgotten by then, so what is on screen is
+        // incomplete rather than wrong — and *that* is what the seal now carries, so
+        // a screen can say it.
+        //
+        // Two sources, one status. `answer.reload` is `failed` when the closure
+        // above **threw**; `reprojection` is non-null when it returned a typed
+        // failure instead. Both mean the same thing to a person.
+        const thrown = answer.reload.kind === 'failed' ? answer.reload.failure : null;
+        const stale: IpcFailure | null = thrown ?? reprojection;
+        if (thrown !== null) {
+          report(thrown);
+        }
+        const invalidated: RawSaveReload =
+          stale === null ? answer.reload : { kind: 'failed', failure: stale };
+        // **There is no `outOfDate` arm here, and a move's is not missing.** A move
+        // compares the revision the transaction ended on against the one this state
+        // was projecting, because a `committed: false` there can still mean some
+        // other program moved the file on between the lock's two reads. A
+        // replacement cannot reach that: `committed: false` means the candidate was
+        // byte-identical to what the locked read found, and the locked read already
+        // agreed with `baseRevision` or this would be a conflict — so the revision
+        // the answer carries is the one that was sent.
+        //
+        // **And a conflict installs nothing here** — `BrowserState.moveMatch`'s own
+        // note says why. There is no second read of the file's text either: the
+        // conflict payload carries `disk_text`, paired with `disk_revision` by the
+        // command layer, so the capture this used to make had nothing to add and a
+        // race to lose (`docs/decisions/2c-4a-1-notes.md` section 4.1). What is
+        // written down is which projection the conflict describes.
+        if (answer.value.outcome === 'conflict') {
+          rememberTheConflict(document, saveConflictSource(answer.value));
+        }
+        //
+        // Sealed here and nowhere else: this is the one place that knows which
+        // document was aimed at, what the transaction answered, and what this
+        // state's own invalidation made of it.
+        return {
+          kind: 'sealed',
+          sealed: sealWholeDocumentSave(document, answer.value, invalidated)
+        };
+      } finally {
+        // **Ruling 27's barrier closes here, on every exit this wrapper has** —
+        // including an exception: `close` releases it on whatever the answer above
+        // established, or on `uncertain` when nothing did. See `beginWrite`.
+        write.close();
       }
-      // **The write committed and the window could not be brought back into
-      // step.** It is reported rather than turned into a failed save, because the
-      // bytes really are on disk and telling the caller otherwise would invite a
-      // retry of a write that already happened (D2). Everything cached for the
-      // file has already been forgotten by then, so what is on screen is
-      // incomplete rather than wrong — and *that* is what the seal now carries, so
-      // a screen can say it.
-      //
-      // Two sources, one status. `answer.reload` is `failed` when the closure
-      // above **threw**; `reprojection` is non-null when it returned a typed
-      // failure instead. Both mean the same thing to a person.
-      const thrown = answer.reload.kind === 'failed' ? answer.reload.failure : null;
-      const stale: IpcFailure | null = thrown ?? reprojection;
-      if (thrown !== null) {
-        report(thrown);
-      }
-      const invalidated: RawSaveReload =
-        stale === null ? answer.reload : { kind: 'failed', failure: stale };
-      // **There is no `outOfDate` arm here, and a move's is not missing.** A move
-      // compares the revision the transaction ended on against the one this state
-      // was projecting, because a `committed: false` there can still mean some
-      // other program moved the file on between the lock's two reads. A
-      // replacement cannot reach that: `committed: false` means the candidate was
-      // byte-identical to what the locked read found, and the locked read already
-      // agreed with `baseRevision` or this would be a conflict — so the revision
-      // the answer carries is the one that was sent.
-      //
-      // **And a conflict installs nothing here** — `BrowserState.moveMatch`'s own
-      // note says why. There is no second read of the file's text either: the
-      // conflict payload carries `disk_text`, paired with `disk_revision` by the
-      // command layer, so the capture this used to make had nothing to add and a
-      // race to lose (`docs/decisions/2c-4a-1-notes.md` section 4.1). What is
-      // written down is which projection the conflict describes.
-      if (answer.value.outcome === 'conflict') {
-        rememberTheConflict(document, saveConflictSource(answer.value));
-      }
-      //
-      // Sealed here and nowhere else: this is the one place that knows which
-      // document was aimed at, what the transaction answered, and what this
-      // state's own invalidation made of it.
-      return { kind: 'sealed', sealed: sealWholeDocumentSave(document, answer.value, invalidated) };
     }, // End of function saveRawDocument()
 
     async listBackupBatches(): Promise<CommandResult<BackupBatchListing>> {

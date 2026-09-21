@@ -83,12 +83,14 @@ import {
   type InvalidationStatus,
   type WholeDocumentOutcome
 } from './invalidation';
-import type { ExternalConflictObservation } from './conflictSource';
+import { externalConflictSource, type ExternalConflictObservation } from './conflictSource';
+import { reapplyEvidenceFor } from './reapply';
 import { startDraft, structuredDraftRules, textDraftRules } from './draft';
 import {
   confirmReloadDiskVersion,
   describeEditSave,
-  describeExternalConflict
+  describeExternalConflict,
+  supersedeConflict
 } from './saveOutcome';
 import {
   CONFLICT_CAPABILITIES as MATCH_EDITOR_CAPABILITIES,
@@ -6652,6 +6654,571 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     expect(state.scopedDocument?.revision).toBe('rev-d');
     expect(state.scopedMatches.map((match) => match.id.node)).toEqual([70]);
   }); // End of the "a second registration renews nothing" case
+
+  /**
+   * The parse a third revision of `match/base.yml` would project to.
+   *
+   * @returns The projection, at `rev-d`.
+   */
+  function laterDocument(): DocumentView {
+    return makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-d',
+      matches: [makeMatch({ node: 70, document: 2, revision: 'rev-d', trigger: ':later' })]
+    });
+  } // End of function laterDocument()
+
+  /**
+   * One narrowed observation of **other** bytes than the scripted conflict's.
+   *
+   * A fresh object every call, exactly as {@link externalObservation} is.
+   *
+   * @param sequence - The sequence it was admitted under.
+   * @returns The observation.
+   */
+  function laterObservation(sequence = 9): ExternalConflictObservation {
+    return {
+      sequence,
+      document: 2,
+      previousRevision: 'rev-c',
+      diskRevision: 'rev-d',
+      diskText: '# a third reading\n',
+      disk: laterDocument(),
+      findings: [],
+      correspondences: null
+    };
+  } // End of function laterObservation()
+
+  /**
+   * A window holding one refused raw save of `match/base.yml`.
+   *
+   * @param commands - The scripted boundary, already carrying that refusal.
+   * @returns The state, with the conflict registered and nothing installed.
+   */
+  async function withTheSaveRefused(commands: BrowserCommands): Promise<BrowserState> {
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    return state;
+  } // End of function withTheSaveRefused()
+
+  it('lets a refused save outrank a watcher reading of the same bytes', async () => {
+    // **Ruling 25, in the order the consult names first**: the save conflict is
+    // standing when the watcher's reading of the *same* revision arrives. Revision
+    // equality proves identical bytes and never origin or chronology, and the
+    // refusal carries the stronger fact — a locked write attempt was refused — so
+    // the model, its messages and its **source identity** all stay where they are.
+    const state = await withTheSaveRefused(scriptedCommands({ raws: [CONFLICT] }));
+    const model = modelOf();
+    expect(state.standingConflictFor(2)).toBe(model.source);
+
+    const seen = externalObservation();
+    expect(state.observeExternalChange(seen)).toEqual({
+      kind: 'coalesced',
+      standing: model.source
+    });
+    // Nothing was re-keyed, so the conflict the surface is holding is still the one
+    // this window answers for, and its confirmed reload still installs.
+    expect(state.standingConflictFor(2)).toBe(model.source);
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('installed');
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+  }); // End of the "a refused save outranks the same bytes" case
+
+  it('lets a refused save take the standing place from a watcher reading of the same bytes', async () => {
+    // **Ruling 25 in the other order**, which is the half an implementation can get
+    // wrong while passing the first: the watcher reading arrives first and really is
+    // the conflict, and then the save is refused against the same bytes. The refusal
+    // is the newest fact this window has about that file, so it stands — and the
+    // reading's pending confirmation is withdrawn rather than left able to install.
+    const state = await withTheSecondSnippetSelected(scriptedCommands({ raws: [CONFLICT] }));
+    const seen = externalObservation();
+    expect(state.observeExternalChange(seen)).toEqual({
+      kind: 'raised',
+      source: externalConflictSource(seen)
+    });
+    expect(state.standingConflictFor(2)).toBe(externalConflictSource(seen));
+
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const model = modelOf();
+    expect(state.standingConflictFor(2)).toBe(model.source);
+
+    const external = externalModelOf(seen);
+    expect(state.adoptDiskVersion(external, confirmReloadDiskVersion(external))).toBe('refused');
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+    // The refusal installs, so the window is not stuck: one of the two conflicts can
+    // always be resolved.
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('installed');
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+  }); // End of the "a refused save takes the standing place" case
+
+  it('replaces a standing conflict with a strictly later reading of other bytes', async () => {
+    // **Ruling 26.** A different revision and a sequence nothing older can match:
+    // the disk side is replaced and the draft is not. The superseded conflict
+    // installs nothing afterwards — that is *any pending reload confirmation
+    // withdrawn*, and no projection generation moved, so it is the standing check
+    // that refuses it and nothing else could.
+    const state = await withTheSaveRefused(scriptedCommands({ raws: [CONFLICT] }));
+    const model = modelOf();
+    const later = laterObservation();
+    expect(state.observeExternalChange(later)).toEqual({
+      kind: 'supersedes',
+      superseded: model.source,
+      source: externalConflictSource(later)
+    });
+    expect(state.standingConflictFor(2)).toBe(externalConflictSource(later));
+
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('refused');
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+
+    // And the model that replaces it keeps the very draft the refusal retained.
+    const replacing = supersedeConflict(model, later, MATCH_EDITOR_CAPABILITIES);
+    expect(replacing.draft).toBe(model.draft);
+    expect(state.adoptDiskVersion(replacing, confirmReloadDiskVersion(replacing))).toBe(
+      'installed'
+    );
+    expect(state.scopedDocument?.revision).toBe('rev-d');
+  }); // End of the "a later reading of other bytes supersedes" case
+
+  it('answers all three adoption outcomes for the reading that superseded a save', async () => {
+    // **Ruling 23 through ruling 26's door**: origin may change which conflict
+    // stands, and it may not change who installs. `adoptDiskVersion` is still the
+    // only one, and it still answers its own three values for a conflict that
+    // arrived by superseding another.
+    const state = await withTheSaveRefused(scriptedCommands({ raws: [CONFLICT] }));
+    const later = laterObservation();
+    state.observeExternalChange(later);
+    const replacing = supersedeConflict(modelOf(), later, MATCH_EDITOR_CAPABILITIES);
+
+    const confirmation = confirmReloadDiskVersion(replacing);
+    expect(state.adoptDiskVersion(replacing, confirmation)).toBe('installed');
+    expect(state.scopedDocument?.revision).toBe('rev-d');
+    expect(state.adoptDiskVersion(replacing, confirmation)).toBe('refused');
+    expect(state.adoptDiskVersion(replacing, confirmReloadDiskVersion(replacing))).toBe(
+      'alreadyThere'
+    );
+  }); // End of the "three adoption outcomes after a supersession" case
+
+  it('refuses the reapply evidence of a conflict a later reading superseded', async () => {
+    // **Ruling 26's last clause, and it is one rule for both origins.** Before the
+    // supersession the refusal's own evidence is available; afterwards the conflict
+    // it would come from is not the one standing, so the evidence is about a state
+    // the file has moved on from. The operand is `standingConflictFor`, and nothing
+    // in TypeScript makes a caller ask it.
+    const state = await withTheSaveRefused(scriptedCommands({ raws: [CONFLICT] }));
+    const model = modelOf();
+    expect(reapplyEvidenceFor(model, () => state.standingConflictFor(2))).toEqual({
+      kind: 'saveEvidence',
+      evidence: model.source.conflict.reapply
+    });
+
+    state.observeExternalChange(laterObservation());
+    expect(reapplyEvidenceFor(model, () => state.standingConflictFor(2))).toEqual({
+      kind: 'superseded'
+    });
+  }); // End of the "stale evidence after a supersession" case
+
+  /**
+   * A raw save this case settles by hand, with the barrier open in between.
+   *
+   * **The only way to make an observation arrive *during* a write.** The stub holds
+   * the command open until the case releases the gate, which is exactly the window
+   * ruling 27 is about.
+   *
+   * @param answer - What the boundary finally answers.
+   * @param committedRevision - The revision to re-read at on a commit, or `null`
+   *   when the answer is not a commit.
+   * @param committedProjection - The parse a re-read answers once the commit has
+   *   happened. It defaults to the one the scripted conflict carries; a case about
+   *   a window that moved *past* a held reading passes a third revision instead.
+   * @returns The boundary and the gate that settles it.
+   */
+  function heldRawSave(
+    answer: RawSaveOutcome,
+    committedRevision: ContentRevision | null,
+    committedProjection: DocumentView = replacedDocument()
+  ): { commands: BrowserCommands; release: () => void } {
+    const gate = deferred<void>();
+    const scripted = scriptedCommands();
+    // Whether the commit has happened, which is what decides which parse a re-read
+    // of `match/base.yml` answers: the whole point of a committed replacement is
+    // that the file is not what it was.
+    let committed = false;
+    return {
+      commands: {
+        ...scripted,
+        getDocument: vi.fn(async (id: DocumentId): Promise<CommandResult<DocumentView>> => {
+          if (id === 2 && committed) {
+            return { ok: true, value: committedProjection };
+          }
+          return scripted.getDocument(id);
+        }),
+        saveRawDocument: vi.fn(
+          async (
+            document: DocumentId,
+            _baseRevision: ContentRevision,
+            _text: string,
+            _acknowledgement: Acknowledgement,
+            reload: ReloadAfterRawSave
+          ): Promise<RawSaveOutcome> => {
+            await gate.promise;
+            if (committedRevision !== null) {
+              committed = true;
+              await reload({ document, revision: committedRevision });
+            }
+            return answer;
+          }
+        )
+      },
+      release: () => gate.resolve()
+    };
+  } // End of function heldRawSave()
+
+  it('holds a reading of the bytes its own committed save ended on, and then drops it', async () => {
+    // **Ruling 27's barrier and its coalescing, over a commit.** While the write is
+    // out, what is on disk cannot be attributed, so the reading is held rather than
+    // applied; when the transaction ends on exactly those bytes the reading is not
+    // news about a change and no conflict is raised. **It says the revisions are
+    // equal and never that this window wrote them.**
+    const held = heldRawSave(
+      {
+        ok: true,
+        value: {
+          outcome: 'saved',
+          revision: 'rev-c',
+          committed: true,
+          backup_taken: false,
+          moved: null,
+          notes: []
+        },
+        reload: { kind: 'done' }
+      },
+      'rev-c'
+    );
+    const state = await withTheSecondSnippetSelected(held.commands);
+    const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    expect(state.writeInFlight(2)).toBe(true);
+
+    const seen = externalObservation();
+    expect(state.observeExternalChange(seen)).toEqual({ kind: 'retained' });
+    expect(state.retainedObservationFor(2)).toBe(seen);
+    // Held means held: nothing was registered and nothing stands.
+    expect(state.standingConflictFor(2)).toBeNull();
+
+    held.release();
+    await sending;
+    expect(state.writeInFlight(2)).toBe(false);
+    expect(state.retainedObservationFor(2)).toBeNull();
+    expect(state.standingConflictFor(2)).toBeNull();
+    expect(state.writeOutcomeUncertain(2)).toBe(false);
+    // The commit's own invalidation ran first, which is what the released reading
+    // would have been arbitrated against had it been news.
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+  }); // End of the "held across a committed save" case
+
+  it('releases what it held as a conflict when the write is over and wrote nothing', async () => {
+    // **A definite failure.** `mayHaveWritten` is `false`, so this application can
+    // say the file was not written from here: the held reading is ordinary news
+    // about another writer and is arbitrated exactly as one that arrived with no
+    // write in flight.
+    const held = heldRawSave(
+      { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+      null
+    );
+    const state = await withTheSecondSnippetSelected(held.commands);
+    const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const seen = externalObservation();
+    expect(state.observeExternalChange(seen)).toEqual({ kind: 'retained' });
+
+    held.release();
+    const answer = await sending;
+    expect(answer).toEqual({ kind: 'failed', mayHaveWritten: false });
+    expect(state.writeOutcomeUncertain(2)).toBe(false);
+    expect(state.retainedObservationFor(2)).toBeNull();
+    expect(state.standingConflictFor(2)).toBe(externalConflictSource(seen));
+    // Registering is not adopting: the window is where it was.
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+  }); // End of the "released after a definite failure" case
+
+  it('preserves the uncertainty of a write that may have written', async () => {
+    // **Ruling 27's uncertain arm.** A later watcher snapshot can establish what is
+    // on disk and never who put it there, so the reading still becomes the file's
+    // conflict — the person is told — and every verdict for that file afterwards
+    // says that no automatic reload may be made from it. **Nothing a watcher says
+    // clears it**, which is why the second observation below answers the same arm.
+    if (WRITE_MAY_HAVE_HAPPENED.ok) {
+      throw new Error('this case needs a rejection');
+    }
+    const held = heldRawSave({ ok: false, failure: WRITE_MAY_HAVE_HAPPENED.failure }, null);
+    const state = await withTheSecondSnippetSelected(held.commands);
+    const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const seen = externalObservation();
+    expect(state.observeExternalChange(seen)).toEqual({ kind: 'retained' });
+
+    held.release();
+    expect(await sending).toEqual({ kind: 'failed', mayHaveWritten: true });
+    expect(state.writeOutcomeUncertain(2)).toBe(true);
+    expect(state.retainedObservationFor(2)).toBeNull();
+    expect(state.standingConflictFor(2)).toBe(externalConflictSource(seen));
+
+    const later = laterObservation();
+    expect(state.observeExternalChange(later)).toEqual({
+      kind: 'raisedWithoutReload',
+      source: externalConflictSource(later),
+      superseded: externalConflictSource(seen)
+    });
+    expect(state.writeOutcomeUncertain(2)).toBe(true);
+  }); // End of the "uncertainty is preserved" case
+
+  it('keeps only the newest of several readings held behind one barrier', async () => {
+    // **Coalescing is keeping the newest, never merging two readings**: two
+    // snapshots of one file are two whole readings, and anything built from halves
+    // of both would name a state that never existed. Order of arrival is not order
+    // of sequence, and only the sequence decides.
+    const held = heldRawSave(
+      { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+      null
+    );
+    const state = await withTheSecondSnippetSelected(held.commands);
+    const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    state.observeExternalChange(externalObservation());
+    const newest = laterObservation(9);
+    state.observeExternalChange(newest);
+    state.observeExternalChange(laterObservation(7));
+    expect(state.retainedObservationFor(2)).toBe(newest);
+
+    held.release();
+    await sending;
+    expect(state.standingConflictFor(2)).toBe(externalConflictSource(newest));
+  }); // End of the "newest of several held readings" case
+
+  it('initiates no command from watcher arbitration', async () => {
+    // **Ruling 27's last sentence**, as the assertion that would catch it: no save
+    // command may ever be initiated by watcher arbitration, and nothing here reads a
+    // file either. The two read counts are the ones `withTheSecondSnippetSelected`
+    // leaves behind, unchanged by three arbitrations.
+    const commands = scriptedCommands({ raws: [CONFLICT] });
+    const state = await withTheSaveRefused(commands);
+    const reads = (commands.getDocument as ReturnType<typeof vi.fn>).mock.calls.length;
+    const texts = (commands.documentText as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    state.observeExternalChange(externalObservation());
+    state.observeExternalChange(laterObservation());
+    state.observeExternalChange(laterObservation(2));
+
+    for (const writer of [
+      commands.moveMatch,
+      commands.saveMatch,
+      commands.createMatch,
+      commands.deleteMatch,
+      commands.duplicateMatch
+    ]) {
+      expect(writer).not.toHaveBeenCalled();
+    } // End of the loop over the five editing commands
+    expect(commands.saveRawDocument).toHaveBeenCalledTimes(1);
+    expect(commands.reloadDocument).not.toHaveBeenCalled();
+    expect(commands.getDocument).toHaveBeenCalledTimes(reads);
+    expect(commands.documentText).toHaveBeenCalledTimes(texts);
+  }); // End of the "no command from arbitration" case
+
+  it('registers a released reading at the window it arrived at, not at the one it left', async () => {
+    // **This phase's review, finding 1.** A reading arrives while this window's own
+    // write is out and is held; the write commits on *other* bytes and re-reads the
+    // file, which replaces the projection; only then does the barrier release the
+    // reading and register it. The generation a registration writes down is what
+    // `adoptDiskVersion` compares to refuse a disk snapshot the window has moved
+    // past — so registering at the generation the *release* runs at hands the
+    // reading a freshness it never had, and the door then installs `rev-c` over the
+    // `rev-d` the commit left and reports success for moving the window backwards.
+    const held = heldRawSave(
+      {
+        ok: true,
+        value: {
+          outcome: 'saved',
+          revision: 'rev-d',
+          committed: true,
+          backup_taken: false,
+          moved: null,
+          notes: []
+        },
+        reload: { kind: 'done' }
+      },
+      'rev-d',
+      laterDocument()
+    );
+    const state = await withTheSecondSnippetSelected(held.commands);
+    const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    const seen = externalObservation();
+    expect(state.observeExternalChange(seen)).toEqual({ kind: 'retained' });
+
+    held.release();
+    await sending;
+    // The commit's own re-read landed first, so the window really did move after
+    // the held reading arrived — which is the whole of what makes it stale.
+    expect(state.scopedDocument?.revision).toBe('rev-d');
+    // It is still news, so it became the file's conflict and the person is told.
+    expect(state.standingConflictFor(2)).toBe(externalConflictSource(seen));
+
+    const model = externalModelOf(seen);
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('refused');
+    expect(state.scopedDocument?.revision).toBe('rev-d');
+  }); // End of the "a released reading keeps its arrival window" case
+
+  it('registers no verdict decided against a standing origin that moved underneath it', async () => {
+    // **This phase's review, finding 2 — a check and a spend are not atomic across
+    // a property read.** The observation is a value a caller assembled, so reading
+    // `diskRevision` runs that caller's getter, which re-enters this state and
+    // registers a strictly later reading. The outer verdict was decided against the
+    // standing origin as it was *before* that, and registering it afterwards
+    // overwrites the newer origin with an older one — last-registration-wins means
+    // nothing would refuse it. `readonly` freezes nothing at runtime and no type
+    // says a getter may not do this.
+    const state = await withTheSecondSnippetSelected(scriptedCommands());
+    const inner = laterObservation(12);
+    let entered = false;
+    const outer: ExternalConflictObservation = {
+      sequence: 5,
+      document: 2,
+      previousRevision: 'rev-a',
+      get diskRevision(): ContentRevision {
+        if (!entered) {
+          entered = true;
+          state.observeExternalChange(inner);
+        }
+        return 'rev-c';
+      },
+      diskText: DISK_TEXT,
+      disk: replacedDocument(),
+      findings: [],
+      correspondences: null
+    };
+
+    const verdict = state.observeExternalChange(outer);
+
+    // The newer reading is the one that speaks for the file.
+    const standing = state.standingConflictFor(2);
+    expect(
+      standing !== null && standing.kind === 'externalChange'
+        ? standing.observation.sequence
+        : null
+    ).toBe(12);
+    expect(standing).toBe(externalConflictSource(inner));
+    // And the older one is held rather than dropped: nobody has acted on it.
+    expect(verdict).toEqual({ kind: 'retained' });
+    expect(state.retainedObservationFor(2)).toBe(outer);
+  }); // End of the "a re-entrant registration is not overwritten" case
+
+  /**
+   * A boundary whose one writing command rejects rather than answering.
+   *
+   * **A rejection, not a failure arm**: `CommandResult` carries a failure, and this
+   * is the other thing — the promise itself rejecting, which is what an exception
+   * anywhere below the wrapper looks like from inside it.
+   *
+   * @param command - Which of the six writing commands rejects.
+   * @returns The boundary, scripted for everything else.
+   */
+  function rejectingBoundary(command: string): BrowserCommands {
+    return Object.assign(scriptedCommands(), {
+      [command]: vi.fn(async (): Promise<never> => {
+        throw new Error('the boundary rejected');
+      })
+    });
+  } // End of function rejectingBoundary()
+
+  it('closes the barrier when any of the six writing wrappers rejects', async () => {
+    // **This phase's review, finding 3.** A lease taken before a command and
+    // released after it is released on no path at all when something in between
+    // throws, and the barrier it holds is per document and permanent: every later
+    // observation of that file is retained and never arbitrated, so its
+    // reconciliation is silently dead for the life of the session. The direction is
+    // *safe* and it is not *harmless*. The outcome of a rejected command cannot be
+    // attributed — this application never learned whether the file was written — so
+    // the barrier closes as uncertain, which forbids an automatic reload without
+    // pretending to know anything.
+    for (const writer of WRITERS) {
+      const state = await withTheSecondSnippetSelected(rejectingBoundary(writer.name));
+
+      await expect(writer.send(state)).rejects.toThrow('the boundary rejected');
+
+      expect(state.writeInFlight(2)).toBe(false);
+      expect(state.writeOutcomeUncertain(2)).toBe(true);
+      // And the barrier really is open again: a reading arriving now is arbitrated
+      // rather than held, under the uncertainty this write left.
+      expect(state.observeExternalChange(externalObservation()).kind).toBe(
+        'raisedWithoutReload'
+      );
+    } // End of the loop over the six writing wrappers
+  }); // End of the "a rejected command closes the barrier" case
+
+  it('closes the barrier on what the answer established when the adoption throws', async () => {
+    // **Finding 3's other half: what an exception-safe close settles on.** The
+    // transaction answered, so this application *does* know what happened to the
+    // file; it is the re-read afterwards that threw. Closing on `uncertain` there
+    // would mark the file unattributable for a failure that has nothing to do with
+    // the disk — so the settlement the answer established is kept, and the reading
+    // held during the write, being of exactly the bytes the transaction ended on,
+    // is dropped as not-news rather than raised as a conflict.
+    const scripted = scriptedCommands({
+      moves: [
+        {
+          ok: true,
+          value: {
+            outcome: 'saved',
+            revision: 'rev-c',
+            committed: true,
+            backup_taken: false,
+            moved: null,
+            notes: []
+          }
+        }
+      ]
+    });
+    const seen = externalObservation();
+    let state: BrowserState | null = null;
+    let armed = false;
+    const commands: BrowserCommands = {
+      ...scripted,
+      getDocument: vi.fn(async (id: DocumentId): Promise<CommandResult<DocumentView>> => {
+        if (armed) {
+          // The observation arrives while the write is still in flight — the
+          // wrapper closes its lease after this adoption, deliberately — and then
+          // the re-read fails.
+          state?.observeExternalChange(seen);
+          throw new Error('the re-read threw');
+        }
+        return scripted.getDocument(id);
+      })
+    };
+    state = await withTheSecondSnippetSelected(commands);
+    armed = true;
+
+    await expect(
+      state.moveMatch(baseDocument().matches[0]!.id, null, 'rev-a', NOTHING_ACKNOWLEDGED)
+    ).rejects.toThrow('the re-read threw');
+
+    expect(state.writeInFlight(2)).toBe(false);
+    expect(state.retainedObservationFor(2)).toBeNull();
+    // Dropped as a reading of the bytes this transaction ended on, which is what
+    // the *known* settlement buys: an `uncertain` close would have raised it.
+    expect(state.standingConflictFor(2)).toBeNull();
+    expect(state.writeOutcomeUncertain(2)).toBe(false);
+  }); // End of the "an exception after the answer keeps the settlement" case
+
+  it('forgets what it arbitrated about the workspace it is closing', async () => {
+    // A standing conflict names bytes of a file *that* workspace held, and an
+    // uncertain write is uncertainty about a file this window is about to stop
+    // describing. Carrying either would arbitrate the next workspace's observations
+    // against the last one's facts.
+    const state = await withTheSaveRefused(scriptedCommands({ raws: [CONFLICT] }));
+    state.observeExternalChange(laterObservation());
+    expect(state.standingConflictFor(2)).not.toBeNull();
+
+    await state.open(null);
+
+    expect(state.standingConflictFor(2)).toBeNull();
+    expect(state.retainedObservationFor(2)).toBeNull();
+    expect(state.writeOutcomeUncertain(2)).toBe(false);
+  }); // End of the "an open forgets what was arbitrated" case
 
   it('installs nothing over a projection replaced since the conflict arrived', async () => {
     // **The confirmation pass's High, driven in its own order.** A conflict arrives

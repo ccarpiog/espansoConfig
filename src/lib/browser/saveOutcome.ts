@@ -1135,6 +1135,60 @@ export function describeExternalConflict<T>(
 } // End of function describeExternalConflict()
 
 /**
+ * Replaces one conflict's disk side with a strictly later observation, keeping
+ * the draft (ruling 26).
+ *
+ * **Supersession as one function, so the five replacements cannot be made four.**
+ * Ruling 26 asks for the retained draft preserved and the disk text, the
+ * projection, the disk revision, the findings and the origin replaced; every one
+ * of the five is carried by {@link ExternalChangeConflictSource.observation} or
+ * derived from it by {@link describeExternalConflict}, so the whole of this
+ * function is *which draft goes with the new observation*, and the answer is the
+ * superseded conflict's own.
+ *
+ * **The draft is read off the superseded model and is never a second argument**,
+ * which is the whole of what this forces: a caller cannot preserve *a* draft, only
+ * *the* draft the conflict being replaced retained. What it does not force is that
+ * the observation really is later — `arbitrateObservation` in
+ * `./conflictSource.ts` is what decides that, this function is what carries it
+ * out, and nothing in TypeScript ties the two together.
+ *
+ * **The save arm's `found` cannot survive this, by type rather than by care.**
+ * Ruling 26 requires that a superseded save conflict's `found` is never rendered
+ * as the current disk revision; the answer is an {@link ExternalConflictModel},
+ * which has no `found` at all, so a panel drawing the value this returns has
+ * nothing to render it from.
+ *
+ * **It withdraws nothing and invalidates nothing.** The pending reload
+ * confirmation and the old reapply evidence are the other two halves of ruling 26
+ * and they live where the state does: `BrowserState.adoptDiskVersion` refuses an
+ * origin that no longer stands, and `reapplyEvidenceFor` in `./reapply.ts` refuses
+ * evidence taken from one. This function builds a model and touches neither.
+ *
+ * @typeParam T - The drafted value the superseded conflict retained.
+ * @param superseded - The conflict whose disk side is being replaced, of either
+ *   origin.
+ * @param observation - The strictly later observation, exactly as this window
+ *   narrowed it.
+ * @param capabilities - The calling surface's own declaration, unchanged by the
+ *   supersession: what a reload would do to *that* surface is a fact about the
+ *   surface and not about which observation it is looking at.
+ * @returns The replacing model, carrying the same draft.
+ */
+export function supersedeConflict<T>(
+  superseded: ConflictModel<T>,
+  observation: ExternalConflictObservation,
+  capabilities: ConflictCapabilities
+): ExternalConflictModel<T> {
+  // **The one caller-controlled read, taken once.** `superseded` is a value a
+  // surface is holding, so `draft` can be a getter; reading it here and handing
+  // the result on means the model that comes back carries the draft this call
+  // looked at rather than whatever a second read would answer.
+  const draft = superseded.draft;
+  return describeExternalConflict(observation, draft, capabilities);
+} // End of function supersedeConflict()
+
+/**
  * Builds what a screen says about a **whole-document** save.
  *
  * Reachable only with a {@link WholeDocumentOutcome}, which only

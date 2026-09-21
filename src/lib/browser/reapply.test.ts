@@ -30,7 +30,11 @@ import type {
   ReapplyPlacement,
   ReapplyResolution
 } from '../ipc/types';
-import type { ExternalConflictObservation } from './conflictSource';
+import {
+  externalConflictSource,
+  type ConflictSource,
+  type ExternalConflictObservation
+} from './conflictSource';
 import { startDraft, textDraftRules } from './draft';
 import { makeConflict, makeDocument, makeMatch } from './fixtures';
 import {
@@ -46,7 +50,9 @@ import {
   sharedReapplyObstacleKey,
   subjectCorrespondence,
   subjectIsTargetless,
+  SUPERSEDED_EVIDENCE_KEY,
   type ExternalEvidenceRefusal,
+  type ReapplyEvidenceAccess,
   type ReapplyOutcomeCode
 } from './reapply';
 import {
@@ -290,11 +296,26 @@ describe('which evidence one conflict may work from', () => {
     );
   } // End of function externalConflict()
 
+  /**
+   * The evidence one conflict may work from while it is still the one standing.
+   *
+   * **The standing origin is the conflict's own here**, which is what a window
+   * that has seen nothing newer would pass; the two cases below that are about
+   * ruling 26's supersession pass a different one on purpose.
+   *
+   * @typeParam T - The drafted value the conflict retained.
+   * @param conflict - The conflict a reapply would work from.
+   * @returns Which evidence is available.
+   */
+  function evidenceOf<T>(conflict: ConflictModel<T>): ReapplyEvidenceAccess {
+    return reapplyEvidenceFor(conflict, () => conflict.source);
+  } // End of function evidenceOf()
+
   it('reads the evidence a save conflict carries off its own refusal', () => {
     // Ruling 23's save half: the evidence is `ConflictResult.reapply`, resolved by
     // the command that was refused, about that one operation.
     const conflict = conflictWith({ Identified: { target: TARGET } });
-    expect(reapplyEvidenceFor(conflict)).toEqual({
+    expect(evidenceOf(conflict)).toEqual({
       kind: 'saveEvidence',
       evidence: conflict.source.conflict.reapply
     });
@@ -303,7 +324,7 @@ describe('which evidence one conflict may work from', () => {
   it('refuses an external conflict that carried no correspondence at all', () => {
     // The wire allows a null table whenever either side had no projection, and an
     // absence is not weaker evidence — it is none.
-    expect(reapplyEvidenceFor(externalConflict(null))).toEqual({
+    expect(evidenceOf(externalConflict(null))).toEqual({
       kind: 'refused',
       reason: 'noCorrespondence'
     });
@@ -314,7 +335,7 @@ describe('which evidence one conflict may work from', () => {
     // draft never saw, so nothing in them is about what the person is holding.
     // Content revisions are hashes, so this says the two differ and never which is
     // older.
-    expect(reapplyEvidenceFor(externalConflict(table('rev-z', DISK)))).toEqual({
+    expect(evidenceOf(externalConflict(table('rev-z', DISK)))).toEqual({
       kind: 'refused',
       reason: 'baseRevisionMoved'
     });
@@ -324,7 +345,7 @@ describe('which evidence one conflict may work from', () => {
     // **Ruling 24, second half**, which is also ruling 26 read from the evidence's
     // side: a later observation supersedes the conflict's disk side, and the old
     // table is then evidence about a state the person was not shown.
-    expect(reapplyEvidenceFor(externalConflict(table(DRAFT_BASE, 'rev-later')))).toEqual({
+    expect(evidenceOf(externalConflict(table(DRAFT_BASE, 'rev-later')))).toEqual({
       kind: 'refused',
       reason: 'diskRevisionMoved'
     });
@@ -332,7 +353,7 @@ describe('which evidence one conflict may work from', () => {
 
   it('accepts the table only when both revisions match, and hands back what it checked', () => {
     const matching = table(DRAFT_BASE, DISK);
-    const answer = reapplyEvidenceFor(externalConflict(matching));
+    const answer = evidenceOf(externalConflict(matching));
     expect(answer.kind).toBe('externalCorrespondence');
     if (answer.kind !== 'externalCorrespondence') {
       throw new Error('the accepted arm is what this case is about');
@@ -372,7 +393,7 @@ describe('which evidence one conflict may work from', () => {
       disk_revision: DISK,
       entries: rows
     };
-    const answer = reapplyEvidenceFor(externalConflict(shifting));
+    const answer = evidenceOf(externalConflict(shifting));
     expect(answer.kind).toBe('externalCorrespondence');
     if (answer.kind !== 'externalCorrespondence') {
       throw new Error('the accepted arm is what this case is about');
@@ -388,6 +409,99 @@ describe('which evidence one conflict may work from', () => {
     expect(rows).toHaveLength(1);
     expect(answer.correspondences.entries).toHaveLength(0);
   }); // End of the "the revisions it compared are the ones it answers with" case
+
+  it('refuses the evidence of a superseded conflict, whichever origin it has', () => {
+    // **Ruling 26's "old reapply evidence invalidated", and it is one rule for both
+    // origins.** A refused save's `ConflictResult.reapply` was resolved against a
+    // disk snapshot the file has moved on from exactly as an observation's table can
+    // have been, so the refusal is asked before either arm is reached — and it is
+    // asked of the *save* arm too, which the two revision gates below it never see.
+    const later: ExternalConflictObservation = {
+      sequence: 12,
+      document: 2,
+      previousRevision: DISK,
+      diskRevision: 'rev-later',
+      diskText: '# later still\n',
+      disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-later' }),
+      findings: [],
+      correspondences: null
+    };
+    const stands: ConflictSource = externalConflictSource(later);
+    // A save conflict whose evidence would otherwise be read straight off its
+    // refusal.
+    const save = conflictWith({ Identified: { target: TARGET } });
+    expect(reapplyEvidenceFor(save, () => stands)).toEqual({ kind: 'superseded' });
+    // And an external conflict whose table would otherwise be accepted, because
+    // both of its revisions match.
+    const external = externalConflict(table(DRAFT_BASE, DISK));
+    expect(evidenceOf(external).kind).toBe('externalCorrespondence');
+    expect(reapplyEvidenceFor(external, () => stands)).toEqual({ kind: 'superseded' });
+  }); // End of the "superseded, whichever origin" case
+
+  it('refuses evidence when nothing stands for the file at all', () => {
+    // **`null` is the conservative direction and not a missing answer.** A window
+    // holding no conflict for the file has nothing this evidence could be about, so
+    // the same arm answers — which is what makes a caller that has not looked up a
+    // standing origin fail safe rather than read stale rows.
+    expect(reapplyEvidenceFor(conflictWith(), () => null)).toEqual({ kind: 'superseded' });
+    expect(reapplyEvidenceFor(externalConflict(table(DRAFT_BASE, DISK)), () => null)).toEqual({
+      kind: 'superseded'
+    });
+  }); // End of the "nothing stands" case
+
+  it('refuses evidence the file moved past while that evidence was being assembled', () => {
+    // **This phase's review, finding 4, and it is this project's named
+    // check-and-spend class one level up** (`CLAUDE.md` section 6). Asking what
+    // stands *before* reading the evidence answers a question about an instant that
+    // has passed by the time the answer is given: every read that builds the
+    // evidence crosses into a value a caller assembled — the table's fields, the
+    // draft's base, the conflict's disk revision, **and the iteration of the row
+    // array** — and any one of them can run a getter, a `Proxy` trap or an iterator
+    // that registers a strictly later reading of the file. The iteration is the last
+    // of them, so a supersession triggered there is the one an ordering that checks
+    // "late enough" still misses. The operand is a guard for exactly this reason:
+    // it is asked once, after everything has been read.
+    let standing: ConflictSource | null = null;
+    // Declared mutable and handed over as the `readonly` field it satisfies, then
+    // given an iterator of its own — `readonly` is a compile-time word and freezes
+    // nothing at runtime, and `Array.from` goes through `Symbol.iterator`.
+    const rows: CorrespondenceEntry[] = [];
+    Object.defineProperty(rows, Symbol.iterator, {
+      value: (): IterableIterator<CorrespondenceEntry> => {
+        // A strictly later reading of the file arrives while the rows are copied,
+        // and from here on it is the one that speaks for the file.
+        standing = null;
+        return ([] as CorrespondenceEntry[])[Symbol.iterator]();
+      }
+    });
+    const external = externalConflict({
+      base_revision: DRAFT_BASE,
+      disk_revision: DISK,
+      entries: rows
+    });
+    // Both revisions match, so this table is otherwise accepted — the case is not
+    // vacuous, and the refusal below is the supersession and nothing else.
+    expect(evidenceOf(external).kind).toBe('externalCorrespondence');
+
+    standing = external.source;
+    expect(reapplyEvidenceFor(external, () => standing).kind).toBe('superseded');
+  }); // End of the "superseded while the evidence was assembled" case
+
+  it('names a sentence both dictionaries hold for a superseded conflict', () => {
+    // The same thing `externalEvidenceRefusalKey`'s case below pins for the three
+    // refusals: the key is a real entry in both dictionaries and is not one of
+    // theirs. **What no test here can hold is that the sentence is true** — the
+    // i18n suites check parity and placeholders, never meaning (`CLAUDE.md` §2).
+    const refusals = new Set<TranslationKey>([
+      externalEvidenceRefusalKey('noCorrespondence'),
+      externalEvidenceRefusalKey('baseRevisionMoved'),
+      externalEvidenceRefusalKey('diskRevisionMoved')
+    ]);
+    expect(refusals.has(SUPERSEDED_EVIDENCE_KEY)).toBe(false);
+    for (const locale of LOCALES) {
+      expect(DICTIONARIES[locale][SUPERSEDED_EVIDENCE_KEY]).toBeTruthy();
+    }
+  }); // End of the "a sentence for a superseded conflict" case
 
   it('names a distinct sentence both dictionaries really hold, for every refusal', () => {
     const every = Object.keys({
