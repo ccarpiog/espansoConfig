@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T14:20:42Z",
+ "updated": "2026-09-21T14:22:03Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -456,7 +456,8 @@
    "summary": "Adds the coordinator revision signal, watchState and sanitized registration-state exposure, the two guarded reload requests and the guarded file reread; rung 1323/447/2574/192.",
    "risk": "high",
    "review": "docs/reviews/phase-2d-6-1c.md — Codex, ship-with-fixes, 1 blocker, 1 SHOULD-FIX, both fixed",
-   "narrative": "docs/decisions/2d-6-1c-notes.md"
+   "narrative": "docs/decisions/2d-6-1c-notes.md",
+   "commit": "32ce4e2"
   },
   {
    "id": "2d-6-2",
