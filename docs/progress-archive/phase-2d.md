@@ -4957,3 +4957,21 @@ insertions(+), 1 deletion(-)`. The instrument's contribution is unchanged (Rust 
 vitest +1, Vite +1; a committed tree builds 191). 2d-6-1a's verification narrative, formerly here, is
 archived verbatim in [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-1a's
 verification narrative"*.
+
+### Phase 2d-6-1c's verification narrative — archived 2026-09-21 at Phase 2d-6-2
+
+_Archived verbatim from `PROGRESS.md`; the ladder section that follows it there is live and was kept._
+
+### Phase 2d-6-1c's verification: three frontend gates re-measured twice, the Rust cell held
+
+**`1323 / 447 / 2574 / 192`** at 2d-6-1c, from `1323 / 447 / 2549 / 192`. Measured by the orchestrator on the
+tree the worker reported (`2570`) and again on the final tree after the review's fix round (`2574`), each gate
+on its own, each exit read directly (never through a pipe): `npm run check` **447 files, 0 errors, 0 warnings**
+(unchanged — no new file); `npm test` **2574 passed, 64 files** (+25 from 2549, re-derived per file and each run
+alone to confirm: `workspace.test.ts` 274 → 288 and `reconciliationCoordinator.test.ts` 62 → 73 — +21 for the
+four deliverables, then +4 pinning the review's two findings and the sibling site; `ipc-detail` 141 → 141, no
+new `.ts` file); `npm run build` **192 modules** (unchanged), the server-only bundle markers **absent** (`rg -l`
+lists no file, exit 1) and the client-only **present (2)**. **The Rust cell is held at 1323 and was not
+re-measured**: no path under `src-tauri/` or `crates/` changed beyond the instrument's `main.rs` hook, whose
+pair diff is still `5 insertions(+), 1 deletion(-)`; the instrument's contribution is unchanged (Rust 0,
+svelte-check +1, vitest +1, Vite +1). 2d-6-1b's narrative, formerly here, is archived verbatim in

@@ -935,16 +935,18 @@ export interface SaveConflictModel<T> extends ConflictModelCommon<T> {
  * whose outcome may be unknown, and arbitrated under that uncertainty; the only
  * honest claim is about what was done in response to *this* observation.
  *
- * **Its only producer is {@link describeExternalConflict}, and today that
- * producer has no caller outside this repository's tests.** The arbitration that
- * decides when a watcher observation becomes a surface's conflict exists —
+ * **Its only producer is {@link describeExternalConflict}, and its first
+ * production caller is the match editor's session transition.** The arbitration
+ * that decides when a watcher observation becomes a surface's conflict exists —
  * `BrowserState.observeExternalChange` in `./workspace.svelte.ts`, Phase 2d-5-5b —
  * and since Phase 2d-6-1b it delivers its sealed verdict to every receiver
- * registered over the file through `registerObservationReceiver`; **no production
- * code registers one yet**, so the delivery reaches nobody. The session transition
- * that receives it and calls this producer with a surface's draft is Phase
- * 2d-6-2's, the wiring that registers a session's receiver is 2d-6-6's, and the
- * panel that draws the result is a later 2d-6 step's.
+ * registered over the file through `registerObservationReceiver`. Since Phase
+ * 2d-6-2 `applyObservation` in `./matchEditor.ts` receives it and builds this
+ * model over the editor's draft, holding it in `MatchEditorSession.externalConflict`;
+ * **no production code registers that receiver yet**, so in the running
+ * application the delivery still reaches nobody — the wiring is 2d-6-6's, the
+ * other surfaces' transitions are 2d-6-3, -4 and -5's, and the panel that draws
+ * the result is 2d-6-6's too.
  *
  * @typeParam T - The drafted value.
  */

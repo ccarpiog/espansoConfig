@@ -14681,3 +14681,128 @@ the person's retry; notes §2).
 and the bilingual WKWebView reading — start from the `fetch` recorder already in `src/probe.ts`, not from
 the consult's description), **2d-8** (instrument removal and harness-free closure; corrects the `main.rs`
 comment and deletes `/private/tmp/espansoconfig-harness-2d-5-7b/`).
+
+## The 2d-6-1c → 2d-6-2 handoff, superseded 2026-09-21 at 2d-6-2
+
+_Archived verbatim from `PROGRESS.md` when Phase 2d-6-2 closed. The three binding documents it names, the consult's verdict paragraph, the instrument warning, the open-items map and the orchestrator's three rulings at 1b's close are restated in the live section; what 2d-6-1 left for 2d-6-2 was consumed by it (`docs/decisions/2d-6-2-notes.md`)._
+
+## Next action
+
+### Phase 2d-6-1c is complete and CLOSED, and **2d-6-1 closes with it** — its full acceptance is checked in one place, [`2d-6-1c-notes.md`](docs/decisions/2d-6-1c-notes.md) §3. The next action is **Phase 2d-6-2 — match-editor external session and reapply**, the first step that consumes what 2d-6-1 landed.
+
+**The three documents that bind every 2d-6 step, in reading order**:
+[`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (**the consult; it binds** — Codex at
+high effort, 2026-09-21, eleven rulings, no gate run and none claimed),
+[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (the record — §2 the eleven-step
+split with per-step scope, acceptance and the rulings that bind it, **the 2d-6-2 entry at lines 96-103**; §3
+forty-three binding rulings; §4 the citation audit; **§5 nine corrections that override `phase-2d-design.md`
+item 6 and `2d-5-split-notes.md` — read them before treating either as the spec**; §6 what was not settled; §7
+the map of the handed-on obligations and open items 0-11; §8 its review) and
+[`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md) (the brief).
+
+**The consult's verdict, in one paragraph**: 2d-6 is not seven callbacks plus translated markup; it needs a
+complete observation-to-session protocol — delivery after write settlement, model-owned submission blocking,
+origin-correct messages. Two corrections to the inherited design: **recovery is an eighth live write surface**,
+and **removing the last document must not unmount retained sessions**. Native backend-status exposure stays
+outside the phase; the DOM foreground source (open item 8) comes in as step 2d-6-10; every component-changing
+step owes a narrow window regression reading; mounted evidence is bilingual.
+
+**What 2d-6-1 landed, none of it consumed by production yet** (ruling 42; member names only — each record's §1
+has signatures, refusal reasons and line numbers, §2 its rulings: `docs/decisions/2d-6-1a-notes.md`,
+`2d-6-1b-notes.md`, `2d-6-1c-notes.md`). **1a**, values, no `BrowserState` member: `ObservationDelivery` and
+`decideAutomaticReload` in `src/lib/browser/observationDelivery.ts`; `conflictRevisionsOf`, `isSaveConflict`,
+`isExternalConflict` in `conflictSource.ts`; `describeExternalConflict` emitting `fileChangedWhileOpen`; the
+four `browser.externalConflict.*` keys with accessors. **1b**, on `BrowserState` (`workspace.svelte.ts`):
+`observeExternalChange` delivering a sealed envelope to every receiver registered over the file, settlement
+published from the write lease's `close()`, `registerObservationReceiver(document, receiver)`,
+`retryRetainedObservation(document)`, `uncertaintyAcknowledgementFor` + `acknowledgeWriteUncertainty`,
+`automaticReloadGuardFor(document)`, and the seventh `ObservationVerdict` arm **`writtenHere`**. **1c**: on the
+coordinator `ReconciliationHost.reconciliationChanged()` and `reopenFromRetainedRequest()`; on `BrowserState`
+`reconciliationRevision()`, `reconciliationWatchState()`, the sanitized `reconciliationRegistration()`,
+`requestMembershipReload()` and `requestLostHistoryRecovery()`, and `requestFileReread(document)`.
+
+**Executable cold — 2d-6-2**, the record's §2 entry quoted in full: *"**Delivers** the editor's
+`externalConflict` field, the restriction at `canSave` and `beginSave`, the confirmation reset on a replacing
+verdict, and the full-identity `editor` correspondence lookup; save history and field intent survive.
+**Acceptance:** model tests over pristine and edited drafts, collisions, all four evidence arms and all three
+adoption outcomes; `beginSave` called directly under an external conflict answers `null`. **Components: none.**
+**Bound by** entries 6-9, 11, 12, 19, 20, 22. **Depends on** 2d-6-1."* The nine rulings it binds (§3 has each
+one's full text and what it does *not* force): **6** `externalConflict: ExternalConflictModel<T> | null` on each
+immutable session, `SaveOutcomeModel` save-only; **7** only one conflict is active, a committed success stays as
+history; **8** "cannot submit" is a model rule at `canSave` and `beginSave`, tested past a disabled button, and
+it cannot force its inputs to be current (R37); **9** the unconditional dismissal never erases an external
+block; **11** every verdict has a named session action — **plus the seventh arm 1b added, `writtenHere`: lift
+the restriction recorded for that observation and change nothing else** (1b notes §1.5 and §5 item 2; switch
+with a `never` terminus so no arm is skipped silently); **12** a replacing verdict resets `reload`, clears
+confirmations and invalidates displayed reapply results in the model transition; **19** the external
+correspondence lookup, never a `supported` reapply that always falls back; **20** correspondence converts by
+full base identity, never by array index or arena node; **22** refusals resolve to manual resolution with the
+typed sentence, and under unresolved uncertainty reapply may not obtain adoption internally. **Decisions are
+values in `src/lib/browser/matchEditor.ts`; no component is touched** — none registers a receiver before 2d-6-6,
+so the tests feed the session its envelopes through 1b's `observeExternalChange` / `registerObservationReceiver`
+and read 1c's `reconciliationRevision()` and requests as a model. **The command spy stays at zero** through
+every session transition (rulings 34/35 of the 2d-5 record); a reload request that reaches `open()` is the one
+place a command is expected, scripted. **Inherited as well**: the four umbrella `browser.reapply.*` sentences
+(`manualResolution`, `adoptionRefused`, `unavailable`, `notAttempted`) still ending *"Nothing was written"*,
+overbroad after an uncertain write, taken with the register review this step owes, and `index.ts`'s *"says only
+that nothing was applied, written or moved"* with them (1a notes §5 item 1).
+
+**Orchestrator's rulings taken at 1b's close**: (1) **the `ReconciliationWorkspace` interface is not widened**
+in 2d-6-1 — ruling 4's "narrow arbitration/delivery member" is the `BrowserState` member,
+`observationTransitions.ts`'s `tellTheSurfaceAbout` still hands the registered `WriteSurfaceTransition` the bare
+observation, and routing it through `observeExternalChange` with child-reported receivers is **2d-6-6's**, one
+interface member and one host line (1c kept to this). (2) **The acknowledgement operand stays
+`ConflictSource`**, so a file under the hold with a save refusal standing has an exit; 2d-6-9 draws it. (3)
+**The `projectionReplaced` refusal at an outlived arrival generation stands** as the consult's item 3 read
+literally; whether a snapshot still on screen counts as current is **2d-6-9's** to decide (1b notes §5).
+
+**Open items 2d-6-1 deliberately left, none a defect of it** (1a notes §5, 1b notes §5, 1c notes §5). **From
+1c**: a disposal from `host.openGeneration()` still costs one refused drain (pre-existing); an uncertainty that
+settles while a person's reread is out is unseen by the guard — the raw wrapper's own re-read supersedes first,
+and `completed` truthfully says the read neither failed nor was refused; `completed` does not claim "installed"
+(`rereadUnderGuard` answers `null` for a discard and an install alike); the notification over-approximates by
+design (a count is what ruling 28 asked for); the registration rejection reaches no developer channel
+(pre-existing). **From 1b**: `classifyFailure`'s "never throws" sentence in `src/lib/ipc/errors.ts` is false for
+a thrown value with a hostile `code` getter (pre-existing; corrected when a step next changes that module); a
+hostile `sequence` getter can defeat its own retention inside the retry's restore comparison, and a receiver
+that manufactures a fresh observation on every delivery loops through this door as through the coordinator (both
+stated in the code — the drain bounds repetition, not invention). **From 1a**: the Spanish of the nine bounded
+sentences awaits ruling 40's bilingual review (**2d-6-11's**); the stale "nine codes" sentence in
+`saveOutcome.ts` / `index.ts` (corrected when a step next changes those modules' list).
+
+#### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
+
+`git status --short --untracked-files=all` shows **four uncommitted instrument paths** — `M
+src-tauri/src/main.rs` and `M src/main.ts` (two hook lines each; `git diff --stat` over the pair is `5
+insertions(+), 1 deletion(-)` and must stay that way), `?? src-tauri/src/probe.rs` and `?? src/probe.ts`.
+**Do not commit them, do not revert them, and do not treat them as unaccounted-for work.** They are the
+temporary window-reading instrument (`CLAUDE.md` §6, *Window readings*); 2d-8 deletes it. **Stage by
+path**: `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/`, `src/lib/i18n/`, `src/lib/ipc/`, and
+any `src-tauri/` or `src/lib/components/` file **by name** — never `src-tauri/src/` as a directory. The
+2d-6 steps that add a component or a `.ts` module move the Vite module count (one per module, two per
+styled component) and the `ipc-detail` row count (one per file under the scanned roots) — re-derive per
+file, never from the total, and remember the instrument's known contribution (`Verification baseline`).
+**A worker must never run `git stash`**: 1a's worker did so by accident inside a compound command and
+reversed it at once (`2d-6-1a-notes.md` §6); the instrument survived, but a stash that is not popped
+loses the instrument silently. Say so in every worker brief.
+
+#### Open items — the live map is the record's §7
+
+`docs/decisions/2d-6-split-notes.md` §7 states, per item, whether the consult **took it into 2d-6** (obligations
+(1)-(3), open items 5, 6, 8, 9), **deferred it** (1 — the `file:line` drift checker; 7 — the `"permissions": []`
+comment in `main.rs`, 2d-8's; 10 — the `dispose()`-on-close path) or **left it untouched** (0, 2, 3, 4, 11). Two
+facts the consult item did not anticipate, now bound by rulings: **native watcher degradation is not on the
+wire** (`WatchStatusView` is read by `watch_check` alone), and `BrowserState` exposed neither `watchState()` nor
+its registration — **1c discharged that one** (item 11: `reconciliationWatchState()`,
+`reconciliationRegistration()`). Obligations (2) and (3) of the 2d-5 hand-off — the two-exit uncertainty rule
+and the two-release retained rule — are **discharged by 1b** in the code's own doc comments (the third exit is
+the acknowledgement, the third release the person's retry; notes §2).
+
+#### The rest of the 2d consult, so a step is not invented
+
+**2d-6** (its eleven steps; 2d-6-1 closed as three sub-phases, 2d-6-2 next), **2d-7** (the reviewed instrument
+and the bilingual WKWebView reading — start from the `fetch` recorder already in `src/probe.ts`, not from the
+consult's description), **2d-8** (instrument removal and harness-free closure; corrects the `main.rs` comment
+and deletes `/private/tmp/espansoconfig-harness-2d-5-7b/`).
+---
+

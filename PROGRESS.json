@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T14:22:03Z",
+ "updated": "2026-09-21T15:49:17Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -421,7 +421,7 @@
    "id": "2d-6",
    "title": "Components, i18n and mounted evidence",
    "status": "in_progress",
-   "summary": "Eleven steps per its design consult; 2d-6-1 is done (three sub-phases closed) and 2d-6-2, the match-editor external session and reapply, is next."
+   "summary": "Eleven steps per its design consult; 2d-6-1 (three sub-phases) and 2d-6-2 are done, 2d-6-3 is next."
   },
   {
    "id": "2d-6-1",
@@ -443,7 +443,7 @@
    "id": "2d-6-1b",
    "title": "Observation-protocol members on BrowserState",
    "status": "done",
-   "summary": "Adds the arbitration/delivery member with settlement publication, receiver registration, the person-requested retry, the one-shot uncertainty acknowledgement and per-file reload-guard state; rung 1323/447/2549/192.",
+   "summary": "Adds the arbitration/delivery member with settlement publication, receiver registration, the person-requested retry, the one-shot uncertainty acknowledgement and per-file reload-guard state.",
    "risk": "high",
    "review": "docs/reviews/phase-2d-6-1b.md — Codex, ship-with-fixes, 1 blocker, 2 SHOULD-FIX, all fixed",
    "narrative": "docs/decisions/2d-6-1b-notes.md",
@@ -462,8 +462,11 @@
   {
    "id": "2d-6-2",
    "title": "Match-editor external session and reapply",
-   "status": "queued",
-   "summary": "Gives the match editor its external-conflict session, submission blocking and the reapply-for-external path."
+   "status": "done",
+   "summary": "Gives the match editor its external-conflict session, the submission block at canSave and beginSave, the seven-arm receiver with an arrival-order replay queue and the full-identity reapply lookup.",
+   "risk": "high",
+   "review": "docs/reviews/phase-2d-6-2.md — Codex, ship-with-fixes, 2 blockers, 0 SHOULD-FIX, both fixed",
+   "narrative": "docs/decisions/2d-6-2-notes.md"
   },
   {
    "id": "2d-6-3",
@@ -536,7 +539,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 done, 2d-6-2 next); 2d-7 and 2d-8 are queued."
+   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 and 2d-6-2 done, 2d-6-3 next); 2d-7 and 2d-8 follow."
   },
   {
    "id": "3",

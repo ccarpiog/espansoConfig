@@ -42,6 +42,8 @@ import {
   anchorCorrespondence,
   attemptOfReapply,
   beginReapply,
+  correspondenceRowFor,
+  enterReapply,
   externalEvidenceRefusalKey,
   reapplyEvidenceFor,
   reapplyOutcomeKey,
@@ -50,6 +52,7 @@ import {
   sharedReapplyObstacleKey,
   subjectCorrespondence,
   subjectIsTargetless,
+  subjectResolution,
   SUPERSEDED_EVIDENCE_KEY,
   type ExternalEvidenceRefusal,
   type ReapplyEvidenceAccess,
@@ -495,8 +498,11 @@ describe('which evidence one conflict may work from', () => {
     const refusals = new Set<TranslationKey>([
       externalEvidenceRefusalKey('noCorrespondence'),
       externalEvidenceRefusalKey('baseRevisionMoved'),
-      externalEvidenceRefusalKey('diskRevisionMoved')
+      externalEvidenceRefusalKey('diskRevisionMoved'),
+      externalEvidenceRefusalKey('noRowForBase'),
+      externalEvidenceRefusalKey('severalRowsForBase')
     ]);
+    expect(refusals.size).toBe(5);
     expect(refusals.has(SUPERSEDED_EVIDENCE_KEY)).toBe(false);
     for (const locale of LOCALES) {
       expect(DICTIONARIES[locale][SUPERSEDED_EVIDENCE_KEY]).toBeTruthy();
@@ -507,7 +513,10 @@ describe('which evidence one conflict may work from', () => {
     const every = Object.keys({
       noCorrespondence: true,
       baseRevisionMoved: true,
-      diskRevisionMoved: true
+      diskRevisionMoved: true,
+      // The two row refusals of Phase 2d-6-2, rendered by the same accessor.
+      noRowForBase: true,
+      severalRowsForBase: true
     } satisfies Record<ExternalEvidenceRefusal, true>) as readonly ExternalEvidenceRefusal[];
     const keys = new Set<TranslationKey>();
     for (const reason of every) {
@@ -525,6 +534,225 @@ describe('which evidence one conflict may work from', () => {
     );
   }); // End of the "one sentence per refusal" case
 }); // End of the "which evidence one conflict may work from" suite
+
+describe('the entry over both origins, and the row lookup by full identity — Phase 2d-6-2', () => {
+  /** The revision every retained draft in this suite was made from. */
+  const DRAFT_BASE = 'rev-a';
+
+  /** The revision the disk holds in every external conflict here. */
+  const DISK = 'rev-c';
+
+  /** The base identity a session over the second snippet of the file would hold. */
+  const BASE_ID = { document: 2, revision: DRAFT_BASE, node: 11 } as const;
+
+  /**
+   * One row of a table, about one base identity.
+   *
+   * @param base - The identity the row is about.
+   * @param editor - What the editor tier answered; the exact tier answers nothing.
+   * @returns The row.
+   */
+  function row(
+    base: { readonly document: number; readonly revision: string; readonly node: number },
+    editor: ReapplyResolution = { Unsupported: {} }
+  ): CorrespondenceEntry {
+    return { base, exact: { Unsupported: {} }, editor };
+  } // End of function row()
+
+  /**
+   * A validated table over the two revisions every case here uses.
+   *
+   * @param entries - Its rows.
+   * @returns The table, frozen as `reapplyEvidenceFor` would hand it on.
+   */
+  function validated(entries: readonly CorrespondenceEntry[]): CorrespondenceTable {
+    return Object.freeze({
+      base_revision: DRAFT_BASE,
+      disk_revision: DISK,
+      entries: Object.freeze([...entries])
+    });
+  } // End of function validated()
+
+  /**
+   * One external conflict carrying a table.
+   *
+   * @param correspondences - The table, or `null`.
+   * @returns The model a surface would hold.
+   */
+  function externalWith(correspondences: CorrespondenceTable | null) {
+    const observation: ExternalConflictObservation = {
+      sequence: 9,
+      document: 2,
+      previousRevision: DRAFT_BASE,
+      diskRevision: DISK,
+      diskText: '# the file as it is now\n',
+      disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: DISK }),
+      findings: [],
+      correspondences
+    };
+    return describeExternalConflict(
+      observation,
+      startDraft(DRAFT_BASE, 'typed', textDraftRules),
+      SUPPORTED
+    );
+  } // End of function externalWith()
+
+  it('gates on support before the conflict, exactly as the save-only entry does', () => {
+    expect(enterReapply(UNAVAILABLE, null, () => null)).toEqual({ kind: 'unavailable' });
+    expect(enterReapply(UNAVAILABLE, conflictWith(), () => null)).toEqual({ kind: 'unavailable' });
+    expect(enterReapply(SUPPORTED, null, () => null)).toEqual({ kind: 'notAttempted' });
+  });
+
+  it('enters a save conflict with its own evidence, and an external one with its table', () => {
+    // **The four answers stay distinct on the ready arm** (entry 19): a save's
+    // `ReapplyEvidence` and an observation's table are two arms, never one cast to
+    // the other.
+    const save = conflictWith({ Identified: { target: TARGET } });
+    const saveEntry = enterReapply(SUPPORTED, save, () => save.source);
+    expect(saveEntry).toEqual({
+      kind: 'ready',
+      conflict: save,
+      evidence: { kind: 'saveEvidence', evidence: save.source.conflict.reapply }
+    });
+    const table = validated([row(BASE_ID, { Identified: { target: TARGET } })]);
+    const external = externalWith(table);
+    const externalEntry = enterReapply(SUPPORTED, external, () => external.source);
+    expect(externalEntry.kind).toBe('ready');
+    if (externalEntry.kind !== 'ready') {
+      throw new Error('the ready arm is what this case is about');
+    }
+    expect(externalEntry.conflict).toBe(external);
+    expect(externalEntry.evidence.kind).toBe('externalCorrespondence');
+    // A refused table and a superseded origin are the other two arms, unchanged.
+    const tableless = externalWith(null);
+    expect(enterReapply(SUPPORTED, tableless, () => tableless.source)).toMatchObject({
+      kind: 'ready',
+      evidence: { kind: 'refused', reason: 'noCorrespondence' }
+    });
+    expect(enterReapply(SUPPORTED, external, () => null)).toMatchObject({
+      kind: 'ready',
+      evidence: { kind: 'superseded' }
+    });
+  }); // End of the "both origins enter" case
+
+  it('asks the guard once, and not at all without a conflict', () => {
+    let asked = 0;
+    const external = externalWith(validated([]));
+    const guard = (): ConflictSource | null => {
+      asked += 1;
+      return external.source;
+    };
+    enterReapply(SUPPORTED, null, guard);
+    enterReapply(UNAVAILABLE, external, guard);
+    expect(asked).toBe(0);
+    enterReapply(SUPPORTED, external, guard);
+    expect(asked).toBe(1);
+  });
+
+  it('finds the one row that carries all three fields of the identity', () => {
+    const wanted = row(BASE_ID, { Identified: { target: TARGET } });
+    const table = validated([row({ document: 2, revision: DRAFT_BASE, node: 10 }), wanted]);
+    expect(correspondenceRowFor(table, BASE_ID)).toEqual({ kind: 'found', entry: wanted });
+    // The found row is the table's own object, so the surface reads its resolution
+    // off the row that was matched and not off a copy something could diverge from.
+    const found = correspondenceRowFor(table, BASE_ID);
+    expect(found.kind === 'found' && found.entry).toBe(wanted);
+  });
+
+  it('never takes a node number alone, or an array position, as identity (entry 20)', () => {
+    // **Arena-node equality across revisions is not identity**: the same node
+    // number names a different mapping after any reparse. A row whose `base.node`
+    // agrees and whose revision or document does not is no row for this snippet.
+    const sameNodeOtherRevision = validated([row({ document: 2, revision: 'rev-z', node: 11 })]);
+    expect(correspondenceRowFor(sameNodeOtherRevision, BASE_ID)).toEqual({
+      kind: 'refused',
+      reason: 'noRowForBase'
+    });
+    const sameNodeOtherDocument = validated([row({ document: 3, revision: DRAFT_BASE, node: 11 })]);
+    expect(correspondenceRowFor(sameNodeOtherDocument, BASE_ID)).toEqual({
+      kind: 'refused',
+      reason: 'noRowForBase'
+    });
+    // **Array position is not identity either**: this snippet is the second of its
+    // file, and the second row of this table is about another snippet entirely. A
+    // lookup by index would have answered that row; this refuses.
+    const byPositionOnly = validated([
+      row({ document: 2, revision: DRAFT_BASE, node: 10 }),
+      row({ document: 2, revision: DRAFT_BASE, node: 12 })
+    ]);
+    expect(correspondenceRowFor(byPositionOnly, BASE_ID)).toEqual({
+      kind: 'refused',
+      reason: 'noRowForBase'
+    });
+    // And an empty table has no row for anybody.
+    expect(correspondenceRowFor(validated([]), BASE_ID)).toEqual({
+      kind: 'refused',
+      reason: 'noRowForBase'
+    });
+  }); // End of the "never node or index" case
+
+  it('refuses a table that names the identity in more than one row, taking neither', () => {
+    // No Rust writer produces this — one row per base match — and the type permits
+    // it; choosing the first would be a guess about identity, which is what ruling
+    // 20 forbids.
+    const twice = validated([
+      row(BASE_ID, { Identified: { target: TARGET } }),
+      row({ document: 2, revision: DRAFT_BASE, node: 10 }),
+      row(BASE_ID, { Refused: { reason: 'AmbiguousTrigger' } })
+    ]);
+    expect(correspondenceRowFor(twice, BASE_ID)).toEqual({
+      kind: 'refused',
+      reason: 'severalRowsForBase'
+    });
+  });
+
+  it('reads each field of the identity once, before the rows are compared', () => {
+    // **The check-and-spend class** (`CLAUDE.md` §6): the identity is a value a
+    // caller holds and any field of it could be a getter answering one thing to
+    // the first row and another to the second. Captured once, the same three
+    // values are compared against every row.
+    const reads = { document: 0, revision: 0, node: 0 };
+    const identity = {
+      get document(): number {
+        reads.document += 1;
+        return 2;
+      },
+      get revision(): string {
+        reads.revision += 1;
+        return DRAFT_BASE;
+      },
+      get node(): number {
+        reads.node += 1;
+        return 11;
+      }
+    };
+    const table = validated([
+      row({ document: 2, revision: DRAFT_BASE, node: 10 }),
+      row(BASE_ID),
+      row({ document: 2, revision: DRAFT_BASE, node: 12 })
+    ]);
+    expect(correspondenceRowFor(table, identity).kind).toBe('found');
+    expect(reads).toEqual({ document: 1, revision: 1, node: 1 });
+  });
+
+  it('reads a row’s resolution with the same three-arm rule the save subject gets', () => {
+    expect(subjectResolution({ Identified: { target: TARGET } })).toEqual({
+      kind: 'identified',
+      target: TARGET
+    });
+    expect(subjectResolution({ Refused: { reason: 'TargetMissingOrTriggerChanged' } })).toEqual({
+      kind: 'refused',
+      reason: 'TargetMissingOrTriggerChanged'
+    });
+    for (const empty of [{ Unsupported: {} }, { Targetless: {} }] as const) {
+      expect(subjectResolution(empty)).toEqual({ kind: 'noSubject' });
+    } // End of the loop over the two empty arms
+    // And the save reader is this one over the evidence's `subject`, so the two
+    // cannot answer differently for one resolution.
+    const evidence = conflictWith({ Refused: { reason: 'AmbiguousExact' } }).source.conflict.reapply;
+    expect(subjectCorrespondence(evidence)).toEqual(subjectResolution(evidence.subject));
+  });
+}); // End of the "entry over both origins" suite
 
 describe('the adoption', () => {
   it('spends one token per conflict, so a second attempt presents the spent one', () => {

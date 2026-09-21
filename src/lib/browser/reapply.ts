@@ -27,7 +27,10 @@
  * 1. **The gate.** {@link beginReapply} is the one place a surface's permanent
  *    {@link ConflictReapplySupport} is read, so the raw editor's *unavailable* is a
  *    declaration a transition honours rather than a fact about which functions
- *    happen to exist.
+ *    happen to exist. Since Phase 2d-6-2 {@link enterReapply} is the same gate
+ *    over **both** origins, answering `reapplyEvidenceFor`'s four arms on its
+ *    `ready` arm; the match editor enters there, and the other surfaces migrate
+ *    in their own 2d-6 steps.
  * 2. **The evidence readers.** {@link subjectCorrespondence} and
  *    {@link anchorCorrespondence} turn `ConflictResult.reapply`'s two wire enums
  *    into the three answers a surface can act on. They are here rather than in five
@@ -36,7 +39,11 @@
  *    argument. Since Phase 2d-5-5a {@link reapplyEvidenceFor} sits above them and
  *    decides *which* evidence there is to read: a refused save's own
  *    `ReapplyEvidence`, or a watcher observation's whole-file correspondence table
- *    with its two revisions checked (rulings 23 and 24).
+ *    with its two revisions checked (rulings 23 and 24). Since Phase 2d-6-2
+ *    {@link correspondenceRowFor} finds one snippet's row in that table by its
+ *    **full** base identity — never by array index or arena node — and
+ *    {@link subjectResolution} reads a row's answer with the same three-arm rule
+ *    the refused save's subject gets (the 2d-6 record's §3 entry 20).
  * 3. **The adoption.** {@link adoptForReapply} spends the conflict's one
  *    authorization through the {@link AdoptTheDiskVersion} its caller passes,
  *    which on all five match surfaces is `BrowserState.adoptDiskVersion` — the
@@ -87,10 +94,13 @@
 
 import type { TranslationKey } from '../i18n/dictionaries';
 import type {
+  CorrespondenceEntry,
   CorrespondenceTable,
+  MatchId,
   MatchView,
   ReapplyEvidence,
-  ReapplyRefusal
+  ReapplyRefusal,
+  ReapplyResolution
 } from '../ipc/types';
 import type { ConflictSource, SaveConflictSource } from './conflictSource';
 import type { AdoptTheDiskVersion } from './editorSave';
@@ -301,6 +311,14 @@ export type ReapplyOutcome<S, O> =
  * parameter back to the union and reintroducing the choice; what would then be
  * needed is a new arm, not a reused one.
  *
+ * **The save-only predecessor of {@link enterReapply}, since Phase 2d-6-2.** The
+ * match editor enters through that one, which takes either origin and answers
+ * with `reapplyEvidenceFor`'s four distinct arms; the raw editor, the four
+ * operation surfaces and the recovery form still enter here, and migrating each is
+ * its own 2d-6 step's (2d-6-3, 2d-6-4, 2d-6-5). Nothing in TypeScript stops a
+ * surface staying here for ever; what it forfeits by staying is the external
+ * origin, which this signature refuses at compile time.
+ *
  * @typeParam T - The drafted value the conflict retained.
  * @param capabilities - The calling surface's own declaration.
  * @param conflict - The save conflict it is showing, or `null`.
@@ -320,6 +338,86 @@ export function beginReapply<T>(
 } // End of function beginReapply()
 
 /**
+ * What {@link enterReapply} answered — the reapply entry protocol over **both**
+ * origins, Phase 2d-6-2 (the 2d-6 record's §3 entry 19).
+ *
+ * {@link ReapplyStart}'s shape with one difference that is the whole point: the
+ * `ready` arm carries a {@link ReapplyEvidenceAccess} and not a `ReapplyEvidence`,
+ * so a surface that enters here switches over the four distinct answers — save
+ * evidence, external correspondence, a specific refusal, superseded evidence —
+ * and cannot read a correspondence table as if it were a refused save's own
+ * answers. **The type forces the four to stay apart; it cannot force a surface
+ * to act on each honestly** — a surface that mapped every non-save arm to one
+ * sentence would compile, and its own suite is what stops it.
+ *
+ * @typeParam T - The drafted value the conflict retained.
+ */
+export type ReapplyEntry<T> =
+  | {
+      /** There is a conflict of either origin and this surface may work from it. */
+      readonly kind: 'ready';
+      /** The conflict, carrying the disk snapshot and the retained draft. */
+      readonly conflict: ConflictModel<T>;
+      /**
+       * Which evidence its origin offers, with the live supersession question
+       * already asked — {@link reapplyEvidenceFor}'s answer, unchanged.
+       */
+      readonly evidence: ReapplyEvidenceAccess;
+    }
+  | {
+      /** This surface can never reapply. */
+      readonly kind: 'unavailable';
+    }
+  | {
+      /** It could, and there is no conflict showing. */
+      readonly kind: 'notAttempted';
+    };
+
+/**
+ * Whether a surface may attempt a reapply of a conflict of **either** origin, and
+ * what it would work from — Phase 2d-6-2, the 2d-6 record's §3 entry 19.
+ *
+ * **{@link beginReapply} generalized, not widened.** The gate is the same — the
+ * permanent {@link ConflictCapabilities.reapplySupport} is asked before the
+ * conflict, for the reason stated there — and what differs is the evidence: it is
+ * obtained through {@link reapplyEvidenceFor}, for the save origin and the
+ * external one alike, with the standing-origin guard asked *last*, after every
+ * caller-controlled operand has been read. The four answers that function keeps
+ * distinct stay distinct on the `ready` arm, and the correspondence table is
+ * never cast to a `ReapplyEvidence` — a surface that wants a snippet out of it
+ * looks its row up through {@link correspondenceRowFor} by full base identity
+ * (entry 20).
+ *
+ * **What it forces and what it does not, in the same sentence.** It forces that
+ * an external conflict is entered with its table's two revisions checked and the
+ * supersession question asked; it cannot force that the guard a caller hands in
+ * answers the window's live standing origin rather than the conflict's own —
+ * `StandingOriginGuard`'s doc says which closure is honest, and a `() =>
+ * conflict.source` compiles and asks nothing. It reads nothing from the window,
+ * installs nothing and spends no authorization.
+ *
+ * @typeParam T - The drafted value the conflict retained.
+ * @param capabilities - The calling surface's own declaration.
+ * @param conflict - The conflict it is showing, of either origin, or `null`.
+ * @param standing - Asks what origin currently stands for that file. Called at
+ *   most once, and only when there is a conflict to ask about.
+ * @returns The conflict and its evidence access, or the arm to answer with.
+ */
+export function enterReapply<T>(
+  capabilities: ConflictCapabilities,
+  conflict: ConflictModel<T> | null,
+  standing: StandingOriginGuard
+): ReapplyEntry<T> {
+  if (capabilities.reapplySupport === 'unavailable') {
+    return { kind: 'unavailable' };
+  }
+  if (conflict === null) {
+    return { kind: 'notAttempted' };
+  }
+  return { kind: 'ready', conflict, evidence: reapplyEvidenceFor(conflict, standing) };
+} // End of function enterReapply()
+
+/**
  * The correspondence answers one refusal carried, off its origin.
  *
  * **The one place `ConflictResult.reapply` is read** (ruling 23), so the save half
@@ -335,11 +433,34 @@ export function saveReapplyEvidence(source: SaveConflictSource): ReapplyEvidence
 } // End of function saveReapplyEvidence()
 
 /**
+ * Why one full base identity has no single row in a validated correspondence
+ * table — Phase 2d-6-2, the 2d-6 record's §3 entry 20.
+ *
+ * **Two refusals about the rows, kept apart from the three about the table.**
+ * A table whose two revisions match can still fail a surface for the one snippet
+ * it is about: no row carries that identity, or more than one does. The second
+ * is a shape no Rust writer produces — `CorrespondenceTable.entries` is one row
+ * per base match — and it is refused rather than resolved by taking the first,
+ * because which of two rows is *the* row is exactly the guess ruling 20 forbids.
+ * Neither says the snippet is gone; both say the evidence does not name it once.
+ */
+export type CorrespondenceRowRefusal =
+  /** No row of the table carries this full base identity. */
+  | 'noRowForBase'
+  /** More than one row does, which a correspondence never should. */
+  | 'severalRowsForBase';
+
+/**
  * Why an external observation's correspondence table may not be used as evidence.
  *
- * **Three refusals and no fourth**, because the table carries exactly two revisions
- * and either can be the wrong one; the third is the absence of a table at all,
- * which the wire allows whenever either side had no projection.
+ * **Three refusals about the table and two about its rows.** The table carries
+ * exactly two revisions and either can be the wrong one, and the wire allows the
+ * absence of a table whenever either side had no projection; those are the first
+ * three, answered by {@link reapplyEvidenceFor}. The two of
+ * {@link CorrespondenceRowRefusal} are answered later and per snippet, by
+ * {@link correspondenceRowFor}, once the table itself has passed — and they are
+ * members of this union so that one accessor, `tExternalEvidenceRefusal`, renders
+ * every way the external evidence can refuse (the record's §3 entry 22).
  */
 export type ExternalEvidenceRefusal =
   /** The observation carried no correspondence table. */
@@ -347,7 +468,8 @@ export type ExternalEvidenceRefusal =
   /** Its rows were minted from a revision this draft was not made against. */
   | 'baseRevisionMoved'
   /** Its answers were resolved against a revision this conflict is not about. */
-  | 'diskRevisionMoved';
+  | 'diskRevisionMoved'
+  | CorrespondenceRowRefusal;
 
 /**
  * Where one conflict's reapply evidence comes from, and whether it may be used.
@@ -590,7 +712,7 @@ function evidenceOf<T>(
  * `src/lib/browser/` follows: a renamed key is a compile error here, and a new
  * member of {@link ExternalEvidenceRefusal} with no sentence is one too.
  *
- * @param reason - Which negative claim about the table this is.
+ * @param reason - Which negative claim about the table, or about its rows, this is.
  * @returns The key holding that reason's sentence.
  */
 export function externalEvidenceRefusalKey(reason: ExternalEvidenceRefusal): TranslationKey {
@@ -601,8 +723,100 @@ export function externalEvidenceRefusalKey(reason: ExternalEvidenceRefusal): Tra
       return 'browser.reapply.externalEvidence.baseRevisionMoved';
     case 'diskRevisionMoved':
       return 'browser.reapply.externalEvidence.diskRevisionMoved';
+    case 'noRowForBase':
+      return 'browser.reapply.externalEvidence.noRowForBase';
+    case 'severalRowsForBase':
+      return 'browser.reapply.externalEvidence.severalRowsForBase';
   }
 } // End of function externalEvidenceRefusalKey()
+
+/**
+ * What the search of a validated table for one full base identity found —
+ * Phase 2d-6-2, the 2d-6 record's §3 entry 20.
+ *
+ * Two arms and never a third: a row was found, and it is exactly one; or the
+ * table is refused for that identity, with the reason typed so the surface
+ * reaches manual resolution through `tExternalEvidenceRefusal` (entry 22).
+ */
+export type CorrespondenceRowLookup =
+  | {
+      /** Exactly one row carries the identity. */
+      readonly kind: 'found';
+      /**
+       * That row, as the observation carried it.
+       *
+       * **The row object is the observation's, not a copy**: `reapplyEvidenceFor`
+       * copies the array spine and nothing inside it, and this function reads the
+       * row's `base` and nothing else. Its `exact` and `editor` resolutions are
+       * read by the surface, once, through {@link subjectResolution}.
+       */
+      readonly entry: CorrespondenceEntry;
+    }
+  | {
+      /** No row carries the identity, or more than one does. */
+      readonly kind: 'refused';
+      /** Which. */
+      readonly reason: CorrespondenceRowRefusal;
+    };
+
+/**
+ * Finds the one row of a validated table that is about one base snippet, by its
+ * **full** identity — Phase 2d-6-2, the 2d-6 record's §3 entry 20.
+ *
+ * **Document, revision and node must all match, and nothing weaker is identity.**
+ * A `MatchId` is scoped to the parse it was minted from: the same arena node
+ * number names a different mapping after any reparse, and a position in the
+ * `entries` array is a fact about the base projection's order, not about a
+ * snippet. So neither `entries[i]` for the snippet's index nor a row whose
+ * `base.node` alone agrees is ever taken — the row is found by comparing all
+ * three fields, and a table whose `base_revision` differs from the identity's
+ * revision therefore matches no row at all, whichever nodes it names.
+ *
+ * **Missing and duplicate both refuse, conservatively.** No row is *no evidence*
+ * for this snippet; two rows is a table this application cannot read, because
+ * choosing between them would be a guess about identity. Neither answer says
+ * anything about the snippet on disk.
+ *
+ * **Every caller-controlled operand is read once, before the comparison it feeds.**
+ * The three fields of the identity are captured before the loop; each row's
+ * `base` is read once and its three fields once each. The table's spine is the
+ * frozen copy `reapplyEvidenceFor` built, so the row count is fixed; what a getter
+ * behind a row's `base` could still do is answer one identity to this function
+ * and another to a later reader, which is why the found row is handed back whole
+ * and the surface reads its resolution exactly once.
+ *
+ * **What it does not do.** It reads no resolution, decides no correspondence tier
+ * and installs nothing: which of the row's two answers a surface may act on is
+ * that surface's, by ruling 20 — the editor takes `editor`, a destructive
+ * operation takes `exact`, an anchor takes `exact` from the same table.
+ *
+ * @param table - A table `reapplyEvidenceFor` answered `externalCorrespondence`
+ *   with. Nothing here re-checks its revisions; a caller that hands in an
+ *   unvalidated table gets rows about a snapshot the conflict may not be about.
+ * @param base - The snippet's identity as this surface holds it, minted from the
+ *   base snapshot the draft was made against.
+ * @returns The one row, or why there is not exactly one.
+ */
+export function correspondenceRowFor(
+  table: CorrespondenceTable,
+  base: MatchId
+): CorrespondenceRowLookup {
+  const document = base.document;
+  const revision = base.revision;
+  const node = base.node;
+  let found: CorrespondenceEntry | null = null;
+  for (const entry of table.entries) {
+    const row = entry.base;
+    if (row.document !== document || row.revision !== revision || row.node !== node) {
+      continue;
+    }
+    if (found !== null) {
+      return { kind: 'refused', reason: 'severalRowsForBase' };
+    }
+    found = entry;
+  } // End of the loop over the table's rows
+  return found === null ? { kind: 'refused', reason: 'noRowForBase' } : { kind: 'found', entry: found };
+} // End of function correspondenceRowFor()
 
 /**
  * What {@link beginReapply} answered.
@@ -643,15 +857,38 @@ export type ReapplyStart<T> =
  *   snippet to find.
  */
 export function subjectCorrespondence(evidence: ReapplyEvidence): SubjectCorrespondence {
-  const subject = evidence.subject;
-  if ('Identified' in subject) {
-    return { kind: 'identified', target: subject.Identified.target };
+  return subjectResolution(evidence.subject);
+} // End of function subjectCorrespondence()
+
+/**
+ * What one resolution leaves a surface to work with, wherever it came from.
+ *
+ * **Factored out of {@link subjectCorrespondence} at Phase 2d-6-2 so that a
+ * correspondence table's row can be read without manufacturing a
+ * `ReapplyEvidence` around it.** A refused save's `subject` and a table row's
+ * `editor` or `exact` are the same wire enum answering the same question — which
+ * snippet of the disk snapshot, if exactly one, carried the evidence — and the
+ * three-arm collapse is the same: `Unsupported` and `Targetless` both leave a
+ * surface that needs a target with none. Inventing a `placement` to reuse the
+ * evidence reader would have been the cast ruling 19 forbids in another spelling.
+ *
+ * The resolution is read exactly once per arm test, in the order `Identified`,
+ * `Refused`; it is caller data — a row of the observation's table — and the
+ * `target` handed back is the object it carried.
+ *
+ * @param resolution - One resolution, off a refusal's evidence or a table row.
+ * @returns The identified snippet, the refusal, or the fact that there is no
+ *   snippet to find.
+ */
+export function subjectResolution(resolution: ReapplyResolution): SubjectCorrespondence {
+  if ('Identified' in resolution) {
+    return { kind: 'identified', target: resolution.Identified.target };
   }
-  if ('Refused' in subject) {
-    return { kind: 'refused', reason: subject.Refused.reason };
+  if ('Refused' in resolution) {
+    return { kind: 'refused', reason: resolution.Refused.reason };
   }
   return { kind: 'noSubject' };
-} // End of function subjectCorrespondence()
+} // End of function subjectResolution()
 
 /**
  * Whether the evidence's subject is a creation's — *this change brings its own

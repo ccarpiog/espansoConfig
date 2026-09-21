@@ -1420,9 +1420,13 @@ export function tReapplyRefusal(reason: ReapplyRefusal): string {
 /**
  * Renders what one reapply attempt ended as, in one language.
  *
- * **Six arms and no operand.** `manualResolution` says only that nothing was
- * applied, written or moved; *why* is the surface's own obstacle, drawn beside
- * this and never folded into it.
+ * **Six arms and no operand.** `manualResolution` says only that this attempt
+ * applied nothing, wrote nothing and moved nothing; *why* is the surface's own
+ * obstacle, drawn beside this and never folded into it. **Every one of the six
+ * bounds its claim to the attempt** since Phase 2d-6-2's register review — *this
+ * reapply attempt wrote nothing*, never *nothing was written* — because a reapply
+ * can be asked for after a write of this window's own whose outcome is unknown,
+ * and an unbounded sentence would then be a claim about the file nobody can make.
  *
  * @param locale - The dictionary to read from.
  * @param code - Which arm the attempt ended on.
@@ -1475,18 +1479,21 @@ export function tReapplyReadiness(draftKind: ConflictDraftKind): string {
  * `tReapplyOutcome`'s reason: a component that turned the code into a key in markup
  * would be doing the one thing CLAUDE.md section 2 forbids.
  *
- * **None of the three sentences carries an operand**, so nothing is substituted
+ * **None of the five sentences carries an operand**, so nothing is substituted
  * here. None names a revision: a content revision is a hex digest, and showing one
  * beside a refusal would invite a person to compare two strings that carry no
- * order.
+ * order. Three are about the table and two, since Phase 2d-6-2, about its rows —
+ * no row for the snippet, or more than one (the 2d-6 record's §3 entry 20).
  *
  * **Nothing draws this yet.** The origin switch is Phase 2d-5-5a's vocabulary and
- * 2d-6 is where a panel shows one of its refusals; the only caller today is
- * `../browser/reapply.test.ts`. An accessor with no component caller is deliberate,
- * because a code with no string is worse than a code with no caller.
+ * 2d-6 is where a panel shows one of its refusals; since Phase 2d-6-2 the match
+ * editor's reapply reaches these through {@link describeEditorReapplyObstacle},
+ * which no component draws for the external origin until 2d-6-6. An accessor with
+ * no component caller is deliberate, because a code with no string is worse than
+ * a code with no caller.
  *
  * @param locale - The dictionary to read from.
- * @param reason - Which negative claim about the table this is.
+ * @param reason - Which negative claim about the table, or about its rows, this is.
  * @returns The translated sentence.
  */
 export function describeExternalEvidenceRefusal(
@@ -1500,7 +1507,7 @@ export function describeExternalEvidenceRefusal(
  * Renders why an external observation's correspondence was refused, in the current
  * language.
  *
- * @param reason - Which negative claim about the table this is.
+ * @param reason - Which negative claim about the table, or about its rows, this is.
  * @returns The translated sentence.
  */
 export function tExternalEvidenceRefusal(reason: ExternalEvidenceRefusal): string {
@@ -1520,9 +1527,11 @@ export function tExternalEvidenceRefusal(reason: ExternalEvidenceRefusal): strin
  * 2d-6 record's §3 entry 24): the accepted sequence orders observations, and it
  * establishes nothing about disk chronology relative to a locked save read.
  *
- * **Nothing draws it yet**, exactly as nothing draws the three above: ruling 26 is
- * Phase 2d-5-5b's and the panel that shows one of these is 2d-6's. A code with no
- * string is worse than a code with no caller, which is why it exists now.
+ * **Nothing draws it yet**, exactly as nothing draws the five above: ruling 26 is
+ * Phase 2d-5-5b's and the panel that shows one of these is 2d-6-6's; since Phase
+ * 2d-6-2 the match editor's `supersededEvidence` obstacle resolves to it through
+ * {@link describeEditorReapplyObstacle}. A code with no string is worse than a code
+ * with no caller, which is why it exists now.
  *
  * @param locale - The dictionary to read from.
  * @returns The translated sentence.
@@ -1588,6 +1597,13 @@ function describeSharedReapplyObstacle(
  * of the two shipped does. The names themselves come from the detail pane's own
  * labels, so a field is called the same thing here as it is where it is edited.
  *
+ * **A `switch` with a `never` terminus since Phase 2d-6-2**, when the union grew
+ * the four external-origin arms — a refused table or row, superseded evidence, a
+ * write whose outcome is unknown, and a reading the window holds undecided — so
+ * that an arm added to
+ * `EditorReapplyObstacle` with no sentence chosen here is a compile error rather
+ * than a fall-through into the shared describer, which would have thrown on it.
+ *
  * @param locale - The dictionary to read from.
  * @param obstacle - What stopped the reapply.
  * @returns The translated sentence.
@@ -1596,16 +1612,27 @@ export function describeEditorReapplyObstacle(
   locale: Locale,
   obstacle: EditorReapplyObstacle
 ): string {
-  if (obstacle.kind === 'fieldCollisions') {
-    return translate(locale, editorReapplyObstacleKey(obstacle), {
-      fields: obstacle.fields
-        .map((field) => translate(locale, detailFieldKey(fieldLabelName(field))))
-        .join(', ')
-    });
+  switch (obstacle.kind) {
+    case 'fieldCollisions':
+      return translate(locale, editorReapplyObstacleKey(obstacle), {
+        fields: obstacle.fields
+          .map((field) => translate(locale, detailFieldKey(fieldLabelName(field))))
+          .join(', ')
+      });
+    case 'targetNotEditable':
+    case 'externalEvidence':
+    case 'supersededEvidence':
+    case 'writeOutcomeUnknown':
+    case 'observationRetained':
+      return translate(locale, editorReapplyObstacleKey(obstacle));
+    case 'correspondence':
+    case 'evidenceNotATarget':
+      return describeSharedReapplyObstacle(locale, obstacle);
+    default: {
+      const unreachable: never = obstacle;
+      return unreachable;
+    }
   }
-  return obstacle.kind === 'targetNotEditable'
-    ? translate(locale, editorReapplyObstacleKey(obstacle))
-    : describeSharedReapplyObstacle(locale, obstacle);
 } // End of function describeEditorReapplyObstacle()
 
 /**

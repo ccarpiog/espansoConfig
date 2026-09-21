@@ -507,8 +507,10 @@ export function standingConflictOf(source: ConflictSource): StandingConflict {
  * a session can say an observation is waiting, and the two arms that end a wait
  * (`writtenHere`, or whichever arm a settlement or a retry arbitrates to) travel
  * the same path afterwards. Nothing in TypeScript ties a receiver to a session or
- * makes a session act on the arm it is given; that is the session transition's,
- * which is 2d-6-2's.
+ * makes a session act on the arm it is given; that is the session transition's —
+ * the match editor's is `applyObservation` in `./matchEditor.ts` (Phase 2d-6-2),
+ * with one named action per arm and a `never` terminus; the other surfaces' are
+ * 2d-6-3, 2d-6-4 and 2d-6-5's.
  */
 export type ObservationVerdict =
   | {
@@ -549,7 +551,9 @@ export type ObservationVerdict =
        * for a verdict that will never come. The session's named action (the 2d-6
        * record's §3 entry 11, extended by Phase 2d-6-1b) is to lift the
        * pending-reconciliation restriction it recorded for this observation and to
-       * change nothing else — no disk comparison, no origin, no reload offer.
+       * change nothing else — no disk comparison, no origin, no reload offer —
+       * which is what the match editor's `applyObservation` does with it since
+       * Phase 2d-6-2, by the observation's identity.
        */
       readonly kind: 'writtenHere';
     }

@@ -101,9 +101,23 @@ import {
 } from './saveOutcome';
 import {
   CONFLICT_CAPABILITIES as MATCH_EDITOR_CAPABILITIES,
+  acknowledgeSnapshot,
+  applyObservation,
+  applySave as applyEditorSave,
+  askToReloadDiskVersion,
   baselineOf,
+  beginSave,
   buffersOf,
-  type MatchBuffers
+  canSave,
+  confirmDiskReload,
+  editField,
+  matchEditorView,
+  reapplyToDiskVersion as reapplyEditorToDiskVersion,
+  reloadTheDiskVersion,
+  startMatchEditor,
+  type AcknowledgeTheUncertainty,
+  type MatchBuffers,
+  type MatchEditorSession
 } from './matchEditor';
 import {
   editRecoveryField,
@@ -9909,6 +9923,482 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(invoked).not.toHaveBeenCalled();
     }); // End of the "failed read" case
   }); // End of the "coordinator and workspace members" suite
+
+  describe('the match editor’s external session — Phase 2d-6-2', () => {
+    // **The session's receiver fed by a real window.** Every envelope here is one
+    // `observeExternalChange`, a settlement or a retry sealed and delivered; the
+    // session applies it through `applyObservation` in `./matchEditor.ts` and asks
+    // the window's own doors — `adoptDiskVersion`, `standingConflictFor`, the two
+    // acknowledgement members. No component registers anything (2d-6-6's), and the
+    // route guard holds the command spy at zero through every transition.
+
+    /** The snippet every session here edits: the second of `match/base.yml`. */
+    const EDITED: MatchView = baseDocument().matches[1]!;
+
+    /**
+     * A session over that snippet with `replace` drafted, registered as a receiver
+     * over its file, so that every delivery lands on the session the case reads.
+     *
+     * @param state - The window.
+     * @returns The live session, a reader of it, and the unregister.
+     */
+    function editorOver(state: BrowserState): {
+      readonly current: () => MatchEditorSession;
+      readonly set: (next: MatchEditorSession) => void;
+      readonly off: () => void;
+    } {
+      let session = editField(startMatchEditor(EDITED, () => 0), 'replace', 'mine');
+      const off = state.registerObservationReceiver(2, (delivery) => {
+        session = applyObservation(session, delivery);
+      });
+      return {
+        current: () => session,
+        set: (next) => {
+          session = next;
+        },
+        off
+      };
+    } // End of function editorOver()
+
+    /**
+     * The window's two acknowledgement members, composed as the editor's callback.
+     *
+     * @param state - The window.
+     * @returns The callback `acknowledgeSnapshot` takes.
+     */
+    function acknowledgingThrough(state: BrowserState): AcknowledgeTheUncertainty {
+      return (source) => {
+        const acknowledgement = state.uncertaintyAcknowledgementFor(source);
+        return acknowledgement === null
+          ? 'refused'
+          : state.acknowledgeWriteUncertainty(acknowledgement).kind;
+      };
+    } // End of function acknowledgingThrough()
+
+    /**
+     * An observation of `match/base.yml` carrying a correspondence table whose one
+     * row is about the edited snippet, resolved to a snippet of the disk projection.
+     *
+     * @param editor - What the editor tier answered for the row.
+     * @param disk - The disk projection, holding the target when there is one.
+     * @returns The observation, over the two revisions the window holds.
+     */
+    function observedWithTable(
+      editor: ReapplyResolution,
+      disk: DocumentView
+    ): ExternalConflictObservation {
+      return {
+        ...externalObservation(),
+        disk,
+        correspondences: {
+          base_revision: 'rev-a',
+          disk_revision: 'rev-c',
+          entries: [{ base: EDITED.id, exact: { Unsupported: {} }, editor }]
+        }
+      };
+    } // End of function observedWithTable()
+
+    /** The edited snippet as the disk holds it after another writer's change. */
+    function diskTwin(): MatchView {
+      return makeMatch({ node: 41, document: 2, revision: 'rev-c', trigger: ':date', label: 'Today' });
+    } // End of function diskTwin()
+
+    it('raises through a registered receiver, refuses the save, and moves nothing', async () => {
+      const commands = scriptedCommands();
+      const state = await withTheSecondSnippetSelected(commands);
+      const revision = state.reconciliationRevision();
+      const reads = (commands.getDocument as ReturnType<typeof vi.fn>).mock.calls.length;
+      const editor = editorOver(state);
+      expect(canSave(editor.current())).toBe(true);
+
+      const seen = externalObservation();
+      const answered = state.observeExternalChange(seen);
+      const session = editor.current();
+      expect(answered.verdict.kind).toBe('raised');
+      // The session shows the origin the window registered — the same object — and
+      // its own draft, retained.
+      expect(session.externalConflict?.source).toBe(state.standingConflictFor(2));
+      expect(session.draft.value.replace.text).toBe('mine');
+      expect(canSave(session)).toBe(false);
+      expect(beginSave(session)).toBeNull();
+      expect(matchEditorView(session).externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
+      // Nothing moved: no read, no reload, no coordinator transition, no command.
+      expect(state.scopedDocument?.revision).toBe('rev-a');
+      expect(commands.getDocument).toHaveBeenCalledTimes(reads);
+      expect(commands.saveMatch).not.toHaveBeenCalled();
+      expect(state.reconciliationRevision()).toBe(revision);
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+    }); // End of the "raised through the receiver" case
+
+    it('resolves the conflict through the real door: installed, alreadyThere and refused', async () => {
+      // **Installed**: the editor's two-step reload adopts and closes.
+      const installing = await withTheSecondSnippetSelected(scriptedCommands());
+      const first = editorOver(installing);
+      installing.observeExternalChange(externalObservation());
+      const closed = reloadTheDiskVersion(
+        confirmDiskReload(askToReloadDiskVersion(first.current())),
+        installing.adoptDiskVersion
+      );
+      expect(closed.closed).toBe(true);
+      expect(closed.externalConflict).toBeNull();
+      expect(installing.scopedDocument?.revision).toBe('rev-c');
+      first.off();
+
+      // **Already there**: another surface's confirmation adopted the same
+      // observation first, so the window holds the bytes and the editor's own
+      // confirmed reload is satisfied without a second installation.
+      const satisfied = await withTheSecondSnippetSelected(scriptedCommands());
+      const second = editorOver(satisfied);
+      const seen = externalObservation();
+      satisfied.observeExternalChange(seen);
+      const elsewhere = externalModelOf(seen);
+      expect(satisfied.adoptDiskVersion(elsewhere, confirmReloadDiskVersion(elsewhere))).toBe('installed');
+      const before = satisfied.scopedDocument;
+      const alsoClosed = reloadTheDiskVersion(
+        confirmDiskReload(askToReloadDiskVersion(second.current())),
+        satisfied.adoptDiskVersion
+      );
+      expect(alsoClosed.closed).toBe(true);
+      // Nothing was installed a second time: the projection is the object it was.
+      expect(satisfied.scopedDocument).toBe(before);
+      expect(satisfied.scopedDocument?.revision).toBe('rev-c');
+      second.off();
+
+      // **Refused**: a strictly later reading superseded the origin at the window
+      // while this session was no longer listening, so the door refuses the
+      // outlived confirmation, the panel says so, and nothing closes or moves.
+      const refusing = await withTheSecondSnippetSelected(scriptedCommands());
+      const third = editorOver(refusing);
+      refusing.observeExternalChange(externalObservation());
+      third.off();
+      refusing.observeExternalChange({
+        ...externalObservation(),
+        sequence: 6,
+        diskRevision: 'rev-d',
+        disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+      });
+      const stuck = reloadTheDiskVersion(
+        confirmDiskReload(askToReloadDiskVersion(third.current())),
+        refusing.adoptDiskVersion
+      );
+      expect(stuck.closed).toBe(false);
+      expect(matchEditorView(stuck).reloadUnavailable).toBe(true);
+      expect(stuck.externalConflict).toBe(third.current().externalConflict);
+      expect(refusing.scopedDocument?.revision).toBe('rev-a');
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "three adoption outcomes" case
+
+    it('reapplies over the observation’s table by full identity, through the live guard and the real door', async () => {
+      const disk = makeDocument({
+        id: 2,
+        relativePath: 'match/base.yml',
+        revision: 'rev-c',
+        matches: [diskTwin()]
+      });
+      const state = await withTheSecondSnippetSelected(scriptedCommands());
+      const editor = editorOver(state);
+      state.observeExternalChange(observedWithTable({ Identified: { target: diskTwin() } }, disk));
+      const stuck = editor.current();
+      expect(stuck.externalConflict).not.toBeNull();
+
+      const answer = reapplyEditorToDiskVersion(stuck, state.adoptDiskVersion, () =>
+        state.standingConflictFor(2)
+      );
+      expect(answer.kind).toBe('reapplied');
+      if (answer.kind !== 'reapplied') {
+        throw new Error('this case is about the rebuilt session');
+      }
+      expect(answer.session.match).toEqual(diskTwin().id);
+      expect(answer.session.draft.value.replace.text).toBe('mine');
+      expect(canSave(answer.session)).toBe(true);
+      // The window moved to the observation's snapshot, once, through the door.
+      expect(state.scopedDocument?.revision).toBe('rev-c');
+      expect(state.scopedMatches.map((match) => match.id.node)).toEqual([41]);
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+
+      // **Superseded through the guard**: the same conflict, after a later reading
+      // took the standing place, is refused before any evidence is read and nothing
+      // is adopted.
+      const later = await withTheSecondSnippetSelected(scriptedCommands());
+      const listening = editorOver(later);
+      later.observeExternalChange(observedWithTable({ Identified: { target: diskTwin() } }, disk));
+      listening.off();
+      later.observeExternalChange({
+        ...externalObservation(),
+        sequence: 6,
+        diskRevision: 'rev-d',
+        disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+      });
+      expect(
+        reapplyEditorToDiskVersion(listening.current(), later.adoptDiskVersion, () =>
+          later.standingConflictFor(2)
+        )
+      ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } });
+      expect(later.scopedDocument?.revision).toBe('rev-a');
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "reapply through the live guard" case
+
+    it('is told retained through the barrier and then the settlement’s verdict, blocking the save in between', async () => {
+      // A raw save of the same file — another surface's write — is in flight, so
+      // the observation is held; the editor is told so and may not send; the
+      // settlement arbitrates the held reading and the editor is told that too.
+      const held = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null
+      );
+      const state = await withTheSecondSnippetSelected(held.commands);
+      const editor = editorOver(state);
+      const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      const seen = externalObservation();
+      state.observeExternalChange(seen);
+      const waiting = editor.current();
+      expect(waiting.awaitingReconciliation).toBe(seen);
+      expect(waiting.externalConflict).toBeNull();
+      expect(canSave(waiting)).toBe(false);
+      expect(beginSave(waiting)).toBeNull();
+      expect(matchEditorView(waiting).externalNotices).toEqual([{ kind: 'observationRetained' }]);
+      // The window's guard says the same thing the session's notice does.
+      expect(await state.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'observationRetained',
+        at: 'request'
+      });
+
+      held.release();
+      await sending;
+      const decided = editor.current();
+      expect(decided.awaitingReconciliation).toBeNull();
+      expect(decided.externalConflict?.source).toBe(externalConflictSource(seen));
+      expect(canSave(decided)).toBe(false);
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+
+      // **`writtenHere`**: a held reading of exactly the bytes the commit ended on
+      // lifts the wait and raises nothing.
+      const committing = heldRawSave(
+        {
+          ok: true,
+          value: { outcome: 'saved', revision: 'rev-c', committed: true, backup_taken: false, moved: null, notes: [] },
+          reload: { kind: 'done' }
+        },
+        'rev-c'
+      );
+      const window = await withTheSecondSnippetSelected(committing.commands);
+      const listening = editorOver(window);
+      const writing = window.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      const same = externalObservation();
+      window.observeExternalChange(same);
+      expect(listening.current().awaitingReconciliation).toBe(same);
+      committing.release();
+      await writing;
+      const lifted = listening.current();
+      expect(lifted.awaitingReconciliation).toBeNull();
+      expect(lifted.externalConflict).toBeNull();
+      expect(canSave(lifted)).toBe(true);
+      expect(window.standingConflictFor(2)).toBeNull();
+      expect(invoked).not.toHaveBeenCalled();
+      listening.off();
+    }); // End of the "retained then decided" case
+
+    it('withholds the reload under the uncertainty hold and rebuilds it through the window’s acknowledgement', async () => {
+      const commands = scriptedCommands({ raws: [WRITE_MAY_HAVE_HAPPENED] });
+      const state = await withTheSecondSnippetSelected(commands);
+      expect(await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED)).toEqual({
+        kind: 'failed',
+        mayHaveWritten: true
+      });
+      expect(state.writeOutcomeUncertain(2)).toBe(true);
+      const editor = editorOver(state);
+      expect(state.observeExternalChange(externalObservation()).verdict.kind).toBe('raisedWithoutReload');
+      const withheld = editor.current();
+      expect(withheld.uncertaintyUnresolved).toBe(true);
+      expect(matchEditorView(withheld).conflictChoices).toEqual(['keepEditing', 'copyDraft']);
+      expect(matchEditorView(withheld).externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
+      // The reapply refuses before it could obtain an adoption, and the window is
+      // where it was.
+      expect(
+        reapplyEditorToDiskVersion(withheld, state.adoptDiskVersion, () => state.standingConflictFor(2))
+      ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } });
+      expect(askToReloadDiskVersion(withheld)).toBe(withheld);
+      expect(state.scopedDocument?.revision).toBe('rev-a');
+
+      // The acknowledgement, minted and spent through the window's own members,
+      // ends the hold there and rebuilds the availability here; nothing installs.
+      const acknowledged = acknowledgeSnapshot(withheld, acknowledgingThrough(state));
+      expect(acknowledged.uncertaintyUnresolved).toBe(false);
+      expect(state.writeOutcomeUncertain(2)).toBe(false);
+      expect(state.automaticReloadGuardFor(2).uncertaintyUnresolved).toBe(false);
+      expect(state.scopedDocument?.revision).toBe('rev-a');
+      expect(matchEditorView(acknowledged).conflictChoices).toContain('reloadDiskVersion');
+      // A second acknowledgement has nothing to end and asks nothing that spends.
+      expect(acknowledgeSnapshot(acknowledged, acknowledgingThrough(state))).toBe(acknowledged);
+      // And the reload now goes through, two steps and the door.
+      const closed = reloadTheDiskVersion(
+        confirmDiskReload(askToReloadDiskVersion(acknowledged)),
+        state.adoptDiskVersion
+      );
+      expect(closed.closed).toBe(true);
+      expect(state.scopedDocument?.revision).toBe('rev-c');
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+    }); // End of the "uncertainty acknowledged through the window" case
+
+    it('refuses a reapply while a reading is held behind another surface’s write, through the real door', async () => {
+      // **The review's first blocker, with a real adopter.** Conflict A stands and
+      // is registered; a raw save of the same file is in flight; reading B arrives
+      // and is held, so the editor refuses to send. `adoptDiskVersion` has no
+      // write-in-flight guard, so a reapply that reached it would install A's
+      // snapshot and hand back a fresh session with no wait recorded — and the
+      // blocked submission would be allowed through that session's ordinary save.
+      const held = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null
+      );
+      const disk = makeDocument({
+        id: 2,
+        relativePath: 'match/base.yml',
+        revision: 'rev-c',
+        matches: [diskTwin()]
+      });
+      const state = await withTheSecondSnippetSelected(held.commands);
+      const editor = editorOver(state);
+      state.observeExternalChange(observedWithTable({ Identified: { target: diskTwin() } }, disk));
+      expect(editor.current().externalConflict).not.toBeNull();
+      const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      const laterReading: ExternalConflictObservation = {
+        ...externalObservation(),
+        sequence: 6,
+        diskRevision: 'rev-d',
+        disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+      };
+      expect(state.observeExternalChange(laterReading).verdict.kind).toBe('retained');
+      const blocked = editor.current();
+      expect(blocked.awaitingReconciliation).toBe(laterReading);
+      expect(canSave(blocked)).toBe(false);
+
+      const answer = reapplyEditorToDiskVersion(blocked, state.adoptDiskVersion, () =>
+        state.standingConflictFor(2)
+      );
+      expect(answer).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      // Nothing adopted, nothing moved, and the block stands on the session shown.
+      expect(state.scopedDocument?.revision).toBe('rev-a');
+      expect(canSave(blocked)).toBe(false);
+      expect(matchEditorView(blocked).reapplyOffered).toBe(false);
+
+      held.release();
+      await sending;
+      // The settlement decided the held reading — a later reading of other bytes
+      // supersedes A — and the wait is over, with a conflict standing still.
+      const decided = editor.current();
+      expect(decided.awaitingReconciliation).toBeNull();
+      expect(decided.externalConflict?.source).toBe(externalConflictSource(laterReading));
+      expect(canSave(decided)).toBe(false);
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+    }); // End of the "reapply refused behind another surface's write" case
+
+    it('keeps a raised conflict delivered during its own save when a sibling’s coalesced follows it before the continuation', async () => {
+      // **The review's second blocker, the reviewer's interleaving, through the
+      // window.** The editor's own save is out; the barrier tells it `retained(A)`;
+      // the save is refused, so the settlement delivers `raised(A)` from inside the
+      // wrapper's `finally`; a sibling receiver over the same file answers that
+      // `raised` by publishing a later reading of the same bytes, which the window
+      // decides `coalesced` and hands to every receiver — all of it before the
+      // editor's `await` resumes. The hold must replay both, in that order.
+      const answering = deferred<CommandResult<SaveResult>>();
+      const commands: BrowserCommands = {
+        ...scriptedCommands(),
+        saveMatch: vi.fn(() => answering.promise)
+      };
+      const state = await withTheSecondSnippetSelected(commands);
+      const editor = editorOver(state);
+      const started = beginSave(editor.current());
+      if (started === null) {
+        throw new Error('the edited draft is saveable');
+      }
+      editor.set(started.session);
+      const sending = state.saveMatch(
+        started.session.match,
+        started.draft,
+        started.session.draft.baseRevision,
+        started.submission.acknowledgement
+      );
+      // The sibling: on `raised`, it publishes a later reading of the same bytes.
+      let republished = false;
+      const offSibling = state.registerObservationReceiver(2, (delivery) => {
+        if (delivery.verdict.kind === 'raised' && !republished) {
+          republished = true;
+          state.observeExternalChange({ ...externalObservation(), sequence: 6 });
+        }
+      });
+      const seen = externalObservation();
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('retained');
+      expect(editor.current().externalConflict).toBeNull();
+
+      answering.resolve({
+        ok: true,
+        value: {
+          outcome: 'refused',
+          verdict: 'RefusedForUnacknowledgedSuspicions',
+          findings: [suspicion()]
+        }
+      });
+      const answer = await sending;
+      if (answer.kind !== 'answered') {
+        throw new Error('the scripted refusal is an answer');
+      }
+      // Everything the window decided reached the editor before this line, held.
+      const holding = editor.current();
+      expect(holding.externalConflict).toBeNull();
+      editor.set(applyEditorSave(holding, answer.result, answer.adoption));
+
+      const settled = editor.current();
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(settled.externalConflict?.source).toBe(externalConflictSource(seen));
+      expect(settled.externalConflict?.source).toBe(state.standingConflictFor(2));
+      expect(settled.awaitingReconciliation).toBeNull();
+      expect(canSave(settled)).toBe(false);
+      // Held in the order the window decided, and nothing left held once replayed.
+      expect(holding.heldDeliveries.map((delivery) => delivery.verdict.kind)).toEqual([
+        'retained',
+        'raised',
+        'coalesced'
+      ]);
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(invoked).not.toHaveBeenCalled();
+      offSibling();
+      editor.off();
+    }); // End of the "raised kept behind a sibling's coalesced" case
+
+    it('receives one decision per delivery through a retry, and never a command', async () => {
+      // A held reading retried by the person arrives at the session as the
+      // arbitration's verdict, on the same receiver, with nothing sent.
+      const held = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null
+      );
+      const state = await withTheSecondSnippetSelected(held.commands);
+      const editor = editorOver(state);
+      const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      const seen = externalObservation();
+      state.observeExternalChange(seen);
+      expect(state.retryRetainedObservation(2)).toEqual({ kind: 'writeInFlight' });
+      expect(editor.current().awaitingReconciliation).toBe(seen);
+      held.release();
+      await sending;
+      expect(editor.current().externalConflict?.source).toBe(externalConflictSource(seen));
+      expect(state.retryRetainedObservation(2)).toEqual({ kind: 'nothingRetained' });
+      expect(held.commands.saveMatch).not.toHaveBeenCalled();
+      expect(held.commands.reloadDocument).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+    }); // End of the "retry reaches the receiver" case
+  }); // End of the "match editor's external session" suite
 }); // End of the "deferred adoption" suite
 
 /**

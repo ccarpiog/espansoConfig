@@ -42,7 +42,11 @@ import {
   type ExternalConflictAction,
   type ExternalConflictNotice
 } from '../browser/observationDelivery';
-import { externalEvidenceRefusalKey, SUPERSEDED_EVIDENCE_KEY } from '../browser/reapply';
+import {
+  externalEvidenceRefusalKey,
+  reapplyOutcomeKey,
+  SUPERSEDED_EVIDENCE_KEY
+} from '../browser/reapply';
 import { conflictMessageKey, type ConflictMessage } from '../browser/saveOutcome';
 import {
   describeConflictMessage,
@@ -241,18 +245,49 @@ describe('the reviewed wording, pinned literally', () => {
   }); // End of the "external origin and conflict lines" case
 
   it('pins the reapply refusals over external evidence to "this reapply attempt wrote nothing" (entry 24)', () => {
-    // The three sentences `tExternalEvidenceRefusal` renders used to end *Nothing
+    // The three sentences `tExternalEvidenceRefusal` rendered used to end *Nothing
     // was written* — an unbounded claim about the file, false after a write this
-    // window attempted with an unknown outcome. Each now ends with a claim about
-    // this attempt alone, and the old clause is gone from all three.
-    for (const reason of ['noCorrespondence', 'baseRevisionMoved', 'diskRevisionMoved'] as const) {
+    // window attempted with an unknown outcome. Each ends with a claim about this
+    // attempt alone, the old clause is gone, and the two row refusals Phase 2d-6-2
+    // added (the record's §3 entry 20) end the same way.
+    for (const reason of [
+      'noCorrespondence',
+      'baseRevisionMoved',
+      'diskRevisionMoved',
+      'noRowForBase',
+      'severalRowsForBase'
+    ] as const) {
       const key = externalEvidenceRefusalKey(reason);
       expect(sentence('en', key), reason).toMatch(/ This reapply attempt wrote nothing\.$/);
       expect(sentence('en', key), reason).not.toContain('Nothing was written');
       expect(sentence('es', key), reason).toMatch(/ Este intento de reaplicar no ha escrito nada\.$/);
       expect(sentence('es', key), reason).not.toContain('No se ha escrito nada');
-    } // End of the loop over the three external-evidence refusals
+    } // End of the loop over the five external-evidence refusals
   }); // End of the "reapply refusals" case
+
+  it('pins every reapply outcome sentence to a claim about this attempt (Phase 2d-6-2 register review)', () => {
+    // **The four umbrella sentences 2d-6-1a left, and the two success arms found
+    // beside them.** *Nothing was written* on a reapply outcome is a claim about the
+    // file, and after a write of this window's own whose outcome is unknown nobody
+    // can make it; every one of the six now bounds the claim to the attempt, in
+    // both languages, and the unbounded clause is gone from all six.
+    for (const code of [
+      'reapplied',
+      'alreadySatisfied',
+      'manualResolution',
+      'adoptionRefused',
+      'unavailable',
+      'notAttempted'
+    ] as const) {
+      const key = reapplyOutcomeKey(code);
+      expect(sentence('en', key).toLowerCase(), code).toContain('this reapply attempt wrote nothing');
+      expect(sentence('en', key), code).not.toMatch(/nothing (was|has been) written/i);
+      expect(sentence('es', key).toLowerCase(), code).toContain(
+        'este intento de reaplicar no ha escrito nada'
+      );
+      expect(sentence('es', key), code).not.toMatch(/no se ha escrito nada/i);
+    } // End of the loop over the six reapply outcome arms
+  }); // End of the "reapply outcome register" case
 
   it('pins the supersession sentence to "accepted evidence changed" (entry 24) in both languages', () => {
     expect(sentence('en', SUPERSEDED_EVIDENCE_KEY)).toBe(
@@ -281,6 +316,9 @@ describe('the semantic bounds of entry 40, as absences', () => {
     'browser.reapply.externalEvidence.noCorrespondence',
     'browser.reapply.externalEvidence.baseRevisionMoved',
     'browser.reapply.externalEvidence.diskRevisionMoved',
+    // The two row refusals of Phase 2d-6-2, bounded like their three siblings.
+    'browser.reapply.externalEvidence.noRowForBase',
+    'browser.reapply.externalEvidence.severalRowsForBase',
     'browser.reapply.supersededConflict'
   ];
 

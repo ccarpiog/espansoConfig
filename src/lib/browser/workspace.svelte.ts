@@ -988,9 +988,10 @@ export interface LoadFailure {
  * **It receives a sealed envelope and never re-arbitrates**: the observation and
  * the verdict inside are this window's one decision, and every receiver
  * registered over the file gets the same object. What a receiver does with it is
- * the session transition's business (entry 11), which is 2d-6-2's; nothing in
- * TypeScript makes a receiver act on the arm it is given, or act on it in order
- * against its own awaited write (entry 5 — see
+ * the session transition's business (entry 11) — the match editor's is
+ * `applyObservation` in `./matchEditor.ts` since Phase 2d-6-2, and no component
+ * registers it yet; nothing in TypeScript makes a receiver act on the arm it is
+ * given, or act on it in order against its own awaited write (entry 5 — see
  * {@link BrowserState.registerObservationReceiver}).
  *
  * **It answers `void`, deliberately.** A return type would be a claim about a

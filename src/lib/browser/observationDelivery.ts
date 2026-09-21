@@ -9,10 +9,13 @@
  * orchestrator's cut) landed the values 2d-6-1b's `BrowserState` members and
  * 2d-6-2's session transitions consume, **additively**, and the record's §3 entry
  * 42 is why — shared facilities land before callers activate, so every boundary
- * compiles. Since 2d-6-1b `./workspace.svelte.ts` is the one production importer:
- * it seals every verdict it reaches through the constructors below and answers the
- * guard's three inputs; no component and no session transition consumes either
- * yet.
+ * compiles. Since 2d-6-1b `./workspace.svelte.ts` seals every verdict it reaches
+ * through the constructors below and answers the guard's three inputs; since
+ * 2d-6-2 the match editor's `applyObservation` in `./matchEditor.ts` consumes the
+ * envelope, one named action per verdict arm. **No component registers that
+ * receiver yet** (2d-6-6's), so in production every envelope still reaches the
+ * receivers a test registered, or nobody; the other surfaces' transitions are
+ * 2d-6-3, 2d-6-4 and 2d-6-5's.
  *
  * 1. **The delivery envelope** ({@link ObservationDelivery}): the narrowed
  *    observation plus the verdict the window reached about it, sealed together so
@@ -373,12 +376,13 @@ export function decideAutomaticReload(inputs: AutomaticReloadGuardInputs): Autom
  * reviewing the snapshot cannot establish whether it completed — an unknown
  * outcome, never a failure and never a success.
  *
- * **Nothing draws these yet.** The session state that shows the first is
- * 2d-6-2's; the acknowledgement that ends the second exists
+ * **Nothing draws these yet.** The match editor's view answers both since
+ * 2d-6-2 (`MatchEditorView.externalNotices` in `./matchEditor.ts`), and no
+ * component reads that field; the acknowledgement that ends the second exists
  * (`BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, since
- * 2d-6-1b) and no component calls it. The codes exist because a code with no
- * string is worse than a code with no caller, and because the wording is reviewed
- * once, here, before anything draws it.
+ * 2d-6-1b) and no component calls it — 2d-6-9 draws the control. The codes exist
+ * because a code with no string is worse than a code with no caller, and because
+ * the wording is reviewed once, here, before anything draws it.
  */
 export type ExternalConflictNotice =
   | {
