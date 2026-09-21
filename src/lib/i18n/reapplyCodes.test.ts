@@ -329,7 +329,14 @@ describe('the reapply obstacle sentences', () => {
     { kind: 'notTheDestination' },
     { kind: 'creationRefused', reason: 'anchorUnavailable' },
     { kind: 'correspondence', reason: 'AmbiguousTrigger' },
-    { kind: 'evidenceNotATarget' }
+    { kind: 'evidenceNotATarget' },
+    // The external-origin arms, Phase 2d-6-3; every one reuses a sentence that
+    // already exists, and `matchCreation.test.ts` pins each reason of the second.
+    { kind: 'destinationRequired' },
+    { kind: 'externalEvidence', reason: 'noRowForBase' },
+    { kind: 'supersededEvidence' },
+    { kind: 'writeOutcomeUnknown' },
+    { kind: 'observationRetained' }
   ];
 
   /** Every arm of the deletion's union, exhaustively. */

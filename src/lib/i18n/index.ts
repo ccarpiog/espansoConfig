@@ -1648,6 +1648,12 @@ export function tEditorReapplyObstacle(obstacle: EditorReapplyObstacle): string 
 /**
  * Renders why a creation form's reapply refused, in one language.
  *
+ * **A `switch` with a `never` terminus since Phase 2d-6-3**, when the union grew
+ * the external-origin arms — a form naming no file, a refused table or row,
+ * superseded evidence, a write whose outcome is unknown, and a reading the window
+ * holds undecided — so that an arm added to `CreationReapplyObstacle` with no
+ * sentence chosen here is a compile error rather than a fall-through.
+ *
  * @param locale - The dictionary to read from.
  * @param obstacle - What stopped the reapply.
  * @returns The translated sentence, with any nested code's under it.
@@ -1665,10 +1671,19 @@ export function describeCreationReapplyObstacle(
     case 'evidenceNotAnAnchor':
     case 'anchorNotInDestination':
     case 'notTheDestination':
+    case 'destinationRequired':
+    case 'externalEvidence':
+    case 'supersededEvidence':
+    case 'writeOutcomeUnknown':
+    case 'observationRetained':
       return translate(locale, key);
     case 'correspondence':
     case 'evidenceNotATarget':
       return describeSharedReapplyObstacle(locale, obstacle);
+    default: {
+      const unreachable: never = obstacle;
+      return unreachable;
+    }
   }
 } // End of function describeCreationReapplyObstacle()
 
@@ -1885,10 +1900,21 @@ export function describeRecoveryReapplyObstacle(
     case 'recoveryRefused':
       return `${translate(locale, key)} ${translate(locale, recoveryRefusalKey(obstacle.reason))}`;
     case 'notTheDestination':
+    case 'destinationRequired':
+    case 'supersededEvidence':
+    case 'writeOutcomeUnknown':
+    case 'observationRetained':
       return translate(locale, key);
     case 'correspondence':
     case 'evidenceNotATarget':
       return describeSharedReapplyObstacle(locale, obstacle);
+    default: {
+      // A `never` terminus since Phase 2d-6-3, when the union grew its four
+      // external-origin arms, so an arm with no sentence chosen here is a compile
+      // error rather than a fall-through.
+      const unreachable: never = obstacle;
+      return unreachable;
+    }
   }
 } // End of function describeRecoveryReapplyObstacle()
 

@@ -509,8 +509,11 @@ export function standingConflictOf(source: ConflictSource): StandingConflict {
  * the same path afterwards. Nothing in TypeScript ties a receiver to a session or
  * makes a session act on the arm it is given; that is the session transition's —
  * the match editor's is `applyObservation` in `./matchEditor.ts` (Phase 2d-6-2),
- * with one named action per arm and a `never` terminus; the other surfaces' are
- * 2d-6-3, 2d-6-4 and 2d-6-5's.
+ * with one named action per arm and a `never` terminus, and the new-snippet
+ * form's and the recovery form's are `applyObservation` in `./matchCreation.ts`
+ * and `applyRecoveryObservation` in `./recovery.ts` (Phase 2d-6-3), in the same
+ * shape; the deleter's, mover's, duplicator's, raw editor's and restore's are
+ * 2d-6-4 and 2d-6-5's.
  */
 export type ObservationVerdict =
   | {

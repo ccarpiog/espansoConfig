@@ -2,7 +2,7 @@
  * Recovery from a conflict nothing could resolve automatically, driven without a
  * screen.
  *
- * Eight groups, and each is a way this escape could be wrong in a manner a person
+ * Nine groups, and each is a way this escape could be wrong in a manner a person
  * would only discover after their file had been written — or after they had lost a
  * draft nothing could land:
  *
@@ -23,7 +23,12 @@
  *    neither offered;
  * 8. **what recovery never does** — no create offer for the three operation
  *    surfaces or the raw editor, no send while a refusal stands, and no route
- *    from this module to the command layer at all.
+ *    from this module to the command layer at all;
+ * 9. **the external session** — Phase 2d-6-3: the form's own receiver over its
+ *    destination, cross-file and same-file, with `origin.conflict` left the exact
+ *    object it was; the destination-less form that requires an explicit
+ *    destination; the held observation; the uncertainty and its exits; and the
+ *    reapply over the external origin, which reads no table at all.
  *
  * Per `1b-2a-notes.md` section 14, a `describe`/`it` callback whose sibling
  * argument is already its description carries no JSDoc of its own; ordinary
@@ -77,12 +82,15 @@ import {
   RECOVERY_CONFLICT_CAPABILITIES,
   RECOVERY_POSITION,
   acknowledgeRecoveryFindings,
+  acknowledgeRecoverySnapshot,
   applyRecoveryCreate,
+  applyRecoveryObservation,
   askToReloadRecoveryDiskVersion,
   beginRecoveryCreate,
   confirmRecoveryDiskReload,
   reapplyRecoveryToDiskVersion,
   reloadRecoveryDiskVersion,
+  canChooseRecoveryDestination,
   canCreateRecovery,
   chooseRecoveryDestination,
   conflictDraftKindOf,
@@ -98,9 +106,12 @@ import {
   recoveryConflictOf,
   recoveryCreateCouldNotBeSent,
   recoveryDestinationsOf,
+  recoveryReapplyObstacleKey,
   recoveryRefusal,
+  recoveryRefusalKey,
   recoveryRouteOf,
   recoveryIsAnswerable,
+  recoveryTargetOf,
   recoveryView,
   recoveryWithoutCreation,
   redoRecoveryEdit,
@@ -115,10 +126,37 @@ import {
   type InstallTheWaitingForm,
   type RecoveryCreateAnswer,
   type RecoveryDraftKind,
+  type RecoveryReapplyObstacle,
+  type RecoveryRefusal,
   type RecoverySession,
   type RecoveryUnavailable,
   type RecoveryWithoutCreationKind
 } from './recovery';
+import { DICTIONARIES } from '../i18n/dictionaries';
+import { LOCALES } from '../i18n/locale';
+import { describeRecoveryReapplyObstacle } from '../i18n';
+import {
+  externalConflictSource,
+  standingConflictOf,
+  type ConflictSource,
+  type ExternalChangeConflictSource,
+  type ExternalConflictObservation,
+  type ObservationVerdict
+} from './conflictSource';
+import { NOT_RELOADING } from './editorSave';
+import {
+  arbitratedDelivery,
+  retainedDelivery,
+  writtenHereDelivery,
+  type ObservationDelivery
+} from './observationDelivery';
+import { attemptOfReapply, reapplyToShow } from './reapply';
+import {
+  isExternalConflict,
+  isSaveConflict,
+  type ConflictChoice,
+  type ExternalConflictModel
+} from './saveOutcome';
 
 /** The revision the window is projecting when every conflict below arrives. */
 const HELD: ContentRevision = 'a'.repeat(64);
@@ -1291,6 +1329,28 @@ const CLOSED_FORM_PROBES: Readonly<Record<string, ClosedFormProbe>> = {
     answers: (closed) => beginRecoveryCreate(closed),
     answersItself: false,
     otherwise: null
+  },
+  // Phase 2d-6-3: the receiver and the acknowledgement, both closed-first.
+  applyRecoveryObservation: {
+    answers: (closed) =>
+      applyRecoveryObservation(
+        closed,
+        retainedDelivery({
+          sequence: 5,
+          document: 2,
+          previousRevision: HELD,
+          diskRevision: AFTER,
+          diskText: '',
+          disk: diskFile({ revision: AFTER }),
+          findings: [],
+          correspondences: null
+        })
+      ),
+    answersItself: true
+  },
+  acknowledgeRecoverySnapshot: {
+    answers: (closed) => acknowledgeRecoverySnapshot(closed, () => 'acknowledged'),
+    answersItself: true
   }
 };
 
@@ -1329,6 +1389,10 @@ const NOT_A_FORM_TRANSITION: readonly string[] = [
   'recoveryBaseRevisionOf',
   'recoveryIsAnswerable',
   'transferStatusOf',
+  // Phase 2d-6-3: two queries — the destination door, and the target the form
+  // reports upward.
+  'canChooseRecoveryDestination',
+  'recoveryTargetOf',
   // Key functions, added at 2c-4c-3a: each takes a code and answers a dictionary
   // key, and not one of them takes a form.
   'recoveryChoiceKey',
@@ -1898,3 +1962,737 @@ describe('what recovery never does', () => {
     expect(recoveryBaseRevisionOf(openedOverCreator())).toBe(DISK);
   });
 }); // End of the "what recovery never does" suite
+
+describe('the external session — Phase 2d-6-3', () => {
+  // **The form's own receiver, driven without a window.** Every envelope here is
+  // sealed by the three constructors of `./observationDelivery.ts`; the cases
+  // through a real `BrowserState` — two receivers over one file, the door, the
+  // acknowledgement members — are `workspace.test.ts`'s. Nothing here registers
+  // anything and nothing here calls a command.
+
+  /** The disk text every observation below reads. */
+  const THEIRS = 'matches:\n  - trigger: x\n    replace: theirs\n';
+
+  /**
+   * One narrowed observation of `match/base.yml` — the origin's own file.
+   *
+   * A fresh object every call: the memo in `./conflictSource.ts` and the form's
+   * wait are keyed on identity, so two calls are two observations.
+   *
+   * @param overrides - Whatever the case needs beyond the defaults.
+   * @returns The observation.
+   */
+  function observation(
+    overrides: Partial<ExternalConflictObservation> = {}
+  ): ExternalConflictObservation {
+    return {
+      sequence: 5,
+      document: 2,
+      previousRevision: HELD,
+      diskRevision: AFTER,
+      diskText: THEIRS,
+      disk: diskFile({ revision: AFTER }),
+      findings: [],
+      correspondences: null,
+      ...overrides
+    };
+  } // End of function observation()
+
+  /**
+   * One narrowed observation of `match/other.yml` — a cross-file destination.
+   *
+   * @param overrides - Whatever the case needs beyond the defaults.
+   * @returns The observation.
+   */
+  function otherObservation(
+    overrides: Partial<ExternalConflictObservation> = {}
+  ): ExternalConflictObservation {
+    return observation({
+      document: 3,
+      previousRevision: OTHER,
+      diskRevision: 'e'.repeat(64),
+      disk: otherFile({ revision: 'e'.repeat(64) }),
+      ...overrides
+    });
+  } // End of function otherObservation()
+
+  /**
+   * An arbitrated envelope, asserted to have reached the arm the case is about.
+   *
+   * @param standing - What stands for the file, or `null`.
+   * @param seen - The observation.
+   * @param uncertain - Whether the last settled write may have written.
+   * @param arm - The verdict the case needs.
+   * @returns The sealed envelope.
+   */
+  function decided(
+    standing: ConflictSource | null,
+    seen: ExternalConflictObservation,
+    uncertain: boolean,
+    arm: ObservationVerdict['kind']
+  ): ObservationDelivery {
+    const delivery = arbitratedDelivery(
+      standing === null ? null : standingConflictOf(standing),
+      seen,
+      uncertain
+    );
+    expect(delivery.verdict.kind).toBe(arm);
+    return delivery;
+  } // End of function decided()
+
+  /**
+   * The `raised` envelope for one observation.
+   *
+   * @param seen - The observation.
+   * @returns The envelope.
+   */
+  function raised(seen: ExternalConflictObservation): ObservationDelivery {
+    return decided(null, seen, false, 'raised');
+  } // End of function raised()
+
+  /**
+   * A recorder for the window's own adoption.
+   *
+   * @param answer - What the window answers.
+   * @returns The callback to pass, and the conflicts it was handed.
+   */
+  function adopting(answer: DiskAdoptionOutcome = 'installed'): {
+    readonly adopt: AdoptTheDiskVersion<CreationBuffers>;
+    readonly adoptions: ConflictModel<CreationBuffers>[];
+  } {
+    const adoptions: ConflictModel<CreationBuffers>[] = [];
+    return {
+      adopt: (conflict) => {
+        adoptions.push(conflict);
+        return answer;
+      },
+      adoptions
+    };
+  } // End of function adopting()
+
+  /**
+   * The external conflict a form shows, or a failure naming the case.
+   *
+   * @param held - The form.
+   * @returns Its external conflict.
+   */
+  function externalOf(held: RecoverySession): ExternalConflictModel<CreationBuffers> {
+    const conflict = held.externalConflict;
+    if (conflict === null) {
+      throw new Error('this case needs an external conflict on the form');
+    }
+    return conflict;
+  } // End of function externalOf()
+
+  /**
+   * A form opened over the editor's conflict about `match/base.yml`, retargeted
+   * to `match/other.yml` — the cross-file recovery.
+   *
+   * @returns The form, writing into the other file.
+   */
+  function crossFile(): RecoverySession {
+    const moved = chooseRecoveryDestination(openedOverEditor(), 3);
+    expect(moved.chosen).toBe(3);
+    return moved;
+  } // End of function crossFile()
+
+  /**
+   * A form whose conflict's own file is no longer eligible, so nothing is chosen.
+   *
+   * @returns The destination-less form.
+   */
+  function unaddressed(): RecoverySession {
+    const opened = openedOverEditor(
+      snippet(),
+      {},
+      [heldFile(), otherFile()],
+      diskFile({ topLevelKeys: ['global_vars'] })
+    );
+    expect(opened.chosen).toBeNull();
+    expect(opened.destinations.map((one) => one.document)).toEqual([3]);
+    return opened;
+  } // End of function unaddressed()
+
+  /**
+   * A form whose own create met a save conflict.
+   *
+   * @param form - The form to send from.
+   * @returns The form showing its own save conflict.
+   */
+  async function saveConflicted(form: RecoverySession = openedOverEditor()): Promise<RecoverySession> {
+    return sendRecoveryCreate(
+      form,
+      recordingCreate([
+        {
+          kind: 'answered',
+          result: makeConflict({ disk: diskFile({ revision: AFTER }), expected: DISK, subject: { Targetless: {} } }),
+          adoption: NOT_OWED
+        }
+      ]).create,
+      INSTALLS_NOTHING
+    );
+  } // End of function saveConflicted()
+
+  describe('the origin stays the exact object it was (entry 25)', () => {
+    it('raises the destination’s conflict over a cross-file recovery and leaves the origin untouched', () => {
+      const form = crossFile();
+      const origin = form.origin;
+      const originSource = origin.conflict;
+      expect(recoveryTargetOf(form)).toEqual({ kind: 'document', document: 3 });
+      const seen = otherObservation();
+      const told = applyRecoveryObservation(form, raised(seen));
+      const conflict = externalOf(told);
+      expect(conflict.source).toBe(externalConflictSource(seen));
+      expect(isExternalConflict(conflict)).toBe(true);
+      expect(conflict.disk.id).toBe(3);
+      expect(recoveryConflictOf(told)).toBe(conflict);
+      // **Distinct, and the same object it was**: the origin is the source conflict
+      // about `match/base.yml`, not replaced, not rebuilt, not read.
+      expect(told.origin).toBe(origin);
+      expect(told.origin.conflict).toBe(originSource);
+      expect(told.origin.conflict).not.toBe(conflict.source);
+      expect(told.origin.document).toBe(2);
+      expect(sourceConflictState(told)).toBe('retained');
+      // The form is blocked by the destination's conflict, with a code of its own.
+      expect(isRecoveryEditable(told)).toBe(false);
+      expect(recoveryRefusal(told)).toBe('externalConflict');
+      expect(recoveryRefusalKey('externalConflict')).toBe('browser.externalConflict.fileChangedWhileOpen');
+      expect(beginRecoveryCreate(told)).toBeNull();
+      expect(told.draft.value).toEqual({ trigger: ':sig', replace: 'Regards' });
+      const view = recoveryView(told);
+      expect(view.conflict).toBe(conflict);
+      expect(view.externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
+      expect(view.messages).toEqual([]);
+      expect(view.sourceConflict).toBe('retained');
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>([
+        'keepEditing',
+        'keepMyDraft',
+        'reloadDiskVersion'
+      ]);
+      // A reading of the origin's file is not about this form any more.
+      expect(applyRecoveryObservation(form, raised(observation()))).toBe(form);
+      expect(applyRecoveryObservation(form, retainedDelivery(observation()))).toBe(form);
+    }); // End of the "cross-file recovery" case
+
+    it('records a same-file reading in its own field, never on the origin', () => {
+      // The form writes back into the origin's file, so it receives that file's
+      // deliveries — the same envelope the host would — and keeps its own copy.
+      const form = openedOverEditor();
+      expect(form.chosen).toBe(2);
+      expect(recoveryTargetOf(form)).toEqual({ kind: 'document', document: 2 });
+      const seen = observation();
+      const told = applyRecoveryObservation(form, raised(seen));
+      expect(externalOf(told).source).toBe(externalConflictSource(seen));
+      expect(told.origin).toBe(form.origin);
+      expect(told.origin.conflict).toBe(form.origin.conflict);
+      expect(told.origin.conflict).not.toBe(externalOf(told).source);
+      expect(told.origin.conflict.kind).toBe('save');
+      expect(externalOf(told).source.kind).toBe('externalChange');
+    });
+
+    it('spends the destination conflict’s authorization on a reload, never the origin’s, and closes', () => {
+      const told = applyRecoveryObservation(crossFile(), raised(otherObservation()));
+      const recorder = adopting();
+      const closed = reloadRecoveryDiskVersion(
+        confirmRecoveryDiskReload(askToReloadRecoveryDiskVersion(told)),
+        recorder.adopt
+      );
+      expect(closed.closed).toBe(true);
+      expect(closed.externalConflict).toBeNull();
+      expect(recorder.adoptions).toEqual([externalOf(told)]);
+      expect(recorder.adoptions[0]!.source).not.toBe(told.origin.conflict);
+      expect(closed.origin.conflict).toBe(told.origin.conflict);
+      // An adoption was spent, so the window is one this form can no longer vouch
+      // for — the same rule the save-origin reload carries.
+      expect(sourceConflictState(closed)).toBe('windowMoved');
+      // The other two adoption outcomes: satisfied and refused.
+      const alsoClosed = reloadRecoveryDiskVersion(
+        confirmRecoveryDiskReload(askToReloadRecoveryDiskVersion(told)),
+        adopting('alreadyThere').adopt
+      );
+      expect(alsoClosed.closed).toBe(true);
+      const refused = reloadRecoveryDiskVersion(
+        confirmRecoveryDiskReload(askToReloadRecoveryDiskVersion(told)),
+        adopting('refused').adopt
+      );
+      expect(refused.closed).toBe(false);
+      expect(recoveryView(refused).reloadUnavailable).toBe(true);
+      expect(refused.externalConflict).toBe(told.externalConflict);
+      expect(sourceConflictState(refused)).toBe('retained');
+    }); // End of the "reload spends the destination's" case
+  }); // End of the "origin stays" suite
+
+  describe('the destination-less form requires an explicit destination (entry 21)', () => {
+    it('shows the affected file’s state, keeps its values and its unknown target, and withholds both ways to the disk', () => {
+      const form = unaddressed();
+      expect(recoveryTargetOf(form)).toEqual({ kind: 'unknown' });
+      const seen = otherObservation();
+      const told = applyRecoveryObservation(form, raised(seen));
+      const conflict = externalOf(told);
+      expect(conflict.source).toBe(externalConflictSource(seen));
+      expect(told.chosen).toBeNull();
+      expect(recoveryTargetOf(told)).toEqual({ kind: 'unknown' });
+      expect(recoveryBaseRevisionOf(told)).toBe('');
+      expect(told.draft.value).toEqual({ trigger: ':sig', replace: 'Regards' });
+      expect(told.origin.conflict).toBe(form.origin.conflict);
+      expect(recoveryRefusal(told)).toBe('noDestination');
+      expect(beginRecoveryCreate(told)).toBeNull();
+      expect(isRecoveryEditable(told)).toBe(false);
+      expect(canChooseRecoveryDestination(told)).toBe(true);
+      const view = recoveryView(told);
+      expect(view.destinationRequired).toBe(true);
+      expect(view.canChooseDestination).toBe(true);
+      expect(view.editable).toBe(false);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing']);
+      expect(askToReloadRecoveryDiskVersion(told)).toBe(told);
+      const recorder = adopting();
+      expect(reapplyRecoveryToDiskVersion(told, recorder.adopt, () => conflict.source)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'destinationRequired' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+      expect(recoveryReapplyObstacleKey({ kind: 'destinationRequired' })).toBe('browser.recovery.cannotCreate.noDestination');
+      expect(keepRecovering(told).externalConflict).toBe(conflict);
+      // **Naming the affected file** keeps the conflict, over a draft re-pointed at
+      // the revision this form holds for it, never the observed one.
+      const named = chooseRecoveryDestination(told, 3);
+      expect(named.chosen).toBe(3);
+      expect(recoveryBaseRevisionOf(named)).toBe(OTHER);
+      expect(externalOf(named).source).toBe(conflict.source);
+      expect(externalOf(named).draft).toBe(named.draft);
+      expect(recoveryRefusal(named)).toBe('externalConflict');
+      expect(recoveryView(named).destinationRequired).toBe(false);
+      expect(recoveryView(named).conflictChoices).toContain('reloadDiskVersion');
+      // A file that is not one of its own is still refused, conflict or not.
+      expect(chooseRecoveryDestination(told, 2)).toBe(told);
+      expect(chooseRecoveryDestination(told, 99)).toBe(told);
+    }); // End of the "affected file's state" case
+
+    it('drops the conflict for a destination the observation was not about', () => {
+      // Opened over a window listing a third eligible file, so there is another
+      // file to name.
+      const third = makeDocument({ id: 4, relativePath: 'match/third.yml', revision: 'f'.repeat(64) });
+      const opened = openedOverEditor(
+        snippet(),
+        {},
+        [heldFile(), otherFile(), third],
+        diskFile({ topLevelKeys: ['global_vars'] })
+      );
+      const withThird = startMatchFieldRecovery(
+        resolvedNothing<EditorReapplyObstacle>({ kind: 'evidenceNotATarget' }),
+        conflictOver<MatchBuffers>(drafted(snippet()).buffers, diskFile({ topLevelKeys: ['global_vars'] })),
+        drafted(snippet()).baseline,
+        [...DOCUMENTS, makeSummary({ id: 4, relativePath: 'match/third.yml' })],
+        [heldFile(), otherFile(), third],
+        CLOCK
+      );
+      if (withThird.kind !== 'ready') {
+        throw new Error('this case needs an opened form');
+      }
+      expect(opened.chosen).toBeNull();
+      const told = applyRecoveryObservation(withThird.session, raised(otherObservation()));
+      expect(told.chosen).toBeNull();
+      const elsewhere = chooseRecoveryDestination(told, 4);
+      expect(elsewhere.chosen).toBe(4);
+      expect(elsewhere.externalConflict).toBeNull();
+      expect(recoveryConflictOf(elsewhere)).toBeNull();
+      expect(canCreateRecovery(elsewhere)).toBe(true);
+      expect(recoveryBaseRevisionOf(elsewhere)).toBe('f'.repeat(64));
+      expect(elsewhere.origin.conflict).toBe(told.origin.conflict);
+    });
+  }); // End of the "destination-less form" suite
+
+  describe('the held observation, the hold during a create, and the collisions (entries 5, 7, 8, 9, 11, 12)', () => {
+    it('records a wait as a restriction on sending, keeps the boxes live, and lifts it by identity', () => {
+      const seen = observation();
+      const waiting = applyRecoveryObservation(openedOverEditor(), retainedDelivery(seen));
+      expect(waiting.awaitingReconciliation.get(2)).toBe(seen);
+      expect(waiting.externalConflict).toBeNull();
+      expect(recoveryRefusal(waiting)).toBe('observationRetained');
+      expect(recoveryRefusalKey('observationRetained')).toBe('browser.externalConflict.observationRetained');
+      expect(beginRecoveryCreate(waiting)).toBeNull();
+      expect(isRecoveryEditable(waiting)).toBe(true);
+      const typed = editRecoveryField(waiting, 'replace', 'Kind regards');
+      expect(typed.draft.value.replace).toBe('Kind regards');
+      expect(recoveryView(typed).externalNotices).toEqual([{ kind: 'observationRetained' }]);
+      expect(applyRecoveryObservation(typed, writtenHereDelivery(observation())).awaitingReconciliation.get(2)).toBe(seen);
+      const lifted = applyRecoveryObservation(typed, writtenHereDelivery(seen));
+      expect(lifted).toEqual({ ...typed, awaitingReconciliation: new Map() });
+      expect(canCreateRecovery(lifted)).toBe(true);
+      expect(applyRecoveryObservation(lifted, writtenHereDelivery(seen))).toBe(lifted);
+      const standing = externalConflictSource(observation({ sequence: 9 }));
+      expect(applyRecoveryObservation(waiting, decided(standing, seen, false, 'notLater'))).toEqual({
+        ...waiting,
+        awaitingReconciliation: new Map()
+      });
+      const newer = observation({ sequence: 7 });
+      expect(applyRecoveryObservation(waiting, retainedDelivery(newer)).awaitingReconciliation.get(2)).toBe(newer);
+      // A wait about the file the form stops writing into is kept, and blocks
+      // nothing over the other file.
+      const moved = chooseRecoveryDestination(waiting, 3);
+      expect(moved.awaitingReconciliation).toBe(waiting.awaitingReconciliation);
+      expect(recoveryRefusal(moved)).toBeNull();
+      // A reading of another file records no wait on a form that names a file.
+      expect(applyRecoveryObservation(openedOverEditor(), retainedDelivery(otherObservation()))).toEqual(openedOverEditor());
+    }); // End of the "retained and writtenHere" case
+
+    it('keeps a wait across a change of destination, so returning to the file restores its block (the review’s second blocker)', () => {
+      const seen = observation();
+      const waiting = applyRecoveryObservation(openedOverEditor(), retainedDelivery(seen));
+      expect(beginRecoveryCreate(waiting)).toBeNull();
+      const away = chooseRecoveryDestination(waiting, 3);
+      expect(away.chosen).toBe(3);
+      expect(recoveryRefusal(away)).toBeNull();
+      const back = chooseRecoveryDestination(away, 2);
+      expect(back.chosen).toBe(2);
+      expect(recoveryRefusal(back)).toBe('observationRetained');
+      expect(beginRecoveryCreate(back)).toBeNull();
+      const lifted = applyRecoveryObservation(back, writtenHereDelivery(seen));
+      expect(recoveryRefusal(lifted)).toBeNull();
+      expect(beginRecoveryCreate(lifted)).not.toBeNull();
+    }); // End of the "wait kept across a change of destination" case
+
+    it('holds every delivery during its own create and replays them in arrival order', () => {
+      const started = beginRecoveryCreate(openedOverEditor());
+      if (started === null) {
+        throw new Error('an opened form is submittable');
+      }
+      const seen = observation();
+      const later = observation({ sequence: 6 });
+      const standing = externalConflictSource(seen);
+      const held = applyRecoveryObservation(
+        applyRecoveryObservation(applyRecoveryObservation(started.session, retainedDelivery(seen)), raised(seen)),
+        decided(standing, later, false, 'coalesced')
+      );
+      expect(held.externalConflict).toBeNull();
+      expect(held.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised', 'coalesced']);
+      const settled = applyRecoveryCreate(held, REFUSED, NOT_OWED);
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(externalOf(settled).source).toBe(standing);
+      expect(settled.awaitingReconciliation.size).toBe(0);
+      expect(canCreateRecovery(settled)).toBe(false);
+      expect(settled.origin.conflict).toBe(held.origin.conflict);
+      // A create that produced no outcome consumes the hold too.
+      const heldUncertain = applyRecoveryObservation(started.session, decided(null, seen, true, 'raisedWithoutReload'));
+      const failed = recoveryCreateCouldNotBeSent(heldUncertain, true, null);
+      expect(failed.heldDeliveries).toEqual([]);
+      expect(failed.uncertaintyUnresolved).toBe(true);
+      expect(sourceConflictState(failed)).toBe('windowMoved');
+    });
+
+    it('settles a send against the form the caller holds, so deliveries applied during the flight survive (the review’s first blocker)', async () => {
+      // **The reviewer's interleaving, at the model level.** The installer stores
+      // the waiting form where a receiver would update it; the create, before it
+      // answers, delivers `retained` then `raised` to that form as a window's
+      // settlement does; the composition must settle the form the caller holds
+      // then, not the one it captured before its await.
+      const seen = observation();
+      const standing = externalConflictSource(seen);
+      let current: RecoverySession | null = null;
+      let installs = 0;
+      const create: CreateARecoveredSnippet = async () => {
+        if (current === null) {
+          throw new Error('the waiting form is installed before the request');
+        }
+        current = applyRecoveryObservation(current, retainedDelivery(seen));
+        current = applyRecoveryObservation(current, raised(seen));
+        expect(current.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised']);
+        return { kind: 'answered', result: REFUSED, adoption: NOT_OWED };
+      };
+      const settled = await sendRecoveryCreate(
+        openedOverEditor(),
+        create,
+        (waiting) => {
+          installs += 1;
+          current = waiting;
+        },
+        () => {
+          if (current === null) {
+            throw new Error('the reader is asked after the installer');
+          }
+          return current;
+        }
+      );
+      expect(installs).toBe(1);
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(externalOf(settled).source).toBe(standing);
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.awaitingReconciliation.size).toBe(0);
+      expect(beginRecoveryCreate(settled)).toBeNull();
+      // Every other answer is settled against the current form too.
+      for (const answer of [
+        { kind: 'notAttempted' } as const,
+        {
+          kind: 'failed',
+          mayHaveWritten: true,
+          failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+        } as const
+      ]) {
+        current = null;
+        const other = await sendRecoveryCreate(
+          openedOverEditor(),
+          async () => {
+            if (current !== null) {
+              current = applyRecoveryObservation(current, raised(seen));
+            }
+            return answer;
+          },
+          (waiting) => {
+            current = waiting;
+          },
+          () => current ?? openedOverEditor()
+        );
+        expect(externalOf(other).source).toBe(standing);
+        expect(other.phase).toBe('editing');
+      } // End of the loop over the two answers that are not outcomes
+      // Without a reader the composition can only settle the form it captured —
+      // the documented cost for a caller that registers no receiver.
+      current = null;
+      const unread = await sendRecoveryCreate(openedOverEditor(), create, (waiting) => {
+        current = waiting;
+      });
+      expect(unread.externalConflict).toBeNull();
+      // And a create that throws is settled as a failed send that may have
+      // written, handed to the installer, and re-thrown.
+      current = null;
+      const installed: RecoverySession[] = [];
+      await expect(
+        sendRecoveryCreate(
+          openedOverEditor(),
+          async () => {
+            if (current !== null) {
+              current = applyRecoveryObservation(current, raised(seen));
+            }
+            throw new Error('the boundary threw');
+          },
+          (waiting) => {
+            installed.push(waiting);
+            current = waiting;
+          },
+          () => current ?? openedOverEditor()
+        )
+      ).rejects.toThrow('the boundary threw');
+      expect(installed).toHaveLength(2);
+      const thrown = installed[1]!;
+      expect(thrown.phase).toBe('editing');
+      expect(thrown.sendFailure?.kind).toBe('mayHaveWritten');
+      expect(sourceConflictState(thrown)).toBe('windowMoved');
+      expect(externalOf(thrown).source).toBe(standing);
+    }); // End of the "send settled against the current form" case
+
+    it('retires a save conflict of its own when an observation supersedes it, resetting the reload', async () => {
+      const stuck = await saveConflicted();
+      const saveModel = recoveryConflictOf(stuck);
+      if (saveModel === null || !isSaveConflict(saveModel)) {
+        throw new Error('this case starts from a save conflict');
+      }
+      const confirmed = confirmRecoveryDiskReload(askToReloadRecoveryDiskVersion(stuck));
+      const attempt = attemptOfReapply(confirmed, { kind: 'adoptionRefused' } as const);
+      const seen = observation({ diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      const next = applyRecoveryObservation(confirmed, decided(saveModel.source, seen, false, 'supersedes'));
+      expect(next.outcome).toBeNull();
+      expect(next.submitted).toBeNull();
+      expect(externalOf(next).draft).toBe(saveModel.draft);
+      expect(next.reload).toBe(NOT_RELOADING);
+      expect(reapplyToShow(attempt, next)).toBeNull();
+      const recorder = adopting();
+      expect(reloadRecoveryDiskVersion(next, recorder.adopt)).toBe(next);
+      expect(recorder.adoptions).toEqual([]);
+      expect(next.origin.conflict).toBe(stuck.origin.conflict);
+      // The reverse collision, for a direct call: a conflict answer retires the
+      // external conflict; a refusal leaves it.
+      const blocked = applyRecoveryObservation(await refusedForm(), raised(observation()));
+      const conflicted = applyRecoveryCreate(
+        blocked,
+        makeConflict({ disk: diskFile({ revision: AFTER }), expected: DISK, subject: { Targetless: {} } }),
+        NOT_OWED
+      );
+      expect(conflicted.externalConflict).toBeNull();
+      expect(recoveryConflictOf(conflicted)?.source.kind).toBe('save');
+      expect(applyRecoveryCreate(blocked, REFUSED, NOT_OWED).externalConflict).toBe(blocked.externalConflict);
+    }); // End of the "supersedes a save conflict" case
+
+    it('lets keepRecovering cancel the warning and the panel, and nothing external', async () => {
+      const seen = observation();
+      const blocked = askToReloadRecoveryDiskVersion(applyRecoveryObservation(await refusedForm(), raised(seen)));
+      const kept = keepRecovering(blocked);
+      expect(kept.outcome).toBeNull();
+      expect(kept.reload).toBe(NOT_RELOADING);
+      expect(kept.externalConflict).toBe(blocked.externalConflict);
+      expect(beginRecoveryCreate(kept)).toBeNull();
+      const withheld = applyRecoveryObservation(openedOverEditor(), decided(null, observation(), true, 'raisedWithoutReload'));
+      expect(keepRecovering(withheld).uncertaintyUnresolved).toBe(true);
+      const waiting = applyRecoveryObservation(openedOverEditor(), retainedDelivery(seen));
+      expect(keepRecovering(waiting).awaitingReconciliation.get(2)).toBe(seen);
+    });
+
+    it('changes nothing on coalesced and notLater, not even the object, and takes nothing once closed', () => {
+      const seen = observation();
+      const asked = askToReloadRecoveryDiskVersion(applyRecoveryObservation(openedOverEditor(), raised(seen)));
+      const standing = externalConflictSource(seen);
+      expect(applyRecoveryObservation(asked, decided(standing, observation({ sequence: 6 }), false, 'coalesced'))).toBe(asked);
+      expect(
+        applyRecoveryObservation(asked, decided(standing, observation({ sequence: 4, diskRevision: 'd'.repeat(64) }), false, 'notLater'))
+      ).toBe(asked);
+      const closed = reloadRecoveryDiskVersion(confirmRecoveryDiskReload(asked), adopting().adopt);
+      expect(closed.closed).toBe(true);
+      expect(applyRecoveryObservation(closed, raised(observation()))).toBe(closed);
+    });
+  }); // End of the "held observation and collisions" suite
+
+  describe('the uncertainty and its exits (entries 11, 14, 15, 22; the record’s §5.5)', () => {
+    it('withholds the reload and the reapply on raisedWithoutReload until the snapshot is acknowledged', () => {
+      const seen = observation();
+      const withheld = applyRecoveryObservation(openedOverEditor(), decided(null, seen, true, 'raisedWithoutReload'));
+      expect(withheld.uncertaintyUnresolved).toBe(true);
+      const view = recoveryView(withheld);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing']);
+      expect(view.externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
+      expect(askToReloadRecoveryDiskVersion(withheld)).toBe(withheld);
+      const recorder = adopting();
+      expect(reapplyRecoveryToDiskVersion(withheld, recorder.adopt, () => externalOf(withheld).source)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'writeOutcomeUnknown' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+      const asked: ExternalChangeConflictSource[] = [];
+      expect(
+        acknowledgeRecoverySnapshot(withheld, (source) => {
+          asked.push(source);
+          return 'refused';
+        })
+      ).toBe(withheld);
+      // The source handed to the window is the destination conflict's, never the
+      // origin's (entry 25).
+      expect(asked).toEqual([externalOf(withheld).source]);
+      expect(asked[0]).not.toBe(withheld.origin.conflict);
+      const acknowledged = acknowledgeRecoverySnapshot(withheld, () => 'acknowledged');
+      expect(acknowledged).toEqual({ ...withheld, uncertaintyUnresolved: false, reload: NOT_RELOADING });
+      expect(recoveryView(acknowledged).conflictChoices).toContain('reloadDiskVersion');
+      let askedWithoutCause = 0;
+      const plain = applyRecoveryObservation(openedOverEditor(), raised(seen));
+      expect(
+        acknowledgeRecoverySnapshot(plain, () => {
+          askedWithoutCause += 1;
+          return 'acknowledged';
+        })
+      ).toBe(plain);
+      expect(askedWithoutCause).toBe(0);
+      // Exit one, as the form sees it: a later verdict under no uncertainty.
+      const later = observation({ sequence: 6, diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      const replaced = applyRecoveryObservation(withheld, decided(externalConflictSource(seen), later, false, 'supersedes'));
+      expect(replaced.uncertaintyUnresolved).toBe(false);
+      expect(recoveryView(replaced).conflictChoices).toContain('reloadDiskVersion');
+    }); // End of the "raisedWithoutReload" case
+  }); // End of the "uncertainty" suite
+
+  describe('the reapply over the external origin reads no table (entries 19, 20, 22)', () => {
+    it('re-points the form at the observed version with nothing looked up, whichever table the reading carried', () => {
+      // A recovery create is targetless and goes at the end, so a table naming
+      // subjects, a table about other revisions and no table at all are alike.
+      const tables: readonly (ExternalConflictObservation['correspondences'])[] = [
+        null,
+        { base_revision: 'z'.repeat(64), disk_revision: AFTER, entries: [] },
+        {
+          base_revision: DISK,
+          disk_revision: AFTER,
+          entries: [
+            {
+              base: snippet().id,
+              exact: { Identified: { target: diskFile({ revision: AFTER }).matches[0]! } },
+              editor: { Unsupported: {} }
+            }
+          ]
+        }
+      ];
+      for (const correspondences of tables) {
+        const stuck = applyRecoveryObservation(openedOverEditor(), raised(observation({ correspondences })));
+        const recorder = adopting();
+        const answer = reapplyRecoveryToDiskVersion(stuck, recorder.adopt, () => externalOf(stuck).source);
+        expect(answer.kind).toBe('reapplied');
+        if (answer.kind !== 'reapplied') {
+          throw new Error('this case is about the rebuilt form');
+        }
+        expect(recoveryBaseRevisionOf(answer.session)).toBe(AFTER);
+        expect(answer.session.draft.value).toEqual(stuck.draft.value);
+        expect(answer.session.externalConflict).toBeNull();
+        expect(answer.session.awaitingReconciliation.size).toBe(0);
+        expect(answer.session.windowWasReconciled).toBe(true);
+        expect(answer.session.origin.conflict).toBe(stuck.origin.conflict);
+        expect(recorder.adoptions).toEqual([externalOf(stuck)]);
+        expect(canCreateRecovery(answer.session)).toBe(true);
+      } // End of the loop over the three tables
+    }); // End of the "reads no table" case
+
+    it('refuses superseded evidence, a held reading, a form naming no file, and the window’s refusal', () => {
+      const stuck = applyRecoveryObservation(openedOverEditor(), raised(observation()));
+      const recorder = adopting();
+      expect(reapplyRecoveryToDiskVersion(stuck, recorder.adopt, () => null)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'supersededEvidence' }
+      });
+      const heldReading = observation({ sequence: 6, diskRevision: 'd'.repeat(64), disk: diskFile({ revision: 'd'.repeat(64) }) });
+      const held = applyRecoveryObservation(stuck, retainedDelivery(heldReading));
+      expect(reapplyRecoveryToDiskVersion(held, recorder.adopt, () => externalOf(stuck).source)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      expect(recoveryView(held).conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'reloadDiskVersion']);
+      expect(recorder.adoptions).toEqual([]);
+      expect(reapplyRecoveryToDiskVersion(stuck, adopting('refused').adopt, () => externalOf(stuck).source)).toEqual({
+        kind: 'adoptionRefused'
+      });
+      expect(reapplyRecoveryToDiskVersion(stuck, adopting('alreadyThere').adopt, () => externalOf(stuck).source).kind).toBe('reapplied');
+      // Without a guard the door decides, as the component's save-origin call has
+      // always had it.
+      expect(reapplyRecoveryToDiskVersion(stuck, adopting('refused').adopt)).toEqual({ kind: 'adoptionRefused' });
+      // The ordinary checks run again over the disk parse: a file that lost its
+      // list drops out of the destinations.
+      const listless = applyRecoveryObservation(
+        openedOverEditor(),
+        raised(observation({ disk: diskFile({ revision: AFTER, topLevelKeys: ['global_vars'] }) }))
+      );
+      expect(reapplyRecoveryToDiskVersion(listless, recorder.adopt, () => externalOf(listless).source)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'recoveryRefused', reason: 'destinationUnavailable' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "refusals" case
+
+    it('names a sentence in both languages for every obstacle and refusal the external origin can raise', () => {
+      const obstacles: RecoveryReapplyObstacle[] = [
+        { kind: 'destinationRequired' },
+        { kind: 'supersededEvidence' },
+        { kind: 'writeOutcomeUnknown' },
+        { kind: 'observationRetained' }
+      ];
+      for (const obstacle of obstacles) {
+        const key = recoveryReapplyObstacleKey(obstacle);
+        for (const locale of LOCALES) {
+          expect(DICTIONARIES[locale][key], `${locale}:${obstacle.kind}`).toBeTruthy();
+          expect(describeRecoveryReapplyObstacle(locale, obstacle)).toBe(DICTIONARIES[locale][key]);
+        } // End of the loop over the two locales
+      } // End of the loop over the external obstacles
+      const refusals: RecoveryRefusal[] = ['externalConflict', 'observationRetained'];
+      for (const refusal of refusals) {
+        for (const locale of LOCALES) {
+          expect(DICTIONARIES[locale][recoveryRefusalKey(refusal)], `${locale}:${refusal}`).toBeTruthy();
+        } // End of the loop over the two locales
+      } // End of the loop over the two refusals
+    });
+  }); // End of the "reapply over the external origin" suite
+
+  /**
+   * A form whose own create was refused for a suspicion.
+   *
+   * @returns The form showing the refusal.
+   */
+  async function refusedForm(): Promise<RecoverySession> {
+    return sendRecoveryCreate(
+      openedOverEditor(),
+      recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
+      INSTALLS_NOTHING
+    );
+  } // End of function refusedForm()
+}); // End of the "external session" suite

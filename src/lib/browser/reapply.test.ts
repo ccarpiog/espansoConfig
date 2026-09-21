@@ -40,6 +40,7 @@ import { makeConflict, makeDocument, makeMatch } from './fixtures';
 import {
   adoptForReapply,
   anchorCorrespondence,
+  anchorResolution,
   attemptOfReapply,
   beginReapply,
   correspondenceRowFor,
@@ -752,6 +753,37 @@ describe('the entry over both origins, and the row lookup by full identity — P
     const evidence = conflictWith({ Refused: { reason: 'AmbiguousExact' } }).source.conflict.reapply;
     expect(subjectCorrespondence(evidence)).toEqual(subjectResolution(evidence.subject));
   });
+
+  it('reads a row’s exact tier as an anchor, with notAnchored for both empty arms — Phase 2d-6-3', () => {
+    // **The creator's `after` placement reads its anchor's `exact` tier off a
+    // row**, and a row's tier is a `ReapplyResolution` — four arms — where a
+    // refused save's anchor is a `ReapplyPlacement` with three. The honest third
+    // answer for a position is `notAnchored`, never `noSubject`, whose sentence
+    // says *this change brings its own snippet*.
+    expect(anchorResolution({ Identified: { target: TARGET } })).toEqual({
+      kind: 'identified',
+      target: TARGET
+    });
+    expect(anchorResolution({ Refused: { reason: 'NoExactCorrespondence' } })).toEqual({
+      kind: 'refused',
+      reason: 'NoExactCorrespondence'
+    });
+    for (const empty of [{ Unsupported: {} }, { Targetless: {} }] as const) {
+      expect(anchorResolution(empty)).toEqual({ kind: 'notAnchored' });
+      expect(anchorResolution(empty)).not.toEqual(subjectResolution(empty));
+    } // End of the loop over the two empty arms
+    // The target handed back is the row's own object, read once.
+    let reads = 0;
+    const row: ReapplyResolution = {
+      get Identified(): { readonly target: MatchView } {
+        reads += 1;
+        return { target: TARGET };
+      }
+    };
+    const answer = anchorResolution(row);
+    expect(answer.kind === 'identified' ? answer.target : null).toBe(TARGET);
+    expect(reads).toBe(1);
+  }); // End of the "anchor resolution" case
 }); // End of the "entry over both origins" suite
 
 describe('the adoption', () => {

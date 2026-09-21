@@ -43,7 +43,9 @@
  *    {@link correspondenceRowFor} finds one snippet's row in that table by its
  *    **full** base identity — never by array index or arena node — and
  *    {@link subjectResolution} reads a row's answer with the same three-arm rule
- *    the refused save's subject gets (the 2d-6 record's §3 entry 20).
+ *    the refused save's subject gets (the 2d-6 record's §3 entry 20); since Phase
+ *    2d-6-3 {@link anchorResolution} reads a row's `exact` tier as an **anchor**,
+ *    with `notAnchored` as its third arm, for the creator's `after` placement.
  * 3. **The adoption.** {@link adoptForReapply} spends the conflict's one
  *    authorization through the {@link AdoptTheDiskVersion} its caller passes,
  *    which on all five match surfaces is `BrowserState.adoptDiskVersion` — the
@@ -313,11 +315,12 @@ export type ReapplyOutcome<S, O> =
  *
  * **The save-only predecessor of {@link enterReapply}, since Phase 2d-6-2.** The
  * match editor enters through that one, which takes either origin and answers
- * with `reapplyEvidenceFor`'s four distinct arms; the raw editor, the four
- * operation surfaces and the recovery form still enter here, and migrating each is
- * its own 2d-6 step's (2d-6-3, 2d-6-4, 2d-6-5). Nothing in TypeScript stops a
- * surface staying here for ever; what it forfeits by staying is the external
- * origin, which this signature refuses at compile time.
+ * with `reapplyEvidenceFor`'s four distinct arms, and since Phase 2d-6-3 so do
+ * the new-snippet form and the recovery form; the raw editor, the deleter, the
+ * mover and the duplicator still enter here, and migrating each is its own 2d-6
+ * step's (2d-6-4, 2d-6-5). Nothing in TypeScript stops a surface staying here for ever;
+ * what it forfeits by staying is the external origin, which this signature
+ * refuses at compile time.
  *
  * @typeParam T - The drafted value the conflict retained.
  * @param capabilities - The calling surface's own declaration.
@@ -923,6 +926,42 @@ export function anchorCorrespondence(evidence: ReapplyEvidence): AnchorCorrespon
   }
   return { kind: 'notAnchored' };
 } // End of function anchorCorrespondence()
+
+/**
+ * What one table row's resolution leaves a surface to place **after**.
+ *
+ * **{@link subjectResolution}'s twin, added at Phase 2d-6-3 for the same reason
+ * that one was factored out at 2d-6-2**: an anchored creation or move reads its
+ * anchor's `exact` tier off a correspondence table's row (the 2d-6 record's §3
+ * entry 20 — "the anchor's `exact` from the same table"), and that tier is a
+ * `ReapplyResolution` — the wire enum a refused save's *subject* is, not the
+ * `ReapplyPlacement` its *anchor* is. Reading it through {@link subjectResolution}
+ * would have answered `noSubject` for a row that resolves to nothing, whose
+ * sentence says *this change brings its own snippet*; the honest third arm for an
+ * anchor is `notAnchored`, and it is answered here for **both** empty wire arms,
+ * `Unsupported` and `Targetless` — neither names a snippet to place after, and
+ * which of the two a row carries is a fact about the base match, not about the
+ * position. Inventing a `ReapplyEvidence` around the row to reuse
+ * {@link anchorCorrespondence} would have been the cast ruling 19 forbids in
+ * another spelling.
+ *
+ * The resolution is read exactly once per arm test, in the order `Identified`,
+ * `Refused`; it is caller data — a row of the observation's table — and the
+ * `target` handed back is the object it carried.
+ *
+ * @param resolution - One resolution, off a table row's `exact` tier.
+ * @returns The identified anchor, the refusal, or the fact that the row names no
+ *   anchor.
+ */
+export function anchorResolution(resolution: ReapplyResolution): AnchorCorrespondence {
+  if ('Identified' in resolution) {
+    return { kind: 'identified', target: resolution.Identified.target };
+  }
+  if ('Refused' in resolution) {
+    return { kind: 'refused', reason: resolution.Refused.reason };
+  }
+  return { kind: 'notAnchored' };
+} // End of function anchorResolution()
 
 /**
  * Installs the disk observation a conflict carried, for a reapply.

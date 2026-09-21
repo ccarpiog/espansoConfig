@@ -943,10 +943,13 @@ export interface SaveConflictModel<T> extends ConflictModelCommon<T> {
  * registered over the file through `registerObservationReceiver`. Since Phase
  * 2d-6-2 `applyObservation` in `./matchEditor.ts` receives it and builds this
  * model over the editor's draft, holding it in `MatchEditorSession.externalConflict`;
- * **no production code registers that receiver yet**, so in the running
- * application the delivery still reaches nobody — the wiring is 2d-6-6's, the
- * other surfaces' transitions are 2d-6-3, -4 and -5's, and the panel that draws
- * the result is 2d-6-6's too.
+ * since Phase 2d-6-3 the new-snippet form's `applyObservation` in
+ * `./matchCreation.ts` and the recovery form's `applyRecoveryObservation` in
+ * `./recovery.ts` do the same over their own drafts. **No production code
+ * registers any of those receivers yet**, so in the running application the
+ * delivery still reaches nobody — the wiring is 2d-6-6's, the deleter's, mover's,
+ * duplicator's, raw editor's and restore's transitions are 2d-6-4 and -5's, and
+ * the panel that draws the result is 2d-6-6's too.
  *
  * @typeParam T - The drafted value.
  */

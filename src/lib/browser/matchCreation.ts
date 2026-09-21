@@ -114,6 +114,54 @@
  * from `../ipc/commands` and skipping `BrowserState` altogether — the hole
  * `saveMatch`, `moveMatch` and `saveRawDocument` have had since 2b-2a. What the
  * model forces is that no submission is produced from a form that has committed.
+ *
+ * ## The external session — Phase 2d-6-3
+ *
+ * The shape `./matchEditor.ts` took at 2d-6-2, in this form's terms.
+ * {@link MatchCreationSession.externalConflict} is the conflict a watcher
+ * observation raised over the file this form writes into, a field beside
+ * `outcome` and never an arm of it (the 2d-6 record's §3 entry 6);
+ * {@link applyObservation} is the form's receiver as a value, one named action per
+ * verdict arm and a `never` terminus (entry 11); {@link conflictOf} answers the
+ * conflict shown whichever origin it has, so {@link isEditable},
+ * {@link creationRefusal} and {@link beginCreate} refuse under both (entry 8). A
+ * held observation ({@link MatchCreationSession.awaitingReconciliation}) refuses
+ * the send and nothing else; a conflict raised under an unknown write outcome
+ * ({@link MatchCreationSession.uncertaintyUnresolved}) withholds the reload and the
+ * reapply until {@link acknowledgeSnapshot} is told the hold ended (entries 11, 22);
+ * {@link keepDrafting} erases none of the three (entry 9).
+ *
+ * **What is this form's own is the file it is about, because the file can be
+ * unknown.** Every other session is opened *over* a file; this one chooses its
+ * destination, and until it has, `targetingSurfaceFor` in `./restore.ts`
+ * attributes it to every creator-eligible file — its **wildcard protection**. So
+ * a delivery is *about* this form when the form names no file yet, or when the
+ * observation's file is the one chosen ({@link applyObservation} reads exactly one
+ * property of an observation to decide that, `document`, once); a delivery about
+ * another file can only end a wait this form recorded for that very observation,
+ * and the waits are kept **per file**, so a change of destination neither drops
+ * nor restores one.
+ * **A destination-less form told of a change keeps its fields and its wildcard
+ * protection, shows the affected file's state and requires an explicit
+ * destination** (entry 21): the reload and the reapply are withheld, the
+ * unknown-target reapply is refused, and the one way forward is
+ * {@link chooseDestination} — the only transition open under an external conflict,
+ * and open only while the form names no file. It never chooses the observed file
+ * and never re-points the draft at the observed revision: what the person names is
+ * what the form writes into, at the revision this window holds for it.
+ *
+ * **The reapply reads both origins through one entry** — `enterReapply` in
+ * `./reapply.ts` — and consults the external table for one thing only, the anchor
+ * of an `after` placement, found by its **full** base identity and read through
+ * `anchorResolution` from its row's `exact` tier (entries 19 and 20); a `front` or
+ * `end` placement asks the table nothing, as it asks a refused save's anchor
+ * nothing.
+ *
+ * **No component registers this receiver yet.** 2d-6-6 wires
+ * `BrowserState.registerObservationReceiver` to it through `DetailPane`, which
+ * also decides over which files a destination-less form is registered; until then
+ * every case that drives it is a model test. {@link creationTargetOf} is the target
+ * that wiring reports upward, and nothing reads it yet.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -130,7 +178,6 @@ import type {
   NewMatch,
   NewMatchPosition,
   PresentationNote,
-  ReapplyEvidence,
   ReapplyRefusal,
   SaveResult
 } from '../ipc/types';
@@ -174,30 +221,53 @@ import {
 } from './editorSave';
 import type { InvalidationStatus } from './invalidation';
 import { plainIdentity } from './matchDeletion';
+import type { AcknowledgeTheUncertainty } from './matchEditor';
 import type { RawSaveChoice } from './rawSave';
+import type {
+  ConflictSource,
+  ExternalConflictObservation
+} from './conflictSource';
+import {
+  externalConflictNoticeKey,
+  type ExternalConflictNotice,
+  type ObservationDelivery
+} from './observationDelivery';
 import {
   adoptForReapply,
   anchorCorrespondence,
-  beginReapply,
+  anchorResolution,
+  correspondenceRowFor,
+  enterReapply,
+  externalEvidenceRefusalKey,
   sharedReapplyObstacleKey,
   subjectIsTargetless,
+  SUPERSEDED_EVIDENCE_KEY,
+  type AnchorCorrespondence,
+  type ExternalEvidenceRefusal,
   type ReapplyAttempt,
+  type ReapplyEvidenceAccess,
   type ReapplyOutcome,
-  type SharedReapplyObstacle
+  type SharedReapplyObstacle,
+  type StandingOriginGuard
 } from './reapply';
+import type { WriteSurfaceTarget } from './restore';
 import {
   conflictChoicesFor,
   conflictDiskText,
   copyOfDraft,
   describeEditSave,
+  describeExternalConflict,
+  externalConflictMessageKey,
   invalidationFailureMessage,
   reapplyIsOffered,
+  supersedeConflict,
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDiskText,
+  type ConflictMessage,
   type ConflictModel,
+  type ExternalConflictModel,
   type RetainedDraftField,
-  type SaveConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -587,6 +657,96 @@ export interface MatchCreationSession {
    * screen that offers *open the new snippet* has to be able to draw that case.
    */
   readonly created: MatchId | null;
+  /**
+   * The conflict a watcher observation raised over the file this form writes
+   * into, or `null` — Phase 2d-6-3, the 2d-6 record's §3 entry 6.
+   *
+   * **A field of its own beside {@link MatchCreationSession.outcome}, never an
+   * arm of it**, for `MatchEditorSession.externalConflict`'s reason: an outcome is
+   * how *a save* ended, and a conflict the watcher raised is not that.
+   * {@link conflictOf} is the one accessor that reads both and answers the
+   * conflict this form is showing, whichever origin it has. **Only one conflict is
+   * active at a time, and the transitions are what keep it so** (entry 7):
+   * {@link applyObservation} retires a save conflict's outcome when it sets this,
+   * and {@link applyCreate} retires this when a create ends as a conflict. The
+   * type admits both populated, and a form built by hand with both gets
+   * {@link conflictOf}'s stated precedence, not a guarantee.
+   *
+   * **Which file it is about is the form's own question.** While a destination is
+   * chosen it is a conflict about that file; while none is, it is the state of an
+   * *affected* file — one this form could have written into — shown so the person
+   * can name where the snippet goes (entry 21). One slot either way: a
+   * destination-less form told of a second affected file shows the later one, and
+   * what protects the earlier is the command's own revision check, never this
+   * field. While it is non-null the two boxes are frozen and nothing can be sent;
+   * {@link keepDrafting} does not clear it (entry 9). The ways out are the reload
+   * and the reapply for a form that names a file, and an explicit destination for
+   * one that does not.
+   */
+  readonly externalConflict: ExternalConflictModel<CreationBuffers> | null;
+  /**
+   * Whether {@link MatchCreationSession.externalConflict} was raised while a
+   * write of this window's own had an unknown outcome, and this form has not been
+   * told the hold ended — Phase 2d-6-3, entry 11's `raisedWithoutReload` row.
+   *
+   * While `true` the ordinary reload is withheld and the reapply refused, for the
+   * match editor's reason: a confirmed installation of bytes a write of this
+   * window may or may not have produced would settle, silently, a question only
+   * the person can. It ends when {@link acknowledgeSnapshot} is told the window
+   * ended the hold, or when a later verdict replaces the conflict under no
+   * uncertainty. **It records what this form was told and nothing more**: a hold
+   * the window ends by a later definite write delivers nothing to a form, and
+   * this flag cannot see it.
+   */
+  readonly uncertaintyUnresolved: boolean;
+  /**
+   * The observations this form was told the window is holding and has not
+   * decided about, **one per file, keyed by the file** — Phase 2d-6-3, entry 11's
+   * `retained` row, and the review of this phase (its second finding).
+   *
+   * **A restriction on sending and nothing else**: while the chosen file has an
+   * entry, {@link creationRefusal} answers `observationRetained` and
+   * {@link beginCreate} answers `null` (entry 8); the controls stay live, and no
+   * disk comparison and no origin is recorded. An entry is lifted by the delivery
+   * that decides **that** observation, whatever the verdict — `writtenHere`
+   * included — compared by identity, and replaced by a later `retained` about the
+   * same file. **A change of destination neither drops nor restores an entry**:
+   * the phase first shipped a single slot that {@link chooseDestination} emptied
+   * when the form left the file, so a form told `retained(A)` that visited B and
+   * came back to A had lost the only record of A's wait and could send past a
+   * block the window still held. Keyed by file, what the form knows about A
+   * survives the detour and blocks nothing while the form is over B.
+   *
+   * **What the map forces and what it does not, in the same sentence.** It
+   * forces that every wait this form was told of is kept until the delivery that
+   * decides it arrives, and that only the chosen file's wait blocks the send; it
+   * cannot force that such a delivery arrives — a form whose receiver was
+   * unregistered from A while it was over B is never told A's decision and stays
+   * blocked over A until it is closed — nor that a wait the form was *not* told of,
+   * because it was not registered over A when the window held the reading, is
+   * recorded at all. Both are facts about where a form's receiver is registered,
+   * which is 2d-6-6's; `BrowserState.automaticReloadGuardFor(document)` answers
+   * the window's own state for a caller that wants to reconcile the two. What the
+   * map cannot see is a reading the barrier coalesced away without announcing it,
+   * exactly as the editor's single slot cannot.
+   */
+  readonly awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>;
+  /**
+   * Every delivery that arrived while this form's own create was in flight, in
+   * the order it arrived, kept until that create's answer has been applied — Phase
+   * 2d-6-3, the 2d-6 record's §3 entry 5.
+   *
+   * `MatchEditorSession.heldDeliveries`'s rule, unchanged: the window publishes a
+   * write's settlement from inside the writing wrapper, before the `await` that
+   * started it resumes, so {@link applyObservation} appends here while the phase
+   * is `saving` and {@link applyCreate} and {@link createCouldNotBeSent} replay the
+   * whole list through it, first to last, after their own answer. **What the list
+   * forces** is that no envelope delivered during the create is dropped and that
+   * first-to-last is the order; **what it does not force** is that arrival order
+   * was decision order — the window's own contract — nor that a component applies
+   * a delivery through this module at all.
+   */
+  readonly heldDeliveries: readonly ObservationDelivery[];
   /** Where the typing run's boundary readings come from. */
   readonly clock: Clock;
 }
@@ -678,9 +838,65 @@ export function startMatchCreation(
     closed: false,
     committed: false,
     created: null,
+    externalConflict: null,
+    uncertaintyUnresolved: false,
+    awaitingReconciliation: new Map(),
+    heldDeliveries: [],
     clock
   };
 } // End of function startMatchCreation()
+
+/**
+ * The wait that restricts this form **now**, or `null` — the chosen file's entry
+ * of {@link MatchCreationSession.awaitingReconciliation}, or, for a form naming no
+ * file, the first entry it holds, since such a form is attributed to every file it
+ * could write into.
+ *
+ * @param session - The form to ask about.
+ * @returns The observation the form is waiting on, or `null`.
+ */
+function awaitedFor(session: MatchCreationSession): ExternalConflictObservation | null {
+  const waits = session.awaitingReconciliation;
+  if (session.chosen !== null) {
+    return waits.get(session.chosen) ?? null;
+  }
+  const first = waits.values().next();
+  return first.done === true ? null : first.value;
+} // End of function awaitedFor()
+
+/**
+ * The waits with one file's entry replaced.
+ *
+ * @param waits - The waits held.
+ * @param document - The file the observation is about.
+ * @param observation - The observation now held for it.
+ * @returns A new map; the argument is untouched.
+ */
+function withWait(
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  document: DocumentId,
+  observation: ExternalConflictObservation
+): ReadonlyMap<DocumentId, ExternalConflictObservation> {
+  const next = new Map(waits);
+  next.set(document, observation);
+  return next;
+} // End of function withWait()
+
+/**
+ * The waits with one file's entry removed.
+ *
+ * @param waits - The waits held.
+ * @param document - The file whose wait ended.
+ * @returns A new map; the argument is untouched.
+ */
+function withoutWait(
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  document: DocumentId
+): ReadonlyMap<DocumentId, ExternalConflictObservation> {
+  const next = new Map(waits);
+  next.delete(document);
+  return next;
+} // End of function withoutWait()
 
 /**
  * The revision one chosen destination was projected at, or the empty revision.
@@ -723,24 +939,34 @@ export function chosenDestination(session: MatchCreationSession): CreationDestin
 } // End of function chosenDestination()
 
 /**
- * The conflict the form is showing, or `null`.
+ * The conflict the form is showing, of either origin, or `null`.
+ *
+ * **Widened to the union at Phase 2d-6-3**, from the save arm alone. The external
+ * conflict is answered first, then the outcome's conflict arm — a definite answer
+ * for a form built by hand with both populated, and a decision about nothing for
+ * one this module built, because {@link applyObservation} and {@link applyCreate}
+ * keep the two exclusive (the 2d-6 record's §3 entry 7).
  *
  * @param session - The form to ask about.
  * @returns The conflict model, or `null` when the form is not in one.
  */
-export function conflictOf(
-  session: MatchCreationSession
-): SaveConflictModel<CreationBuffers> | null {
-  return conflictArm(session.outcome);
+export function conflictOf(session: MatchCreationSession): ConflictModel<CreationBuffers> | null {
+  return session.externalConflict ?? conflictArm(session.outcome);
 } // End of function conflictOf()
 
 /**
  * Whether this form accepts changes at all right now.
  *
  * Three reasons it may not, and each has its own refusal code below: not while a
- * save is in flight, not while a conflict is showing, and not after a commit —
- * because every destination this form holds was derived from a projection that
- * commit replaced.
+ * save is in flight, not while a conflict of either origin is showing, and not
+ * after a commit — because every destination this form holds was derived from a
+ * projection that commit replaced.
+ *
+ * **A held observation is deliberately not among them** (Phase 2d-6-3): it is a
+ * restriction on sending, and blocking keystrokes for a window decision that has
+ * not been made would claim more than the fact supports. Nor is the one door a
+ * destination-less form keeps open under an external conflict decided here — that
+ * is {@link canChooseDestination}'s, and it is wider than this on purpose.
  *
  * @param session - The form to ask about.
  * @returns `true` when the controls may change anything.
@@ -753,6 +979,45 @@ export function isEditable(session: MatchCreationSession): boolean {
     conflictOf(session) === null
   );
 } // End of function isEditable()
+
+/**
+ * Whether this form is a destination-less one told of a change, whose only way
+ * forward is an explicit destination — Phase 2d-6-3, the 2d-6 record's §3 entry 21.
+ *
+ * True exactly when the form is otherwise live, names no file, and an external
+ * conflict stands over it. It reads the external field and never
+ * {@link conflictOf}: a save conflict cannot arise on a form with no destination
+ * through this module, and a hand-built one with both gets no destination door.
+ *
+ * @param session - The form to ask about.
+ * @returns `true` when the form requires an explicit destination before anything
+ *   else can happen to it.
+ */
+function requiresExplicitDestination(session: MatchCreationSession): boolean {
+  return (
+    !session.closed &&
+    session.phase === 'editing' &&
+    !session.committed &&
+    session.chosen === null &&
+    session.externalConflict !== null
+  );
+} // End of function requiresExplicitDestination()
+
+/**
+ * Whether the destination control does anything — Phase 2d-6-3.
+ *
+ * **Wider than {@link isEditable} by exactly one state**: a destination-less form
+ * under an external conflict, for which naming a file is the resolution entry 21
+ * requires and the one transition left open. Everywhere else the two agree. A
+ * renderer that gated the destination control on `editable` alone would leave
+ * that form with no way forward, so the view carries this as its own field.
+ *
+ * @param session - The form to ask about.
+ * @returns `true` when {@link chooseDestination} may move the destination.
+ */
+export function canChooseDestination(session: MatchCreationSession): boolean {
+  return isEditable(session) || requiresExplicitDestination(session);
+} // End of function canChooseDestination()
 
 /**
  * Everything the form must forget when the transaction it would send changes.
@@ -811,26 +1076,63 @@ function withdrawnSubmission(
  * typed values are kept: they are what the person wrote, and they mean the same
  * thing in either file.
  *
+ * **It is the one transition open to a destination-less form under an external
+ * conflict, and it is that form's resolution** — Phase 2d-6-3, the 2d-6 record's
+ * §3 entry 21. Such a form was told a file it *could* have written into changed;
+ * what it is required to do is name the file it *does* write into, explicitly.
+ * Naming the affected file keeps the conflict, rebuilt over the re-pointed draft,
+ * so the form is then an ordinary destination conflict with the reload and the
+ * reapply offered; naming any other file drops it, because the form no longer
+ * writes into the file the observation was about. **The waits are left exactly as
+ * they are** (the review of this phase, second finding): a wait about the file
+ * left blocks nothing while the form is over another, and is there again, still
+ * blocking, when the form comes back — see
+ * {@link MatchCreationSession.awaitingReconciliation} for what that forces and
+ * what it cannot. The draft's base becomes **the revision this window holds** for
+ * the file named, never the observed disk revision: that is the retargeting entry
+ * 21 forbids, and it is left to the reapply, which only a form naming the file may
+ * reach. Nothing here adopts, installs or spends. Whether the form was told of
+ * two affected files and shows the later one is stated on
+ * {@link MatchCreationSession.externalConflict}; the command's own revision check
+ * is what refuses a base this window was told is stale.
+ *
  * @param session - The form.
  * @param document - The file to write into.
  * @returns The form with that destination, its default placement and a draft
- *   drafted from it, or the same form when it is not accepting changes or the
- *   destination did not move.
+ *   drafted from it, or the same form when it is not accepting a destination or
+ *   the destination did not move.
  */
 export function chooseDestination(
   session: MatchCreationSession,
   document: DocumentId
 ): MatchCreationSession {
-  if (!isEditable(session) || session.chosen === document) {
+  if (!canChooseDestination(session) || session.chosen === document) {
     return session;
   }
-  return {
-    ...withdrawnSubmission(
-      session,
-      retargetedDraft(session.draft, revisionOf(session.destinations, document))
-    ),
+  const draft = retargetedDraft(session.draft, revisionOf(session.destinations, document));
+  const chosen: MatchCreationSession = {
+    ...withdrawnSubmission(session, draft),
     chosen: document,
     placement: defaultPlacement(session.destinations, session.held, document)
+  };
+  if (!requiresExplicitDestination(session)) {
+    return chosen;
+  }
+  // **The explicit destination resolution.** The observation is read off this
+  // module's own frozen model, and its `document` once.
+  const conflict = session.externalConflict;
+  const observation = conflict === null ? null : conflict.source.observation;
+  const affected = observation !== null && observation.document === document;
+  return {
+    ...chosen,
+    externalConflict:
+      affected && observation !== null
+        ? describeExternalConflict(observation, draft, CONFLICT_CAPABILITIES)
+        : null,
+    uncertaintyUnresolved: affected ? session.uncertaintyUnresolved : false,
+    // A warning collected under the destination-less conflict, had one been
+    // offered, is not spendable against the destination conflict (entry 12).
+    reload: NOT_RELOADING
   };
 } // End of function chooseDestination()
 
@@ -1009,10 +1311,27 @@ export type CreationRefusal =
   | 'alreadyCreated'
   /** A save is in flight. */
   | 'saveInFlight'
-  /** A conflict is on screen and has not been dismissed. */
-  | 'conflict'
   /** No file has been chosen. */
   | 'noDestination'
+  /** A save conflict is on screen and has not been resolved. */
+  | 'conflict'
+  /**
+   * A watcher observation raised a conflict over the chosen file, and it has not
+   * been resolved — Phase 2d-6-3, the 2d-6 record's §3 entry 8.
+   *
+   * A code of its own rather than `conflict`, because that code's sentence says
+   * the file changed *while this snippet was being written*, which is false of an
+   * observation no save answered. Rendered through the external origin's own
+   * first line (`browser.externalConflict.fileChangedWhileOpen`), which is the
+   * reason exactly and adds no key.
+   */
+  | 'externalConflict'
+  /**
+   * The window holds a reading of the chosen file it has not decided about, and
+   * this form may not send until it has — entry 8's "unresolved retained
+   * delivery". Rendered through the retained notice's own sentence.
+   */
+  | 'observationRetained'
   /** The chosen file is one this application will not write a snippet into. */
   | 'destinationIneligible'
   /** The placement names a snippet the chosen file's projection does not hold. */
@@ -1047,12 +1366,29 @@ export function newMatchOf(buffers: CreationBuffers): NewMatch {
  * Why the form cannot be submitted, or `null` when it can.
  *
  * The order of the checks is the order a person would fix them in: what the form
- * is doing, then where the snippet goes, then what it says.
+ * is doing, then where the snippet goes, then what stands over that file, then
+ * what it says.
+ *
+ * **`noDestination` is asked before either conflict since Phase 2d-6-3**, because
+ * for a destination-less form told of a change the destination *is* the
+ * resolution (the 2d-6 record's §3 entry 21): the sentence a person needs first is
+ * *choose the file*, and choosing one is what decides whether the conflict shown
+ * is about the file this form writes into. A save conflict on a form with no
+ * destination is a state this module never produces, so the move changes no
+ * answer a save can reach. The conflicts come next in {@link conflictOf}'s
+ * precedence — the external one, then the save one — and then a held reading
+ * (entry 8), before the destination's eligibility: each a code, so a screen can
+ * say why the button does nothing, and each rendered by a sentence that already
+ * exists.
  *
  * **The carriage-return check reads the value that would be sent**, which is the
  * buffers here because both fields are always written — unlike the small editor,
  * where a field refused *for* carrying a carriage return legitimately holds one
  * in its buffer while sending `'Unchanged'`.
+ *
+ * **What this forces and what it does not**: it forces refusal for the form it is
+ * handed; it cannot force that form to be current (R37) — one snapshot, one
+ * synchronous decision.
  *
  * @param session - The form to ask about.
  * @returns The reason, or `null` when {@link beginCreate} would produce a
@@ -1065,12 +1401,18 @@ export function creationRefusal(session: MatchCreationSession): CreationRefusal 
   if (session.phase === 'saving') {
     return 'saveInFlight';
   }
-  if (conflictOf(session) !== null) {
-    return 'conflict';
-  }
   const destination = chosenDestination(session);
   if (destination === null) {
     return 'noDestination';
+  }
+  if (session.externalConflict !== null) {
+    return 'externalConflict';
+  }
+  if (conflictArm(session.outcome) !== null) {
+    return 'conflict';
+  }
+  if (awaitedFor(session) !== null) {
+    return 'observationRetained';
   }
   if (destination.eligibility.kind !== 'eligible') {
     return 'destinationIneligible';
@@ -1193,6 +1535,16 @@ export function beginCreate(session: MatchCreationSession): StartedCreation | nu
  * this window could not read it back; telling the person the create failed would
  * invite a retry of a write that already happened (`PROGRESS.md` D2).
  *
+ * **What it does about an external conflict, and about a delivery held during
+ * the create** — Phase 2d-6-3, `applySave`'s rule in `./matchEditor.ts`. A
+ * `saved` or a `conflict` answer retires {@link MatchCreationSession.externalConflict}
+ * (the 2d-6 record's §3 entry 7: the create's own answer is the newer fact about
+ * the file); a `refused` answer wrote nothing and leaves it standing. Neither is
+ * reachable from {@link beginCreate} while an external conflict stands, so this
+ * keeps the invariant for a caller that drove the model directly. Then, whatever
+ * the answer, every delivery {@link applyObservation} held while the create was in
+ * flight is replayed on top, in arrival order (entry 5).
+ *
  * @param session - The form waiting for an answer.
  * @param result - How the save ended, exactly as the transaction reported it.
  * @param adoption - What became of the adoption, from `BrowserState.createMatch`.
@@ -1213,7 +1565,8 @@ export function applyCreate(
   const failed = invalidationFailureMessage(adoption);
   const extraMessages = failed === null ? [] : [failed];
   if (result.outcome !== 'saved') {
-    return {
+    const refused = result.outcome === 'refused';
+    return consumingHeldDeliveries({
       ...session,
       phase: 'editing',
       group: null,
@@ -1222,10 +1575,12 @@ export function applyCreate(
       // **A new outcome resets the reload**, so a confirmation collected for an
       // earlier conflict cannot be spent while this one is on screen.
       reload: NOT_RELOADING,
-      sendFailure: null
-    };
+      sendFailure: null,
+      externalConflict: refused ? session.externalConflict : null,
+      uncertaintyUnresolved: refused ? session.uncertaintyUnresolved : false
+    });
   }
-  return {
+  return consumingHeldDeliveries({
     ...session,
     // A commit replaced the bytes every destination here was derived from, so the
     // form stops accepting changes until it is seeded again. A `committed: false`
@@ -1238,9 +1593,42 @@ export function applyCreate(
     outcome,
     extraMessages,
     reload: NOT_RELOADING,
-    sendFailure: null
-  };
+    sendFailure: null,
+    // The create ended on the file, so the disk side an earlier observation
+    // showed is no longer the comparison to draw (entry 7).
+    externalConflict: null,
+    uncertaintyUnresolved: false
+  });
 } // End of function applyCreate()
+
+/**
+ * Replays every delivery a form held during its create, in the order it arrived,
+ * once the create's own answer is on it — the 2d-6 record's §3 entry 5.
+ *
+ * `consumingHeldDeliveries` in `./matchEditor.ts`, for this form: the list is
+ * emptied before the first replay so a replay cannot see itself in it, each
+ * envelope goes through {@link applyObservation} exactly as it would have on
+ * arrival, and each is applied to the form the one before it left. **What this
+ * forces** is that no envelope delivered during the create is dropped and that
+ * first-to-last is the order; **what it cannot force** is that the window
+ * delivered them in the order it decided them.
+ *
+ * @param settled - The form with its create's answer applied and its phase back
+ *   to `editing`.
+ * @returns The form with every held delivery applied, or the same form when none
+ *   was held.
+ */
+function consumingHeldDeliveries(settled: MatchCreationSession): MatchCreationSession {
+  const held = settled.heldDeliveries;
+  if (held.length === 0) {
+    return settled;
+  }
+  let replayed: MatchCreationSession = { ...settled, heldDeliveries: [] };
+  for (const delivery of held) {
+    replayed = applyObservation(replayed, delivery);
+  } // End of the loop over the deliveries held during the create
+  return replayed;
+} // End of function consumingHeldDeliveries()
 
 /**
  * Records that the create produced no outcome.
@@ -1261,12 +1649,15 @@ export function createCouldNotBeSent(
   mayHaveWritten: boolean,
   reason: IpcFailure | null
 ): MatchCreationSession {
-  return {
+  // The create is over, so a delivery held while it was out is applied now — the
+  // settlement of an uncertain write arbitrates the held reading under that
+  // uncertainty, and its `raisedWithoutReload` is what this applies (entry 5).
+  return consumingHeldDeliveries({
     ...session,
     phase: 'editing',
     group: null,
     sendFailure: sendFailureOf(mayHaveWritten, reason)
-  };
+  });
 } // End of function createCouldNotBeSent()
 
 /**
@@ -1298,6 +1689,17 @@ export function acknowledgeCreationFindings(
  * {@link MatchCreationSession.committed} lives on the form and survives this, so
  * a person cannot dismiss their way past the re-seed a commit owes.
  *
+ * **Nor does it erase an external block** — Phase 2d-6-3, the 2d-6 record's §3
+ * entry 9. {@link MatchCreationSession.externalConflict},
+ * {@link MatchCreationSession.uncertaintyUnresolved} and
+ * {@link MatchCreationSession.awaitingReconciliation} all survive this spread:
+ * what this dismisses under an external conflict is the save outcome's panel and
+ * the reload warning, and the conflict and both restrictions stand until an
+ * explicit resolution — the reload's confirmation, a reapply, an explicit
+ * destination, or closing. What the spread forces is that the three fields are
+ * copied; what no type forces is that a later edit keeps them out of the literal,
+ * and the suite's case is what would notice.
+ *
  * @param session - The form showing an outcome.
  * @returns The form with nothing being said about the last attempt.
  */
@@ -1314,14 +1716,39 @@ export function keepDrafting(session: MatchCreationSession): MatchCreationSessio
 } // End of function keepDrafting()
 
 /**
+ * The conflict a reload may be asked about, or `null` when none may be — Phase
+ * 2d-6-3, the reload gate of the 2d-6 record's §3 entries 11 and 21 as one rule
+ * for the three reload steps below.
+ *
+ * Withheld in two states. Under an unacknowledged write uncertainty, for the
+ * match editor's reason: a confirmed installation of bytes a write of this window
+ * may or may not have produced would settle silently what only the person can.
+ * And for a destination-less form told of a change (entry 21): a reload adopts
+ * the observed file into the window and closes this form, which is the adoption of
+ * a file the person never named — the resolution such a form requires is an
+ * explicit destination, after which the reload is offered for the file named. The
+ * view withholds the control through the same facts, and the three transitions
+ * refuse it, so a call made past the withheld control changes nothing (entry 8).
+ *
+ * @param session - The form to ask about.
+ * @returns The conflict, or `null` when there is none or its reload is withheld.
+ */
+function reloadableConflictOf(session: MatchCreationSession): ConflictModel<CreationBuffers> | null {
+  return session.uncertaintyUnresolved || requiresExplicitDestination(session)
+    ? null
+    : conflictOf(session);
+} // End of function reloadableConflictOf()
+
+/**
  * Asks to load the version on disk, which is the step **before** confirming.
  *
  * @param session - The session showing a conflict.
  * @returns The session at the warning, or the same session when no conflict is
- *   showing or one has already been asked about.
+ *   showing, one has already been asked about, or the reload is withheld
+ *   ({@link reloadableConflictOf}).
  */
 export function askToReloadDiskVersion(session: MatchCreationSession): MatchCreationSession {
-  const next = reloadAsked(conflictOf(session), session.reload);
+  const next = reloadAsked(reloadableConflictOf(session), session.reload);
   return next === null ? session : { ...session, reload: next };
 } // End of function askToReloadDiskVersion()
 
@@ -1336,7 +1763,7 @@ export function askToReloadDiskVersion(session: MatchCreationSession): MatchCrea
  * @returns The session holding the confirmation, or the same session.
  */
 export function confirmDiskReload(session: MatchCreationSession): MatchCreationSession {
-  const next = reloadConfirmed(conflictOf(session), session.reload);
+  const next = reloadConfirmed(reloadableConflictOf(session), session.reload);
   return next === null ? session : { ...session, reload: next };
 } // End of function confirmDiskReload()
 
@@ -1371,7 +1798,7 @@ export function reloadTheDiskVersion(
   session: MatchCreationSession,
   adopt: AdoptTheDiskVersion<CreationBuffers>
 ): MatchCreationSession {
-  const spend = spendTheConfirmedReload(conflictOf(session), session.reload, adopt);
+  const spend = spendTheConfirmedReload(reloadableConflictOf(session), session.reload, adopt);
   if (spend === 'notAttempted') {
     return session;
   }
@@ -1392,9 +1819,191 @@ export function reloadTheDiskVersion(
     extraMessages: [],
     reload: NOT_RELOADING,
     sendFailure: null,
+    // The conflict of either origin is resolved by the reload that ends this
+    // form, and a closed form says nothing about any file any more.
+    externalConflict: null,
+    uncertaintyUnresolved: false,
+    awaitingReconciliation: new Map(),
     closed: true
   };
 } // End of function reloadTheDiskVersion()
+
+/**
+ * Takes the window's decision about one watcher observation — Phase 2d-6-3, the
+ * 2d-6 record's §3 entries 6, 7, 11, 12 and 21.
+ *
+ * **The form's receiver, as a value**, in the shape `applyObservation` in
+ * `./matchEditor.ts` established: a component registers a function through
+ * `BrowserState.registerObservationReceiver` that calls this with the envelope and
+ * installs what comes back (the wiring is 2d-6-6's), and the decision is here so a
+ * suite can drive every arm without a window. It never re-arbitrates and reads
+ * none of the window's tables.
+ *
+ * **Every verdict has a named action, switched with a `never` terminus** (entry
+ * 11, plus the seventh arm Phase 2d-6-1b added):
+ *
+ * | Verdict | What this does, for a delivery about this form |
+ * |---|---|
+ * | `raised` | builds the external model from the observation and the retained draft |
+ * | `raisedWithoutReload` | the same, and records that the reload is withheld until the uncertainty is acknowledged |
+ * | `supersedes` | `supersedeConflict` over the conflict shown — its draft kept, its disk side replaced |
+ * | `coalesced` | keeps the model, its source identity and the reload step |
+ * | `notLater` | changes nothing |
+ * | `retained` | records the held observation as a restriction on sending; no disk comparison, no origin |
+ * | `writtenHere` | lifts the restriction recorded for that observation, and changes nothing else |
+ *
+ * **Which deliveries are about this form is this form's own question**, and the
+ * answer is the module header's: every one while no destination is chosen — the
+ * form is then attributed to every creator-eligible file, and a change to any of
+ * them is the affected file's state it must show (entry 21) — and those about the
+ * chosen file once one is. A delivery about another file can only end a wait
+ * recorded for that very observation, by identity, under that file's key; a
+ * `retained` about another file records nothing. To decide that, this reads
+ * **one** property of the observation, `document`, once — the editor reads none —
+ * and the envelope's two fields and the verdict's `kind`, once each, before
+ * anything is decided.
+ *
+ * **Every replacing verdict resets the reload step and retires a save conflict**
+ * (entries 7 and 12), and a displayed reapply result is invalidated by the same
+ * transition because `reapplyToShow` in `./reapply.ts` pairs a report to a form by
+ * identity. `supersedes` builds through `supersedeConflict` when a conflict is
+ * shown and through `describeExternalConflict` over the form's draft when none
+ * is; the `superseded` origin the verdict names is not compared with the shown
+ * conflict's — the envelope is the window's decision about the file, and a form
+ * that re-checked it would be arbitrating.
+ *
+ * **During this form's own create the envelope is appended to the held list, not
+ * applied** (entry 5): see {@link MatchCreationSession.heldDeliveries}. A closed
+ * form takes nothing.
+ *
+ * **What it forces and what it does not, in the same sentence.** It forces that
+ * every arm of `ObservationVerdict` has an action here — an eighth arm is a
+ * compile error at the terminus — and that no arm installs, adopts, spends or
+ * calls a command, which its signature cannot prove and the command spy at zero
+ * in `workspace.test.ts` does. It cannot force that a component registers it,
+ * over which files, or installs what it answers; nor that the envelope was sealed
+ * by the window rather than assembled by hand.
+ *
+ * @param session - The form.
+ * @param delivery - What the window decided, sealed with the observation.
+ * @returns The form after the decision, or the same form when the verdict
+ *   changes nothing about it.
+ */
+export function applyObservation(
+  session: MatchCreationSession,
+  delivery: ObservationDelivery
+): MatchCreationSession {
+  if (session.closed) {
+    return session;
+  }
+  // **The caller-controlled reads, taken once and first.**
+  const observation = delivery.observation;
+  const kind = delivery.verdict.kind;
+  const file = observation.document;
+  if (session.phase === 'saving') {
+    return { ...session, heldDeliveries: [...session.heldDeliveries, delivery] };
+  }
+  // The decision about an awaited observation ends the wait for it, whatever
+  // the decision is and whichever file it is about; any other observation leaves
+  // every wait standing.
+  const waits = session.awaitingReconciliation;
+  const stillWaiting = waits.get(file) === observation ? withoutWait(waits, file) : waits;
+  const about = session.chosen === null || session.chosen === file;
+  const lifted = stillWaiting === waits ? session : { ...session, awaitingReconciliation: stillWaiting };
+  switch (kind) {
+    case 'retained':
+      // A `retained` ends no wait: a re-held reading is still held.
+      return about ? { ...session, awaitingReconciliation: withWait(waits, file, observation) } : session;
+    case 'writtenHere':
+    case 'coalesced':
+    case 'notLater':
+      return lifted;
+    case 'raised':
+    case 'supersedes':
+      return about ? replacedBy(session, observation, false, stillWaiting) : lifted;
+    case 'raisedWithoutReload':
+      return about ? replacedBy(session, observation, true, stillWaiting) : lifted;
+    default: {
+      const unreachable: never = kind;
+      return unreachable;
+    }
+  }
+} // End of function applyObservation()
+
+/**
+ * The form after a verdict that puts a new origin in front of it.
+ *
+ * The shared body of the three replacing arms of {@link applyObservation}, which
+ * documents what happens here; this is the one place the external model is built
+ * for this surface from a delivery.
+ *
+ * @param session - The form, not closed and not saving.
+ * @param observation - The observation the verdict is about.
+ * @param uncertaintyUnresolved - Whether the verdict was `raisedWithoutReload`.
+ * @param awaitingReconciliation - The waits still held after this delivery.
+ * @returns The form showing the new conflict.
+ */
+function replacedBy(
+  session: MatchCreationSession,
+  observation: ExternalConflictObservation,
+  uncertaintyUnresolved: boolean,
+  awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>
+): MatchCreationSession {
+  const shown = conflictOf(session);
+  const externalConflict =
+    shown === null
+      ? describeExternalConflict(observation, session.draft, CONFLICT_CAPABILITIES)
+      : supersedeConflict(shown, observation, CONFLICT_CAPABILITIES);
+  // A save conflict is retired with its submission (entry 7); a refusal or a
+  // success stays, as history, with the submission a refusal's consent needs.
+  const retiring = conflictArm(session.outcome) !== null;
+  return {
+    ...session,
+    externalConflict,
+    uncertaintyUnresolved,
+    awaitingReconciliation,
+    outcome: retiring ? null : session.outcome,
+    submitted: retiring ? null : session.submitted,
+    extraMessages: retiring ? [] : session.extraMessages,
+    group: null,
+    // Entry 12: the confirmation collected for the conflict that was on screen is
+    // not spendable against this one, and the warning it was collected under must
+    // not stay on screen saying the wrong thing (the record's §5.7).
+    reload: NOT_RELOADING
+  };
+} // End of function replacedBy()
+
+/**
+ * Records that the person has reviewed the disk snapshot and the window has ended
+ * the uncertainty hold — Phase 2d-6-3, the 2d-6 record's §3 entries 14 and 15.
+ *
+ * `acknowledgeSnapshot` in `./matchEditor.ts`, for this form, taking the same
+ * two-valued callback: it rebuilds the conflict's availability and nothing else —
+ * the ordinary reload is offered again from its idle step and the reapply is no
+ * longer refused for the uncertainty — installing nothing, minting no consent and
+ * re-observing nothing. Asked at most once per call and only when there is
+ * something to end; a `refused` leaves the form unchanged. What it cannot see is
+ * a hold the window ended without a delivery, stated on
+ * {@link MatchCreationSession.uncertaintyUnresolved}.
+ *
+ * @param session - The form showing a conflict raised under uncertainty.
+ * @param acknowledge - The window's two acknowledgement members, composed.
+ * @returns The form with its reload and reapply available again, or the same
+ *   form.
+ */
+export function acknowledgeSnapshot(
+  session: MatchCreationSession,
+  acknowledge: AcknowledgeTheUncertainty
+): MatchCreationSession {
+  const conflict = session.externalConflict;
+  if (session.closed || conflict === null || !session.uncertaintyUnresolved) {
+    return session;
+  }
+  if (acknowledge(conflict.source) !== 'acknowledged') {
+    return session;
+  }
+  return { ...session, uncertaintyUnresolved: false, reload: NOT_RELOADING };
+} // End of function acknowledgeSnapshot()
 
 /**
  * Why a reapply of this form could not be carried out.
@@ -1430,11 +2039,16 @@ export type CreationReapplyObstacle =
       /**
        * The conflict is about a file this form is not writing into.
        *
-       * **Unreachable while a conflict is showing**, because {@link isEditable} is
-       * `false` then and {@link chooseDestination} refuses — so the destination
-       * cannot move between the send and the reapply. It is checked rather than
+       * **Unreachable through this module's transitions**, and checked rather than
        * assumed because a rebase against the wrong file's projection would install
-       * another file's anchors under this form's destination.
+       * another file's anchors under this form's destination. For a form that
+       * names a file, {@link isEditable} is `false` under a conflict and
+       * {@link chooseDestination} refuses, so the destination cannot move between
+       * the send and the reapply, and {@link applyObservation} records no conflict
+       * about another file. The one form {@link chooseDestination} accepts under a
+       * conflict names none (Phase 2d-6-3): its reapply is refused as
+       * `destinationRequired` first, naming the affected file keeps a conflict
+       * about that file, and naming another drops the conflict.
        */
       readonly kind: 'notTheDestination';
     }
@@ -1450,6 +2064,63 @@ export type CreationReapplyObstacle =
       readonly kind: 'creationRefused';
       /** Which of that rule's codes, for the panel to render. */
       readonly reason: CreationRefusal;
+    }
+  | {
+      /**
+       * The form names no file, so there is nothing to re-point at the observed
+       * one — Phase 2d-6-3, the 2d-6 record's §3 entry 21.
+       *
+       * **The unknown-target reapply is a refusal, not a choice.** Re-pointing the
+       * draft at the observed file's revision would be choosing that file for the
+       * person, and the resolution such a form requires is an explicit
+       * destination. Refused before any evidence is read and before the door;
+       * rendered through `browser.matchCreation.cannotCreate.noDestination`,
+       * which is the sentence exactly and adds no key.
+       */
+      readonly kind: 'destinationRequired';
+    }
+  | {
+      /**
+       * The external observation's correspondence could not be used to find the
+       * anchor — Phase 2d-6-3, the record's §3 entries 20 and 22.
+       *
+       * Five reasons, all about the evidence and never about the file: the reading
+       * carried no table, the table's base or disk revision is not this
+       * conflict's, or the table names the anchor's base identity in no row or in
+       * more than one. **Reachable only for an `after` placement**: a `front` or
+       * `end` asks the table nothing, so a refused table refuses nothing it asked
+       * for. Rendered through `tExternalEvidenceRefusal`.
+       */
+      readonly kind: 'externalEvidence';
+      /** Which negative claim about the evidence this is. */
+      readonly reason: ExternalEvidenceRefusal;
+    }
+  | {
+      /**
+       * Another accepted reading of the file has superseded the conflict's
+       * evidence, whichever origin it had (entry 22). Answered by the live
+       * standing-origin guard, asked last; rendered through `tSupersededEvidence`.
+       */
+      readonly kind: 'supersededEvidence';
+    }
+  | {
+      /**
+       * The conflict was raised while a write of this window's own had an unknown
+       * outcome, and the person has not acknowledged that (entries 11 and 22).
+       * Refused before any evidence is read; rendered through the uncertainty
+       * notice's own sentence.
+       */
+      readonly kind: 'writeOutcomeUnknown';
+    }
+  | {
+      /**
+       * The window holds a reading of this file it has not decided about (entries
+       * 8 and 11). A reapply hands back a form whose ordinary *Add* is live, and
+       * one rebuilt over the adopted snapshot would carry no record of the wait;
+       * so it is refused before any evidence is read. Rendered through the retained
+       * notice's own sentence.
+       */
+      readonly kind: 'observationRetained';
     };
 
 /** What a reapply of this form became. */
@@ -1494,6 +2165,22 @@ export function creationReapplyObstacleKey(obstacle: CreationReapplyObstacle): T
     case 'correspondence':
     case 'evidenceNotATarget':
       return sharedReapplyObstacleKey(obstacle);
+    case 'destinationRequired':
+      // The refusal's own sentence, through its own key function: *choose the
+      // file this snippet should be added to* is the reason exactly.
+      return creationRefusalKey('noDestination');
+    case 'externalEvidence':
+      return externalEvidenceRefusalKey(obstacle.reason);
+    case 'supersededEvidence':
+      return SUPERSEDED_EVIDENCE_KEY;
+    case 'writeOutcomeUnknown':
+      return externalConflictNoticeKey({ kind: 'writeOutcomeUnknown' });
+    case 'observationRetained':
+      return externalConflictNoticeKey({ kind: 'observationRetained' });
+    default: {
+      const unreachable: never = obstacle;
+      return unreachable;
+    }
   }
 } // End of function creationReapplyObstacleKey()
 
@@ -1531,25 +2218,39 @@ function destinationOfProjection(view: DocumentView): CreationDestination {
  *
  * `front` and `end` are handed back untouched: they are semantic choices and the
  * command lowers them against whatever list it finds, so a change to the file's
- * snippets does not change what they mean. An `after` is replaced by the anchor the
- * evidence identified — never by the old one, whose revision belongs to a parse
- * that is gone — and the replacement is taken **from the rebuilt destination's own
- * anchors**, so what is installed is that list's plain copy.
+ * snippets does not change what they mean — **and they ask the evidence nothing**,
+ * which is why the evidence is read only for an `after`. An `after` is replaced by
+ * the anchor the evidence identified — never by the old one, whose revision
+ * belongs to a parse that is gone — and the replacement is taken **from the
+ * rebuilt destination's own anchors**, so what is installed is that list's plain
+ * copy.
+ *
+ * **Both origins since Phase 2d-6-3** (the 2d-6 record's §3 entries 19, 20 and
+ * 22), through {@link anchorOfEvidence}: a refused save's anchor is read as
+ * before; an external table is searched for the anchor's **full** base identity
+ * and the row's `exact` tier read as the anchor; a refused table refuses the
+ * `after` it was asked about; superseded evidence refuses whatever the placement.
  *
  * @param placement - What the form asked for.
- * @param evidence - The correspondence answers from the conflict's payload.
+ * @param evidence - Which evidence the conflict's origin offers.
  * @param destination - The newly parsed destination, for its anchors.
  * @returns The placement to hold, or the obstacle that stops the reapply.
  */
 function rebuiltPlacement(
   placement: CreationPlacement,
-  evidence: ReapplyEvidence,
+  evidence: ReapplyEvidenceAccess,
   destination: CreationDestination
 ): { readonly placement: CreationPlacement } | { readonly obstacle: CreationReapplyObstacle } {
+  if (evidence.kind === 'superseded') {
+    return { obstacle: { kind: 'supersededEvidence' } };
+  }
   if (placement.kind !== 'after') {
     return { placement };
   }
-  const anchor = anchorCorrespondence(evidence);
+  const anchor = anchorOfEvidence(evidence, placement.anchor);
+  if ('obstacle' in anchor) {
+    return anchor;
+  }
   if (anchor.kind === 'refused') {
     return { obstacle: { kind: 'anchorCorrespondence', reason: anchor.reason } };
   }
@@ -1564,14 +2265,82 @@ function rebuiltPlacement(
 } // End of function rebuiltPlacement()
 
 /**
+ * The anchor one conflict's evidence names for this form's `after` placement, or
+ * why it names none — the origin switch of {@link rebuiltPlacement}, Phase 2d-6-3.
+ *
+ * **Three arms in, and each has its own answer** (the 2d-6 record's §3 entry 19;
+ * the fourth, `superseded`, is answered by the caller before any placement is
+ * read). Save evidence is read through `anchorCorrespondence`, as it always was.
+ * An external table is searched through `correspondenceRowFor` for the anchor's
+ * **full** base identity — the identity this form holds for it, minted from the
+ * parse the draft was placed against — and the found row's `exact` tier is read
+ * through `anchorResolution` (entry 20: "the anchor's `exact` from the same
+ * table"), exactly once. A refused table or row resolves to manual resolution
+ * with `tExternalEvidenceRefusal`'s sentence (entry 22). Nothing here is cast: a
+ * row is a row and a `ReapplyEvidence` is a `ReapplyEvidence`.
+ *
+ * @param evidence - What `enterReapply` found the conflict's origin to offer,
+ *   never `superseded`.
+ * @param anchor - The snippet the form places the new one after, by the identity
+ *   the base parse minted.
+ * @returns The anchor answer to work from, or the manual resolution to answer
+ *   with.
+ */
+function anchorOfEvidence(
+  evidence: Exclude<ReapplyEvidenceAccess, { readonly kind: 'superseded' }>,
+  anchor: MatchId
+): AnchorCorrespondence | { readonly obstacle: CreationReapplyObstacle } {
+  switch (evidence.kind) {
+    case 'saveEvidence':
+      return anchorCorrespondence(evidence.evidence);
+    case 'externalCorrespondence': {
+      const row = correspondenceRowFor(evidence.correspondences, anchor);
+      if (row.kind === 'refused') {
+        return { obstacle: { kind: 'externalEvidence', reason: row.reason } };
+      }
+      // **The row's exact tier, read once.** `exact` is the one field of the row
+      // this form reads; `editor` is the match editor's flexible tier and is not
+      // looked at for a position.
+      return anchorResolution(row.entry.exact);
+    }
+    case 'refused':
+      return { obstacle: { kind: 'externalEvidence', reason: evidence.reason } };
+    default: {
+      const unreachable: never = evidence;
+      return unreachable;
+    }
+  }
+} // End of function anchorOfEvidence()
+
+/**
+ * The guard {@link reapplyToDiskVersion} uses when its caller hands none in.
+ *
+ * `unaskedGuard` in `./matchEditor.ts`, for this form: it answers the shown
+ * conflict's own origin, so the supersession question the entry asks last is
+ * answered *yes, it stands* without the window being asked. It exists so that the
+ * one component caller, which 2d-6-3 may not touch, keeps its save-origin reapply
+ * exactly as it was; what it costs is stated on the caller.
+ *
+ * @param conflict - The conflict shown, or `null`.
+ * @returns A guard that never asks the window.
+ */
+function unaskedGuard(conflict: ConflictModel<CreationBuffers> | null): StandingOriginGuard {
+  const source: ConflictSource | null = conflict === null ? null : conflict.source;
+  return (): ConflictSource | null => source;
+} // End of function unaskedGuard()
+
+/**
  * Re-points this form at the newly parsed disk version and revalidates it.
  *
  * **The consult's Q4 for the creator, which is the targetless surface**: there is
- * no snippet to identify, because a creation brings its own. `subjectIsTargetless`
- * is what says so, and it is the one place `Targetless` is told apart from
- * `Unsupported` — the two are two facts, and a whole-document save's *there is
- * nothing here to reapply at all* must not be read as a creation's *there is
- * nothing to find*.
+ * no snippet to identify, because a creation brings its own. For the save origin
+ * `subjectIsTargetless` is what says so, and it is the one place `Targetless` is
+ * told apart from `Unsupported` — the two are two facts, and a whole-document
+ * save's *there is nothing here to reapply at all* must not be read as a
+ * creation's *there is nothing to find*. For the external origin there is no
+ * subject to ask about at all: the table is consulted for the anchor of an `after`
+ * placement and for nothing else (the 2d-6 record's §3 entry 20 — "creation
+ * targetless with no invented `MatchId`").
  *
  * What is retained is the {@link CreationBuffers} the person typed. What is rebuilt
  * is everything around them:
@@ -1595,29 +2364,70 @@ function rebuiltPlacement(
  * the candidate's own findings and the content-addressed acknowledgement protocol
  * are what decide that, at the command, for the newly derived candidate.
  *
+ * **Both origins since Phase 2d-6-3, through one entry** (entries 19, 20 and 22):
+ * `enterReapply` in `./reapply.ts` answers `reapplyEvidenceFor`'s four arms and
+ * {@link rebuiltPlacement} switches over them. **Three refusals come before any
+ * evidence is read**, in this order: an unacknowledged write uncertainty (entry
+ * 22 — a reapply ends in an adoption, which the uncertainty withholds); a reading
+ * the window holds undecided (entry 8 — a form rebuilt over the adopted snapshot
+ * would carry no record of the wait, and the blocked send would go through it);
+ * and a form that names no file (entry 21 — the unknown-target reapply is a
+ * refusal, not a choice: re-pointing the draft at the observed file would choose
+ * that file for the person). The view withholds the control through the same
+ * facts; these are the rules for a call made past it.
+ *
+ * **The standing-origin guard is a parameter, and it is optional for one stated
+ * reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s: `MatchCreator.svelte`
+ * calls this with two arguments and 2d-6-3 touches no component. When no guard is
+ * handed in the supersession question is not asked here; what still refuses a
+ * superseded origin on that path is `adoptDiskVersion`'s fourth check, at the
+ * door, answered `adoptionRefused` without the typed sentence. An omitted guard
+ * costs a sentence and some work, never a wrong installation.
+ *
+ * **What no type here forces**: that `adopt`'s body does anything, that a caller
+ * stops on `adoptionRefused`, that the form handed back is installed, or that the
+ * guard a caller passes asks the window rather than the conflict. What is closed
+ * is that no path here writes, calls a command, or adopts anything before the
+ * whole rebase has been decided.
+ *
  * @param session - The form showing the conflict.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
  *   all on a refusal.
+ * @param standing - Asks what origin stands for the file **now**;
+ *   `() => browser.standingConflictFor(document)` is the honest closure. `null`,
+ *   the default, asks nothing — see above for what that costs.
  * @returns What became of the attempt.
  */
 export function reapplyToDiskVersion(
   session: MatchCreationSession,
-  adopt: AdoptTheDiskVersion<CreationBuffers>
+  adopt: AdoptTheDiskVersion<CreationBuffers>,
+  standing: StandingOriginGuard | null = null
 ): MatchCreationReapply {
-  const start = beginReapply(CONFLICT_CAPABILITIES, conflictOf(session));
-  if (start.kind !== 'ready') {
-    return start;
+  const conflict = conflictOf(session);
+  const entry = enterReapply(CONFLICT_CAPABILITIES, conflict, standing ?? unaskedGuard(conflict));
+  if (entry.kind !== 'ready') {
+    return entry;
   }
-  if (!subjectIsTargetless(start.evidence)) {
-    return { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } };
+  if (session.uncertaintyUnresolved) {
+    return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+  }
+  if (awaitedFor(session) !== null) {
+    return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
   }
   const held = chosenDestination(session);
-  const disk = start.conflict.disk;
-  if (held === null || held.document !== disk.id) {
+  if (held === null) {
+    return { kind: 'manualResolution', obstacle: { kind: 'destinationRequired' } };
+  }
+  const evidence = entry.evidence;
+  if (evidence.kind === 'saveEvidence' && !subjectIsTargetless(evidence.evidence)) {
+    return { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } };
+  }
+  const disk = entry.conflict.disk;
+  if (held.document !== disk.id) {
     return { kind: 'manualResolution', obstacle: { kind: 'notTheDestination' } };
   }
   const destination = destinationOfProjection(disk);
-  const wanted = rebuiltPlacement(session.placement, start.evidence, destination);
+  const wanted = rebuiltPlacement(session.placement, evidence, destination);
   if ('obstacle' in wanted) {
     return { kind: 'manualResolution', obstacle: wanted.obstacle };
   }
@@ -1637,13 +2447,22 @@ export function reapplyToDiskVersion(
     extraMessages: [],
     group: null,
     sendFailure: null,
-    reload: NOT_RELOADING
+    reload: NOT_RELOADING,
+    // The conflict of either origin is what this resolves, and the uncertainty
+    // with it; the waits are carried, for `rebuiltOver`'s reason in
+    // `./matchEditor.ts` — the destination's is absent on every path this module
+    // takes, because the refusal above comes first, and the map is carried so the
+    // rebuild's honesty does not depend on that refusal's position, and so a wait
+    // about another file survives the rebuild.
+    externalConflict: null,
+    uncertaintyUnresolved: false,
+    awaitingReconciliation: session.awaitingReconciliation
   };
   const refusal = creationRefusal(rebuilt);
   if (refusal !== null) {
     return { kind: 'manualResolution', obstacle: { kind: 'creationRefused', reason: refusal } };
   }
-  if (adoptForReapply(start.conflict, adopt) === 'refused') {
+  if (adoptForReapply(entry.conflict, adopt) === 'refused') {
     return { kind: 'adoptionRefused' };
   }
   return { kind: 'reapplied', session: rebuilt };
@@ -1689,6 +2508,62 @@ export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   reapplySupport: 'supported'
 };
 
+/**
+ * What this form offers about the conflict it is showing **now**, derived from
+ * the declaration and two facts about the form — Phase 2d-6-3, the 2d-6 record's
+ * §3 entries 11 and 21.
+ *
+ * The declaration above is permanent; this is the "effective capabilities" the
+ * consult's Q3 names. The reload and the reapply are both withheld under an
+ * unacknowledged write uncertainty, for the match editor's reason, and both
+ * withheld for a destination-less form told of a change (entry 21) — the reload
+ * because it adopts a file the person never named, the reapply because it would
+ * choose that file for them; the resolution such a form requires is an explicit
+ * destination, and the choice list says so by offering neither. The reapply alone
+ * is withheld while the window holds an undecided reading, because it hands back
+ * a form whose ordinary *Add* is live; the reload is not, because it closes the
+ * form and sends nothing. The copy is untouched — a copy writes nothing. It feeds
+ * `conflictChoicesFor`, which stays the only producer of a choice list; what this
+ * cannot force is that the transitions honour the same facts, which is why each
+ * asks {@link reloadableConflictOf} or the fields themselves.
+ *
+ * @param session - The form to derive for.
+ * @returns The capabilities to offer choices from.
+ */
+function effectiveCapabilitiesOf(session: MatchCreationSession): ConflictCapabilities {
+  const reloadWithheld = session.uncertaintyUnresolved || requiresExplicitDestination(session);
+  const reapplyWithheld = reloadWithheld || awaitedFor(session) !== null;
+  if (!reloadWithheld && !reapplyWithheld) {
+    return CONFLICT_CAPABILITIES;
+  }
+  return {
+    ...CONFLICT_CAPABILITIES,
+    offersReload: !reloadWithheld,
+    offersReapply: !reapplyWithheld
+  };
+} // End of function effectiveCapabilitiesOf()
+
+/**
+ * The notices one form owes, in the order the stronger claim comes first.
+ *
+ * The uncertainty first, because it is the one state under which the conflict on
+ * screen offers neither way to the disk version, and the held observation second.
+ * Each is answered from one form field and nothing is read twice.
+ *
+ * @param session - The form to describe.
+ * @returns The codes, possibly none.
+ */
+function externalNoticesOf(session: MatchCreationSession): readonly ExternalConflictNotice[] {
+  const notices: ExternalConflictNotice[] = [];
+  if (session.externalConflict !== null && session.uncertaintyUnresolved) {
+    notices.push({ kind: 'writeOutcomeUnknown' });
+  }
+  if (awaitedFor(session) !== null) {
+    notices.push({ kind: 'observationRetained' });
+  }
+  return notices;
+} // End of function externalNoticesOf()
+
 /** Everything a screen needs about one form, derived on every read. */
 export interface MatchCreationView {
   /** Every file the form offers, eligible or not, in window order. */
@@ -1728,13 +2603,50 @@ export interface MatchCreationView {
   readonly outcome: SaveOutcomeModel<CreationBuffers> | null;
   /** The outcome's lines followed by anything to be said beside them. */
   readonly messages: readonly SaveOutcomeMessage[];
+  /**
+   * The external conflict's own lines, or none — Phase 2d-6-3.
+   *
+   * Beside {@link MatchCreationView.messages} and never merged into it, for
+   * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
+   * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
+   * twice. Rendered through `tConflictMessage`. No component reads it yet.
+   */
+  readonly externalMessages: readonly ConflictMessage[];
+  /**
+   * The lines owed while an observation cannot be acted on — Phase 2d-6-3.
+   *
+   * `writeOutcomeUnknown` first, `observationRetained` second, from the form's
+   * own fields. No component reads it yet; 2d-6-6 and 2d-6-9 do.
+   */
+  readonly externalNotices: readonly ExternalConflictNotice[];
+  /**
+   * Whether this is a destination-less form told of a change, whose only way
+   * forward is naming the file it writes into — Phase 2d-6-3, entry 21.
+   *
+   * While `true` the conflict is shown, the boxes are frozen, the reload and the
+   * reapply are withheld, and {@link MatchCreationView.canChooseDestination} is
+   * `true` although {@link MatchCreationView.editable} is not. A renderer says so
+   * with the `noDestination` refusal sentence, which
+   * {@link MatchCreationView.refusal} already answers. No component reads it yet.
+   */
+  readonly destinationRequired: boolean;
+  /**
+   * Whether the destination control does anything — Phase 2d-6-3.
+   *
+   * {@link canChooseDestination}: `editable`, widened by exactly the state above.
+   * A renderer that gates the destination control on `editable` alone leaves a
+   * destination-less form under an external conflict with no way forward, which
+   * is why this is a field of its own rather than a rule in markup. No component
+   * reads it yet.
+   */
+  readonly canChooseDestination: boolean;
   /** The presentation changes a saved arm disclosed, in report order. */
   readonly notes: readonly PresentationNote[];
   /** What to offer about a refusal, withdrawn once its findings are stale. */
   readonly refusalChoices: readonly RawSaveChoice[];
   /** Whether the findings on screen are about a draft that has since changed. */
   readonly findingsAreStale: boolean;
-  /** The conflict being shown, or `null`. */
+  /** The conflict being shown, of either origin, or `null`. */
   readonly conflict: ConflictModel<CreationBuffers> | null;
   /**
    * The draft that conflict retained, labelled, in {@link CREATION_FIELDS} order.
@@ -1842,7 +2754,9 @@ export function matchCreationView(session: MatchCreationSession): MatchCreationV
   const conflictChoices =
     conflict === null
       ? []
-      : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload));
+      : conflictChoicesFor(effectiveCapabilitiesOf(session), offeredReloadStep(session.reload));
+  const externallyBlocked = session.externalConflict !== null || awaitedFor(session) !== null;
+  const refusalChoices = offeredRefusalChoices(refused, stale);
   return {
     destinations: session.destinations,
     chosen: chosenDestination(session),
@@ -1860,8 +2774,18 @@ export function matchCreationView(session: MatchCreationSession): MatchCreationV
     failureLines: sendFailureLines(session.sendFailure?.reason ?? null),
     outcome,
     messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
+    externalMessages: session.externalConflict === null ? [] : session.externalConflict.messages,
+    externalNotices: externalNoticesOf(session),
+    destinationRequired: requiresExplicitDestination(session),
+    canChooseDestination: canChooseDestination(session),
     notes: saved === null ? [] : saved.notes,
-    refusalChoices: offeredRefusalChoices(refused, stale),
+    // The one offer a refusal panel may keep under an external block is the
+    // dismissal: `beginCreate` would answer `null` to the other, and a control
+    // that does nothing when pressed is the defect `conflictChoicesFor` exists to
+    // stop.
+    refusalChoices: externallyBlocked
+      ? refusalChoices.filter((choice) => choice === 'keepEditing')
+      : refusalChoices,
     findingsAreStale: refused !== null && stale,
     conflict,
     retainedDraft: conflict === null ? [] : retainedDraftOf(conflict),
@@ -1984,6 +2908,12 @@ export function destinationRefusalKey(reason: DestinationRefusal): TranslationKe
 /**
  * The dictionary key holding one submission refusal's sentence.
  *
+ * **The two external blocks reuse sentences that already exist** (Phase 2d-6-3):
+ * the external origin's own first line for `externalConflict`, and the retained
+ * notice's for `observationRetained`, each through its own key function so a
+ * renamed key is a compile error there and here at once. No sentence of this
+ * module's own was added for either.
+ *
  * @param reason - Why the form cannot be submitted.
  * @returns The key holding that reason's sentence.
  */
@@ -1995,6 +2925,10 @@ export function creationRefusalKey(reason: CreationRefusal): TranslationKey {
       return 'browser.matchCreation.cannotCreate.saveInFlight';
     case 'conflict':
       return 'browser.matchCreation.cannotCreate.conflict';
+    case 'externalConflict':
+      return externalConflictMessageKey({ kind: 'fileChangedWhileOpen' });
+    case 'observationRetained':
+      return externalConflictNoticeKey({ kind: 'observationRetained' });
     case 'noDestination':
       return 'browser.matchCreation.cannotCreate.noDestination';
     case 'destinationIneligible':
@@ -2051,3 +2985,25 @@ export function acknowledgementOf(
 export function baseRevisionOf(session: MatchCreationSession): ContentRevision {
   return session.draft.baseRevision;
 } // End of function baseRevisionOf()
+
+/**
+ * Which file this form would write, as the target it reports upward — Phase
+ * 2d-6-3, the 2d-6 record's §3 entries 3 and 21.
+ *
+ * `unknown` while no file is chosen and the chosen file otherwise — the value
+ * `DetailPane` builds today from the `DocumentId | null` `MatchCreator` reports,
+ * answered here from the form so the mapping has one home. **It stays `unknown`
+ * through an external conflict over a destination-less form**: the wildcard
+ * protection entry 21 keeps is exactly that this answer does not change until the
+ * person names a file, and nothing in this module writes `chosen` but
+ * {@link chooseDestination}. Whether a component reports this value, and over
+ * which files an `unknown` target is registered as a receiver, is 2d-6-6's;
+ * nothing reads it yet.
+ *
+ * @param session - The form to ask about.
+ * @returns The target, by the identity this window holds.
+ */
+export function creationTargetOf(session: MatchCreationSession): WriteSurfaceTarget {
+  const chosen = session.chosen;
+  return chosen === null ? { kind: 'unknown' } : { kind: 'document', document: chosen };
+} // End of function creationTargetOf()

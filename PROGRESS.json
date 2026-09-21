@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T15:49:17Z",
+ "updated": "2026-09-21T17:04:01Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -421,7 +421,7 @@
    "id": "2d-6",
    "title": "Components, i18n and mounted evidence",
    "status": "in_progress",
-   "summary": "Eleven steps per its design consult; 2d-6-1 (three sub-phases) and 2d-6-2 are done, 2d-6-3 is next."
+   "summary": "Eleven steps per its design consult; 2d-6-1 (three sub-phases), 2d-6-2 and 2d-6-3 are done, 2d-6-4 is next."
   },
   {
    "id": "2d-6-1",
@@ -472,8 +472,11 @@
   {
    "id": "2d-6-3",
    "title": "Creation and recovery external sessions",
-   "status": "queued",
-   "summary": "Gives the creator and the recovery surface — the eighth registered kind — their external-conflict sessions."
+   "status": "done",
+   "summary": "Gives the creator and recovery form their external-conflict sessions, the submission block at every door, the destination-less refusal and the origin kept unspent; 2 review blockers fixed.",
+   "risk": "high",
+   "review": "docs/reviews/phase-2d-6-3.md",
+   "narrative": "docs/decisions/2d-6-3-notes.md"
   },
   {
    "id": "2d-6-4",

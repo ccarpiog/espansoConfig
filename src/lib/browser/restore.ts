@@ -337,6 +337,16 @@ import type { RawSaveAnswer } from './workspace.svelte';
  * value has to be able to say so. The six that *compete* with restore are
  * {@link CompetingWriteSurfaceKind}, and the phrase in the consult — "all six
  * competing surface kinds" — is those six.
+ *
+ * **Seven members, and not a complete list of the surfaces that write** — the
+ * 2d-6 record's §5.1 and §3 entry 3. The recovery form chooses its own
+ * destination and calls `BrowserState.createMatch`, and may stay open beside the
+ * editor it was opened from, so an editor over one file protects no recovery
+ * destination in another; it is the eighth kind, and `recoveryTargetOf` in
+ * `./recovery.ts` answers the file it would write since Phase 2d-6-3. Adding the
+ * member here, with the assembly in `DetailPane` that a new member breaks at
+ * compile time, is 2d-6-6's; until then a recovery form is a write surface this
+ * type cannot name.
  */
 export type OpenWriteSurfaceKind =
   /** A snippet of the file is open in the small editor. */
