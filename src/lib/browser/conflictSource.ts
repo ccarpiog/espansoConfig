@@ -32,10 +32,12 @@
  * identity-keyed maps — that module's `conflictOrigins` and this one's sibling, the
  * reapply authorization memo — are keyed on a {@link ConflictSource}. Phase 2d-5-5b
  * added the second half: `BrowserState.observeExternalChange` drives
- * {@link arbitrateObservation}, so {@link externalConflictSource} now has a
- * production caller too. What still has none is a **component** — drawing either
- * origin is 2d-6's, and nothing in this repository shows a person which of the two
- * a panel is about.
+ * {@link arbitrateObservation} — through `arbitratedDelivery` in
+ * `./observationDelivery.ts` since Phase 2d-6-1b, which seals the verdict with the
+ * observation it is about — so {@link externalConflictSource} now has a production
+ * caller too. What still has none is a **component** — drawing either origin is
+ * 2d-6's, and nothing in this repository shows a person which of the two a panel
+ * is about.
  *
  * **Two things this module does not touch, and may not.** `conflictChoicesFor` in
  * `./saveOutcome.ts` stays the only producer of a choice list — what is exported
@@ -486,17 +488,27 @@ export function standingConflictOf(source: ConflictSource): StandingConflict {
  * What one window did with a watcher observation of a file it holds a conflict
  * about.
  *
- * **The answers of rulings 25, 26 and 27 as one value.** Only
- * `BrowserState.observeExternalChange` in `./workspace.svelte.ts` answers the
- * `retained` arm — it is the only thing that knows whether a write is in flight,
- * and the only thing that can tell that its own tables moved while a verdict was
- * being decided — and {@link arbitrateObservation} produces every other one.
+ * **The answers of rulings 25, 26 and 27 as one value.** Only `BrowserState` in
+ * `./workspace.svelte.ts` answers the `retained` and `writtenHere` arms — it is
+ * the only thing that knows whether a write is in flight, what revision that
+ * write ended on, and whether its own tables moved while a verdict was being
+ * decided — and {@link arbitrateObservation} produces every other one.
  *
  * **Not one of these arms installs anything, and none may.** Ruling 23 keeps
  * `BrowserState.adoptDiskVersion` the only confirmed-install door and
  * `conflictChoicesFor` in `./saveOutcome.ts` the only producer of a choice list,
  * and ruling 27 forbids watcher arbitration initiating any save command at all;
  * this is a verdict about *which origin stands*, and nothing else.
+ *
+ * **Every arm is delivered** (the 2d-6 record's §3 entries 2 and 4): since Phase
+ * 2d-6-1b, `BrowserState` seals each verdict with the observation it is about into
+ * an `ObservationDelivery` (`./observationDelivery.ts`) and hands that one
+ * envelope to every receiver registered over the file — the `retained` arm too, so
+ * a session can say an observation is waiting, and the two arms that end a wait
+ * (`writtenHere`, or whichever arm a settlement or a retry arbitrates to) travel
+ * the same path afterwards. Nothing in TypeScript ties a receiver to a session or
+ * makes a session act on the arm it is given; that is the session transition's,
+ * which is 2d-6-2's.
  */
 export type ObservationVerdict =
   | {
@@ -504,19 +516,42 @@ export type ObservationVerdict =
        * Ruling 27: a write this window started is still in flight for the file,
        * so the observation is held and coalesced rather than applied.
        *
-       * **A second thing answers it, and it is not a second meaning**: since this
-       * phase's review, `BrowserState.observeExternalChange` also holds an
-       * observation whose arbitration found the state it was decided against
-       * changed underneath it — a re-entrant registration through a getter on the
-       * value it was reading. *Held, and nobody has acted on it* is the whole of
-       * what this arm says either way; what it never says is that the observation
-       * will be looked at again. **What releases a held observation today is a
-       * later settlement of a write for the file, or `open()` dropping the
-       * workspace whole** — nothing schedules a second look. The 2d-6 record's §5.6
-       * binds a third release, a person-requested retry, to Phase 2d-6-1b; until
-       * that lands there is none, and this comment is corrected when it does.
+       * **A second thing answers it, and it is not a second meaning**: since
+       * Phase 2d-5-5b's review, `BrowserState` also holds an observation whose
+       * arbitration found the state it was decided against changed underneath it
+       * — a re-entrant registration through a getter on the value it was reading.
+       * *Held, and nobody has acted on it* is the whole of what this arm says
+       * either way; what it never says is that the observation will be looked at
+       * again. **Three things release a held observation**: a later settlement of
+       * a write for the file, which arbitrates it or drops it as `writtenHere`; a
+       * person's `BrowserState.retryRetainedObservation`, one attempt per press
+       * (the 2d-6 record's §3 entries 16-18); and `open()` dropping the workspace
+       * whole. Nothing schedules a second look on its own, and a retry whose
+       * arbitration finds the tables moved again leaves the observation held and
+       * askable again.
        */
       readonly kind: 'retained';
+    }
+  | {
+      /**
+       * Ruling 27's barrier released the held observation because its disk
+       * revision is exactly the revision a write of this window ended on, so it is
+       * not news about a change: nothing is registered, nothing stands from it,
+       * and the wait the `retained` arm announced is over.
+       *
+       * **It says the revisions are equal and never that this window wrote them**
+       * — `BarrierRelease.writtenHere`'s own caveat, carried unchanged: another
+       * program may have produced byte-identical content, and no watcher snapshot
+       * can say who wrote anything. **Only a settlement answers it**, never a pure
+       * arbitration and never a retry: `BrowserState` seals it when
+       * {@link releaseBarrier} answers `writtenHere`, so that a session told
+       * `retained` earlier is told the check happened rather than left waiting
+       * for a verdict that will never come. The session's named action (the 2d-6
+       * record's §3 entry 11, extended by Phase 2d-6-1b) is to lift the
+       * pending-reconciliation restriction it recorded for this observation and to
+       * change nothing else — no disk comparison, no origin, no reload offer.
+       */
+      readonly kind: 'writtenHere';
     }
   | {
       /** Nothing stood for the file, so this observation is its conflict now. */
@@ -566,11 +601,16 @@ export type ObservationVerdict =
 /**
  * Every verdict an arbitration that really ran can answer.
  *
- * **`retained` is the one arm this excludes**, and the exclusion is the type
- * saying what the prose would otherwise have to: {@link arbitrateObservation} is
- * pure and holds no barrier, so it cannot answer that a write is in flight.
+ * **`retained` and `writtenHere` are the two arms this excludes**, and the
+ * exclusion is the type saying what the prose would otherwise have to:
+ * {@link arbitrateObservation} is pure and holds no barrier, so it cannot answer
+ * that a write is in flight, and it knows no settlement, so it cannot answer that
+ * a held reading was of the bytes a write ended on.
  */
-export type ArbitrationOutcome = Exclude<ObservationVerdict, { readonly kind: 'retained' }>;
+export type ArbitrationOutcome = Exclude<
+  ObservationVerdict,
+  { readonly kind: 'retained' | 'writtenHere' }
+>;
 
 /**
  * Which origin stands for one file, given what stood before and what was observed.

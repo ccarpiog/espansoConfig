@@ -4835,3 +4835,103 @@ changed; the other three cells of the rung are 2d-5-7b's measurement and are not
 The consult itself ran no gate and says so (`phase-2d-6-design.md`, second paragraph under the header).
 2d-5-7b's own verification narrative, formerly here, is archived verbatim in
 [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-5-7b's verification narrative"*.
+
+### Phase 2d-6-1a's verification narrative — archived 2026-09-21 at Phase 2d-6-1b
+
+_Archived verbatim from `PROGRESS.md`; the ladder section that follows it there is live and was kept._
+
+### Phase 2d-6-1a's verification: three frontend gates re-measured, the Rust cell held
+
+**`1323 / 447 / 2520 / 192`** at 2d-6-1a, from `1323 / 444 / 2474 / 191`. Measured by the orchestrator
+on the final tree after the review's three fixes, each gate on its own, each exit 0 read directly (never
+through a pipe): `npm run check` **447 files, 0 errors, 0 warnings** (+3: the production module
+`observationDelivery.ts` and both new test files, all under `tsconfig` — the review's third finding
+corrected the worker's first decomposition, which had the baseline at 445); `npm test` **2520 passed,
+64 files** (+46 from 2474, re-derived per file: +15 `observationDelivery.test.ts`, +21 `externalConflictCodes.test.ts` (19 at first landing, then the three scan cases replacing one control), +4 `conflictSource.test.ts`, +3 `saveOutcome.test.ts` (one the review's `@ts-expect-error` tuple pin), +3 `ipc-detail` rows for the three new `.ts` files under the scanned root); `npm run build` **192 modules** (+1, `observationDelivery.ts`,
+reachable through `codes.ts`), the server-only bundle markers **absent** and the client-only **present
+(2)**. **The Rust cell is held at 1323 and was not re-measured**: `git status` shows no path under
+`src-tauri/` or `crates/` beyond the instrument's `main.rs` hook, and `dictionary_contract.rs:91` places
+`browser.*` outside the Rust contract, so no Rust gate could have moved. The instrument's contribution is
+unchanged (Rust 0, svelte-check +1, vitest +1, Vite +1; a committed tree builds 191 now). The 2d-6 design
+consult's verification narrative, formerly here, is archived verbatim in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"The 2d-6 design consult's verification
+narrative"*.
+
+
+### The superseded-baseline preamble, the pre-instrument baseline block and the flaky-gate finding — archived 2026-09-21 at Phase 2d-6-1b
+
+_Archived verbatim from `PROGRESS.md`'s *Verification baseline*. The pre-instrument block had been kept in full for 2d-5-7's production comparison, and 2d-5-7 closed at 2d-5-7b; 2d-6-11's with-and-without-instrument accounting reads it here. The flaky-gate rule it carries — `--test-threads=1` is the authoritative form of the Rust gate on this host — is `CLAUDE.md` §4's._
+
+### The superseded baseline blocks of 2d-5-2b-D … 2d-5-3
+
+Their figures are every rung of the ladder below and their decompositions are in each phase's notes
+(2d-5-3's in `2d-5-3-notes.md` §6 and §8.6), so nothing is lost by not restating them: each was **true
+of the tree that committed it**. **The block below is the one exception and is kept in full**, because
+it carries the *production* measurement 2d-5-7 will compare against.
+
+### The baseline as it stood before the instrument landed
+
+**`1320 / 438 / 2254 / 186`** — `cargo test --workspace` / `npm run check` files / `npm test` /
+`npm run build` modules. **Measured in full by the orchestrator alone on 2026-09-05, across Phases
+2d-5-2b-D and 2d-5-2b-E**, each command run on its own. The three frontend gates were run **four
+times** — on the tree as inherited, after 2d-5-2b-D's fixes, and again on 2d-5-2b-E's final tree —
+and every run returned the same three figures. **2d-5-2b-E changed no source file at all** (its commit
+is record files only), so its run confirms rather than re-establishes the baseline. `npm run check` → **438 files, 0 errors, 0
+warnings** (both runs); `npm test` → **59 files, 2254 passed**, exit 0 (both runs); `npm run build` →
+**186 modules** (both runs); `cargo test --workspace -- --test-threads=1` → **1320**, summed over
+**26** binaries *and* checked by the complementary question — **no `test result` line lacking
+`0 failed`** — because a sum can be right while a binary is silent. Clippy (exit 0),
+`cargo fmt --check` and `cargo tree -p espansoconfig-core | rg tauri` (finds nothing) were all clean.
+**Both bundle oracles were read after the fix and both lines are reported**, the second because it
+proves the search can match at all: server-only markers **absent**, client-only markers
+**present (2)**.
+**The Rust half was proven untouched** — `git diff --numstat` over the phase's fix names only
+`src/lib/components/`, so no path under `crates/` or `src-tauri/` — which is why the Rust figure was
+measured once, on the inherited tree, and the fix could not move it.
+
+**No count moved this phase, and that is the expected result.** The fix is **comment-only** — that
+was verified mechanically rather than by eye, with `git diff -U0` filtered to changed lines that are
+not comment lines, which returned nothing — so no file entered or left the program, no new reachable
+module, no new component and no new case. **It is also line-count-neutral**: `git diff --numstat` is
+`1 1` and `3 3`, which is this phase's structural guard against the self-invalidating citation its
+review found (§16.2 of the notes). The previous baseline was the same `1320 / 438 / 2254 / 186`,
+measured at Phase 2d-5-2b-D, at 2d-5-2b-C, at 2d-5-2b-B and at 2d-5-2b-A on 2026-09-05.
+
+**2d-5-2b-E moved nothing and could not have.** Its commit contains `PROGRESS.md`,
+`docs/decisions/2d-5-2b-notes.md`, `docs/progress-archive/next-action-history.md` and
+`docs/reviews/phase-2d-5-2b-E.md` — every one on §7's closed list, and none of them is read by
+`svelte-check`, by `vitest` or by the Vite build. The Rust figure was last measured on the same source
+tree and no path under `crates/` or `src-tauri/` has changed since.
+
+### The `cargo test --workspace` gate is flaky on this host **alone**, and that is new
+
+**This is the sharpest thing this phase measured, and it is a host finding rather than a source
+one.** The recorded scar said `cargo test --workspace` is unsafe to run *concurrently with itself*.
+**That is too narrow.** At 2d-5-2b-A a **solo** run — nothing else on the machine — failed **8**
+`watch_check` tests, every one at `wait_until_ready` with *"timed out waiting for the watcher's
+baseline scan"* against a `PATIENCE` of **120 seconds** (`src-tauri/src/watch_check.rs:72`). An
+earlier run in the same session, concurrent with the three frontend gates, failed **9**. The two
+failure sets differ, and `a_real_removal_under_match_reaches_the_sink` passed while its `config`
+twin failed — **partial and unstable, not uniform**, which is what rules out a source defect.
+
+**The cure is `--test-threads=1`, and it was measured rather than guessed.**
+`cargo test -p espansoconfig --bin espansoconfig watch_check -- --test-threads=1` → **20 passed, 0
+failed** in 84.65s. Then `cargo test --workspace -- --test-threads=1` → **1320 passed, no `test
+result` line lacking `0 failed`**, exit 0 — which is exactly the recorded baseline. The cause is
+parallel **real filesystem watchers** inside one binary, not two cargo processes.
+
+**Three consequences a later phase must not have to rediscover.**
+
+1. **`cargo test --workspace` on its own is no longer sufficient evidence on this host.** A failing
+   `watch_check` set means *re-run it serially before concluding anything* — and **no conclusion
+   about source may be drawn from either a concurrent run or a parallel one that fails only
+   `watch_check`**.
+2. **`--test-threads=1` is the authoritative form of the gate here**, and it is what produced the
+   1320 above. It costs wall clock and buys a figure that does not move under scheduling luck.
+3. **Never read a cargo exit status through a pipe.** At 2d-5-2b-A the first run reported
+   `exited with code 0` while 9 tests failed, because the command ended in `| tail -60` and the
+   pipeline's status is `tail`'s. Redirect to a file and grep it; the exit code is then cargo's.
+   That cost one wrong reading before it was caught. **2d-5-2b-B followed all three consequences** —
+   serial form, redirected to a file, and the complementary `0 failed` question asked of every one of
+   the 26 `test result` lines — and the gate was clean on both of its runs.
+

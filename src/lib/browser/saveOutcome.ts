@@ -939,9 +939,12 @@ export interface SaveConflictModel<T> extends ConflictModelCommon<T> {
  * producer has no caller outside this repository's tests.** The arbitration that
  * decides when a watcher observation becomes a surface's conflict exists —
  * `BrowserState.observeExternalChange` in `./workspace.svelte.ts`, Phase 2d-5-5b —
- * but it registers the origin and delivers nothing yet; the session transition that
- * calls this producer with a surface's draft is Phase 2d-6-2's, and the panel that
- * draws the result is a later 2d-6 step's.
+ * and since Phase 2d-6-1b it delivers its sealed verdict to every receiver
+ * registered over the file through `registerObservationReceiver`; **no production
+ * code registers one yet**, so the delivery reaches nobody. The session transition
+ * that receives it and calls this producer with a surface's draft is Phase
+ * 2d-6-2's, the wiring that registers a session's receiver is 2d-6-6's, and the
+ * panel that draws the result is a later 2d-6 step's.
  *
  * @typeParam T - The drafted value.
  */

@@ -14437,3 +14437,107 @@ start from the `fetch` recorder already in `src/probe.ts`, not from the consult'
 (instrument removal and harness-free closure; corrects the `main.rs` comment and deletes
 `/private/tmp/espansoconfig-harness-2d-5-7b/`).
 ---
+
+## The Next-action section the 2d-6-1b checkpoint replaced — archived 2026-09-21
+
+_Archived verbatim from `PROGRESS.md` when Phase 2d-6-1b closed. The three binding documents it names, the consult's verdict paragraph, the instrument warning and the open-items map are restated in the live section; what 2d-6-1a left for 1b was consumed by 1b (`docs/decisions/2d-6-1b-notes.md`)._
+
+## Next action
+
+### Phase 2d-6-1a is complete and CLOSED. The next action is **Phase 2d-6-1b — the observation-protocol members on `BrowserState`**, the second of the three sub-phases 2d-6-1 was cut into.
+
+**The three documents that bind every 2d-6 step, in reading order**:
+[`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (**the consult; it binds** — Codex at
+high effort, 2026-09-21, eleven rulings, no gate run and none claimed),
+[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (the record — §2 the eleven-step
+split with per-step scope, acceptance and the rulings that bind it, **and directly under 2d-6-1 the
+orchestrator's three-way cut of it, taken 2026-09-21**; §3 forty-three binding rulings; §4 the citation
+audit; **§5 nine corrections that override `phase-2d-design.md` item 6 and `2d-5-split-notes.md` — read
+them before treating either as the spec**; §6 what was not settled; §7 the map of the handed-on
+obligations and open items 0-11; §8 its review) and
+[`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md) (the brief, with its 16-row
+facts table and a *Drift* paragraph naming which older ranges no longer resolve — every
+`workspace.svelte.ts` range in the 2d-5 consult and brief among them).
+
+**The consult's verdict, in one paragraph**: 2d-6 is not seven callbacks plus translated markup; it needs a
+complete observation-to-session protocol — delivery after write settlement, model-owned submission
+blocking, origin-correct messages. Two corrections to the inherited design: **recovery is an eighth live
+write surface**, and **removing the last document must not unmount retained sessions**. Native
+backend-status exposure stays outside the phase; the DOM foreground source (open item 8) comes in as
+step 2d-6-10; every component-changing step owes a narrow window regression reading; mounted evidence is
+bilingual.
+
+**What 2d-6-1a left for 1b to consume** (`docs/decisions/2d-6-1a-notes.md` is the record): the envelope
+`ObservationDelivery` with `arbitratedDelivery` / `retainedDelivery` / `isReplacingVerdict` and the pure
+per-file guard `decideAutomaticReload` in `src/lib/browser/observationDelivery.ts`; the shared revision
+description `conflictRevisionsOf` and the parent-narrowing guards `isSaveConflict` / `isExternalConflict`
+in `conflictSource.ts`; `describeExternalConflict` emitting `fileChangedWhileOpen` (an
+`ExternalConflictMessage`, never `changedElsewhere`) in `saveOutcome.ts`; and the four
+`browser.externalConflict.*` keys — `fileChangedWhileOpen`, `observationRetained` (ruling 13's sentence),
+`writeOutcomeUnknown` and `action.acknowledgeSnapshot` (ruling 14's) — each with its `describe*` accessor
+and `t*` wrapper, pinned literally in EN and ES by `src/lib/i18n/externalConflictCodes.test.ts`. **Nothing
+consumes any of it yet**, by design (ruling 42: shared facilities land before callers activate).
+
+**Executable cold — 2d-6-1b**: the record's §2 cut defines it. It adds to `BrowserState`
+(`src/lib/browser/workspace.svelte.ts`, ~5 950 lines — read only what is needed) **the narrow
+`ReconciliationWorkspace` arbitration/delivery member** with settlement verdicts published through it, so
+the `arbitrateHere` answer near line 3147 is no longer discarded, without readmitting an accepted sequence
+(rulings 2, 4, 5 — delivery during a child's own awaited write is held until the child applies its
+result; nothing in TypeScript orders that, a mounted test will, in 2d-6-6); **the person-requested retry**
+at the record's original arrival generation, one attempt per press, unavailable during an in-flight
+write, re-entrancy leaving the observation askable again, never a fresh `observeExternalChange` (rulings
+16, 17, 18; `retryRetainedObservation` is a suggested name only); **the uncertainty acknowledgement** —
+one-shot, bound to open generation, document, uncertainty generation and standing source, reading
+caller-controlled operands before its final checks, refusing in flight, after supersession or at an
+outlived generation, atomically spending and ending the hold, installing nothing and issuing no command
+(rulings 14, 15; `acknowledgeWriteUncertainty` suggested); and **the per-file automatic-reload guard
+state** that feeds `decideAutomaticReload` — per file, never per mounted panel (ruling 15). **Components:
+none. The command spy stays at exactly zero** through every arbitration, retry and acknowledgement (ruling
+18: a signature cannot prove the absence of a hidden command call; negative spy tests do). Its acceptance
+is 2d-6-1's share: a settlement verdict is delivered, not discarded; one retry press makes at most one
+attempt; the acknowledgement refuses in flight, after supersession and at a moved generation, and spends
+once. **Ruling 41 debts 1b inherits from 1a's notes §5**: the "exactly two uncertainty exits" sentences in
+`workspace.svelte.ts` and the "retained is released only by settlement or `open()`" class — 1b's diff
+falsifies them, so 1b corrects them. **Then 2d-6-1c** (the coordinator revision signal, `watchState()` and
+sanitized registration exposure — which 1c claims, per the record's §6 item 11 — and the three guarded
+reload/reread requests, rulings 28, 29, 32), and 2d-6-1 is done when 1c closes and the record's full
+2d-6-1 acceptance is checked.
+
+**Open items 1a deliberately left** (its notes §5, all out of 1a's scope, none a defect): four umbrella
+`browser.reapply.*` sentences still end "Nothing was written" — **2d-6-2's**, the step that reworks reapply
+entry (ruling 24 applies when that diff touches them); the Spanish of the nine bounded sentences awaits the
+bilingual prose review ruling 40 names, which is 2d-6-11's consolidation; a stale "nine codes" doc sentence
+in `saveOutcome.ts` / `index.ts` — corrected when a step next changes those modules' code list (ruling 41
+permits, does not oblige).
+
+#### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
+
+`git status --short --untracked-files=all` shows **four uncommitted instrument paths** — `M
+src-tauri/src/main.rs` and `M src/main.ts` (two hook lines each; `git diff --stat` over the pair is `5
+insertions(+), 1 deletion(-)` and must stay that way), `?? src-tauri/src/probe.rs` and `?? src/probe.ts`.
+**Do not commit them, do not revert them, and do not treat them as unaccounted-for work.** They are the
+temporary window-reading instrument (`CLAUDE.md` §6, *Window readings*); 2d-8 deletes it. **Stage by
+path**: `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/`, `src/lib/i18n/`, `src/lib/ipc/`, and
+any `src-tauri/` or `src/lib/components/` file **by name** — never `src-tauri/src/` as a directory. The
+2d-6 steps that add a component or a `.ts` module move the Vite module count (one per module, two per
+styled component) and the `ipc-detail` row count (one per file under the scanned roots) — re-derive per
+file, never from the total, and remember the instrument's known contribution (`Verification baseline`).
+**A worker must never run `git stash`**: 1a's worker did so by accident inside a compound command and
+reversed it at once (`2d-6-1a-notes.md` §6); the instrument survived, but a stash that is not popped
+loses the instrument silently. Say so in every worker brief.
+
+#### Open items — the live map is the record's §7
+
+`docs/decisions/2d-6-split-notes.md` §7 states, per item, whether the consult **took it into 2d-6**
+(obligations (1)-(3), open items 5, 6, 8, 9), **deferred it** (1 — the `file:line` drift checker; 7 — the
+`"permissions": []` comment in `main.rs`, 2d-8's; 10 — the `dispose()`-on-close path) or **left it
+untouched** (0, 2, 3, 4, 11). Two facts the consult item did not anticipate, now bound by rulings: **native
+watcher degradation is not on the wire** (`WatchStatusView` is read by `watch_check` alone), and
+`BrowserState` exposes neither `watchState()` nor its registration — **1c claims the latter**.
+
+#### The rest of the 2d consult, so a step is not invented
+
+**2d-6** (its eleven steps, 2d-6-1 now three sub-phases), **2d-7** (the reviewed instrument and the
+bilingual WKWebView reading — start from the `fetch` recorder already in `src/probe.ts`, not from the
+consult's description), **2d-8** (instrument removal and harness-free closure; corrects the `main.rs`
+comment and deletes `/private/tmp/espansoconfig-harness-2d-5-7b/`).

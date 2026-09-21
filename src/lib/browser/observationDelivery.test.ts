@@ -3,13 +3,13 @@
  * external-conflict notices — Phase 2d-6-1a.
  *
  * **Model tests only, in the node environment, and they are about this module
- * alone.** Nothing in production consumes any of these values yet — 2d-6-1b's
- * `BrowserState` members and 2d-6-2's session transitions are what will — so what
- * this file pins is what this step shipped: that an envelope's verdict is about the
- * observation it carries, for every arm; that the guard refuses under an unresolved
- * uncertainty hold with no surface registered at all; that every code here reaches
- * a real sentence in both dictionaries through the one accessor a component may
- * use.
+ * alone.** `BrowserState` in `./workspace.svelte.ts` consumes the constructors and
+ * answers the guard's inputs since Phase 2d-6-1b, and `./workspace.test.ts` is
+ * where that is pinned; what this file pins is what this module ships: that an
+ * envelope's verdict is about the observation it carries, for every arm; that the
+ * guard refuses under an unresolved uncertainty hold with no surface registered at
+ * all; that every code here reaches a real sentence in both dictionaries through
+ * the one accessor a component may use.
  *
  * **What no case here establishes**, said in the same breath: that a session acts
  * on the verdict it is delivered, that `BrowserState` answers the guard's three
@@ -42,6 +42,7 @@ import {
   externalConflictNoticeKey,
   isReplacingVerdict,
   retainedDelivery,
+  writtenHereDelivery,
   type AutomaticReloadDecision,
   type AutomaticReloadGuardInputs,
   type ExternalConflictAction,
@@ -156,38 +157,46 @@ describe('the delivery envelope', () => {
       expect(delivery.observation, expected).toBe(seen);
       if (isReplacingVerdict(delivery.verdict)) {
         expect(delivery.verdict.source.observation, expected).toBe(delivery.observation);
-      } else if (delivery.verdict.kind !== 'retained') {
+      } else {
+        // The narrowed `ArbitratedDelivery` leaves only the two standing-carrying
+        // arms here: `retained` and `writtenHere` are not in its verdict type.
         expect(delivery.verdict.standing, expected).toBe(standing?.source);
       }
     } // End of the loop over every arbitrated arm
   }); // End of the "every arbitrated arm" case
 
-  it('never seals a retained verdict through arbitration, and seals one only through retainedDelivery', () => {
-    // `retained` is the one arm a pure arbitration cannot answer — it holds no
-    // barrier — so the arbitrating constructor never produces it, whatever the
-    // operands, and the other constructor produces nothing else.
+  it('never seals a retained or writtenHere verdict through arbitration, and seals each only through its own constructor', () => {
+    // `retained` and `writtenHere` are the two arms a pure arbitration cannot
+    // answer — it holds no barrier and knows no settlement — so the arbitrating
+    // constructor never produces either, whatever the operands, and each of the
+    // other two constructors produces exactly its own arm.
     for (const standing of [null, standingSave(), standingExternal(1)]) {
       for (const uncertain of [false, true]) {
-        expect(arbitratedDelivery(standing, observation(), uncertain).verdict.kind).not.toBe(
-          'retained'
-        );
+        const kind: string = arbitratedDelivery(standing, observation(), uncertain).verdict.kind;
+        expect(kind).not.toBe('retained');
+        expect(kind).not.toBe('writtenHere');
       } // End of the loop over both uncertainty answers
     } // End of the loop over three standing origins
     const seen = observation();
     const held = retainedDelivery(seen);
     expect(held.observation).toBe(seen);
     expect(held.verdict).toEqual({ kind: 'retained' });
-  }); // End of the "retained only through retainedDelivery" case
+    const dropped = writtenHereDelivery(seen);
+    expect(dropped.observation).toBe(seen);
+    expect(dropped.verdict).toEqual({ kind: 'writtenHere' });
+    expect(isReplacingVerdict(dropped.verdict)).toBe(false);
+  }); // End of the "retained and writtenHere only through their constructors" case
 
   it('is frozen, so one recipient cannot change what a sibling recipient reads', () => {
     const arbitrated = arbitratedDelivery(null, observation(), false);
     const held = retainedDelivery(observation());
-    for (const delivery of [arbitrated, held]) {
+    const dropped = writtenHereDelivery(observation());
+    for (const delivery of [arbitrated, held, dropped]) {
       expect(Object.isFrozen(delivery)).toBe(true);
       expect(() => {
         (delivery as { verdict: ObservationVerdict }).verdict = { kind: 'retained' };
       }).toThrow(TypeError);
-    } // End of the loop over both constructors' envelopes
+    } // End of the loop over the three constructors' envelopes
     // Shallow, and said so: the observation inside is the caller's object as it was.
     expect(Object.isFrozen(arbitrated.observation)).toBe(false);
   }); // End of the "frozen" case
@@ -197,12 +206,13 @@ describe('which verdicts replace what a surface shows', () => {
   /**
    * Every verdict arm, one key each.
    *
-   * `Object.keys` over a `satisfies Record<…, true>`: a seventh arm of
+   * `Object.keys` over a `satisfies Record<…, true>`: an eighth arm of
    * `ObservationVerdict` is a compile error **here** rather than an arm nobody
    * drives — the run-time half of the `never` terminus `isReplacingVerdict` carries.
    */
   const EVERY_VERDICT = Object.keys({
     retained: true,
+    writtenHere: true,
     raised: true,
     raisedWithoutReload: true,
     supersedes: true,
@@ -222,6 +232,8 @@ describe('which verdicts replace what a surface shows', () => {
     switch (kind) {
       case 'retained':
         return { kind };
+      case 'writtenHere':
+        return { kind };
       case 'raised':
         return { kind, source };
       case 'raisedWithoutReload':
@@ -238,7 +250,7 @@ describe('which verdicts replace what a surface shows', () => {
   it('names exactly the three arms that carry a new origin', () => {
     const replacing = EVERY_VERDICT.filter((kind) => isReplacingVerdict(verdictOf(kind)));
     expect([...replacing].sort()).toEqual(['raised', 'raisedWithoutReload', 'supersedes']);
-    expect(EVERY_VERDICT).toHaveLength(6);
+    expect(EVERY_VERDICT).toHaveLength(7);
   });
 
   it('narrows to a verdict whose source is the memoized origin', () => {

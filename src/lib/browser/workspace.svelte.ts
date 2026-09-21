@@ -65,7 +65,7 @@ import type {
   RawSaveReload,
   ReloadAfterRawSave
 } from '../ipc/commands';
-import { mayHaveWritten, reportIpcFailure } from '../ipc/errors';
+import { classifyFailure, mayHaveWritten, reportIpcFailure } from '../ipc/errors';
 import type { IpcFailure } from '../ipc/errors';
 // **A type-only import, and that is load-bearing.** `../ipc/events` builds its real
 // adapter at module scope from Tauri's `listen`, and the one production module that
@@ -97,7 +97,6 @@ import type {
   WorkspaceSummary
 } from '../ipc/types';
 import {
-  arbitrateObservation,
   externalConflictSource,
   newestObservationOf,
   releaseBarrier,
@@ -111,6 +110,13 @@ import type {
   ObservationVerdict,
   WriteSettlement
 } from './conflictSource';
+import {
+  arbitratedDelivery,
+  retainedDelivery,
+  writtenHereDelivery,
+  type AutomaticReloadGuardInputs,
+  type ObservationDelivery
+} from './observationDelivery';
 import {
   sealWholeDocumentSave,
   type InvalidationStatus,
@@ -134,6 +140,7 @@ import {
   type RestoreContext,
   type RestoreSession,
   type StartedRestore,
+  targetingSurfaceFor,
   type WriteSurfaceDocumentTarget
 } from './restore';
 import type {
@@ -923,6 +930,140 @@ export interface LoadFailure {
   readonly failure: IpcFailure;
 }
 
+/**
+ * What one session receives when this window decides something about an
+ * observation of the file it is over — Phase 2d-6-1b, the 2d-6 record's §3
+ * entries 2 and 4.
+ *
+ * **It receives a sealed envelope and never re-arbitrates**: the observation and
+ * the verdict inside are this window's one decision, and every receiver
+ * registered over the file gets the same object. What a receiver does with it is
+ * the session transition's business (entry 11), which is 2d-6-2's; nothing in
+ * TypeScript makes a receiver act on the arm it is given, or act on it in order
+ * against its own awaited write (entry 5 — see
+ * {@link BrowserState.registerObservationReceiver}).
+ *
+ * **It answers `void`, deliberately.** A return type would be a claim about a
+ * protocol between the window and a session that no step has designed; the window
+ * learns what a session did by what the session then asks of it.
+ */
+export type ObservationReceiver = (delivery: ObservationDelivery) => void;
+
+/**
+ * Removes one receiver registration, and only that one.
+ *
+ * **Instance-bound by construction** (the 2d-6 record's §3 entry 1): the closure
+ * names the registration it was answered for, so an old child's unregister
+ * cannot detach the registration its replacement made, even when both registered
+ * the same function. **One-shot and idempotent**: a second call finds nothing and
+ * changes nothing. Nothing in TypeScript forces a caller to invoke it, exactly as
+ * with `UnregisterWriteSurface`; a receiver whose host never unregisters goes on
+ * being delivered to.
+ */
+export type UnregisterObservationReceiver = () => void;
+
+/**
+ * What one press of the person's retry did about a held observation — Phase
+ * 2d-6-1b, the 2d-6 record's §3 entries 16-18.
+ *
+ * **Three answers and never a loop.** Nothing here schedules another attempt:
+ * `attempted` says exactly one arbitration ran and its envelope was delivered,
+ * whatever arm it reached — including `retained` again, when the tables moved
+ * under the attempt, which leaves the observation held and the action askable
+ * again — and the other two say no arbitration ran at all.
+ */
+export type RetainedRetryOutcome =
+  | {
+      /** The barrier holds nothing for the file, so there is nothing to retry. */
+      readonly kind: 'nothingRetained';
+    }
+  | {
+      /**
+       * A write this window started is still in flight for the file, so the
+       * action is unavailable (entry 16). The held observation is untouched, and
+       * that write's own settlement is what will release it.
+       */
+      readonly kind: 'writeInFlight';
+    }
+  | {
+      /**
+       * Exactly one arbitration ran, at the record's original arrival generation,
+       * and this is the envelope every receiver over the file was handed.
+       */
+      readonly kind: 'attempted';
+      /** The one decision, sealed. */
+      readonly delivery: ObservationDelivery;
+    };
+
+/**
+ * The brand of an uncertainty acknowledgement. Declared, never exported, never at
+ * runtime — the shape `ReloadConfirmation` in `./saveOutcome.ts` uses.
+ */
+declare const ACKNOWLEDGES: unique symbol;
+
+/**
+ * A person's one-shot acknowledgement of one file's uncertainty hold — Phase
+ * 2d-6-1b, the 2d-6 record's §3 entry 14.
+ *
+ * **Minted by {@link BrowserState.uncertaintyAcknowledgementFor} and spent by
+ * {@link BrowserState.acknowledgeWriteUncertainty}, and opaque in between.** What
+ * it is bound to — the open generation, the file, the uncertainty generation and
+ * the standing origin the person reviewed — lives in a table private to the state
+ * that minted it, keyed by this object's identity, so a hand-built literal of
+ * this shape names nothing and is refused; a caller cannot read, forge or widen
+ * the binding. It is a *risk state acknowledged*, never a permission: spending it
+ * installs nothing, mints no reload consent and issues no command, and a reload
+ * afterwards still needs its own two-step confirmation and `adoptDiskVersion`
+ * (entry 15). What the brand cannot force is that the person really reviewed the
+ * snapshot; the control that mints one on a press is 2d-6-9's, and only a mounted
+ * test can show it is drawn beside that snapshot.
+ */
+export interface UncertaintyAcknowledgement {
+  /** The brand. Never present at runtime, never nameable outside this module. */
+  readonly [ACKNOWLEDGES]: typeof ACKNOWLEDGES;
+}
+
+/**
+ * Why an acknowledgement was refused, in the order the questions are asked.
+ *
+ * **Decisions, not sentences**: no dictionary key hangs off these, and whether a
+ * refusal is drawn at all is 2d-6-9's. A refused acknowledgement spends nothing —
+ * the hold stands, and the person may mint a fresh one against the state as it
+ * now is.
+ */
+export type UncertaintyAcknowledgementRefusal =
+  /** No state minted this object, or it was minted by another window. */
+  | 'unknown'
+  /** This acknowledgement was already spent. */
+  | 'spent'
+  /** `open()` has replaced the workspace the hold was about. */
+  | 'workspaceReplaced'
+  /** A write this window started is still in flight for the file. */
+  | 'writeInFlight'
+  /** A newer origin stands for the file than the one the person reviewed. */
+  | 'superseded'
+  /** The file's projection was replaced after the reviewed origin arrived. */
+  | 'projectionReplaced'
+  /**
+   * The hold this was minted for is gone or is not the current one: it already
+   * ended, or a later uncertain write re-established it, and a snapshot reviewed
+   * before that write says nothing about it.
+   */
+  | 'holdMoved';
+
+/** What became of one acknowledgement. */
+export type UncertaintyAcknowledgementOutcome =
+  | {
+      /** Spent, and the hold is ended. Nothing was installed and no command ran. */
+      readonly kind: 'acknowledged';
+    }
+  | {
+      /** Nothing was spent and the hold stands. */
+      readonly kind: 'refused';
+      /** The first question that refused it. */
+      readonly reason: UncertaintyAcknowledgementRefusal;
+    };
+
 /** The browser's reactive state. */
 export interface BrowserState {
   /** Where the load has got to. */
@@ -1206,32 +1347,52 @@ export interface BrowserState {
     observation: ExternalConflictObservation
   ): ExternalChangeConflictSource;
   /**
-   * Arbitrates one watcher observation against this window's own state — Phase
-   * 2d-5-5b, rulings 25, 26 and 27.
+   * Arbitrates one watcher observation against this window's own state, once, and
+   * delivers the one decision to every receiver registered over its file — Phase
+   * 2d-5-5b, rulings 25, 26 and 27; Phase 2d-6-1b, the 2d-6 record's §3 entries
+   * 2, 4 and 5.
    *
-   * **The door the coordinator's write-surface transition will call**, and the only
-   * one that applies all three rulings together: ruling 27's barrier first, because
-   * a write of this window's own that is still in flight makes every question below
-   * it unanswerable; then ruling 25, at the same disk revision the standing conflict
-   * wins; then ruling 26, a strictly later observation of different bytes replaces
-   * the standing conflict's disk side. The decisions themselves are
-   * `arbitrateObservation` and `releaseBarrier` in `./conflictSource.ts`; what this
-   * adds is the four tables they are asked about.
+   * **The arbitration/delivery member the record's entry 4 names**, and the only
+   * door that applies all three rulings together: ruling 27's barrier first,
+   * because a write of this window's own that is still in flight makes every
+   * question below it unanswerable; then ruling 25, at the same disk revision the
+   * standing conflict wins; then ruling 26, a strictly later observation of
+   * different bytes replaces the standing conflict's disk side. The decisions
+   * themselves are `arbitrateObservation` and `releaseBarrier` in
+   * `./conflictSource.ts`; what this adds is the four tables they are asked about
+   * and the receivers the answer goes to.
+   *
+   * **Arbitrated once, delivered whole.** Two sessions over one file receive the
+   * *same* sealed `ObservationDelivery` (`./observationDelivery.ts`), never two
+   * verdicts decided independently — which is what stops one answering `raised`
+   * and the other `coalesced` for one observation (entry 2). A `retained` answer is
+   * delivered too, so a session can say an observation is waiting; and the
+   * settlement that later releases it (`beginWrite`'s lease) and the person's
+   * {@link retryRetainedObservation} publish through the same private path, so the
+   * verdict that ends the wait arrives where the wait was announced. **Who is
+   * registered is not this method's question**: in production nothing registers a
+   * receiver yet — the coordinator's `tellTheSurfaceAbout` in
+   * `./observationTransitions.ts` still calls a surface's `WriteSurfaceTransition`
+   * with the bare observation, and routing it through this member together with
+   * child-reported receivers is 2d-6-6's — so today every delivery reaches the
+   * receivers a test registered, or nobody.
    *
    * **It registers, and it installs nothing.** A verdict that names a new origin
-   * goes through the same private registration the six save wrappers use, so the
-   * projection generation it is written at is this window's current one and
-   * {@link adoptDiskVersion} stays the only confirmed-install door. Nothing here
-   * replaces a projection, moves the selection, reads a file or calls any command —
-   * **no save command may ever be initiated by watcher arbitration** (ruling 27),
-   * and the narrowest way to say so is that this method reaches no command at all.
+   * goes through the same private registration the six save wrappers use, at the
+   * generation the observation arrived at, and {@link adoptDiskVersion} stays the
+   * only confirmed-install door. Nothing here replaces a projection, moves the
+   * selection, reads a file, mints reload consent or calls any command — **no save
+   * command may ever be initiated by watcher arbitration** (ruling 27), and the
+   * narrowest way to say so is that this method reaches no command at all; a
+   * signature cannot prove that (entry 18), and `workspace.test.ts` holds the
+   * `invoke` spy at zero across every delivery to establish it.
    *
    * **What it deliberately does not do is accounting.** Ruling 25 requires the
    * coalesced observation to be accepted for sequence and watermark accounting all
    * the same; that is `AcceptedSequences.admit` in `./observationTransitions.ts` and
    * the cursor in `./reconciliationCoordinator.ts`, neither of which this method
-   * touches, so a `coalesced` answer here says nothing about whether the batch was
-   * acknowledged.
+   * or any delivery touches, so a `coalesced` answer here says nothing about
+   * whether the batch was acknowledged, and no publication readmits a sequence.
    *
    * **Nothing forces a caller to have narrowed the observation from a wire
    * snapshot**, exactly as {@link rememberExternalConflict} cannot: the interface is
@@ -1239,9 +1400,185 @@ export interface BrowserState {
    *
    * @param observation - The narrowed observation, exactly as this window narrowed
    *   it.
-   * @returns What was decided about it, including whether it is merely being held.
+   * @returns The envelope every receiver over the file was handed: the observation
+   *   and what was decided about it, including whether it is merely being held.
    */
-  observeExternalChange(observation: ExternalConflictObservation): ObservationVerdict;
+  observeExternalChange(observation: ExternalConflictObservation): ObservationDelivery;
+  /**
+   * Registers a session's receiver for deliveries about one file — Phase 2d-6-1b.
+   *
+   * **Where the envelopes of {@link observeExternalChange}, of a write's
+   * settlement and of {@link retryRetainedObservation} go.** Delivery is
+   * synchronous and in registration order, each receiver is called once per
+   * envelope, and a receiver registered or removed *during* a delivery does not
+   * change that delivery's recipients. **Decisions arrive in the order they were
+   * made, at every receiver**: a publication a receiver makes while being told
+   * something is decided at once and delivered after the current envelope has
+   * reached every recipient, and one drain hands out each (observation, verdict
+   * kind) pair once — so a receiver that re-publishes what it receives comes to
+   * rest, while one that manufactures a fresh observation on every delivery does
+   * not and cannot be made to. A receiver that throws is reported on this state's
+   * failure channel and does not stop its siblings being told, nor turn a settled
+   * write into an exception — a settlement publishes from inside the writing
+   * wrapper's `finally`, and a committed write is never afterwards reported as an
+   * error; a reporter that throws, or a thrown value that cannot be classified, is
+   * dropped at that same boundary rather than let through it.
+   *
+   * **What it is for, and who calls it today.** The 2d-6 record's §3 entry 1
+   * routes a child's receiver up through a required callback prop and keeps the
+   * registry assembly in `DetailPane`; 2d-6-6 is the step that makes that call.
+   * **No production code registers a receiver in this phase**: the member exists
+   * so that the delivery path can be exercised and pinned by `workspace.test.ts`
+   * with fake receivers before any component depends on it (entry 42).
+   *
+   * **Entry 5, stated where the code cannot force it.** A settlement is published
+   * synchronously from the lease's `close()`, which runs before the wrapper's own
+   * promise settles — so the session whose write it was receives the settlement
+   * envelope *before* its `await save(...)` continuation runs. The record rules
+   * that such a session holds the delivery until it has applied its own result and
+   * then consumes the latest valid one, or the continuation overwrites the
+   * delivered conflict. **Nothing in TypeScript orders a continuation against a
+   * delivery**; that ordering is a mounted-test fact, and the mounted test is
+   * 2d-6-6's.
+   *
+   * **Not cleared by `open()`, for {@link registerWriteSurface}'s reason**: a
+   * component owns its registration and removes it through the function this
+   * answers, and clearing here would leave a still-open surface holding an inert
+   * lease. Registering is keyed by nothing but the file: two receivers for one
+   * file are two registrations, and the same function registered twice is
+   * delivered to twice.
+   *
+   * @param document - The file the receiver's session is over.
+   * @param receiver - What that session is told.
+   * @returns The one-shot, instance-bound unregister.
+   */
+  registerObservationReceiver(
+    document: DocumentId,
+    receiver: ObservationReceiver
+  ): UnregisterObservationReceiver;
+  /**
+   * Makes one arbitration attempt on the observation the barrier holds for one
+   * file, because a person asked — Phase 2d-6-1b, the 2d-6 record's §3 entries
+   * 16, 17 and 18.
+   *
+   * **One press, at most one attempt, and no loop.** Nothing calls this on a
+   * surface closing or from an effect, and nothing schedules a second attempt:
+   * the record is taken out of the barrier, arbitrated exactly once at **its
+   * original arrival generation**, and the envelope is delivered through
+   * {@link observeExternalChange}'s path. An attempt whose arbitration finds the
+   * tables moved underneath it retains the observation again, at the same arrival
+   * generation, and answers `attempted` with a `retained` verdict — held, and
+   * askable again. A re-entrant press from inside the attempt finds the barrier
+   * already empty and answers `nothingRetained`, so two presses cannot arbitrate
+   * one record twice.
+   *
+   * **Never a fresh {@link observeExternalChange}** (entry 17): that would read
+   * today's projection generation and hand evidence that arrived before a
+   * projection replacement a freshness it never had — `adoptDiskVersion` would
+   * then find the generations equal and install the older snapshot. The record's
+   * identity and generation are read off this state's own table, before it is
+   * modified; the only caller-controlled operand is the `DocumentId`.
+   *
+   * **Unavailable during a write in flight** (entry 16): the barrier is closed and
+   * the observation is left for that write's settlement, which is the one path
+   * that can tell whether the reading was of the bytes the write ended on.
+   *
+   * **It calls no command, installs no projection and mints no reload consent**
+   * (entry 18); a signature cannot prove the first, and the tests' `invoke` spy at
+   * zero is what does. Watermark and accepted sequence are untouched, as
+   * {@link observeExternalChange} says of every delivery.
+   *
+   * @param document - The file.
+   * @returns What the press did.
+   */
+  retryRetainedObservation(document: DocumentId): RetainedRetryOutcome;
+  /**
+   * Mints the one-shot acknowledgement of one file's uncertainty hold, bound to
+   * what stands right now — Phase 2d-6-1b, the 2d-6 record's §3 entry 14.
+   *
+   * **Bound to four facts, all read off this state's own tables**: the current
+   * open generation, the file the origin is registered against, the file's
+   * current uncertainty generation, and the origin itself, which must be the one
+   * standing for the file. The origin's arrival generation must also still be the
+   * file's projection generation, exactly as {@link adoptDiskVersion} requires —
+   * a snapshot the window has since moved past is not the evidence the person
+   * would be acknowledging. `null` when any of that fails, when the file is under
+   * no hold, or when a write is in flight; a refusal here spends nothing.
+   *
+   * **The one caller-controlled operand is the origin object, and it is read by
+   * identity only** — a `WeakMap` lookup and a `===` — so no getter of the
+   * caller's runs between the questions below and the entry that is written.
+   * **Which origin the caller passes is the caller's honesty**: `model.source` of
+   * the panel the person is looking at is the honest one, and nothing in
+   * TypeScript stops a caller passing the standing origin it never showed.
+   *
+   * @param source - The origin whose disk snapshot the person reviewed, of either
+   *   kind: the `raisedWithoutReload` verdict's `externalChange` origin in the case
+   *   the record describes, or a save refusal's, whose `disk_text` is a disk
+   *   snapshot too.
+   * @returns The acknowledgement, or `null` when nothing may be acknowledged
+   *   against the state as it stands.
+   */
+  uncertaintyAcknowledgementFor(source: ConflictSource): UncertaintyAcknowledgement | null;
+  /**
+   * Spends one acknowledgement and ends the hold it was minted for, atomically —
+   * Phase 2d-6-1b, the 2d-6 record's §3 entries 14 and 15.
+   *
+   * **The third exit from ruling 27's uncertainty**, beside a later write of this
+   * window's own that ends on a named revision and `open()`. It is neither a
+   * second installation door nor a `force`: it installs nothing, replaces no
+   * projection, mints no reload consent, re-observes nothing and issues no
+   * command. What it changes is one fact — the file is no longer under the hold —
+   * so that a session may rebuild the conflict's availability; the reload it may
+   * then offer still needs its own two-step confirmation and
+   * {@link adoptDiskVersion}, which stays revision-checked, and the
+   * `raisedWithoutReload` verdicts already delivered are not rewritten.
+   *
+   * **Refused, spending nothing, when** the object was not minted here, was
+   * already spent, `open()` has run since, a write is in flight for the file, a
+   * newer origin stands than the one reviewed, the projection was replaced after
+   * that origin arrived, or the hold is gone or was re-established by a later
+   * uncertain write — in that order, and the first refusal answers.
+   *
+   * **Check and spend are one synchronous block over this state's own tables.**
+   * The only caller-controlled operand is the acknowledgement's identity, read
+   * once by a `WeakMap` lookup that runs no user code; every fact compared is a
+   * `Map`, `Set` or counter of this state; and the spend — marking the object
+   * spent and deleting the file from the uncertain set — follows the last question
+   * with no statement between them that could run a getter. What that cannot
+   * force is that the acknowledgement was minted against the snapshot the person
+   * actually looked at; see {@link uncertaintyAcknowledgementFor}.
+   *
+   * @param acknowledgement - What {@link uncertaintyAcknowledgementFor} minted.
+   * @returns Whether the hold ended, and if not, the first reason it did not.
+   */
+  acknowledgeWriteUncertainty(
+    acknowledgement: UncertaintyAcknowledgement
+  ): UncertaintyAcknowledgementOutcome;
+  /**
+   * The three per-file facts an automatic reread of one file is decided on —
+   * Phase 2d-6-1b, the 2d-6 record's §3 entries 15 and 32.
+   *
+   * **The state that feeds `decideAutomaticReload` in `./observationDelivery.ts`,
+   * answered from this state's own tables and never from a mounted panel.**
+   * `uncertaintyUnresolved` is the uncertain set, which outlives any surface —
+   * the hold blocks an automatic reread after the surface that raised it closes,
+   * per file; `observationRetained` is the barrier's table; `surfaceOpen` is the
+   * write-surface registry asked through `targetingSurfaceFor`, the same
+   * conservative question the coordinator asks before it rereads. All three are
+   * read in one synchronous block and the answer is frozen.
+   *
+   * **A value, not a decision, and not a request.** The predicate that decides is
+   * 1a's, and the guarded reread request that asks it — rechecking every guard
+   * immediately before installation, the record's entry 32 — is 2d-6-1c's. This
+   * member triggers nothing. What it cannot force is that its answer is still
+   * current by the time a caller acts: it is a snapshot, and the caller that
+   * installs must ask again inside its guard.
+   *
+   * @param document - The file.
+   * @returns The three facts, as they stand at the call.
+   */
+  automaticReloadGuardFor(document: DocumentId): AutomaticReloadGuardInputs;
   /**
    * Which conflict origin currently speaks for one file, or `null`.
    *
@@ -1268,6 +1605,8 @@ export interface BrowserState {
    *
    * **At most one, and it is the newest**: coalescing keeps the latest reading
    * rather than a queue, because two readings of one file are two whole snapshots.
+   * **Three things release it**: the settlement of a write for the file, a
+   * person's {@link retryRetainedObservation}, and `open()`.
    *
    * @param document - The file.
    * @returns What is held, or `null`.
@@ -1275,15 +1614,19 @@ export interface BrowserState {
   retainedObservationFor(document: DocumentId): ExternalConflictObservation | null;
   /**
    * Whether the last settled write this state made for one file may have written
-   * (ruling 27).
+   * and nothing has ended that hold (ruling 27).
    *
    * **It is preserved rather than resolved.** A later watcher snapshot can
    * establish what is on disk and never who wrote it, so no observation clears
-   * this; a later write of this window's own that *ended* does, and so does
-   * `open()`.
+   * this. **Three things end it**: a later write of this window's own that
+   * *ended* on a named revision, `open()`, and the person's
+   * {@link acknowledgeWriteUncertainty} (Phase 2d-6-1b, the 2d-6 record's §5.5) —
+   * the last of which establishes nothing about the earlier write and says only
+   * that the risk was looked at.
    *
    * @param document - The file.
-   * @returns Whether what is on disk for it cannot be attributed.
+   * @returns Whether what is on disk for it cannot be attributed and the hold
+   *   stands.
    */
   writeOutcomeUncertain(document: DocumentId): boolean;
   /**
@@ -2213,8 +2556,54 @@ interface ExternalDocumentStatusEntry {
 interface RetainedObservation {
   /** The observation the barrier is holding. */
   readonly observation: ExternalConflictObservation;
-  /** That file's projection generation when this observation arrived. */
+  /**
+   * That file's projection generation when this observation arrived.
+   *
+   * **What a settlement and a person's retry both arbitrate at** — never the
+   * generation they run at (the 2d-6 record's §3 entry 17).
+   */
   readonly generation: number;
+}
+
+/**
+ * What one minted {@link UncertaintyAcknowledgement} is bound to — Phase 2d-6-1b.
+ *
+ * Four facts read off this state's own tables at minting and compared against
+ * them at spending; the binding is this module's own literal, so reading it runs
+ * no user code.
+ */
+interface AcknowledgementBinding {
+  /** The `open()` generation the hold belonged to. */
+  readonly openGeneration: number;
+  /** The file, as the origin's own registration names it. */
+  readonly document: DocumentId;
+  /** The file's uncertainty generation when this was minted. */
+  readonly uncertaintyGeneration: number;
+  /** The origin the person reviewed, which stood for the file at minting. */
+  readonly source: ConflictSource;
+}
+
+/**
+ * One registered receiver — Phase 2d-6-1b.
+ *
+ * An object rather than the bare function, so that identity is per registration:
+ * the unregister answered for one registration removes that object and no other,
+ * whichever function the sibling registrations hold.
+ */
+interface ReceiverRegistration {
+  /** The session's receiver. */
+  readonly receiver: ObservationReceiver;
+}
+
+/**
+ * One envelope waiting for the delivery in progress to finish — Phase 2d-6-1b's
+ * review, finding 2.
+ */
+interface PendingDelivery {
+  /** The file the envelope is about. */
+  readonly document: DocumentId;
+  /** The sealed decision. */
+  readonly delivery: ObservationDelivery;
 }
 
 /**
@@ -2419,12 +2808,55 @@ export function createBrowserState(
   const retainedObservations = new Map<DocumentId, RetainedObservation>();
   // **Every file whose last settled write may have written** (ruling 27). It is
   // preserved rather than resolved: a later watcher snapshot can establish what is on
-  // disk but never who put it there, so nothing a watcher says can clear this. What
-  // clears it is a later write of this window's own that *ended* — a transaction
-  // outcome names the revision the file holds — and `open()`, which replaces the
-  // workspace the uncertainty was about. **Nothing else does, and no gate would
-  // notice if a file stayed in here for the life of a session.**
+  // disk but never who put it there, so nothing a watcher says can clear this.
+  // **Three things end it** (the 2d-6 record's §5.5): a later write of this
+  // window's own that *ended* — a transaction outcome names the revision the file
+  // holds — `open()`, which replaces the workspace the uncertainty was about, and
+  // the person's `acknowledgeWriteUncertainty` below, which establishes nothing
+  // about the earlier write and only says the risk was looked at. No gate would
+  // notice if a file stayed in here for the life of a session; what 2d-6-1b gives
+  // a person is a way out they have to press.
   const uncertainWrites = new Set<DocumentId>();
+  // **How many times each file's hold has been established** — Phase 2d-6-1b. An
+  // acknowledgement is bound to the number it was minted at, so one minted while
+  // the person reviewed a snapshot cannot spend a hold a *later* uncertain write
+  // re-established: that snapshot says nothing about the later write. Bumped by
+  // the lease's `close()` on every `uncertain` settlement, whether or not the file
+  // was already in the set; never decremented and deliberately not cleared by
+  // `open()` — it is monotonic for the life of this state, and the open generation
+  // is what refuses an acknowledgement minted for a workspace that is gone. A file
+  // with no entry has never been held, which is generation zero.
+  const uncertaintyGenerations = new Map<DocumentId, number>();
+  // **What each minted acknowledgement is bound to**, keyed by the object's
+  // identity, and **which have been spent** — Phase 2d-6-1b. Two `Weak*` tables
+  // rather than a flag on the object: the object is frozen and empty, so a caller
+  // cannot read or forge its binding, and a hand-built literal of the shape is
+  // absent from both and refused. Neither table is cleared by `open()`: an
+  // acknowledgement minted for an earlier workspace carries that workspace's open
+  // generation and is refused by it.
+  const acknowledgementBindings = new WeakMap<UncertaintyAcknowledgement, AcknowledgementBinding>();
+  const spentAcknowledgements = new WeakSet<UncertaintyAcknowledgement>();
+  // **Who is told about each file** — Phase 2d-6-1b. One registration object per
+  // `registerObservationReceiver` call, so the same function registered twice is
+  // two entries and each unregister removes exactly the one it was answered for.
+  // Not `$state` — nothing renders it — and not cleared by `open()`, for the reason
+  // `writeSurfaces` below gives: a component owns its registration and removes it
+  // through the function it was handed. **Empty in production today**: no
+  // component registers a receiver until 2d-6-6, so every delivery below reaches
+  // whoever a test registered, or nobody.
+  const observationReceivers = new Map<DocumentId, Set<ReceiverRegistration>>();
+  // **The delivery queue** — Phase 2d-6-1b's review, finding 2. A publication made
+  // from inside a delivery (a receiver that calls `observeExternalChange` or the
+  // retry while being told something) is decided at once and *delivered* only
+  // after the envelope now going round has reached every recipient, so every
+  // receiver sees decisions in the order they were made. `delivering` says a
+  // drain is running; the queue holds what arrived during it; the per-drain table
+  // says which (observation, verdict kind) pairs this drain has already handed
+  // out, which is what bounds a receiver that re-publishes what it receives. All
+  // three are reset when the outermost `deliver` returns.
+  const pendingDeliveries: PendingDelivery[] = [];
+  let delivering = false;
+  const handedOutThisDrain = new Map<ExternalConflictObservation, Set<ObservationVerdict['kind']>>();
   // **Every write surface this window has told this state about** — Phase 2d-5-2a.
   // One registry per state, created here rather than at module level for the reason
   // `./writeSurfaceRegistry.ts` gives: two windows are two registries, and a
@@ -2615,22 +3047,10 @@ export function createBrowserState(
       /**
        * Whether the new-snippet form would offer one file as a destination.
        *
-       * **A file this window holds no row for is `notCreatorEligible`**, which is
-       * the safe direction here and the unsafe one nowhere: a `false` makes an
-       * unknown-target creator *stop* covering that file, so the effect is that a
-       * document nothing names may be reloaded. That is exactly right for a file
-       * this window is not showing, since no form could have offered it.
-       *
-       * @param document - The file.
-       * @returns Whether an unknown-target creator may be about it.
+       * The private {@link creatorEligibilityFor}, which states the safe direction;
+       * shared with `automaticReloadGuardFor` so the question has one answer.
        */
-      creatorEligibility: (document: DocumentId): CreatorEligibility => {
-        const summary = documents.find((held) => held.id === document);
-        if (summary === undefined) {
-          return 'notCreatorEligible';
-        }
-        return creatorEligibilityOf(summary, viewOf(document) ?? null);
-      },
+      creatorEligibility: creatorEligibilityFor,
       /**
        * The transition of the live surface of one kind.
        *
@@ -2750,6 +3170,30 @@ export function createBrowserState(
     events,
     foreground
   );
+
+  /**
+   * Whether the new-snippet form would offer one file as a destination.
+   *
+   * **The coordinator host's `creatorEligibility` and
+   * {@link BrowserState.automaticReloadGuardFor}'s `surfaceOpen` share it**, so
+   * that "may a surface be about this file" is one question wherever it is asked
+   * (Phase 2d-6-1b extracted it from the host literal for the second caller). A
+   * file this window holds no row for is `notCreatorEligible`, which is the safe
+   * direction here and the unsafe one nowhere: a `false` makes an unknown-target
+   * creator *stop* covering that file, so the effect is that a document nothing
+   * names may be reloaded — exactly right for a file this window is not showing,
+   * since no form could have offered it.
+   *
+   * @param document - The file.
+   * @returns Whether an unknown-target creator may be about it.
+   */
+  function creatorEligibilityFor(document: DocumentId): CreatorEligibility {
+    const summary = documents.find((held) => held.id === document);
+    if (summary === undefined) {
+      return 'notCreatorEligible';
+    }
+    return creatorEligibilityOf(summary, viewOf(document) ?? null);
+  } // End of function creatorEligibilityFor()
 
   /**
    * Brings the reactive mirror into step with the registry.
@@ -2953,27 +3397,38 @@ export function createBrowserState(
    *
    * **What it does then is retain the observation and answer `retained`**, which is
    * the conservative direction and not a dropped reading: an observation held is an
-   * observation no one has acted on, and the next settlement of a write for that
-   * file releases it. **If no write is ever made for that file again, it stays
-   * held** — `open()` is the only other thing that clears the table, and nothing in
-   * TypeScript says a held observation will be looked at.
+   * observation no one has acted on. **Three things release it** (the 2d-6
+   * record's §5.6): the next settlement of a write for that file, a person's
+   * {@link BrowserState.retryRetainedObservation} — one attempt per press, which
+   * lands here again at the same arrival generation — and `open()` clearing the
+   * table. Nothing in TypeScript says a held observation will be looked at, and
+   * nothing schedules a look on its own.
+   *
+   * **It decides and registers; it does not deliver.** The envelope it answers is
+   * sealed by `arbitratedDelivery` or `retainedDelivery` in
+   * `./observationDelivery.ts`, so the verdict inside is about the observation
+   * inside by construction, and {@link arbitrateAndDeliver} is the one caller that
+   * hands it to the receivers — every path that reaches this function goes through
+   * that one, so an arbitration cannot be decided here and go unannounced, which
+   * is what happened to the settlement's answer before Phase 2d-6-1b (the 2d-6
+   * record's §3 entry 2).
    *
    * @param document - The file, read off the observation by the caller and taken
    *   once.
    * @param observation - The narrowed observation.
    * @param arrival - That file's projection generation when this observation
    *   arrived, which is what a registration records.
-   * @returns What was decided.
+   * @returns What was decided, sealed with the observation it is about.
    */
   function arbitrateHere(
     document: DocumentId,
     observation: ExternalConflictObservation,
     arrival: number
-  ): ObservationVerdict {
+  ): ObservationDelivery {
     const standing = standingConflicts.get(document);
     const uncertain = uncertainWrites.has(document);
     const generation = projectionGenerationOf(document);
-    const verdict = arbitrateObservation(
+    const delivery = arbitratedDelivery(
       standing === undefined ? null : standingConflictOf(standing),
       observation,
       uncertain
@@ -2991,8 +3446,9 @@ export function createBrowserState(
       // of this state's own tables — a `Map` keyed by a `DocumentId` and a `Set` of
       // them — so nothing can run between them and the registration below.
       retainObservation(document, observation, arrival);
-      return { kind: 'retained' };
+      return retainedDelivery(observation);
     }
+    const verdict = delivery.verdict;
     switch (verdict.kind) {
       case 'raised':
       case 'raisedWithoutReload':
@@ -3004,16 +3460,161 @@ export function createBrowserState(
         // leave the outlived one in place. **At the generation this observation
         // arrived at**, never at today's: see {@link rememberTheConflict}.
         rememberTheConflict(document, verdict.source, arrival);
-        return verdict;
+        return delivery;
       case 'coalesced':
       case 'notLater':
-        return verdict;
+        return delivery;
       default: {
+        // `retained` and `writtenHere` are not arms here: `arbitratedDelivery`
+        // answers an `ArbitratedDelivery`, whose verdict is an `ArbitrationOutcome`.
         const unreachable: never = verdict;
         return unreachable;
       }
     }
   } // End of function arbitrateHere()
+
+  /**
+   * Arbitrates one observation and hands the one decision to every receiver over
+   * its file — Phase 2d-6-1b, the 2d-6 record's §3 entries 2 and 4.
+   *
+   * **The one caller of {@link arbitrateHere}, and the one path every verdict
+   * travels**: the public `observeExternalChange`, the lease's settlement in
+   * {@link beginWrite} and the person's `retryRetainedObservation` all end here,
+   * so a session is told about a settlement on the same path it was told the
+   * observation was held on, and no arbitration is decided and discarded. It adds
+   * no rule of its own.
+   *
+   * @param document - The file, taken once by the caller.
+   * @param observation - The narrowed observation.
+   * @param arrival - That file's projection generation when the observation
+   *   arrived.
+   * @returns The envelope that was delivered.
+   */
+  function arbitrateAndDeliver(
+    document: DocumentId,
+    observation: ExternalConflictObservation,
+    arrival: number
+  ): ObservationDelivery {
+    const delivery = arbitrateHere(document, observation, arrival);
+    deliver(document, delivery);
+    return delivery;
+  } // End of function arbitrateAndDeliver()
+
+  /**
+   * Hands one sealed envelope to every receiver registered over one file, in the
+   * order decisions were made — Phase 2d-6-1b, and its review's findings 1 and 2.
+   *
+   * **Synchronous, and queued behind the delivery in progress.** The outermost
+   * call drains: it hands out its own envelope, then every envelope a receiver
+   * published while being told — through `observeExternalChange` or the retry —
+   * in the order they were decided. A nested call therefore returns at once and
+   * its envelope reaches the receivers after the current one has reached them
+   * all; without that, a receiver publishing a newer decision from inside an older
+   * one would hand its sibling the newer verdict first. No `await` and no
+   * microtask: the drain ends before the outermost call returns.
+   *
+   * **One drain hands out each (observation, verdict kind) pair once.** A repeat
+   * of a pair this drain already delivered goes back to its caller and to nobody
+   * else — within one synchronous block a second verdict of the same kind about
+   * the same object tells a recipient nothing the first did not, and delivering
+   * it is exactly what lets a receiver that re-publishes what it receives loop for
+   * ever. **What that bounds is repetition, not invention**: a receiver that
+   * manufactures a fresh observation on every delivery loops through this door as
+   * it would through any, and nothing in TypeScript stops it.
+   *
+   * **The recipients of one envelope are fixed before the first is called**, and
+   * are read when that envelope is handed out — so a receiver registered by a
+   * sibling during a drain is told the *later* envelopes of that drain and not the
+   * one being handed out when it registered.
+   *
+   * **Nothing escapes {@link handOut}.** Each receiver call is isolated, and so is
+   * the reporting of what it threw, because this runs from the write lease's
+   * `close()` inside the six wrappers' `finally` — a throw escaping from here
+   * would replace a settled write's answer with a session's exception, and a
+   * committed write is never afterwards reported as an error.
+   *
+   * **It touches no table of this state**: it neither admits a sequence nor moves
+   * the coordinator's watermark — it cannot reach either — and it installs nothing.
+   *
+   * @param document - The file the envelope is about.
+   * @param delivery - The sealed decision.
+   */
+  function deliver(document: DocumentId, delivery: ObservationDelivery): void {
+    if (delivering) {
+      pendingDeliveries.push({ document, delivery });
+      return;
+    }
+    delivering = true;
+    try {
+      let next: PendingDelivery | undefined = { document, delivery };
+      while (next !== undefined) {
+        handOut(next.document, next.delivery);
+        next = pendingDeliveries.shift();
+      } // End of the loop that drains the delivery queue
+    } finally {
+      // `handOut` cannot throw, so this is reached with the queue empty; the reset
+      // is unconditional all the same, so that no future edit could leave a drain
+      // marked as running with envelopes stranded behind it.
+      delivering = false;
+      pendingDeliveries.length = 0;
+      handedOutThisDrain.clear();
+    }
+  } // End of function deliver()
+
+  /**
+   * Hands one envelope to the receivers registered over its file right now, once
+   * per (observation, verdict kind) pair per drain, containing everything they
+   * throw — Phase 2d-6-1b's review, finding 1.
+   *
+   * **Two boundaries, not one.** A receiver that throws is reported through the
+   * injected `report`, classified as an `unexpected` failure — the one developer
+   * channel this state has, at the cost of a console prefix naming a command where
+   * the fault is a session's. But `classifyFailure` in `../ipc/errors` reads `code`
+   * off whatever was thrown, so a thrown object with a throwing getter makes the
+   * classification throw, and an injected reporter can throw on its own; either
+   * would have escaped the first `catch`. The second `catch` drops what the first
+   * could not report. **It is the one place this state drops an error, and the
+   * reason is stated where it happens**: the channel that carries errors is what
+   * failed, nothing else can carry it, and the committed write's answer must
+   * survive. **Nothing in TypeScript stops a receiver or a reporter throwing**, and
+   * a receiver that does has told nobody what it did with the envelope.
+   *
+   * @param document - The file the envelope is about.
+   * @param delivery - The sealed decision.
+   */
+  function handOut(document: DocumentId, delivery: ObservationDelivery): void {
+    // **Own data throughout.** The envelope is this module's frozen literal, the
+    // verdict inside it is a constructor's frozen literal, and the two tables are
+    // keyed by an object and a `DocumentId`; no read below runs user code until a
+    // receiver is called.
+    const observation = delivery.observation;
+    const kind = delivery.verdict.kind;
+    const handed = handedOutThisDrain.get(observation);
+    if (handed === undefined) {
+      handedOutThisDrain.set(observation, new Set([kind]));
+    } else if (handed.has(kind)) {
+      return;
+    } else {
+      handed.add(kind);
+    }
+    const registered = observationReceivers.get(document);
+    if (registered === undefined) {
+      return;
+    }
+    const recipients = [...registered];
+    for (const registration of recipients) {
+      try {
+        registration.receiver(delivery);
+      } catch (raw: unknown) {
+        try {
+          report(classifyFailure(raw));
+        } catch {
+          // Dropped, and said so above: the reporter, or the classification of a
+          // hostile thrown value, is what failed here.
+        }
+      }
+    } // End of the loop over the receivers registered when the envelope was handed out
+  } // End of function handOut()
 
   /**
    * Takes one observation into ruling 27's barrier, keeping the newer of the two.
@@ -3064,10 +3665,21 @@ export function createBrowserState(
    * leaves this application unable to say whether the file was written, and
    * `uncertain` is what "cannot be attributed" is called; it forbids automatic
    * reload for that file until a later write of this window's own ends on a named
-   * revision or `open()` replaces the workspace. An exception *after* the answer
-   * settles on what the answer established, because that is known and losing it
-   * would mark a file unattributable for a failure that has nothing to do with the
-   * disk.
+   * revision, `open()` replaces the workspace, or the person acknowledges the
+   * snapshot through {@link BrowserState.acknowledgeWriteUncertainty} (Phase
+   * 2d-6-1b's third exit). An exception *after* the answer settles on what the
+   * answer established, because that is known and losing it would mark a file
+   * unattributable for a failure that has nothing to do with the disk.
+   *
+   * **What `close` releases is delivered, not discarded** — Phase 2d-6-1b, the
+   * 2d-6 record's §3 entry 2. A held observation the settlement arbitrates goes
+   * through {@link arbitrateAndDeliver}, and one it drops as a reading of the
+   * bytes the write ended on is delivered as `writtenHere`, so a session told
+   * `retained` while the write was out is told how the wait ended on the same
+   * path. Both run synchronously inside the wrapper's `finally`, before the
+   * wrapper's promise settles; entry 5's ordering obligation on the session that
+   * receives its own settlement is stated at
+   * {@link BrowserState.registerObservationReceiver}.
    *
    * **Nothing in TypeScript forces a caller to close at all**, and a wrapper that
    * dropped the lease would still leave the barrier open; the `finally` at each of
@@ -3104,8 +3716,14 @@ export function createBrowserState(
         // just established. An `ended` outcome names the revision the file holds and
         // therefore ends an earlier uncertainty; `nothingWritten` establishes
         // nothing new and leaves one standing.
+        //
+        // **Every `uncertain` settlement is a new hold, counted** — Phase 2d-6-1b.
+        // The generation moves whether or not the file was already in the set, so
+        // an acknowledgement minted against the earlier hold is refused for this
+        // one: the snapshot the person reviewed then says nothing about this write.
         if (settlement.kind === 'uncertain') {
           uncertainWrites.add(document);
+          uncertaintyGenerations.set(document, (uncertaintyGenerations.get(document) ?? 0) + 1);
         } else if (settlement.kind === 'ended') {
           uncertainWrites.delete(document);
         }
@@ -3134,8 +3752,11 @@ export function createBrowserState(
             // not news about a change. It is dropped rather than arbitrated —
             // arbitrating it would supersede nothing and coalesce into whatever
             // stands, which is an answer about a conflict rather than about a
-            // write.
+            // write. **Dropped from the table, and announced** (Phase 2d-6-1b):
+            // the sessions that were told `retained` are told the check happened
+            // and nothing stands from it, on the same path.
             retainedObservations.delete(document);
+            deliver(document, writtenHereDelivery(release.observation));
             return;
           case 'arbitrate':
             retainedObservations.delete(document);
@@ -3144,7 +3765,10 @@ export function createBrowserState(
             // ran — the wrappers close after their own adoption, deliberately — so
             // registering at today's generation would tell `adoptDiskVersion` that
             // this observation had seen a window it never saw (finding 1).
-            arbitrateHere(document, release.observation, arrival);
+            // **And delivered** — Phase 2d-6-1b, the 2d-6 record's §3 entry 2: the
+            // answer used to be discarded here, which left a session told
+            // `retained` waiting for a verdict that had already been reached.
+            arbitrateAndDeliver(document, release.observation, arrival);
             return;
           default: {
             const unreachable: never = release;
@@ -4106,7 +4730,7 @@ export function createBrowserState(
       return source;
     }, // End of function rememberExternalConflict()
 
-    observeExternalChange(observation: ExternalConflictObservation): ObservationVerdict {
+    observeExternalChange(observation: ExternalConflictObservation): ObservationDelivery {
       // **The caller-controlled read taken first, and once**, the same idiom
       // `rememberExternalConflict` above and `adoptDiskVersion` use: `observation`
       // is a value a caller assembled, so `document` can be a getter that answers
@@ -4121,11 +4745,201 @@ export function createBrowserState(
         // **Ruling 27's barrier.** A write this window started is still out, so what
         // is on disk cannot be attributed yet: it is held and coalesced with
         // whatever was already held, and nothing is applied until the write settles.
+        // **Held, and said so** (Phase 2d-6-1b): the receivers over the file get a
+        // `retained` envelope, so a session can say an observation is waiting, and
+        // the settlement that releases it publishes on the same path.
         retainObservation(document, observation, arrival);
-        return { kind: 'retained' };
+        const held = retainedDelivery(observation);
+        deliver(document, held);
+        return held;
       }
-      return arbitrateHere(document, observation, arrival);
+      return arbitrateAndDeliver(document, observation, arrival);
     }, // End of function observeExternalChange()
+
+    registerObservationReceiver(
+      document: DocumentId,
+      receiver: ObservationReceiver
+    ): UnregisterObservationReceiver {
+      // One object per call, so identity is per registration and the unregister
+      // below removes exactly this one — see `ReceiverRegistration`.
+      const registration: ReceiverRegistration = { receiver };
+      const registered = observationReceivers.get(document);
+      if (registered === undefined) {
+        observationReceivers.set(document, new Set([registration]));
+      } else {
+        registered.add(registration);
+      }
+      /**
+       * Removes this registration and no other; inert once it has run.
+       */
+      return (): void => {
+        const held = observationReceivers.get(document);
+        if (held === undefined) {
+          return;
+        }
+        // **The consuming operation's answer is read, not thrown away**: a `delete`
+        // that answers `false` here is the second call of a one-shot unregister,
+        // and that is inert by design rather than a defect — but it is named, so
+        // the empty-set cleanup below runs only for a registration that was there.
+        if (held.delete(registration) && held.size === 0) {
+          observationReceivers.delete(document);
+        }
+      }; // End of the unregister this registration answers
+    }, // End of function registerObservationReceiver()
+
+    retryRetainedObservation(document: DocumentId): RetainedRetryOutcome {
+      // **Every operand off this state's own tables, and the record modified only
+      // after both of its facts are taken.** `document` is a number, the table is a
+      // `Map` keyed by it, and the record is this module's own literal, so nothing
+      // between the first line and the deletion runs user code.
+      const record = retainedObservations.get(document) ?? null;
+      if (record === null) {
+        return { kind: 'nothingRetained' };
+      }
+      if ((writesInFlight.get(document) ?? 0) > 0) {
+        // **Unavailable during a write in flight** (entry 16). The record is left
+        // exactly as it was: that write's settlement is the one path that can tell
+        // whether the held reading was of the bytes the write ended on, and
+        // arbitrating it now would answer a question the barrier exists to defer.
+        return { kind: 'writeInFlight' };
+      }
+      const observation = record.observation;
+      // **The original arrival generation, never today's** (entry 17).
+      const arrival = record.generation;
+      // **The one attempt is spent before the arbitration reads anything of the
+      // caller's.** The arbitration walks the observation — a value somebody
+      // assembled, whose getters can re-enter this state — so the record comes out
+      // of the barrier first: a re-entrant press finds nothing held and answers
+      // `nothingRetained`, and an arbitration that finds the tables moved retains
+      // the observation again at this same arrival generation, which is the
+      // *askable again* the record's entry 16 requires and not a second attempt.
+      retainedObservations.delete(document);
+      let delivery: ObservationDelivery;
+      try {
+        delivery = arbitrateAndDeliver(document, observation, arrival);
+      } catch (raw: unknown) {
+        // **A throw here decided nothing that was written, so the record is owed
+        // back** — this phase's review, finding 3. Every throw `arbitrateHere` can
+        // make is a caller-controlled read — the observation's fields, the standing
+        // origin's, and on its retained path the `sequence` comparison against a
+        // reading held meanwhile — and none comes after a table was written;
+        // delivery contains its own. Restored only into an empty slot, by `has` and
+        // `set` on a `Map` keyed by a number with nothing between them: a
+        // re-entrant arrival the throwing read retained meanwhile stays, whatever
+        // its sequence, because re-applying the barrier's newest-wins rule would
+        // need a `sequence` read of the caller's object inside a `catch` that must
+        // not throw. What that does not cover, said plainly: a `sequence` getter
+        // that throws inside that very comparison leaves the meanwhile-held reading
+        // in the slot and this one lost — an observation that defeats its own
+        // retention, which nothing in TypeScript prevents. The throw itself still
+        // reaches the caller, and a completed arbitration never reaches this arm.
+        if (!retainedObservations.has(document)) {
+          retainedObservations.set(document, record);
+        }
+        throw raw;
+      }
+      return { kind: 'attempted', delivery };
+    }, // End of function retryRetainedObservation()
+
+    uncertaintyAcknowledgementFor(source: ConflictSource): UncertaintyAcknowledgement | null {
+      // **The caller's object is read by identity only.** `WeakMap.get` on an object
+      // key and `===` run no user code; no property of `source` is read here.
+      const origin = conflictOrigins.get(source);
+      if (origin === undefined) {
+        // Not an origin this state registered, or a hand-built wrapper.
+        return null;
+      }
+      const document = origin.document;
+      if (
+        (writesInFlight.get(document) ?? 0) > 0 ||
+        !uncertainWrites.has(document) ||
+        standingConflicts.get(document) !== source ||
+        origin.generation !== projectionGenerationOf(document)
+      ) {
+        // Every refusal `acknowledgeWriteUncertainty` would give at once, asked
+        // here so that nothing is minted for a press that could not succeed. The
+        // spend asks them all again: this is a courtesy, not the guard.
+        return null;
+      }
+      const acknowledgement = Object.freeze({}) as UncertaintyAcknowledgement;
+      acknowledgementBindings.set(
+        acknowledgement,
+        Object.freeze({
+          openGeneration,
+          document,
+          uncertaintyGeneration: uncertaintyGenerations.get(document) ?? 0,
+          source
+        })
+      );
+      return acknowledgement;
+    }, // End of function uncertaintyAcknowledgementFor()
+
+    acknowledgeWriteUncertainty(
+      acknowledgement: UncertaintyAcknowledgement
+    ): UncertaintyAcknowledgementOutcome {
+      // **One caller-controlled operand, read once by identity.** Everything below
+      // it is this state's own — a frozen binding this module wrote, three `Map`s, a
+      // `Set` and a counter — so no user code can run between the first question
+      // and the spend at the end.
+      const binding = acknowledgementBindings.get(acknowledgement);
+      if (binding === undefined) {
+        return { kind: 'refused', reason: 'unknown' };
+      }
+      if (spentAcknowledgements.has(acknowledgement)) {
+        return { kind: 'refused', reason: 'spent' };
+      }
+      const document = binding.document;
+      if (binding.openGeneration !== openGeneration) {
+        return { kind: 'refused', reason: 'workspaceReplaced' };
+      }
+      if ((writesInFlight.get(document) ?? 0) > 0) {
+        return { kind: 'refused', reason: 'writeInFlight' };
+      }
+      const source = binding.source;
+      if (standingConflicts.get(document) !== source) {
+        return { kind: 'refused', reason: 'superseded' };
+      }
+      const origin = conflictOrigins.get(source);
+      if (origin === undefined || origin.generation !== projectionGenerationOf(document)) {
+        // `origin` cannot be `undefined` for a source that stood at minting —
+        // `conflictOrigins` is a `WeakMap` nothing deletes from — but the type says
+        // it can, and the honest answer to a source with no arrival generation is
+        // the same refusal as to one whose generation has moved.
+        return { kind: 'refused', reason: 'projectionReplaced' };
+      }
+      if (
+        !uncertainWrites.has(document) ||
+        (uncertaintyGenerations.get(document) ?? 0) !== binding.uncertaintyGeneration
+      ) {
+        return { kind: 'refused', reason: 'holdMoved' };
+      }
+      // **Spent and ended in one breath.** Nothing stands between the last question
+      // above and these two writes, and neither runs user code: `WeakSet.add` on an
+      // object key and `Set.delete` on a number. The generation counter is left as
+      // it is — a hold is counted when it is established, and this ends one rather
+      // than making another.
+      spentAcknowledgements.add(acknowledgement);
+      uncertainWrites.delete(document);
+      return { kind: 'acknowledged' };
+    }, // End of function acknowledgeWriteUncertainty()
+
+    automaticReloadGuardFor(document: DocumentId): AutomaticReloadGuardInputs {
+      // **Three reads of this state's own tables, in one synchronous block, then
+      // frozen.** `surfaceOpen` is the registry's answer through the same predicate
+      // the coordinator asks — `targetingSurfaceFor` over the live set with this
+      // file's creator eligibility — so a destination-less creator over an eligible
+      // file counts as a surface here exactly as it does there. The registry
+      // itself, never the reactive mirror: this is a coordinator-side question.
+      const uncertaintyUnresolved = uncertainWrites.has(document);
+      const observationRetained = retainedObservations.has(document);
+      const surfaceOpen =
+        targetingSurfaceFor(
+          document,
+          writeSurfaces.openWriteSurfaces(),
+          creatorEligibilityFor(document)
+        ) !== null;
+      return Object.freeze({ uncertaintyUnresolved, observationRetained, surfaceOpen });
+    }, // End of function automaticReloadGuardFor()
 
     standingConflictFor(document: DocumentId): ConflictSource | null {
       return standingConflictFor(document);
@@ -4191,6 +5005,13 @@ export function createBrowserState(
       // barrier while its write was still running, which is the unsafe direction.
       // The maps it protects are empty by then, so a settlement that lands after
       // this releases nothing.
+      //
+      // **Nor are Phase 2d-6-1b's three tables**, each for its own reason stated
+      // where it is declared: `uncertaintyGenerations` is monotonic and the open
+      // generation bumped above is what refuses an acknowledgement minted for the
+      // workspace being closed; the two acknowledgement tables are weak and carry
+      // that generation; and `observationReceivers` is a component's own
+      // registration, exactly as `writeSurfaces` is.
       standingConflicts.clear();
       retainedObservations.clear();
       uncertainWrites.clear();

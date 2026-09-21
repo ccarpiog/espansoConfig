@@ -6,23 +6,27 @@
  * ## Three pure things, landed before anything consumes them
  *
  * Phase 2d-6-1a (the 2d-6 record, `docs/decisions/2d-6-split-notes.md` §2, the
- * orchestrator's cut) lands the values 2d-6-1b's `BrowserState` members and
- * 2d-6-2's session transitions will consume, **additively**: nothing in production
- * imports this module yet, and the record's §3 entry 42 is why — shared facilities
- * land before callers activate, so every boundary compiles.
+ * orchestrator's cut) landed the values 2d-6-1b's `BrowserState` members and
+ * 2d-6-2's session transitions consume, **additively**, and the record's §3 entry
+ * 42 is why — shared facilities land before callers activate, so every boundary
+ * compiles. Since 2d-6-1b `./workspace.svelte.ts` is the one production importer:
+ * it seals every verdict it reaches through the constructors below and answers the
+ * guard's three inputs; no component and no session transition consumes either
+ * yet.
  *
  * 1. **The delivery envelope** ({@link ObservationDelivery}): the narrowed
  *    observation plus the verdict the window reached about it, sealed together so
  *    a session receives *one decision* and never re-arbitrates (entries 2 and 4).
- *    Two constructors and no third: {@link arbitratedDelivery} runs the
+ *    Three constructors and no generic one: {@link arbitratedDelivery} runs the
  *    arbitration itself, so the verdict it seals is about the observation it
- *    seals, and {@link retainedDelivery} seals the one arm a pure arbitration can
- *    never answer.
+ *    seals, and {@link retainedDelivery} and {@link writtenHereDelivery} seal the
+ *    two arms a pure arbitration can never answer.
  * 2. **The per-file automatic-reload guard decision**
  *    ({@link decideAutomaticReload}): whether an automatic reread of a file may
  *    still be taken, given the three per-file facts the record names (entries 15
- *    and 32). The predicate only — the state that feeds it is 2d-6-1b's, and the
- *    guarded request that asks it is 2d-6-1c's.
+ *    and 32). The predicate only — `BrowserState.automaticReloadGuardFor` answers
+ *    the three facts from its own tables since 2d-6-1b, and the guarded request
+ *    that asks the predicate is 2d-6-1c's.
  * 3. **The sentences a surface owes while it cannot act** —
  *    {@link ExternalConflictNotice} for a retained observation (entry 13) and an
  *    unknown write outcome (entry 14), and {@link ExternalConflictAction} for the
@@ -43,6 +47,7 @@
 import type { TranslationKey } from '../i18n/dictionaries';
 import {
   arbitrateObservation,
+  type ArbitrationOutcome,
   type ExternalChangeConflictSource,
   type ExternalConflictObservation,
   type ObservationVerdict,
@@ -60,13 +65,13 @@ import {
  * receive the *same* envelope, which is what stops one of them answering
  * `raised` and the other `coalesced` for one observation (entry 2).
  *
- * **Sealed by construction, and shallowly.** Both constructors freeze the
+ * **Sealed by construction, and shallowly.** All three constructors freeze the
  * envelope, so a recipient cannot swap the verdict out from under a sibling
  * recipient; the observation and the verdict inside are the objects they were,
  * not frozen by this module. **Nothing in TypeScript ties the two fields
  * together**: a literal of this shape with a verdict about some other
- * observation type-checks, and only the two constructors below make the pairing
- * true. A caller that assembles one by hand gets no such guarantee.
+ * observation type-checks, and only the three constructors below make the
+ * pairing true. A caller that assembles one by hand gets no such guarantee.
  */
 export interface ObservationDelivery {
   /** The narrowed observation, exactly as this window narrowed it. */
@@ -83,6 +88,21 @@ export interface ObservationDelivery {
 }
 
 /**
+ * An envelope whose verdict a pure arbitration answered.
+ *
+ * **The type says what {@link arbitratedDelivery} can seal**: never `retained`,
+ * never `writtenHere`, because `arbitrateObservation` answers neither. A consumer
+ * holding one may switch over `ArbitrationOutcome` alone with a `never` terminus,
+ * where a consumer of the wider {@link ObservationDelivery} must handle all seven
+ * arms. It is an intersection rather than a second interface so that every
+ * `ArbitratedDelivery` is an `ObservationDelivery` with no conversion.
+ */
+export type ArbitratedDelivery = ObservationDelivery & {
+  /** What was decided, by a pure arbitration. */
+  readonly verdict: ArbitrationOutcome;
+};
+
+/**
  * Seals an observation with the verdict of arbitrating it, in one step.
  *
  * **The arbitration runs here so the pairing cannot be wrong.** `arbitrateObservation`
@@ -95,21 +115,25 @@ export interface ObservationDelivery {
  *
  * **It decides and delivers nothing.** The verdict is computed and sealed; which
  * sessions receive the envelope, and whether the window's tables moved between the
- * decision and the delivery, are the caller's questions (2d-6-1b's member). The
- * memoized origin on the three replacing arms comes from `externalConflictSource`
- * through the arbitration, which is a lookup and not a registration.
+ * decision and the delivery, are the caller's questions — `BrowserState`'s
+ * private `arbitrateHere` in `./workspace.svelte.ts`, which re-reads its four
+ * tables after this returns and retains the observation instead when they moved.
+ * The memoized origin on the three replacing arms comes from
+ * `externalConflictSource` through the arbitration, which is a lookup and not a
+ * registration.
  *
  * @param standing - What stands for the file, or `null` when nothing does.
  * @param observation - The narrowed observation that arrived.
  * @param writeOutcomeUncertain - Whether the last settled write this window made
  *   for the file may have written (ruling 27).
- * @returns The sealed envelope, whose verdict is never `retained`.
+ * @returns The sealed envelope, whose verdict is never `retained` and never
+ *   `writtenHere`.
  */
 export function arbitratedDelivery(
   standing: StandingConflict | null,
   observation: ExternalConflictObservation,
   writeOutcomeUncertain: boolean
-): ObservationDelivery {
+): ArbitratedDelivery {
   const verdict = arbitrateObservation(standing, observation, writeOutcomeUncertain);
   return Object.freeze({ observation, verdict });
 } // End of function arbitratedDelivery()
@@ -117,9 +141,9 @@ export function arbitratedDelivery(
 /**
  * Seals an observation the window is holding rather than acting on.
  *
- * **The one arm {@link arbitratedDelivery} can never produce**, because a pure
- * arbitration holds no barrier and cannot know a write is in flight; only
- * `BrowserState.observeExternalChange` answers `retained`, and this is the
+ * **One of the two arms {@link arbitratedDelivery} can never produce**, because a
+ * pure arbitration holds no barrier and cannot know a write is in flight; only
+ * `BrowserState` in `./workspace.svelte.ts` answers `retained`, and this is the
  * envelope it seals when it does. It says *held, and nobody has acted on it* and
  * nothing more — not that the observation will be looked at again.
  *
@@ -131,10 +155,32 @@ export function retainedDelivery(observation: ExternalConflictObservation): Obse
 } // End of function retainedDelivery()
 
 /**
+ * Seals an observation a settlement dropped as a reading of the bytes a write of
+ * this window ended on.
+ *
+ * **The other arm {@link arbitratedDelivery} can never produce**, because a pure
+ * arbitration knows no settlement; only the write lease's `close()` in
+ * `./workspace.svelte.ts` answers `writtenHere`, when `releaseBarrier` in
+ * `./conflictSource.ts` finds the held observation's disk revision equal to the
+ * revision the transaction ended on. It exists so that a session told `retained`
+ * is told the wait is over on the same path — the alternative is a session that
+ * blocks submission for a check that already happened and was never announced. It
+ * says the revisions are equal and never that this window wrote them.
+ *
+ * @param observation - The observation the barrier held and dropped.
+ * @returns The sealed envelope, whose verdict is `writtenHere`.
+ */
+export function writtenHereDelivery(
+  observation: ExternalConflictObservation
+): ObservationDelivery {
+  return Object.freeze({ observation, verdict: Object.freeze({ kind: 'writtenHere' as const }) });
+} // End of function writtenHereDelivery()
+
+/**
  * The three verdicts that put a **new** origin in front of a surface.
  *
  * `raised`, `raisedWithoutReload` and `supersedes` each carry the memoized
- * `externalChange` source the surface's model is built from; the other three
+ * `externalChange` source the surface's model is built from; the other four
  * carry the origin that already stood, or nothing. The 2d-6 record's §3 entry 12
  * is written over this distinction — a replacing verdict resets the surface's
  * reload step and clears its pending confirmations, and no other verdict does —
@@ -148,7 +194,7 @@ export type ReplacingVerdict = Extract<
 /**
  * Whether one verdict replaces what a surface is showing (entry 12).
  *
- * **A `switch` with a `never` terminus**, so a seventh arm of `ObservationVerdict`
+ * **A `switch` with a `never` terminus**, so an eighth arm of `ObservationVerdict`
  * is a compile error here rather than a verdict that silently counts as
  * non-replacing. What it says is which arms *carry a new source*; whether a
  * session really resets its reload step on one is that session's transition's
@@ -166,6 +212,7 @@ export function isReplacingVerdict(verdict: ObservationVerdict): verdict is Repl
     case 'coalesced':
     case 'notLater':
     case 'retained':
+    case 'writtenHere':
       return false;
     default: {
       const unreachable: never = verdict;
@@ -186,8 +233,10 @@ export function isReplacingVerdict(verdict: ObservationVerdict): verdict is Repl
  * into and which outlives no component that failed to report.
  *
  * **Nothing in TypeScript forces a caller to answer these from the tables that
- * hold them.** Three booleans are three booleans; `BrowserState` is what answers
- * them honestly (2d-6-1b), and it re-asks immediately before any installation.
+ * hold them.** Three booleans are three booleans; `BrowserState.automaticReloadGuardFor`
+ * in `./workspace.svelte.ts` is what answers them from the tables, in one
+ * synchronous block, and the guarded request that must re-ask immediately before
+ * any installation is 2d-6-1c's.
  */
 export interface AutomaticReloadGuardInputs {
   /**
@@ -196,10 +245,11 @@ export interface AutomaticReloadGuardInputs {
    *
    * `true` for as long as the file is under ruling 27's uncertainty — from the
    * settlement that could not attribute the bytes until a later write settles
-   * definitely, `open()` drops the workspace, or (once 2d-6-1b lands it) the person
-   * acknowledges the snapshot. An automatic reread under it would install bytes a
-   * write of this window may or may not have produced, and would do so with no
-   * surface open to tell anybody — which is exactly the case entry 15 forbids.
+   * definitely, `open()` drops the workspace, or the person acknowledges the
+   * snapshot through `BrowserState.acknowledgeWriteUncertainty` (the third exit,
+   * entry 14). An automatic reread under it would install bytes a write of this
+   * window may or may not have produced, and would do so with no surface open to
+   * tell anybody — which is exactly the case entry 15 forbids.
    */
   readonly uncertaintyUnresolved: boolean;
   /**
@@ -320,10 +370,12 @@ export function decideAutomaticReload(inputs: AutomaticReloadGuardInputs): Autom
  * reviewing the snapshot cannot establish whether it completed — an unknown
  * outcome, never a failure and never a success.
  *
- * **Nothing spends these yet.** The session state that shows the first is
- * 2d-6-2's and the acknowledgement that ends the second is 2d-6-1b's; the codes
- * exist now because a code with no string is worse than a code with no caller,
- * and because the wording is reviewed once, here, before anything draws it.
+ * **Nothing draws these yet.** The session state that shows the first is
+ * 2d-6-2's; the acknowledgement that ends the second exists
+ * (`BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, since
+ * 2d-6-1b) and no component calls it. The codes exist because a code with no
+ * string is worse than a code with no caller, and because the wording is reviewed
+ * once, here, before anything draws it.
  */
 export type ExternalConflictNotice =
   | {
@@ -366,8 +418,9 @@ export function externalConflictNoticeKey(notice: ExternalConflictNotice): Trans
  * One thing a person may do about an external-conflict notice, as a code.
  *
  * **One arm today, and it is a label rather than a transition.** The
- * acknowledgement that ends an uncertainty hold (entry 14) is a `BrowserState`
- * member 2d-6-1b adds; this names the control's label and nothing else, so that
+ * acknowledgement that ends an uncertainty hold (entry 14) is
+ * `BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, which no
+ * component calls yet; this names the control's label and nothing else, so that
  * the wording — *I have reviewed this snapshot* — is fixed here with the sentence
  * it answers. It is not a {@link ExternalConflictNotice} arm because a label is
  * not a line: a renderer that iterated notices and drew each as a paragraph would

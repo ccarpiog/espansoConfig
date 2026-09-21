@@ -845,8 +845,10 @@ export function tConflictMessage(message: ConflictMessage): string {
  * The reactive wrapper over `describeExternalConflictNotice` in `./codes` (the
  * 2d-6 record's §3 entries 13 and 14). **No component calls it yet, and no
  * session produces the state it names yet**: the retained restriction is
- * 2d-6-2's session state and the uncertainty acknowledgement is 2d-6-1b's
- * member. A code with no string is worse than a code with no caller.
+ * 2d-6-2's session state, and the acknowledgement that ends the second state
+ * exists — `BrowserState.acknowledgeWriteUncertainty` in
+ * `../browser/workspace.svelte.ts`, since 2d-6-1b — with no component calling
+ * it. A code with no string is worse than a code with no caller.
  *
  * @param notice - Which state the surface is in.
  * @returns The translated sentence.
@@ -860,7 +862,9 @@ export function tExternalConflictNotice(notice: ExternalConflictNotice): string 
  * language.
  *
  * The reactive wrapper over `describeExternalConflictAction` in `./codes`. It
- * labels a control 2d-6-1b's member will stand behind; nothing draws it yet.
+ * labels the control that will call `BrowserState.acknowledgeWriteUncertainty`
+ * in `../browser/workspace.svelte.ts` (the member exists since 2d-6-1b); nothing
+ * draws the control yet, and the step that does is 2d-6-9.
  *
  * @param action - Which control to label.
  * @returns The translated label.

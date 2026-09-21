@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T11:44:53Z",
+ "updated": "2026-09-21T12:58:04Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -427,7 +427,7 @@
    "id": "2d-6-1",
    "title": "Delivery, retained-state and uncertainty protocol",
    "status": "in_progress",
-   "summary": "Split 2026-09-21 into 2d-6-1a, 2d-6-1b and 2d-6-1c (record §2); done when all three close."
+   "summary": "Split 2026-09-21 into 2d-6-1a, 2d-6-1b and 2d-6-1c (record §2); 1a and 1b closed, done when 1c closes and the full acceptance is checked."
   },
   {
    "id": "2d-6-1a",
@@ -442,8 +442,11 @@
   {
    "id": "2d-6-1b",
    "title": "Observation-protocol members on BrowserState",
-   "status": "queued",
-   "summary": "Adds the arbitration/delivery member with settlement publication, the person-requested retry, the uncertainty acknowledgement and per-file automatic-reload guard state."
+   "status": "done",
+   "summary": "Adds the arbitration/delivery member with settlement publication, receiver registration, the person-requested retry, the one-shot uncertainty acknowledgement and per-file reload-guard state; rung 1323/447/2549/192.",
+   "risk": "high",
+   "review": "docs/reviews/phase-2d-6-1b.md — Codex, ship-with-fixes, 1 blocker, 2 SHOULD-FIX, all fixed",
+   "narrative": "docs/decisions/2d-6-1b-notes.md"
   },
   {
    "id": "2d-6-1c",
