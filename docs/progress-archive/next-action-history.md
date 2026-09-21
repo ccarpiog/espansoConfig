@@ -13718,3 +13718,227 @@ established this is the blocker of 2d-5-5a's review and is pinned by `workspace.
 **Closure:** the workflow's — one review, blockers fixed, verification re-run, phase closed. A fix
 answers the findings the review named, in the files it named; anything else noticed on the way is an
 open item in the phase's notes, not a fix in the same phase.
+
+
+## The Next-action section the 2d-5-6 checkpoint replaced — archived 2026-09-21
+
+**Verbatim and unedited.** It is the section `PROGRESS.md` carried from Phase 2d-5-5b's close
+on 2026-09-21 until Phase 2d-5-6 closed the same day: the 2d-5-6 brief as it stood, the
+instrument warning, the outline of what 2d-5-5b built, the three obligations it handed on,
+the open items 0-5, and *"The one item 2d-5 still inherits as work"* — which 2d-5-6
+discharged. **The open items themselves are not archived by this move** — they are carried
+forward in the live section, compacted, which is where a later phase must read them.
+
+## Next action
+
+### Phase 2d-5-5b is complete and CLOSED. The next action is **Phase 2d-5-6 — the file-wide route-guard closure**.
+
+**Step 5 of the consult was split on 2026-09-21 and both halves are now closed.** 2d-5-5a built the
+`ConflictSource` origin union (rulings 21–24); 2d-5-5b built the arbitration over it (rulings 25, 26
+and 27). Neither is a review round and neither supersedes the other. **Four of the seven 2d-5 steps
+were closed before this pair; five are closed now, and 2d-5-6 and 2d-5-7 remain.**
+
+#### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
+
+`git status --short --untracked-files=all` shows **four uncommitted instrument paths**:
+
+```
+ M src-tauri/src/main.rs      two hook lines — `mod probe;` and `probe::register_with_probe(…)`
+ M src/main.ts                two hook lines — the `startProbe` import and its call
+?? src-tauri/src/probe.rs     the four probe IPC commands and the two external writers
+?? src/probe.ts               the Svelte-driving plan driver
+```
+
+**Do not commit them, do not revert them, and do not treat them as unaccounted-for work.** They are the
+temporary window-reading instrument (`docs/decisions/2c-5-5a-instrument-rebuild.md` §1); it is never
+committed, and 2d-8 deletes it. `git diff --stat` over the two hook files is `5 insertions(+), 1
+deletion(-)` and must stay that way. **Stage by path**: `PROGRESS.md`, `PROGRESS.json`, `docs/`,
+`src/lib/browser/`, `src/lib/i18n/`, and any `src-tauri/` or `src/lib/components/` file **by name** —
+never `src-tauri/src/` as a directory, which would sweep `probe.rs` and `main.rs` in.
+
+#### Phase 2d-5-6 — the file-wide route-guard closure
+
+**Spec:** step 6 of [`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md). Its
+substance is *"The one item 2d-5 still inherits as work"* below, which has been carried since 2d-4b
+and is discharged **here and not before**:
+
+`src/lib/browser/workspace.svelte.ts` imports its command wrappers at module level, so a call made
+through one of those bindings rather than through an injected parameter increments the `drains`
+counter in nothing. The route is caught in **six** named cases — one `expect(invoked)` assertion in
+`DetailPane.test.ts` and five in `RestorePane.test.ts`, each in a distinct `it` block and **in neither
+`afterEach`** — while `workspace.test.ts`, whose subject module holds the route, has no
+`@tauri-apps/api/core` mock at all. **The closure is owed to all three files.** The source is
+`2d-4b-notes.md` §14.8 item 1, re-derived by `2d-5-split-notes.md` §7; 2d-4b's closure explicitly did
+not discharge it. **Re-derive the six counts on the current tree before quoting them** — they are from
+2026-09-05 and three phases have changed `workspace.test.ts` since.
+
+**2d-5-5b widened what the guard has to cover**, and this is the one thing 2d-5-6 must not miss: all
+six writing wrappers now open a barrier lease immediately before their command and close it in a
+`finally`. A call that escapes through a module-level binding therefore escapes the **barrier** as
+well as the counter, and a barrier that is opened but never closed leaves that document's
+reconciliation silently dead. `docs/decisions/2d-5-5b-notes.md` §6 item 12 records that **no case in
+this repository drives two overlapping writes of one file**, so nothing today would notice.
+
+**Starting points:** `src/lib/browser/workspace.svelte.ts` (the wrappers and `beginWrite`),
+`src/lib/browser/workspace.test.ts`, `src/lib/components/DetailPane.test.ts` and
+`src/lib/components/RestorePane.test.ts`. **Components: none** — the two component files are test
+files; no `.svelte` file is 2d-5-6's to change.
+
+**Closure:** the workflow's — one review, blockers fixed, verification re-run, phase closed. A fix
+answers the findings the review named, in the files it named; anything else noticed on the way is an
+open item in the phase's notes, not a fix in the same phase.
+
+#### What 2d-5-5b built, so 2d-5-6 and 2d-6 do not re-derive it
+
+The authoritative account is [`docs/decisions/2d-5-5b-notes.md`](docs/decisions/2d-5-5b-notes.md);
+its §6 is the newest *where it is thin* list, **fourteen items**. In outline:
+
+- **The decisions, as pure values in `src/lib/browser/conflictSource.ts`** — `standingConflictOf`,
+  `arbitrateObservation`, `releaseBarrier`, `newestObservationOf`, and the
+  `ObservationVerdict` / `ArbitrationOutcome` pair. They read no state and reach no command.
+- **The tables they are asked about, on `BrowserState`** — a standing conflict per file, an in-flight
+  count per file, at most one retained observation per file (carrying **the projection generation it
+  arrived at**, not the one it is released at), and the set of files whose last settled write
+  **may have written**.
+- **`BrowserState.observeExternalChange`** — the one door that applies all three rulings, and
+  `supersedeConflict` in `saveOutcome.ts`, which builds the replacing model with the draft preserved.
+- **`adoptDiskVersion` gained an ordered step 4** refusing an origin that no longer stands. It is
+  still the only confirmed-install door. A supersession replaces no projection, so no generation
+  moves and the pre-existing generation comparison was blind to it.
+- **`reapplyEvidenceFor` takes a `StandingOriginGuard`**, does every caller-controlled read first
+  (row iteration included) and asks the guard once, last.
+
+**Three obligations this phase hands the next one, stated so they are not discovered late.**
+
+1. **`observeExternalChange` and `supersedeConflict` have no production caller.** Wiring the
+   arbitration in front of `tellTheSurfaceAbout` needs a new `ReconciliationWorkspace` member and a
+   decision about what a `retained` verdict does to a surface. **That is 2d-6's**, and until it lands
+   no gate in this repository would notice if either door stopped working
+   (`2d-5-5b-notes.md` §6 items 2 and 7).
+2. **An exception-safe close charges an uncertainty only a later write can clear**, so a command that
+   throws leaves the file in `mayHaveWritten` and every verdict for it afterwards is
+   `raisedWithoutReload`. There is no surface that can clear it, because the panel is 2d-6's
+   (§6 items 4 and 13).
+3. **A verdict decided against a state that moved underneath it retains its observation and may never
+   be looked at again.** A bounded re-arbitration would be better and is a deliberate later decision,
+   not an omission (§6 item 14).
+
+#### Open items, carried forward for a later phase to take deliberately
+
+**0 — the withdrawn round's review is kept as a record.**
+[`docs/reviews/phase-2d-5-4-H.md`](docs/reviews/phase-2d-5-4-H.md) is Codex's static review of
+2d-5-4-G's fix (no tests run): `ship-with-fixes`, **0 blockers, 5 SHOULD-FIX** — two
+injected-property-read windows (`observationTransitions.ts:1544`, `reconciliationCoordinator.ts:947`;
+the chain's own records call them not production-reachable, because wire values are JSON-parsed plain
+objects), two contract comments (`reconciliationCoordinator.ts:929` and `:1027`) and one record
+passage (`docs/reviews/phase-2d-5-2a.md:28`). **None commissions a round.** Neither 2d-5-5a nor
+2d-5-5b took them — neither changed either module (`2d-5-5a-notes.md` §8 item 6,
+`2d-5-5b-notes.md` §6 item 10). They stay here for a phase that touches those files.
+
+**1 — four cross-file `file:line` citations in comments under `src/` were stale as of 2026-09-05.**
+`src/` held 10 fully-qualified citations and 16 bare `:NNN` continuations; four of the ten were wrong —
+`browser/reapply.ts:612` and `:613`, `browser/writeSurfaceRegistry.ts:231` and
+`browser/restore.test.ts:2504`. **Every one that was chased was correct when written**, so the class is
+drift. `writeSurfaceRegistry.ts`'s instance was caused by 2d-5-2b's own additions to `DetailPane.svelte`
+and survived all five rounds of the chain that caused it; 2d-5-4-G re-derived `:231` as the closing
+brace of an interface, with the nearest citation at `:242` naming `DetailPane.svelte:844-961`, a range
+inside that component's `<script>` block rather than the *"one `if`/`else` chain"* of markup it claims,
+sitting there since `4f7c500` (`2d-5-4-G-notes.md` §9 item 7). **These numbers are themselves from
+2026-09-05 and 2026-09-20 and have not been re-derived since; 2d-5-5a changed `reapply.ts`, so its two
+are the most likely to have moved again.** The measurement is `2d-5-2b-notes.md` §17.3 and §17.4; the
+full argument is in [`next-action-history.md`](docs/progress-archive/next-action-history.md) under
+*"archived 2026-09-05 at Phase 2d-5-2c-1"*. **The cheap durable guard, if a phase wants one, is a
+checker that resolves `file:line` references in comments** — nothing in this repository pins one.
+
+**2 — S11's partial-application window.** `accept()` writes `watermark = newestSequence` **above** the
+observation loop, so a throw from any host member an arm calls at observation *k* leaves the cursor
+already advanced past the whole batch: the next drain asks `host.drain(watermark)`, observations
+*k* … *n* are never fetched again, and nothing counts them as dropped. The comment says so and **the
+window is open.** It is **recorded only** rather than actionable because a *correctness defect* needs a
+decided behaviour to be wrong against, and what this application should do with a half-applied batch
+**has never been ruled on**. **Closing it is a phase decision with its own acceptance criteria**:
+re-drain from the failed observation, or treat the batch as lost history. `2d-5-4-G-notes.md` §7 and
+§9 item 9 are the record.
+
+**3 — the save arm still hands its reapply evidence back by identity.** 2d-5-5a's review finding 2
+closed that window on the **external** arm only — `reapplyEvidenceFor`'s accepted external arm now
+captures its five operands before comparing and returns a frozen snapshot with a copied row array —
+because a fix answers the findings the review named. `saveReapplyEvidence` is the same class, named in
+`2d-5-5a-notes.md` §8 item 9 and **not fixed there deliberately**. **2d-5-5b changed `reapply.ts`
+and did not take it either** (`2d-5-5b-notes.md` §6 item 9): its own review finding 4 hardened the
+*external* arm a second time, into a `StandingOriginGuard` asked once and last, and a fix answers
+only the findings the review named. The save arm is now the one arm of that function that has never
+been hardened, and the asymmetry is deliberate rather than overlooked.
+
+**4 — `expected?: never` was measured and not applied.** 2d-5-5a's review finding 3 established that
+`ExternalConflictModel` merely makes `expected` **inaccessible**, not absent: excess-property checking
+rejects it only for a fresh object literal annotated with the arm itself, and accepts it both for the
+same literal annotated with the **union** and for any non-fresh variable. The record now says so. The
+structural remedy — `expected?: never` on the external arm — was measured against this repository's
+TypeScript (6.0.3) and deliberately not taken, as machinery added to make a sentence true rather than
+to fix a defect. `2d-5-5a-notes.md` §8 item 10 holds the measurement if a later phase wants it.
+
+**5 — seven surfaces of the 2d-5-5 pair have no production caller yet, exactly as designed.**
+From 2d-5-5a: `describeExternalConflict`, `rememberExternalConflict`, `reapplyEvidenceFor`'s external
+arm, the three new dictionary entries and `tExternalEvidenceRefusal` (`2d-5-5a-notes.md` §8 items 3,
+4 and 5). From 2d-5-5b: `observeExternalChange` and `supersedeConflict` (`2d-5-5b-notes.md` §6 items
+2 and 7). All are reached by tests alone until 2d-6 draws the origin. That is the two phases' scope,
+not an omission — but it means **no gate in this repository would notice if one of them stopped
+working**, and 2d-6 is where that changes. **The barrier is the exception**: `beginWrite` runs in
+production inside all six writing wrappers from 2d-5-5b onward, so it is the one part of the
+arbitration a live window already executes.
+
+#### What `writeSurfaceRegistry.ts` is, after five phases — **archived**
+
+Its 27 lines are in [`next-action-history.md`](docs/progress-archive/next-action-history.md) under
+*"archived 2026-09-05 at Phase 2d-5-3-A"*, **nothing in them superseded**. The one sentence that is a
+check rather than a description: **the generation moves at exactly three places**, and the
+`rg -n 'writeSurfaces\.' src/lib/browser/workspace.svelte.ts` sweep does **not** show the lease's two
+mutations, so it is weaker than the item it serves.
+
+#### The rest of the split, so a step is not invented
+
+**2d-5-6** the file-wide route-guard closure; **2d-5-7** production activation, the capability
+widening and the baseline re-measure (components: **yes**, `AppShell.svelte` only). Then
+**2d-6 … 2d-8**, of which **2d-6 is the step that gives the 2d-5-5 pair its production callers**.
+
+The three documents that bind every step, in reading order:
+[`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md) (**the consult; it binds**),
+[`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) (the record — read its §5
+corrections before treating `phase-2d-design.md` step 5 as the spec) and
+[`docs/decisions/2d-5-design-brief.md`](docs/decisions/2d-5-design-brief.md) (the brief).
+
+#### The one item 2d-5 still inherits as work
+
+**The drain guard's escaping route, discharged at 2d-5-6 and not before.**
+`src/lib/browser/workspace.svelte.ts` imports its command wrappers at module level, so a call made
+through one of those bindings rather than through an injected parameter increments the `drains`
+counter in nothing. The route is caught in **six** named cases — one `expect(invoked)` assertion in
+`DetailPane.test.ts` and five in `RestorePane.test.ts`, each in a distinct `it` block and **in neither
+`afterEach`** — while `workspace.test.ts`, whose subject module holds the route, has no
+`@tauri-apps/api/core` mock at all. **The closure is owed to all three files.** This is
+`2d-4b-notes.md` §14.8 item 1 (re-derived by `2d-5-split-notes.md` §7), which 2d-4b's closure
+explicitly did not discharge.
+
+#### Two properties a later step could make live
+
+1. **`targetingSurfaceFor`'s first-wins guard (`restore.ts:623`) is behaviourally inert today**: only
+   the `matchCreator` arm of `OpenWriteSurface` carries a `WriteSurfaceTarget`, so a destination-less
+   surface is always a `matchCreator` and the variable can only hold that one string. The comment
+   there claims only what is true and was deliberately **not** widened. Give a second kind a
+   `WriteSurfaceTarget` and the guard stops being inert on its own. `2d-5-1-C-notes.md` §3 is the record.
+2. **`invalidateEverySurface`'s body is executed by a test and its *effect* is still unobservable**
+   while `busy` keeps the seven surfaces mutually exclusive. **2d-5-1-B's measurement is not
+   superseded** — deleting a line from that function still breaks no test in this repository. It stays
+   a coverage bound rather than a correctness defect, so it holds no step open.
+   `2d-5-2b-notes.md` §9.1 and §11 item 6 are the record.
+
+#### Residues that are recorded, not work — **archived at 2d-5-3-C**
+
+**None is a correctness defect in source**, so none holds a step open. All four are in
+[`docs/progress-archive/next-action-history.md`](docs/progress-archive/next-action-history.md) under
+*"The recorded residues, archived 2026-09-05 at Phase 2d-5-3-C"*, unedited. The one a later step is
+most likely to trip over, kept here because it is a **method rule** rather than a residue:
+**`scripts/lint/ipc-detail.test.ts` generates its cases from `scannableFiles()`**, so its count moves
+when a file is merely *added* under the scanned roots — **re-derive a test count per file, on a
+pristine tree, never from the total.**

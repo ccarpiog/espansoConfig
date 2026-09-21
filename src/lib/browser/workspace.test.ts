@@ -9,9 +9,15 @@
  * Every command is scripted here rather than mocked at the module level: the
  * state takes its commands as a parameter precisely so that a test can make
  * `get_match` refuse and watch what happens next.
+ *
+ * **What is mocked is the Tauri boundary beneath the wrappers, for the whole
+ * file** — Phase 2d-5-6, ruling 34. `@tauri-apps/api/core` is replaced and
+ * `$lib/ipc/commands` is not, so a call that reaches the real wrappers through
+ * the module-level bindings `workspace.svelte.ts` holds lands on a spy that
+ * rejects, and the `afterEach` below holds that spy to zero in every case.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IpcFailure } from '../ipc/errors';
 import { classifyFailure } from '../ipc/errors';
 import type {
@@ -139,12 +145,37 @@ import {
   type StartedRestore
 } from './restore';
 import {
-  createBrowserState,
+  createBrowserState as createUnrecordedBrowserState,
   type BackupCommands,
   type BrowserCommands,
   type BrowserState,
   type RawSaveAnswer
 } from './workspace.svelte';
+
+/**
+ * The Tauri boundary, replaced for the whole file — Phase 2d-5-6, ruling 34.
+ *
+ * `vi.hoisted` because a `vi.mock` factory is lifted above every import and
+ * cannot close over an ordinary `const`. It **rejects**: a call that got this far
+ * is already the defect, and a stub that answered would let a case pass.
+ *
+ * **What is mocked is `@tauri-apps/api/core` and not `$lib/ipc/commands`**, and
+ * that choice is the whole guard: the real wrapper module and the real
+ * `REAL_COMMANDS` assembly stay in place, so a wrapper in `workspace.svelte.ts`
+ * that reaches one of the bindings it imports at module level — rather than the
+ * surface it was injected with — runs the real wrapper all the way down to this
+ * spy. The `afterEach` at the end of the harness asserts it was never reached.
+ * That closes the route **in this file**: nothing in Vitest prevents a future
+ * test file from importing `$lib/ipc/commands` with no spy at all.
+ */
+const { invoked } = vi.hoisted(() => ({ invoked: vi.fn() }));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: readonly unknown[]): Promise<never> => {
+    invoked(...args);
+    return Promise.reject(new Error('this suite invokes no command'));
+  }
+}));
 
 /**
  * Opens what the state's raw save answered.
@@ -330,12 +361,12 @@ interface Script {
    * What `drain_external_changes` answers, in order — Phase 2d-5-3.
    *
    * **A finite queue, and running out is a failure rather than a fallback.** A
-   * reconciliation case declares exactly how many drains it expects through
-   * {@link expectDrains}, and every answer it scripts must be consumed: the
-   * `afterEach` below asserts both, so a coordinator that drained one time too
-   * many or too few fails its own case instead of the next one. A case that
-   * scripts nothing keeps the refusal every other case in this file has always
-   * had.
+   * reconciliation case declares exactly which drains it expects — how many, and
+   * asked with which cursor — through {@link expectDrains}, and every answer it
+   * scripts must be consumed: the `afterEach` below asserts all of it, so a
+   * coordinator that drained one time too many or too few, or with the wrong
+   * watermark, fails its own case instead of the next one. A case that scripts
+   * nothing keeps the refusal every other case in this file has always had.
    */
   readonly drains?: readonly CommandResult<ReconciliationBatch>[];
 }
@@ -352,23 +383,26 @@ interface Script {
 let drains = 0;
 
 /**
- * How many drains the case now running has declared it will make.
+ * The `afterSequence` of every drain the case now running has declared it will
+ * make, in order — so the budget is both how many calls and which cursor each one
+ * carries (Phase 2d-5-6, ruling 35).
  *
- * **Zero is still the default, and that is the point.** Every case written
- * before Phase 2d-5-3 declares nothing and is held to zero exactly as before;
- * only a case that calls {@link expectDrains} may drain, and it must drain that
- * many times. Ruling 35's uniform file-wide treatment of the three suites — the
- * hoisted `@tauri-apps/api/core` spy and its own `invoked` assertion — is
- * 2d-5-6's and is deliberately not started here.
+ * **Empty is still the default, and that is the point.** Every case that declares
+ * nothing is held to zero drains, exactly as it has been since Phase 2d-5-3; only
+ * a case that calls {@link expectDrains} may drain, and it must drain exactly that
+ * many times, asked with exactly those cursors. A count alone was the 2d-5-3
+ * shape, and it let a case drain the right number of times with the wrong
+ * watermark unless the case also read {@link drainSequences} itself.
  */
-let drainBudget = 0;
+let drainBudget: readonly number[] = [];
 
 /**
  * The `afterSequence` of every drain made through an injected surface, in order.
  *
- * Read by the reconciliation cases so that "the watermark the previous answer
- * established" is an assertion rather than an inference, and cleared with the
- * budget.
+ * Compared against {@link drainBudget} by the `afterEach` below, and read directly
+ * by the lifecycle cases that want to assert an intermediate state — so that "the
+ * watermark the previous answer established" is an assertion rather than an
+ * inference. Cleared with the budget.
  */
 let drainSequences: number[] = [];
 
@@ -382,13 +416,187 @@ let drainSequences: number[] = [];
 let drainsPending = 0;
 
 /**
- * Declares how many drains this case will make through the injected surface.
+ * How many drains were answered by the stub's refusal because the scripted queue
+ * had nothing left for them.
  *
- * @param count - The exact number, asserted by the `afterEach` below.
+ * The other half of "a finite scripted queue" (ruling 35), found by the phase's
+ * review: {@link drainsPending} catches a queue with an answer left over, but a
+ * case that drains one time *more* than it scripted was answered `noWorkspaceOpen`
+ * by the fallback below and stayed green so long as the cursor budget matched.
+ * Counted rather than thrown, because a throw inside the drain would be caught by
+ * the coordinator's own error handling and would surface as the wrong defect.
  */
-function expectDrains(count: number): void {
-  drainBudget = count;
+let drainsUnscripted = 0;
+
+/**
+ * Declares the drains this case will make through the injected surface.
+ *
+ * @param afterSequences - The exact `afterSequence` of each call, in order; its
+ *   length is the exact number of calls. Both are asserted by the `afterEach`
+ *   below.
+ */
+function expectDrains(afterSequences: readonly number[]): void {
+  drainBudget = afterSequences;
 } // End of function expectDrains()
+
+/**
+ * One state the case now running built, with what the `afterEach` below asks of
+ * it.
+ */
+interface BuiltState {
+  /** The state. */
+  readonly state: BrowserState;
+  /**
+   * The surface it was built over, or `null` when the case let the production
+   * default stand. Its writing stubs are where the files it wrote are read from.
+   */
+  readonly commands: BrowserCommands | null;
+  /**
+   * Whether `start()` was called on it, so that its coordinator holds a
+   * subscription and a pump.
+   *
+   * @returns The answer.
+   */
+  readonly started: () => boolean;
+  /**
+   * Whether `dispose()` was called on it.
+   *
+   * @returns The answer.
+   */
+  readonly disposed: () => boolean;
+}
+
+/**
+ * Every state the case now running has built.
+ *
+ * Read and cleared by the `afterEach` below, which asks each one two things: that
+ * a coordinator the case started was disposed before the case ended (ruling 35's
+ * last sentence), and that no write lease is still open on any file the harness
+ * can name.
+ */
+let statesBuilt: BuiltState[] = [];
+
+/**
+ * Builds a state exactly as the module does, and records it for the `afterEach`.
+ *
+ * **The module's own name, on purpose**: the import is aliased so that the
+ * nearly two hundred call sites below read as they always have, and the
+ * arguments are forwarded unchanged, production defaults included — a case that
+ * omits the backup surface gets `REAL_BACKUP_COMMANDS`, and the hoisted spy at
+ * the top of this file is what notices if that surface is then reached.
+ *
+ * Two spies are installed on the state so that the `afterEach` can ask whether
+ * its coordinator was started and whether it was disposed. **Nothing forces a
+ * case to dispose what it started**; the `afterEach` is what fails one that does
+ * not.
+ *
+ * @param args - Exactly what `createBrowserState` in `./workspace.svelte.ts`
+ *   takes.
+ * @returns The state.
+ */
+function createBrowserState(
+  ...args: Parameters<typeof createUnrecordedBrowserState>
+): BrowserState {
+  const state = createUnrecordedBrowserState(...args);
+  const start = vi.spyOn(state, 'start');
+  const dispose = vi.spyOn(state, 'dispose');
+  statesBuilt.push({
+    state,
+    commands: args[0] ?? null,
+    started: () => start.mock.calls.length > 0,
+    disposed: () => dispose.mock.calls.length > 0
+  });
+  return state;
+} // End of function createBrowserState()
+
+/**
+ * The six members of a surface whose call opens ruling 27's barrier.
+ *
+ * Each of the six wrappers in `workspace.svelte.ts` opens the barrier on exactly
+ * the file identity it then hands its command — `match.document`, `id.document`
+ * or `document` — so the first argument of every recorded call names a file a
+ * lease was opened for. Nothing in TypeScript keeps a seventh writer, or a
+ * wrapper that opened the barrier on some other identity, in step with this
+ * list; it is read against the module by hand.
+ */
+const BARRIERED_MEMBERS = [
+  'moveMatch',
+  'saveMatch',
+  'createMatch',
+  'deleteMatch',
+  'duplicateMatch',
+  'saveRawDocument'
+] as const;
+
+/**
+ * Every file a surface's writing stubs were asked to write.
+ *
+ * Read from the `vi.fn` records rather than from the state, because the barrier
+ * table is private to the module and `writeInFlight` answers one file at a time.
+ * A writing member a case replaced with something other than a `vi.fn` records
+ * nothing and contributes nothing here; the state's own document list, added by
+ * the caller, is what still names those files.
+ *
+ * @param commands - The surface.
+ * @returns The identities, without repetition.
+ */
+function filesWrittenThrough(commands: BrowserCommands): ReadonlySet<DocumentId> {
+  const written = new Set<DocumentId>();
+  for (const member of BARRIERED_MEMBERS) {
+    const stub: unknown = commands[member];
+    if (!vi.isMockFunction(stub)) {
+      continue;
+    }
+    for (const call of stub.mock.calls) {
+      const first: unknown = call[0];
+      if (typeof first === 'number') {
+        written.add(first);
+      } else if (
+        typeof first === 'object' &&
+        first !== null &&
+        'document' in first &&
+        typeof first.document === 'number'
+      ) {
+        written.add(first.document);
+      }
+    } // End of the loop over one stub's recorded calls
+  } // End of the loop over the six barriered members
+  return written;
+} // End of function filesWrittenThrough()
+
+/**
+ * Every write lease a case left open, by the identities this harness can name.
+ *
+ * Asks each state about every file it lists and every file its surface's writing
+ * stubs were asked to write. A lease opened through the injected surface is
+ * always about one of those, for {@link BARRIERED_MEMBERS}' reason; a lease
+ * opened through a module-level binding is the hoisted spy's to catch, since the
+ * wrapper closes it in a `finally` either way. **What this cannot see is a lease
+ * on a file neither source names**, which no wrapper opens today and nothing in
+ * TypeScript prevents tomorrow.
+ *
+ * @param built - The states the case built.
+ * @returns One entry per open lease: which state, by build order, and which file.
+ */
+function openLeasesOf(
+  built: readonly BuiltState[]
+): readonly { readonly state: number; readonly document: DocumentId }[] {
+  const open: { readonly state: number; readonly document: DocumentId }[] = [];
+  for (const [index, one] of built.entries()) {
+    const files = new Set<DocumentId>(one.state.documents.map((summary) => summary.id));
+    if (one.commands !== null) {
+      for (const document of filesWrittenThrough(one.commands)) {
+        files.add(document);
+      }
+    }
+    for (const document of files) {
+      if (one.state.writeInFlight(document)) {
+        open.push({ state: index, document });
+      }
+    }
+  } // End of the loop over the states the case built
+  return open;
+} // End of function openLeasesOf()
 
 /**
  * A command surface that answers from a script.
@@ -527,16 +735,16 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     // **The bound is the injection, and it is stated because this file's subject
     // module holds a route around it.** `workspace.svelte.ts` imports its command
     // wrappers at module level, so a call made through one of those bindings rather
-    // than through an injected parameter increments nothing here — and **no suite
-    // in this repository closes that route file-wide**, this one included. The
-    // count is evidence about the injected boundary and never about the module, and
-    // the phase that starts draining owns closing the route instead of trusting
-    // this comment.
+    // than through an injected parameter increments nothing here. The count is
+    // evidence about the injected boundary and never about the module; **the route
+    // is the hoisted `@tauri-apps/api/core` spy's** (Phase 2d-5-6, ruling 34), which
+    // the same `afterEach` holds to zero — a call that took it would run the real
+    // wrapper down to a spy that rejects, and be reported by name.
     //
     // The measurements behind that paragraph — how many wrappers the module binds
     // and to which surfaces, which phase probed which route and what each cost,
     // why a drain is swallowed rather than recorded in this file, and what the two
-    // component suites do and do not trap — are
+    // component suites did and did not trap before 2d-5-6 — are
     // `docs/decisions/2d-4b-notes.md` §11.8, which exists to be what this pointer
     // finds. **They are not repeated here on purpose.** They are counts and line
     // ranges in files other than this one, nothing in this repository checks a
@@ -556,6 +764,9 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
         drainsPending -= 1;
         return scripted;
       }
+      // Past the end of the queue, or no queue at all. The `afterEach` holds this
+      // to zero: a case that means to see this refusal scripts it.
+      drainsUnscripted += 1;
       const answer: CommandResult<ReconciliationBatch> = {
         ok: false,
         failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
@@ -585,31 +796,66 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   };
 } // End of function deferred()
 
+beforeEach(() => {
+  invoked.mockClear();
+});
+
 afterEach(() => {
-  // The assertion `scriptedCommands()`'s refusal cannot make on its own, applied
-  // to every case in this file — the bound, and the one route that escapes it,
-  // are stated where {@link drains} is incremented. The counts are read, then
-  // cleared, then asserted, so one drain fails one case rather than every case
-  // after it.
-  //
-  // **Extended at Phase 2d-5-3 rather than deleted, which the comment this
-  // replaces said this phase would do "on purpose".** The blanket zero is now the
-  // *default* budget: every case written before this phase declares nothing and is
-  // held to zero exactly as it was, and a reconciliation case declares an exact
-  // budget with {@link expectDrains} and is held to that. Two questions, asked
-  // separately: how many drains happened, and whether every scripted answer was
-  // consumed — a case that drains too few times and one that scripts too many
-  // answers are different defects.
+  // Everything is read, then cleared, then asserted, so one defect fails one case
+  // rather than every case after it — and the assertions run in the order a
+  // reader would want them attributed: the route first, because a wrapper that
+  // escaped through it also did nothing through the surface, and a count below
+  // would then fail for a reason that is not the count's.
   const drained = drains;
   const budget = drainBudget;
+  const asked = drainSequences;
   const pending = drainsPending;
+  const unscripted = drainsUnscripted;
+  const built = statesBuilt;
   drains = 0;
-  drainBudget = 0;
+  drainBudget = [];
   drainsPending = 0;
+  drainsUnscripted = 0;
   drainSequences = [];
-  expect(drained).toBe(budget);
+  statesBuilt = [];
+
+  // **The route (ruling 34).** The assertion `scriptedCommands()`'s refusal cannot
+  // make on its own, applied to every case in this file: the bound, and the route
+  // around it, are stated where {@link drains} is incremented, and this is where
+  // the route is caught — a wrapper that reached the real `invoke` is reported
+  // here by command name. Zero in every case, an intended drain included, because
+  // even an intended drain must use the injected boundary.
+  expect(invoked).not.toHaveBeenCalled();
+
+  // **Every coordinator started was disposed (ruling 35, last sentence).** A
+  // started coordinator holds a subscription and a pump, and one left running
+  // would drain into the next case's counters. A state never started registered
+  // nothing and is not owed a disposal, which is why the question is asked of the
+  // started ones. Nothing in TypeScript makes a case call `dispose()`; this does.
+  const undisposed = built.filter((one) => one.started() && !one.disposed()).length;
+  expect(undisposed).toBe(0);
+
+  // **No write lease is left open (ruling 27's barrier).** A lease still open when
+  // the case ends is a write the case never let settle — a deferred answer never
+  // resolved — and in production that file's reconciliation would be silently
+  // dead from then on. Bounded as {@link openLeasesOf} states.
+  expect(openLeasesOf(built)).toEqual([]);
+
+  // **The budget was consumed exactly, with nothing pending (ruling 35).** Four
+  // questions, asked separately because they are different defects: which cursors
+  // the drains asked with, in order; how many drains happened; whether every
+  // scripted answer was consumed; and whether every drain *had* a scripted answer
+  // — a case that drains the right number of times with the wrong watermark, one
+  // that drains too few times, one that scripts more answers than it drains, and
+  // one that drains past the end of its queue and was answered by the fallback
+  // refusal each fail their own line. The last is the review's finding: without
+  // it the queue was finite in one direction only. An unscripted case has the
+  // empty budget and is held to zero exactly as it always was.
+  expect(asked).toEqual(budget);
+  expect(drained).toBe(budget.length);
   expect(pending).toBe(0);
-});
+  expect(unscripted).toBe(0);
+}); // End of the afterEach that closes the route, the coordinators, the barrier and the budget
 
 describe('the load', () => {
   it('starts in the reading state before anything is asked', () => {
@@ -8610,7 +8856,7 @@ describe('the reconciliation lifecycle', () => {
   }); // End of the no-start case
 
   it('drains once when the injected registration resolves', async () => {
-    expectDrains(1);
+    expectDrains([0]);
     const events = testEvents();
     const state = createBrowserState(
       scriptedCommands({ drains: [reconciliationBatch({ newest_sequence: 4 })] }),
@@ -8626,8 +8872,35 @@ describe('the reconciliation lifecycle', () => {
     expect(events.unlistens()).toBe(1);
   }); // End of the registration-drain case
 
+  it('counts a drain the scripted queue had no answer for', async () => {
+    // The negative control of the `afterEach`'s fourth budget question, found by
+    // the 2d-5-6 review: one answer is scripted and the surface is drained twice,
+    // directly, so the second call is what the fallback refusal answers. The
+    // cursor budget and the pending count both come out clean — which is exactly
+    // the false green the counter exists to catch.
+    expectDrains([0, 0]);
+    const commands = scriptedCommands({ drains: [reconciliationBatch({ newest_sequence: 4 })] });
+
+    const first = await commands.drainExternalChanges(0);
+    const second = await commands.drainExternalChanges(0);
+
+    expect(first.ok).toBe(true);
+    expect(second).toEqual({
+      ok: false,
+      failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+    });
+    expect(drainsPending).toBe(0);
+    expect(drainsUnscripted).toBe(1);
+
+    // This case provoked the count on purpose and is the one case allowed to clear
+    // it before the `afterEach` reads it. Nothing in Vitest prevents another case
+    // from copying this line; a reviewer reading a second one has found a case
+    // hiding an unscripted drain.
+    drainsUnscripted = 0;
+  }); // End of the unscripted-drain negative control
+
   it('drains again once a workspace reaches ready', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     const state = createBrowserState(
       scriptedCommands({
@@ -8652,7 +8925,7 @@ describe('the reconciliation lifecycle', () => {
   }); // End of the open-drain case
 
   it('drains for no failed open, and holds later triggers behind the gate it left closed', async () => {
-    expectDrains(1);
+    expectDrains([0]);
     const failure: IpcFailure = { kind: 'command', error: { code: 'noWorkspaceOpen' } };
     const events = testEvents();
     const state = createBrowserState(
@@ -8689,7 +8962,7 @@ describe('the reconciliation lifecycle', () => {
   }); // End of the failed-open case
 
   it('drains for an open that completes before start, in one call', async () => {
-    expectDrains(1);
+    expectDrains([0]);
     const events = testEvents();
     const state = createBrowserState(
       scriptedCommands({ drains: [reconciliationBatch()] }),
@@ -8711,7 +8984,7 @@ describe('the reconciliation lifecycle', () => {
   }); // End of the open-before-start case
 
   it('drains for a wake at the current epoch and for nothing else', async () => {
-    expectDrains(2);
+    expectDrains([0, 11]);
     const events = testEvents();
     const state = createBrowserState(
       scriptedCommands({
@@ -8738,7 +9011,7 @@ describe('the reconciliation lifecycle', () => {
   }); // End of the wake case
 
   it('drains on a foreground signal', async () => {
-    expectDrains(2);
+    expectDrains([0, 2]);
     const events = testEvents();
     const activity = testForeground();
     const state = createBrowserState(
@@ -8759,7 +9032,7 @@ describe('the reconciliation lifecycle', () => {
   }); // End of the foreground case
 
   it('clears the session cursor at the entry of every open', async () => {
-    expectDrains(3);
+    expectDrains([0, 9, 0]);
     const events = testEvents();
     const state = createBrowserState(
       scriptedCommands({
@@ -8793,7 +9066,7 @@ describe('the reconciliation lifecycle', () => {
   }); // End of the cursor-cleared-by-open case
 
   it('stops draining once disposed, and unlistens exactly once', async () => {
-    expectDrains(1);
+    expectDrains([0]);
     const events = testEvents();
     const activity = testForeground();
     const state = createBrowserState(
@@ -8819,7 +9092,7 @@ describe('the reconciliation lifecycle', () => {
   }); // End of the disposal case
 
   it('registers nothing through the inert default source, and still drains on an open', async () => {
-    expectDrains(1);
+    expectDrains([0]);
     // No event source injected: `createBrowserState` defaults to the inert one,
     // which refuses rather than reporting a subscription this application does not
     // have. The other triggers are unaffected, which is the honest description of
@@ -9001,7 +9274,7 @@ function expectNoDocumentCommandSince(
 
 describe('the observation transitions', () => {
   it('rereads a changed file no open surface may be about', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       reload: { ok: true, value: rereadBaseDocument() },
@@ -9031,7 +9304,7 @@ describe('the observation transitions', () => {
   }); // End of the clean-reread case
 
   it('tells the open surface instead, and installs nothing', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     const told: number[] = [];
     const commands = scriptedCommands({
@@ -9073,7 +9346,7 @@ describe('the observation transitions', () => {
   }); // End of the surface-open case
 
   it('rereads one file and conflicts the other in the same batch', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     const told: number[] = [];
     const commands = scriptedCommands({
@@ -9116,7 +9389,7 @@ describe('the observation transitions', () => {
   }); // End of the two-document case
 
   it('installs nothing when a surface opens while the reread is in flight', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     const told: number[] = [];
     const held = deferred<CommandResult<DocumentView>>();
@@ -9163,7 +9436,7 @@ describe('the observation transitions', () => {
   }); // End of the surface-open race
 
   it('inserts an added file as a row and reads nothing for it', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       drains: [
@@ -9218,7 +9491,7 @@ describe('the observation transitions', () => {
   }); // End of the addition case
 
   it('clears the selection with the gone notice when the selected file is removed', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       drains: [
@@ -9268,7 +9541,7 @@ describe('the observation transitions', () => {
   }); // End of the removed-selected case
 
   it('leaves a selection in another file alone when one file is removed', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       drains: [
@@ -9306,7 +9579,7 @@ describe('the observation transitions', () => {
   }); // End of the removed-other case
 
   it('keeps the projection of an unreadable file and marks it unavailable', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       drains: [
@@ -9344,7 +9617,7 @@ describe('the observation transitions', () => {
   }); // End of the unreadable case
 
   it('routes a Named and an Unnamed observation to no command at all', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       drains: [
@@ -9403,7 +9676,7 @@ describe('the observation transitions', () => {
   }); // End of the Named-and-Unnamed case
 
   it('sends no document command for the row an addition invented', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       drains: [
@@ -9459,7 +9732,7 @@ describe('the observation transitions', () => {
   }); // End of the pending-addition viewer case
 
   it('leaves the file marked stale when the guarded reread fails', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       reload: {
@@ -9494,7 +9767,7 @@ describe('the observation transitions', () => {
   }); // End of the failed-reread case
 
   it('installs nothing when the answer’s own getter opens a surface', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     const told: number[] = [];
     let sprung = false;
@@ -9562,7 +9835,7 @@ describe('the observation transitions', () => {
   }); // End of the value-getter case
 
   it('installs into the slot the projection names, whatever a retained view says', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     let armed = false;
     let reads = 0;
@@ -9619,7 +9892,7 @@ describe('the observation transitions', () => {
   }); // End of the retained-view-accessor case
 
   it('repairs the selection against the projection it read, not a re-entrant one', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 0]);
     const events = testEvents();
     let fired = false;
     let reads = 0;
@@ -9689,7 +9962,7 @@ describe('the observation transitions', () => {
   }); // End of the re-entrant-repair case
 
   it('keeps a newer removal over an older reread that came back a failure', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 5]);
     const events = testEvents();
     const answer = deferred<CommandResult<DocumentView>>();
     const base = scriptedCommands({
@@ -9762,7 +10035,7 @@ describe('the observation transitions', () => {
   }); // End of the newer-removal case
 
   it('keeps an overlapping reread’s installed status over an older failure', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 5]);
     const events = testEvents();
     const first = deferred<CommandResult<DocumentView>>();
     let reads = 0;
@@ -9821,7 +10094,7 @@ describe('the observation transitions', () => {
   }); // End of the overlapping-reread case
 
   it('clears the mark when an explicit reread installs the file again', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     let reads = 0;
     const base = scriptedCommands({
@@ -9873,7 +10146,7 @@ describe('the observation transitions', () => {
   }); // End of the explicit-recovery case
 
   it('lets a newer successful reread clear a mark an older failure cannot hold', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     const first = deferred<CommandResult<DocumentView>>();
     const second = deferred<CommandResult<DocumentView>>();
@@ -9937,7 +10210,7 @@ describe('the observation transitions', () => {
   }); // End of the superseded-failure ownership case
 
   it('keeps a newer unreadable reason an explicit reread did not set', async () => {
-    expectDrains(2);
+    expectDrains([0, 0]);
     const events = testEvents();
     const held = deferred<CommandResult<DocumentView>>();
     const base = scriptedCommands({
@@ -9984,7 +10257,7 @@ describe('the observation transitions', () => {
   }); // End of the reread-over-a-newer-reason case
 
   it('reads no summary of its own inside the coordinator’s guard', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 0]);
     const events = testEvents();
     const answer = deferred<CommandResult<DocumentView>>();
     let armed = false;
@@ -10065,7 +10338,7 @@ describe('the observation transitions', () => {
   }); // End of the unnormalized-summary ingress case
 
   it('sends document_text for the viewer’s file after an observation installs', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       reload: { ok: true, value: rereadBaseDocument() },
@@ -10120,7 +10393,7 @@ describe('the observation transitions', () => {
 
 describe('the discarded-history recovery', () => {
   it('re-runs the original open request when no surface is open', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       drains: [
@@ -10155,7 +10428,7 @@ describe('the discarded-history recovery', () => {
   }); // End of the empty-registry recovery case
 
   it('reloads nothing while a surface is open, and preserves the window', async () => {
-    expectDrains(3);
+    expectDrains([0, 0, 9]);
     const events = testEvents();
     const commands = scriptedCommands({
       drains: [
@@ -10208,7 +10481,7 @@ describe('the discarded-history recovery', () => {
   }); // End of the blocked case
 
   it('takes the permitted reload at the next batch once the surface closes', async () => {
-    expectDrains(4);
+    expectDrains([0, 0, 9, 0]);
     const events = testEvents();
     const commands = scriptedCommands({
       drains: [

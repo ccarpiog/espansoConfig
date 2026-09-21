@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T07:31:00Z",
+ "updated": "2026-09-21T08:30:41Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -114,7 +114,7 @@
    "title": "2d step 5 — live reconciliation, seven steps",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Seven steps; 1 to 3 closed, step 4 closed and its review tail is at its seventh link, 2d-5-4-G."
+   "summary": "Seven steps; 1 through 6 are closed, 2d-5-7 (production activation, capability and baseline) is next."
   },
   {
    "id": "2d-5-1",
@@ -348,9 +348,9 @@
   {
    "id": "2d-5-5",
    "title": "External conflicts and save arbitration",
-   "status": "in_progress",
+   "status": "done",
    "risk": "high",
-   "summary": "Seven steps; step 5 was split on 2026-09-21 and both halves are closed, so five are done and 2d-5-6 is next."
+   "summary": "Step 5, split on 2026-09-21 into 2d-5-5a and 2d-5-5b; both halves are closed, so the step is done."
   },
   {
    "id": "2d-5-5a",
@@ -374,14 +374,17 @@
   {
    "id": "2d-5-6",
    "title": "The file-wide route-guard closure",
-   "status": "queued",
-   "summary": "Not started; it discharges the drain guard's escaping route owed to three test files."
+   "status": "done",
+   "summary": "The hoisted core spy and file-wide route, coordinator, lease and exact drain-budget assertions land in three test files; the review found the queue finite in one direction only, fixed.",
+   "risk": "high",
+   "review": "docs/reviews/phase-2d-5-6.md",
+   "narrative": "docs/decisions/2d-5-6-notes.md"
   },
   {
    "id": "2d-5-7",
    "title": "Production activation, capability widening and baseline re-measure",
    "status": "queued",
-   "summary": "Not started; the only 2d-5 step that touches a component."
+   "summary": "Next: the real event source reachable, AppShell starting and disposing the coordinator, both event permissions, the dispatcher extension, all four baselines re-measured."
   },
   {
    "id": "2d-6",

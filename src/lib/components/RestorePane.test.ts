@@ -107,12 +107,20 @@ import type {
 import RestorePane from './RestorePane.svelte';
 
 /**
- * The Tauri boundary, replaced for the whole file.
+ * The Tauri boundary, replaced for the whole file — on the same terms as
+ * `workspace.test.ts` since Phase 2d-5-6 (ruling 34).
  *
  * `vi.hoisted` because a `vi.mock` factory is lifted above every import and
- * cannot close over an ordinary `const`. The replacement **rejects** rather than
- * answering: a call that got this far is already the defect, and a stub that
- * answered would let the case continue and pass.
+ * cannot close over an ordinary `const`. It **rejects**: a call that got this far
+ * is already the defect, and a stub that answered would let a case pass.
+ *
+ * **What is mocked is `@tauri-apps/api/core` and not `$lib/ipc/commands`**, so
+ * the real wrappers and the real `REAL_COMMANDS` assembly stay in place, and a
+ * wrapper in `workspace.svelte.ts` that reaches a binding it imports at module
+ * level — rather than the surface it was injected with — runs down to this spy.
+ * The `afterEach` below holds it to zero in every case. That closes the route
+ * **in this file**: nothing in Vitest prevents a future test file from importing
+ * `$lib/ipc/commands` with no spy at all.
  */
 const { invoked } = vi.hoisted(() => ({ invoked: vi.fn() }));
 
@@ -436,11 +444,11 @@ interface Opened {
  * {@link mountRestore} builds a **real** `BrowserState`, and `workspace.svelte.ts`
  * holds a module-level `drainExternalChanges` binding that increments nothing in
  * this count. *No component imports the wrapper* is true and is narrower than
- * what this file executes, so it is not the bound. What this file does have, and
- * the count is not, is a partial trap: the `invoke` mock at the top of the file
- * rejects, so a drain taking that route would record on `invoked` — but `invoked`
- * is asserted case by case and never in the `afterEach`, so it catches nothing
- * file-wide. The `afterEach` below reads and resets the count.
+ * what this file executes, so it is not the bound. The other route is the hoisted
+ * `invoke` spy's: since Phase 2d-5-6 the `afterEach` below holds `invoked` to zero
+ * in every case, so a drain taking that route is caught file-wide and by command
+ * name, where before it was caught only in the cases that asserted `invoked`
+ * themselves. The `afterEach` reads and resets this count beside it.
  */
 let drains = 0;
 
@@ -593,6 +601,11 @@ async function mountRestore(
     stop: () => {
       void unmount(component);
       target.remove();
+      // Every coordinator created is disposed before its case ends (ruling 35).
+      // Nothing this pane draws starts one, so this releases nothing today; it is
+      // here so that the rule holds for every state this file builds rather than
+      // for the ones a case remembers.
+      state.dispose();
     }
   };
 } // End of function mountRestore()
@@ -758,14 +771,21 @@ beforeEach(() => {
 
 afterEach(() => {
   locale.setOverride(null);
-  // The assertion `mountRestore()`'s refusal cannot make on its own, applied to
-  // every case in this file: a restore never drains through the injected surface
-  // at 2d-4b. Read, then cleared, then asserted, so one drain fails one case
-  // rather than every case after it.
+  // Read, then cleared, then asserted, so one defect fails one case rather than
+  // every case after it. The route first (ruling 34): a wrapper that reached the
+  // real `invoke` is reported here by command name, and zero is the number in
+  // every case because even an intended drain must use the injected boundary.
   const drained = drains;
   drains = 0;
+  expect(invoked).not.toHaveBeenCalled();
+  // Then the drain budget (ruling 35), which in this file is an exact zero for
+  // every case rather than a scripted queue: nothing this pane draws starts the
+  // coordinator, so no case here reconciles, and a case that began to would owe
+  // the scripted answers `workspace.test.ts` scripts rather than a larger
+  // allowance here. This is the assertion `mountRestore()`'s refusal cannot make
+  // on its own.
   expect(drained).toBe(0);
-});
+}); // End of the afterEach that closes the route and the drain budget
 
 describe('the mounted restore pane: the catalogue and the candidate', () => {
   it('walks a recognised batch to an exact candidate without invoking anything', async () => {
