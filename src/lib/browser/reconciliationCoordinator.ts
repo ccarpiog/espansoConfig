@@ -34,11 +34,12 @@
  *
  * **Nothing here is reactive, deliberately.** A coordinator reads its own state
  * immediately before it decides something, exactly as the generation counters in
- * `./workspace.svelte.ts` are read by the request that took one. If a later phase
- * needs a window to *draw* the cursor — 2d-6 draws {@link
- * ReconciliationWatchState}'s `notWatched` arm — the mirror belongs in
- * `BrowserState`, where `openWriteSurfaces()`'s mirror already lives, and not
- * here.
+ * `./workspace.svelte.ts` are read by the request that took one. What a window
+ * that *draws* the cursor gets is one notification — Phase 2d-6-1c's
+ * {@link ReconciliationHost.reconciliationChanged}, called after every transition
+ * of a value a reader answers — and the signal it feeds lives in `BrowserState`,
+ * where `openWriteSurfaces()`'s mirror already lives, and not here. No value is
+ * mirrored: every reader on that state re-asks this coordinator.
  *
  * ## What this module deliberately does **not** do
  *
@@ -52,10 +53,13 @@
  *   the six conflict registrations, the reapply evidence, the same-revision
  *   coalescing and the in-flight-write barrier — is **2d-5-5's**. Every registered
  *   transition is a no-op today.
- * - **It performs no membership reload.**
+ * - **It performs no membership reload of its own.**
  *   {@link ReconciliationCoordinator.membershipReloadWanted} is a request the
- *   `Named` and `Unnamed` arms raise and **nothing here acts on it**; only a
- *   `discarded` loss reopens a workspace.
+ *   `Named` and `Unnamed` arms raise and **nothing here acts on it**; a
+ *   `discarded` loss reopens a workspace, and so does a person's request through
+ *   {@link ReconciliationCoordinator.reopenFromRetainedRequest} — which the
+ *   window's two guarded request methods call after their own rechecks, and
+ *   which no observation ever reaches.
  * - **It runs in the shipped window on three of its four triggers.** Since Phase
  *   2d-5-7a `AppShell.svelte` builds its state over the real event source of
  *   `src/lib/ipc/events.ts`, calls {@link ReconciliationCoordinator.start} from
@@ -373,6 +377,42 @@ export interface ReconciliationHost extends ReconciliationWorkspace {
    * @param failure - The refusal, unchanged.
    */
   report(failure: IpcFailure): void;
+  /**
+   * Told after every transition of a value one of this coordinator's readers
+   * answers — Phase 2d-6-1c, the 2d-6 record's §3 entry 28.
+   *
+   * **One notification, carrying nothing.** The host is told *that* something a
+   * reader answers has moved, never *what*: a `BrowserState` bumps one reactive
+   * revision number from it and every reader on that state re-asks the
+   * coordinator, so no boolean is copied and the coordinator stays the one
+   * authority. It is called synchronously, in the same block as the write it
+   * describes and after that write, so a host that reads back inside it sees the
+   * new value.
+   *
+   * **A host member rather than a constructor option, for the reason the
+   * interface header gives**: an option with an inert default would let a host be
+   * built without one and go on compiling, and a coordinator whose transitions
+   * nobody can observe is a screen that never redraws. A required member is a
+   * compile error at every construction site instead.
+   *
+   * **What the type cannot force, in the same sentence as what it does.** It
+   * forces every host to *have* a notification; it cannot force every mutation
+   * site inside the coordinator to *call* it — nothing in TypeScript ties a
+   * `let` assignment to a call, so a transition added without one compiles and
+   * leaves a screen stale with every gate green. `reconciliationCoordinator.test.ts`
+   * counts the notification across every transition the interface names,
+   * asynchronous subscription rejection included, and that suite is the whole of
+   * the enforcement.
+   *
+   * **It is caller code, and it is placed accordingly.** Every call is after the
+   * writes of the transition it announces and before nothing that a re-entrant
+   * `open()` or `dispose()` fired from inside it could make wrong: the coordinator
+   * never writes a captured number below a notification without re-asking its
+   * lifecycle first. A host whose notification throws is not contained — the one
+   * production host increments a number and cannot throw, and the module's rule
+   * for host members that throw is stated on `ensurePumping`.
+   */
+  reconciliationChanged(): void;
 }
 
 /** What a foreground or resume signal is handed to. */
@@ -701,12 +741,14 @@ export interface ReconciliationCoordinator {
    * Whether a `Named` or an `Unnamed` observation has asked for a safe membership
    * reload.
    *
-   * **Nothing acts on it.** It is set by the arms the consult's Q8 says *request a
-   * safe membership reload*, cleared by
-   * {@link ReconciliationCoordinator.workspaceOpened}, and read by 2d-6, which is
-   * where a person gets a control. Performing it automatically would mean
-   * replacing the whole window — every projection, the selection and the viewer
-   * with it — because an unrelated file appeared beside the configuration.
+   * **Nothing acts on it automatically.** It is set by the arms the consult's Q8
+   * says *request a safe membership reload*, cleared by
+   * {@link ReconciliationCoordinator.workspaceOpened}, and read by the window,
+   * whose `requestMembershipReload` in `./workspace.svelte.ts` is the model half
+   * of the control a person gets (Phase 2d-6-1c; 2d-6-9 draws it). Performing it
+   * automatically would mean replacing the whole window — every projection, the
+   * selection and the viewer with it — because an unrelated file appeared beside
+   * the configuration.
    *
    * @returns `true` once such a request has been made in this session.
    */
@@ -717,6 +759,37 @@ export interface ReconciliationCoordinator {
    * @returns `true` once disposed, forever.
    */
   isDisposed(): boolean;
+  /**
+   * Re-runs the retained original open request because a person asked — Phase
+   * 2d-6-1c, the 2d-6 record's §3 entry 29.
+   *
+   * **The request never leaves this coordinator.** A `BrowserState` reload request
+   * calls this rather than reading the retained request and opening with it, so
+   * that nothing on the window side holds a value it could substitute — the
+   * retained request is the one `workspaceOpened()` was told, `null` included,
+   * and never `summary.root` (ruling 11). The reopen goes through
+   * {@link ReconciliationWorkspace.reopenWorkspace}, which under
+   * `./workspace.svelte.ts` is the existing `open()`.
+   *
+   * **Its one fence is disposal, and it is asked here rather than by the
+   * caller**: a disposed coordinator asks the window to reload nothing, whatever
+   * the caller checked a statement earlier. The registry, the outstanding writes
+   * and the open gate are the caller's to recheck — they are the window's facts,
+   * and `BrowserState`'s two request methods ask all three in the same
+   * synchronous block as this call, with no caller code between.
+   *
+   * **It moves the applying lifecycle before it reopens**, for
+   * `recoverFromLostHistory`'s reason: a host that reopens without announcing
+   * through `workspaceOpened()` — which nothing in TypeScript forces — must still
+   * leave every session built after this point unable to claim the lifecycle
+   * being replaced. The blocked state is reset with it, because a whole open is
+   * exactly what that state was waiting for; the membership-reload flag is left
+   * to `workspaceOpened()`, which clears it on every open.
+   *
+   * @returns `true` when the reopen was started; `false` when this coordinator is
+   *   disposed and nothing was done.
+   */
+  reopenFromRetainedRequest(): boolean;
   /**
    * Whether the single-flight slot is occupied.
    *
@@ -877,8 +950,26 @@ export function createReconciliationCoordinator(
   function rememberReason(reason: DrainReason): void {
     if (!pendingReasons.includes(reason)) {
       pendingReasons.push(reason);
+      notifyChanged();
     }
   } // End of function rememberReason()
+
+  /**
+   * Tells the host that a value one of the readers answers has moved — Phase
+   * 2d-6-1c.
+   *
+   * **One function, called after every transition, and nothing in TypeScript
+   * makes a new transition call it.** The sites that do are enumerated on
+   * {@link ReconciliationHost.reconciliationChanged}'s test suite rather than
+   * here, because a list in a comment is the kind of sentence this project has
+   * watched go stale; what this comment can say is the placement rule every site
+   * follows — after the writes it announces, and never between a lifecycle
+   * capture and a write that capture fences, because the host's callback is
+   * caller code and a re-entrant `open()` inside it moves the lifecycle.
+   */
+  function notifyChanged(): void {
+    host.reconciliationChanged();
+  } // End of function notifyChanged()
 
   /**
    * Writes one physical drain onto the record.
@@ -893,6 +984,7 @@ export function createReconciliationCoordinator(
     outcome: DrainOutcome
   ): void {
     drainRecords.push({ afterSequence, reasons, outcome });
+    notifyChanged();
   } // End of function record()
 
   /**
@@ -1181,6 +1273,10 @@ export function createReconciliationCoordinator(
        */
       requestMembershipReload: (): void => {
         membershipReloadRequested = true;
+        // Announced from inside the observation loop, which already runs host
+        // members per observation and re-asks the lifecycle for each; nothing of
+        // the cursor is written after this loop.
+        notifyChanged();
       }
     };
     for (const observation of observations) {
@@ -1231,13 +1327,29 @@ export function createReconciliationCoordinator(
   async function runOneDrain(): Promise<void> {
     const lifecycleAt = lifecycle;
     const reasons = pendingReasons.splice(0, pendingReasons.length);
+    // `pending()` moved. Announced here, above the host's generation read, which
+    // is caller code of the same standing: a re-entrant `open()` from either lands
+    // above the lifecycle comparison `accept()` makes below the await.
+    notifyChanged();
+    if (disposed) {
+      // **Reachable since the notification above, and unreachable before it** —
+      // the 2d-6-1c review's should-fix, in its second form. `pump()`'s loop
+      // condition asks `drainMayStart()` synchronously in the statement that
+      // calls this function, so until Phase 2d-6-1c nothing between that check
+      // and the await was caller code and a check here was a claim no test could
+      // fail. The notification is caller code, and a host that disposes from it
+      // used to be answered with one physical drain against a coordinator that
+      // had already ended, refused a microtask later by the arm below the await.
+      // Recorded as that arm records it, so the reasons spliced off above are not
+      // lost from the record; `host.openGeneration()` below is caller code of the
+      // same standing and is not fenced — a disposal from *there* still costs one
+      // refused drain, as it always has.
+      record(watermark, reasons, 'disposed');
+      return;
+    }
     const openedAt = host.openGeneration();
     const expectedAdopted = adopted;
     const expectedEpoch = epoch;
-    // **No disposal check here, and its absence is deliberate.** `pump()`'s loop
-    // condition is the check, evaluated synchronously in the statement that calls
-    // this function, so one written here would be unreachable — and an unreachable
-    // guard is a claim no test can fail. The one that matters is below the await.
     const afterSequence = watermark;
     let answer: CommandResult<ReconciliationBatch>;
     try {
@@ -1514,6 +1626,10 @@ export function createReconciliationCoordinator(
     }
     const running = pump();
     inFlight = running;
+    // `isPumping()` moved. `pump()` has yielded at its first line, so nothing of
+    // the drain has run yet and a re-entrant request inside the host's callback
+    // sees an occupied slot, exactly as one made by any other caller would.
+    notifyChanged();
     /**
      * Releases the slot, whichever way the pump ended, and re-enters if a request
      * is outstanding.
@@ -1540,6 +1656,15 @@ export function createReconciliationCoordinator(
         return;
       }
       inFlight = null;
+      // `isPumping()` moved back. Announced with the slot already free, so a
+      // request the host's callback makes starts a pump through the ordinary door
+      // and the re-entry below then finds the slot taken and returns. **This is
+      // the one notification that runs inside a promise callback**: a host whose
+      // callback throws here rejects the `void`-ed promise `running.then(...)`
+      // returns, with no handler — the unhandled rejection the comment below names
+      // as the cost of a `void`-ed `.finally` — and the one production host cannot
+      // throw.
+      notifyChanged();
       if (requested && drainMayStart()) {
         ensurePumping();
       }
@@ -1583,6 +1708,7 @@ export function createReconciliationCoordinator(
    */
   async function register(): Promise<void> {
     registrationState = { kind: 'registering' };
+    notifyChanged();
     let off: ReconciliationUnlisten;
     try {
       off = await events.subscribe(onWake);
@@ -1592,7 +1718,12 @@ export function createReconciliationCoordinator(
       // here would put the claim back in a different place. The other three
       // triggers are unaffected: a window with no wake transport still drains
       // after an open and on foreground.
+      //
+      // **Announced like every other transition** — the 2d-6 record's entry 28
+      // names this one because it is the asynchronous arm a screen would
+      // otherwise never learn of: nothing else runs when a subscription rejects.
       registrationState = { kind: 'failed', error };
+      notifyChanged();
       return;
     }
     if (disposed) {
@@ -1601,11 +1732,13 @@ export function createReconciliationCoordinator(
       // disposed while `subscribe` was in flight still ends the subscription
       // exactly once and leaves nothing listening.
       registrationState = { kind: 'abandoned' };
+      notifyChanged();
       off();
       return;
     }
     unlisten = off;
     registrationState = { kind: 'registered' };
+    notifyChanged();
     requestDrain('registration');
   } // End of function register()
 
@@ -1672,18 +1805,35 @@ export function createReconciliationCoordinator(
       // fired rather than awaited, because `start()` answers a host's `onMount`
       // and must not make it asynchronous.
       void register();
-      foregroundOff.push(
-        foreground.subscribe(
-          /**
-           * Asks for a drain because the window came forward.
-           *
-           * @returns Nothing; the pump is what answers.
-           */
-          function onForeground(): void {
-            requestDrain('foreground');
-          }
-        )
+      if (disposed) {
+        // **The `registering` notification ran inside the call above, and it is
+        // caller code** — the 2d-6-1c review's should-fix. A host that disposes
+        // from it used to watch this function go on to subscribe to the foreground
+        // source, and `dispose()` had already run its removal loop over an empty
+        // list: a listener nothing would ever remove. Nothing below may take a
+        // resource on a coordinator that has ended, so this returns with none
+        // taken. The registration in flight lands as `abandoned` on its own.
+        return;
+      }
+      const offForeground = foreground.subscribe(
+        /**
+         * Asks for a drain because the window came forward.
+         *
+         * @returns Nothing; the pump is what answers.
+         */
+        function onForeground(): void {
+          requestDrain('foreground');
+        }
       );
+      if (disposed) {
+        // `subscribe` is the injected source's own code and can dispose this
+        // coordinator re-entrantly too; the unsubscribe it answered is then called
+        // here, once, instead of being held by a list `dispose()` has already
+        // emptied. Nothing in TypeScript forces a source not to do this.
+        offForeground();
+        return;
+      }
+      foregroundOff.push(offForeground);
       if (requested && drainMayStart()) {
         // Anything recorded before the lifecycle began — an `open()` that reached
         // `ready` first — is flushed here, in arrival order. Not, however, an
@@ -1727,6 +1877,12 @@ export function createReconciliationCoordinator(
       // site that ends the applying lifecycle moves the counter* — is a second
       // reason, not the reason.
       lifecycle += 1;
+      // `isDisposed()` moved, and it is announced before the two caller-owned
+      // calls below rather than after them: a foreground unsubscribe or a held
+      // unlisten that throws must not leave a screen believing this coordinator
+      // is still live. A re-entrant `dispose()` from the callback returns at the
+      // guard above.
+      notifyChanged();
       // **Synchronously**, before anything can await: ruling 16 says foreground
       // listeners are removed synchronously, and there is no reason for the wake
       // listener to be different when its unlisten is already held.
@@ -1796,6 +1952,10 @@ export function createReconciliationCoordinator(
       // window, because `open()` took its generation in the statement before this
       // call; being *told* is the only thing that distinguishes it.
       openInProgress = true;
+      // Every reader but `registration()` and `isDisposed()` moved above. Last,
+      // after the gate: the one caller of this function is `open()`'s first
+      // statements, and nothing here is written after the callback.
+      notifyChanged();
     }, // End of function workspaceOpened()
 
     workspaceReady(): void {
@@ -1803,6 +1963,10 @@ export function createReconciliationCoordinator(
       // more thing held behind it — together with every reason recorded while it
       // was closed, which the pump answers in arrival order.
       openInProgress = false;
+      // `awaitingWorkspaceReady()` moved. Announced before the request below, which
+      // announces its own two transitions and refuses on a disposed coordinator
+      // without announcing anything.
+      notifyChanged();
       requestDrain('workspaceOpened');
     }, // End of function workspaceReady()
 
@@ -1867,6 +2031,32 @@ export function createReconciliationCoordinator(
     isDisposed(): boolean {
       return disposed;
     },
+
+    reopenFromRetainedRequest(): boolean {
+      if (disposed) {
+        return false;
+      }
+      // **The same three statements as `recoverFromLostHistory`'s reopen, without
+      // its two fences** — deliberately not shared with it. That function's fences
+      // are about a batch it is applying (the registry read it makes and the
+      // lifecycle it captured before reading the batch); this member applies no
+      // batch and is fenced by the window's own rechecks in the block that calls
+      // it. The lifecycle moves first, for the reason given there: a host that
+      // reopens without announcing still leaves every later session unable to
+      // claim the lifecycle being replaced. `membershipReloadRequested` is left to
+      // `workspaceOpened()`, which every announcing host reaches synchronously.
+      lifecycle += 1;
+      block = { kind: 'running' };
+      // **Fired, never awaited, and the host owns everything after it.** Nothing
+      // of the cursor is written below, so a host that announces synchronously —
+      // the production `open()` does — clears the cursor before this returns and
+      // one that does not leaves it where it stood.
+      host.reopenWorkspace(openRequest);
+      // `block()` moved, and it is announced after the reopen rather than before
+      // it so the callback runs with nothing left to write here.
+      notifyChanged();
+      return true;
+    }, // End of function reopenFromRetainedRequest()
 
     isPumping(): boolean {
       return inFlight !== null;

@@ -132,6 +132,22 @@ interface ControlledHost {
    * @returns The count.
    */
   outstanding(): number;
+  /**
+   * How many times the coordinator announced a transition — Phase 2d-6-1c.
+   *
+   * **The only evidence that a transition was announced**: nothing in TypeScript
+   * makes a mutation site call the host, so every case in the notification suite
+   * reads this before and after one transition.
+   *
+   * @returns The count.
+   */
+  changes(): number;
+  /**
+   * Runs inside every announcement, for the one case about re-entrancy.
+   *
+   * Assignable; `null` is the ordinary host, which counts and does nothing else.
+   */
+  onChanged: (() => void) | null;
 }
 
 /**
@@ -150,6 +166,7 @@ function controlledHost(): ControlledHost {
   const removed: DocumentId[] = [];
   const statuses: { document: DocumentId; status: ExternalDocumentStatus | null }[] = [];
   const drift: ExternalPathDrift[] = [];
+  let changed = 0;
   const control: ControlledHost = {
     host: {
       /**
@@ -287,6 +304,16 @@ function controlledHost(): ControlledHost {
        */
       reopenWorkspace: (request: string | null): void => {
         reopened.push(request);
+      },
+      /**
+       * Counts the announcement, and runs the case's hook if it set one.
+       *
+       * The count moves **before** the hook, so a hook that reads it sees the
+       * announcement it is inside.
+       */
+      reconciliationChanged: (): void => {
+        changed += 1;
+        control.onChanged?.();
       }
     },
     asked,
@@ -311,7 +338,9 @@ function controlledHost(): ControlledHost {
       }
       settle(result);
     },
-    outstanding: (): number => waiting.length
+    outstanding: (): number => waiting.length,
+    changes: (): number => changed,
+    onChanged: null
   };
   return control;
 } // End of function controlledHost()
@@ -2265,3 +2294,368 @@ describe('what no observation ever reaches', () => {
     coordinator.dispose();
   }); // End of the named-row case
 }); // End of the "what no observation ever reaches" suite
+
+describe('the state-change notification — Phase 2d-6-1c', () => {
+  /**
+   * Asserts that the count moved across one step, and answers the new count.
+   *
+   * @param control - The host whose count is read.
+   * @param before - The count before the step.
+   * @returns The count after it.
+   */
+  function movedSince(control: ControlledHost, before: number): number {
+    const after = control.changes();
+    expect(after).toBeGreaterThan(before);
+    return after;
+  } // End of function movedSince()
+
+  it('announces every registration transition, the pump slot and the drain record', async () => {
+    // **Entry 28, the ordinary lifecycle.** `idle → registering` at `start()`,
+    // `registering → registered` when the subscription resolves, then the request
+    // the registration makes, the slot the pump takes, the record the drain
+    // writes and the epoch the answer adopts — each read is a reader of this
+    // coordinator, and each moves the count.
+    const control = controlledHost();
+    const events = controlledEvents();
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    expect(control.changes()).toBe(0);
+    expect(coordinator.registration().kind).toBe('idle');
+
+    coordinator.start();
+    let count = movedSince(control, 0);
+    expect(coordinator.registration().kind).toBe('registering');
+
+    events.settle();
+    await flush();
+    count = movedSince(control, count);
+    expect(coordinator.registration().kind).toBe('registered');
+    expect(coordinator.isPumping()).toBe(true);
+    expect(control.outstanding()).toBe(1);
+
+    control.answer(batch({ newest_sequence: 4 }));
+    await flush();
+    count = movedSince(control, count);
+    expect(coordinator.watchState()).toEqual({ kind: 'watching', epoch: EPOCH });
+    expect(coordinator.drains()).toHaveLength(1);
+    expect(coordinator.isPumping()).toBe(false);
+
+    // A request that a closed slot cannot serve yet still moves `pending()`.
+    coordinator.workspaceOpened(null);
+    count = movedSince(control, count);
+    expect(coordinator.awaitingWorkspaceReady()).toBe(true);
+    coordinator.workspaceReady();
+    count = movedSince(control, count);
+    await flush();
+    expect(control.outstanding()).toBe(1);
+    control.answer(batch());
+    await flush();
+    count = movedSince(control, count);
+
+    coordinator.dispose();
+    movedSince(control, count);
+    expect(coordinator.isDisposed()).toBe(true);
+    expect(events.unlistens()).toBe(1);
+  }); // End of the ordinary-lifecycle case
+
+  it('announces the asynchronous subscription rejection', async () => {
+    // **The arm entry 28 names by itself**: nothing else runs when `subscribe`
+    // rejects, so a screen that was not told here would show `registering` for the
+    // life of the window.
+    const control = controlledHost();
+    const events = controlledEvents();
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.start();
+    const registering = control.changes();
+    expect(coordinator.registration().kind).toBe('registering');
+
+    events.fail(new Error('the backend refused to record the listener'));
+    await flush();
+
+    expect(control.changes()).toBeGreaterThan(registering);
+    expect(coordinator.registration().kind).toBe('failed');
+    expect(control.asked).toEqual([]);
+    coordinator.dispose();
+  }); // End of the subscription-rejection case
+
+  it('announces the inert default source refusing, and an abandoned registration', async () => {
+    const inert = controlledHost();
+    const viaInert = createReconciliationCoordinator(inert.host, INERT_RECONCILIATION_EVENTS);
+    viaInert.start();
+    const registering = inert.changes();
+    await flush();
+    expect(inert.changes()).toBeGreaterThan(registering);
+    expect(viaInert.registration().kind).toBe('failed');
+    viaInert.dispose();
+
+    // Disposed while `subscribe` is in flight: the resolution lands as
+    // `abandoned` (ruling 16), and that is announced too.
+    const control = controlledHost();
+    const events = controlledEvents();
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    coordinator.start();
+    coordinator.dispose();
+    const disposed = control.changes();
+    events.settle();
+    await flush();
+    expect(control.changes()).toBeGreaterThan(disposed);
+    expect(coordinator.registration().kind).toBe('abandoned');
+    expect(events.unlistens()).toBe(1);
+  }); // End of the inert-and-abandoned case
+
+  it('announces both block transitions and the membership-reload request', async () => {
+    // Blocked by a `discarded` rise under an open surface; then the permitted
+    // reload at the next batch once the registry is empty, which resets the block
+    // and reopens; and, separately, an `Unnamed` change raising the membership
+    // request.
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    control.surfaces = [SURFACE_OVER_ONE];
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    const running = control.changes();
+
+    control.answer(batch({ newest_sequence: 5, discarded: 1, observations: [removal(2)] }));
+    await flush();
+    let count = movedSince(control, running);
+    expect(coordinator.block().kind).toBe('blockedByLostHistory');
+
+    control.surfaces = [];
+    events.wake(EPOCH, 6);
+    await flush();
+    control.answer(batch({ newest_sequence: 6, discarded: 1 }));
+    await flush();
+    count = movedSince(control, count);
+    expect(coordinator.block()).toEqual({ kind: 'running' });
+    expect(control.reopened).toEqual(['/tmp/espanso']);
+
+    // The membership request, on a fresh session so the blocked arm is not what
+    // announces it.
+    const fresh = controlledHost();
+    const session = createReconciliationCoordinator(fresh.host, controlledEvents(true).source);
+    session.start();
+    await flush();
+    const quiet = fresh.changes();
+    fresh.answer(
+      batch({
+        newest_sequence: 3,
+        observations: [
+          {
+            Removed: {
+              sequence: 3,
+              document: { Unnamed: { relative_path: 'match/stranger.yml' } },
+              previous_revision: null
+            }
+          }
+        ]
+      })
+    );
+    await flush();
+    expect(fresh.changes()).toBeGreaterThan(quiet);
+    expect(session.membershipReloadWanted()).toBe(true);
+    session.dispose();
+    coordinator.dispose();
+  }); // End of the block-and-membership case
+
+  it('is placed so that an open re-entered from the callback cannot poison the cursor', async () => {
+    // **The placement rule of `notifyChanged()`, driven.** The one announcement
+    // that runs between a lifecycle capture and the drain's await is the
+    // `pending()` splice at the top of `runOneDrain`; a callback that reopens the
+    // workspace from inside it must leave the batch that comes back
+    // unattributable. The hook fires exactly there — the only announcement at
+    // which the queue is empty while a pump holds the slot.
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    let reentered = 0;
+    control.onChanged = (): void => {
+      if (reentered === 0 && coordinator.pending().length === 0 && coordinator.isPumping()) {
+        reentered += 1;
+        coordinator.workspaceOpened('/elsewhere');
+        coordinator.workspaceReady();
+      }
+    };
+    coordinator.start();
+    await flush();
+    expect(reentered).toBe(1);
+    expect(control.outstanding()).toBe(1);
+
+    control.answer(batch({ newest_sequence: 9 }));
+    await flush();
+
+    // Refused by `accept()`'s lifecycle comparison, not by either generation
+    // check: the fake host's generation never moved and the gate was reopened
+    // inside the same callback. Nothing of the cursor was written.
+    expect(coordinator.drains().map((record) => record.outcome)).toContain('staleOpen');
+    expect(coordinator.cursor()).toEqual({ epoch: 0, watermark: 0, lastDiscarded: 0 });
+    expect(coordinator.watchState()).toEqual({ kind: 'notObserved' });
+    coordinator.dispose();
+  }); // End of the re-entrant-callback case
+
+  it('takes no foreground listener, and issues no drain, on a coordinator the registering notification disposed', async () => {
+    // **The phase review's should-fix, re-derived.** The `registering`
+    // notification runs synchronously inside `start()`; a host that disposes
+    // from it saw `start()` go on to subscribe to the foreground source, leaving
+    // a listener nothing would ever remove. The registration resolving afterwards
+    // is the `abandoned` arm, as before.
+    const control = controlledHost();
+    const events = controlledEvents();
+    const activity = controlledForeground();
+    const coordinator = createReconciliationCoordinator(
+      control.host,
+      events.source,
+      activity.source
+    );
+    let disposedFromTheCallback = 0;
+    control.onChanged = (): void => {
+      if (coordinator.registration().kind === 'registering' && !coordinator.isDisposed()) {
+        disposedFromTheCallback += 1;
+        coordinator.dispose();
+      }
+    };
+    coordinator.workspaceReady();
+    coordinator.start();
+
+    expect(disposedFromTheCallback).toBe(1);
+    expect(coordinator.isDisposed()).toBe(true);
+    expect(activity.listening()).toBe(false);
+    activity.signal();
+    await flush();
+    expect(control.asked).toEqual([]);
+    expect(coordinator.isPumping()).toBe(false);
+
+    events.settle();
+    await flush();
+    expect(coordinator.registration().kind).toBe('abandoned');
+    expect(events.unlistens()).toBe(1);
+  }); // End of the disposed-while-registering case
+
+  it('issues no physical drain when the pending-splice notification disposed the coordinator', async () => {
+    // The one notification between a lifecycle capture and the drain's await.
+    // Before the fix a disposal from it still reached `host.drain()`, and the
+    // comment above that call said a disposal check there was unreachable — true
+    // until the notification made it caller code.
+    const control = controlledHost();
+    const events = controlledEvents(true);
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    let disposedFromTheCallback = 0;
+    control.onChanged = (): void => {
+      if (
+        disposedFromTheCallback === 0 &&
+        coordinator.pending().length === 0 &&
+        coordinator.isPumping()
+      ) {
+        disposedFromTheCallback += 1;
+        coordinator.dispose();
+      }
+    };
+    coordinator.start();
+    await flush();
+
+    expect(disposedFromTheCallback).toBe(1);
+    expect(control.asked).toEqual([]);
+    expect(control.outstanding()).toBe(0);
+    expect(coordinator.drains()).toEqual([
+      { afterSequence: 0, reasons: ['registration'], outcome: 'disposed' }
+    ]);
+    expect(events.unlistens()).toBe(1);
+  }); // End of the disposed-at-the-splice case
+
+  it('ends a registration exactly once, and drains nothing, when the registered notification disposes the coordinator', async () => {
+    // The symmetric path the review did not name, checked and found not to
+    // hold: `unlisten` is stored before `registered` is announced, so a disposal
+    // from that announcement calls it once, and the `requestDrain` after the
+    // announcement refuses on the disposed coordinator. Kept as the positive pin.
+    const control = controlledHost();
+    const events = controlledEvents();
+    const coordinator = createReconciliationCoordinator(control.host, events.source);
+    control.onChanged = (): void => {
+      if (coordinator.registration().kind === 'registered' && !coordinator.isDisposed()) {
+        coordinator.dispose();
+      }
+    };
+    coordinator.start();
+    events.settle();
+    await flush();
+
+    expect(coordinator.isDisposed()).toBe(true);
+    expect(events.unlistens()).toBe(1);
+    expect(control.asked).toEqual([]);
+    expect(coordinator.pending()).toEqual([]);
+    coordinator.dispose();
+    expect(events.unlistens()).toBe(1);
+  }); // End of the disposed-when-registered case
+}); // End of the "state-change notification" suite
+
+describe('the reopen from the retained request — Phase 2d-6-1c', () => {
+  it('re-runs exactly the retained request, null included, and resets the block', async () => {
+    const control = controlledHost();
+    const coordinator = createReconciliationCoordinator(control.host, controlledEvents(true).source);
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    // Block it first, so the reset is observable.
+    control.surfaces = [SURFACE_OVER_ONE];
+    control.answer(batch({ newest_sequence: 5, discarded: 1 }));
+    await flush();
+    expect(coordinator.block().kind).toBe('blockedByLostHistory');
+    expect(control.reopened).toEqual([]);
+    const before = control.changes();
+
+    expect(coordinator.reopenFromRetainedRequest()).toBe(true);
+
+    // **The retained request, never a root this file could hand over**, the block
+    // back to `running`, and the transition announced. The registry is
+    // deliberately still non-empty here: rechecking it is the window's, and this
+    // member's one fence is disposal.
+    expect(control.reopened).toEqual(['/tmp/espanso']);
+    expect(coordinator.block()).toEqual({ kind: 'running' });
+    expect(control.changes()).toBeGreaterThan(before);
+
+    coordinator.workspaceOpened(null);
+    coordinator.workspaceReady();
+    expect(coordinator.reopenFromRetainedRequest()).toBe(true);
+    expect(control.reopened).toEqual(['/tmp/espanso', null]);
+    coordinator.dispose();
+  }); // End of the retained-request case
+
+  it('refuses after disposal, reopening nothing and announcing nothing', async () => {
+    const control = controlledHost();
+    const coordinator = createReconciliationCoordinator(control.host, controlledEvents(true).source);
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    coordinator.dispose();
+    const disposed = control.changes();
+
+    expect(coordinator.reopenFromRetainedRequest()).toBe(false);
+
+    expect(control.reopened).toEqual([]);
+    expect(control.changes()).toBe(disposed);
+  }); // End of the disposed case
+
+  it('ends the applying lifecycle, so a drain in flight installs nothing', async () => {
+    // The same fence `recoverFromLostHistory` moves: a host that reopens without
+    // announcing — this one — must still leave the batch that was out when the
+    // person asked unable to claim the lifecycle it was drained in.
+    const control = controlledHost();
+    const coordinator = createReconciliationCoordinator(control.host, controlledEvents(true).source);
+    coordinator.workspaceOpened('/tmp/espanso');
+    coordinator.workspaceReady();
+    coordinator.start();
+    await flush();
+    expect(control.outstanding()).toBe(1);
+
+    expect(coordinator.reopenFromRetainedRequest()).toBe(true);
+    control.answer(batch({ newest_sequence: 8 }));
+    await flush();
+
+    expect(coordinator.drains().map((record) => record.outcome)).toEqual(['staleOpen']);
+    expect(coordinator.cursor().watermark).toBe(0);
+    coordinator.dispose();
+  }); // End of the lifecycle case
+}); // End of the "reopen from the retained request" suite

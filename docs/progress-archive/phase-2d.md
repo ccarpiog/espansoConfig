@@ -4935,3 +4935,25 @@ parallel **real filesystem watchers** inside one binary, not two cargo processes
    serial form, redirected to a file, and the complementary `0 failed` question asked of every one of
    the 26 `test result` lines — and the gate was clean on both of its runs.
 
+
+### Phase 2d-6-1b's verification narrative — archived 2026-09-21 at Phase 2d-6-1c
+
+_Archived verbatim from `PROGRESS.md`; the ladder section that follows it there is live and was kept._
+
+### Phase 2d-6-1b's verification: three frontend gates re-measured twice, the Rust cell held
+
+**`1323 / 447 / 2549 / 192`** at 2d-6-1b, from `1323 / 447 / 2520 / 192`. Measured by the orchestrator
+on the tree the worker reported (`2543`) and again on the final tree after the review's three fixes
+(`2549`), each gate on its own, each exit read directly (never through a pipe): `npm run check` **447
+files, 0 errors, 0 warnings** (unchanged — no new file; the record and the review pair are not under
+`tsconfig`); `npm test` **2549 passed, 64 files** (+29 from 2520, **all in `workspace.test.ts`, 245 →
+274**, run alone to confirm: +23 for the four deliverables and the entry 41 corrections, then +6 pinning
+the review's three findings; `observationDelivery.test.ts` reshaped at 14 → 14; `ipc-detail` 141 → 141,
+no new `.ts` file under the scanned roots); `npm run build` **192 modules** (unchanged, no new module),
+the server-only bundle markers **absent** (`rg -l` lists no file, exit 1) and the client-only **present
+(2)**. **The Rust cell is held at 1323 and was not re-measured**: `git status` shows no path under
+`src-tauri/` or `crates/` beyond the instrument's `main.rs` hook, whose pair diff is still `5
+insertions(+), 1 deletion(-)`. The instrument's contribution is unchanged (Rust 0, svelte-check +1,
+vitest +1, Vite +1; a committed tree builds 191). 2d-6-1a's verification narrative, formerly here, is
+archived verbatim in [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-1a's
+verification narrative"*.

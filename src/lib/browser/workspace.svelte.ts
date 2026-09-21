@@ -94,6 +94,7 @@ import type {
   NewMatchPosition,
   ReconciliationBatch,
   SaveResult,
+  ScalarView,
   WorkspaceSummary
 } from '../ipc/types';
 import {
@@ -112,9 +113,11 @@ import type {
 } from './conflictSource';
 import {
   arbitratedDelivery,
+  decideAutomaticReload,
   retainedDelivery,
   writtenHereDelivery,
   type AutomaticReloadGuardInputs,
+  type AutomaticReloadRefusal,
   type ObservationDelivery
 } from './observationDelivery';
 import {
@@ -151,9 +154,12 @@ import {
   createReconciliationCoordinator,
   INERT_FOREGROUND_EVENTS,
   INERT_RECONCILIATION_EVENTS,
+  NO_RECONCILIATION_TRANSPORT,
   type ForegroundSource,
   type ReconciliationBlock,
-  type ReconciliationCoordinator
+  type ReconciliationCoordinator,
+  type ReconciliationWatchState,
+  type RegistrationState
 } from './reconciliationCoordinator';
 import { filterMatches } from './search';
 import type { SelectedMatch, SelectionRepair } from './selection';
@@ -606,10 +612,11 @@ function ownedMatchOf(match: MatchView): MatchView {
  * one of those comparisons and the install it approved.
  *
  * **Exactly how deep it copies, and what it therefore does not promise.** Two
- * levels, plus one field at the third: this view's own fields, each match's own
- * fields ({@link ownedMatchOf}), and each match's `id`
- * ({@link ownedMatchIdOf}). That is the depth this module reads after a guard,
- * and the readers are these five:
+ * levels, plus one field at the third, plus the top-level keys: this view's own
+ * fields, each match's own fields ({@link ownedMatchOf}), each match's `id`
+ * ({@link ownedMatchIdOf}), and each of `top_level_keys` with its span
+ * ({@link ownedScalarOf}). That is the depth this module reads after a guard,
+ * and the readers are these five, plus the sixth the keys paragraph below names:
  *
  * - `installView` reads `next.id` and the `id` of every element of `views`;
  * - `repairAfter` reads `view.id` and indexes `view.matches`, and `reresolve`
@@ -629,11 +636,24 @@ function ownedMatchOf(match: MatchView): MatchView {
  * order is the whole difference, and it is stated here so that changing it is a
  * decision rather than an accident.
  *
+ * **And the top-level keys, each with its span** — Phase 2d-6-1c, the phase
+ * review's blocker. A sixth reader stands after a guard: `creatorEligibilityFor`
+ * reads `top_level_keys[i].text` through `destinationEligibility`, and it is
+ * asked inside two guards — the coordinator's `creatorEligibility` host member
+ * in `tellTheSurfaceAbout`, and `automaticReloadGuardFor` inside
+ * `requestFileReread`'s installation guard, **after** that guard has read the
+ * registry list and the two hold tables. With the keys held by reference, a
+ * `text` getter there ran caller code between the guard's reads and the
+ * installation, and a surface it registered was invisible to the list already
+ * taken: the answer installed under a surface that had just opened.
+ * {@link ownedScalarOf} copies every key's own fields and its span here, so
+ * every later read of one is a read of data this module wrote.
+ *
  * **Anything deeper is still the command's own object** — the value of
  * `trigger`, `content`, `options`, `profile`, and the elements of
- * `top_level_keys`, `global_vars`, `imports`, `coverage`, `undescended`,
- * `diagnostics`, `hazards` and `unknown_entries` — so a consumer that walks one
- * of those is reading caller-controlled data, and no type says so.
+ * `global_vars`, `imports`, `coverage`, `undescended`, `diagnostics`, `hazards`
+ * and `unknown_entries` — so a consumer that walks one of those is reading
+ * caller-controlled data, and no type says so.
  *
  * **What the compile-time claim covers, and what it silently does not.** A
  * *required* member added to {@link DocumentView}, {@link MatchView} or
@@ -653,6 +673,10 @@ function ownedProjectionOf(view: DocumentView): DocumentView {
   for (const match of view.matches) {
     matches.push(ownedMatchOf(match));
   } // End of the loop over the projection's matches
+  const topLevelKeys: ScalarView[] = [];
+  for (const key of view.top_level_keys) {
+    topLevelKeys.push(ownedScalarOf(key));
+  } // End of the loop over the projection's top-level keys
   return {
     id: view.id,
     path: view.path,
@@ -667,7 +691,7 @@ function ownedProjectionOf(view: DocumentView): DocumentView {
     parsed: view.parsed,
     stream_documents: view.stream_documents,
     shape: view.shape,
-    top_level_keys: view.top_level_keys,
+    top_level_keys: topLevelKeys,
     matches,
     global_vars: view.global_vars,
     imports: view.imports,
@@ -680,6 +704,32 @@ function ownedProjectionOf(view: DocumentView): DocumentView {
     safely_editable: view.safely_editable
   };
 } // End of function ownedProjectionOf()
+
+/**
+ * Copies one scalar out of a command's answer into an object this module built —
+ * Phase 2d-6-1c.
+ *
+ * Every own field of {@link ScalarView} and the two numbers of its span, read once
+ * here and never again. `text` is the field the guards read; the rest are copied
+ * so that the object is wholly this module's rather than a hybrid whose remaining
+ * fields would still run a command's accessors. The same compile-time caveat as
+ * {@link ownedProjectionOf}: a required field added to `ScalarView` fails here, an
+ * optional one does not.
+ *
+ * @param scalar - A scalar exactly as a command answered it.
+ * @returns A scalar whose own properties, and whose span, are data this module
+ *   wrote.
+ */
+function ownedScalarOf(scalar: ScalarView): ScalarView {
+  return {
+    text: scalar.text,
+    decoded: scalar.decoded,
+    style: scalar.style,
+    span: { start: scalar.span.start, end: scalar.span.end },
+    node: scalar.node,
+    ambiguous_yaml_1_1: scalar.ambiguous_yaml_1_1
+  };
+} // End of function ownedScalarOf()
 
 /**
  * Copies one sidebar row out of a command's answer into an object this module
@@ -1062,6 +1112,179 @@ export type UncertaintyAcknowledgementOutcome =
       readonly kind: 'refused';
       /** The first question that refused it. */
       readonly reason: UncertaintyAcknowledgementRefusal;
+    };
+
+/**
+ * Why the wake registration failed, as a code — Phase 2d-6-1c, the 2d-6 record's
+ * §3 entry 28.
+ *
+ * **The sanitizing narrowing.** The coordinator's own `RegistrationState` keeps
+ * whatever `subscribe` rejected with, unchanged and typed `unknown`, because a
+ * registration failure must stay observable to its own suite; a window gets one
+ * of two codes instead, so that no `Error` instance, no Tauri sentence and no
+ * developer string crosses out of the model. `noTransport` is the inert default
+ * source refusing — a state built with no wake transport, which every test state
+ * is — and `rejected` is everything else, a transport that exists and refused.
+ * Neither is a message: the EN/ES sentences for a failed registration are
+ * 2d-6-9's, and a `switch` over these two with a `never` terminus is how it
+ * selects one.
+ */
+export type RegistrationFailureReason = 'noTransport' | 'rejected';
+
+/**
+ * What became of the wake registration, as a window may know it — Phase 2d-6-1c.
+ *
+ * The coordinator's five arms with the failure arm narrowed to
+ * {@link RegistrationFailureReason}. Every value is frozen and built here; nothing
+ * a reader gets is an object the coordinator holds.
+ */
+export type ReconciliationRegistrationState =
+  | {
+      /** `start()` has not been called. */
+      readonly kind: 'idle';
+    }
+  | {
+      /** `subscribe` was called and has not settled. */
+      readonly kind: 'registering';
+    }
+  | {
+      /** `subscribe` resolved; a wake reaches this window. */
+      readonly kind: 'registered';
+    }
+  | {
+      /** `subscribe` rejected; nothing is listening and nothing pretends to be. */
+      readonly kind: 'failed';
+      /** Which kind of refusal, as a code. */
+      readonly reason: RegistrationFailureReason;
+    }
+  | {
+      /** `subscribe` resolved after disposal and its unlisten was called at once. */
+      readonly kind: 'abandoned';
+    };
+
+/**
+ * What a guarded workspace reload request decided — Phase 2d-6-1c, the 2d-6
+ * record's §3 entry 29.
+ *
+ * **Two request methods share it, and both are decisions, not sentences.** No
+ * key hangs off a reason: 2d-6-9 draws these, and what it needs to draw a refusal
+ * travels with the arm — which surface kinds are open, which files have a write
+ * out — so the drawing step does not have to re-ask a registry that may have
+ * moved since the refusal. The refusals are asked in this order, the strongest
+ * claim first: a disposed coordinator can reload nothing in this window ever
+ * again; a workspace that has not reached `ready` has no membership to refresh
+ * and no history to recover; for the lost-history intent alone, a `running`
+ * session has nothing to recover from; a write in flight settles on its own and
+ * the request is simply early; an open surface is the one refusal the person can
+ * act on, and the arm names what to close.
+ */
+export type WorkspaceReloadOutcome =
+  | {
+      /**
+       * The retained original open request was re-run through `open()`.
+       *
+       * **Started, not finished**: `open()` is asynchronous and this state's
+       * `status` is what says where it got to, exactly as after any other open.
+       */
+      readonly kind: 'reloading';
+    }
+  | {
+      /** Nothing was reopened. */
+      readonly kind: 'refused';
+      /** The coordinator has been disposed; no reload can be made from here. */
+      readonly reason: 'disposed';
+    }
+  | {
+      /** Nothing was reopened. */
+      readonly kind: 'refused';
+      /**
+       * An `open()` has begun and none has since reached `ready` — one is loading,
+       * or the last one failed. The coordinator's gate cannot tell those apart and
+       * this reason does not pretend to.
+       */
+      readonly reason: 'workspaceNotReady';
+    }
+  | {
+      /** Nothing was reopened. */
+      readonly kind: 'refused';
+      /** A write this window started has not settled. */
+      readonly reason: 'writeInFlight';
+      /** The files with a write out, in no particular order, without repetition. */
+      readonly documents: readonly DocumentId[];
+    }
+  | {
+      /** Nothing was reopened. */
+      readonly kind: 'refused';
+      /** A write surface is registered; closing it is what permits the request. */
+      readonly reason: 'surfaceOpen';
+      /** The kind of every open surface, in the registry's own order. */
+      readonly surfaces: readonly OpenWriteSurfaceKind[];
+    }
+  | {
+      /** Nothing was reopened. */
+      readonly kind: 'refused';
+      /**
+       * The lost-history request only: reconciliation is `running`, so there is
+       * no lost history to recover from. A stale press after a batch-driven
+       * recovery already took the permitted reload lands here rather than
+       * reloading the window a second time.
+       */
+      readonly reason: 'notBlocked';
+    };
+
+/**
+ * Why a guarded file reread was refused — Phase 2d-6-1c, the 2d-6 record's §3
+ * entry 32.
+ *
+ * Four this state asks first, in order; then 1a's three per-file hold reasons in
+ * `decideAutomaticReload`'s own order; then the write barrier, last because a
+ * write in flight is the one condition that ends by itself. `notAddressable` is a
+ * file this window holds no row for, or one an `Added` observation invented and
+ * the open workspace does not resolve — `reload_document` would refuse it, so the
+ * request refuses first. `blockedByLostHistory` is the consult's *recheck the
+ * block*: a session holding everything it has may not clear one file's `stale`
+ * mark while its membership is in question.
+ */
+export type FileRereadRefusalReason =
+  | 'disposed'
+  | 'workspaceNotReady'
+  | 'notAddressable'
+  | 'blockedByLostHistory'
+  | 'writeInFlight'
+  | AutomaticReloadRefusal;
+
+/**
+ * What a guarded file reread request did — Phase 2d-6-1c.
+ *
+ * **Three arms, and `completed` claims less than "installed".** `refused` says
+ * which guard refused and *when*: at the request, before any command was sent;
+ * or at the installation, after the read answered, because a guard that held
+ * when the request was made had moved by the time the answer came back — the
+ * read was made and its answer discarded. `failed` is the command's own refusal,
+ * reported and answered as every read on this state is. `completed` says the read
+ * did not fail and no guard refused it; whether *this* answer was installed is
+ * what the projections say, for `rereadDocument`'s reason — an answer the window
+ * no longer wanted is discarded rather than applied, and nothing here can tell
+ * that from an installation without claiming more than the captures prove.
+ */
+export type FileRereadOutcome =
+  | {
+      /** A guard refused. */
+      readonly kind: 'refused';
+      /** Which one. */
+      readonly reason: FileRereadRefusalReason;
+      /** Before the read was sent, or immediately before its answer was installed. */
+      readonly at: 'request' | 'installation';
+    }
+  | {
+      /** The read itself was refused by the command. */
+      readonly kind: 'failed';
+      /** Its failure, as reported. */
+      readonly failure: IpcFailure;
+    }
+  | {
+      /** The read did not fail and every guard held at the installation. */
+      readonly kind: 'completed';
     };
 
 /** The browser's reactive state. */
@@ -1566,14 +1789,21 @@ export interface BrowserState {
    * per file; `observationRetained` is the barrier's table; `surfaceOpen` is the
    * write-surface registry asked through `targetingSurfaceFor`, the same
    * conservative question the coordinator asks before it rereads. All three are
-   * read in one synchronous block and the answer is frozen.
+   * read in one synchronous block and the answer is frozen, and **the block runs
+   * no caller code**: every object the eligibility question walks — the rows, the
+   * views, and since Phase 2d-6-1c each view's top-level keys — is a copy this
+   * module made at ingress. What the type cannot force is that it stays so: a
+   * field the predicate starts reading that ingress does not copy puts a
+   * command's accessor back inside a guard, and only the key-getter case in
+   * `workspace.test.ts` would notice.
    *
    * **A value, not a decision, and not a request.** The predicate that decides is
-   * 1a's, and the guarded reread request that asks it — rechecking every guard
-   * immediately before installation, the record's entry 32 — is 2d-6-1c's. This
-   * member triggers nothing. What it cannot force is that its answer is still
-   * current by the time a caller acts: it is a snapshot, and the caller that
-   * installs must ask again inside its guard.
+   * 1a's, and {@link BrowserState.requestFileReread} is the guarded reread request
+   * that asks it — at the request and again immediately before installation, the
+   * record's entry 32 (Phase 2d-6-1c). This member triggers nothing. What it
+   * cannot force is that its answer is still current by the time a caller acts:
+   * it is a snapshot, and the caller that installs must ask again inside its
+   * guard, which is exactly what that request does.
    *
    * @param document - The file.
    * @returns The three facts, as they stand at the call.
@@ -2505,6 +2735,138 @@ export interface BrowserState {
    * @returns `true` once such a request has been made in this session.
    */
   membershipReloadWanted(): boolean;
+
+  /**
+   * How many times the coordinator has announced a transition — Phase 2d-6-1c,
+   * the 2d-6 record's §3 entry 28.
+   *
+   * **The one reconciliation signal, and the dependency every coordinator reader
+   * on this state subscribes a `$derived` or an `$effect` to.** It is a counter
+   * and nothing else: no watch state, block, registration or flag is copied into
+   * this state, so there is no second copy to keep in step — each reader re-asks
+   * the coordinator and reads this number first, exactly as `openWriteSurfaces()`
+   * reads `surfaceGeneration`. A component may read this directly to re-derive
+   * from several readers at once.
+   *
+   * **What the type forces and what it cannot, in one sentence.** It forces that
+   * every announcement the coordinator makes moves one number; it cannot force
+   * the coordinator to announce every transition — a typed callback cannot make
+   * every mutation site call it — and `reconciliationCoordinator.test.ts` is what
+   * counts the announcements across every transition, asynchronous subscription
+   * rejection included. It also cannot force that nothing else moves with it: it
+   * touches no selection and no other value here, and `workspace.test.ts` pins
+   * that the selection is the very object it was across every announcement.
+   *
+   * @returns The count since this state was built; never reset by `open()`.
+   */
+  reconciliationRevision(): number;
+
+  /**
+   * What this window can truthfully say about being watched — Phase 2d-6-1c, the
+   * 2d-6 record's §3 entry 28 and its §6 item 11.
+   *
+   * The coordinator's answer, unchanged: a `notObserved`, `notWatched` or
+   * `watching` value carrying at most an epoch number, which needs no narrowing.
+   * Reading it subscribes a derivation to {@link BrowserState.reconciliationRevision}.
+   *
+   * @returns The typed state the 2d-5 record's ruling 9 asks for.
+   */
+  reconciliationWatchState(): ReconciliationWatchState;
+
+  /**
+   * What became of the wake registration, sanitized — Phase 2d-6-1c.
+   *
+   * **No receiver, lease, unlisten or `Error` crosses here.** The coordinator's
+   * failure arm carries whatever `subscribe` rejected with; this answers a
+   * {@link RegistrationFailureReason} code in its place, built fresh and frozen.
+   * Reading it subscribes a derivation to {@link BrowserState.reconciliationRevision}.
+   *
+   * @returns The registration state a window may draw from.
+   */
+  reconciliationRegistration(): ReconciliationRegistrationState;
+
+  /**
+   * Asks for the workspace's membership to be refreshed — Phase 2d-6-1c, the 2d-6
+   * record's §3 entry 29.
+   *
+   * **A whole `open()` with the coordinator's retained original request, on a
+   * person's ask.** The request never passes through this state: this method
+   * takes no argument at all, so nothing a screen displays can be handed in as a
+   * root, and the coordinator re-runs what `open()` was last called with — `null`
+   * included, which means *discover the configuration root*. It ends in the
+   * existing `open()`, which clears every projection, the selection and the
+   * viewer; that is what a membership refresh is.
+   *
+   * **Four rechecks at execution, in one synchronous block with the reopen** and
+   * with no caller code between them: the coordinator's disposal, its open gate
+   * (`awaitingWorkspaceReady()`), the outstanding writes and the write-surface
+   * registry. An open surface refuses with the kinds that are open; closing the
+   * last one **permits and does not trigger** — nothing here observes the
+   * registry emptying, and only a fresh call reloads. It is permitted whether or
+   * not {@link BrowserState.membershipReloadWanted} is `true`: that flag says an
+   * observation *asked*, and a person may refresh without one having asked.
+   *
+   * What the type forces is that no path is accepted; what it cannot force is
+   * that a caller rechecks anything itself, which is why every check is inside.
+   *
+   * @returns Whether the reopen was started, and if not, the first reason it was
+   *   refused.
+   */
+  requestMembershipReload(): WorkspaceReloadOutcome;
+
+  /**
+   * Asks for recovery from a hole in the observation history — Phase 2d-6-1c,
+   * the 2d-6 record's §3 entry 29.
+   *
+   * **The same reopen as {@link BrowserState.requestMembershipReload}, under one
+   * more condition**: reconciliation must be `blockedByLostHistory`. A separate
+   * intent and a separate method because the two controls say different things
+   * to a person — one refreshes a membership an observation could not describe,
+   * the other recovers from a session that has been holding everything it has —
+   * and because a request for a recovery there is nothing to recover from is
+   * refused (`notBlocked`) rather than reloading the window again: the permitted
+   * reload may already have been taken at the batch after the last surface
+   * closed, and a stale press must not clear a workspace twice.
+   *
+   * The four rechecks, the no-argument rule and *permits without triggering* are
+   * the sibling's, word for word.
+   *
+   * @returns Whether the reopen was started, and if not, the first reason it was
+   *   refused.
+   */
+  requestLostHistoryRecovery(): WorkspaceReloadOutcome;
+
+  /**
+   * Reads one file again on a person's ask, under every guard — Phase 2d-6-1c,
+   * the 2d-6 record's §3 entry 32.
+   *
+   * **The control for a `stale` file whose surface has closed, and never
+   * {@link BrowserState.rereadDocument}.** That member's guard always holds; this
+   * one asks eight questions and asks them **twice** — once at the request, so a
+   * refusal costs no command, and once immediately before the installation, in
+   * the same synchronous block as it, through `rereadUnderGuard`'s guard. The
+   * eight: the coordinator's disposal, its open gate, whether this window holds an
+   * addressable row for the file, the lost-history block, 1b's three per-file
+   * facts through 1a's `decideAutomaticReload` — the uncertainty hold, a retained
+   * observation, an open surface over the file — and last a write in flight for
+   * the file. A guard that held at the request and moved while the read was out
+   * refuses the installation, and the answer says so (`at: 'installation'`).
+   *
+   * **It marks nothing `stale` and clears the mark only by installing**, which is
+   * `rereadUnderGuard`'s own rule: the clear lives with the install and a refusal
+   * clears nothing. The automatic clean path is untouched — a fresh accepted
+   * observation still rereads through the coordinator's guard when every guard
+   * permits — and this is a second caller of the same helper, not a change to it.
+   *
+   * What the type forces is that the guard is a function asked by the helper;
+   * what it cannot force is that the function re-asks rather than replays, and
+   * `workspace.test.ts` flips each guard between the request and the answer to
+   * pin it.
+   *
+   * @param document - The file to read again.
+   * @returns What was decided, and if the read was made, how it ended.
+   */
+  requestFileReread(document: DocumentId): Promise<FileRereadOutcome>;
 }
 
 /**
@@ -2937,6 +3299,25 @@ export function createBrowserState(
   // a fourth written without a `noticeWriteSurfaces()` would leave this number
   // behind the registry with nothing failing.
   let surfaceGeneration = $state(0);
+  // **The coordinator's announcements, counted into a signal** — Phase 2d-6-1c,
+  // the 2d-6 record's §3 entry 28. The coordinator is not reactive and stays so;
+  // it tells this state, through the host member below, that a value one of its
+  // readers answers has moved, and this number is bumped in that callback and
+  // nowhere else. **A count, never a copy**: no watch state, block or flag is
+  // mirrored, so nothing here can be behind the coordinator — every reader
+  // re-asks it and reads this number first, which is `surfaceGeneration`'s shape
+  // with the direction reversed (the registry's generation is copied because the
+  // registry has one; the coordinator has none and announces instead).
+  //
+  // **What it forces and what it cannot, in one sentence.** It forces that a
+  // `$derived` or an `$effect` reading any coordinator reader on this state re-runs
+  // on every announcement; it cannot force the coordinator to announce every
+  // transition, because a typed callback does not make a mutation site call it,
+  // and that is `reconciliationCoordinator.test.ts`'s to count. It moves nothing
+  // else: not the selection, not a generation, not a status — the callback is one
+  // increment, and `workspace.test.ts` holds the selection to the same object
+  // across every announcement.
+  let reconciliationRevision = $state(0);
   // **What this window can say about a file it did not reload** — Phase 2d-5-4.
   // One entry per document at most, replaced rather than appended, and `$state`
   // because 2d-6 draws these: a `Map` in `$state` is not reactive without Svelte's
@@ -3165,6 +3546,17 @@ export function createBrowserState(
        */
       reopenWorkspace: (request: string | null): void => {
         void state.open(request);
+      },
+      /**
+       * Bumps the one reconciliation signal — Phase 2d-6-1c.
+       *
+       * One increment and nothing else, so that a callback the coordinator makes
+       * from inside a transition can neither throw nor re-enter this state; what
+       * it costs is one invalidation of every derivation that read a coordinator
+       * reader here.
+       */
+      reconciliationChanged: (): void => {
+        reconciliationRevision += 1;
       }
     },
     events,
@@ -3194,6 +3586,163 @@ export function createBrowserState(
     }
     return creatorEligibilityOf(summary, viewOf(document) ?? null);
   } // End of function creatorEligibilityFor()
+
+  /**
+   * Narrows the coordinator's registration state to what a window may hold —
+   * Phase 2d-6-1c.
+   *
+   * **The one place the rejection value is read, and it is read for one
+   * comparison.** The inert source rejects with an `Error` carrying
+   * `NO_RECONCILIATION_TRANSPORT`, which is the exported string that exists for
+   * exactly this distinction; anything else is `rejected`. The `message` read is
+   * on a value the transport threw — caller code in the sense every read of an
+   * injected value is — and nothing is spent after it, so a hostile getter can
+   * make this reader throw and nothing worse. Every answer is a fresh frozen
+   * literal: the coordinator's own object never crosses.
+   *
+   * @param registration - The coordinator's answer.
+   * @returns The sanitized state.
+   */
+  function sanitizedRegistration(registration: RegistrationState): ReconciliationRegistrationState {
+    switch (registration.kind) {
+      case 'idle':
+      case 'registering':
+      case 'registered':
+      case 'abandoned':
+        return Object.freeze({ kind: registration.kind });
+      case 'failed': {
+        const error = registration.error;
+        const reason: RegistrationFailureReason =
+          error instanceof Error && error.message === NO_RECONCILIATION_TRANSPORT
+            ? 'noTransport'
+            : 'rejected';
+        return Object.freeze({ kind: 'failed', reason });
+      }
+      default: {
+        const exhaustive: never = registration;
+        return exhaustive;
+      }
+    }
+  } // End of function sanitizedRegistration()
+
+  /**
+   * The first workspace-reload recheck that refuses, or `null` — Phase 2d-6-1c,
+   * the 2d-6 record's §3 entry 29.
+   *
+   * **Every read is this state's own or the coordinator's, and none runs caller
+   * code**: three coordinator closures over plain `let`s, a `Map` of numbers and
+   * the registry's own list. That is what lets {@link reopenRetained} treat the
+   * answer as current in the statement after it. The registry is read directly
+   * rather than through the reactive mirror, for the coordinator host's reason:
+   * this is a decision, not a dependency.
+   *
+   * **The order.** Disposal and the open gate first, because either means there
+   * is no shown workspace for any reload to act on; then, for the lost-history
+   * intent alone, whether there is a hole to recover from at all; then the two
+   * conditions that are about *now* — a write that will settle by itself, and a
+   * surface the person can close.
+   *
+   * @param intent - Which request is asking; only `lostHistory` asks the block.
+   * @returns The refusal, or `null` when every recheck permits.
+   */
+  function workspaceReloadRefusal(
+    intent: 'membership' | 'lostHistory'
+  ): Extract<WorkspaceReloadOutcome, { kind: 'refused' }> | null {
+    if (reconciliation.isDisposed()) {
+      return { kind: 'refused', reason: 'disposed' };
+    }
+    if (reconciliation.awaitingWorkspaceReady()) {
+      return { kind: 'refused', reason: 'workspaceNotReady' };
+    }
+    if (intent === 'lostHistory' && reconciliation.block().kind !== 'blockedByLostHistory') {
+      return { kind: 'refused', reason: 'notBlocked' };
+    }
+    if (writesInFlight.size > 0) {
+      return {
+        kind: 'refused',
+        reason: 'writeInFlight',
+        documents: Object.freeze([...writesInFlight.keys()])
+      };
+    }
+    const open = writeSurfaces.openWriteSurfaces();
+    if (open.length > 0) {
+      return {
+        kind: 'refused',
+        reason: 'surfaceOpen',
+        surfaces: Object.freeze(open.map((surface) => surface.kind))
+      };
+    }
+    return null;
+  } // End of function workspaceReloadRefusal()
+
+  /**
+   * Rechecks and reopens, in one synchronous block — Phase 2d-6-1c.
+   *
+   * **The whole body of the two request methods.** The rechecks and the reopen
+   * are adjacent statements with no caller code between them: the coordinator's
+   * `reopenFromRetainedRequest` asks disposal once more on its own side and then
+   * reaches `open()` through the host's `reopenWorkspace`, with the request it
+   * retained. The `false` arm is reachable only by a disposal between the two
+   * statements, which no code runs, and is answered as the refusal it is rather
+   * than trusted away.
+   *
+   * @param intent - Which request is asking.
+   * @returns The outcome.
+   */
+  function reopenRetained(intent: 'membership' | 'lostHistory'): WorkspaceReloadOutcome {
+    const refusal = workspaceReloadRefusal(intent);
+    if (refusal !== null) {
+      return refusal;
+    }
+    if (!reconciliation.reopenFromRetainedRequest()) {
+      return { kind: 'refused', reason: 'disposed' };
+    }
+    return { kind: 'reloading' };
+  } // End of function reopenRetained()
+
+  /**
+   * The first guard that refuses a person's reread of one file, or `null` —
+   * Phase 2d-6-1c, the 2d-6 record's §3 entry 32.
+   *
+   * **Asked twice by `requestFileReread`, and it is the same function both
+   * times** — once before the command is sent and once inside `rereadUnderGuard`'s
+   * guard, immediately before the installation. Four questions of this state and
+   * the coordinator, then 1a's predicate over 1b's three facts, then the write
+   * barrier — the hold before the barrier because its three reasons are the
+   * stronger claims (`decideAutomaticReload` orders them so for the same reason)
+   * and a write in flight is the one condition here that ends by itself. The
+   * addressability read walks `documents` and `pendingAdditions`, both this
+   * module's own arrays of this module's own objects; `automaticReloadGuardFor`
+   * reads three tables and the eligibility predicate over ingress copies — the
+   * top-level keys included, since the phase review's blocker made `ownedScalarOf`
+   * copy them — so nothing here runs caller code, and the key-getter case in
+   * `workspace.test.ts` is what holds that true.
+   *
+   * @param document - The file.
+   * @returns The reason, or `null` when every guard permits.
+   */
+  function fileRereadRefusal(document: DocumentId): FileRereadRefusalReason | null {
+    if (reconciliation.isDisposed()) {
+      return 'disposed';
+    }
+    if (reconciliation.awaitingWorkspaceReady()) {
+      return 'workspaceNotReady';
+    }
+    if (!documents.some((held) => held.id === document) || pendingAdditions.includes(document)) {
+      return 'notAddressable';
+    }
+    if (reconciliation.block().kind === 'blockedByLostHistory') {
+      return 'blockedByLostHistory';
+    }
+    const decision = decideAutomaticReload(state.automaticReloadGuardFor(document));
+    if (decision.kind === 'refused') {
+      return decision.reason;
+    }
+    if ((writesInFlight.get(document) ?? 0) > 0) {
+      return 'writeInFlight';
+    }
+    return null;
+  } // End of function fileRereadRefusal()
 
   /**
    * Brings the reactive mirror into step with the registry.
@@ -4309,10 +4858,15 @@ export function createBrowserState(
     forgetFileText();
     installView(next);
     // **The clear lives with the install** — Phase 2d-5-4's second review, and it
-    // used to live in the coordinator's guard. There it reached one caller of two:
-    // `BrowserState.rereadDocument` passes `ALWAYS_PERMITTED`, so a person using the
-    // recovery control on a file a failed guarded reread had marked `stale` read it
-    // successfully from disk and the mark stayed for the rest of the session.
+    // used to live in the coordinator's guard. There it reached one caller of the
+    // two this helper then had: `BrowserState.rereadDocument` passes
+    // `ALWAYS_PERMITTED`, so a person using the recovery control on a file a failed
+    // guarded reread had marked `stale` read it successfully from disk and the
+    // mark stayed for the rest of the session. **Since Phase 2d-6-1c there are
+    // three callers**: `requestFileReread` passes a guard that re-asks disposal,
+    // the open gate, addressability, the lost-history block, the write barrier and
+    // the per-file hold immediately before this installation, and its refusal
+    // returns above like every other — clearing nothing, installing nothing.
     //
     // **What it claims is narrow, and both halves are load-bearing.** It claims
     // *this file's content is current as of this read* — the projection now on
@@ -4930,6 +5484,17 @@ export function createBrowserState(
       // file's creator eligibility — so a destination-less creator over an eligible
       // file counts as a surface here exactly as it does there. The registry
       // itself, never the reactive mirror: this is a coordinator-side question.
+      //
+      // **No caller code runs in this block, and that is a fact about ingress, not
+      // about this function** — the phase review's blocker (2d-6-1c). The
+      // eligibility question walks `documents`, `views` and a view's
+      // `top_level_keys[i].text`; the rows and the views were always this module's
+      // copies, and the keys are since `ownedScalarOf`. Before that copy the key
+      // read here was of the command's own object and ran *after* the registry
+      // list above it had been taken, so a getter that registered a surface was
+      // invisible to the answer it ran inside. A field this predicate starts
+      // reading that ingress does not copy reopens exactly that, with nothing
+      // failing but `workspace.test.ts`'s key-getter case.
       const uncertaintyUnresolved = uncertainWrites.has(document);
       const observationRetained = retainedObservations.has(document);
       const surfaceOpen =
@@ -5316,8 +5881,16 @@ export function createBrowserState(
       // absent guard really means is narrower — **a person's own recovery is not
       // arbitrated away by a surface opening or by the registry moving**, which is
       // all the coordinator's guard decides. Ownership of the file's *status* is a
-      // different question, and `rereadUnderGuard` answers it for both callers with
+      // different question, and `rereadUnderGuard` answers it for every caller with
       // its own capture rather than with a guard.
+      //
+      // **What this member is not, since Phase 2d-6-1c.** It is not the control for
+      // a `stale` file whose surface has closed: the 2d-6 record's §3 entry 32
+      // forbids exposing this unguarded call as that control, and
+      // `requestFileReread` is the guarded request that serves it. This one stays
+      // what it was — the reload the move and duplicate panels offer from inside a
+      // conflict they already own, where the surface asking *is* the surface the
+      // guard would otherwise refuse for.
       return rereadUnderGuard(document, ALWAYS_PERMITTED);
     }, // End of function rereadDocument()
 
@@ -6219,17 +6792,88 @@ export function createBrowserState(
     },
 
     reconciliationBlock(): ReconciliationBlock {
-      // **Straight through, and deliberately not mirrored into a signal.** Nothing
-      // draws it at this step, and a mirror added before there is a consumer would
-      // be a second copy of the coordinator's answer that this file would have to
-      // keep in step. 2d-6 is where a window derives from it, and mirroring is that
-      // step's decision to take the way `surfaceGeneration` was taken.
+      // **The read is the dependency; the coordinator is the answer** — Phase
+      // 2d-6-1c, the shape `openWriteSurfaces()` uses. Nothing is mirrored: the
+      // value is still the coordinator's own, asked fresh, and reading the revision
+      // first is what makes a `$derived` that asks this re-run when the block moves.
+      // The sentence that stood here — *deliberately not mirrored into a signal*,
+      // with 2d-6 named as the step to decide — is discharged this way rather than
+      // by a copy, so there is no second value to keep in step.
+      void reconciliationRevision;
       return reconciliation.block();
     }, // End of function reconciliationBlock()
 
     membershipReloadWanted(): boolean {
+      void reconciliationRevision;
       return reconciliation.membershipReloadWanted();
-    }
+    },
+
+    reconciliationRevision(): number {
+      return reconciliationRevision;
+    },
+
+    reconciliationWatchState(): ReconciliationWatchState {
+      void reconciliationRevision;
+      return reconciliation.watchState();
+    },
+
+    reconciliationRegistration(): ReconciliationRegistrationState {
+      void reconciliationRevision;
+      return sanitizedRegistration(reconciliation.registration());
+    },
+
+    requestMembershipReload(): WorkspaceReloadOutcome {
+      // No question of its own: whether an observation asked for one is not a
+      // condition of a person asking. The shared body holds the rechecks and the
+      // reopen in one block.
+      return reopenRetained('membership');
+    },
+
+    requestLostHistoryRecovery(): WorkspaceReloadOutcome {
+      // One more question than the sibling — `notBlocked` — asked inside the same
+      // block as the others: a `running` session has no hole to recover from, and a
+      // stale press after the batch-driven recovery took the permitted reload must
+      // not clear the window a second time.
+      return reopenRetained('lostHistory');
+    },
+
+    async requestFileReread(document: DocumentId): Promise<FileRereadOutcome> {
+      // **Asked once before the command, so a refusal costs nothing.** The same
+      // function is asked again inside the guard below, immediately before the
+      // installation and in its synchronous block, which is the recheck entry 32
+      // requires; a guard that permits here and refuses there is recorded as an
+      // installation refusal.
+      const early = fileRereadRefusal(document);
+      if (early !== null) {
+        return { kind: 'refused', reason: early, at: 'request' };
+      }
+      // What the guard decided, when it was asked. `rereadUnderGuard` asks its
+      // guard at most once per call and answers `null` for a refusal exactly as it
+      // does for an installation, so the guard records its own answer here and the
+      // arm below reads it back rather than inferring anything from `null`.
+      let refusedAt: FileRereadRefusalReason | null = null;
+      /**
+       * Re-asks every guard immediately before the installation.
+       *
+       * @returns `true` when the answer may be installed.
+       */
+      const guard = (): boolean => {
+        refusedAt = fileRereadRefusal(document);
+        return refusedAt === null;
+      };
+      const failure = await rereadUnderGuard(document, guard);
+      if (failure !== null) {
+        return { kind: 'failed', failure };
+      }
+      // Read through a local of the wider type: TypeScript narrows `refusedAt` to
+      // its initializer across the closure's assignment, and the comparison would
+      // otherwise be against `null` alone.
+      const refused: FileRereadRefusalReason | null = refusedAt;
+      if (refused !== null) {
+        return { kind: 'refused', reason: refused, at: 'installation' };
+      }
+      return { kind: 'completed' };
+    } // End of function requestFileReread()
   };
 
   return state;

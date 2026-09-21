@@ -9110,6 +9110,805 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(invoked).not.toHaveBeenCalled();
     }); // End of the "retained and creator facts" case
   }); // End of the "observation protocol" suite
+
+  describe('the coordinator and workspace members — Phase 2d-6-1c', () => {
+    /**
+     * A boundary whose `reload_document` answers only when the case says so.
+     *
+     * Each call is its own promise, oldest released first, so a case can put the
+     * window into a different state *between* a reread's request and its answer —
+     * which is the only way to show that the guard is re-asked at the installation
+     * rather than replayed from the request.
+     *
+     * @param script - Anything else the boundary should answer.
+     * @returns The boundary, and the gate that answers the oldest pending read.
+     */
+    function heldReloads(script: Script = {}): {
+      commands: BrowserCommands;
+      release: () => void;
+    } {
+      const scripted = scriptedCommands(script);
+      const waiting: ((value: CommandResult<DocumentView>) => void)[] = [];
+      return {
+        commands: {
+          ...scripted,
+          reloadDocument: vi.fn(
+            (): Promise<CommandResult<DocumentView>> =>
+              new Promise((resolve) => {
+                waiting.push(resolve);
+              })
+          )
+        },
+        release: () => {
+          const settle = waiting.shift();
+          if (settle === undefined) {
+            throw new Error('no reload is waiting to be answered');
+          }
+          settle({ ok: true, value: rereadBaseDocument() });
+        }
+      };
+    } // End of function heldReloads()
+
+    /**
+     * A window holding one uncertain write of `match/base.yml`, so the file is
+     * under ruling 27's hold with no surface open and no write out.
+     *
+     * The 1b suite's `underAnUncertainHold` is scoped to that suite; this one
+     * differs in registering no observation, because the hold alone is the input
+     * these cases are about.
+     *
+     * @returns The window and its boundary.
+     */
+    async function underTheUncertaintyHold(): Promise<{
+      state: BrowserState;
+      commands: BrowserCommands;
+    }> {
+      const commands = scriptedCommands({ raws: [WRITE_MAY_HAVE_HAPPENED] });
+      const state = await withTheSecondSnippetSelected(commands);
+      expect(await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED)).toEqual({
+        kind: 'failed',
+        mayHaveWritten: true
+      });
+      expect(state.writeOutcomeUncertain(2)).toBe(true);
+      return { state, commands };
+    } // End of function underTheUncertaintyHold()
+
+    /**
+     * A wake transport whose registration rejects with what the case says.
+     *
+     * @param error - What `subscribe` rejects with.
+     * @returns The source.
+     */
+    function rejectingEvents(error: unknown): ReconciliationEventSource {
+      return {
+        /**
+         * Refuses.
+         *
+         * @returns A promise that rejects with the case's value.
+         */
+        subscribe(): Promise<ReconciliationUnlisten> {
+          return Promise.reject(error);
+        }
+      };
+    } // End of function rejectingEvents()
+
+    it('bumps one revision on every announcement, sanitizes the rejection, and leaves the selection the object it was', async () => {
+      // **Entry 28 on this state.** `open()` announced twice before `start()`;
+      // `start()` announces `registering` synchronously; the inert default source
+      // rejects asynchronously and that lands as `failed`/`noTransport` with no
+      // `error` property; the flushed open request drains once and the epoch it
+      // adopts moves `watchState()`. Through all of it the selection is the very
+      // object it was, and no command beyond the one scripted drain is reached.
+      expectDrains([0]);
+      const commands = scriptedCommands({ drains: [reconciliationBatch()] });
+      const state = await withTheSecondSnippetSelected(commands);
+      const held = state.selectedMatch;
+      expect(held).not.toBeNull();
+      const opened = state.reconciliationRevision();
+      expect(opened).toBeGreaterThan(0);
+      expect(state.reconciliationRegistration()).toEqual({ kind: 'idle' });
+      expect(state.reconciliationWatchState()).toEqual({ kind: 'notObserved' });
+
+      state.start();
+      const registering = state.reconciliationRevision();
+      expect(registering).toBeGreaterThan(opened);
+      expect(state.reconciliationRegistration()).toEqual({ kind: 'registering' });
+      expect(state.selectedMatch).toBe(held);
+
+      await settleDrains();
+      const settled = state.reconciliationRevision();
+      expect(settled).toBeGreaterThan(registering);
+      const registration = state.reconciliationRegistration();
+      expect(registration).toEqual({ kind: 'failed', reason: 'noTransport' });
+      expect('error' in registration).toBe(false);
+      expect(Object.isFrozen(registration)).toBe(true);
+      expect(state.reconciliationWatchState()).toEqual({ kind: 'watching', epoch: 5 });
+      expect(state.reconciliationBlock()).toEqual({ kind: 'running' });
+      expect(state.membershipReloadWanted()).toBe(false);
+      expect(state.selectedMatch).toBe(held);
+
+      state.dispose();
+      expect(state.reconciliationRevision()).toBeGreaterThan(settled);
+      expect(state.selectedMatch).toBe(held);
+      expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+      expect(commands.reloadDocument).not.toHaveBeenCalled();
+      expectNoSaveCommand(commands);
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "one revision" case
+
+    it('classifies a transport that refuses as rejected, whatever it threw', async () => {
+      // The other code, and the shape of the sanitizing: an `Error` that is not
+      // the inert source's, and a thrown string, both cross as `rejected` and
+      // nothing of what was thrown crosses with them. No open, so no drain.
+      for (const thrown of [new Error('the backend refused to record the listener'), 'refused']) {
+        const state = createBrowserState(
+          scriptedCommands(),
+          () => undefined,
+          undefined,
+          rejectingEvents(thrown)
+        );
+        state.start();
+        const registering = state.reconciliationRevision();
+        await settleDrains();
+        expect(state.reconciliationRevision()).toBeGreaterThan(registering);
+        const registration = state.reconciliationRegistration();
+        expect(registration).toEqual({ kind: 'failed', reason: 'rejected' });
+        expect(Object.keys(registration)).toEqual(['kind', 'reason']);
+        state.dispose();
+      } // End of the loop over the two thrown values
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "rejected" case
+
+    it('exposes notWatched for an epoch of zero, and registered for a transport that resolved', async () => {
+      expectDrains([0]);
+      const events = testEvents();
+      const state = createBrowserState(
+        scriptedCommands({ drains: [reconciliationBatch({ epoch: 0 })] }),
+        () => undefined,
+        undefined,
+        events.source
+      );
+      state.start();
+      await settleDrains();
+
+      expect(state.reconciliationRegistration()).toEqual({ kind: 'registered' });
+      expect(state.reconciliationWatchState()).toEqual({ kind: 'notWatched' });
+      state.dispose();
+      expect(events.unlistens()).toBe(1);
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "notWatched" case
+
+    it('refuses a membership refresh while a surface is open, permits once the last closes without triggering, then re-runs the retained request', async () => {
+      // **Entry 29, the membership intent.** Three drains and no more: the
+      // registration's, the first open's, and the one the reload's own `open()`
+      // requests at `ready` — which is the one command the request is expected
+      // to reach. Nothing asked for a membership reload here, and the request is
+      // permitted regardless (§2 of the phase notes).
+      expectDrains([0, 0, 0]);
+      const events = testEvents();
+      const commands = scriptedCommands({
+        drains: [reconciliationBatch(), reconciliationBatch(), reconciliationBatch()]
+      });
+      const state = createBrowserState(commands, () => undefined, undefined, events.source);
+      state.start();
+      await settleDrains();
+      await state.open('/tmp/espanso');
+      await settleDrains();
+      expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+      expect(state.membershipReloadWanted()).toBe(false);
+
+      const editor = state.registerWriteSurface(
+        { kind: 'matchEditor', target: { kind: 'document', document: 2 } },
+        () => undefined
+      );
+      const creator = state.registerWriteSurface(
+        { kind: 'matchCreator', target: { kind: 'unknown' } },
+        () => undefined
+      );
+      expect(state.requestMembershipReload()).toEqual({
+        kind: 'refused',
+        reason: 'surfaceOpen',
+        surfaces: ['matchEditor', 'matchCreator']
+      });
+      editor();
+      expect(state.requestMembershipReload()).toEqual({
+        kind: 'refused',
+        reason: 'surfaceOpen',
+        surfaces: ['matchCreator']
+      });
+      expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+
+      // **Closing the last one permits and does not trigger**: nothing observes
+      // the registry emptying, and a settled queue shows no open was started.
+      creator();
+      await settleDrains();
+      expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+      expect(state.status).toBe('ready');
+
+      expect(state.requestMembershipReload()).toEqual({ kind: 'reloading' });
+      expect(commands.openWorkspace).toHaveBeenCalledTimes(2);
+      expect(commands.openWorkspace).toHaveBeenNthCalledWith(2, '/tmp/espanso');
+      expect(state.status).toBe('loading');
+      await settleDrains();
+      await settleDrains();
+      expect(state.status).toBe('ready');
+      expect(state.documents.map((document) => document.id)).toEqual([1, 2, 3]);
+      expect(drainSequences).toEqual([0, 0, 0]);
+      expectNoSaveCommand(commands);
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "membership refresh" case
+
+    it('re-runs null when null was the request, and clears the wanted flag by reopening', async () => {
+      // `open(null)` means *discover the root*, and the retained request is that
+      // `null` — never the summary's rendered root. The observation batch raises
+      // the membership request; the reopen is what clears it.
+      expectDrains([0, 0, 0]);
+      const events = testEvents();
+      const commands = scriptedCommands({
+        drains: [
+          reconciliationBatch(),
+          reconciliationBatch({
+            newest_sequence: 3,
+            observations: [
+              {
+                Removed: {
+                  sequence: 3,
+                  document: { Unnamed: { relative_path: 'match/stranger.yml' } },
+                  previous_revision: null
+                }
+              }
+            ]
+          }),
+          reconciliationBatch()
+        ]
+      });
+      const state = createBrowserState(commands, () => undefined, undefined, events.source);
+      state.start();
+      await settleDrains();
+      await state.open(null);
+      await settleDrains();
+      expect(state.membershipReloadWanted()).toBe(true);
+      expect(state.summary?.root).toBe('/tmp/espanso');
+
+      expect(state.requestMembershipReload()).toEqual({ kind: 'reloading' });
+
+      expect(commands.openWorkspace).toHaveBeenCalledTimes(2);
+      expect(commands.openWorkspace).toHaveBeenNthCalledWith(2, null);
+      expect(state.membershipReloadWanted()).toBe(false);
+      await settleDrains();
+      await settleDrains();
+      expect(state.status).toBe('ready');
+      expectNoSaveCommand(commands);
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "null request" case
+
+    it('refuses both requests during an in-flight write, naming the file, and permits once it settles', async () => {
+      // No `start()`, so no drain at all: the reopen's own request is remembered
+      // and never issued, and the budget is empty.
+      const held = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null
+      );
+      const state = await withTheSecondSnippetSelected(held.commands);
+      const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+      expect(state.requestMembershipReload()).toEqual({
+        kind: 'refused',
+        reason: 'writeInFlight',
+        documents: [2]
+      });
+      // The lost-history intent asks its own question before the barrier, and a
+      // `running` session answers it first.
+      expect(state.requestLostHistoryRecovery()).toEqual({ kind: 'refused', reason: 'notBlocked' });
+      expect(held.commands.openWorkspace).toHaveBeenCalledTimes(1);
+
+      held.release();
+      await sending;
+      expect(state.writeInFlight(2)).toBe(false);
+      expect(state.requestMembershipReload()).toEqual({ kind: 'reloading' });
+      expect(held.commands.openWorkspace).toHaveBeenCalledTimes(2);
+      expect(held.commands.openWorkspace).toHaveBeenNthCalledWith(2, null);
+      await settleDrains();
+      await settleDrains();
+      expect(state.status).toBe('ready');
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "write in flight" case
+
+    it('refuses while an open is loading, after an open that failed, and after disposal', async () => {
+      // **Lifecycle and disposal, at execution.** The gate is closed from an
+      // `open()`'s first statements until one reaches `ready`; a refused
+      // `open_workspace` leaves it closed, and the reason says *not ready* rather
+      // than claiming which of the two it is. After `dispose()` both intents
+      // answer `disposed` first, ahead of every other question.
+      const gate = deferred<CommandResult<WorkspaceSummary>>();
+      const scripted = scriptedCommands();
+      const commands: BrowserCommands = {
+        ...scripted,
+        openWorkspace: vi.fn(() => gate.promise)
+      };
+      const state = createBrowserState(commands, () => undefined);
+      const opening = state.open('/tmp/espanso');
+      expect(state.requestMembershipReload()).toEqual({ kind: 'refused', reason: 'workspaceNotReady' });
+      expect(state.requestLostHistoryRecovery()).toEqual({
+        kind: 'refused',
+        reason: 'workspaceNotReady'
+      });
+      gate.resolve({ ok: true, value: SUMMARY });
+      await opening;
+      expect(state.status).toBe('ready');
+      expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+
+      const failing = createBrowserState(
+        scriptedCommands({
+          open: { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } }
+        }),
+        () => undefined
+      );
+      await failing.open(null);
+      expect(failing.status).toBe('failed');
+      expect(failing.requestMembershipReload()).toEqual({
+        kind: 'refused',
+        reason: 'workspaceNotReady'
+      });
+
+      state.dispose();
+      expect(state.requestMembershipReload()).toEqual({ kind: 'refused', reason: 'disposed' });
+      expect(state.requestLostHistoryRecovery()).toEqual({ kind: 'refused', reason: 'disposed' });
+      expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "lifecycle and disposal" case
+
+    it('refuses a lost-history recovery while a surface is open, permits once it closes without triggering, and recovers on the explicit ask', async () => {
+      // **Entry 29, the lost-history intent, over ruling 12's blocked state.** The
+      // surface is open when the `discarded` rise arrives, so the batch-driven
+      // recovery declines and the session blocks; closing the surface permits the
+      // person's request and starts nothing; the request re-runs the retained
+      // request, resets the block, and the reopen's drain adopts the new epoch.
+      expectDrains([0, 0, 0]);
+      const events = testEvents();
+      const commands = scriptedCommands({
+        drains: [
+          reconciliationBatch(),
+          reconciliationBatch({ newest_sequence: 9, discarded: 1 }),
+          reconciliationBatch({ epoch: 6 })
+        ]
+      });
+      const state = createBrowserState(commands, () => undefined, undefined, events.source);
+      state.start();
+      await settleDrains();
+      expect(state.requestLostHistoryRecovery()).toEqual({ kind: 'refused', reason: 'notBlocked' });
+
+      const lease = state.registerWriteSurface(
+        { kind: 'matchDuplicator', target: { kind: 'document', document: 3 } },
+        () => undefined
+      );
+      await state.open('/tmp/espanso');
+      await settleDrains();
+      expect(state.reconciliationBlock()).toEqual({
+        kind: 'blockedByLostHistory',
+        discarded: 1,
+        epoch: 5
+      });
+      expect(state.requestLostHistoryRecovery()).toEqual({
+        kind: 'refused',
+        reason: 'surfaceOpen',
+        surfaces: ['matchDuplicator']
+      });
+      expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+
+      lease();
+      await settleDrains();
+      expect(commands.openWorkspace).toHaveBeenCalledTimes(1);
+      expect(state.reconciliationBlock().kind).toBe('blockedByLostHistory');
+
+      expect(state.requestLostHistoryRecovery()).toEqual({ kind: 'reloading' });
+      expect(commands.openWorkspace).toHaveBeenCalledTimes(2);
+      expect(commands.openWorkspace).toHaveBeenNthCalledWith(2, '/tmp/espanso');
+      expect(state.reconciliationBlock()).toEqual({ kind: 'running' });
+      await settleDrains();
+      await settleDrains();
+      expect(state.status).toBe('ready');
+      expect(state.reconciliationWatchState()).toEqual({ kind: 'watching', epoch: 6 });
+      expect(state.requestLostHistoryRecovery()).toEqual({ kind: 'refused', reason: 'notBlocked' });
+      expect(drainSequences).toEqual([0, 0, 0]);
+      expectNoSaveCommand(commands);
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "lost-history recovery" case
+
+    it('refuses the reread at the request under each of the three per-file holds, sending nothing', async () => {
+      // **Entry 32's first half, one input at a time.** The uncertainty hold with
+      // no surface and no write out; a retained observation, held while a write is
+      // out and named ahead of the barrier because it is the stronger claim; and a
+      // registered surface over the file. Each answers at the request, and
+      // `reload_document` is never sent.
+      const uncertain = await underTheUncertaintyHold();
+      expect(uncertain.state.automaticReloadGuardFor(2)).toEqual({
+        uncertaintyUnresolved: true,
+        observationRetained: false,
+        surfaceOpen: false
+      });
+      expect(await uncertain.state.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'uncertaintyUnresolved',
+        at: 'request'
+      });
+      expect(uncertain.commands.reloadDocument).not.toHaveBeenCalled();
+
+      const held = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null
+      );
+      const retaining = await withTheSecondSnippetSelected(held.commands);
+      const sending = retaining.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      retaining.observeExternalChange(externalObservation());
+      expect(retaining.automaticReloadGuardFor(2).observationRetained).toBe(true);
+      expect(await retaining.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'observationRetained',
+        at: 'request'
+      });
+      held.release();
+      await sending;
+      expect(held.commands.reloadDocument).not.toHaveBeenCalled();
+
+      const commands = scriptedCommands();
+      const covered = await withTheSecondSnippetSelected(commands);
+      const surface = covered.registerWriteSurface(
+        { kind: 'matchDeleter', target: { kind: 'document', document: 2 } },
+        () => undefined
+      );
+      expect(await covered.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'surfaceOpen',
+        at: 'request'
+      });
+      // The other file shares no hold, and a surface over one file is not a
+      // surface over the other.
+      expect(await covered.requestFileReread(3)).toEqual({ kind: 'completed' });
+      surface();
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      expect(commands.reloadDocument).toHaveBeenCalledWith(3);
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "three holds at the request" case
+
+    it('refuses the reread at the request for a write in flight, an invented row, an unknown file, a blocked session and a loading workspace', async () => {
+      // The other five guards, each at the request. The write barrier is asked
+      // last, so it answers only when no hold does — here nothing is retained
+      // because no observation arrived while the write was out.
+      const held = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null
+      );
+      const writing = await withTheSecondSnippetSelected(held.commands);
+      const sending = writing.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      expect(await writing.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'writeInFlight',
+        at: 'request'
+      });
+      expect(await writing.requestFileReread(99)).toEqual({
+        kind: 'refused',
+        reason: 'notAddressable',
+        at: 'request'
+      });
+      held.release();
+      await sending;
+      expect(held.commands.reloadDocument).not.toHaveBeenCalled();
+
+      // A blocked session, and a row an addition invented, on one lifecycle: the
+      // surface makes the `discarded` rise block rather than recover, and the
+      // `Added` observation in the same batch is dropped with the rest — so the
+      // invented row comes from a batch drained *before* the loss.
+      expectDrains([0, 0, 6]);
+      const events = testEvents();
+      const commands = scriptedCommands({
+        drains: [
+          reconciliationBatch(),
+          reconciliationBatch({
+            newest_sequence: 6,
+            observations: [
+              {
+                Added: {
+                  sequence: 6,
+                  document_summary: makeSummary({ id: 42, relativePath: 'match/new.yml' }),
+                  content: {
+                    Projected: {
+                      disk: makeDocument({ id: 42, relativePath: 'match/new.yml' }),
+                      findings: []
+                    }
+                  }
+                }
+              }
+            ]
+          }),
+          reconciliationBatch({ newest_sequence: 9, discarded: 1 })
+        ]
+      });
+      const state = createBrowserState(commands, () => undefined, undefined, events.source);
+      state.start();
+      await settleDrains();
+      await state.open(null);
+      await settleDrains();
+      expect(state.documents.map((document) => document.id)).toEqual([1, 2, 3, 42]);
+      expect(await state.requestFileReread(42)).toEqual({
+        kind: 'refused',
+        reason: 'notAddressable',
+        at: 'request'
+      });
+
+      const lease = state.registerWriteSurface(
+        { kind: 'matchEditor', target: { kind: 'document', document: 3 } },
+        () => undefined
+      );
+      events.wake(5, 9);
+      await settleDrains();
+      await settleDrains();
+      expect(state.reconciliationBlock().kind).toBe('blockedByLostHistory');
+      expect(await state.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'blockedByLostHistory',
+        at: 'request'
+      });
+      lease();
+
+      // A loading workspace: the request's own `open()` closes the gate.
+      const loading = createBrowserState(scriptedCommands(), () => undefined);
+      const opening = loading.open(null);
+      expect(await loading.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'workspaceNotReady',
+        at: 'request'
+      });
+      await opening;
+
+      state.dispose();
+      expect(await state.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'disposed',
+        at: 'request'
+      });
+      expect(commands.reloadDocument).not.toHaveBeenCalled();
+      expectNoSaveCommand(commands);
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "other five guards at the request" case
+
+    it('re-asks every guard immediately before installing, so one that moved while the read was out refuses the installation', async () => {
+      // **Entry 32's second half.** Four reads, each permitted at the request and
+      // each answered after the window moved in a way that moves none of
+      // `rereadUnderGuard`'s own captures — so only the re-asked guard can refuse:
+      // a surface opened over the file; an observation retained behind a write
+      // that is still out; a bare write in flight; and a disposal. Each refuses at
+      // the installation with the guard that moved, and the projection is the
+      // object it was — nothing installed, nothing cleared. (An uncertainty that
+      // *settles* while a read is out is not driven here: the wrapper's own
+      // re-read supersedes the pending read first, and that answer is discarded
+      // as no longer wanted, which `completed` truthfully reports.)
+      const held = heldReloads();
+      const gates: { promise: Promise<void>; resolve: (value: void) => void }[] = [];
+      const commands: BrowserCommands = {
+        ...held.commands,
+        saveRawDocument: vi.fn(async (): Promise<RawSaveOutcome> => {
+          const gate = deferred<void>();
+          gates.push(gate);
+          await gate.promise;
+          return { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } };
+        })
+      };
+      const state = await withTheSecondSnippetSelected(commands);
+      const projection = state.scopedDocument;
+      expect(projection).not.toBeNull();
+
+      const first = state.requestFileReread(2);
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      const surface = state.registerWriteSurface(
+        { kind: 'matchEditor', target: { kind: 'document', document: 2 } },
+        () => undefined
+      );
+      held.release();
+      expect(await first).toEqual({ kind: 'refused', reason: 'surfaceOpen', at: 'installation' });
+      expect(state.scopedDocument).toBe(projection);
+      surface();
+
+      const second = state.requestFileReread(2);
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(2);
+      const firstWrite = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      expect(state.observeExternalChange(externalObservation()).verdict.kind).toBe('retained');
+      held.release();
+      expect(await second).toEqual({
+        kind: 'refused',
+        reason: 'observationRetained',
+        at: 'installation'
+      });
+      expect(state.scopedDocument).toBe(projection);
+      gates[0]?.resolve();
+      await firstWrite;
+      expect(state.retainedObservationFor(2)).toBeNull();
+
+      const third = state.requestFileReread(2);
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(3);
+      const secondWrite = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      held.release();
+      expect(await third).toEqual({ kind: 'refused', reason: 'writeInFlight', at: 'installation' });
+      expect(state.scopedDocument).toBe(projection);
+      gates[1]?.resolve();
+      await secondWrite;
+
+      // The third file is under no hold, so the same flip on it is disposal.
+      const fourth = state.requestFileReread(3);
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(4);
+      state.dispose();
+      held.release();
+      expect(await fourth).toEqual({ kind: 'refused', reason: 'disposed', at: 'installation' });
+      expect(state.views.find((view) => view.id === 3)?.matches.map((match) => match.id.node)).toEqual([
+        20
+      ]);
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "re-asked at the installation" case
+
+    it('completes a stale file whose surface has closed, clears the mark, and leaves the automatic path to a fresh observation', async () => {
+      // **Ruling 32's scenario, end to end.** A change arrives while a surface is
+      // open over the file: the surface is told, the file is marked `stale`, and
+      // nothing is reread. The surface closes — closure triggers nothing. The
+      // explicit request rereads, installs the disk projection, and clears the
+      // mark. Then a fresh accepted observation with no surface open takes the
+      // automatic clean path exactly as before this phase.
+      expectDrains([0, 0, 5]);
+      const events = testEvents();
+      const told: number[] = [];
+      const commands = scriptedCommands({
+        reload: { ok: true, value: rereadBaseDocument() },
+        drains: [
+          reconciliationBatch(),
+          reconciliationBatch({
+            newest_sequence: 5,
+            observations: [changedObservation(5, addressable(2, 'match/base.yml'))]
+          }),
+          reconciliationBatch({
+            newest_sequence: 6,
+            observations: [changedObservation(6, addressable(2, 'match/base.yml'))]
+          })
+        ]
+      });
+      const state = createBrowserState(commands, () => undefined, undefined, events.source);
+      state.start();
+      await settleDrains();
+      const lease = state.registerWriteSurface(
+        { kind: 'matchEditor', target: { kind: 'document', document: 2 } },
+        (observation) => {
+          told.push(observation.sequence);
+        }
+      );
+      await state.open(null);
+      await settleDrains();
+      await settleDrains();
+      state.show({ kind: 'document', id: 2 });
+      expect(told).toEqual([5]);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      expect(commands.reloadDocument).not.toHaveBeenCalled();
+      expect(await state.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'surfaceOpen',
+        at: 'request'
+      });
+
+      lease();
+      await settleDrains();
+      expect(commands.reloadDocument).not.toHaveBeenCalled();
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+
+      expect(await state.requestFileReread(2)).toEqual({ kind: 'completed' });
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      expect(state.scopedMatches.map((match) => match.id.node)).toEqual([77]);
+      expect(state.externalDocumentStatus(2)).toBeNull();
+
+      events.wake(5, 6);
+      await settleDrains();
+      await settleDrains();
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(2);
+      expect(told).toEqual([5]);
+      expectNoSaveCommand(commands);
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "stale after close" case
+
+    it('reads no command-built key inside the installation guard, so a key’s own getter cannot open a surface under it', async () => {
+      // **The phase review's blocker, re-derived.** `creatorEligibilityFor` reads
+      // `view.top_level_keys[i].text` through `destinationEligibility`, and before
+      // the ingress copy owned those keys that read was of the command's own
+      // object — run inside `fileRereadRefusal`, *after* the registry list and the
+      // two hold tables had been read. A getter there that registered a surface
+      // over the file was invisible to the guard it ran inside: the answer was
+      // installed under a surface that had just opened. Now the key is copied at
+      // ingress, the getter fires exactly once — in `open()`, before any guard —
+      // and never again, so nothing it could do is reachable from a guard.
+      let reads = 0;
+      let armed = false;
+      let firedInsideTheGuard = false;
+      let state: BrowserState | null = null;
+      const projection = makeDocument({
+        id: 2,
+        relativePath: 'match/base.yml',
+        matches: [
+          makeMatch({ node: 10, document: 2, trigger: ':sig', label: 'Signature' }),
+          makeMatch({ node: 11, document: 2, trigger: ':date', label: 'Today' })
+        ]
+      });
+      const trap: DocumentView = {
+        ...projection,
+        top_level_keys: [
+          {
+            ...projection.top_level_keys[0]!,
+            get text(): string {
+              reads += 1;
+              if (armed && !firedInsideTheGuard) {
+                firedInsideTheGuard = true;
+                state?.registerWriteSurface(
+                  { kind: 'matchEditor', target: { kind: 'document', document: 2 } },
+                  () => undefined
+                );
+              }
+              return 'matches';
+            }
+          }
+        ]
+      };
+      const held = heldReloads({
+        documents: new Map<number, CommandResult<DocumentView>>([
+          [1, { ok: true, value: profileDocument() }],
+          [2, { ok: true, value: trap }],
+          [3, { ok: true, value: otherDocument() }]
+        ])
+      });
+      state = createBrowserState(held.commands, () => undefined);
+      await state.open(null);
+      state.show({ kind: 'document', id: 2 });
+      const atIngress = reads;
+
+      const reading = state.requestFileReread(2);
+      expect(held.commands.reloadDocument).toHaveBeenCalledTimes(1);
+      armed = true;
+      held.release();
+      const outcome = await reading;
+
+      // **No surface exists, and the read installed legitimately** — before the
+      // fix this line read `expected [ [ 'matchEditor' ], …(2) ] to deeply equal
+      // [ [], { kind: 'completed' }, [ 77 ] ]`: an editor open over the file and
+      // node 77 installed under it. And **no guard read the command's key**: the
+      // count did not move across the request and the installation (before the
+      // fix, `expected 2 to be +0` — the request guard and the installation guard),
+      // and the trap never fired.
+      expect([
+        state.openWriteSurfaces().map((surface) => surface.kind),
+        outcome,
+        state.scopedMatches.map((match) => match.id.node)
+      ]).toEqual([[], { kind: 'completed' }, [77]]);
+      expect(reads).toBe(atIngress);
+      expect(firedInsideTheGuard).toBe(false);
+      // The control: the trap is live, and ingress is where it fired — while
+      // `open()` copied the projection, before any guard existed.
+      expect(atIngress).toBeGreaterThan(0);
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "key getter inside the guard" case
+
+    it('answers a read the command refused as failed, reported, with nothing installed', async () => {
+      const failure: IpcFailure = { kind: 'command', error: { code: 'noWorkspaceOpen' } };
+      const reported: IpcFailure[] = [];
+      const commands = scriptedCommands({ reload: { ok: false, failure } });
+      const state = createBrowserState(commands, (refusal) => {
+        reported.push(refusal);
+      });
+      await state.open(null);
+      state.show({ kind: 'document', id: 2 });
+
+      expect(await state.requestFileReread(2)).toEqual({ kind: 'failed', failure });
+      expect(reported).toEqual([failure]);
+      expect(state.scopedMatches.map((match) => match.id.node)).toEqual([10, 11]);
+      expect(invoked).not.toHaveBeenCalled();
+    }); // End of the "failed read" case
+  }); // End of the "coordinator and workspace members" suite
 }); // End of the "deferred adoption" suite
 
 /**

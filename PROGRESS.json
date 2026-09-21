@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T12:58:32Z",
+ "updated": "2026-09-21T14:20:42Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -420,14 +420,14 @@
   {
    "id": "2d-6",
    "title": "Components, i18n and mounted evidence",
-   "status": "queued",
-   "summary": "Components, i18n and mounted evidence for live reconciliation; split into eleven steps 2d-6-1 to 2d-6-11 by its design consult."
+   "status": "in_progress",
+   "summary": "Eleven steps per its design consult; 2d-6-1 is done (three sub-phases closed) and 2d-6-2, the match-editor external session and reapply, is next."
   },
   {
    "id": "2d-6-1",
    "title": "Delivery, retained-state and uncertainty protocol",
-   "status": "in_progress",
-   "summary": "Split 2026-09-21 into 2d-6-1a, 2d-6-1b and 2d-6-1c (record §2); 1a and 1b closed, done when 1c closes and the full acceptance is checked."
+   "status": "done",
+   "summary": "All three sub-phases 2d-6-1a, 2d-6-1b and 2d-6-1c are closed; the full 2d-6-1 acceptance is checked in one place, 2d-6-1c-notes.md section 3."
   },
   {
    "id": "2d-6-1a",
@@ -452,8 +452,11 @@
   {
    "id": "2d-6-1c",
    "title": "Coordinator and workspace members on BrowserState",
-   "status": "queued",
-   "summary": "Adds the coordinator revision signal, watchState and registration-state exposure, the two guarded reload requests and the guarded file reread request."
+   "status": "done",
+   "summary": "Adds the coordinator revision signal, watchState and sanitized registration-state exposure, the two guarded reload requests and the guarded file reread; rung 1323/447/2574/192.",
+   "risk": "high",
+   "review": "docs/reviews/phase-2d-6-1c.md — Codex, ship-with-fixes, 1 blocker, 1 SHOULD-FIX, both fixed",
+   "narrative": "docs/decisions/2d-6-1c-notes.md"
   },
   {
    "id": "2d-6-2",
@@ -532,7 +535,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 5 are closed; 2d-6 is next and goes to a design consult first; 2d-7 and 2d-8 are queued."
+   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 done, 2d-6-2 next); 2d-7 and 2d-8 are queued."
   },
   {
    "id": "3",

@@ -669,8 +669,12 @@ export interface ReconciliationWorkspace {
    * Re-runs the retained original open request.
    *
    * Ruling 11: **the retained request, never `summary.root`**, which is a lossy
-   * rendering and is not round-trippable as a command argument. Only the
-   * discarded-history recovery calls it, and only with no write surface open.
+   * rendering and is not round-trippable as a command argument. Two callers, both
+   * in `./reconciliationCoordinator.ts` and both with the retained request: the
+   * discarded-history recovery, only with no write surface open; and, since Phase
+   * 2d-6-1c, `reopenFromRetainedRequest`, which the window's two guarded reload
+   * request methods reach after rechecking the registry, the outstanding writes,
+   * the open gate and disposal themselves. No transition in this module calls it.
    *
    * @param request - Exactly what the original `open()` was called with.
    */

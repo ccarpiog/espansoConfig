@@ -25,8 +25,10 @@
  *    ({@link decideAutomaticReload}): whether an automatic reread of a file may
  *    still be taken, given the three per-file facts the record names (entries 15
  *    and 32). The predicate only — `BrowserState.automaticReloadGuardFor` answers
- *    the three facts from its own tables since 2d-6-1b, and the guarded request
- *    that asks the predicate is 2d-6-1c's.
+ *    the three facts from its own tables since 2d-6-1b, and
+ *    `BrowserState.requestFileReread` is the guarded request that asks the
+ *    predicate since 2d-6-1c — at the request and again immediately before the
+ *    installation.
  * 3. **The sentences a surface owes while it cannot act** —
  *    {@link ExternalConflictNotice} for a retained observation (entry 13) and an
  *    unknown write outcome (entry 14), and {@link ExternalConflictAction} for the
@@ -235,8 +237,9 @@ export function isReplacingVerdict(verdict: ObservationVerdict): verdict is Repl
  * **Nothing in TypeScript forces a caller to answer these from the tables that
  * hold them.** Three booleans are three booleans; `BrowserState.automaticReloadGuardFor`
  * in `./workspace.svelte.ts` is what answers them from the tables, in one
- * synchronous block, and the guarded request that must re-ask immediately before
- * any installation is 2d-6-1c's.
+ * synchronous block, and `BrowserState.requestFileReread` is the guarded request
+ * that re-asks them immediately before any installation, through
+ * `rereadUnderGuard`'s guard (Phase 2d-6-1c).
  */
 export interface AutomaticReloadGuardInputs {
   /**
