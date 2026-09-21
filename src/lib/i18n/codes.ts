@@ -56,6 +56,20 @@
  * wire value the caller still holds, and all belong in a console rather than in
  * a message. The developer string of an unexpected failure is the same case and
  * is stated once more, loudly, on {@link describeIpcFailure}.
+ *
+ * ## Frontend-state accessors, since Phase 2d-6-1a
+ *
+ * The last section of this file holds `describe*` accessors over **frontend
+ * state** — codes the browser model raises and no Rust enum owns, under
+ * `browser.externalConflict.*`. The 2d-6 design consult's Q9 (the record's §3
+ * entry 39) puts new ones here with reactive `t*` wrappers in `./index.ts`, and
+ * leaves the older browser-model accessors in `./index.ts` where they are. Their
+ * key functions stay beside the types they switch over, in `../browser/`, so a
+ * renamed key is a compile error in the module that owns the code; what this
+ * file adds is the one-locale describer a test can call without a store. **The
+ * Rust contract does not see them**: `dictionary_contract.rs` compares the
+ * `code.` namespace alone, so a `browser.*` key with no accessor is caught by
+ * nothing but the suites under this directory that call every accessor.
  */
 
 import type { CommandError, IpcFailure } from '../ipc/errors';
@@ -141,6 +155,13 @@ import {
   wireVariantName,
   wireVariantOperands
 } from '../ipc/types';
+import {
+  externalConflictActionKey,
+  externalConflictNoticeKey,
+  type ExternalConflictAction,
+  type ExternalConflictNotice
+} from '../browser/observationDelivery';
+import { conflictMessageKey, type ConflictMessage } from '../browser/saveOutcome';
 import { DICTIONARIES, translate, type TranslationKey, type TranslationParams } from './dictionaries';
 import type { Locale } from './locale';
 
@@ -1791,3 +1812,65 @@ export const CODE_NAMESPACES_WITHOUT_A_BUILDER = [
   'discoveryError',
   'identityError'
 ] as const;
+
+// ---------------------------------------------------------------------------
+// The external-conflict sentences a surface owes — Phase 2d-6-1a
+// ---------------------------------------------------------------------------
+//
+// Frontend state, not wire codes: no Rust enum owns these, and the header says
+// why they live here anyway. Three describers, each one line over `translate`
+// and a key function that lives beside the type it switches over. None takes an
+// operand — a revision is a hex digest nobody can compare, and the sentences
+// name no file, no time and no writer, because the window cannot say who changed
+// the file or when.
+
+/**
+ * The sentence one conflict line reads as, of either origin, in one language.
+ *
+ * **The describer a renderer of `view.conflict` uses**, so that an external
+ * conflict's lines — whose first is `fileChangedWhileOpen`, a code no save
+ * outcome has — are drawn through one typed accessor rather than by a component
+ * that narrows the union itself and forgets the external arm. Delegates the key
+ * choice to `conflictMessageKey` in `../browser/saveOutcome`, which is exhaustive
+ * over both constituent unions where each is declared.
+ *
+ * @param locale - The dictionary to read from.
+ * @param message - A line of either conflict arm.
+ * @returns The translated sentence.
+ */
+export function describeConflictMessage(locale: Locale, message: ConflictMessage): string {
+  return translate(locale, conflictMessageKey(message));
+} // End of function describeConflictMessage()
+
+/**
+ * The sentence one external-conflict notice reads as, in one language.
+ *
+ * The retained sentence (the 2d-6 record's §3 entry 13) and the unknown-outcome
+ * sentence (entry 14). Both are pinned literally, in both languages, by
+ * `externalConflictCodes.test.ts`; what that pins is reviewed wording, never
+ * meaning or translation quality.
+ *
+ * @param locale - The dictionary to read from.
+ * @param notice - Which state the surface is in.
+ * @returns The translated sentence.
+ */
+export function describeExternalConflictNotice(
+  locale: Locale,
+  notice: ExternalConflictNotice
+): string {
+  return translate(locale, externalConflictNoticeKey(notice));
+} // End of function describeExternalConflictNotice()
+
+/**
+ * The label one external-conflict action reads as, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param action - Which control to label.
+ * @returns The translated label.
+ */
+export function describeExternalConflictAction(
+  locale: Locale,
+  action: ExternalConflictAction
+): string {
+  return translate(locale, externalConflictActionKey(action));
+} // End of function describeExternalConflictAction()

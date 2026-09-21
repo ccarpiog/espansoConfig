@@ -17,8 +17,8 @@
  * So the decisions are made on this side of the boundary, where a test can reach
  * them (`docs/decisions/1c-1-notes.md` hole 1), and what comes out is **codes and
  * operands, never sentences** — the rule every model in this directory follows. A
- * component renders one by calling `tSaveOutcomeMessage` or `tConflictChoice` in
- * `../i18n`, never by building a key.
+ * component renders one by calling `tSaveOutcomeMessage`, `tConflictMessage` or
+ * `tConflictChoice` in `../i18n`, never by building a key.
  *
  * ## The conflict arm is a state, not a description
  *
@@ -241,6 +241,76 @@ export type SaveOutcomeMessage =
       /** The save committed and the window could not be brought back into step. */
       readonly kind: 'windowOutOfStep';
     };
+
+/**
+ * One line only an **external** conflict shows, as a code rather than a sentence.
+ *
+ * **Why the external origin needs a line of its own** (Phase 2d-6-1a; the 2d-6
+ * record's §3 entry 24). Until this phase {@link describeExternalConflict} put
+ * {@link SaveOutcomeMessage} `changedElsewhere` first, and that code's sentence
+ * says *the save was refused rather than applied over that change* — false of an
+ * origin under which no save was initiated. Adding an origin line beside it does
+ * not cancel a false sentence; only not emitting it does, so the external model
+ * never carries `changedElsewhere` and carries this instead.
+ *
+ * **One arm today, and the discriminant is named for what it says rather than for
+ * the origin.** Its sentence claims that the file changed on disk while the
+ * surface was open and that no save was initiated *in response to this
+ * observation* — never that nothing was ever written: an observation released by
+ * ruling 27's barrier follows a write this window did attempt, whose outcome may
+ * be unknown.
+ *
+ * Its keys live under `browser.externalConflict.*` (entry 39), never under
+ * `browser.saveOutcome.*`, because that namespace describes how a save ended and
+ * no save is what this line is about.
+ */
+export type ExternalConflictMessage = {
+  /**
+   * The file changed on disk while this surface was open, and no save was
+   * initiated in response to the observation.
+   */
+  readonly kind: 'fileChangedWhileOpen';
+};
+
+/**
+ * One line either conflict origin may show.
+ *
+ * **The union a renderer of `view.conflict` draws from** (the 2d-6 record's §3
+ * entry 10 puts that render outside the save-outcome branch). The two members'
+ * `kind` literals are disjoint by construction — `fileChangedWhileOpen` is not a
+ * {@link SaveOutcomeMessage} arm — so {@link conflictMessageKey} narrows on one
+ * `case` and delegates the rest; a literal added to both unions would be caught
+ * there as an unreachable `default`.
+ *
+ * **The save arm's `messages` stays `readonly SaveOutcomeMessage[]`**, so every
+ * surface view that spreads `outcome.messages` into its own list keeps its type and
+ * the eight components keep drawing it through `tSaveOutcomeMessage`. The external
+ * arm's list is {@link ExternalConflictMessages}, whose elements are this union.
+ */
+export type ConflictMessage = SaveOutcomeMessage | ExternalConflictMessage;
+
+/**
+ * The lines an external conflict shows: the external origin's own line first, then
+ * save-outcome lines.
+ *
+ * **A tuple with a required first element, since the phase's review**, because a
+ * plain `readonly ConflictMessage[]` admitted `changedElsewhere` in every position
+ * and a comment claimed otherwise. What this type forces is exactly one thing:
+ * **element 0 is an {@link ExternalConflictMessage}**, so `changedElsewhere` — or
+ * any other save-outcome code — in the first position is a compile error in
+ * {@link describeExternalConflict}. What it does **not** force: the rest is
+ * `SaveOutcomeMessage`, which admits `changedElsewhere` at index 1 onwards. That
+ * exclusion is the producer's alone — it writes only the draft-kept line and the
+ * reload warning after the first — and `saveOutcome.test.ts` drives every surface
+ * declaration through it asserting the absence at every index.
+ *
+ * Iterating it yields {@link ConflictMessage}, so `tConflictMessage` in `../i18n`
+ * draws every element and a renderer never narrows in markup.
+ */
+export type ExternalConflictMessages = readonly [
+  ExternalConflictMessage,
+  ...SaveOutcomeMessage[]
+];
 
 /**
  * What the person may do about a conflict.
@@ -765,7 +835,8 @@ interface ConflictModelCommon<T> {
    * {@link SaveConflictModel.changedAgain} is true the file moved twice and this
    * is the later of the two observations, so no message may present it as the
    * bytes that refused the save. On the external arm there is no `found` at all,
-   * because nothing was attempted and nothing refused it.
+   * because no save was initiated in response to the observation, so nothing
+   * refused one.
    *
    * **This is the disk side of the comparison, and it supersedes a second read.**
    * Until 2c-4a-2 the raw editor was handed the text by a separate `document_text`
@@ -784,8 +855,12 @@ interface ConflictModelCommon<T> {
    * nothing else to put in it.
    */
   readonly draft: Draft<T>;
-  /** The lines to show, in order. */
-  readonly messages: readonly SaveOutcomeMessage[];
+  // **`messages` is declared on each arm rather than here, since Phase 2d-6-1a.**
+  // The two arms carry different line types — the save arm's are
+  // `SaveOutcomeMessage` alone, so the surface views that spread them keep their
+  // type; the external arm's include `ExternalConflictMessage` — and a shared
+  // field would have to be typed over the union, widening every save outcome for
+  // a line no save shows.
 } // End of interface ConflictModelCommon
 
 /**
@@ -839,24 +914,34 @@ export interface SaveConflictModel<T> extends ConflictModelCommon<T> {
    * two as descriptions of the same bytes would be a false statement.
    */
   readonly changedAgain: boolean;
+  /** The lines to show, in order. Every one a line a save outcome can show. */
+  readonly messages: readonly SaveOutcomeMessage[];
 } // End of interface SaveConflictModel
 
 /**
- * The watcher saw the file change while this surface was open, **no write was
- * attempted**, and the draft is here.
+ * The watcher saw the file change while this surface was open, **no save was
+ * initiated in response to that observation**, and the draft is here.
  *
- * **The second origin, and it carries strictly less** (ruling 21). There was no
- * save, so there is no `expected`, no `found` and no `changedAgain`: what this arm
- * knows is the observation it was narrowed from — its sequence, the disk revision,
- * the disk text, the projection and the correspondence table — and every one of
- * those lives on {@link ExternalChangeConflictSource.observation} rather than being
- * copied out beside it.
+ * **The second origin, and it carries strictly less** (ruling 21). No save was
+ * initiated in response to the observation, so there is no `expected`, no `found`
+ * and no `changedAgain`: what this arm knows is the observation it was narrowed
+ * from — its sequence, the disk revision, the disk text, the projection and the
+ * correspondence table — and every one of those lives on
+ * {@link ExternalChangeConflictSource.observation} rather than being copied out
+ * beside it.
  *
- * **Nothing in production builds one yet, and the record says so rather than
- * implying otherwise.** {@link describeExternalConflict} is its only producer and
- * its callers today are this repository's tests; the arbitration that decides when
- * a watcher observation becomes a surface's conflict is 2d-5-5b's, and drawing
- * either origin is 2d-6's.
+ * **Not "no write was attempted"** — the 2d-6 record's §3 entry 24. An observation
+ * ruling 27's barrier held is released after a write this window *did* attempt,
+ * whose outcome may be unknown, and arbitrated under that uncertainty; the only
+ * honest claim is about what was done in response to *this* observation.
+ *
+ * **Its only producer is {@link describeExternalConflict}, and today that
+ * producer has no caller outside this repository's tests.** The arbitration that
+ * decides when a watcher observation becomes a surface's conflict exists —
+ * `BrowserState.observeExternalChange` in `./workspace.svelte.ts`, Phase 2d-5-5b —
+ * but it registers the origin and delivers nothing yet; the session transition that
+ * calls this producer with a surface's draft is Phase 2d-6-2's, and the panel that
+ * draws the result is a later 2d-6 step's.
  *
  * @typeParam T - The drafted value.
  */
@@ -869,21 +954,75 @@ export interface ExternalConflictModel<T> extends ConflictModelCommon<T> {
    * hand-built wrapper installs nothing.
    */
   readonly source: ExternalChangeConflictSource;
+  /**
+   * The lines to show, in order.
+   *
+   * **Typed as {@link ExternalConflictMessages}, not `readonly SaveOutcomeMessage[]`**:
+   * the tuple's first element is the external origin's own line by type, and no
+   * save-outcome code is admitted there. Rendered through `tConflictMessage` in
+   * `../i18n`, never through `tSaveOutcomeMessage`, which cannot take this list.
+   */
+  readonly messages: ExternalConflictMessages;
 } // End of interface ExternalConflictModel
 
 /**
- * The file moved on under an open surface, **nothing was written**, and the draft
- * is here.
+ * The file moved on under an open surface, **nothing was written in response**,
+ * and the draft is here.
  *
  * **Two arms since Phase 2d-5-5a, told apart by `source.kind`** — and the
  * discriminant is nested, which TypeScript narrows for a *property* and not for the
  * object that holds it. A consumer that needs one arm's own fields therefore
- * narrows the model by hand, or takes the arm's type directly the way
- * `beginReapply` in `./reapply.ts` does; nothing here forces either.
+ * narrows the model through {@link isSaveConflict} or {@link isExternalConflict},
+ * or takes the arm's type directly the way `beginReapply` in `./reapply.ts` does;
+ * nothing here forces either, and a renderer that reads `model.source.kind` and
+ * then reads `model.expected` off the unnarrowed union is a compile error rather
+ * than a wrong revision.
  *
  * @typeParam T - The drafted value.
  */
 export type ConflictModel<T> = SaveConflictModel<T> | ExternalConflictModel<T>;
+
+/**
+ * Whether one conflict came from a refused save, narrowing the **model**.
+ *
+ * **The one tested type guard the 2d-6 record's §3 entry 10 names**, and it exists
+ * because `model.source.kind === 'save'` narrows `model.source` and leaves `model`
+ * the union (2d-5-5a §8 item 1): a renderer that switched on the nested discriminant
+ * and then reached for `expected` on the parent got a compile error, and the
+ * tempting repair was a cast. This reads the same discriminant and lets TypeScript
+ * carry the answer to the parent.
+ *
+ * **It reads `source.kind` and nothing else**, so it establishes which arm the
+ * value declares itself to be; it cannot establish that the save-only fields are
+ * present on a value assembled by hand with the wrong `source`, because nothing at
+ * run time can. `describeConflict` is the only production producer of the save arm
+ * and always writes all three.
+ *
+ * @typeParam T - The drafted value.
+ * @param model - A conflict of either origin.
+ * @returns Whether it is the save arm.
+ */
+export function isSaveConflict<T>(model: ConflictModel<T>): model is SaveConflictModel<T> {
+  return model.source.kind === 'save';
+} // End of function isSaveConflict()
+
+/**
+ * Whether one conflict came from a watcher observation, narrowing the **model**.
+ *
+ * {@link isSaveConflict}'s twin, and not its negation written by hand at a call
+ * site: a third arm of {@link ConflictModel} would make `!isSaveConflict(model)`
+ * silently admit it to the external branch, whereas this reads the discriminant
+ * it is about.
+ *
+ * @typeParam T - The drafted value.
+ * @param model - A conflict of either origin.
+ * @returns Whether it is the external arm.
+ */
+export function isExternalConflict<T>(
+  model: ConflictModel<T>
+): model is ExternalConflictModel<T> {
+  return model.source.kind === 'externalChange';
+} // End of function isExternalConflict()
 
 /**
  * How one save ended, as the thing a screen draws.
@@ -1072,23 +1211,34 @@ function describeConflict<T>(
  * it.
  *
  * **The external origin's only producer** (ruling 21), and it is deliberately not
- * `describeConflict` widened: there is no `SaveResult` here, nothing was attempted,
- * and the three save-only fields have no honest value to take. What it carries is
- * the narrowed observation whole, inside the memoized source, exactly as the save
- * arm carries its refusal.
+ * `describeConflict` widened: there is no `SaveResult` here, no save was initiated
+ * in response to the observation, and the three save-only fields have no honest
+ * value to take. What it carries is the narrowed observation whole, inside the
+ * memoized source, exactly as the save arm carries its refusal.
  *
- * **Three lines and not five, and each omission is a decision.**
- * {@link SaveOutcomeMessage} `nothingWasWritten` is left out because *nothing was
- * written* here would be read as *your save wrote nothing*, and no save was made —
- * what did and did not happen is the origin line's, `conflictOriginMessage` in
- * `./conflictSource.ts` (ruling 23). `changedAgainSinceRefusal` is left out because
+ * **Three lines and not five, and each omission is a decision.** The first line is
+ * {@link ExternalConflictMessage} `fileChangedWhileOpen` and **never**
+ * {@link SaveOutcomeMessage} `changedElsewhere` — Phase 2d-6-1a's correction (the
+ * 2d-6 record's §3 entry 24): `changedElsewhere`'s sentence says the save was
+ * refused, and no save was initiated here. `nothingWasWritten` is left out because
+ * *nothing was written* would be read as *your save wrote nothing*, and it would
+ * also be an unbounded historical claim about a file a write of this window may
+ * have reached with an unknown outcome — what did and did not happen in response
+ * to the observation is the first line's and the origin line's, `conflictOriginMessage`
+ * in `./conflictSource.ts` (ruling 23). `changedAgainSinceRefusal` is left out because
  * there is no refusal for anything to have changed again since.
  *
  * **What this forces and what it does not, in the same sentence.** It forces that
  * every external conflict this repository builds carries the memoized source and
- * the three lines above; it cannot force that a caller supplies an observation this
- * window really narrowed, because {@link ExternalConflictObservation} is an
- * ordinary interface a caller can satisfy by hand.
+ * the three lines above; the tuple type {@link ExternalConflictMessages} forces
+ * that the **first** line is an {@link ExternalConflictMessage} and so cannot be
+ * `changedElsewhere`; and nothing in the type forbids `changedElsewhere` at a later
+ * index — the rest is `SaveOutcomeMessage` — so its absence there rests on this
+ * producer writing only the two lines that follow, and on `saveOutcome.test.ts`
+ * driving every surface's declaration through it and asserting the absence at
+ * every index. It cannot force that a caller supplies an observation this window
+ * really narrowed, because {@link ExternalConflictObservation} is an ordinary
+ * interface a caller can satisfy by hand.
  *
  * **What an unregistered observation cannot do, stated as the narrow thing it is**
  * (this phase's review, finding 4). A model built here installs nothing *until the
@@ -1121,7 +1271,14 @@ export function describeExternalConflict<T>(
     source: externalConflictSource(observation),
     draft,
     messages: [
-      { kind: 'changedElsewhere' },
+      // **The external origin's own first line, and not `changedElsewhere`.** The
+      // tuple type `ExternalConflictMessages` is what keeps a save-outcome code out
+      // of *this* position: element 0 must be an `ExternalConflictMessage`. It keeps
+      // nothing out of the two positions below — their type admits any
+      // `SaveOutcomeMessage` — so what excludes `changedElsewhere` there is that
+      // this function writes only the two lines it writes, and the test over every
+      // surface declaration that asserts the absence at every index.
+      { kind: 'fileChangedWhileOpen' },
       // The same shared rule the save arm uses, for the same reason: what was
       // retained is what the drafted value *is*, and three of the six surfaces
       // never typed anything.
@@ -1828,6 +1985,53 @@ export function saveOutcomeMessageKey(message: SaveOutcomeMessage): TranslationK
       return 'browser.saveOutcome.windowOutOfStep';
   }
 } // End of function saveOutcomeMessageKey()
+
+/**
+ * The dictionary key holding one external-only line's sentence.
+ *
+ * A `switch` over literal keys for {@link saveOutcomeMessageKey}'s reason, with a
+ * `never` terminus so a second {@link ExternalConflictMessage} arm is a compile
+ * error here rather than a line with no sentence. The keys live under
+ * `browser.externalConflict.*` (the 2d-6 record's §3 entry 39).
+ *
+ * @param message - A line only the external arm shows.
+ * @returns The key holding that line's sentence.
+ */
+export function externalConflictMessageKey(message: ExternalConflictMessage): TranslationKey {
+  switch (message.kind) {
+    case 'fileChangedWhileOpen':
+      return 'browser.externalConflict.fileChangedWhileOpen';
+    default: {
+      // `message.kind` rather than `message`: a one-arm type is not a union, so
+      // TypeScript narrows the discriminant to `never` here and not the object.
+      const unreachable: never = message.kind;
+      return unreachable;
+    }
+  }
+} // End of function externalConflictMessageKey()
+
+/**
+ * The dictionary key holding one conflict line's sentence, of either origin.
+ *
+ * **Narrows on the external arm's literal and delegates everything else**, so
+ * the exhaustiveness of the two constituent unions is checked where each lives —
+ * {@link saveOutcomeMessageKey} for the save-outcome lines and
+ * {@link externalConflictMessageKey} for the external one — and this function
+ * cannot be the place a new line of either kind is forgotten. The `default`
+ * receives the {@link SaveOutcomeMessage} narrowing, which is what makes the
+ * delegation type-check without a cast.
+ *
+ * @param message - A line of either conflict arm.
+ * @returns The key holding that line's sentence.
+ */
+export function conflictMessageKey(message: ConflictMessage): TranslationKey {
+  switch (message.kind) {
+    case 'fileChangedWhileOpen':
+      return externalConflictMessageKey(message);
+    default:
+      return saveOutcomeMessageKey(message);
+  }
+} // End of function conflictMessageKey()
 
 /**
  * The dictionary key holding one conflict choice's label.

@@ -107,6 +107,10 @@ import {
 // entry, so importing a model nothing drew would have put it in the production
 // bundle. `RestorePane.svelte` draws them now.
 import { restoreRefusalKey, type RestoreRefusal } from '../browser/restore';
+import type {
+  ExternalConflictAction,
+  ExternalConflictNotice
+} from '../browser/observationDelivery';
 import {
   conflictChoiceKey,
   conflictOperationKey,
@@ -117,6 +121,7 @@ import {
   saveOutcomeMessageKey,
   type ConflictChoice,
   type ConflictDraftKind,
+  type ConflictMessage,
   type ConflictOperation,
   type DraftFieldStatus,
   type RetainedDraftField,
@@ -186,6 +191,7 @@ import {
   describeBatchSkipped,
   describeChangedContent,
   describeCommandError,
+  describeConflictMessage,
   describeContentKind,
   describeDecodeError,
   describeDiagnostic,
@@ -193,6 +199,8 @@ import {
   describeDuplicateSeam,
   describeEditError,
   describeEntrySkipped,
+  describeExternalConflictAction,
+  describeExternalConflictNotice,
   describeExternalObservation,
   describeFileKind,
   describeFindingClass,
@@ -265,6 +273,7 @@ export {
   describeBatchSkipped,
   describeChangedContent,
   describeCommandError,
+  describeConflictMessage,
   describeContentKind,
   describeDecodeError,
   describeDiagnostic,
@@ -272,6 +281,8 @@ export {
   describeDuplicateSeam,
   describeEditError,
   describeEntrySkipped,
+  describeExternalConflictAction,
+  describeExternalConflictNotice,
   describeExternalObservation,
   describeFileKind,
   describeFindingClass,
@@ -803,6 +814,60 @@ export function tRestoreRefusal(refusal: RestoreRefusal): string {
 export function tSaveOutcomeMessage(message: SaveOutcomeMessage): string {
   return translate(locale.current, saveOutcomeMessageKey(message));
 } // End of function tSaveOutcomeMessage()
+
+/**
+ * Renders one line of a conflict of **either origin**, in the current language.
+ *
+ * The reactive wrapper over `describeConflictMessage` in `./codes` (Phase
+ * 2d-6-1a). It exists because an external conflict's first line,
+ * `fileChangedWhileOpen`, is not a `SaveOutcomeMessage` and
+ * {@link tSaveOutcomeMessage} cannot take the external model's list; a renderer
+ * of `view.conflict` calls this one for both arms and never narrows the union in
+ * markup.
+ *
+ * **No component calls it yet.** The 2d-6 record's §3 entry 10 renders
+ * `view.conflict` outside the save-outcome branch in the component steps
+ * (2d-6-6 onwards); this phase lands the accessor so the code has a string
+ * before anything draws it. The eight components keep calling
+ * {@link tSaveOutcomeMessage} over `view.messages`, whose type is unchanged.
+ *
+ * @param message - A line of either conflict arm.
+ * @returns The translated sentence.
+ */
+export function tConflictMessage(message: ConflictMessage): string {
+  return describeConflictMessage(locale.current, message);
+} // End of function tConflictMessage()
+
+/**
+ * Renders the line a surface shows while an observation about its file is held
+ * or a write's outcome is unknown, in the current language.
+ *
+ * The reactive wrapper over `describeExternalConflictNotice` in `./codes` (the
+ * 2d-6 record's §3 entries 13 and 14). **No component calls it yet, and no
+ * session produces the state it names yet**: the retained restriction is
+ * 2d-6-2's session state and the uncertainty acknowledgement is 2d-6-1b's
+ * member. A code with no string is worse than a code with no caller.
+ *
+ * @param notice - Which state the surface is in.
+ * @returns The translated sentence.
+ */
+export function tExternalConflictNotice(notice: ExternalConflictNotice): string {
+  return describeExternalConflictNotice(locale.current, notice);
+} // End of function tExternalConflictNotice()
+
+/**
+ * Renders the label of the control that ends an uncertainty hold, in the current
+ * language.
+ *
+ * The reactive wrapper over `describeExternalConflictAction` in `./codes`. It
+ * labels a control 2d-6-1b's member will stand behind; nothing draws it yet.
+ *
+ * @param action - Which control to label.
+ * @returns The translated label.
+ */
+export function tExternalConflictAction(action: ExternalConflictAction): string {
+  return describeExternalConflictAction(locale.current, action);
+} // End of function tExternalConflictAction()
 
 /**
  * Renders the line saying where one conflict came from, in the current language.
@@ -1439,14 +1504,17 @@ export function tExternalEvidenceRefusal(reason: ExternalEvidenceRefusal): strin
 } // End of function tExternalEvidenceRefusal()
 
 /**
- * Renders that a conflict's disk side was replaced by a later reading, in one
- * language.
+ * Renders that a conflict's evidence was superseded by another accepted reading,
+ * in one language.
  *
  * The accessor over `SUPERSEDED_EVIDENCE_KEY` in `../browser/reapply`, and the one
  * sentence the `superseded` arm of `ReapplyEvidenceAccess` owes. It takes no
  * operand and names no revision, for the reason the three refusals above do not: a
  * content revision is a hex digest, and showing one beside a refusal invites a
- * person to compare two strings that carry no order.
+ * person to compare two strings that carry no order. **Since Phase 2d-6-1a the
+ * sentence says the accepted evidence changed and not that the disk is newer** (the
+ * 2d-6 record's §3 entry 24): the accepted sequence orders observations, and it
+ * establishes nothing about disk chronology relative to a locked save read.
  *
  * **Nothing draws it yet**, exactly as nothing draws the three above: ruling 26 is
  * Phase 2d-5-5b's and the panel that shows one of these is 2d-6's. A code with no
@@ -1460,8 +1528,8 @@ export function describeSupersededEvidence(locale: Locale): string {
 } // End of function describeSupersededEvidence()
 
 /**
- * Renders that a conflict's disk side was replaced by a later reading, in the
- * current language.
+ * Renders that a conflict's evidence was superseded by another accepted reading,
+ * in the current language.
  *
  * @returns The translated sentence.
  */

@@ -4821,3 +4821,17 @@ is unchanged at Rust 0, svelte-check +1, vitest +1 (the `ipc-detail` row for `sr
 harness's own launches are not a gate and are read in `2d-5-7b-window-reading.md` §4. 2d-5-7a's
 per-case derivation of the seven-case move, formerly here, is archived verbatim in
 [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-5-7a's verification narrative"*.
+
+### The 2d-6 design consult's verification narrative — archived 2026-09-21 at Phase 2d-6-1a
+
+_Archived verbatim from `PROGRESS.md`; the ladder section that follows it there is live and was kept._
+
+The phase's product is four files under `docs/` (brief, consult, record, record review) plus the checkpoint
+pair; `git status --short --untracked-files=all` before the commit showed **no path outside `docs/` and
+the checkpoint pair beyond the four instrument paths**, which is the whole claim. `npm test` was run once
+by the orchestrator, exit 0, **2474 passed, 62 files** — the vitest cell of the rung, unchanged. **No
+Cargo gate, no `svelte-check` and no Vite build were run**, because no Rust, TypeScript or Svelte file
+changed; the other three cells of the rung are 2d-5-7b's measurement and are not restated as this phase's.
+The consult itself ran no gate and says so (`phase-2d-6-design.md`, second paragraph under the header).
+2d-5-7b's own verification narrative, formerly here, is archived verbatim in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-5-7b's verification narrative"*.

@@ -259,7 +259,16 @@ export type ConflictOriginMessage =
       readonly kind: 'refusedSave';
     }
   | {
-      /** The file changed on disk while this surface was open, with no save attempted. */
+      /**
+       * The file changed on disk while this surface was open, and no save was
+       * initiated in response to that observation.
+       *
+       * **Not "with no save attempted"** — Phase 2d-6-1a's correction (the 2d-6
+       * record, §3 entry 24). An observation held by ruling 27's barrier is
+       * released after a write this window *did* attempt, possibly with an
+       * uncertain outcome, so the only claim the sentence may make is about what
+       * was done *in response to this observation*: nothing.
+       */
       readonly kind: 'changedWhileOpen';
     };
 
@@ -311,6 +320,105 @@ export function conflictOriginMessageKey(message: ConflictOriginMessage): Transl
     }
   }
 } // End of function conflictOriginMessageKey()
+
+/**
+ * The revisions one conflict may honestly name, as one typed value over both
+ * origins.
+ *
+ * **The shared description helper the 2d-6 record's §3 entry 10 asks for, and it
+ * is deliberately asymmetric.** The save arm names three: what the save was based
+ * on (`expected`), what the locked read found and refused it on (`found`), and
+ * what the read taken afterwards observed (`observed`). The external arm names
+ * **one** — the revision of the exact bytes the watcher read — because there was
+ * no save to have been based on anything and no locked read to have found
+ * anything. Declaring the two arms with different fields is what makes a renderer
+ * that draws `expected` off an external conflict a compile error rather than a
+ * relabelled `previousRevision`.
+ *
+ * **Two things the external arm never carries, and why.** `previousRevision` is
+ * *the last stable revision the engine tracked before this reading*; it is not
+ * what this window loaded and not what any draft was made from, so presenting it
+ * under the save arm's *expected* label would tell a person their draft was based
+ * on a revision it may never have seen. And there is no *found* to manufacture:
+ * the observation is one reading, not a refusal followed by a re-read. Both
+ * exclusions are structural here — the arm has no such field — and a renderer
+ * cannot get them back through this type.
+ *
+ * **It describes and does not compare.** Which origin stands, whether the bytes
+ * differ and whether the file moved twice are `arbitrateObservation`'s and the
+ * save arm's `changedAgain` — reported here as a fact read off the refusal, never
+ * recomputed from a second read.
+ */
+export type ConflictRevisionDescription =
+  | {
+      /** A save this application attempted was refused under the write lock. */
+      readonly kind: 'save';
+      /** The revision the save was based on: what the surface loaded. */
+      readonly expected: ContentRevision;
+      /** The revision the locked read found: the bytes that refused the save. */
+      readonly found: ContentRevision;
+      /** The revision of the fresh read taken after the refusal. */
+      readonly observed: ContentRevision;
+      /**
+       * Whether `found` and `observed` differ: the file moved twice.
+       *
+       * The same comparison `describeConflict` in `./saveOutcome.ts` makes for
+       * `SaveConflictModel.changedAgain`, over the same two wire fields, so the two
+       * cannot disagree about one refusal.
+       */
+      readonly changedAgain: boolean;
+    }
+  | {
+      /** The watcher observed the file changing while a surface was open over it. */
+      readonly kind: 'externalChange';
+      /** The revision of the exact bytes the watcher read. Nothing else. */
+      readonly observed: ContentRevision;
+    };
+
+/**
+ * The revisions one conflict may name, read once off its origin.
+ *
+ * **A `switch` with a `never` terminus**, so a third arm of {@link ConflictSource}
+ * is a compile error here rather than an origin that silently borrows the save
+ * arm's three revisions. Every operand is read exactly once, off the origin, and
+ * the answer is frozen: the origin is a value a caller holds and a getter behind
+ * `expected` could answer one thing to a comparison and another to a screen.
+ *
+ * **What it forces and what it cannot.** It forces that the external arm's
+ * description carries no `expected` and no `found` — there is no field to put one
+ * in. It cannot force a renderer to use it: a component that reads
+ * `source.observation.previousRevision` directly and draws it under an *expected*
+ * label compiles, and only a mounted test over that component can catch it.
+ *
+ * @param source - Where the conflict came from.
+ * @returns The revisions that origin may honestly name.
+ */
+export function conflictRevisionsOf(source: ConflictSource): ConflictRevisionDescription {
+  switch (source.kind) {
+    case 'save': {
+      const conflict = source.conflict;
+      const expected = conflict.expected;
+      const found = conflict.found;
+      const observed = conflict.disk_revision;
+      return Object.freeze({
+        kind: 'save' as const,
+        expected,
+        found,
+        observed,
+        changedAgain: found !== observed
+      });
+    }
+    case 'externalChange':
+      return Object.freeze({
+        kind: 'externalChange' as const,
+        observed: source.observation.diskRevision
+      });
+    default: {
+      const unreachable: never = source;
+      return unreachable;
+    }
+  }
+} // End of function conflictRevisionsOf()
 
 /**
  * What one standing conflict says about the file it is about, captured once.
@@ -402,7 +510,11 @@ export type ObservationVerdict =
        * changed underneath it — a re-entrant registration through a getter on the
        * value it was reading. *Held, and nobody has acted on it* is the whole of
        * what this arm says either way; what it never says is that the observation
-       * will be looked at again, which only a later settlement does.
+       * will be looked at again. **What releases a held observation today is a
+       * later settlement of a write for the file, or `open()` dropping the
+       * workspace whole** — nothing schedules a second look. The 2d-6 record's §5.6
+       * binds a third release, a person-requested retry, to Phase 2d-6-1b; until
+       * that lands there is none, and this comment is corrected when it does.
        */
       readonly kind: 'retained';
     }

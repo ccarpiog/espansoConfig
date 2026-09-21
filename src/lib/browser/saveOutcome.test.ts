@@ -34,6 +34,7 @@ import { LOCALES } from '../i18n/locale';
 import type {
   ConflictResult,
   ContentRevision,
+  CorrespondenceTable,
   Finding,
   PresentationNote,
   RefusedResult,
@@ -52,11 +53,15 @@ import {
   authorizeDiskAdoption,
   conflictChoiceKey,
   conflictChoicesFor,
+  conflictMessageKey,
   conflictOperationKey,
   confirmReloadDiskVersion,
   copyOfDraft,
   describeEditSave,
   describeExternalConflict,
+  externalConflictMessageKey,
+  isExternalConflict,
+  isSaveConflict,
   supersedeConflict,
   describeWholeDocumentSave,
   draftFieldStatusKey,
@@ -71,8 +76,10 @@ import {
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDraftKind,
+  type ConflictModel,
   type ConflictOperation,
   type DraftFieldStatus,
+  type ExternalConflictMessages,
   type OutcomeArm,
   type RetainedDraftField,
   type SaveConflictModel,
@@ -91,6 +98,7 @@ import { CONFLICT_CAPABILITIES as MATCH_EDITOR } from './matchEditor';
 import { CONFLICT_CAPABILITIES as MOVER } from './matchMove';
 import { CONFLICT_CAPABILITIES as RAW_EDITOR } from './rawEditor';
 import { CONFLICT_CAPABILITIES as RESTORE } from './restore';
+import { RECOVERY_CONFLICT_CAPABILITIES as RECOVERY } from './recovery';
 
 /**
  * Every member of {@link ConflictChoice}, and **exhaustively** so.
@@ -643,13 +651,17 @@ describe('the two conflict origins', () => {
 
   it('says nothing about a save in the lines an external conflict shows', () => {
     // Ruling 23: an external conflict may say only that the file changed while the
-    // surface was open and that no write was made in response. *Nothing was
-    // written* would be read as *your save wrote nothing*, and there was no save;
-    // *changed again since the refusal* names a refusal that never happened.
+    // surface was open and that no save was initiated in response. *Nothing was
+    // written* would be read as *your save wrote nothing*, and no save was initiated
+    // in response to the observation; *changed again since the refusal* names a
+    // refusal that never happened; and `changedElsewhere` — the first line until
+    // Phase 2d-6-1a — says *the save was refused*, which the 2d-6 record's §3 entry
+    // 24 rules false of this origin. The first line is the external origin's own.
     const model = describeExternalConflict(observation(), draftInHand(), RAW_EDITOR);
     expect(model.messages).not.toContainEqual({ kind: 'nothingWasWritten' });
     expect(model.messages).not.toContainEqual({ kind: 'changedAgainSinceRefusal' });
-    expect(model.messages).toContainEqual({ kind: 'changedElsewhere' });
+    expect(model.messages).not.toContainEqual({ kind: 'changedElsewhere' });
+    expect(model.messages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
     // **The surface's declared capabilities are unchanged by the origin**
     // (ruling 23): the raw editor's reload still reseeds its draft and the mover's
     // still abandons an operation nobody typed, and the same two declarations
@@ -754,6 +766,133 @@ describe('the two conflict origins', () => {
     expect(supersedeConflict(shifting, observation(), RAW_EDITOR).draft).toBe(draft);
     expect(reads).toBe(1);
   }); // End of the "reads the draft once" case
+
+  /**
+   * Every surface's own conflict declaration, named.
+   *
+   * Written out rather than derived, so that a ninth surface's declaration has to
+   * be added here by hand — the R24 corollary — and the case below cannot pass
+   * because it iterated fewer declarations than exist.
+   */
+  const EVERY_DECLARATION: ReadonlyMap<string, ConflictCapabilities> = new Map([
+    ['creator', CREATOR],
+    ['deleter', DELETER],
+    ['duplicator', DUPLICATOR],
+    ['matchEditor', MATCH_EDITOR],
+    ['mover', MOVER],
+    ['rawEditor', RAW_EDITOR],
+    ['restore', RESTORE],
+    ['recovery', RECOVERY]
+  ]);
+
+  /**
+   * Every shape of narrowed observation the wire admits, named.
+   *
+   * The two optional halves — a previous revision and a correspondence table —
+   * are the only fields that vary; the four combinations are all of them.
+   *
+   * @returns One observation per combination, freshly built.
+   */
+  function everyObservationShape(): ReadonlyMap<string, ExternalConflictObservation> {
+    const table: CorrespondenceTable = {
+      base_revision: BASE,
+      disk_revision: AFTER,
+      entries: []
+    };
+    return new Map([
+      ['first reading, no table', { ...observation(), previousRevision: null }],
+      ['tracked before, no table', observation()],
+      ['first reading, with table', { ...observation(), previousRevision: null, correspondences: table }],
+      ['tracked before, with table', { ...observation(), correspondences: table }]
+    ]);
+  } // End of function everyObservationShape()
+
+  it('never emits changedElsewhere for any external conflict, whatever the surface or the observation', () => {
+    // **The acceptance the 2d-6 record's §2 names for 2d-6-1**, driven over every
+    // declaration and every observation shape rather than one: `changedElsewhere`'s
+    // sentence says *the save was refused rather than applied over that change*,
+    // and an origin under which no save was initiated may not say it. The type of
+    // `ExternalConflictMessage` is what keeps the code out of the first position;
+    // this is the run-time half over every input the producer can be given.
+    for (const [surface, capabilities] of EVERY_DECLARATION) {
+      for (const [shape, seen] of everyObservationShape()) {
+        const model = describeExternalConflict(seen, draftInHand(), capabilities);
+        const kinds = model.messages.map((message) => message.kind);
+        expect(kinds, `${surface}: ${shape}`).not.toContain('changedElsewhere');
+        expect(kinds[0], `${surface}: ${shape}`).toBe('fileChangedWhileOpen');
+        // And the supersession path, which builds through the same producer, keeps
+        // the same property — a replacing model over the same draft.
+        const replaced = supersedeConflict(model, seen, capabilities);
+        expect(
+          replaced.messages.map((message) => message.kind),
+          `${surface}: ${shape}: superseded`
+        ).not.toContain('changedElsewhere');
+      } // End of the loop over every observation shape
+    } // End of the loop over every surface declaration
+    expect(EVERY_DECLARATION.size).toBe(8);
+  }); // End of the "never emits changedElsewhere" case
+
+  it('refuses a save-outcome code in the first position by type, and only there', () => {
+    // The phase's review: a plain `ConflictMessage[]` admitted `changedElsewhere`
+    // everywhere while a comment claimed the type excluded it. The list is a tuple
+    // now, and this is the compile-time half — the `@ts-expect-error` is an error
+    // itself if the tuple ever stops refusing a save code at index 0. The second
+    // literal type-checks on purpose: index 1 onwards is `SaveOutcomeMessage`, and
+    // the doc says so; the run-time case above is what covers those positions.
+    // @ts-expect-error — a save-outcome code may not be the first line.
+    const refused: ExternalConflictMessages = [{ kind: 'changedElsewhere' }];
+    const admitted: ExternalConflictMessages = [
+      { kind: 'fileChangedWhileOpen' },
+      { kind: 'changedElsewhere' }
+    ];
+    expect(refused).toHaveLength(1);
+    expect(admitted).toHaveLength(2);
+  }); // End of the "tuple refuses a save code first" case
+
+  it('gives the external line a key under browser.externalConflict, never under browser.saveOutcome', () => {
+    // Entry 39's namespace rule, as a check on the key function: the external
+    // origin's line is not a save outcome and may not borrow that namespace.
+    const key = externalConflictMessageKey({ kind: 'fileChangedWhileOpen' });
+    expect(key).toBe('browser.externalConflict.fileChangedWhileOpen');
+    expect(conflictMessageKey({ kind: 'fileChangedWhileOpen' })).toBe(key);
+    for (const locale of LOCALES) {
+      expect(DICTIONARIES[locale][key].trim(), locale).not.toBe('');
+    } // End of the loop over the two locales
+    // The union's key function delegates every save-outcome line to the save
+    // function unchanged, so the two cannot disagree about one code.
+    expect(conflictMessageKey({ kind: 'changedElsewhere' })).toBe(
+      saveOutcomeMessageKey({ kind: 'changedElsewhere' })
+    );
+    expect(conflictMessageKey({ kind: 'reloadDiscardsDraft' })).toBe(
+      saveOutcomeMessageKey({ kind: 'reloadDiscardsDraft' })
+    );
+  }); // End of the "external line's namespace" case
+
+  it('narrows the model by origin through the two type guards, not through source.kind alone', () => {
+    // 2d-5-5a §8 item 1: `model.source.kind === 'save'` narrows `model.source` and
+    // leaves `model` the union, so a renderer reaching for `expected` needed a cast.
+    // The guards carry the answer to the parent. What a run-time test can show is
+    // that each guard answers by the discriminant it is about and that the narrowed
+    // value really has, or really lacks, the save-only fields.
+    const save = describeWholeDocumentSave(conflictWith(), draftInHand(), RAW_EDITOR);
+    const external = describeExternalConflict(observation(), draftInHand(), RAW_EDITOR);
+    if (save.kind !== 'conflict') {
+      throw new Error('the conflict arm is what this case is about');
+    }
+    const models: readonly ConflictModel<string>[] = [save, external];
+    const saves = models.filter(isSaveConflict);
+    const externals = models.filter(isExternalConflict);
+    expect(saves).toEqual([save]);
+    expect(externals).toEqual([external]);
+    // Narrowed, `expected` is a `ContentRevision` and not a type error.
+    expect(saves[0]!.expected).toBe(BASE);
+    expect(Object.hasOwn(externals[0]!, 'expected')).toBe(false);
+    // The two are each other's complement over the union as declared today, and
+    // neither is written as the other's negation.
+    for (const model of models) {
+      expect(isSaveConflict(model)).toBe(!isExternalConflict(model));
+    } // End of the loop over the two models
+  }); // End of the "two type guards" case
 }); // End of the "two conflict origins" suite
 
 describe('the one authority that decides what a conflict offers', () => {

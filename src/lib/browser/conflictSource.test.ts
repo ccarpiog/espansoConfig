@@ -29,6 +29,7 @@ import {
   arbitrateObservation,
   conflictOriginMessage,
   conflictOriginMessageKey,
+  conflictRevisionsOf,
   externalConflictSource,
   newestObservationOf,
   releaseBarrier,
@@ -226,21 +227,112 @@ describe('the origin line', () => {
     } // End of the loop over the two lines
   }); // End of the "reaches the screen through the accessor" case
 
-  it('says of the watcher line that no save was attempted, in both locales', () => {
+  it('says of the watcher line that no save was initiated in response to the observation, in both locales', () => {
     // **One property of one sentence, not its meaning.** The external origin's whole
-    // claim is that this application wrote nothing in response to the change it saw;
-    // a line that dropped that clause would read as a report of a failed save. The
-    // third assertion is the discriminator rather than a control: it shows the clause
-    // belongs to the watcher line alone, so a scan that matched both sentences — the
-    // way a scan for a word every sentence happens to contain would — fails here.
+    // claim is that this application initiated no save in response to the change it
+    // saw; a line that dropped that clause would read as a report of a failed save.
+    // **Not "no save was attempted"** — Phase 2d-6-1a narrowed the clause (the 2d-6
+    // record's §3 entry 24), because an observation the barrier held is released
+    // after a write this window *did* attempt, so the old sentence was an unbounded
+    // historical claim. The last two assertions are the discriminator rather than a
+    // control: they show the clause belongs to the watcher line alone, so a scan
+    // that matched both sentences fails here, and that the old clause is gone.
     const key = conflictOriginMessageKey({ kind: 'changedWhileOpen' });
-    expect(DICTIONARIES.en[key].toLowerCase()).toContain('no save was attempted');
-    expect(DICTIONARIES.es[key].toLowerCase()).toContain('no se intentó ningún guardado');
-    expect(DICTIONARIES.en[conflictOriginMessageKey({ kind: 'refusedSave' })]).not.toContain(
-      'No save was attempted'
+    expect(DICTIONARIES.en[key]).toContain('No save was initiated in response to this observation');
+    expect(DICTIONARIES.es[key]).toContain(
+      'No se ha iniciado ningún guardado como respuesta a esta observación'
     );
-  }); // End of the "no save was attempted" case
+    expect(DICTIONARIES.en[key].toLowerCase()).not.toContain('no save was attempted');
+    expect(DICTIONARIES.es[key].toLowerCase()).not.toContain('no se intentó ningún guardado');
+    expect(DICTIONARIES.en[conflictOriginMessageKey({ kind: 'refusedSave' })]).not.toContain(
+      'No save was initiated'
+    );
+  }); // End of the "no save was initiated in response" case
 }); // End of the "origin line" suite
+
+describe('the revisions one conflict may name', () => {
+  it('names three for a refused save, read off the refusal, with the moved-twice fact', () => {
+    // The save arm's description is the refusal's three revisions under the labels a
+    // panel already draws — expected, found, observed — and `changedAgain` is the
+    // same comparison `describeConflict` makes, over the same two wire fields.
+    const once = refusal();
+    const description = conflictRevisionsOf(saveConflictSource(once));
+    expect(description).toEqual({
+      kind: 'save',
+      expected: BASE,
+      found: DISK,
+      observed: DISK,
+      changedAgain: false
+    });
+    const twice = makeConflict({
+      disk: makeDocument({ id: TARGET, revision: 'c'.repeat(64) }),
+      expected: BASE,
+      found: DISK
+    });
+    expect(conflictRevisionsOf(saveConflictSource(twice))).toEqual({
+      kind: 'save',
+      expected: BASE,
+      found: DISK,
+      observed: 'c'.repeat(64),
+      changedAgain: true
+    });
+  }); // End of the "three for a refused save" case
+
+  it('names only the observed disk revision for an external change, and never the previous one', () => {
+    // **Entry 10's two prohibitions, as absences.** The external arm has no
+    // `expected` and no `found` — there was no save to be based on anything and no
+    // locked read to have found anything — and `previousRevision` is not relabelled
+    // as either: it is what the watcher tracked, not what any draft was made from.
+    const seen = observation();
+    expect(seen.previousRevision).toBe(BASE);
+    const description = conflictRevisionsOf(externalConflictSource(seen));
+    expect(description).toEqual({ kind: 'externalChange', observed: DISK });
+    for (const absent of ['expected', 'found', 'changedAgain', 'previousRevision']) {
+      expect(Object.hasOwn(description, absent), absent).toBe(false);
+    } // End of the loop over the four names the external arm must not carry
+    // No value of the description is the previous revision, under any name.
+    expect(Object.values(description)).not.toContain(BASE);
+    // And a first reading — no previous revision at all — describes identically.
+    const first = externalConflictSource({ ...observation(), previousRevision: null });
+    expect(conflictRevisionsOf(first)).toEqual({ kind: 'externalChange', observed: DISK });
+  }); // End of the "only the observed disk revision" case
+
+  it('is decided for every origin the union has, and answers a frozen value', () => {
+    // The exhaustive drive over `EVERY_ORIGIN`, so a third origin fails here as well
+    // as at the `never` terminus. Frozen because a description is handed to a
+    // renderer and a getter behind `expected` could otherwise answer a comparison one
+    // thing and a screen another.
+    for (const kind of EVERY_ORIGIN) {
+      const description = conflictRevisionsOf(sourceOf(kind));
+      expect(description.kind, kind).toBe(kind);
+      expect(Object.isFrozen(description), kind).toBe(true);
+    } // End of the loop over every origin
+  }); // End of the "every origin" case
+
+  it('reads each revision off the origin exactly once', () => {
+    // `CLAUDE.md` section 6's check-and-spend class, for a describer: a source is a
+    // value a caller holds, and a getter that counts its reads shows the description
+    // was built from one reading of each field.
+    const reads = { expected: 0, found: 0, disk_revision: 0 };
+    const counted: ConflictResult = {
+      ...refusal(),
+      get expected(): ContentRevision {
+        reads.expected += 1;
+        return BASE;
+      },
+      get found(): ContentRevision {
+        reads.found += 1;
+        return DISK;
+      },
+      get disk_revision(): ContentRevision {
+        reads.disk_revision += 1;
+        return DISK;
+      }
+    };
+    conflictRevisionsOf(saveConflictSource(counted));
+    expect(reads).toEqual({ expected: 1, found: 1, disk_revision: 1 });
+  }); // End of the "reads each revision once" case
+}); // End of the "revisions one conflict may name" suite
 
 describe('arbitrating a watcher observation against what stands', () => {
   /** A third revision, for the observation that supersedes. */

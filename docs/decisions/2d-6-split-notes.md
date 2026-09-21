@@ -66,6 +66,33 @@ stays at zero through every arbitration, retry and acknowledgement; `describeExt
 longer emits `changedElsewhere`. **Components: none.** **Bound by** entries 2, 4, 5, 11, 14-19,
 24, 28, 29, 32, 40. **Depends on** nothing in 2d-6.
 
+#### The orchestrator's cut of 2d-6-1, taken 2026-09-21 (§6 item 16)
+
+Nine deliverables against a one-worker bound is too many for one coherent phase, so 2d-6-1 runs as
+three sub-phases in dependency order, each owing the gate set and its own review. **The union is
+2d-6-1 exactly**: nothing is added, and the acceptance above is checked in full when 2d-6-1c closes.
+
+- **2d-6-1a — values, shared primitives and messages.** The delivery envelope as a value (narrowed
+  observation plus verdict, entry 4) with no `BrowserState` member yet; the shared conflict-description
+  and evidence primitives (entry 10 — one typed revision description over both origins, never relabelling
+  `previousRevision` as "expected" nor manufacturing "found"); the pure per-file automatic-reload
+  guard decision (entries 15 and 32, the predicate only — its state is 1b's); the origin-correct message
+  values with EN/ES sentences under the entry 39 namespaces, pinned to the entry 40 bounds — the
+  retained sentence (entry 13), the uncertainty sentences (entry 14), the three corrections of entry 24,
+  and `describeExternalConflict` no longer emitting `changedElsewhere`; the entry 41 corrections in the
+  files it touches. **Components: none; no new `workspace.svelte.ts` member.** Bound by entries 4, 10,
+  11 (the values each verdict's action consumes), 13, 14 (sentences), 15 (predicate), 24, 39, 40, 41.
+- **2d-6-1b — the observation-protocol members.** The narrow `ReconciliationWorkspace`
+  arbitration/delivery member with settlement verdicts published through it (entries 2, 4, 5); the
+  person-requested retry at the original arrival generation (entries 16, 17, 18); the uncertainty
+  acknowledgement (entries 14, 15); the per-file automatic-reload guard state (entry 15). **Components:
+  none.** The command spy stays at zero through every arbitration, retry and acknowledgement.
+- **2d-6-1c — the coordinator and workspace members.** The coordinator state-change notification
+  feeding one `BrowserState` revision signal, and the `watchState()` and sanitized registration-state
+  exposure §6 item 11 says no step claimed — **1c claims it** (entry 28); the two guarded reload request
+  methods (entry 29); the guarded file reread request delegating to `rereadUnderGuard` (entry 32).
+  **Components: none.**
+
 ### 2d-6-2 — match-editor external session and reapply
 
 **Delivers** the editor's `externalConflict` field, the restriction at `canSave` and `beginSave`, the

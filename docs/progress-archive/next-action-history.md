@@ -14358,3 +14358,82 @@ first-wins guard (`2d-5-1-C-notes.md` §3) and `invalidateEverySurface`'s unobse
 (`2d-5-2b-notes.md` §9.1). The one method rule kept here: **`scripts/lint/ipc-detail.test.ts` generates
 its cases from `scannableFiles()`**, so its count moves when a file is merely *added* under the scanned
 roots — **re-derive a test count per file, on a pristine tree, never from the total.**
+
+## The Next-action section the 2d-6-1a checkpoint replaced — archived 2026-09-21
+
+_Archived verbatim from `PROGRESS.md` when Phase 2d-6-1a closed. The three binding documents it names, the consult's verdict paragraph and the instrument warning are restated in the live section; the split it asked phase selection to consider was taken and is recorded in `docs/decisions/2d-6-split-notes.md` §2._
+
+## Next action
+
+### The 2d-6 design consult is complete and CLOSED. The next action is **Phase 2d-6-1 — delivery, retained-state and uncertainty protocol**, the first of the eleven steps the consult cut 2d-6 into.
+
+**The three documents that bind every 2d-6 step, in reading order**:
+[`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (**the consult; it binds** — Codex at
+high effort, 2026-09-21, eleven rulings, no gate run and none claimed),
+[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (the record — §2 the eleven-step
+split with per-step scope, acceptance and the rulings that bind it; §3 forty-three binding rulings; §4 a
+114-row citation audit, 105 resolving, 9 with a note, 0 failing; **§5 nine corrections that override
+`phase-2d-design.md` item 6 and `2d-5-split-notes.md` — read them before treating either as the spec**; §6
+what was not settled, gaps and overlaps in the split; §7 the map of the three handed-on obligations and
+open items 0-11; §8 its review) and
+[`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md) (the brief, with its 16-row
+facts table re-derived on the 2026-09-21 tree and a *Drift* paragraph naming which older ranges no longer
+resolve — every `workspace.svelte.ts` range in the 2d-5 consult and brief among them; the file is 5 948
+lines now).
+
+**The consult's verdict, in one paragraph**: 2d-6 is not seven callbacks plus translated markup; it needs a
+complete observation-to-session protocol — delivery after write settlement, model-owned submission
+blocking, origin-correct messages. Two corrections to the inherited design: **recovery is an eighth live
+write surface**, and **removing the last document must not unmount retained sessions**. Native
+backend-status exposure stays outside the phase; the DOM foreground source (open item 8) comes in as
+step 2d-6-10; every component-changing step owes a narrow window regression reading; mounted evidence is
+bilingual.
+
+**Executable cold — 2d-6-1**: the record's §2 first subsection defines it. It delivers the delivery
+envelope and the narrow `ReconciliationWorkspace` arbitration/delivery member, settlement verdicts
+published through it, the person-requested retry, the coordinator state-change notification feeding a
+`BrowserState` revision signal, the guarded workspace and file reload requests, the uncertainty
+acknowledgement, per-file automatic-reload guards, the shared description and evidence primitives and the
+origin-correct message values with EN/ES sentences — **components: none**, bound by entries 2, 4, 5, 11,
+14-19, 24, 28, 29, 32 and 40. **Its acceptance** is the record's: a settlement verdict is delivered, not
+discarded; one retry press makes at most one attempt; the acknowledgement refuses in flight, after
+supersession and at a moved generation and spends once; the command spy stays at zero throughout;
+`describeExternalConflict` no longer emits `changedElsewhere`. **The record's own §6 says 2d-6-1 carries
+nine deliverables against the one-worker bound** — phase selection should consider splitting it (values
+and messages first, then the `BrowserState` members) and record the split in the record's §2 if it does.
+The other recorded gaps to carry: no step claims the `BrowserState` exposure of `watchState()` /
+registration state (entry 28), and no model step names the per-surface `removed`-status transition
+(entry 30) — the first step to need either takes it and says so.
+
+#### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
+
+`git status --short --untracked-files=all` shows **four uncommitted instrument paths** — `M
+src-tauri/src/main.rs` and `M src/main.ts` (two hook lines each; `git diff --stat` over the pair is `5
+insertions(+), 1 deletion(-)` and must stay that way), `?? src-tauri/src/probe.rs` and `?? src/probe.ts`.
+**Do not commit them, do not revert them, and do not treat them as unaccounted-for work.** They are the
+temporary window-reading instrument (`CLAUDE.md` §6, *Window readings*); 2d-8 deletes it. **Stage by
+path**: `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/`, `src/lib/i18n/`, `src/lib/ipc/`, and
+any `src-tauri/` or `src/lib/components/` file **by name** — never `src-tauri/src/` as a directory. The
+2d-6 steps that add a component or a `.ts` module move the Vite module count (one per module, two per
+styled component) and the `ipc-detail` row count (one per file under the scanned roots) — re-derive per
+file, never from the total, and remember the instrument's known contribution (`Verification baseline`).
+
+#### Open items — the live map is the record's §7
+
+`docs/decisions/2d-6-split-notes.md` §7 states, per item, whether the consult **took it into 2d-6**
+(obligations (1)-(3), open items 5, 6, 8, 9), **deferred it** (1 — the `file:line` drift checker; 7 — the
+`"permissions": []` comment in `main.rs`, 2d-8's; 10 — the `dispose()`-on-close path) or **left it
+untouched** (0, 2, 3, 4, 11). The previous statement of the eleven items, with their citations, is
+archived verbatim in [`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The
+Next-action section the 2d-6 design consult checkpoint replaced"*, and is not restated here. Two facts the
+consult item did not anticipate, found while writing the brief and now bound by rulings: **native watcher
+degradation is not on the wire** (`WatchStatusView` is read by `watch_check` alone), and `BrowserState`
+exposes neither `watchState()` nor its registration.
+
+#### The rest of the 2d consult, so a step is not invented
+
+**2d-6** (its eleven steps, above), **2d-7** (the reviewed instrument and the bilingual WKWebView reading —
+start from the `fetch` recorder already in `src/probe.ts`, not from the consult's description), **2d-8**
+(instrument removal and harness-free closure; corrects the `main.rs` comment and deletes
+`/private/tmp/espansoconfig-harness-2d-5-7b/`).
+---

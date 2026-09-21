@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T11:03:34Z",
+ "updated": "2026-09-21T11:44:29Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -426,8 +426,29 @@
   {
    "id": "2d-6-1",
    "title": "Delivery, retained-state and uncertainty protocol",
+   "status": "in_progress",
+   "summary": "Split 2026-09-21 into 2d-6-1a, 2d-6-1b and 2d-6-1c (record §2); done when all three close."
+  },
+  {
+   "id": "2d-6-1a",
+   "title": "Delivery values, shared conflict primitives and origin-correct messages",
+   "status": "done",
+   "risk": "high",
+   "summary": "Adds the delivery envelope value, the shared revision description and reload-guard primitives, and the EN/ES reconciliation sentences; no component, no BrowserState member; rung 1323/447/2520/192.",
+   "review": "docs/reviews/phase-2d-6-1a.md — Codex, ship-with-fixes, 0 blockers, 3 SHOULD-FIX, all fixed",
+   "narrative": "docs/decisions/2d-6-1a-notes.md"
+  },
+  {
+   "id": "2d-6-1b",
+   "title": "Observation-protocol members on BrowserState",
    "status": "queued",
-   "summary": "Adds the delivery envelope, the arbitration member, settlement verdicts, the requested retry, guarded reloads, the uncertainty acknowledgement and EN/ES message values; no component."
+   "summary": "Adds the arbitration/delivery member with settlement publication, the person-requested retry, the uncertainty acknowledgement and per-file automatic-reload guard state."
+  },
+  {
+   "id": "2d-6-1c",
+   "title": "Coordinator and workspace members on BrowserState",
+   "status": "queued",
+   "summary": "Adds the coordinator revision signal, watchState and registration-state exposure, the two guarded reload requests and the guarded file reread request."
   },
   {
    "id": "2d-6-2",
