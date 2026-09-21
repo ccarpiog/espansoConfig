@@ -476,7 +476,8 @@
    "summary": "Gives the creator and recovery form their external-conflict sessions, the submission block at every door, the destination-less refusal and the origin kept unspent; 2 review blockers fixed.",
    "risk": "high",
    "review": "docs/reviews/phase-2d-6-3.md",
-   "narrative": "docs/decisions/2d-6-3-notes.md"
+   "narrative": "docs/decisions/2d-6-3-notes.md",
+   "commit": "1c48d52"
   },
   {
    "id": "2d-6-4",
