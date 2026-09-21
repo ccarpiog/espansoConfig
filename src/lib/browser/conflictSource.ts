@@ -512,8 +512,10 @@ export function standingConflictOf(source: ConflictSource): StandingConflict {
  * with one named action per arm and a `never` terminus, and the new-snippet
  * form's and the recovery form's are `applyObservation` in `./matchCreation.ts`
  * and `applyRecoveryObservation` in `./recovery.ts` (Phase 2d-6-3), in the same
- * shape; the deleter's, mover's, duplicator's, raw editor's and restore's are
- * 2d-6-4 and 2d-6-5's.
+ * shape, as are the deleter's `applyDeletionObservation` in `./matchDeletion.ts`,
+ * the mover's `applyMoveObservation` in `./matchMove.ts` and the duplicator's
+ * `applyDuplicationObservation` in `./matchDuplication.ts` (Phase 2d-6-4); the
+ * raw editor's and restore's are 2d-6-5's.
  */
 export type ObservationVerdict =
   | {

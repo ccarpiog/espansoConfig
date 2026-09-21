@@ -95,6 +95,57 @@
  * commit **spends** the session: {@link MatchDeletionSession.deleted} is set and
  * nothing here clears it. What the *window* does about its selection is
  * `BrowserState.deleteMatch`'s, and it is documented there.
+ *
+ * ## The external session — Phase 2d-6-4
+ *
+ * The shape `./matchEditor.ts` took at 2d-6-2 and `./matchCreation.ts` at
+ * 2d-6-3, for a deletion. {@link MatchDeletionSession.externalConflict} is the
+ * conflict a watcher observation raised over the file this session is about, a
+ * field beside `outcome` and never an arm of it (the 2d-6 record's §3 entry 6);
+ * {@link applyDeletionObservation} is the session's receiver as a value, one named
+ * action per verdict arm and a `never` terminus (entry 11); {@link conflictOf}
+ * answers the conflict shown whichever origin it has, so {@link canRequestDelete},
+ * {@link requestDelete} and {@link confirmDelete} refuse under both (entry 8 —
+ * the request **and** the confirmation, and a direct call past a disabled control
+ * answers the same session or `null`). A held observation
+ * ({@link MatchDeletionSession.awaitingReconciliation}) refuses the request and
+ * the confirmation too; a conflict raised under an unknown write outcome
+ * ({@link MatchDeletionSession.uncertaintyUnresolved}) withholds the reload and
+ * refuses the reapply until {@link acknowledgeDeletionSnapshot} is told the hold
+ * ended (entries 11, 22); {@link dismissDeletionOutcome} erases none of the three
+ * (entry 9).
+ *
+ * **A replacing verdict withdraws a pending confirmation** (entry 12): a question
+ * asked about the snippet as this window projected it is not an answer about the
+ * file as another writer left it, so `raised`, `raisedWithoutReload` and
+ * `supersedes` put {@link MatchDeletionSession.pending} back to `null` and reset
+ * the reload step; `coalesced` and `notLater` leave both where they are.
+ *
+ * **The reapply reads both origins through one entry** — `enterReapply` in
+ * `./reapply.ts` — and takes the snippet from an external table by its **full**
+ * base identity through `correspondenceRowFor`, reading the row's `exact` tier
+ * through `subjectResolution` (entries 19, 20 and 22): a destructive operation
+ * never takes the flexible tier, never an array index and never a node number
+ * alone. A refused table or row resolves to manual resolution with
+ * `tExternalEvidenceRefusal`'s sentence, superseded evidence with
+ * `tSupersededEvidence`'s.
+ *
+ * **Every door and every settling transition can read the installed session**
+ * through a {@link ReadTheInstalledSession} (this phase's review): a
+ * caller-controlled read — `projected`, a table row, the disk projection, an
+ * observation being replayed — runs arbitrary code, and a receiver run from it
+ * replaces the installed session behind the transition's back. {@link confirmDelete}
+ * spends only against the session it was handed while that is still installed;
+ * {@link reapplyToDiskVersion} rechecks the installed session's blocks and
+ * conflict immediately before adopting; {@link applyDeletion} and
+ * {@link deletionCouldNotBeSent} replay what the receiver appended during their
+ * own replay. The reader is optional while no component passes one, and its doc
+ * says what that costs.
+ *
+ * **No component registers this receiver yet.** 2d-6-6 wires
+ * `BrowserState.registerObservationReceiver` to it through `DetailPane`; until
+ * then every case that drives it is a model test, and `MatchDeleter.svelte` draws
+ * neither the external conflict nor the two notices (2d-6-7's).
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -141,28 +192,46 @@ import {
   type SendFailureLine
 } from './editorSave';
 import type { InvalidationStatus } from './invalidation';
+import type { AcknowledgeTheUncertainty } from './matchEditor';
 import type { RawSaveChoice } from './rawSave';
+import type { ConflictSource, ExternalConflictObservation } from './conflictSource';
+import {
+  externalConflictNoticeKey,
+  type ExternalConflictNotice,
+  type ObservationDelivery
+} from './observationDelivery';
 import {
   adoptForReapply,
-  beginReapply,
+  correspondenceRowFor,
+  enterReapply,
+  externalEvidenceRefusalKey,
   sharedReapplyObstacleKey,
   subjectCorrespondence,
+  subjectResolution,
+  SUPERSEDED_EVIDENCE_KEY,
+  type ExternalEvidenceRefusal,
   type ReapplyAttempt,
+  type ReapplyEvidenceAccess,
   type ReapplyOutcome,
-  type SharedReapplyObstacle
+  type SharedReapplyObstacle,
+  type StandingOriginGuard,
+  type SubjectCorrespondence
 } from './reapply';
 import {
   conflictChoicesFor,
   conflictDiskText,
   describeEditSave,
+  describeExternalConflict,
   invalidationFailureMessage,
   reapplyIsOffered,
+  supersedeConflict,
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDiskText,
+  type ConflictMessage,
   type ConflictOperation,
   type ConflictModel,
-  type SaveConflictModel,
+  type ExternalConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -370,10 +439,11 @@ export interface MatchDeletionSession {
   /**
    * How far a confirmed reload of the disk version has got.
    *
-   * **Reset to `idle` by every new outcome and by every dismissal**, which is what
-   * stops a confirmation collected for one conflict from being spendable while a
-   * later one is on screen. The window refuses a spent confirmation too, but this
-   * is the guard that means the situation never arises.
+   * **Reset to `idle` by every new outcome, by every dismissal and by every
+   * replacing verdict** ({@link applyDeletionObservation}, the 2d-6 record's §3
+   * entry 12), which is what stops a confirmation collected for one conflict from
+   * being spendable while a later one is on screen. The window refuses a spent
+   * confirmation too, but this is the guard that means the situation never arises.
    */
   readonly reload: ReloadStep;
   /**
@@ -394,6 +464,90 @@ export interface MatchDeletionSession {
    * does.
    */
   readonly deleted: boolean;
+  /**
+   * The conflict a watcher observation raised over the file this session is
+   * about, or `null` — Phase 2d-6-4, the 2d-6 record's §3 entry 6.
+   *
+   * **A field of its own beside {@link MatchDeletionSession.outcome}, never an
+   * arm of it**, for `MatchEditorSession.externalConflict`'s reason: an outcome is
+   * how *a deletion* ended, and a conflict the watcher raised is not that.
+   * {@link conflictOf} is the one accessor that reads both and answers the
+   * conflict this session is showing, whichever origin it has. **Only one conflict
+   * is active at a time, and the transitions are what keep it so** (entry 7):
+   * {@link applyDeletionObservation} retires a save conflict's outcome when it
+   * sets this, and {@link applyDeletion} retires this when a deletion ends as a
+   * conflict or a success. The type admits both populated, and a session built by
+   * hand with both gets {@link conflictOf}'s stated precedence, not a guarantee.
+   *
+   * While it is non-null nothing can be requested or confirmed and any pending
+   * question has been withdrawn (entry 12); {@link dismissDeletionOutcome} does
+   * not clear it (entry 9). The ways out are the reload and the reapply.
+   */
+  readonly externalConflict: ExternalConflictModel<MatchId> | null;
+  /**
+   * Whether {@link MatchDeletionSession.externalConflict} was raised while a
+   * write of this window's own had an unknown outcome, and this session has not
+   * been told the hold ended — Phase 2d-6-4, entry 11's `raisedWithoutReload` row.
+   *
+   * While `true` the ordinary reload is withheld and the reapply refused, for the
+   * match editor's reason: a confirmed installation of bytes a write of this
+   * window may or may not have produced would settle, silently, a question only
+   * the person can. It ends when {@link acknowledgeDeletionSnapshot} is told the
+   * window ended the hold, or when a later verdict replaces the conflict under no
+   * uncertainty. **It records what this session was told and nothing more**: a
+   * hold the window ends by a later definite write delivers nothing to a session,
+   * and this flag cannot see it. This module never sets it without a conflict, so
+   * the request and the confirmation are blocked by the conflict it qualifies.
+   */
+  readonly uncertaintyUnresolved: boolean;
+  /**
+   * The observations this session was told the window is holding and has not
+   * decided about, keyed by the file each is about — Phase 2d-6-4, entry 11's
+   * `retained` row, in the shape 2d-6-3's review gave the creator.
+   *
+   * **A restriction on asking and answering, and nothing else**: while this
+   * session's own file has an entry, {@link canRequestDelete} answers `false`, so
+   * {@link requestDelete} answers the same session and {@link confirmDelete}
+   * answers `null` (entry 8); no disk comparison and no origin is recorded. An
+   * entry is lifted by the delivery that decides **that** observation, whatever
+   * the verdict — `writtenHere` included — compared by identity, and replaced by
+   * a later `retained` about the same file.
+   *
+   * **What the map forces and what it does not, in the same sentence.** It
+   * forces that a wait is always keyed by the file it is about and that only
+   * this session's file's wait blocks; through this module's own transitions it
+   * holds at most that one entry, because a `retained` about another file records
+   * nothing here — the map is the shape the sessions share since 2d-6-3's review,
+   * so the field reads alike on every surface, not a claim that this session can
+   * change its file. It cannot force that the deciding delivery arrives — a
+   * session whose receiver was unregistered before the window decided is never
+   * told and stays blocked until closed — nor that a wait it was *not* told of,
+   * because no receiver was registered when the window held the reading, is
+   * recorded at all; both are facts about registration, which is 2d-6-6's. What
+   * it cannot see is a reading the barrier coalesced away without announcing it.
+   */
+  readonly awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>;
+  /**
+   * Every delivery that arrived while this session's own deletion was in flight,
+   * in the order it arrived, kept until that deletion's answer has been applied —
+   * Phase 2d-6-4, the 2d-6 record's §3 entry 5.
+   *
+   * `MatchEditorSession.heldDeliveries`'s rule, unchanged: the window publishes a
+   * write's settlement from inside the writing wrapper, before the `await` that
+   * started it resumes, so {@link applyDeletionObservation} appends here while the
+   * phase is `saving` and {@link applyDeletion} and {@link deletionCouldNotBeSent}
+   * replay the whole list through it, first to last, after their own answer —
+   * and, given a {@link ReadTheInstalledSession}, whatever the receiver appended
+   * to the installed session while they were doing so. **What the list forces**
+   * is that no envelope delivered during the deletion is dropped and that
+   * first-to-last is the order; **what it does not force** is that arrival order
+   * was decision order — the window's own contract — nor that a caller passes
+   * the reader: this module has no send composition, so the caller hands the
+   * settling transition the session it holds and the reader that answers it, as
+   * 2d-6-6's `MatchDeleter.svelte` must, and nothing in TypeScript stops a caller
+   * handing it a capture and no reader.
+   */
+  readonly heldDeliveries: readonly ObservationDelivery[];
 }
 
 /**
@@ -458,25 +612,85 @@ export function startMatchDeletion(
     sendFailure: null,
     reload: NOT_RELOADING,
     closed: false,
-    deleted: false
+    deleted: false,
+    externalConflict: null,
+    uncertaintyUnresolved: false,
+    awaitingReconciliation: new Map(),
+    heldDeliveries: []
   };
 } // End of function startMatchDeletion()
 
 /**
- * The conflict the session is showing, or `null`.
+ * The wait that restricts this session **now**, or `null` — its own file's entry
+ * of {@link MatchDeletionSession.awaitingReconciliation}.
+ *
+ * @param session - The session to ask about.
+ * @returns The observation the session is waiting on, or `null`.
+ */
+function awaitedFor(session: MatchDeletionSession): ExternalConflictObservation | null {
+  return session.awaitingReconciliation.get(session.document) ?? null;
+} // End of function awaitedFor()
+
+/**
+ * The waits with one file's entry replaced.
+ *
+ * @param waits - The waits held.
+ * @param document - The file the observation is about.
+ * @param observation - The observation now held for it.
+ * @returns A new map; the argument is untouched.
+ */
+function withWait(
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  document: DocumentId,
+  observation: ExternalConflictObservation
+): ReadonlyMap<DocumentId, ExternalConflictObservation> {
+  const next = new Map(waits);
+  next.set(document, observation);
+  return next;
+} // End of function withWait()
+
+/**
+ * The waits with one file's entry removed.
+ *
+ * @param waits - The waits held.
+ * @param document - The file whose wait ended.
+ * @returns A new map; the argument is untouched.
+ */
+function withoutWait(
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  document: DocumentId
+): ReadonlyMap<DocumentId, ExternalConflictObservation> {
+  const next = new Map(waits);
+  next.delete(document);
+  return next;
+} // End of function withoutWait()
+
+/**
+ * The conflict the session is showing, of either origin, or `null`.
+ *
+ * **Widened to the union at Phase 2d-6-4**, from the save arm alone. The external
+ * conflict is answered first, then the outcome's conflict arm — a definite answer
+ * for a session built by hand with both populated, and a decision about nothing
+ * for one this module built, because {@link applyDeletionObservation} and
+ * {@link applyDeletion} keep the two exclusive (the 2d-6 record's §3 entry 7).
  *
  * @param session - The session to ask about.
  * @returns The conflict model, or `null` when the session is not in one.
  */
-export function conflictOf(session: MatchDeletionSession): SaveConflictModel<MatchId> | null {
-  return conflictArm(session.outcome);
+export function conflictOf(session: MatchDeletionSession): ConflictModel<MatchId> | null {
+  return session.externalConflict ?? conflictArm(session.outcome);
 } // End of function conflictOf()
 
 /**
  * Whether this session may be asked to delete right now.
  *
- * Four reasons it may not: the snippet is not deletable, a deletion is already in
- * flight, a conflict is on screen, or one has already committed.
+ * Five reasons it may not: the snippet is not deletable, a deletion is already in
+ * flight, a conflict of either origin is on screen, one has already committed,
+ * or the window holds a reading of this file it has not decided about (Phase
+ * 2d-6-4, the 2d-6 record's §3 entry 8). An unresolved write uncertainty blocks
+ * through the conflict it qualifies, which this module never sets it without.
+ * **Both doors ask this**: {@link requestDelete} and {@link confirmDelete}, so a
+ * call made past a disabled control answers the same session or `null`.
  *
  * @param session - The session to ask about.
  * @returns `true` when {@link requestDelete} would do anything.
@@ -487,7 +701,8 @@ export function canRequestDelete(session: MatchDeletionSession): boolean {
     session.eligibility.kind === 'deletable' &&
     session.phase === 'editing' &&
     !session.deleted &&
-    conflictOf(session) === null
+    conflictOf(session) === null &&
+    awaitedFor(session) === null
   );
 } // End of function canRequestDelete()
 
@@ -496,6 +711,14 @@ export function canRequestDelete(session: MatchDeletionSession): boolean {
  *
  * The first of the two phases. It records **which** snippet was asked about, so
  * the answer cannot be spent on another one.
+ *
+ * **It takes no {@link ReadTheInstalledSession}, and that is not an omission**:
+ * its one operand is the session itself, whose fields this module built as plain
+ * data, so no caller-controlled read runs between {@link canRequestDelete} and
+ * the question being recorded, and nothing external is spent by recording it.
+ * A caller that reads its live session, calls this and installs the answer in
+ * one synchronous block gives a receiver no moment to run in between; nothing in
+ * TypeScript forces that block.
  *
  * @param session - The session.
  * @returns The session with the question pending, or the same session when it may
@@ -522,6 +745,43 @@ export function requestDelete(session: MatchDeletionSession): MatchDeletionSessi
 export function cancelDelete(session: MatchDeletionSession): MatchDeletionSession {
   return session.pending === null ? session : { ...session, pending: null };
 } // End of function cancelDelete()
+
+/**
+ * Reads the session a caller currently holds — the one its registered receiver
+ * has been updating — for a door or a settling transition to check against.
+ *
+ * **The reader `ReadTheInstalledForm` in `./recovery.ts` is, for this session**,
+ * and it exists for the reason this phase's review gave (its first, second and
+ * third findings, one class): a door's caller-controlled operand — `projected`,
+ * a correspondence row, the disk projection — is read through property access,
+ * and a property read runs arbitrary code; a getter there can call
+ * `BrowserState.observeExternalChange`, whose registered receiver replaces the
+ * *installed* session with one carrying an external conflict or a wait. A
+ * transition that then checked the block on the session it was handed would
+ * check a session no longer installed, and spend. So every spending door and
+ * every settling transition asks for the installed session through this, once,
+ * after its last caller-controlled read and immediately before its spend, and
+ * refuses when what is installed is not what it was handed or now carries a
+ * block.
+ *
+ * **What it forces and what it does not, in the same sentence.** With one
+ * supplied, {@link confirmDelete} spends only against the session it was handed
+ * while that session is still the one installed, {@link reapplyToDiskVersion}
+ * adopts only when the installed session's restrictions and conflict are what
+ * they were, and {@link applyDeletion} / {@link deletionCouldNotBeSent} settle
+ * every delivery the receiver appended to the installed session during the
+ * flight and during their own replay. It cannot force a caller to supply one:
+ * the parameter is optional so that `MatchDeleter.svelte`, which this phase may
+ * not touch and which registers no receiver today, keeps compiling — and a
+ * caller that registers a receiver and passes no reader gets the displaced
+ * check and the lost delivery this closes. 2d-6-6, which registers the receiver,
+ * must pass `() => session` at every door and may make the parameter required.
+ * Nor can it force that the closure reads the installed session rather than a
+ * capture; `() => session` over the component's `$state.raw` is the honest one.
+ *
+ * @returns The session the caller holds now.
+ */
+export type ReadTheInstalledSession = () => MatchDeletionSession;
 
 /** A deletion about to be sent: the session that is waiting, and what to send. */
 export interface StartedDeletion {
@@ -570,25 +830,55 @@ export interface StartedDeletion {
  * same shape the acknowledgement round trip has everywhere else in this
  * application.
  *
+ * **The submission block is asked last, after the last caller-controlled read,
+ * and against the installed session** (Phase 2d-6-4, the 2d-6 record's §3 entry
+ * 8 and R37; this phase's review, its first finding): the pending identity, the
+ * session's own, the draft's candidate and `projected` are all read and compared
+ * first; then the installed session is read through `current`, once; and only a
+ * session that is still the one handed in and passes {@link canRequestDelete}
+ * spends. A getter behind `projected` therefore runs before the block decides,
+ * and a receiver it runs — which replaces the installed session with one carrying
+ * an external conflict or a wait — is seen by the block rather than overwritten
+ * by the spend. An external conflict, a held reading and the uncertainty the
+ * conflict carries each answer `null` here, exactly as they disable the control.
+ * What that forces is refusal for the inputs supplied and for the session
+ * installed at the moment of the spend; it cannot force those inputs to be
+ * current — one projection snapshot, one synchronous decision — nor that a
+ * caller passes a reader at all ({@link ReadTheInstalledSession} says what a
+ * missing one costs).
+ *
  * @param session - The session holding the person's answer.
  * @param projected - The identity the projection this window holds **now** gives
  *   the snippet, or `null` when it holds no such snippet any more. Required, and
  *   nullable rather than defaulted: a default would be this function inventing
  *   agreement for a caller that did not look.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   checks the block on the session handed in — honest only for a caller that
+ *   registers no receiver, which is every caller today.
  * @returns The waiting session and what to send, or `null`.
  */
 export function confirmDelete(
   session: MatchDeletionSession,
-  projected: MatchId | null
+  projected: MatchId | null,
+  current: ReadTheInstalledSession | null = null
 ): StartedDeletion | null {
+  // **The caller-controlled reads, taken once and first.** `projected` is the
+  // one argument from outside the session; it is compared before the block below
+  // is asked, so nothing caller-controlled runs between the block and the spend.
   const pending = session.pending;
-  if (pending === null || !canRequestDelete(session)) {
+  const held = session.match;
+  const candidate = session.draft.value;
+  if (pending === null || projected === null || !sameIdentity(pending.match, held)) {
     return null;
   }
-  if (projected === null || !sameIdentity(pending.match, session.match)) {
+  if (!sameIdentity(projected, held) || !sameIdentity(projected, candidate)) {
     return null;
   }
-  if (!sameIdentity(projected, session.match) || !sameIdentity(projected, session.draft.value)) {
+  // **The installed session, read once, after the last caller-controlled read.**
+  // A receiver run from a getter above has replaced it; a session that is no
+  // longer the one installed spends nothing.
+  const installed = current === null ? session : current();
+  if (installed !== session || !canRequestDelete(session)) {
     return null;
   }
   const submission = submissionOf(session.draft);
@@ -623,17 +913,42 @@ export function confirmDelete(
  * snippet really is gone from the file; telling the person the deletion failed
  * would invite a retry of a write that already happened (`PROGRESS.md` D2).
  *
- * @param session - The session waiting for an answer.
+ * **What it does about an external conflict, and about a delivery held during
+ * the deletion** — Phase 2d-6-4, `applySave`'s rule in `./matchEditor.ts`. A
+ * `saved` or a `conflict` answer retires
+ * {@link MatchDeletionSession.externalConflict} (the 2d-6 record's §3 entry 7:
+ * the deletion's own answer is the newer fact about the file); a `refused` answer
+ * wrote nothing and leaves it standing. Neither is reachable from
+ * {@link confirmDelete} while an external conflict stands, so this keeps the
+ * invariant for a caller that drove the model directly. Then, whatever the
+ * answer, every delivery {@link applyDeletionObservation} held while the deletion
+ * was in flight is replayed on top, in arrival order (entry 5) — **and, with a
+ * reader supplied, every delivery the receiver appended to the installed session
+ * during this transition's own reads and replay** (this phase's review, its
+ * second finding): the replay reads the observations it replays, a read runs
+ * caller code, and a window told of a reading from there delivers it to the
+ * installed session, still `saving`, where the receiver appends it. Without a
+ * reader the transition settles what it was handed and such a delivery is lost
+ * when the caller installs the result; {@link ReadTheInstalledSession} says who
+ * owes the reader. This module composes no send, so `MatchDeleter.svelte`
+ * settles its live `session` after its own `await`; with a reader that session
+ * may even be a capture, because the installed one's appended list is what is
+ * replayed.
+ *
+ * @param session - The session waiting for an answer, as the caller holds it.
  * @param result - How the save ended, exactly as the transaction reported it.
  * @param adoption - What became of the adoption, from `BrowserState.deleteMatch`.
  *   Required and not defaulted: a default would be this function inventing a
  *   `notOwed` for a caller that simply did not look.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   replays only what the session handed in holds.
  * @returns The session showing what the deletion ended as.
  */
 export function applyDeletion(
   session: MatchDeletionSession,
   result: SaveResult,
-  adoption: InvalidationStatus
+  adoption: InvalidationStatus,
+  current: ReadTheInstalledSession | null = null
 ): MatchDeletionSession {
   const submission = session.submitted;
   if (submission === null) {
@@ -643,28 +958,117 @@ export function applyDeletion(
   const failed = invalidationFailureMessage(adoption);
   const extraMessages = failed === null ? [] : [failed];
   if (result.outcome !== 'saved') {
-    return {
+    const refused = result.outcome === 'refused';
+    return consumingHeldDeliveries(
+      {
+        ...session,
+        phase: 'editing',
+        outcome,
+        extraMessages,
+        // **A new outcome resets the reload**, so a confirmation collected for an
+        // earlier conflict cannot be spent while this one is on screen.
+        reload: NOT_RELOADING,
+        sendFailure: null,
+        externalConflict: refused ? session.externalConflict : null,
+        uncertaintyUnresolved: refused ? session.uncertaintyUnresolved : false
+      },
+      current
+    );
+  }
+  return consumingHeldDeliveries(
+    {
       ...session,
+      deleted: result.committed,
+      draft: savedDraft(session.draft, submission, result.revision),
       phase: 'editing',
       outcome,
       extraMessages,
-      // **A new outcome resets the reload**, so a confirmation collected for an
-      // earlier conflict cannot be spent while this one is on screen.
       reload: NOT_RELOADING,
-      sendFailure: null
-    };
-  }
-  return {
-    ...session,
-    deleted: result.committed,
-    draft: savedDraft(session.draft, submission, result.revision),
-    phase: 'editing',
-    outcome,
-    extraMessages,
-    reload: NOT_RELOADING,
-    sendFailure: null
-  };
+      sendFailure: null,
+      // The deletion ended on the file, so the disk side an earlier observation
+      // showed is no longer the comparison to draw (entry 7).
+      externalConflict: null,
+      uncertaintyUnresolved: false
+    },
+    current
+  );
 } // End of function applyDeletion()
+
+/**
+ * Whether one held list is the other with more appended: the same envelopes, by
+ * identity, in the same positions.
+ *
+ * A receiver appends and never reorders, so the installed session's list is the
+ * handed-in list with the deliveries that arrived since; a list that is not is
+ * one this transition cannot reason about and leaves alone.
+ *
+ * @param arrived - The installed session's list.
+ * @param replayed - The list already replayed.
+ * @returns `true` when `arrived` begins with every entry of `replayed`.
+ */
+function extendsTheReplayed(
+  arrived: readonly ObservationDelivery[],
+  replayed: readonly ObservationDelivery[]
+): boolean {
+  return replayed.every((delivery, at) => arrived[at] === delivery);
+} // End of function extendsTheReplayed()
+
+/**
+ * Replays every delivery a session held during its deletion, in the order it
+ * arrived, once the deletion's own answer is on it — the 2d-6 record's §3 entry
+ * 5 — and then every delivery the receiver appended to the installed session
+ * while that was happening (this phase's review, its second finding).
+ *
+ * `consumingHeldDeliveries` in `./matchEditor.ts`, for this session, with one
+ * more round: the list is emptied before the first replay so a replay cannot see
+ * itself in it, each envelope goes through {@link applyDeletionObservation}
+ * exactly as it would have on arrival, and each is applied to the session the
+ * one before it left. **Replaying an envelope reads its observation, and a read
+ * runs caller code**: a getter there can tell the window of a reading, and the
+ * window delivers it at once to the installed session — which is still `saving`,
+ * so the receiver appends it there, to a list this transition was handed a copy
+ * of. So after each round the installed session is read through `current`, once,
+ * and the envelopes it holds beyond the ones replayed are replayed too, in the
+ * order they arrived, until a read finds none. **What this forces** is that no
+ * envelope delivered during the deletion, or during this settlement, is dropped
+ * when a reader is supplied, and that first-to-last is the order; **what it
+ * cannot force** is that the window delivered them in the order it decided them,
+ * that a reader is supplied at all, or that the installed session is the one
+ * handed in with more appended — a list that is not an extension of the one
+ * replayed is left alone, since the transition cannot say what it is. Nor can it
+ * force the rounds to end: a getter that tells the window of a fresh reading on
+ * every read does not come to rest here, exactly as it does not at the window's
+ * own drain (`registerObservationReceiver`'s doc), and one that re-tells a
+ * reading already decided does, because the window hands each decision out once.
+ *
+ * @param settled - The session with its deletion's answer applied and its phase
+ *   back to `editing`.
+ * @param current - Reads the session the caller holds now, or `null`.
+ * @returns The session with every held delivery applied, or the same session
+ *   when none was held.
+ */
+function consumingHeldDeliveries(
+  settled: MatchDeletionSession,
+  current: ReadTheInstalledSession | null
+): MatchDeletionSession {
+  let queue = settled.heldDeliveries;
+  let replayed: MatchDeletionSession = queue.length === 0 ? settled : { ...settled, heldDeliveries: [] };
+  let seen = 0;
+  for (;;) {
+    for (let at = seen; at < queue.length; at += 1) {
+      replayed = applyDeletionObservation(replayed, queue[at]!);
+    } // End of the loop over the deliveries not yet replayed
+    seen = queue.length;
+    if (current === null) {
+      return replayed;
+    }
+    const arrived = current().heldDeliveries;
+    if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
+      return replayed;
+    }
+    queue = arrived;
+  } // End of the loop over the rounds of replay
+} // End of function consumingHeldDeliveries()
 
 /**
  * Records that the deletion produced no outcome.
@@ -674,22 +1078,34 @@ export function applyDeletion(
  * question, and the only honest answers are "no" and "this application cannot
  * tell".
  *
- * @param session - The session waiting for an answer.
+ * The deletion is over, so a delivery held while it was out is applied now: the
+ * settlement of an uncertain write arbitrates the held reading under that
+ * uncertainty, and its `raisedWithoutReload` is what this applies (entry 5), and
+ * with a reader every delivery appended to the installed session during the
+ * replay is applied too, for {@link applyDeletion}'s reason.
+ *
+ * @param session - The session waiting for an answer, as the caller holds it.
  * @param mayHaveWritten - Whether the file may already have lost the snippet.
  * @param reason - Why the command rejected, or `null` when nothing was sent and
  *   the boundary therefore has no rejection to hand on.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   replays only what the session handed in holds.
  * @returns The session, back to its resting state, with the right notice raised.
  */
 export function deletionCouldNotBeSent(
   session: MatchDeletionSession,
   mayHaveWritten: boolean,
-  reason: IpcFailure | null
+  reason: IpcFailure | null,
+  current: ReadTheInstalledSession | null = null
 ): MatchDeletionSession {
-  return {
-    ...session,
-    phase: 'editing',
-    sendFailure: sendFailureOf(mayHaveWritten, reason)
-  };
+  return consumingHeldDeliveries(
+    {
+      ...session,
+      phase: 'editing',
+      sendFailure: sendFailureOf(mayHaveWritten, reason)
+    },
+    current
+  );
 } // End of function deletionCouldNotBeSent()
 
 /**
@@ -719,6 +1135,17 @@ export function acknowledgeDeletionFindings(
  * survives this, so nobody can dismiss their way into deleting a snippet that is
  * already gone.
  *
+ * **Nor does it erase an external block** — Phase 2d-6-4, the 2d-6 record's §3
+ * entry 9. {@link MatchDeletionSession.externalConflict},
+ * {@link MatchDeletionSession.uncertaintyUnresolved} and
+ * {@link MatchDeletionSession.awaitingReconciliation} all survive this spread:
+ * what this dismisses under an external conflict is the save outcome's panel and
+ * the reload warning, and the conflict and both restrictions stand until an
+ * explicit resolution — the reload's confirmation, a reapply, or closing. What
+ * the spread forces is that the three fields are copied; what no type forces is
+ * that a later edit keeps them out of the literal, and the suite's case is what
+ * would notice.
+ *
  * @param session - The session showing an outcome.
  * @returns The session with nothing being said about the last attempt.
  */
@@ -734,14 +1161,33 @@ export function dismissDeletionOutcome(session: MatchDeletionSession): MatchDele
 } // End of function dismissDeletionOutcome()
 
 /**
+ * The conflict a reload may be asked about, or `null` when none may be — Phase
+ * 2d-6-4, the reload gate of the 2d-6 record's §3 entry 11 as one rule for the
+ * three reload steps below.
+ *
+ * Withheld under an unacknowledged write uncertainty, for the match editor's
+ * reason: a confirmed installation of bytes a write of this window may or may
+ * not have produced would settle silently what only the person can. The view
+ * withholds the control through the same fact, and the three transitions refuse
+ * it, so a call made past the withheld control changes nothing (entry 8).
+ *
+ * @param session - The session to ask about.
+ * @returns The conflict, or `null` when there is none or its reload is withheld.
+ */
+function reloadableConflictOf(session: MatchDeletionSession): ConflictModel<MatchId> | null {
+  return session.uncertaintyUnresolved ? null : conflictOf(session);
+} // End of function reloadableConflictOf()
+
+/**
  * Asks to load the version on disk, which is the step **before** confirming.
  *
  * @param session - The session showing a conflict.
  * @returns The session at the warning, or the same session when no conflict is
- *   showing or one has already been asked about.
+ *   showing, one has already been asked about, or the reload is withheld
+ *   ({@link reloadableConflictOf}).
  */
 export function askToReloadDiskVersion(session: MatchDeletionSession): MatchDeletionSession {
-  const next = reloadAsked(conflictOf(session), session.reload);
+  const next = reloadAsked(reloadableConflictOf(session), session.reload);
   return next === null ? session : { ...session, reload: next };
 } // End of function askToReloadDiskVersion()
 
@@ -756,7 +1202,7 @@ export function askToReloadDiskVersion(session: MatchDeletionSession): MatchDele
  * @returns The session holding the confirmation, or the same session.
  */
 export function confirmDiskReload(session: MatchDeletionSession): MatchDeletionSession {
-  const next = reloadConfirmed(conflictOf(session), session.reload);
+  const next = reloadConfirmed(reloadableConflictOf(session), session.reload);
   return next === null ? session : { ...session, reload: next };
 } // End of function confirmDiskReload()
 
@@ -791,7 +1237,7 @@ export function reloadTheDiskVersion(
   session: MatchDeletionSession,
   adopt: AdoptTheDiskVersion<MatchId>
 ): MatchDeletionSession {
-  const spend = spendTheConfirmedReload(conflictOf(session), session.reload, adopt);
+  const spend = spendTheConfirmedReload(reloadableConflictOf(session), session.reload, adopt);
   if (spend === 'notAttempted') {
     return session;
   }
@@ -813,16 +1259,206 @@ export function reloadTheDiskVersion(
     extraMessages: [],
     reload: NOT_RELOADING,
     sendFailure: null,
+    // The conflict of either origin is resolved by the reload that ends this
+    // session, and a closed session says nothing about any file any more.
+    externalConflict: null,
+    uncertaintyUnresolved: false,
+    awaitingReconciliation: new Map(),
     closed: true
   };
 } // End of function reloadTheDiskVersion()
 
 /**
+ * Takes the window's decision about one watcher observation — Phase 2d-6-4, the
+ * 2d-6 record's §3 entries 6, 7, 11 and 12.
+ *
+ * **The session's receiver, as a value**, in the shape `applyObservation` in
+ * `./matchEditor.ts` established: a component registers a function through
+ * `BrowserState.registerObservationReceiver` that calls this with the envelope and
+ * installs what comes back (the wiring is 2d-6-6's), and the decision is here so a
+ * suite can drive every arm without a window. It never re-arbitrates and reads
+ * none of the window's tables.
+ *
+ * **Every verdict has a named action, switched with a `never` terminus** (entry
+ * 11, plus the seventh arm Phase 2d-6-1b added):
+ *
+ * | Verdict | What this does, for a delivery about this session's file |
+ * |---|---|
+ * | `raised` | builds the external model from the observation and the retained draft, and withdraws a pending question |
+ * | `raisedWithoutReload` | the same, and records that the reload is withheld until the uncertainty is acknowledged |
+ * | `supersedes` | `supersedeConflict` over the conflict shown — its draft kept, its disk side replaced — and withdraws a pending question |
+ * | `coalesced` | keeps the model, its source identity, the reload step and the pending question |
+ * | `notLater` | changes nothing |
+ * | `retained` | records the held observation as a restriction on asking and answering; no disk comparison, no origin |
+ * | `writtenHere` | lifts the restriction recorded for that observation, and changes nothing else |
+ *
+ * **Which deliveries are about this session is decided by the observation's
+ * file**, read once: a session is opened over one file and a delivery about
+ * another can only end a wait recorded for that very observation, by identity,
+ * under that file's key — it raises nothing here, because a reload of it would
+ * adopt a file the person never named. A `retained` about another file records
+ * nothing. The creator reads the same one property for the same reason; the
+ * editor reads none, and this session reads it so a mis-registered delivery
+ * fails safe rather than raising a stranger's conflict. The envelope's two fields
+ * and the verdict's `kind` are read once each, before anything is decided.
+ *
+ * **Every replacing verdict resets the reload step, withdraws a pending question
+ * and retires a save conflict** (entries 7 and 12): the confirmation collected
+ * for the conflict that was on screen must not be spendable against the one that
+ * replaced it, the question asked about the snippet as this window projected it
+ * is not an answer about the file as it now is, and a save conflict's outcome is
+ * retired so that only one conflict is active — a committed success or a refusal
+ * in `outcome` stays as history. A displayed reapply result is invalidated by
+ * the same transition, because `reapplyToShow` in `./reapply.ts` pairs a report
+ * to a session by identity and every replacing arm answers a new session.
+ * `supersedes` builds through `supersedeConflict` when a conflict is shown and
+ * through `describeExternalConflict` over the session's draft when none is; the
+ * `superseded` origin the verdict names is not compared with the shown
+ * conflict's — the envelope is the window's decision about the file, and a
+ * session that re-checked it would be arbitrating.
+ *
+ * **During this session's own deletion the envelope is appended to the held
+ * list, not applied** (entry 5): see {@link MatchDeletionSession.heldDeliveries}.
+ * A closed session takes nothing.
+ *
+ * **What it forces and what it does not, in the same sentence.** It forces that
+ * every arm of `ObservationVerdict` has an action here — an eighth arm is a
+ * compile error at the terminus — and that no arm installs, adopts, spends or
+ * calls a command, which its signature cannot prove and the command spy at zero
+ * in `workspace.test.ts` does. It cannot force that a component registers it,
+ * over which files, or installs what it answers; nor that the envelope was sealed
+ * by the window rather than assembled by hand.
+ *
+ * @param session - The session.
+ * @param delivery - What the window decided, sealed with the observation.
+ * @returns The session after the decision, or the same session when the verdict
+ *   changes nothing about it.
+ */
+export function applyDeletionObservation(
+  session: MatchDeletionSession,
+  delivery: ObservationDelivery
+): MatchDeletionSession {
+  if (session.closed) {
+    return session;
+  }
+  // **The caller-controlled reads, taken once and first.**
+  const observation = delivery.observation;
+  const kind = delivery.verdict.kind;
+  const file = observation.document;
+  if (session.phase === 'saving') {
+    return { ...session, heldDeliveries: [...session.heldDeliveries, delivery] };
+  }
+  // The decision about an awaited observation ends the wait for it, whatever
+  // the decision is and whichever file it is about; any other observation leaves
+  // every wait standing.
+  const waits = session.awaitingReconciliation;
+  const stillWaiting = waits.get(file) === observation ? withoutWait(waits, file) : waits;
+  const about = session.document === file;
+  const lifted = stillWaiting === waits ? session : { ...session, awaitingReconciliation: stillWaiting };
+  switch (kind) {
+    case 'retained':
+      // A `retained` ends no wait: a re-held reading is still held.
+      return about ? { ...session, awaitingReconciliation: withWait(waits, file, observation) } : session;
+    case 'writtenHere':
+    case 'coalesced':
+    case 'notLater':
+      return lifted;
+    case 'raised':
+    case 'supersedes':
+      return about ? replacedBy(session, observation, false, stillWaiting) : lifted;
+    case 'raisedWithoutReload':
+      return about ? replacedBy(session, observation, true, stillWaiting) : lifted;
+    default: {
+      const unreachable: never = kind;
+      return unreachable;
+    }
+  }
+} // End of function applyDeletionObservation()
+
+/**
+ * The session after a verdict that puts a new origin in front of it.
+ *
+ * The shared body of the three replacing arms of
+ * {@link applyDeletionObservation}, which documents what happens here; this is
+ * the one place the external model is built for this surface from a delivery,
+ * and the one place a pending question is withdrawn by a fact about the file
+ * rather than by the person (entry 12).
+ *
+ * @param session - The session, not closed and not saving.
+ * @param observation - The observation the verdict is about.
+ * @param uncertaintyUnresolved - Whether the verdict was `raisedWithoutReload`.
+ * @param awaitingReconciliation - The waits still held after this delivery.
+ * @returns The session showing the new conflict, with nothing pending.
+ */
+function replacedBy(
+  session: MatchDeletionSession,
+  observation: ExternalConflictObservation,
+  uncertaintyUnresolved: boolean,
+  awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>
+): MatchDeletionSession {
+  const shown = conflictOf(session);
+  const externalConflict =
+    shown === null
+      ? describeExternalConflict(observation, session.draft, CONFLICT_CAPABILITIES)
+      : supersedeConflict(shown, observation, CONFLICT_CAPABILITIES);
+  // A save conflict is retired with its submission (entry 7); a refusal or a
+  // success stays, as history, with the submission a refusal's consent needs.
+  const retiring = conflictArm(session.outcome) !== null;
+  return {
+    ...session,
+    externalConflict,
+    uncertaintyUnresolved,
+    awaitingReconciliation,
+    outcome: retiring ? null : session.outcome,
+    submitted: retiring ? null : session.submitted,
+    extraMessages: retiring ? [] : session.extraMessages,
+    // Entry 12: the question asked about the snippet as this window projected it
+    // is withdrawn — the person answers it again over the file as it now is, if
+    // at all — and the confirmation collected for the conflict that was on
+    // screen is not spendable against this one, nor may its warning stay on
+    // screen saying the wrong thing (the record's §5.7).
+    pending: null,
+    reload: NOT_RELOADING
+  };
+} // End of function replacedBy()
+
+/**
+ * Records that the person has reviewed the disk snapshot and the window has ended
+ * the uncertainty hold — Phase 2d-6-4, the 2d-6 record's §3 entries 14 and 15.
+ *
+ * `acknowledgeSnapshot` in `./matchEditor.ts`, for this session, taking the same
+ * two-valued callback: it rebuilds the conflict's availability and nothing else —
+ * the ordinary reload is offered again from its idle step and the reapply is no
+ * longer refused for the uncertainty — installing nothing, minting no consent and
+ * re-observing nothing. Asked at most once per call and only when there is
+ * something to end; a `refused` leaves the session unchanged. What it cannot see
+ * is a hold the window ended without a delivery, stated on
+ * {@link MatchDeletionSession.uncertaintyUnresolved}.
+ *
+ * @param session - The session showing a conflict raised under uncertainty.
+ * @param acknowledge - The window's two acknowledgement members, composed.
+ * @returns The session with its reload and reapply available again, or the same
+ *   session.
+ */
+export function acknowledgeDeletionSnapshot(
+  session: MatchDeletionSession,
+  acknowledge: AcknowledgeTheUncertainty
+): MatchDeletionSession {
+  const conflict = session.externalConflict;
+  if (session.closed || conflict === null || !session.uncertaintyUnresolved) {
+    return session;
+  }
+  if (acknowledge(conflict.source) !== 'acknowledged') {
+    return session;
+  }
+  return { ...session, uncertaintyUnresolved: false, reload: NOT_RELOADING };
+} // End of function acknowledgeDeletionSnapshot()
+
+/**
  * Why a reapply of this deletion could not be carried out.
  *
- * **A code, never a sentence.** There is no key function for these yet, and that is
- * 2c-4b-2's boundary: nothing draws them, so 2c-4b-3 adds the accessors together
- * with the panel that renders them.
+ * **A code, never a sentence.** {@link deletionReapplyObstacleKey} maps each arm
+ * to a dictionary key and `tDeletionReapplyObstacle` in `../i18n` renders it.
  */
 export type DeletionReapplyObstacle =
   | SharedReapplyObstacle
@@ -831,6 +1467,47 @@ export type DeletionReapplyObstacle =
       readonly kind: 'notDeletable';
       /** Which refusal the newly parsed projection gives, as a code. */
       readonly reason: DeletionRefusal;
+    }
+  | {
+      /**
+       * The external observation's correspondence could not be used to find the
+       * snippet — Phase 2d-6-4, the 2d-6 record's §3 entries 20 and 22.
+       *
+       * Five reasons, all about the evidence and never about the file: the
+       * reading carried no table, the table's base or disk revision is not this
+       * conflict's, or the table names this session's full base identity in no
+       * row or in more than one. Rendered through `tExternalEvidenceRefusal`.
+       */
+      readonly kind: 'externalEvidence';
+      /** Which negative claim about the evidence this is. */
+      readonly reason: ExternalEvidenceRefusal;
+    }
+  | {
+      /**
+       * Another accepted reading of the file has superseded the conflict's
+       * evidence, whichever origin it had (entry 22). Answered by the live
+       * standing-origin guard, asked last; rendered through `tSupersededEvidence`.
+       */
+      readonly kind: 'supersededEvidence';
+    }
+  | {
+      /**
+       * The conflict was raised while a write of this window's own had an unknown
+       * outcome, and the person has not acknowledged that (entries 11 and 22).
+       * Refused before any evidence is read; rendered through the uncertainty
+       * notice's own sentence.
+       */
+      readonly kind: 'writeOutcomeUnknown';
+    }
+  | {
+      /**
+       * The window holds a reading of this file it has not decided about (entries
+       * 8 and 11). A reapply hands back a session whose ordinary request is live,
+       * and one rebuilt over the adopted snapshot would carry no record of the
+       * wait; so it is refused before any evidence is read. Rendered through the
+       * retained notice's own sentence.
+       */
+      readonly kind: 'observationRetained';
     };
 
 /** What a reapply of this deletion became. */
@@ -856,6 +1533,11 @@ export type DeletionReapplyAttempt = ReapplyAttempt<
  * `notDeletable` carries a {@link DeletionRefusal}, which already has its own
  * sentences and its own accessor; the i18n layer composes the two.
  *
+ * **The four external-origin arms reuse sentences that already exist** (Phase
+ * 2d-6-4), each through its own key function so a renamed key is a compile error
+ * there and here at once; the terminus is `never`, so an arm with no key is one
+ * too. No sentence of this module's own was added.
+ *
  * @param obstacle - What stopped the reapply.
  * @returns The key holding that obstacle's sentence.
  */
@@ -866,8 +1548,90 @@ export function deletionReapplyObstacleKey(obstacle: DeletionReapplyObstacle): T
     case 'correspondence':
     case 'evidenceNotATarget':
       return sharedReapplyObstacleKey(obstacle);
+    case 'externalEvidence':
+      return externalEvidenceRefusalKey(obstacle.reason);
+    case 'supersededEvidence':
+      return SUPERSEDED_EVIDENCE_KEY;
+    case 'writeOutcomeUnknown':
+      return externalConflictNoticeKey({ kind: 'writeOutcomeUnknown' });
+    case 'observationRetained':
+      return externalConflictNoticeKey({ kind: 'observationRetained' });
+    default: {
+      const unreachable: never = obstacle;
+      return unreachable;
+    }
   }
 } // End of function deletionReapplyObstacleKey()
+
+/**
+ * The guard {@link reapplyToDiskVersion} uses when its caller hands none in.
+ *
+ * `unaskedGuard` in `./matchEditor.ts`, for this session: it answers the shown
+ * conflict's own origin, so the supersession question the entry asks last is
+ * answered *yes, it stands* without the window being asked. It exists so that the
+ * one component caller, which 2d-6-4 may not touch, keeps its save-origin reapply
+ * exactly as it was; what it costs is stated on the caller.
+ *
+ * @param conflict - The conflict shown, or `null`.
+ * @returns A guard that never asks the window.
+ */
+function unaskedGuard(conflict: ConflictModel<MatchId> | null): StandingOriginGuard {
+  const source: ConflictSource | null = conflict === null ? null : conflict.source;
+  return (): ConflictSource | null => source;
+} // End of function unaskedGuard()
+
+/**
+ * The snippet one conflict's evidence names for this deletion, or why it names
+ * none — the origin switch of {@link reapplyToDiskVersion}, Phase 2d-6-4.
+ *
+ * **Four arms in, and each has its own answer** (the 2d-6 record's §3 entry 19).
+ * Save evidence is read through `subjectCorrespondence`, as it always was. An
+ * external table is searched through `correspondenceRowFor` for this session's
+ * **full** base identity — document, base revision and node, never an array index
+ * and never the node alone (entry 20) — and the found row's `exact` tier is read
+ * through `subjectResolution`, exactly once: a destructive operation takes the
+ * strict tier, and the flexible `editor` tier is not looked at. A refused table
+ * or row resolves to manual resolution with `tExternalEvidenceRefusal`'s
+ * sentence, superseded evidence with `tSupersededEvidence`'s (entry 22). Nothing
+ * here is cast: a row is a row and a `ReapplyEvidence` is a `ReapplyEvidence`.
+ *
+ * @param evidence - What `enterReapply` found the conflict's origin to offer.
+ * @param base - This session's snippet, by the identity the base snapshot minted.
+ * @returns The subject to work from, or the manual resolution to answer with.
+ */
+function subjectOfEvidence(
+  evidence: ReapplyEvidenceAccess,
+  base: MatchId
+): SubjectCorrespondence | Extract<MatchDeletionReapply, { kind: 'manualResolution' }> {
+  switch (evidence.kind) {
+    case 'saveEvidence':
+      return subjectCorrespondence(evidence.evidence);
+    case 'externalCorrespondence': {
+      const row = correspondenceRowFor(evidence.correspondences, base);
+      if (row.kind === 'refused') {
+        return {
+          kind: 'manualResolution',
+          obstacle: { kind: 'externalEvidence', reason: row.reason }
+        };
+      }
+      // **The row's exact tier, read once.** `exact` is the one field of the row
+      // this surface reads; `editor` is the match editor's flexible tier and is
+      // not looked at for a deletion.
+      return subjectResolution(row.entry.exact);
+    }
+    case 'refused':
+      return {
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: evidence.reason }
+      };
+    case 'superseded':
+      return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+    default: {
+      const unreachable: never = evidence;
+      return unreachable;
+    }
+  }
+} // End of function subjectOfEvidence()
 
 /**
  * Reissues this deletion against the newly parsed disk version.
@@ -877,7 +1641,9 @@ export function deletionReapplyObstacleKey(obstacle: DeletionReapplyObstacle): T
  * the person reviewed it*. The tier is 2c-4b-1's and is chosen by the command that
  * built the question — `delete_match` asks for `ExactItem` — so an identified
  * subject here is a snippet whose own owned lines are byte-for-byte what this
- * session was about.
+ * session was about. **The external origin takes the same tier**, off the table's
+ * row for this session's full base identity (the 2d-6 record's §3 entry 20), read
+ * through {@link subjectOfEvidence}.
  *
  * **The confirmation is asked again, and against the live projection.** The session
  * handed back has **nothing pending**: the person presses *Delete* again, and
@@ -897,20 +1663,80 @@ export function deletionReapplyObstacleKey(obstacle: DeletionReapplyObstacle): T
  * never as a satisfied request. Saying otherwise would claim the file was examined
  * and the snippet found absent, which is a stronger claim than the evidence carries.
  *
+ * **Both origins since Phase 2d-6-4, through one entry** (entries 19, 20 and 22):
+ * `enterReapply` in `./reapply.ts` answers `reapplyEvidenceFor`'s four arms and
+ * {@link subjectOfEvidence} switches over them. **Two refusals come before the
+ * entry, so a blocked session reads no evidence at all** (this phase's review,
+ * its fourth finding — the entry reads the observation's table): an
+ * unacknowledged write uncertainty (entry 22 — a reapply ends in an adoption,
+ * which the uncertainty withholds, so adoption may not be obtained here
+ * indirectly) and a reading the window holds undecided (entry 8 — a session
+ * rebuilt over the adopted snapshot would carry no record of the wait, and the
+ * blocked request would go through it). The view withholds the control through
+ * the same facts; these are the rules for a call made past it.
+ *
+ * **The two blocks and the conflict's identity are asked again of the installed
+ * session, once, immediately before the adoption** (this phase's review, its
+ * third finding): every read between the entry and the door — the table's rows,
+ * the row's tier, the disk projection `startMatchDeletion` walks — is a read of
+ * caller data, and a getter there can tell the window of a reading, whose
+ * receiver records a wait, an uncertainty or a new conflict on the installed
+ * session. The session handed in cannot see that; the one `current` reads can.
+ * So the adoption is refused `observationRetained` or `writeOutcomeUnknown` when
+ * the installed session now carries either, and `supersededEvidence` when the
+ * conflict it shows is no longer the one being reapplied; otherwise the rebuilt
+ * session carries the **installed** session's waits forward, for `rebuiltOver`'s
+ * reason in `./matchEditor.ts` — its own file's entry is absent, because the
+ * recheck comes first, and the map is carried so a wait about another file
+ * survives the rebuild. Without a reader the recheck is asked of the session
+ * handed in, and a wait recorded on the installed one during the reads is lost
+ * with the rebuilt session ({@link ReadTheInstalledSession} says who owes the
+ * reader).
+ *
+ * **The standing-origin guard is a parameter, and it is optional for one stated
+ * reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s: `MatchDeleter.svelte`
+ * calls this with two arguments and 2d-6-4 touches no component. When no guard is
+ * handed in the supersession question is not asked here; what still refuses a
+ * superseded origin on that path is `adoptDiskVersion`'s fourth check, at the
+ * door, answered `adoptionRefused` without the typed sentence. An omitted guard
+ * costs a sentence and some work, never a wrong installation. 2d-6-6, which hands
+ * the live closure down, may make the parameter required.
+ *
  * @param session - The session showing the conflict.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
  *   all on a refusal.
+ * @param standing - Asks what origin stands for the file **now**;
+ *   `() => browser.standingConflictFor(document)` is the honest closure. `null`,
+ *   the default, asks nothing — see above for what that costs.
+ * @param current - Reads the session the caller holds now, for the recheck
+ *   before the adoption. `null`, the default, rechecks the session handed in.
  * @returns What became of the attempt.
  */
 export function reapplyToDiskVersion(
   session: MatchDeletionSession,
-  adopt: AdoptTheDiskVersion<MatchId>
+  adopt: AdoptTheDiskVersion<MatchId>,
+  standing: StandingOriginGuard | null = null,
+  current: ReadTheInstalledSession | null = null
 ): MatchDeletionReapply {
-  const start = beginReapply(CONFLICT_CAPABILITIES, conflictOf(session));
-  if (start.kind !== 'ready') {
-    return start;
+  const conflict = conflictOf(session);
+  if (conflict !== null) {
+    // **Before the entry, which reads the evidence.** A blocked session reads
+    // none of it.
+    if (session.uncertaintyUnresolved) {
+      return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+    }
+    if (awaitedFor(session) !== null) {
+      return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+    }
   }
-  const subject = subjectCorrespondence(start.evidence);
+  const entry = enterReapply(CONFLICT_CAPABILITIES, conflict, standing ?? unaskedGuard(conflict));
+  if (entry.kind !== 'ready') {
+    return entry;
+  }
+  const subject = subjectOfEvidence(entry.evidence, session.match);
+  if (subject.kind === 'manualResolution') {
+    return subject;
+  }
   if (subject.kind === 'refused') {
     return {
       kind: 'manualResolution',
@@ -920,17 +1746,33 @@ export function reapplyToDiskVersion(
   if (subject.kind === 'noSubject') {
     return { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } };
   }
-  const rebuilt = startMatchDeletion(start.conflict.disk, subject.target);
-  if (rebuilt.eligibility.kind !== 'deletable') {
+  const fresh = startMatchDeletion(entry.conflict.disk, subject.target);
+  if (fresh.eligibility.kind !== 'deletable') {
     return {
       kind: 'manualResolution',
-      obstacle: { kind: 'notDeletable', reason: rebuilt.eligibility.reason }
+      obstacle: { kind: 'notDeletable', reason: fresh.eligibility.reason }
     };
   }
-  if (adoptForReapply(start.conflict, adopt) === 'refused') {
+  // **The installed session, read once, after the last caller-controlled read
+  // and immediately before the spend.** Nothing caller-controlled runs between
+  // this read and the door.
+  const installed = current === null ? session : current();
+  if (installed.uncertaintyUnresolved) {
+    return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+  }
+  if (awaitedFor(installed) !== null) {
+    return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+  }
+  if (conflictOf(installed)?.source !== entry.conflict.source) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  if (adoptForReapply(entry.conflict, adopt) === 'refused') {
     return { kind: 'adoptionRefused' };
   }
-  return { kind: 'reapplied', session: rebuilt };
+  return {
+    kind: 'reapplied',
+    session: { ...fresh, awaitingReconciliation: installed.awaitingReconciliation }
+  };
 } // End of function reapplyToDiskVersion()
 
 /**
@@ -971,13 +1813,73 @@ export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   reapplySupport: 'supported'
 };
 
+/**
+ * What this surface offers about the conflict it is showing **now**, derived from
+ * the declaration and two facts about the session — Phase 2d-6-4, the 2d-6
+ * record's §3 entry 11.
+ *
+ * The declaration above is permanent; this is the "effective capabilities" the
+ * consult's Q3 names. The reload and the reapply are both withheld under an
+ * unacknowledged write uncertainty, for the match editor's reason. The reapply
+ * alone is withheld while the window holds an undecided reading, because it
+ * hands back a session whose ordinary request is live; the reload is not,
+ * because it closes the session and sends nothing. It feeds `conflictChoicesFor`,
+ * which stays the only producer of a choice list; what this cannot force is that
+ * the transitions honour the same facts, which is why each asks
+ * {@link reloadableConflictOf} or the fields themselves.
+ *
+ * @param session - The session to derive for.
+ * @returns The capabilities to offer choices from.
+ */
+function effectiveCapabilitiesOf(session: MatchDeletionSession): ConflictCapabilities {
+  const reloadWithheld = session.uncertaintyUnresolved;
+  const reapplyWithheld = reloadWithheld || awaitedFor(session) !== null;
+  if (!reloadWithheld && !reapplyWithheld) {
+    return CONFLICT_CAPABILITIES;
+  }
+  return {
+    ...CONFLICT_CAPABILITIES,
+    offersReload: !reloadWithheld,
+    offersReapply: !reapplyWithheld
+  };
+} // End of function effectiveCapabilitiesOf()
+
+/**
+ * The notices one session owes, in the order the stronger claim comes first.
+ *
+ * The uncertainty first, because it is the one state under which the conflict on
+ * screen offers neither way to the disk version, and the held observation second.
+ * Each is answered from one session field and nothing is read twice.
+ *
+ * @param session - The session to describe.
+ * @returns The codes, possibly none.
+ */
+function externalNoticesOf(session: MatchDeletionSession): readonly ExternalConflictNotice[] {
+  const notices: ExternalConflictNotice[] = [];
+  if (session.externalConflict !== null && session.uncertaintyUnresolved) {
+    notices.push({ kind: 'writeOutcomeUnknown' });
+  }
+  if (awaitedFor(session) !== null) {
+    notices.push({ kind: 'observationRetained' });
+  }
+  return notices;
+} // End of function externalNoticesOf()
+
 /** Everything a screen needs about one deletion, derived on every read. */
 export interface MatchDeletionView {
   /** The snippet this is about. */
   readonly match: MatchId;
-  /** Whether the delete control does anything. */
+  /**
+   * Whether the delete control does anything.
+   *
+   * `false` under an external conflict and while the window holds an undecided
+   * reading of the file too (Phase 2d-6-4), with no code of its own: this
+   * surface's refusal codes are about the snippet, and why the control is off is
+   * said by {@link MatchDeletionView.externalMessages} and
+   * {@link MatchDeletionView.externalNotices}.
+   */
   readonly canDelete: boolean;
-  /** Why it does not, as a code, or `null`. */
+  /** Why the snippet may not be deleted at all, as a code, or `null`. */
   readonly refusal: DeletionRefusal | null;
   /** Whether the person has been asked and has not answered. */
   readonly confirming: boolean;
@@ -994,6 +1896,23 @@ export interface MatchDeletionView {
   /** The outcome's lines followed by anything to be said beside them. */
   readonly messages: readonly SaveOutcomeMessage[];
   /**
+   * The external conflict's own lines, or none — Phase 2d-6-4.
+   *
+   * Beside {@link MatchDeletionView.messages} and never merged into it, for
+   * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
+   * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
+   * twice. Rendered through `tConflictMessage`. No component reads it yet;
+   * 2d-6-7 does.
+   */
+  readonly externalMessages: readonly ConflictMessage[];
+  /**
+   * The lines owed while an observation cannot be acted on — Phase 2d-6-4.
+   *
+   * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
+   * own fields. No component reads it yet; 2d-6-7 and 2d-6-9 do.
+   */
+  readonly externalNotices: readonly ExternalConflictNotice[];
+  /**
    * The presentation changes a saved arm disclosed, in report order.
    *
    * **A deletion is the one command that produces
@@ -1007,7 +1926,7 @@ export interface MatchDeletionView {
   readonly refusalChoices: readonly RawSaveChoice[];
   /** Whether the findings on screen are about a candidate that has since changed. */
   readonly findingsAreStale: boolean;
-  /** The conflict being shown, or `null`. */
+  /** The conflict being shown, of either origin, or `null`. */
   readonly conflict: ConflictModel<MatchId> | null;
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
@@ -1082,7 +2001,9 @@ export function matchDeletionView(session: MatchDeletionSession): MatchDeletionV
   const conflictChoices =
     conflict === null
       ? []
-      : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload));
+      : conflictChoicesFor(effectiveCapabilitiesOf(session), offeredReloadStep(session.reload));
+  const externallyBlocked = session.externalConflict !== null || awaitedFor(session) !== null;
+  const refusalChoices = offeredRefusalChoices(refused, stale);
   return {
     match: session.match,
     canDelete: canRequestDelete(session),
@@ -1094,8 +2015,16 @@ export function matchDeletionView(session: MatchDeletionSession): MatchDeletionV
     failureLines: sendFailureLines(session.sendFailure?.reason ?? null),
     outcome,
     messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
+    externalMessages: session.externalConflict === null ? [] : session.externalConflict.messages,
+    externalNotices: externalNoticesOf(session),
     notes: saved === null ? [] : saved.notes,
-    refusalChoices: offeredRefusalChoices(refused, stale),
+    // The one offer a refusal panel may keep under an external block is the
+    // dismissal: *Save anyway* re-asks the question and `requestDelete` would
+    // answer the same session to it, and a control that does nothing when
+    // pressed is the defect `conflictChoicesFor` exists to stop.
+    refusalChoices: externallyBlocked
+      ? refusalChoices.filter((choice) => choice === 'keepEditing')
+      : refusalChoices,
     findingsAreStale: refused !== null && stale,
     conflict,
     conflictChoices,

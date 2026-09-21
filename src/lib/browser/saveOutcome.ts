@@ -945,11 +945,14 @@ export interface SaveConflictModel<T> extends ConflictModelCommon<T> {
  * model over the editor's draft, holding it in `MatchEditorSession.externalConflict`;
  * since Phase 2d-6-3 the new-snippet form's `applyObservation` in
  * `./matchCreation.ts` and the recovery form's `applyRecoveryObservation` in
- * `./recovery.ts` do the same over their own drafts. **No production code
+ * `./recovery.ts` do the same over their own drafts, and since Phase 2d-6-4 so
+ * do the deleter's `applyDeletionObservation` in `./matchDeletion.ts`, the
+ * mover's `applyMoveObservation` in `./matchMove.ts` and the duplicator's
+ * `applyDuplicationObservation` in `./matchDuplication.ts`. **No production code
  * registers any of those receivers yet**, so in the running application the
- * delivery still reaches nobody — the wiring is 2d-6-6's, the deleter's, mover's,
- * duplicator's, raw editor's and restore's transitions are 2d-6-4 and -5's, and
- * the panel that draws the result is 2d-6-6's too.
+ * delivery still reaches nobody — the wiring is 2d-6-6's, the raw editor's and
+ * restore's transitions are 2d-6-5's, and the panel that draws the result is
+ * 2d-6-6's and 2d-6-7's.
  *
  * @typeParam T - The drafted value.
  */

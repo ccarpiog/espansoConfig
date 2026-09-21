@@ -318,7 +318,13 @@ describe('the reapply obstacle sentences', () => {
     { kind: 'fieldCollisions', fields: ['replace', 'label'] },
     { kind: 'targetNotEditable' },
     { kind: 'correspondence', reason: 'AmbiguousTrigger' },
-    { kind: 'evidenceNotATarget' }
+    { kind: 'evidenceNotATarget' },
+    // The external-origin arms, Phase 2d-6-2; every one reuses a sentence that
+    // already exists, and `matchEditor.test.ts` pins each reason of the first.
+    { kind: 'externalEvidence', reason: 'noRowForBase' },
+    { kind: 'supersededEvidence' },
+    { kind: 'writeOutcomeUnknown' },
+    { kind: 'observationRetained' }
   ];
 
   /** Every arm of the creation form's union, exhaustively. */
@@ -343,14 +349,26 @@ describe('the reapply obstacle sentences', () => {
   const DELETION_OBSTACLES: readonly DeletionReapplyObstacle[] = [
     { kind: 'notDeletable', reason: 'readOnly' },
     { kind: 'correspondence', reason: 'AmbiguousExact' },
-    { kind: 'evidenceNotATarget' }
+    { kind: 'evidenceNotATarget' },
+    // The external-origin arms, Phase 2d-6-4; every one reuses a sentence that
+    // already exists, and `matchDeletion.test.ts` pins each reason of the first.
+    { kind: 'externalEvidence', reason: 'noRowForBase' },
+    { kind: 'supersededEvidence' },
+    { kind: 'writeOutcomeUnknown' },
+    { kind: 'observationRetained' }
   ];
 
   /** Every arm of the duplication's union, exhaustively. */
   const DUPLICATION_OBSTACLES: readonly DuplicationReapplyObstacle[] = [
     { kind: 'notDuplicable', reason: 'readOnly' },
     { kind: 'correspondence', reason: 'AmbiguousExact' },
-    { kind: 'evidenceNotATarget' }
+    { kind: 'evidenceNotATarget' },
+    // The external-origin arms, Phase 2d-6-4, as above; `matchDuplication.test.ts`
+    // pins each reason of the first.
+    { kind: 'externalEvidence', reason: 'noRowForBase' },
+    { kind: 'supersededEvidence' },
+    { kind: 'writeOutcomeUnknown' },
+    { kind: 'observationRetained' }
   ];
 
   /** Every arm of the move's union, exhaustively. */
@@ -361,7 +379,13 @@ describe('the reapply obstacle sentences', () => {
     { kind: 'anchorNotInSequence' },
     { kind: 'moveRefused', reason: 'outOfDate' },
     { kind: 'correspondence', reason: 'AmbiguousExact' },
-    { kind: 'evidenceNotATarget' }
+    { kind: 'evidenceNotATarget' },
+    // The external-origin arms, Phase 2d-6-4, as above; `matchMove.test.ts` pins
+    // each reason of the first.
+    { kind: 'externalEvidence', reason: 'noRowForBase' },
+    { kind: 'supersededEvidence' },
+    { kind: 'writeOutcomeUnknown' },
+    { kind: 'observationRetained' }
   ];
 
   /**

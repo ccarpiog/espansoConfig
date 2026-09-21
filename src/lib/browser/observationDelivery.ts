@@ -12,12 +12,15 @@
  * compiles. Since 2d-6-1b `./workspace.svelte.ts` seals every verdict it reaches
  * through the constructors below and answers the guard's three inputs; since
  * 2d-6-2 the match editor's `applyObservation` in `./matchEditor.ts` consumes the
- * envelope, one named action per verdict arm, and since 2d-6-3 so do the
+ * envelope, one named action per verdict arm; since 2d-6-3 so do the
  * new-snippet form's `applyObservation` in `./matchCreation.ts` and the recovery
- * form's `applyRecoveryObservation` in `./recovery.ts`. **No component registers
- * any of those receivers yet** (2d-6-6's), so in production every envelope still
- * reaches the receivers a test registered, or nobody; the deleter's, mover's,
- * duplicator's, raw editor's and restore's transitions are 2d-6-4 and 2d-6-5's.
+ * form's `applyRecoveryObservation` in `./recovery.ts`, and since 2d-6-4 the
+ * deleter's `applyDeletionObservation` in `./matchDeletion.ts`, the mover's
+ * `applyMoveObservation` in `./matchMove.ts` and the duplicator's
+ * `applyDuplicationObservation` in `./matchDuplication.ts`. **No component
+ * registers any of those receivers yet** (2d-6-6's), so in production every
+ * envelope still reaches the receivers a test registered, or nobody; the raw
+ * editor's and restore's transitions are 2d-6-5's.
  *
  * 1. **The delivery envelope** ({@link ObservationDelivery}): the narrowed
  *    observation plus the verdict the window reached about it, sealed together so
@@ -381,7 +384,10 @@ export function decideAutomaticReload(inputs: AutomaticReloadGuardInputs): Autom
  * **Nothing draws these yet.** The match editor's view answers both since
  * 2d-6-2 (`MatchEditorView.externalNotices` in `./matchEditor.ts`), the
  * new-snippet form's and the recovery form's since 2d-6-3
- * (`MatchCreationView.externalNotices`, `RecoveryView.externalNotices`), and no
+ * (`MatchCreationView.externalNotices`, `RecoveryView.externalNotices`), the
+ * deleter's, mover's and duplicator's since 2d-6-4
+ * (`MatchDeletionView.externalNotices`, `MatchMoveView.externalNotices`,
+ * `MatchDuplicationView.externalNotices`), and no
  * component reads any of those fields; the acknowledgement that ends the second exists
  * (`BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, since
  * 2d-6-1b) and no component calls it — 2d-6-9 draws the control. The codes exist

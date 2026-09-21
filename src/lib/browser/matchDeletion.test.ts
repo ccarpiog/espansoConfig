@@ -11,7 +11,10 @@
  *    for;
  * 3. **the answer** — the three arms, the acknowledgement round trip, and the
  *    `DoubledSequenceSeparation` note that only a deletion produces;
- * 4. **the view** — what a screen would draw, derived on every read.
+ * 4. **the view** — what a screen would draw, derived on every read;
+ * 5. **the external session** (Phase 2d-6-4) — the seven verdict arms, the
+ *    withdrawal of a pending question, the held observation, the uncertainty and
+ *    the reapply over the observation's table by full identity.
  *
  * Per `1b-2a-notes.md` section 14, a `describe`/`it` callback whose sibling
  * argument is already its description carries no JSDoc of its own; ordinary
@@ -23,9 +26,13 @@ import { DICTIONARIES } from '../i18n/dictionaries';
 import { LOCALES } from '../i18n/locale';
 import type {
   ContentRevision,
+  CorrespondenceEntry,
+  CorrespondenceTable,
+  DocumentId,
   DocumentView,
   Finding,
   MatchId,
+  MatchView,
   ReapplyResolution,
   SaveResult
 } from '../ipc/types';
@@ -33,7 +40,9 @@ import { makeConflict, makeDocument, makeMatch } from './fixtures';
 import type { InvalidationStatus } from './invalidation';
 import {
   acknowledgeDeletionFindings,
+  acknowledgeDeletionSnapshot,
   applyDeletion,
+  applyDeletionObservation,
   askToReloadDiskVersion,
   baseRevisionOf,
   cancelDelete,
@@ -43,6 +52,7 @@ import {
   conflictOf,
   deletionCouldNotBeSent,
   deletionEligibility,
+  deletionReapplyObstacleKey,
   deletionRefusalKey,
   dismissDeletionOutcome,
   identityInProjection,
@@ -51,12 +61,29 @@ import {
   reloadTheDiskVersion,
   requestDelete,
   startMatchDeletion,
+  type DeletionReapplyObstacle,
   type DeletionRefusal,
   type MatchDeletionSession
 } from './matchDeletion';
-import type { AdoptTheDiskVersion } from './editorSave';
-import type { DiskAdoptionOutcome } from './saveOutcome';
-import type { ConflictChoice, ConflictModel } from './saveOutcome';
+import { NOT_RELOADING, type AdoptTheDiskVersion } from './editorSave';
+import {
+  externalConflictSource,
+  standingConflictOf,
+  type ConflictSource,
+  type ExternalChangeConflictSource,
+  type ExternalConflictObservation,
+  type ObservationVerdict
+} from './conflictSource';
+import { describeDeletionReapplyObstacle } from '../i18n';
+import {
+  arbitratedDelivery,
+  retainedDelivery,
+  writtenHereDelivery,
+  type ObservationDelivery
+} from './observationDelivery';
+import { attemptOfReapply, reapplyToShow, type StandingOriginGuard } from './reapply';
+import { isExternalConflict, isSaveConflict, type DiskAdoptionOutcome } from './saveOutcome';
+import type { ConflictChoice, ConflictModel, ExternalConflictModel } from './saveOutcome';
 
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -791,3 +818,983 @@ describe('reapplying the retained deletion', () => {
     expect(recorder.adoptions).toEqual([]);
   });
 }); // End of the reapply suite
+
+describe('the external session — Phase 2d-6-4', () => {
+  // **The receiver as a value, driven without a window.** Every envelope here is
+  // sealed by the three constructors of `./observationDelivery.ts`, so the verdict
+  // inside is about the observation inside by construction; `workspace.test.ts`
+  // drives this same transition through a real `BrowserState`. Nothing here can
+  // show a component registers the receiver — 2d-6-6 wires it — and nothing here
+  // calls a command: no `BrowserState` exists in this file.
+
+  /** The disk text every observation below reads. */
+  const THEIRS = 'matches:\n  - trigger: x\n    replace: theirs\n';
+
+  /**
+   * The file as another writer left it: the same two snippets under a new
+   * parse, plus a third.
+   *
+   * @param overrides - Whatever the case needs the disk file to keep saying.
+   * @returns The projection the observation carries.
+   */
+  function diskFile(overrides: Parameters<typeof makeDocument>[0] = {}): DocumentView {
+    return makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: AFTER,
+      matches: [
+        makeMatch({ node: 30, document: 2, revision: AFTER, trigger: ':sig' }),
+        makeMatch({ node: 31, document: 2, revision: AFTER, trigger: ':date' }),
+        makeMatch({ node: 32, document: 2, revision: AFTER, trigger: ':theirs' })
+      ],
+      ...overrides
+    });
+  } // End of function diskFile()
+
+  /**
+   * One narrowed observation of the session's file.
+   *
+   * A fresh object every call, deliberately: the memo in `./conflictSource.ts` and
+   * the session's wait are both keyed on object identity, so two calls are two
+   * observations.
+   *
+   * @param overrides - Whatever the case needs beyond the defaults.
+   * @returns The observation, as a window would have narrowed it.
+   */
+  function observation(
+    overrides: Partial<ExternalConflictObservation> = {}
+  ): ExternalConflictObservation {
+    return {
+      sequence: 5,
+      document: 2,
+      previousRevision: BASE,
+      diskRevision: AFTER,
+      diskText: THEIRS,
+      disk: diskFile(),
+      findings: [],
+      correspondences: null,
+      ...overrides
+    };
+  } // End of function observation()
+
+  /**
+   * An observation of another file, which this session is never about.
+   *
+   * @returns The observation.
+   */
+  function otherObservation(): ExternalConflictObservation {
+    return observation({
+      document: 3,
+      previousRevision: null,
+      diskRevision: 'd'.repeat(64),
+      disk: makeDocument({ id: 3, relativePath: 'match/other.yml', revision: 'd'.repeat(64) })
+    });
+  } // End of function otherObservation()
+
+  /**
+   * An arbitrated envelope, asserted to have reached the arm the case is about.
+   *
+   * @param standing - What stands for the file, or `null`.
+   * @param seen - The observation.
+   * @param uncertain - Whether the last settled write may have written.
+   * @param arm - The verdict the case needs.
+   * @returns The sealed envelope.
+   */
+  function decided(
+    standing: ConflictSource | null,
+    seen: ExternalConflictObservation,
+    uncertain: boolean,
+    arm: ObservationVerdict['kind']
+  ): ObservationDelivery {
+    const delivery = arbitratedDelivery(
+      standing === null ? null : standingConflictOf(standing),
+      seen,
+      uncertain
+    );
+    expect(delivery.verdict.kind).toBe(arm);
+    return delivery;
+  } // End of function decided()
+
+  /**
+   * The `raised` envelope for one observation.
+   *
+   * @param seen - The observation.
+   * @returns The envelope.
+   */
+  function raised(seen: ExternalConflictObservation): ObservationDelivery {
+    return decided(null, seen, false, 'raised');
+  } // End of function raised()
+
+  /**
+   * A recorder for the window's own adoption.
+   *
+   * @param answer - What the window answers.
+   * @returns The callback to pass, and the conflicts it was handed.
+   */
+  function adopting(answer: DiskAdoptionOutcome = 'installed'): {
+    readonly adopt: AdoptTheDiskVersion<MatchId>;
+    readonly adoptions: ConflictModel<MatchId>[];
+  } {
+    const adoptions: ConflictModel<MatchId>[] = [];
+    return {
+      adopt: (conflict) => {
+        adoptions.push(conflict);
+        return answer;
+      },
+      adoptions
+    };
+  } // End of function adopting()
+
+  /**
+   * The external conflict a session shows, or a failure naming the case.
+   *
+   * @param held - The session.
+   * @returns Its external conflict.
+   */
+  function externalOf(held: MatchDeletionSession): ExternalConflictModel<MatchId> {
+    const conflict = held.externalConflict;
+    if (conflict === null) {
+      throw new Error('this case needs an external conflict on the session');
+    }
+    return conflict;
+  } // End of function externalOf()
+
+  /**
+   * A session whose question has been asked and not answered.
+   *
+   * @returns The session with a pending question.
+   */
+  function requested(): MatchDeletionSession {
+    const asked = requestDelete(session());
+    expect(asked.pending).not.toBeNull();
+    return asked;
+  } // End of function requested()
+
+  /**
+   * A session whose deletion met a save conflict — the save origin.
+   *
+   * @returns The session showing the save conflict.
+   */
+  function saveConflicted(): MatchDeletionSession {
+    const started = confirmDelete(requested(), live());
+    if (started === null) {
+      throw new Error('a confirmed deletion is sendable');
+    }
+    return applyDeletion(started.session, CONFLICT, NOT_OWED);
+  } // End of function saveConflicted()
+
+  /**
+   * A session whose deletion was refused for findings — the refusal path.
+   *
+   * @returns The session showing the refusal.
+   */
+  function refusedOnce(): MatchDeletionSession {
+    const started = confirmDelete(requested(), live());
+    if (started === null) {
+      throw new Error('a confirmed deletion is sendable');
+    }
+    return applyDeletion(started.session, REFUSED, NOT_OWED);
+  } // End of function refusedOnce()
+
+  describe('the seven arms over a session opened over one file (entries 6, 8, 11, 12)', () => {
+    it('raises over the file, withdraws the pending question, and refuses both doors', () => {
+      const seen = observation();
+      const next = applyDeletionObservation(requested(), raised(seen));
+      const conflict = externalOf(next);
+      expect(conflict.source).toBe(externalConflictSource(seen));
+      expect(conflict.draft).toBe(next.draft);
+      expect(conflict.diskText).toBe(THEIRS);
+      expect(isExternalConflict(conflict)).toBe(true);
+      expect(conflictOf(next)).toBe(conflict);
+      // `outcome` is untouched: no deletion ended (entry 6).
+      expect(next.outcome).toBeNull();
+      // Entry 12: the question asked about the snippet as this window projected it
+      // is withdrawn, and neither door answers anything.
+      expect(next.pending).toBeNull();
+      expect(canRequestDelete(next)).toBe(false);
+      expect(requestDelete(next)).toBe(next);
+      expect(confirmDelete(next, live())).toBeNull();
+      const view = matchDeletionView(next);
+      expect(view.canDelete).toBe(false);
+      expect(view.confirming).toBe(false);
+      expect(view.refusal).toBeNull();
+      expect(view.conflict).toBe(conflict);
+      expect(view.externalMessages).toBe(conflict.messages);
+      expect(view.externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
+      expect(view.messages).toEqual([]);
+      expect(view.externalNotices).toEqual([]);
+      expect(view.conflictOperation).toBe('deleteSnippet');
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>([
+        'keepEditing',
+        'keepMyDraft',
+        'reloadDiskVersion'
+      ]);
+    }); // End of the "raised over the file" case
+
+    it('answers null from confirmDelete called directly under an external conflict, refusal path included', () => {
+      // **Past a disabled button.** The refusal panel's *Save anyway* would
+      // re-ask the question; `requestDelete` answers the same session, and a
+      // caller that assembled a pending question by hand is refused at
+      // `confirmDelete` after every identity it hands in has been read.
+      const blocked = applyDeletionObservation(refusedOnce(), raised(observation()));
+      expect(blocked.outcome?.kind).toBe('refused');
+      const consented = acknowledgeDeletionFindings(blocked);
+      expect(requestDelete(consented)).toBe(consented);
+      const byHand: MatchDeletionSession = { ...consented, pending: requested().pending };
+      expect(confirmDelete(byHand, live())).toBeNull();
+      const view = matchDeletionView(blocked);
+      expect(view.refusalChoices).toEqual(['keepEditing']);
+      expect(view.findingsAreStale).toBe(false);
+    });
+
+    it('takes nothing from a delivery about another file, except the end of a wait recorded for it', () => {
+      // A session over `match/base.yml` told `match/other.yml` changed is the
+      // object it was: a reload of that conflict would adopt a file the person
+      // never named.
+      const over = requested();
+      const elsewhere = otherObservation();
+      expect(applyDeletionObservation(over, raised(elsewhere))).toBe(over);
+      expect(applyDeletionObservation(over, retainedDelivery(elsewhere))).toBe(over);
+      expect(applyDeletionObservation(over, decided(null, elsewhere, true, 'raisedWithoutReload'))).toBe(over);
+      // A wait a hand-built session holds for that observation ends with the
+      // decision about it, whichever file it names, and nothing is raised.
+      const waiting: MatchDeletionSession = { ...over, awaitingReconciliation: new Map([[3, elsewhere]]) };
+      expect(applyDeletionObservation(waiting, writtenHereDelivery(elsewhere)).awaitingReconciliation.size).toBe(0);
+      expect(applyDeletionObservation(waiting, raised(elsewhere))).toEqual({
+        ...waiting,
+        awaitingReconciliation: new Map()
+      });
+      expect(canRequestDelete(waiting)).toBe(true);
+    });
+
+    it('takes nothing once closed', () => {
+      const closed = reloadTheDiskVersion(
+        confirmDiskReload(askToReloadDiskVersion(saveConflicted())),
+        adopting().adopt
+      );
+      expect(closed.closed).toBe(true);
+      expect(applyDeletionObservation(closed, raised(observation()))).toBe(closed);
+      expect(applyDeletionObservation(closed, retainedDelivery(observation()))).toBe(closed);
+    });
+
+    it('withdraws a pending question on every replacing verdict, and keeps it on coalesced and notLater', () => {
+      const asked = requested();
+      const seen = observation();
+      expect(applyDeletionObservation(asked, raised(seen)).pending).toBeNull();
+      expect(applyDeletionObservation(asked, decided(null, seen, true, 'raisedWithoutReload')).pending).toBeNull();
+      const standing = externalConflictSource(observation({ sequence: 1, diskRevision: 'c'.repeat(64) }));
+      expect(applyDeletionObservation(asked, decided(standing, seen, false, 'supersedes')).pending).toBeNull();
+      // A verdict that changes nothing about the file changes nothing about the
+      // question either: the session is the object it was, question included.
+      const sameBytes = externalConflictSource(observation({ sequence: 1 }));
+      expect(applyDeletionObservation(asked, decided(sameBytes, seen, false, 'coalesced'))).toBe(asked);
+      const later = externalConflictSource(observation({ sequence: 9 }));
+      expect(applyDeletionObservation(asked, decided(later, seen, false, 'notLater'))).toBe(asked);
+      expect(matchDeletionView(asked).confirming).toBe(true);
+    }); // End of the "pending question withdrawn" case
+  }); // End of the "seven arms" suite
+
+  describe('the held observation, and writtenHere by identity (entries 8 and 11)', () => {
+    it('records a wait as a restriction on asking and answering, and lifts it only for that observation', () => {
+      const seen = observation();
+      const waiting = applyDeletionObservation(session(), retainedDelivery(seen));
+      expect(waiting.awaitingReconciliation.get(2)).toBe(seen);
+      expect(waiting.awaitingReconciliation.size).toBe(1);
+      expect(waiting.externalConflict).toBeNull();
+      expect(conflictOf(waiting)).toBeNull();
+      expect(canRequestDelete(waiting)).toBe(false);
+      expect(requestDelete(waiting)).toBe(waiting);
+      const byHand: MatchDeletionSession = { ...waiting, pending: requested().pending };
+      expect(confirmDelete(byHand, live())).toBeNull();
+      const view = matchDeletionView(waiting);
+      expect(view.canDelete).toBe(false);
+      expect(view.conflict).toBeNull();
+      expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
+      // Lifted by identity, and by nothing else.
+      expect(applyDeletionObservation(waiting, writtenHereDelivery(observation())).awaitingReconciliation.get(2)).toBe(seen);
+      const lifted = applyDeletionObservation(waiting, writtenHereDelivery(seen));
+      expect(lifted).toEqual({ ...waiting, awaitingReconciliation: new Map() });
+      expect(canRequestDelete(lifted)).toBe(true);
+      expect(applyDeletionObservation(lifted, writtenHereDelivery(seen))).toBe(lifted);
+      // Any decision about the awaited observation ends the wait; a later
+      // `retained` replaces it; a re-held reading is still held.
+      const standing = externalConflictSource(observation({ sequence: 9 }));
+      expect(applyDeletionObservation(waiting, decided(standing, seen, false, 'notLater'))).toEqual({
+        ...waiting,
+        awaitingReconciliation: new Map()
+      });
+      expect(
+        applyDeletionObservation(
+          waiting,
+          decided(externalConflictSource(observation({ sequence: 1 })), seen, false, 'coalesced')
+        )
+      ).toEqual({ ...waiting, awaitingReconciliation: new Map() });
+      expect(applyDeletionObservation(waiting, raised(seen)).awaitingReconciliation.size).toBe(0);
+      const newer = observation({ sequence: 7 });
+      expect(applyDeletionObservation(waiting, retainedDelivery(newer)).awaitingReconciliation.get(2)).toBe(newer);
+      expect(applyDeletionObservation(waiting, retainedDelivery(seen)).awaitingReconciliation.get(2)).toBe(seen);
+    }); // End of the "retained and writtenHere" case
+
+    it('holds every delivery during its own deletion and replays them in arrival order (entry 5)', () => {
+      const started = confirmDelete(requested(), live());
+      if (started === null) {
+        throw new Error('a confirmed deletion is sendable');
+      }
+      const seen = observation();
+      const later = observation({ sequence: 6 });
+      const standing = externalConflictSource(seen);
+      const held = applyDeletionObservation(
+        applyDeletionObservation(applyDeletionObservation(started.session, retainedDelivery(seen)), raised(seen)),
+        decided(standing, later, false, 'coalesced')
+      );
+      expect(held.externalConflict).toBeNull();
+      expect(held.awaitingReconciliation.size).toBe(0);
+      expect(held.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised', 'coalesced']);
+      // The deletion's answer lands first, the held decisions second, in one
+      // transition: the conflict `raised` announced stands, the wait `retained`
+      // recorded ended with it, and `coalesced` found the conflict it was about.
+      const settled = applyDeletion(held, REFUSED, NOT_OWED);
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(externalOf(settled).source).toBe(standing);
+      expect(settled.awaitingReconciliation.size).toBe(0);
+      expect(canRequestDelete(settled)).toBe(false);
+      // The answer lands first and the replay has the last word, on a commit too:
+      // the session is spent and the conflict stands beside the success.
+      const committed = applyDeletion(held, saved(), ADOPTED);
+      expect(committed.outcome?.kind).toBe('saved');
+      expect(committed.deleted).toBe(true);
+      expect(externalOf(committed).source).toBe(standing);
+      // A deletion that produced no outcome consumes the hold too.
+      const heldUncertain = applyDeletionObservation(
+        started.session,
+        decided(null, seen, true, 'raisedWithoutReload')
+      );
+      const failed = deletionCouldNotBeSent(heldUncertain, true, null);
+      expect(failed.heldDeliveries).toEqual([]);
+      expect(failed.sendFailure?.kind).toBe('mayHaveWritten');
+      expect(failed.uncertaintyUnresolved).toBe(true);
+      expect(externalOf(failed).source).toBe(externalConflictSource(seen));
+    }); // End of the "held during the deletion" case
+  }); // End of the "held observation" suite
+
+  describe('collisions: only one conflict is active (entry 7), and a replacing verdict resets (entry 12)', () => {
+    it('retires a save conflict when an observation supersedes it, keeping the retained draft and dropping the confirmation', () => {
+      const stuck = saveConflicted();
+      const saveModel = conflictOf(stuck);
+      if (saveModel === null || !isSaveConflict(saveModel)) {
+        throw new Error('this case starts from a save conflict');
+      }
+      const confirmed = confirmDiskReload(askToReloadDiskVersion(stuck));
+      expect(confirmed.reload.kind).toBe('confirmed');
+      const attempt = attemptOfReapply(confirmed, { kind: 'adoptionRefused' } as const);
+      expect(reapplyToShow(attempt, confirmed)).toEqual({ kind: 'adoptionRefused' });
+      const seen = observation({ diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      const next = applyDeletionObservation(confirmed, decided(saveModel.source, seen, false, 'supersedes'));
+      expect(next.outcome).toBeNull();
+      expect(next.submitted).toBeNull();
+      const conflict = externalOf(next);
+      expect(conflict.draft).toBe(saveModel.draft);
+      expect(conflict.diskRevision).toBe('c'.repeat(64));
+      expect(conflictOf(next)).toBe(conflict);
+      // The reload is idle again and the confirmation is gone; the displayed
+      // reapply result is about a session no longer on screen.
+      expect(next.reload).toBe(NOT_RELOADING);
+      expect(matchDeletionView(next).awaitingReloadConfirmation).toBe(false);
+      const recorder = adopting();
+      expect(reloadTheDiskVersion(next, recorder.adopt)).toBe(next);
+      expect(recorder.adoptions).toEqual([]);
+      expect(reapplyToShow(attempt, next)).toBeNull();
+    }); // End of the "supersedes a save conflict" case
+
+    it('keeps a committed success and a refusal as history, and lets a deletion that conflicts retire the external one', () => {
+      const started = confirmDelete(requested(), live());
+      if (started === null) {
+        throw new Error('a confirmed deletion is sendable');
+      }
+      const committed = applyDeletion(started.session, saved(), ADOPTED);
+      const overSaved = applyDeletionObservation(committed, raised(observation()));
+      expect(overSaved.outcome?.kind).toBe('saved');
+      expect(overSaved.deleted).toBe(true);
+      expect(conflictOf(overSaved)).toBe(overSaved.externalConflict);
+      // The reverse collision, kept for a direct call: a conflict answer retires
+      // the external conflict, a refusal leaves it.
+      const blocked = applyDeletionObservation(refusedOnce(), raised(observation()));
+      const conflicted = applyDeletion(blocked, CONFLICT, NOT_OWED);
+      expect(conflicted.externalConflict).toBeNull();
+      expect(conflictOf(conflicted)?.source.kind).toBe('save');
+      const refusedAgain = applyDeletion(blocked, REFUSED, NOT_OWED);
+      expect(refusedAgain.externalConflict).toBe(blocked.externalConflict);
+    });
+
+    it('lets the dismissal cancel the warning and the panel, and nothing external (entry 9)', () => {
+      const seen = observation();
+      const blocked = askToReloadDiskVersion(applyDeletionObservation(refusedOnce(), raised(seen)));
+      expect(matchDeletionView(blocked).awaitingReloadConfirmation).toBe(true);
+      const kept = dismissDeletionOutcome(blocked);
+      expect(kept.outcome).toBeNull();
+      expect(kept.reload).toBe(NOT_RELOADING);
+      expect(kept.externalConflict).toBe(blocked.externalConflict);
+      expect(canRequestDelete(kept)).toBe(false);
+      expect(requestDelete(kept)).toBe(kept);
+      const withheld = applyDeletionObservation(session(), decided(null, observation(), true, 'raisedWithoutReload'));
+      expect(dismissDeletionOutcome(withheld).uncertaintyUnresolved).toBe(true);
+      const waiting = applyDeletionObservation(session(), retainedDelivery(seen));
+      expect(dismissDeletionOutcome(waiting).awaitingReconciliation.get(2)).toBe(seen);
+      expect(canRequestDelete(dismissDeletionOutcome(waiting))).toBe(false);
+    });
+
+    it('changes nothing on coalesced and notLater, not even the object', () => {
+      const seen = observation();
+      const asked = askToReloadDiskVersion(applyDeletionObservation(session(), raised(seen)));
+      expect(matchDeletionView(asked).awaitingReloadConfirmation).toBe(true);
+      const standing = externalConflictSource(seen);
+      expect(applyDeletionObservation(asked, decided(standing, observation({ sequence: 6 }), false, 'coalesced'))).toBe(asked);
+      expect(
+        applyDeletionObservation(
+          asked,
+          decided(standing, observation({ sequence: 4, diskRevision: 'd'.repeat(64) }), false, 'notLater')
+        )
+      ).toBe(asked);
+    });
+  }); // End of the "collisions" suite
+
+  describe('the uncertainty and its exits (entries 11, 14, 15, 22; the record’s §5.5)', () => {
+    it('withholds the reload and the reapply on raisedWithoutReload until the snapshot is acknowledged', () => {
+      const seen = observation();
+      const withheld = applyDeletionObservation(requested(), decided(null, seen, true, 'raisedWithoutReload'));
+      expect(withheld.uncertaintyUnresolved).toBe(true);
+      expect(withheld.pending).toBeNull();
+      const view = matchDeletionView(withheld);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing']);
+      expect(view.reapplyOffered).toBe(false);
+      expect(view.externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
+      expect(askToReloadDiskVersion(withheld)).toBe(withheld);
+      const recorder = adopting();
+      expect(reapplyToDiskVersion(withheld, recorder.adopt, () => externalOf(withheld).source)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'writeOutcomeUnknown' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+      // Exit three: the acknowledgement, refused and then accepted.
+      const asked: ExternalChangeConflictSource[] = [];
+      expect(
+        acknowledgeDeletionSnapshot(withheld, (source) => {
+          asked.push(source);
+          return 'refused';
+        })
+      ).toBe(withheld);
+      expect(asked).toEqual([externalOf(withheld).source]);
+      const acknowledged = acknowledgeDeletionSnapshot(withheld, () => 'acknowledged');
+      expect(acknowledged).toEqual({ ...withheld, uncertaintyUnresolved: false, reload: NOT_RELOADING });
+      expect(matchDeletionView(acknowledged).conflictChoices).toContain('reloadDiskVersion');
+      expect(matchDeletionView(askToReloadDiskVersion(acknowledged)).awaitingReloadConfirmation).toBe(true);
+      // Nothing to acknowledge asks nothing.
+      let askedWithoutCause = 0;
+      const plain = applyDeletionObservation(session(), raised(seen));
+      expect(
+        acknowledgeDeletionSnapshot(plain, () => {
+          askedWithoutCause += 1;
+          return 'acknowledged';
+        })
+      ).toBe(plain);
+      expect(askedWithoutCause).toBe(0);
+    }); // End of the "raisedWithoutReload" case
+
+    it('clears the uncertainty when a later verdict under none replaces the conflict', () => {
+      const first = observation();
+      const withheld = applyDeletionObservation(session(), decided(null, first, true, 'raisedWithoutReload'));
+      const later = observation({ sequence: 6, diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      const replaced = applyDeletionObservation(withheld, decided(externalConflictSource(first), later, false, 'supersedes'));
+      expect(replaced.uncertaintyUnresolved).toBe(false);
+      expect(externalOf(replaced).source).toBe(externalConflictSource(later));
+      expect(matchDeletionView(replaced).conflictChoices).toContain('reloadDiskVersion');
+    });
+  }); // End of the "uncertainty" suite
+
+  describe('the reapply over the external origin: the subject’s exact from the table (entries 19, 20, 22)', () => {
+    /** The base identity of the snippet the session is about. */
+    const SUBJECT: MatchId = file().matches[0]!.id;
+
+    /** The disk-side snippet the subject's row identifies. */
+    const TWIN: MatchView = diskFile().matches[0]!;
+
+    /**
+     * One row of a table.
+     *
+     * The editor tier is deliberately a **refusal**, so a surface that read it
+     * instead of `exact` would refuse where this suite expects a rebuild.
+     *
+     * @param base - The identity the row is about.
+     * @param exact - The exact tier's answer.
+     * @returns The row.
+     */
+    function row(base: MatchId, exact: ReapplyResolution): CorrespondenceEntry {
+      return { base, exact, editor: { Refused: { reason: 'AmbiguousTrigger' } } };
+    } // End of function row()
+
+    /**
+     * An observation carrying a table over the two revisions.
+     *
+     * @param entries - The table's rows.
+     * @param revisions - The table's two revisions, defaulting to the matching pair.
+     * @param disk - The disk projection.
+     * @returns The observation.
+     */
+    function observed(
+      entries: readonly CorrespondenceEntry[],
+      revisions: { readonly base?: string; readonly disk?: string } = {},
+      disk: DocumentView = diskFile()
+    ): ExternalConflictObservation {
+      return observation({
+        disk,
+        correspondences: {
+          base_revision: revisions.base ?? BASE,
+          disk_revision: revisions.disk ?? AFTER,
+          entries
+        }
+      });
+    } // End of function observed()
+
+    /**
+     * A session raised over one observation, with the question pending first so
+     * the withdrawal is part of every case.
+     *
+     * @param seen - The observation.
+     * @returns The session and the guard answering its own conflict's origin.
+     */
+    function raisedOver(
+      seen: ExternalConflictObservation
+    ): { readonly stuck: MatchDeletionSession; readonly stands: StandingOriginGuard } {
+      const stuck = applyDeletionObservation(requested(), raised(seen));
+      const source = externalOf(stuck).source;
+      return { stuck, stands: () => source };
+    } // End of function raisedOver()
+
+    it('rebuilds the deletion from the row the subject’s full identity finds, reading its exact tier and never the editor tier', () => {
+      const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
+      const recorder = adopting();
+      const answer = reapplyToDiskVersion(stuck, recorder.adopt, stands);
+      expect(answer.kind).toBe('reapplied');
+      if (answer.kind !== 'reapplied') {
+        throw new Error('this case is about the rebuilt session');
+      }
+      expect(answer.session.match).toEqual(TWIN.id);
+      expect(answer.session.pending).toBeNull();
+      expect(baseRevisionOf(answer.session)).toBe(AFTER);
+      expect(answer.session.externalConflict).toBeNull();
+      expect(answer.session.awaitingReconciliation.size).toBe(0);
+      expect(canRequestDelete(answer.session)).toBe(true);
+      expect(recorder.adoptions).toEqual([externalOf(stuck)]);
+      // The question is asked again, and answered against the live projection.
+      const again = confirmDelete(requestDelete(answer.session), live(diskFile()));
+      expect(again?.match).toEqual(TWIN.id);
+      expect(confirmDelete(requestDelete(answer.session), live())).toBeNull();
+    }); // End of the "rebuilt from the row" case
+
+    it('refuses the subject: a refused tier, an empty tier, a stale full identity, the node alone, the position, and several rows', () => {
+      const recorder = adopting();
+      const refusedTier = raisedOver(observed([row(SUBJECT, { Refused: { reason: 'NoExactCorrespondence' } })]));
+      expect(reapplyToDiskVersion(refusedTier.stuck, recorder.adopt, refusedTier.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'correspondence', reason: 'NoExactCorrespondence' }
+      });
+      for (const empty of [{ Unsupported: {} }, { Targetless: {} }] as const) {
+        const emptyTier = raisedOver(observed([row(SUBJECT, empty)]));
+        expect(reapplyToDiskVersion(emptyTier.stuck, recorder.adopt, emptyTier.stands)).toEqual({
+          kind: 'manualResolution',
+          obstacle: { kind: 'evidenceNotATarget' }
+        });
+      } // End of the loop over the two empty arms
+      // **Full identity, and nothing weaker** (entry 20): a row about the same
+      // node of another parse, a row about the same node of the same parse of
+      // another file, and a row at the subject's array position naming another
+      // node all find nothing.
+      const staleRevision = raisedOver(
+        observed([row({ document: 2, revision: LATER, node: 10 }, { Identified: { target: TWIN } })])
+      );
+      expect(reapplyToDiskVersion(staleRevision.stuck, recorder.adopt, staleRevision.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
+      });
+      const otherFile = raisedOver(
+        observed([row({ document: 3, revision: BASE, node: 10 }, { Identified: { target: TWIN } })])
+      );
+      expect(reapplyToDiskVersion(otherFile.stuck, recorder.adopt, otherFile.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
+      });
+      const byPosition = raisedOver(
+        observed([
+          row({ document: 2, revision: BASE, node: 99 }, { Identified: { target: TWIN } }),
+          row({ document: 2, revision: BASE, node: 11 }, { Identified: { target: TWIN } })
+        ])
+      );
+      expect(reapplyToDiskVersion(byPosition.stuck, recorder.adopt, byPosition.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
+      });
+      const twice = raisedOver(
+        observed([row(SUBJECT, { Identified: { target: TWIN } }), row(SUBJECT, { Identified: { target: TWIN } })])
+      );
+      expect(reapplyToDiskVersion(twice.stuck, recorder.adopt, twice.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'severalRowsForBase' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "subject refusals" case
+
+    it('refuses a table about other revisions, and an observation with none', () => {
+      const recorder = adopting();
+      const otherBase = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })], { base: 'z'.repeat(64) }));
+      expect(reapplyToDiskVersion(otherBase.stuck, recorder.adopt, otherBase.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'baseRevisionMoved' }
+      });
+      const otherDisk = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })], { disk: 'z'.repeat(64) }));
+      expect(reapplyToDiskVersion(otherDisk.stuck, recorder.adopt, otherDisk.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'diskRevisionMoved' }
+      });
+      const tableless = raisedOver(observation());
+      expect(reapplyToDiskVersion(tableless.stuck, recorder.adopt, tableless.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noCorrespondence' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('refuses superseded evidence through the live guard, whichever origin, adopting nothing', () => {
+      const recorder = adopting();
+      const elsewhere = externalConflictSource(observation({ sequence: 9 }));
+      const found = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
+      expect(reapplyToDiskVersion(found.stuck, recorder.adopt, () => elsewhere)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'supersededEvidence' }
+      });
+      expect(reapplyToDiskVersion(found.stuck, recorder.adopt, () => null)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'supersededEvidence' }
+      });
+      expect(reapplyToDiskVersion(saveConflicted(), recorder.adopt, () => elsewhere)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'supersededEvidence' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('answers every adoption outcome for the external origin, and rechecks eligibility over the disk parse', () => {
+      const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
+      expect(reapplyToDiskVersion(stuck, adopting('installed').adopt, stands).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, adopting('alreadyThere').adopt, stands).kind).toBe('reapplied');
+      const refusedWindow = adopting('refused');
+      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt, stands)).toEqual({ kind: 'adoptionRefused' });
+      expect(refusedWindow.adoptions).toHaveLength(1);
+      // The last snippet of the disk parse is refused there, adopting nothing.
+      const alone = diskFile({ matches: [makeMatch({ node: 30, document: 2, revision: AFTER, trigger: ':sig' })] });
+      const last = raisedOver(observed([row(SUBJECT, { Identified: { target: alone.matches[0]! } })], {}, alone));
+      const recorder = adopting();
+      expect(reapplyToDiskVersion(last.stuck, recorder.adopt, last.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'notDeletable', reason: 'lastSnippet' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('refuses a reapply while an observation is held, so no rebuilt session can drop the block', () => {
+      const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
+      const heldReading = observation({ sequence: 6, diskRevision: 'd'.repeat(64), disk: diskFile({ revision: 'd'.repeat(64) }) });
+      const held = applyDeletionObservation(stuck, retainedDelivery(heldReading));
+      expect(held.awaitingReconciliation.get(2)).toBe(heldReading);
+      expect(canRequestDelete(held)).toBe(false);
+      const recorder = adopting();
+      expect(reapplyToDiskVersion(held, recorder.adopt, stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+      const view = matchDeletionView(held);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'reloadDiskVersion']);
+      expect(view.reapplyOffered).toBe(false);
+      expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
+      const lifted = applyDeletionObservation(held, writtenHereDelivery(heldReading));
+      const answer = reapplyToDiskVersion(lifted, adopting().adopt, stands);
+      expect(answer.kind).toBe('reapplied');
+      if (answer.kind === 'reapplied') {
+        expect(answer.session.awaitingReconciliation.size).toBe(0);
+        expect(canRequestDelete(answer.session)).toBe(true);
+      }
+      // The waits are carried whole through the rebuild: one a hand-built session
+      // holds about another file survives it.
+      const elsewhere = otherObservation();
+      const carrying: MatchDeletionSession = { ...stuck, awaitingReconciliation: new Map([[3, elsewhere]]) };
+      const rebuilt = reapplyToDiskVersion(carrying, adopting().adopt, stands);
+      expect(rebuilt.kind).toBe('reapplied');
+      if (rebuilt.kind === 'reapplied') {
+        expect(rebuilt.session.awaitingReconciliation.get(3)).toBe(elsewhere);
+        expect(canRequestDelete(rebuilt.session)).toBe(true);
+      }
+    }); // End of the "reapply refused while held" case
+
+    it('asks nothing of the window when no guard is handed in, and leaves the door to decide', () => {
+      const { stuck } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
+      const refusedWindow = adopting('refused');
+      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt)).toEqual({ kind: 'adoptionRefused' });
+      expect(refusedWindow.adoptions).toEqual([externalOf(stuck)]);
+      expect(reapplyToDiskVersion(stuck, adopting().adopt).kind).toBe('reapplied');
+    });
+
+    it('names a sentence in both languages for every obstacle the external origin can raise', () => {
+      const obstacles: DeletionReapplyObstacle[] = [
+        { kind: 'externalEvidence', reason: 'noCorrespondence' },
+        { kind: 'externalEvidence', reason: 'baseRevisionMoved' },
+        { kind: 'externalEvidence', reason: 'diskRevisionMoved' },
+        { kind: 'externalEvidence', reason: 'noRowForBase' },
+        { kind: 'externalEvidence', reason: 'severalRowsForBase' },
+        { kind: 'supersededEvidence' },
+        { kind: 'writeOutcomeUnknown' },
+        { kind: 'observationRetained' }
+      ];
+      for (const obstacle of obstacles) {
+        const key = deletionReapplyObstacleKey(obstacle);
+        for (const locale of LOCALES) {
+          expect(DICTIONARIES[locale][key], `${locale}:${obstacle.kind}`).toBeTruthy();
+          const rendered = describeDeletionReapplyObstacle(locale, obstacle);
+          expect(rendered, `${locale}:${obstacle.kind}`).toBe(DICTIONARIES[locale][key]);
+          expect(rendered).not.toContain('{');
+        } // End of the loop over the two locales
+      } // End of the loop over the external obstacles
+      expect(deletionReapplyObstacleKey({ kind: 'writeOutcomeUnknown' })).toBe('browser.externalConflict.writeOutcomeUnknown');
+      expect(deletionReapplyObstacleKey({ kind: 'observationRetained' })).toBe('browser.externalConflict.observationRetained');
+    }); // End of the "a sentence per obstacle" case
+  }); // End of the "reapply over the external origin" suite
+
+  describe('the doors, the settlement and the reapply against the installed session (the review’s three blockers)', () => {
+    /** The base identity of the snippet the session is about. */
+    const SUBJECT: MatchId = file().matches[0]!.id;
+
+    /** The disk-side snippet the subject's row identifies. */
+    const TWIN: MatchView = diskFile().matches[0]!;
+
+    /**
+     * A holder standing in for the component's `$state`: what a registered
+     * receiver would update, and what the reader answers.
+     *
+     * @param first - The session installed at the start.
+     * @returns The holder, its reader, and a receiver that applies to it.
+     */
+    function installed(first: MatchDeletionSession): {
+      current: () => MatchDeletionSession;
+      receive: (delivery: ObservationDelivery) => void;
+      set: (next: MatchDeletionSession) => void;
+      held: () => MatchDeletionSession;
+    } {
+      let session = first;
+      return {
+        current: () => session,
+        receive: (delivery) => {
+          session = applyDeletionObservation(session, delivery);
+        },
+        set: (next) => {
+          session = next;
+        },
+        held: () => session
+      };
+    } // End of function installed()
+
+    it('refuses a confirmation when the projection read displaced the installed session', () => {
+      // **The review's first blocker.** A getter behind `projected.document` is
+      // caller code that runs between the block and the spend; a window's
+      // receiver, run from it, replaces the installed session with one carrying
+      // an external conflict. The confirmation must be settled against the
+      // session installed after that read, not the one handed in before it.
+      const holder = installed(requested());
+      const handedIn = holder.current();
+      const seen = observation();
+      const projected: MatchId = {
+        get document(): DocumentId {
+          holder.receive(raised(seen));
+          return 2;
+        },
+        revision: BASE,
+        node: 10
+      };
+      expect(confirmDelete(handedIn, projected, holder.current)).toBeNull();
+      expect(holder.current().externalConflict?.source).toBe(externalConflictSource(seen));
+      expect(holder.current().pending).toBeNull();
+      // The same read that displaces nothing spends as before.
+      const quiet = installed(requested());
+      expect(confirmDelete(quiet.current(), live(), quiet.current)).not.toBeNull();
+      // And a reader answering a session that carries a block is refused too.
+      const waiting = installed(applyDeletionObservation(requested(), retainedDelivery(seen)));
+      const byHand: MatchDeletionSession = { ...waiting.current(), pending: requested().pending };
+      expect(confirmDelete(byHand, live(), waiting.current)).toBeNull();
+    }); // End of the "displaced during the projection read" case
+
+    it('settles against the installed session and replays a delivery that arrived during its own replay', () => {
+      // **The review's second blocker.** With `retained(A), raised(A)` held, a
+      // getter behind A's `document` publishes B while A is being replayed; the
+      // window delivers B to the installed session — still `saving`, so it is
+      // appended there — and a settlement that returned only its own replay would
+      // let the caller overwrite that append. The settled session must carry B.
+      const started = confirmDelete(requested(), live());
+      if (started === null) {
+        throw new Error('a confirmed deletion is sendable');
+      }
+      const holder = installed(started.session);
+      let armed = false;
+      const later = observation({ sequence: 6, diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      const seen: ExternalConflictObservation = {
+        ...observation(),
+        get document(): DocumentId {
+          if (armed) {
+            armed = false;
+            holder.receive(decided(externalConflictSource(this), later, false, 'supersedes'));
+          }
+          return 2;
+        }
+      };
+      holder.receive(retainedDelivery(seen));
+      holder.receive(raised(seen));
+      expect(holder.current().heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised']);
+      armed = true;
+      const settled = applyDeletion(holder.current(), REFUSED, NOT_OWED, holder.current);
+      expect(armed).toBe(false);
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.awaitingReconciliation.size).toBe(0);
+      expect(externalOf(settled).source).toBe(externalConflictSource(later));
+      // The same through a send that produced no outcome.
+      const again = installed(started.session);
+      const seenAgain: ExternalConflictObservation = {
+        ...observation(),
+        get document(): DocumentId {
+          if (armed) {
+            armed = false;
+            again.receive(decided(externalConflictSource(this), later, false, 'supersedes'));
+          }
+          return 2;
+        }
+      };
+      again.receive(retainedDelivery(seenAgain));
+      again.receive(raised(seenAgain));
+      armed = true;
+      const failed = deletionCouldNotBeSent(again.current(), false, null, again.current);
+      expect(failed.heldDeliveries).toEqual([]);
+      expect(externalOf(failed).source).toBe(externalConflictSource(later));
+      // Without a reader the transition settles what it was handed, and says so.
+      const alone = installed(started.session);
+      const seenAlone: ExternalConflictObservation = {
+        ...observation(),
+        get document(): DocumentId {
+          if (armed) {
+            armed = false;
+            alone.receive(decided(externalConflictSource(this), later, false, 'supersedes'));
+          }
+          return 2;
+        }
+      };
+      alone.receive(retainedDelivery(seenAlone));
+      alone.receive(raised(seenAlone));
+      armed = true;
+      expect(externalOf(applyDeletion(alone.current(), REFUSED, NOT_OWED)).source).toBe(externalConflictSource(seenAlone));
+    }); // End of the "delivery during the replay" case
+
+    it('rechecks the installed session immediately before adopting, and refuses a wait or a supersession that arrived during the evidence reads', () => {
+      // **The review's third blocker.** A getter behind a row's `exact` is
+      // caller code that runs after the two blocks were asked and before the
+      // adoption; a window's receiver, run from it, records a wait on the
+      // installed session. The reapply must ask the installed session again,
+      // once, immediately before it adopts — and adopt nothing when it changed.
+      const heldReading = observation({ sequence: 6, diskRevision: 'd'.repeat(64), disk: diskFile({ revision: 'd'.repeat(64) }) });
+      const recorder = adopting();
+      /**
+       * A session raised over a table whose subject row delivers to the holder
+       * when its exact tier is read.
+       *
+       * @param deliver - What the read delivers.
+       * @returns The holder and the guard.
+       */
+      function trapped(deliver: (source: ExternalChangeConflictSource) => ObservationDelivery): {
+        readonly holder: ReturnType<typeof installed>;
+        readonly stands: StandingOriginGuard;
+      } {
+        let holder: ReturnType<typeof installed> | null = null;
+        const row: CorrespondenceEntry = {
+          base: SUBJECT,
+          get exact(): ReapplyResolution {
+            if (holder !== null) {
+              const source = externalOf(holder.current()).source;
+              holder.receive(deliver(source));
+            }
+            return { Identified: { target: TWIN } };
+          },
+          editor: { Unsupported: {} }
+        };
+        const seen = observation({
+          correspondences: { base_revision: BASE, disk_revision: AFTER, entries: [row] }
+        });
+        holder = installed(applyDeletionObservation(requested(), raised(seen)));
+        const source = externalOf(holder.current()).source;
+        return { holder, stands: () => source };
+      } // End of function trapped()
+      const waited = trapped(() => retainedDelivery(heldReading));
+      expect(reapplyToDiskVersion(waited.holder.current(), recorder.adopt, waited.stands, waited.holder.current)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      expect(waited.holder.current().awaitingReconciliation.get(2)).toBe(heldReading);
+      const superseded = trapped((source) => decided(source, heldReading, false, 'supersedes'));
+      expect(
+        reapplyToDiskVersion(superseded.holder.current(), recorder.adopt, superseded.stands, superseded.holder.current)
+      ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } });
+      const uncertain = trapped((source) => decided(source, heldReading, true, 'raisedWithoutReload'));
+      expect(
+        reapplyToDiskVersion(uncertain.holder.current(), recorder.adopt, uncertain.stands, uncertain.holder.current)
+      ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } });
+      expect(recorder.adoptions).toEqual([]);
+      // A read that delivers nothing new adopts as before, and carries the
+      // installed session's waits about other files.
+      const elsewhere = otherObservation();
+      const quiet = trapped(() => retainedDelivery(elsewhere));
+      const answer = reapplyToDiskVersion(quiet.holder.current(), recorder.adopt, quiet.stands, quiet.holder.current);
+      expect(answer.kind).toBe('reapplied');
+      expect(recorder.adoptions).toHaveLength(1);
+    }); // End of the "recheck before adoption" case
+
+    it('reads no evidence for a session that is already blocked', () => {
+      // **The review's should-fix.** The record says the two blocks come before
+      // any evidence is read; the entry used to be asked first. A table whose
+      // spine counts its reads is the pin.
+      let reads = 0;
+      const seen: ExternalConflictObservation = {
+        ...observation(),
+        get correspondences(): CorrespondenceTable {
+          reads += 1;
+          return { base_revision: BASE, disk_revision: AFTER, entries: [] };
+        }
+      };
+      const stuck = applyDeletionObservation(requested(), raised(seen));
+      const stands: StandingOriginGuard = () => externalOf(stuck).source;
+      const recorder = adopting();
+      const held = applyDeletionObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
+      expect(reapplyToDiskVersion(held, recorder.adopt, stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      const withheld = applyDeletionObservation(requested(), decided(null, seen, true, 'raisedWithoutReload'));
+      expect(reapplyToDiskVersion(withheld, recorder.adopt, stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'writeOutcomeUnknown' }
+      });
+      expect(reads).toBe(0);
+      // And an unblocked session reads it exactly once.
+      expect(reapplyToDiskVersion(stuck, recorder.adopt, stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
+      });
+      expect(reads).toBe(1);
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "no evidence read while blocked" case
+  }); // End of the "against the installed session" suite
+}); // End of the "external session" suite

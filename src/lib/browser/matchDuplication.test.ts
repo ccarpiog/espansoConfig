@@ -13,7 +13,10 @@
  * 4. **the refusal precedence** — every adjacent pair of the consult's order,
  *    driven where a transition can reach the pair and constructed where only a
  *    hand-written session can;
- * 5. **the view** — what a screen would draw, derived on every read.
+ * 5. **the view** — what a screen would draw, derived on every read;
+ * 6. **the external session** (Phase 2d-6-4) — the seven verdict arms, the two
+ *    new refusal codes, the held observation, the uncertainty and the reapply
+ *    over the observation's table by full identity.
  *
  * Per `1b-2a-notes.md` section 14, a `describe`/`it` callback whose sibling
  * argument is already its description carries no JSDoc of its own; ordinary
@@ -40,7 +43,9 @@ import type { InvalidationStatus } from './invalidation';
 import { identityInProjection } from './matchDeletion';
 import {
   acknowledgeDuplicationFindings,
+  acknowledgeDuplicationSnapshot,
   applyDuplication,
+  applyDuplicationObservation,
   askToReloadDiskVersion,
   baseRevisionOf,
   beginDuplicate,
@@ -53,6 +58,7 @@ import {
   duplicationEligibility,
   duplicationRecoveryChoices,
   duplicationRecoveryFailed,
+  duplicationReapplyObstacleKey,
   duplicationRecoveryKey,
   duplicationRefusalKey,
   duplicationSubmissionRefusal,
@@ -61,13 +67,31 @@ import {
   reapplyToDiskVersion,
   reloadTheDiskVersion,
   startMatchDuplication,
+  type DuplicationReapplyObstacle,
   type DuplicationRefusal,
   type DuplicationSubmissionRefusal,
   type MatchDuplicationSession
 } from './matchDuplication';
-import type { AdoptTheDiskVersion } from './editorSave';
-import type { DiskAdoptionOutcome } from './saveOutcome';
-import type { ConflictChoice, ConflictModel } from './saveOutcome';
+import { NOT_RELOADING, type AdoptTheDiskVersion } from './editorSave';
+import {
+  externalConflictSource,
+  standingConflictOf,
+  type ConflictSource,
+  type ExternalChangeConflictSource,
+  type ExternalConflictObservation,
+  type ObservationVerdict
+} from './conflictSource';
+import { describeDuplicationReapplyObstacle } from '../i18n';
+import type { CorrespondenceEntry, CorrespondenceTable, DocumentId } from '../ipc/types';
+import {
+  arbitratedDelivery,
+  retainedDelivery,
+  writtenHereDelivery,
+  type ObservationDelivery
+} from './observationDelivery';
+import { attemptOfReapply, reapplyToShow, type StandingOriginGuard } from './reapply';
+import { isExternalConflict, isSaveConflict, type DiskAdoptionOutcome } from './saveOutcome';
+import type { ConflictChoice, ConflictModel, ExternalConflictModel } from './saveOutcome';
 
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -860,7 +884,9 @@ describe('the view a screen draws', () => {
       'mayHaveWritten',
       'alreadyDuplicated',
       'saveInFlight',
+      'externalConflict',
       'conflict',
+      'observationRetained',
       'outOfDate',
       'notDuplicable'
     ];
@@ -1190,3 +1216,885 @@ describe('reapplying the retained duplication', () => {
     expect(recorder.adoptions).toEqual([]);
   });
 }); // End of the reapply suite
+
+describe('the external session — Phase 2d-6-4', () => {
+  // **The receiver as a value, driven without a window.** Every envelope here is
+  // sealed by the three constructors of `./observationDelivery.ts`, so the verdict
+  // inside is about the observation inside by construction; `workspace.test.ts`
+  // drives this same transition through a real `BrowserState`. Nothing here can
+  // show a component registers the receiver — 2d-6-6 wires it — and nothing here
+  // calls a command: no `BrowserState` exists in this file.
+
+  /** The disk text every observation below reads. */
+  const THEIRS = 'matches:\n  - trigger: x\n    replace: theirs\n';
+
+  /**
+   * The file as another writer left it: the same two snippets under a new
+   * parse, plus a third, each an item of the list.
+   *
+   * @param overrides - Whatever the case needs the disk file to keep saying.
+   * @returns The projection the observation carries.
+   */
+  function diskFile(overrides: Parameters<typeof makeDocument>[0] = {}): DocumentView {
+    return makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: AFTER,
+      matches: [
+        makeMatch({ node: 30, document: 2, revision: AFTER, trigger: ':sig', path: matchListPath(0) }),
+        makeMatch({ node: 31, document: 2, revision: AFTER, trigger: ':date', path: matchListPath(1) }),
+        makeMatch({ node: 32, document: 2, revision: AFTER, trigger: ':theirs', path: matchListPath(2) })
+      ],
+      ...overrides
+    });
+  } // End of function diskFile()
+
+  /**
+   * One narrowed observation of the session's file.
+   *
+   * A fresh object every call, deliberately: the memo in `./conflictSource.ts` and
+   * the session's wait are both keyed on object identity.
+   *
+   * @param overrides - Whatever the case needs beyond the defaults.
+   * @returns The observation, as a window would have narrowed it.
+   */
+  function observation(
+    overrides: Partial<ExternalConflictObservation> = {}
+  ): ExternalConflictObservation {
+    return {
+      sequence: 5,
+      document: 2,
+      previousRevision: BASE,
+      diskRevision: AFTER,
+      diskText: THEIRS,
+      disk: diskFile(),
+      findings: [],
+      correspondences: null,
+      ...overrides
+    };
+  } // End of function observation()
+
+  /**
+   * An observation of another file, which this session is never about.
+   *
+   * @returns The observation.
+   */
+  function otherObservation(): ExternalConflictObservation {
+    return observation({
+      document: 3,
+      previousRevision: null,
+      diskRevision: 'd'.repeat(64),
+      disk: makeDocument({ id: 3, relativePath: 'match/other.yml', revision: 'd'.repeat(64) })
+    });
+  } // End of function otherObservation()
+
+  /**
+   * An arbitrated envelope, asserted to have reached the arm the case is about.
+   *
+   * @param standing - What stands for the file, or `null`.
+   * @param seen - The observation.
+   * @param uncertain - Whether the last settled write may have written.
+   * @param arm - The verdict the case needs.
+   * @returns The sealed envelope.
+   */
+  function decided(
+    standing: ConflictSource | null,
+    seen: ExternalConflictObservation,
+    uncertain: boolean,
+    arm: ObservationVerdict['kind']
+  ): ObservationDelivery {
+    const delivery = arbitratedDelivery(
+      standing === null ? null : standingConflictOf(standing),
+      seen,
+      uncertain
+    );
+    expect(delivery.verdict.kind).toBe(arm);
+    return delivery;
+  } // End of function decided()
+
+  /**
+   * The `raised` envelope for one observation.
+   *
+   * @param seen - The observation.
+   * @returns The envelope.
+   */
+  function raised(seen: ExternalConflictObservation): ObservationDelivery {
+    return decided(null, seen, false, 'raised');
+  } // End of function raised()
+
+  /**
+   * A recorder for the window's own adoption.
+   *
+   * @param answer - What the window answers.
+   * @returns The callback to pass, and the conflicts it was handed.
+   */
+  function adopting(answer: DiskAdoptionOutcome = 'installed'): {
+    readonly adopt: AdoptTheDiskVersion<MatchId>;
+    readonly adoptions: ConflictModel<MatchId>[];
+  } {
+    const adoptions: ConflictModel<MatchId>[] = [];
+    return {
+      adopt: (conflict) => {
+        adoptions.push(conflict);
+        return answer;
+      },
+      adoptions
+    };
+  } // End of function adopting()
+
+  /**
+   * The external conflict a session shows, or a failure naming the case.
+   *
+   * @param held - The session.
+   * @returns Its external conflict.
+   */
+  function externalOf(held: MatchDuplicationSession): ExternalConflictModel<MatchId> {
+    const conflict = held.externalConflict;
+    if (conflict === null) {
+      throw new Error('this case needs an external conflict on the session');
+    }
+    return conflict;
+  } // End of function externalOf()
+
+  /**
+   * A session whose duplicate is in flight.
+   *
+   * @returns The waiting session.
+   */
+  function inFlight(): MatchDuplicationSession {
+    const started = beginDuplicate(session(), live());
+    if (started === null) {
+      throw new Error('a fresh session is sendable');
+    }
+    return started.session;
+  } // End of function inFlight()
+
+  /**
+   * A session whose duplicate met a save conflict — the save origin.
+   *
+   * @returns The session showing the save conflict.
+   */
+  function saveConflicted(): MatchDuplicationSession {
+    return applyDuplication(inFlight(), CONFLICT, NOT_OWED);
+  } // End of function saveConflicted()
+
+  /**
+   * A session whose duplicate was refused for the trigger finding — the
+   * ordinary first answer.
+   *
+   * @returns The session showing the refusal.
+   */
+  function refusedOnce(): MatchDuplicationSession {
+    return applyDuplication(inFlight(), REFUSED, NOT_OWED);
+  } // End of function refusedOnce()
+
+  describe('the seven arms over a session opened over one file (entries 6, 8, 11, 12)', () => {
+    it('raises over the file, refuses the send with a code of its own, and spends nothing', () => {
+      const seen = observation();
+      const next = applyDuplicationObservation(session(), raised(seen));
+      const conflict = externalOf(next);
+      expect(conflict.source).toBe(externalConflictSource(seen));
+      expect(conflict.draft).toBe(next.draft);
+      expect(conflict.diskText).toBe(THEIRS);
+      expect(isExternalConflict(conflict)).toBe(true);
+      expect(conflictOf(next)).toBe(conflict);
+      // `outcome` is untouched: no duplicate ended (entry 6).
+      expect(next.outcome).toBeNull();
+      // The refusal has a code of its own, whose sentence is the external origin's
+      // first line and never *while this duplicate was being sent*.
+      expect(duplicationSubmissionRefusal(next, HELD)).toBe('externalConflict');
+      expect(duplicationSubmissionRefusalKey('externalConflict')).toBe('browser.externalConflict.fileChangedWhileOpen');
+      expect(canDuplicate(next, HELD)).toBe(false);
+      expect(beginDuplicate(next, live())).toBeNull();
+      // Nothing is spent: the identities are still the ones the window projects.
+      expect(next.invalidated).toBe(false);
+      expect(next.duplicated).toBe(false);
+      const view = matchDuplicationView(next, HELD);
+      expect(view.canDuplicate).toBe(false);
+      expect(view.cannotDuplicate).toBe('externalConflict');
+      expect(view.spent).toBe(false);
+      expect(view.notDuplicableToShow).toBeNull();
+      expect(view.conflict).toBe(conflict);
+      expect(view.externalMessages).toBe(conflict.messages);
+      expect(view.externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
+      expect(view.messages).toEqual([]);
+      expect(view.externalNotices).toEqual([]);
+      expect(view.conflictOperation).toBe('duplicateSnippet');
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>([
+        'keepEditing',
+        'keepMyDraft',
+        'reloadDiskVersion'
+      ]);
+    }); // End of the "raised over the file" case
+
+    it('answers null from beginDuplicate called directly under an external conflict, refusal path included', () => {
+      // **Past a disabled button.** The refusal panel's *Save anyway* would reach
+      // `beginDuplicate` with consent recorded; the model refuses at the same
+      // rule the view asks, and the view withholds the offer.
+      const blocked = applyDuplicationObservation(refusedOnce(), raised(observation()));
+      expect(blocked.outcome?.kind).toBe('refused');
+      expect(beginDuplicate(acknowledgeDuplicationFindings(blocked), live())).toBeNull();
+      const view = matchDuplicationView(blocked, HELD);
+      expect(view.refusalChoices).toEqual(['keepEditing']);
+      expect(view.findingsAreStale).toBe(false);
+    });
+
+    it('ranks the external conflict where the save conflict sits, and the uncertain send above it', () => {
+      // The rule `refusalGiven` states: the weakest true claim wins. A session
+      // spent by a send it cannot account for says so before it says the file
+      // changed; a stale session says the file changed before it says it is stale.
+      const seen = observation();
+      const uncertain = applyDuplicationObservation(
+        duplicationCouldNotBeSent(inFlight(), true, UNCERTAIN),
+        raised(seen)
+      );
+      expect(duplicationSubmissionRefusal(uncertain, HELD)).toBe('mayHaveWritten');
+      const stale = applyDuplicationObservation(session(), raised(seen));
+      expect(duplicationSubmissionRefusal(stale, [reread()])).toBe('externalConflict');
+      const waiting = applyDuplicationObservation(session(), retainedDelivery(seen));
+      expect(duplicationSubmissionRefusal(waiting, [reread()])).toBe('observationRetained');
+    });
+
+    it('takes nothing from a delivery about another file, except the end of a wait recorded for it', () => {
+      const over = session();
+      const elsewhere = otherObservation();
+      expect(applyDuplicationObservation(over, raised(elsewhere))).toBe(over);
+      expect(applyDuplicationObservation(over, retainedDelivery(elsewhere))).toBe(over);
+      expect(applyDuplicationObservation(over, decided(null, elsewhere, true, 'raisedWithoutReload'))).toBe(over);
+      const waiting: MatchDuplicationSession = { ...over, awaitingReconciliation: new Map([[3, elsewhere]]) };
+      expect(applyDuplicationObservation(waiting, writtenHereDelivery(elsewhere)).awaitingReconciliation.size).toBe(0);
+      expect(applyDuplicationObservation(waiting, raised(elsewhere))).toEqual({
+        ...waiting,
+        awaitingReconciliation: new Map()
+      });
+      expect(canDuplicate(waiting, HELD)).toBe(true);
+    });
+
+    it('takes nothing once closed', () => {
+      const closed = reloadTheDiskVersion(
+        confirmDiskReload(askToReloadDiskVersion(saveConflicted())),
+        adopting().adopt
+      );
+      expect(closed.closed).toBe(true);
+      expect(applyDuplicationObservation(closed, raised(observation()))).toBe(closed);
+      expect(applyDuplicationObservation(closed, retainedDelivery(observation()))).toBe(closed);
+    });
+  }); // End of the "seven arms" suite
+
+  describe('the held observation, and writtenHere by identity (entries 8 and 11)', () => {
+    it('records a wait as a restriction on sending, and lifts it only for that observation', () => {
+      const seen = observation();
+      const waiting = applyDuplicationObservation(session(), retainedDelivery(seen));
+      expect(waiting.awaitingReconciliation.get(2)).toBe(seen);
+      expect(waiting.awaitingReconciliation.size).toBe(1);
+      expect(waiting.externalConflict).toBeNull();
+      expect(conflictOf(waiting)).toBeNull();
+      expect(duplicationSubmissionRefusal(waiting, HELD)).toBe('observationRetained');
+      expect(duplicationSubmissionRefusalKey('observationRetained')).toBe('browser.externalConflict.observationRetained');
+      expect(beginDuplicate(waiting, live())).toBeNull();
+      const view = matchDuplicationView(waiting, HELD);
+      expect(view.canDuplicate).toBe(false);
+      expect(view.cannotDuplicate).toBe('observationRetained');
+      expect(view.conflict).toBeNull();
+      expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
+      // Lifted by identity, and by nothing else.
+      expect(applyDuplicationObservation(waiting, writtenHereDelivery(observation())).awaitingReconciliation.get(2)).toBe(seen);
+      const lifted = applyDuplicationObservation(waiting, writtenHereDelivery(seen));
+      expect(lifted).toEqual({ ...waiting, awaitingReconciliation: new Map() });
+      expect(canDuplicate(lifted, HELD)).toBe(true);
+      expect(applyDuplicationObservation(lifted, writtenHereDelivery(seen))).toBe(lifted);
+      // Any decision about the awaited observation ends the wait; a later
+      // `retained` replaces it; a re-held reading is still held.
+      const standing = externalConflictSource(observation({ sequence: 9 }));
+      expect(applyDuplicationObservation(waiting, decided(standing, seen, false, 'notLater'))).toEqual({
+        ...waiting,
+        awaitingReconciliation: new Map()
+      });
+      expect(
+        applyDuplicationObservation(
+          waiting,
+          decided(externalConflictSource(observation({ sequence: 1 })), seen, false, 'coalesced')
+        )
+      ).toEqual({ ...waiting, awaitingReconciliation: new Map() });
+      expect(applyDuplicationObservation(waiting, raised(seen)).awaitingReconciliation.size).toBe(0);
+      const newer = observation({ sequence: 7 });
+      expect(applyDuplicationObservation(waiting, retainedDelivery(newer)).awaitingReconciliation.get(2)).toBe(newer);
+      expect(applyDuplicationObservation(waiting, retainedDelivery(seen)).awaitingReconciliation.get(2)).toBe(seen);
+    }); // End of the "retained and writtenHere" case
+
+    it('holds every delivery during its own duplicate and replays them in arrival order (entry 5)', () => {
+      const started = inFlight();
+      const seen = observation();
+      const later = observation({ sequence: 6 });
+      const standing = externalConflictSource(seen);
+      const held = applyDuplicationObservation(
+        applyDuplicationObservation(applyDuplicationObservation(started, retainedDelivery(seen)), raised(seen)),
+        decided(standing, later, false, 'coalesced')
+      );
+      expect(held.externalConflict).toBeNull();
+      expect(held.awaitingReconciliation.size).toBe(0);
+      expect(held.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised', 'coalesced']);
+      const settled = applyDuplication(held, REFUSED, NOT_OWED);
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(externalOf(settled).source).toBe(standing);
+      expect(settled.awaitingReconciliation.size).toBe(0);
+      expect(duplicationSubmissionRefusal(settled, HELD)).toBe('externalConflict');
+      // The answer lands first and the replay has the last word, on a commit too.
+      const committed = applyDuplication(held, saved(), ADOPTED);
+      expect(committed.outcome?.kind).toBe('saved');
+      expect(committed.duplicated).toBe(true);
+      expect(externalOf(committed).source).toBe(standing);
+      expect(duplicationSubmissionRefusal(committed, HELD)).toBe('alreadyDuplicated');
+      // A duplicate that produced no outcome consumes the hold too.
+      const heldUncertain = applyDuplicationObservation(started, decided(null, seen, true, 'raisedWithoutReload'));
+      const failed = duplicationCouldNotBeSent(heldUncertain, true, UNCERTAIN);
+      expect(failed.heldDeliveries).toEqual([]);
+      expect(failed.mayHaveWritten).toBe(true);
+      expect(failed.uncertaintyUnresolved).toBe(true);
+      expect(externalOf(failed).source).toBe(externalConflictSource(seen));
+    }); // End of the "held during the duplicate" case
+  }); // End of the "held observation" suite
+
+  describe('collisions: only one conflict is active (entry 7), and a replacing verdict resets (entry 12)', () => {
+    it('retires a save conflict when an observation supersedes it, keeping the retained draft and dropping the confirmation', () => {
+      const stuck = saveConflicted();
+      const saveModel = conflictOf(stuck);
+      if (saveModel === null || !isSaveConflict(saveModel)) {
+        throw new Error('this case starts from a save conflict');
+      }
+      const confirmed = confirmDiskReload(askToReloadDiskVersion(stuck));
+      expect(confirmed.reload.kind).toBe('confirmed');
+      const attempt = attemptOfReapply(confirmed, { kind: 'adoptionRefused' } as const);
+      expect(reapplyToShow(attempt, confirmed)).toEqual({ kind: 'adoptionRefused' });
+      const seen = observation({ diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      const next = applyDuplicationObservation(confirmed, decided(saveModel.source, seen, false, 'supersedes'));
+      expect(next.outcome).toBeNull();
+      expect(next.submitted).toBeNull();
+      const conflict = externalOf(next);
+      expect(conflict.draft).toBe(saveModel.draft);
+      expect(conflict.diskRevision).toBe('c'.repeat(64));
+      expect(conflictOf(next)).toBe(conflict);
+      expect(next.reload).toBe(NOT_RELOADING);
+      expect(matchDuplicationView(next, HELD).awaitingReloadConfirmation).toBe(false);
+      const recorder = adopting();
+      expect(reloadTheDiskVersion(next, recorder.adopt)).toBe(next);
+      expect(recorder.adoptions).toEqual([]);
+      expect(reapplyToShow(attempt, next)).toBeNull();
+    }); // End of the "supersedes a save conflict" case
+
+    it('keeps a committed success and a refusal as history, and lets a duplicate that conflicts retire the external one', () => {
+      const committed = applyDuplication(inFlight(), saved(), ADOPTED);
+      const overSaved = applyDuplicationObservation(committed, raised(observation()));
+      expect(overSaved.outcome?.kind).toBe('saved');
+      expect(overSaved.duplicated).toBe(true);
+      expect(conflictOf(overSaved)).toBe(overSaved.externalConflict);
+      // The weaker claim still wins beside the conflict: the session is spent.
+      expect(duplicationSubmissionRefusal(overSaved, HELD)).toBe('alreadyDuplicated');
+      const blocked = applyDuplicationObservation(refusedOnce(), raised(observation()));
+      const conflicted = applyDuplication(blocked, CONFLICT, NOT_OWED);
+      expect(conflicted.externalConflict).toBeNull();
+      expect(conflictOf(conflicted)?.source.kind).toBe('save');
+      const refusedAgain = applyDuplication(blocked, REFUSED, NOT_OWED);
+      expect(refusedAgain.externalConflict).toBe(blocked.externalConflict);
+    });
+
+    it('lets the dismissal cancel the warning and the panel, and nothing external (entry 9)', () => {
+      const seen = observation();
+      const blocked = askToReloadDiskVersion(applyDuplicationObservation(refusedOnce(), raised(seen)));
+      expect(matchDuplicationView(blocked, HELD).awaitingReloadConfirmation).toBe(true);
+      const kept = dismissDuplicationOutcome(blocked);
+      expect(kept.outcome).toBeNull();
+      expect(kept.reload).toBe(NOT_RELOADING);
+      expect(kept.externalConflict).toBe(blocked.externalConflict);
+      expect(beginDuplicate(kept, live())).toBeNull();
+      const withheld = applyDuplicationObservation(session(), decided(null, observation(), true, 'raisedWithoutReload'));
+      expect(dismissDuplicationOutcome(withheld).uncertaintyUnresolved).toBe(true);
+      const waiting = applyDuplicationObservation(session(), retainedDelivery(seen));
+      expect(dismissDuplicationOutcome(waiting).awaitingReconciliation.get(2)).toBe(seen);
+    });
+
+    it('changes nothing on coalesced and notLater, not even the object', () => {
+      const seen = observation();
+      const asked = askToReloadDiskVersion(applyDuplicationObservation(session(), raised(seen)));
+      expect(matchDuplicationView(asked, HELD).awaitingReloadConfirmation).toBe(true);
+      const standing = externalConflictSource(seen);
+      expect(applyDuplicationObservation(asked, decided(standing, observation({ sequence: 6 }), false, 'coalesced'))).toBe(asked);
+      expect(
+        applyDuplicationObservation(
+          asked,
+          decided(standing, observation({ sequence: 4, diskRevision: 'd'.repeat(64) }), false, 'notLater')
+        )
+      ).toBe(asked);
+    });
+  }); // End of the "collisions" suite
+
+  describe('the uncertainty and its exits (entries 11, 14, 15, 22; the record’s §5.5)', () => {
+    it('withholds the reload and the reapply on raisedWithoutReload until the snapshot is acknowledged', () => {
+      const seen = observation();
+      const withheld = applyDuplicationObservation(session(), decided(null, seen, true, 'raisedWithoutReload'));
+      expect(withheld.uncertaintyUnresolved).toBe(true);
+      const view = matchDuplicationView(withheld, HELD);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing']);
+      expect(view.reapplyOffered).toBe(false);
+      expect(view.externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
+      expect(askToReloadDiskVersion(withheld)).toBe(withheld);
+      const recorder = adopting();
+      expect(reapplyToDiskVersion(withheld, false, recorder.adopt, () => externalOf(withheld).source)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'writeOutcomeUnknown' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+      const asked: ExternalChangeConflictSource[] = [];
+      expect(
+        acknowledgeDuplicationSnapshot(withheld, (source) => {
+          asked.push(source);
+          return 'refused';
+        })
+      ).toBe(withheld);
+      expect(asked).toEqual([externalOf(withheld).source]);
+      const acknowledged = acknowledgeDuplicationSnapshot(withheld, () => 'acknowledged');
+      expect(acknowledged).toEqual({ ...withheld, uncertaintyUnresolved: false, reload: NOT_RELOADING });
+      expect(matchDuplicationView(acknowledged, HELD).conflictChoices).toContain('reloadDiskVersion');
+      expect(matchDuplicationView(askToReloadDiskVersion(acknowledged), HELD).awaitingReloadConfirmation).toBe(true);
+      let askedWithoutCause = 0;
+      const plain = applyDuplicationObservation(session(), raised(seen));
+      expect(
+        acknowledgeDuplicationSnapshot(plain, () => {
+          askedWithoutCause += 1;
+          return 'acknowledged';
+        })
+      ).toBe(plain);
+      expect(askedWithoutCause).toBe(0);
+    }); // End of the "raisedWithoutReload" case
+
+    it('clears the uncertainty when a later verdict under none replaces the conflict', () => {
+      const first = observation();
+      const withheld = applyDuplicationObservation(session(), decided(null, first, true, 'raisedWithoutReload'));
+      const later = observation({ sequence: 6, diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      const replaced = applyDuplicationObservation(withheld, decided(externalConflictSource(first), later, false, 'supersedes'));
+      expect(replaced.uncertaintyUnresolved).toBe(false);
+      expect(externalOf(replaced).source).toBe(externalConflictSource(later));
+      expect(matchDuplicationView(replaced, HELD).conflictChoices).toContain('reloadDiskVersion');
+    });
+  }); // End of the "uncertainty" suite
+
+  describe('the reapply over the external origin: the subject’s exact from the table (entries 19, 20, 22)', () => {
+    /** The base identity of the snippet the session is about. */
+    const SUBJECT: MatchId = file().matches[0]!.id;
+
+    /** The disk-side snippet the subject's row identifies. */
+    const TWIN: MatchView = diskFile().matches[0]!;
+
+    /**
+     * One row of a table, whose editor tier is a refusal so a surface reading
+     * the wrong tier would refuse where this suite expects a rebuild.
+     *
+     * @param base - The identity the row is about.
+     * @param exact - The exact tier's answer.
+     * @returns The row.
+     */
+    function row(base: MatchId, exact: ReapplyResolution): CorrespondenceEntry {
+      return { base, exact, editor: { Refused: { reason: 'AmbiguousTrigger' } } };
+    } // End of function row()
+
+    /**
+     * An observation carrying a table over the two revisions.
+     *
+     * @param entries - The table's rows.
+     * @param revisions - The table's two revisions, defaulting to the matching pair.
+     * @param disk - The disk projection.
+     * @returns The observation.
+     */
+    function observed(
+      entries: readonly CorrespondenceEntry[],
+      revisions: { readonly base?: string; readonly disk?: string } = {},
+      disk: DocumentView = diskFile()
+    ): ExternalConflictObservation {
+      return observation({
+        disk,
+        correspondences: {
+          base_revision: revisions.base ?? BASE,
+          disk_revision: revisions.disk ?? AFTER,
+          entries
+        }
+      });
+    } // End of function observed()
+
+    /**
+     * A session raised over one observation.
+     *
+     * @param seen - The observation.
+     * @returns The session and the guard answering its own conflict's origin.
+     */
+    function raisedOver(
+      seen: ExternalConflictObservation
+    ): { readonly stuck: MatchDuplicationSession; readonly stands: StandingOriginGuard } {
+      const stuck = applyDuplicationObservation(session(), raised(seen));
+      const source = externalOf(stuck).source;
+      return { stuck, stands: () => source };
+    } // End of function raisedOver()
+
+    it('rebuilds the duplicate from the row the subject’s full identity finds, reading its exact tier and never the editor tier', () => {
+      const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
+      const recorder = adopting();
+      const answer = reapplyToDiskVersion(stuck, false, recorder.adopt, stands);
+      expect(answer.kind).toBe('reapplied');
+      if (answer.kind !== 'reapplied') {
+        throw new Error('this case is about the rebuilt session');
+      }
+      expect(answer.session.match).toEqual(TWIN.id);
+      expect(baseRevisionOf(answer.session)).toBe(AFTER);
+      expect(answer.session.draft.consent).toBeNull();
+      expect(answer.session.externalConflict).toBeNull();
+      expect(answer.session.awaitingReconciliation.size).toBe(0);
+      expect(canDuplicate(answer.session, [diskFile()])).toBe(true);
+      expect(beginDuplicate(answer.session, live(0, diskFile()))?.match).toEqual(TWIN.id);
+      expect(beginDuplicate(answer.session, live())).toBeNull();
+      expect(recorder.adoptions).toEqual([externalOf(stuck)]);
+    }); // End of the "rebuilt from the row" case
+
+    it('refuses the subject: a refused tier, an empty tier, a stale full identity, another file, the position, and several rows', () => {
+      const recorder = adopting();
+      const refusedTier = raisedOver(observed([row(SUBJECT, { Refused: { reason: 'AmbiguousExact' } })]));
+      expect(reapplyToDiskVersion(refusedTier.stuck, false, recorder.adopt, refusedTier.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'correspondence', reason: 'AmbiguousExact' }
+      });
+      for (const empty of [{ Unsupported: {} }, { Targetless: {} }] as const) {
+        const emptyTier = raisedOver(observed([row(SUBJECT, empty)]));
+        expect(reapplyToDiskVersion(emptyTier.stuck, false, recorder.adopt, emptyTier.stands)).toEqual({
+          kind: 'manualResolution',
+          obstacle: { kind: 'evidenceNotATarget' }
+        });
+      } // End of the loop over the two empty arms
+      const staleRevision = raisedOver(
+        observed([row({ document: 2, revision: AFTER, node: 10 }, { Identified: { target: TWIN } })])
+      );
+      expect(reapplyToDiskVersion(staleRevision.stuck, false, recorder.adopt, staleRevision.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
+      });
+      const otherFile = raisedOver(
+        observed([row({ document: 3, revision: BASE, node: 10 }, { Identified: { target: TWIN } })])
+      );
+      expect(reapplyToDiskVersion(otherFile.stuck, false, recorder.adopt, otherFile.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
+      });
+      const byPosition = raisedOver(
+        observed([
+          row({ document: 2, revision: BASE, node: 99 }, { Identified: { target: TWIN } }),
+          row({ document: 2, revision: BASE, node: 11 }, { Identified: { target: TWIN } })
+        ])
+      );
+      expect(reapplyToDiskVersion(byPosition.stuck, false, recorder.adopt, byPosition.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
+      });
+      const twice = raisedOver(
+        observed([row(SUBJECT, { Identified: { target: TWIN } }), row(SUBJECT, { Identified: { target: TWIN } })])
+      );
+      expect(reapplyToDiskVersion(twice.stuck, false, recorder.adopt, twice.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'severalRowsForBase' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "subject refusals" case
+
+    it('refuses a table about other revisions, and an observation with none', () => {
+      const recorder = adopting();
+      const otherBase = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })], { base: 'z'.repeat(64) }));
+      expect(reapplyToDiskVersion(otherBase.stuck, false, recorder.adopt, otherBase.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'baseRevisionMoved' }
+      });
+      const otherDisk = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })], { disk: 'z'.repeat(64) }));
+      expect(reapplyToDiskVersion(otherDisk.stuck, false, recorder.adopt, otherDisk.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'diskRevisionMoved' }
+      });
+      const tableless = raisedOver(observation());
+      expect(reapplyToDiskVersion(tableless.stuck, false, recorder.adopt, tableless.stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noCorrespondence' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('refuses superseded evidence through the live guard, whichever origin, adopting nothing', () => {
+      const recorder = adopting();
+      const elsewhere = externalConflictSource(observation({ sequence: 9 }));
+      const found = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
+      expect(reapplyToDiskVersion(found.stuck, false, recorder.adopt, () => elsewhere)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'supersededEvidence' }
+      });
+      expect(reapplyToDiskVersion(found.stuck, false, recorder.adopt, () => null)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'supersededEvidence' }
+      });
+      expect(reapplyToDiskVersion(saveConflicted(), false, recorder.adopt, () => elsewhere)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'supersededEvidence' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('answers every adoption outcome for the external origin, and rechecks eligibility over the disk parse', () => {
+      const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
+      expect(reapplyToDiskVersion(stuck, false, adopting('installed').adopt, stands).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, false, adopting('alreadyThere').adopt, stands).kind).toBe('reapplied');
+      const refusedWindow = adopting('refused');
+      expect(reapplyToDiskVersion(stuck, false, refusedWindow.adopt, stands)).toEqual({ kind: 'adoptionRefused' });
+      expect(refusedWindow.adoptions).toHaveLength(1);
+      // The open-editor rule is asked again, about this window now.
+      const recorder = adopting();
+      expect(reapplyToDiskVersion(stuck, true, recorder.adopt, stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'notDuplicable', reason: 'unsavedDraftInDocument' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('refuses a reapply while an observation is held, so no rebuilt session can drop the block', () => {
+      const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
+      const heldReading = observation({ sequence: 6, diskRevision: 'd'.repeat(64), disk: diskFile({ revision: 'd'.repeat(64) }) });
+      const held = applyDuplicationObservation(stuck, retainedDelivery(heldReading));
+      expect(held.awaitingReconciliation.get(2)).toBe(heldReading);
+      expect(duplicationSubmissionRefusal(held, HELD)).toBe('externalConflict');
+      const recorder = adopting();
+      expect(reapplyToDiskVersion(held, false, recorder.adopt, stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+      const view = matchDuplicationView(held, HELD);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'reloadDiskVersion']);
+      expect(view.reapplyOffered).toBe(false);
+      expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
+      const lifted = applyDuplicationObservation(held, writtenHereDelivery(heldReading));
+      const answer = reapplyToDiskVersion(lifted, false, adopting().adopt, stands);
+      expect(answer.kind).toBe('reapplied');
+      if (answer.kind === 'reapplied') {
+        expect(answer.session.awaitingReconciliation.size).toBe(0);
+        expect(canDuplicate(answer.session, [diskFile()])).toBe(true);
+      }
+      const elsewhere = otherObservation();
+      const carrying: MatchDuplicationSession = { ...stuck, awaitingReconciliation: new Map([[3, elsewhere]]) };
+      const rebuilt = reapplyToDiskVersion(carrying, false, adopting().adopt, stands);
+      expect(rebuilt.kind).toBe('reapplied');
+      if (rebuilt.kind === 'reapplied') {
+        expect(rebuilt.session.awaitingReconciliation.get(3)).toBe(elsewhere);
+      }
+    }); // End of the "reapply refused while held" case
+
+    it('asks nothing of the window when no guard is handed in, and leaves the door to decide', () => {
+      const { stuck } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
+      const refusedWindow = adopting('refused');
+      expect(reapplyToDiskVersion(stuck, false, refusedWindow.adopt)).toEqual({ kind: 'adoptionRefused' });
+      expect(refusedWindow.adoptions).toEqual([externalOf(stuck)]);
+      expect(reapplyToDiskVersion(stuck, false, adopting().adopt).kind).toBe('reapplied');
+    });
+
+    it('names a sentence in both languages for every obstacle the external origin can raise', () => {
+      const obstacles: DuplicationReapplyObstacle[] = [
+        { kind: 'externalEvidence', reason: 'noCorrespondence' },
+        { kind: 'externalEvidence', reason: 'baseRevisionMoved' },
+        { kind: 'externalEvidence', reason: 'diskRevisionMoved' },
+        { kind: 'externalEvidence', reason: 'noRowForBase' },
+        { kind: 'externalEvidence', reason: 'severalRowsForBase' },
+        { kind: 'supersededEvidence' },
+        { kind: 'writeOutcomeUnknown' },
+        { kind: 'observationRetained' }
+      ];
+      for (const obstacle of obstacles) {
+        const key = duplicationReapplyObstacleKey(obstacle);
+        for (const locale of LOCALES) {
+          expect(DICTIONARIES[locale][key], `${locale}:${obstacle.kind}`).toBeTruthy();
+          const rendered = describeDuplicationReapplyObstacle(locale, obstacle);
+          expect(rendered, `${locale}:${obstacle.kind}`).toBe(DICTIONARIES[locale][key]);
+          expect(rendered).not.toContain('{');
+        } // End of the loop over the two locales
+      } // End of the loop over the external obstacles
+    }); // End of the "a sentence per obstacle" case
+  }); // End of the "reapply over the external origin" suite
+
+  describe('the door, the settlement and the reapply against the installed session (the review’s three blockers)', () => {
+    /** The base identity of the snippet the session is about. */
+    const SUBJECT: MatchId = file().matches[0]!.id;
+
+    /** The disk-side snippet the subject's row identifies. */
+    const TWIN: MatchView = diskFile().matches[0]!;
+
+    /**
+     * A holder standing in for the component's `$state`: what a registered
+     * receiver would update, and what the reader answers.
+     *
+     * @param first - The session installed at the start.
+     * @returns The holder, its reader, and a receiver that applies to it.
+     */
+    function installed(first: MatchDuplicationSession): {
+      current: () => MatchDuplicationSession;
+      receive: (delivery: ObservationDelivery) => void;
+    } {
+      let held = first;
+      return {
+        current: () => held,
+        receive: (delivery) => {
+          held = applyDuplicationObservation(held, delivery);
+        }
+      };
+    } // End of function installed()
+
+    it('refuses a duplicate when the projection read displaced the installed session', () => {
+      // **The review's first blocker, at this door.** A getter behind
+      // `projected.document` runs a receiver that replaces the installed session
+      // with one carrying an external conflict; the spend must be refused
+      // against the session installed after that read.
+      const holder = installed(session());
+      const handedIn = holder.current();
+      const seen = observation();
+      const projected: MatchId = {
+        get document(): DocumentId {
+          holder.receive(raised(seen));
+          return 2;
+        },
+        revision: BASE,
+        node: 10
+      };
+      expect(beginDuplicate(handedIn, projected, holder.current)).toBeNull();
+      expect(holder.current().externalConflict?.source).toBe(externalConflictSource(seen));
+      const quiet = installed(session());
+      expect(beginDuplicate(quiet.current(), live(), quiet.current)).not.toBeNull();
+      const waiting = installed(applyDuplicationObservation(session(), retainedDelivery(seen)));
+      expect(beginDuplicate(waiting.current(), live(), waiting.current)).toBeNull();
+    }); // End of the "displaced during the projection read" case
+
+    it('settles against the installed session and replays a delivery that arrived during its own replay', () => {
+      // **The review's second blocker**, on the two settling transitions.
+      const later = observation({ sequence: 6, diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      let armed = false;
+      /**
+       * A holder over an in-flight duplicate told `retained(A), raised(A)`, where
+       * reading A's file while armed delivers a supersession to the holder.
+       *
+       * @returns The holder.
+       */
+      function trapped(): ReturnType<typeof installed> {
+        const holder = installed(inFlight());
+        const seen: ExternalConflictObservation = {
+          ...observation(),
+          get document(): DocumentId {
+            if (armed) {
+              armed = false;
+              holder.receive(decided(externalConflictSource(this), later, false, 'supersedes'));
+            }
+            return 2;
+          }
+        };
+        holder.receive(retainedDelivery(seen));
+        holder.receive(raised(seen));
+        expect(holder.current().heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised']);
+        armed = true;
+        return holder;
+      } // End of function trapped()
+      const answered = trapped();
+      const settled = applyDuplication(answered.current(), REFUSED, NOT_OWED, answered.current);
+      expect(armed).toBe(false);
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(externalOf(settled).source).toBe(externalConflictSource(later));
+      const unanswered = trapped();
+      const failed = duplicationCouldNotBeSent(unanswered.current(), false, null, unanswered.current);
+      expect(failed.heldDeliveries).toEqual([]);
+      expect(externalOf(failed).source).toBe(externalConflictSource(later));
+      // Without a reader the transition settles what it was handed, and says so.
+      const alone = trapped();
+      expect(externalOf(applyDuplication(alone.current(), REFUSED, NOT_OWED)).source).not.toBe(externalConflictSource(later));
+    }); // End of the "delivery during the replay" case
+
+    it('rechecks the installed session immediately before adopting, and refuses a wait or a supersession that arrived during the evidence reads', () => {
+      // **The review's third blocker.**
+      const heldReading = observation({ sequence: 6, diskRevision: 'd'.repeat(64), disk: diskFile({ revision: 'd'.repeat(64) }) });
+      const recorder = adopting();
+      /**
+       * A session raised over a table whose subject row delivers to the holder
+       * when its exact tier is read.
+       *
+       * @param deliver - What the read delivers.
+       * @returns The holder and the guard.
+       */
+      function trapped(deliver: (source: ExternalChangeConflictSource) => ObservationDelivery): {
+        readonly holder: ReturnType<typeof installed>;
+        readonly stands: StandingOriginGuard;
+      } {
+        let holder: ReturnType<typeof installed> | null = null;
+        const row: CorrespondenceEntry = {
+          base: SUBJECT,
+          get exact(): ReapplyResolution {
+            if (holder !== null) {
+              holder.receive(deliver(externalOf(holder.current()).source));
+            }
+            return { Identified: { target: TWIN } };
+          },
+          editor: { Unsupported: {} }
+        };
+        const seen = observation({
+          correspondences: { base_revision: BASE, disk_revision: AFTER, entries: [row] }
+        });
+        holder = installed(applyDuplicationObservation(session(), raised(seen)));
+        const source = externalOf(holder.current()).source;
+        return { holder, stands: () => source };
+      } // End of function trapped()
+      const waited = trapped(() => retainedDelivery(heldReading));
+      expect(
+        reapplyToDiskVersion(waited.holder.current(), false, recorder.adopt, waited.stands, waited.holder.current)
+      ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'observationRetained' } });
+      const superseded = trapped((source) => decided(source, heldReading, false, 'supersedes'));
+      expect(
+        reapplyToDiskVersion(superseded.holder.current(), false, recorder.adopt, superseded.stands, superseded.holder.current)
+      ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } });
+      const uncertain = trapped((source) => decided(source, heldReading, true, 'raisedWithoutReload'));
+      expect(
+        reapplyToDiskVersion(uncertain.holder.current(), false, recorder.adopt, uncertain.stands, uncertain.holder.current)
+      ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } });
+      expect(recorder.adoptions).toEqual([]);
+      const quiet = trapped(() => retainedDelivery(otherObservation()));
+      expect(reapplyToDiskVersion(quiet.holder.current(), false, recorder.adopt, quiet.stands, quiet.holder.current).kind).toBe('reapplied');
+      expect(recorder.adoptions).toHaveLength(1);
+    }); // End of the "recheck before adoption" case
+
+    it('reads no evidence for a session that is already blocked', () => {
+      // **The review's should-fix.**
+      let reads = 0;
+      const seen: ExternalConflictObservation = {
+        ...observation(),
+        get correspondences(): CorrespondenceTable {
+          reads += 1;
+          return { base_revision: BASE, disk_revision: AFTER, entries: [] };
+        }
+      };
+      const stuck = applyDuplicationObservation(session(), raised(seen));
+      const stands: StandingOriginGuard = () => externalOf(stuck).source;
+      const recorder = adopting();
+      const held = applyDuplicationObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
+      expect(reapplyToDiskVersion(held, false, recorder.adopt, stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      const withheld = applyDuplicationObservation(session(), decided(null, seen, true, 'raisedWithoutReload'));
+      expect(reapplyToDiskVersion(withheld, false, recorder.adopt, stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'writeOutcomeUnknown' }
+      });
+      expect(reads).toBe(0);
+      expect(reapplyToDiskVersion(stuck, false, recorder.adopt, stands)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
+      });
+      expect(reads).toBe(1);
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "no evidence read while blocked" case
+  }); // End of the "against the installed session" suite
+}); // End of the "external session" suite

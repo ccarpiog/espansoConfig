@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T17:04:01Z",
+ "updated": "2026-09-21T18:51:40Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -421,7 +421,7 @@
    "id": "2d-6",
    "title": "Components, i18n and mounted evidence",
    "status": "in_progress",
-   "summary": "Eleven steps per its design consult; 2d-6-1 (three sub-phases), 2d-6-2 and 2d-6-3 are done, 2d-6-4 is next."
+   "summary": "Eleven steps per its design consult; 2d-6-1 (three sub-phases), 2d-6-2, 2d-6-3 and 2d-6-4 are done, 2d-6-5 is next."
   },
   {
    "id": "2d-6-1",
@@ -482,8 +482,11 @@
   {
    "id": "2d-6-4",
    "title": "Operation-session external conflicts",
-   "status": "queued",
-   "summary": "Gives the delete, move and duplicate operation sessions their external-conflict handling."
+   "status": "done",
+   "summary": "Gives the delete, move and duplicate sessions external-conflict handling: seven-arm receivers, the block at every door with an installed-session reader, the exact subject and anchor lookup.",
+   "risk": "high",
+   "review": "docs/reviews/phase-2d-6-4.md",
+   "narrative": "docs/decisions/2d-6-4-notes.md"
   },
   {
    "id": "2d-6-5",
@@ -544,7 +547,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 and 2d-6-2 done, 2d-6-3 next); 2d-7 and 2d-8 follow."
+   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 through 2d-6-4 done, 2d-6-5 next); 2d-7 and 2d-8 follow."
   },
   {
    "id": "3",

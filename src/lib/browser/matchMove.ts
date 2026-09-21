@@ -224,6 +224,65 @@
  * writing command has had since 2b-2a. What is closed is that *this module*
  * produces nothing to send without a live-identity check, a frozen base revision
  * and a placement that really moves the snippet.
+ *
+ * ## The external session — Phase 2d-6-4
+ *
+ * The shape `./matchEditor.ts` took at 2d-6-2 and `./matchDeletion.ts` and
+ * `./matchDuplication.ts` take in the same phase, for a move.
+ * {@link MatchMoveSession.externalConflict} is the conflict a watcher observation
+ * raised over the file this session is about, a field beside `outcome` and never
+ * an arm of it (the 2d-6 record's §3 entry 6); {@link applyMoveObservation} is the
+ * session's receiver as a value, one named action per verdict arm and a `never`
+ * terminus (entry 11); {@link conflictOf} answers the conflict shown whichever
+ * origin it has, so {@link canChoose} refuses under both and `refusalGiven` — the
+ * one rule {@link moveSubmissionRefusal} and {@link beginMove} both ask — answers
+ * `externalConflict` for it and `observationRetained` for a held reading
+ * ({@link MatchMoveSession.awaitingReconciliation}), so a direct call past a
+ * disabled control answers `null` (entry 8), asked after the live identity has
+ * been read. A conflict raised under an unknown write outcome
+ * ({@link MatchMoveSession.uncertaintyUnresolved}) withholds the reload and
+ * refuses the reapply until {@link acknowledgeMoveSnapshot} is told the hold
+ * ended (entries 11, 22); {@link dismissMoveOutcome} erases none of the three
+ * (entry 9). A replacing verdict resets the reload step and, by answering a new
+ * session, invalidates a displayed reapply result (entry 12); a move has no
+ * pending confirmation to withdraw, because it asks none (consult Q7), and the
+ * chosen destination is retained on the conflict exactly as it is under a save
+ * conflict.
+ *
+ * **The reapply reads both origins through one entry** — `enterReapply` in
+ * `./reapply.ts` — and takes two things from an external table, each by its
+ * **full** base identity through `correspondenceRowFor` and each from the row's
+ * `exact` tier (entries 19, 20 and 22): the moved snippet through
+ * `subjectResolution`, and, for an `after` placement only, the anchor through
+ * `anchorResolution`, **from the same table**. A `top` or `end` asks the table
+ * nothing about an anchor, as it asks a refused save's anchor nothing. A refused
+ * table or row resolves to manual resolution with `tExternalEvidenceRefusal`'s
+ * sentence, superseded evidence with `tSupersededEvidence`'s.
+ *
+ * **D2r and R25 are unchanged by the external origin.** The identified subject
+ * must still address the sequence this session was opened in
+ * (`notTheSameSequence`), the identified anchor must still be one of that
+ * sequence's own snippets on the disk revision (`anchorNotInSequence`), and what
+ * a reapply hands back is a session whose ordinary {@link beginMove} produces one
+ * move and nothing else — the same-sequence check over a disk version is decided
+ * here, in the model, and the core decides it again.
+ *
+ * **The door and every settling transition can read the installed session**
+ * through a {@link ReadTheInstalledSession} (this phase's review): a
+ * caller-controlled read — `projected`, a table row, the disk projection, an
+ * observation being replayed — runs arbitrary code, and a receiver run from it
+ * replaces the installed session behind the transition's back. {@link beginMove}
+ * spends only against the session it was handed while that is still installed;
+ * {@link reapplyToDiskVersion} rechecks the installed session's blocks and
+ * conflict immediately before adopting; {@link applyMove} and
+ * {@link moveCouldNotBeSent} replay what the receiver appended during their own
+ * replay. The reader is optional while no component passes one, and its doc says
+ * what that costs.
+ *
+ * **No component registers this receiver yet.** 2d-6-6 wires
+ * `BrowserState.registerObservationReceiver` to it through `DetailPane`; until
+ * then every case that drives it is a model test, and `MatchMover.svelte` draws
+ * neither the external conflict nor the two notices (2d-6-7's).
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -238,7 +297,6 @@ import type {
   MatchView,
   PathSegment,
   PresentationNote,
-  ReapplyEvidence,
   ReapplyRefusal,
   SaveResult
 } from '../ipc/types';
@@ -276,29 +334,50 @@ import {
 } from './editorSave';
 import type { InvalidationStatus } from './invalidation';
 import { identityInProjection, plainIdentity } from './matchDeletion';
+import type { AcknowledgeTheUncertainty } from './matchEditor';
 import type { RawSaveChoice } from './rawSave';
+import type { ConflictSource, ExternalConflictObservation } from './conflictSource';
+import {
+  externalConflictNoticeKey,
+  type ExternalConflictNotice,
+  type ObservationDelivery
+} from './observationDelivery';
 import {
   adoptForReapply,
   anchorCorrespondence,
-  beginReapply,
+  anchorResolution,
+  correspondenceRowFor,
+  enterReapply,
+  externalEvidenceRefusalKey,
   sharedReapplyObstacleKey,
   subjectCorrespondence,
+  subjectResolution,
+  SUPERSEDED_EVIDENCE_KEY,
+  type AnchorCorrespondence,
+  type ExternalEvidenceRefusal,
   type ReapplyAttempt,
+  type ReapplyEvidenceAccess,
   type ReapplyOutcome,
-  type SharedReapplyObstacle
+  type SharedReapplyObstacle,
+  type StandingOriginGuard,
+  type SubjectCorrespondence
 } from './reapply';
 import {
   conflictChoicesFor,
   conflictDiskText,
   describeEditSave,
+  describeExternalConflict,
+  externalConflictMessageKey,
   invalidationFailureMessage,
   reapplyIsOffered,
+  supersedeConflict,
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDiskText,
+  type ConflictMessage,
   type ConflictOperation,
   type ConflictModel,
-  type SaveConflictModel,
+  type ExternalConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -702,10 +781,11 @@ export interface MatchMoveSession {
   /**
    * How far a confirmed reload of the disk version has got.
    *
-   * **Reset to `idle` by every new outcome and by every dismissal**, which is what
-   * stops a confirmation collected for one conflict from being spendable while a
-   * later one is on screen. The window refuses a spent confirmation too, but this
-   * is the guard that means the situation never arises.
+   * **Reset to `idle` by every new outcome, by every dismissal and by every
+   * replacing verdict** ({@link applyMoveObservation}, the 2d-6 record's §3 entry
+   * 12), which is what stops a confirmation collected for one conflict from being
+   * spendable while a later one is on screen. The window refuses a spent
+   * confirmation too, but this is the guard that means the situation never arises.
    */
   readonly reload: ReloadStep;
   /**
@@ -717,6 +797,93 @@ export interface MatchMoveSession {
    * reads this closes itself; everything here refuses once it is `true`.
    */
   readonly closed: boolean;
+  /**
+   * The conflict a watcher observation raised over the file this session is
+   * about, or `null` — Phase 2d-6-4, the 2d-6 record's §3 entry 6.
+   *
+   * **A field of its own beside {@link MatchMoveSession.outcome}, never an arm of
+   * it**, for `MatchEditorSession.externalConflict`'s reason: an outcome is how
+   * *a move* ended, and a conflict the watcher raised is not that.
+   * {@link conflictOf} is the one accessor that reads both and answers the
+   * conflict this session is showing, whichever origin it has. **Only one conflict
+   * is active at a time, and the transitions are what keep it so** (entry 7):
+   * {@link applyMoveObservation} retires a save conflict's outcome when it sets
+   * this, and {@link applyMove} retires this when a move ends as a conflict or a
+   * success. The type admits both populated, and a session built by hand with
+   * both gets {@link conflictOf}'s stated precedence, not a guarantee.
+   *
+   * While it is non-null the destination controls refuse and nothing can be sent
+   * — `refusalGiven` answers `externalConflict` — and {@link dismissMoveOutcome}
+   * does not clear it (entry 9). The ways out are the reload and the reapply. **It
+   * does not spend the session**: the identities this session holds are still the
+   * ones the window is projecting, exactly as they are under a save conflict, and
+   * the chosen destination is retained on the conflict.
+   */
+  readonly externalConflict: ExternalConflictModel<MovePlacement> | null;
+  /**
+   * Whether {@link MatchMoveSession.externalConflict} was raised while a write of
+   * this window's own had an unknown outcome, and this session has not been told
+   * the hold ended — Phase 2d-6-4, entry 11's `raisedWithoutReload` row.
+   *
+   * While `true` the ordinary reload is withheld and the reapply refused, for the
+   * match editor's reason: a confirmed installation of bytes a write of this
+   * window may or may not have produced would settle, silently, a question only
+   * the person can. It ends when {@link acknowledgeMoveSnapshot} is told the
+   * window ended the hold, or when a later verdict replaces the conflict under no
+   * uncertainty. **It records what this session was told and nothing more**: a
+   * hold the window ends by a later definite write delivers nothing to a session,
+   * and this flag cannot see it. This module never sets it without a conflict, so
+   * the send is blocked by the conflict it qualifies.
+   */
+  readonly uncertaintyUnresolved: boolean;
+  /**
+   * The observations this session was told the window is holding and has not
+   * decided about, keyed by the file each is about — Phase 2d-6-4, entry 11's
+   * `retained` row, in the shape 2d-6-3's review gave the creator.
+   *
+   * **A restriction on sending and nothing else**: while this session's own file
+   * has an entry, `refusalGiven` answers `observationRetained` and
+   * {@link beginMove} answers `null` (entry 8); the destination controls stay
+   * live, and no disk comparison and no origin is recorded. An entry is lifted by
+   * the delivery that decides **that** observation, whatever the verdict —
+   * `writtenHere` included — compared by identity, and replaced by a later
+   * `retained` about the same file.
+   *
+   * **What the map forces and what it does not, in the same sentence.** It
+   * forces that a wait is always keyed by the file it is about and that only
+   * this session's file's wait blocks; through this module's own transitions it
+   * holds at most that one entry, because a `retained` about another file records
+   * nothing here — the map is the shape the sessions share since 2d-6-3's review,
+   * so the field reads alike on every surface, not a claim that this session can
+   * change its file. It cannot force that the deciding delivery arrives — a
+   * session whose receiver was unregistered before the window decided is never
+   * told and stays blocked until closed — nor that a wait it was *not* told of,
+   * because no receiver was registered when the window held the reading, is
+   * recorded at all; both are facts about registration, which is 2d-6-6's. What
+   * it cannot see is a reading the barrier coalesced away without announcing it.
+   */
+  readonly awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>;
+  /**
+   * Every delivery that arrived while this session's own move was in flight, in
+   * the order it arrived, kept until that move's answer has been applied — Phase
+   * 2d-6-4, the 2d-6 record's §3 entry 5.
+   *
+   * `MatchEditorSession.heldDeliveries`'s rule, unchanged: the window publishes a
+   * write's settlement from inside the writing wrapper, before the `await` that
+   * started it resumes, so {@link applyMoveObservation} appends here while the
+   * phase is `saving` and {@link applyMove} and {@link moveCouldNotBeSent} replay
+   * the whole list through it, first to last, after their own answer — and,
+   * given a {@link ReadTheInstalledSession}, whatever the receiver appended to
+   * the installed session while they were doing so. **What the list forces** is
+   * that no envelope delivered during the move is dropped and that first-to-last
+   * is the order; **what it does not force** is that arrival order was decision
+   * order — the window's own contract — nor that a caller passes the reader:
+   * this module has no send composition, so the caller hands the settling
+   * transition the session it holds and the reader that answers it, as 2d-6-6's
+   * `MatchMover.svelte` must, and nothing in TypeScript stops a caller handing
+   * it a capture and no reader.
+   */
+  readonly heldDeliveries: readonly ObservationDelivery[];
   /**
    * Whether a move has committed through this session.
    *
@@ -853,6 +1020,10 @@ export function startMatchMove(
     sendFailure: null,
     reload: NOT_RELOADING,
     closed: false,
+    externalConflict: null,
+    uncertaintyUnresolved: false,
+    awaitingReconciliation: new Map(),
+    heldDeliveries: [],
     moved: false,
     invalidated: false,
     mayHaveWritten: false,
@@ -861,22 +1032,73 @@ export function startMatchMove(
 } // End of function startMatchMove()
 
 /**
- * The conflict the session is showing, or `null`.
+ * The wait that restricts this session **now**, or `null` — its own file's entry
+ * of {@link MatchMoveSession.awaitingReconciliation}.
+ *
+ * @param session - The session to ask about.
+ * @returns The observation the session is waiting on, or `null`.
+ */
+function awaitedFor(session: MatchMoveSession): ExternalConflictObservation | null {
+  return session.awaitingReconciliation.get(session.document) ?? null;
+} // End of function awaitedFor()
+
+/**
+ * The waits with one file's entry replaced.
+ *
+ * @param waits - The waits held.
+ * @param document - The file the observation is about.
+ * @param observation - The observation now held for it.
+ * @returns A new map; the argument is untouched.
+ */
+function withWait(
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  document: DocumentId,
+  observation: ExternalConflictObservation
+): ReadonlyMap<DocumentId, ExternalConflictObservation> {
+  const next = new Map(waits);
+  next.set(document, observation);
+  return next;
+} // End of function withWait()
+
+/**
+ * The waits with one file's entry removed.
+ *
+ * @param waits - The waits held.
+ * @param document - The file whose wait ended.
+ * @returns A new map; the argument is untouched.
+ */
+function withoutWait(
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  document: DocumentId
+): ReadonlyMap<DocumentId, ExternalConflictObservation> {
+  const next = new Map(waits);
+  next.delete(document);
+  return next;
+} // End of function withoutWait()
+
+/**
+ * The conflict the session is showing, of either origin, or `null`.
+ *
+ * **Widened to the union at Phase 2d-6-4**, from the save arm alone. The external
+ * conflict is answered first, then the outcome's conflict arm — a definite answer
+ * for a session built by hand with both populated, and a decision about nothing
+ * for one this module built, because {@link applyMoveObservation} and
+ * {@link applyMove} keep the two exclusive (the 2d-6 record's §3 entry 7).
  *
  * @param session - The session to ask about.
  * @returns The conflict model, or `null` when the session is not in one.
  */
-export function conflictOf(session: MatchMoveSession): SaveConflictModel<MovePlacement> | null {
-  return conflictArm(session.outcome);
+export function conflictOf(session: MatchMoveSession): ConflictModel<MovePlacement> | null {
+  return session.externalConflict ?? conflictArm(session.outcome);
 } // End of function conflictOf()
 
 /**
  * Whether the destination controls accept a choice right now.
  *
- * Five reasons they may not: a move is in flight, a conflict is on screen, one has
- * already committed, a send failed in a way that may already have written the file,
- * or this session has been told that the projection its anchors were minted from
- * has been replaced.
+ * Five reasons they may not: a move is in flight, a conflict of either origin is
+ * on screen, one has already committed, a send failed in a way that may already
+ * have written the file, or this session has been told that the projection its
+ * anchors were minted from has been replaced.
  *
  * **This one does not take the live projections**, and that is a deliberate line
  * rather than an omission: choosing is a change to what the panel is *showing*,
@@ -884,7 +1106,10 @@ export function conflictOf(session: MatchMoveSession): SaveConflictModel<MovePla
  * refused where it would matter — at {@link moveSubmissionRefusal}, which is the
  * one place that asks the live projections, and at {@link beginMove}, which asks
  * the same question of its own argument. So a stale session can still be clicked
- * about; it cannot send anything.
+ * about; it cannot send anything. **A held observation is deliberately not among
+ * the five either** (Phase 2d-6-4): it is a restriction on sending, and freezing
+ * the destination controls for a window decision that has not been made would
+ * claim more than the fact supports.
  *
  * @param session - The session to ask about.
  * @returns `true` when {@link choosePlacement} would do anything.
@@ -1063,8 +1288,25 @@ export type MoveSubmissionRefusal =
   | 'mayHaveWritten'
   /** A move is in flight. */
   | 'saveInFlight'
-  /** A conflict is on screen and has not been dismissed. */
+  /**
+   * A watcher observation raised a conflict over the file, and it has not been
+   * resolved — Phase 2d-6-4, the 2d-6 record's §3 entry 8.
+   *
+   * A code of its own rather than `conflict`, because that code's sentence says
+   * the file changed *while this move was being sent*, which is false of an
+   * observation no save answered. Rendered through the external origin's own
+   * first line (`browser.externalConflict.fileChangedWhileOpen`), which is the
+   * reason exactly and adds no key.
+   */
+  | 'externalConflict'
+  /** A save conflict is on screen and has not been dismissed. */
   | 'conflict'
+  /**
+   * The window holds a reading of the file it has not decided about, and this
+   * session may not send until it has — entry 8's "unresolved retained
+   * delivery". Rendered through the retained notice's own sentence.
+   */
+  | 'observationRetained'
   /** The snippet may not be moved at all; {@link MoveRefusal} says why. */
   | 'notMovable'
   /**
@@ -1137,9 +1379,19 @@ export type MoveSubmissionRefusal =
  * original projection, where the overlap cannot arise.
  *
  * Below those, the order is the order a person would resolve them in: what the
- * session is doing, then whether this session still describes the file the window
- * is showing, then whether the snippet can move at all, then what the destination
- * panel is showing.
+ * session is doing, then what stands over the file, then whether this session
+ * still describes the file the window is showing, then whether the snippet can
+ * move at all, then what the destination panel is showing.
+ *
+ * **The three external blocks sit where the save conflict does** (Phase 2d-6-4,
+ * entry 8): the external conflict first, in {@link conflictOf}'s precedence, then
+ * the save conflict, then a reading the window holds undecided — each a claim
+ * about what stands over the file rather than about this session, and each
+ * rendered by a sentence that already exists. An unresolved write uncertainty
+ * blocks through the external conflict it qualifies, which this module never
+ * sets it without. **What this forces and what it does not**: it forces refusal
+ * for the session it is handed; it cannot force that session to be current
+ * (R37) — one snapshot, one synchronous decision.
  *
  * @param session - The session to ask about.
  * @param live - Whether the projection this window holds **now** still gives this
@@ -1162,8 +1414,14 @@ function refusalGiven(
   if (session.phase === 'saving') {
     return 'saveInFlight';
   }
-  if (conflictOf(session) !== null) {
+  if (session.externalConflict !== null) {
+    return 'externalConflict';
+  }
+  if (conflictArm(session.outcome) !== null) {
     return 'conflict';
+  }
+  if (awaitedFor(session) !== null) {
+    return 'observationRetained';
   }
   // **By the same rule, one pair further down**: `eligibility` was frozen at this
   // session's first parse, so once the session is stale the definite claim about
@@ -1237,6 +1495,33 @@ export function canMove(session: MatchMoveSession, views: readonly DocumentView[
   return !session.closed && moveSubmissionRefusal(session, views) === null;
 } // End of function canMove()
 
+/**
+ * Reads the session a caller currently holds — the one its registered receiver
+ * has been updating — for the door or a settling transition to check against.
+ *
+ * `ReadTheInstalledSession` in `./matchDeletion.ts`, for this session, and for
+ * the reason stated there (this phase's review, its first, second and third
+ * findings, one class): a caller-controlled operand is read through property
+ * access, a property read runs arbitrary code, and a receiver run from it can
+ * replace the installed session with one carrying a block that a check on the
+ * session handed in would never see. {@link beginMove} reads it once after the
+ * last `projected` read and spends only against the session it was handed while
+ * that is still the one installed; {@link reapplyToDiskVersion} rechecks it once
+ * immediately before adopting, after the subject's row, the anchor's row and the
+ * disk projection have all been read; {@link applyMove} and
+ * {@link moveCouldNotBeSent} replay whatever the receiver appended to it during
+ * their own replay. **What it cannot force**: that a caller supplies one — the
+ * parameter is optional so that `MatchMover.svelte`, which this phase may not
+ * touch and which registers no receiver today, keeps compiling, and a caller
+ * that registers a receiver and passes no reader gets the displaced check and
+ * the lost delivery this closes; 2d-6-6 must pass `() => session` at every door
+ * and may make the parameter required. Nor that the closure reads the installed
+ * session rather than a capture.
+ *
+ * @returns The session the caller holds now.
+ */
+export type ReadTheInstalledSession = () => MatchMoveSession;
+
 /** A move about to be sent: the session that is waiting, and what to send. */
 export interface StartedMove {
   /** The session, now in flight, with the submission recorded on it. */
@@ -1289,27 +1574,46 @@ export interface StartedMove {
  * pressing move is already a deliberate two-step interaction, and only a refused
  * outcome introduces the acknowledge-and-retry round.
  *
+ * **The submission block is asked after the last caller-controlled read, and
+ * against the installed session** (Phase 2d-6-4, the 2d-6 record's §3 entry 8
+ * and R37; this phase's review, its first finding): `projected` is read and
+ * compared first; then the installed session is read through `current`, once;
+ * and only a session that is still the one handed in and passes `refusalGiven` —
+ * which answers `externalConflict` and `observationRetained` beside the ordinary
+ * arms — spends, so a receiver run from a getter behind `projected` is seen by
+ * the block rather than overwritten by the spend. A call made past a disabled
+ * control answers `null` here, exactly as the view withholds it. What no type
+ * forces is that a caller passes a reader ({@link ReadTheInstalledSession}).
+ *
  * @param session - The session showing the destination.
  * @param projected - The identity the projection this window holds **now** gives
  *   the snippet, or `null` when it holds no such snippet any more. Required, and
  *   nullable rather than defaulted: a default would be this function inventing
  *   agreement for a caller that did not look.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   checks the block on the session handed in — honest only for a caller that
+ *   registers no receiver, which is every caller today.
  * @returns The waiting session and what the command takes, or `null`.
  */
 export function beginMove(
   session: MatchMoveSession,
-  projected: MatchId | null
+  projected: MatchId | null,
+  current: ReadTheInstalledSession | null = null
 ): StartedMove | null {
   // **The same rule the view side runs**, with the liveness taken from the
   // argument instead of from a projection list. The refusal was a second
   // computation once, and it omitted the live check — so a screen reported
   // `canMove: true` about a session this function refuses.
   const live = projected !== null && sameIdentity(projected, session.match);
+  // **The installed session, read once, after the last caller-controlled read.**
+  // A receiver run from a getter above has replaced it; a session that is no
+  // longer the one installed spends nothing.
+  const installed = current === null ? session : current();
   // **A closed session sends nothing.** A confirmed reload adopted the disk
   // projection and ended this panel, so its identities describe a parse the window
   // has crossed away from. No refusal *code* is added for it, and that is
   // deliberate: a code is a sentence on a screen, and a closed panel is not on one.
-  if (session.closed || refusalGiven(session, live) !== null) {
+  if (installed !== session || session.closed || refusalGiven(session, live) !== null) {
     return null;
   }
   const submission = submissionOf(session.draft);
@@ -1381,19 +1685,38 @@ export function beginMove(
  * snippet really did move; telling the person the move failed would invite a
  * retry of a write that already happened (`PROGRESS.md` D2).
  *
- * @param session - The session waiting for an answer.
+ * **What it does about an external conflict, and about a delivery held during
+ * the move** — Phase 2d-6-4, `applySave`'s rule in `./matchEditor.ts`. A `saved`
+ * or a `conflict` answer retires {@link MatchMoveSession.externalConflict} (the
+ * 2d-6 record's §3 entry 7: the move's own answer is the newer fact about the
+ * file); a `refused` answer wrote nothing and leaves it standing. Neither is
+ * reachable from {@link beginMove} while an external conflict stands, so this
+ * keeps the invariant for a caller that drove the model directly. Then, whatever
+ * the answer, every delivery {@link applyMoveObservation} held while the move was
+ * in flight is replayed on top, in arrival order (entry 5) — **and, with a reader
+ * supplied, every delivery the receiver appended to the installed session during
+ * this transition's own reads and replay** (this phase's review, its second
+ * finding; `applyDeletion` in `./matchDeletion.ts` says why a replay runs caller
+ * code and what a missing reader costs). This module composes no send, so
+ * `MatchMover.svelte` settles its live `session` after its own `await` and, from
+ * 2d-6-6, hands the reader beside it.
+ *
+ * @param session - The session waiting for an answer, as the caller holds it.
  * @param result - How the save ended, exactly as the transaction reported it.
  * @param adoption - What became of the adoption, from `BrowserState.moveMatch`.
  *   Required and not defaulted: a default would be this function inventing a
  *   `notOwed` for a caller that simply did not look — and since a `notOwed` is
  *   now what keeps the session usable, that invention would be the defect rather
  *   than a shortcut.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   replays only what the session handed in holds.
  * @returns The session showing what the move ended as.
  */
 export function applyMove(
   session: MatchMoveSession,
   result: SaveResult,
-  adoption: InvalidationStatus
+  adoption: InvalidationStatus,
+  current: ReadTheInstalledSession | null = null
 ): MatchMoveSession {
   const submission = session.submitted;
   if (submission === null) {
@@ -1418,31 +1741,107 @@ export function applyMove(
   const moved = session.moved || committed;
   const invalidated = session.invalidated || committed || adoption.kind !== 'notOwed';
   if (result.outcome !== 'saved') {
-    return {
+    const refused = result.outcome === 'refused';
+    return consumingHeldDeliveries(
+      {
+        ...session,
+        phase: 'editing',
+        invalidated,
+        outcome,
+        extraMessages,
+        // **A new outcome resets the reload**, so a confirmation collected for an
+        // earlier conflict cannot be spent while this one is on screen.
+        reload: NOT_RELOADING,
+        sendFailure: null,
+        externalConflict: refused ? session.externalConflict : null,
+        uncertaintyUnresolved: refused ? session.uncertaintyUnresolved : false
+      },
+      current
+    );
+  }
+  return consumingHeldDeliveries(
+    {
       ...session,
-      phase: 'editing',
+      moved,
       invalidated,
+      landed: result.moved,
+      draft: savedDraft(session.draft, submission, result.revision),
+      phase: 'editing',
       outcome,
       extraMessages,
-      // **A new outcome resets the reload**, so a confirmation collected for an
-      // earlier conflict cannot be spent while this one is on screen.
       reload: NOT_RELOADING,
-      sendFailure: null
-    };
-  }
-  return {
-    ...session,
-    moved,
-    invalidated,
-    landed: result.moved,
-    draft: savedDraft(session.draft, submission, result.revision),
-    phase: 'editing',
-    outcome,
-    extraMessages,
-    reload: NOT_RELOADING,
-    sendFailure: null
-  };
+      sendFailure: null,
+      // The move ended on the file, so the disk side an earlier observation showed
+      // is no longer the comparison to draw (entry 7).
+      externalConflict: null,
+      uncertaintyUnresolved: false
+    },
+    current
+  );
 } // End of function applyMove()
+
+/**
+ * Whether one held list is the other with more appended: the same envelopes, by
+ * identity, in the same positions.
+ *
+ * A receiver appends and never reorders, so the installed session's list is the
+ * handed-in list with the deliveries that arrived since; a list that is not is
+ * one this transition cannot reason about and leaves alone.
+ *
+ * @param arrived - The installed session's list.
+ * @param replayed - The list already replayed.
+ * @returns `true` when `arrived` begins with every entry of `replayed`.
+ */
+function extendsTheReplayed(
+  arrived: readonly ObservationDelivery[],
+  replayed: readonly ObservationDelivery[]
+): boolean {
+  return replayed.every((delivery, at) => arrived[at] === delivery);
+} // End of function extendsTheReplayed()
+
+/**
+ * Replays every delivery a session held during its move, in the order it
+ * arrived, once the move's own answer is on it — the 2d-6 record's §3 entry 5 —
+ * and then every delivery the receiver appended to the installed session while
+ * that was happening (this phase's review, its second finding).
+ *
+ * `consumingHeldDeliveries` in `./matchDeletion.ts`, for this session, which
+ * says why a replay runs caller code and what the extra round forces and cannot:
+ * each envelope goes through {@link applyMoveObservation} exactly as it would
+ * have on arrival, applied to the session the one before it left; after each
+ * round the installed session is read once and the envelopes it holds beyond the
+ * ones replayed are replayed too, in arrival order, until a read finds none; a
+ * list that is not an extension of the one replayed is left alone, and a getter
+ * that manufactures a fresh reading on every read does not come to rest.
+ *
+ * @param settled - The session with its move's answer applied and its phase
+ *   back to `editing`.
+ * @param current - Reads the session the caller holds now, or `null`.
+ * @returns The session with every held delivery applied, or the same session
+ *   when none was held.
+ */
+function consumingHeldDeliveries(
+  settled: MatchMoveSession,
+  current: ReadTheInstalledSession | null
+): MatchMoveSession {
+  let queue = settled.heldDeliveries;
+  let replayed: MatchMoveSession = queue.length === 0 ? settled : { ...settled, heldDeliveries: [] };
+  let seen = 0;
+  for (;;) {
+    for (let at = seen; at < queue.length; at += 1) {
+      replayed = applyMoveObservation(replayed, queue[at]!);
+    } // End of the loop over the deliveries not yet replayed
+    seen = queue.length;
+    if (current === null) {
+      return replayed;
+    }
+    const arrived = current().heldDeliveries;
+    if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
+      return replayed;
+    }
+    queue = arrived;
+  } // End of the loop over the rounds of replay
+} // End of function consumingHeldDeliveries()
 
 /**
  * Records that the move produced no outcome.
@@ -1471,23 +1870,35 @@ export function applyMove(
  * {@link moveRecoveryChoices} can say what a `mayHaveWritten` send is offered; a
  * caller pairing an unrelated reason with a set flag is well-typed.
  *
- * @param session - The session waiting for an answer.
+ * The move is over, so a delivery held while it was out is applied now: the
+ * settlement of an uncertain write arbitrates the held reading under that
+ * uncertainty, and its `raisedWithoutReload` is what this applies (entry 5), and
+ * with a reader every delivery appended to the installed session during the
+ * replay is applied too, for {@link applyMove}'s reason.
+ *
+ * @param session - The session waiting for an answer, as the caller holds it.
  * @param mayHaveWritten - Whether the file may already hold the moved snippet.
  * @param reason - Why the command rejected, or `null` when nothing was sent and
  *   the boundary therefore has no rejection to hand on.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   replays only what the session handed in holds.
  * @returns The session, back to its resting state, with the right notice raised.
  */
 export function moveCouldNotBeSent(
   session: MatchMoveSession,
   mayHaveWritten: boolean,
-  reason: IpcFailure | null
+  reason: IpcFailure | null,
+  current: ReadTheInstalledSession | null = null
 ): MatchMoveSession {
-  return {
-    ...session,
-    phase: 'editing',
-    mayHaveWritten: session.mayHaveWritten || mayHaveWritten,
-    sendFailure: sendFailureOf(mayHaveWritten, reason)
-  };
+  return consumingHeldDeliveries(
+    {
+      ...session,
+      phase: 'editing',
+      mayHaveWritten: session.mayHaveWritten || mayHaveWritten,
+      sendFailure: sendFailureOf(mayHaveWritten, reason)
+    },
+    current
+  );
 } // End of function moveCouldNotBeSent()
 
 /**
@@ -1536,6 +1947,17 @@ export function acknowledgeMoveFindings(session: MatchMoveSession): MatchMoveSes
  * disk projection here and {@link applyMove} therefore spent the session from the
  * conflict arm itself.
  *
+ * **Nor does it erase an external block** — Phase 2d-6-4, the 2d-6 record's §3
+ * entry 9. {@link MatchMoveSession.externalConflict},
+ * {@link MatchMoveSession.uncertaintyUnresolved} and
+ * {@link MatchMoveSession.awaitingReconciliation} all survive this spread: what
+ * this dismisses under an external conflict is the save outcome's panel and the
+ * reload warning, and the conflict and both restrictions stand until an explicit
+ * resolution — the reload's confirmation, a reapply, or closing. What the spread
+ * forces is that the three fields are copied; what no type forces is that a
+ * later edit keeps them out of the literal, and the suite's case is what would
+ * notice.
+ *
  * @param session - The session showing an outcome.
  * @returns The session with nothing being said about the last attempt.
  */
@@ -1551,14 +1973,33 @@ export function dismissMoveOutcome(session: MatchMoveSession): MatchMoveSession 
 } // End of function dismissMoveOutcome()
 
 /**
+ * The conflict a reload may be asked about, or `null` when none may be — Phase
+ * 2d-6-4, the reload gate of the 2d-6 record's §3 entry 11 as one rule for the
+ * three reload steps below.
+ *
+ * Withheld under an unacknowledged write uncertainty, for the match editor's
+ * reason: a confirmed installation of bytes a write of this window may or may
+ * not have produced would settle silently what only the person can. The view
+ * withholds the control through the same fact, and the three transitions refuse
+ * it, so a call made past the withheld control changes nothing (entry 8).
+ *
+ * @param session - The session to ask about.
+ * @returns The conflict, or `null` when there is none or its reload is withheld.
+ */
+function reloadableConflictOf(session: MatchMoveSession): ConflictModel<MovePlacement> | null {
+  return session.uncertaintyUnresolved ? null : conflictOf(session);
+} // End of function reloadableConflictOf()
+
+/**
  * Asks to load the version on disk, which is the step **before** confirming.
  *
  * @param session - The session showing a conflict.
  * @returns The session at the warning, or the same session when no conflict is
- *   showing or one has already been asked about.
+ *   showing, one has already been asked about, or the reload is withheld
+ *   ({@link reloadableConflictOf}).
  */
 export function askToReloadDiskVersion(session: MatchMoveSession): MatchMoveSession {
-  const next = reloadAsked(conflictOf(session), session.reload);
+  const next = reloadAsked(reloadableConflictOf(session), session.reload);
   return next === null ? session : { ...session, reload: next };
 } // End of function askToReloadDiskVersion()
 
@@ -1573,7 +2014,7 @@ export function askToReloadDiskVersion(session: MatchMoveSession): MatchMoveSess
  * @returns The session holding the confirmation, or the same session.
  */
 export function confirmDiskReload(session: MatchMoveSession): MatchMoveSession {
-  const next = reloadConfirmed(conflictOf(session), session.reload);
+  const next = reloadConfirmed(reloadableConflictOf(session), session.reload);
   return next === null ? session : { ...session, reload: next };
 } // End of function confirmDiskReload()
 
@@ -1608,7 +2049,7 @@ export function reloadTheDiskVersion(
   session: MatchMoveSession,
   adopt: AdoptTheDiskVersion<MovePlacement>
 ): MatchMoveSession {
-  const spend = spendTheConfirmedReload(conflictOf(session), session.reload, adopt);
+  const spend = spendTheConfirmedReload(reloadableConflictOf(session), session.reload, adopt);
   if (spend === 'notAttempted') {
     return session;
   }
@@ -1630,16 +2071,203 @@ export function reloadTheDiskVersion(
     extraMessages: [],
     reload: NOT_RELOADING,
     sendFailure: null,
+    // The conflict of either origin is resolved by the reload that ends this
+    // session, and a closed session says nothing about any file any more.
+    externalConflict: null,
+    uncertaintyUnresolved: false,
+    awaitingReconciliation: new Map(),
     closed: true
   };
 } // End of function reloadTheDiskVersion()
 
 /**
+ * Takes the window's decision about one watcher observation — Phase 2d-6-4, the
+ * 2d-6 record's §3 entries 6, 7, 11 and 12.
+ *
+ * **The session's receiver, as a value**, in the shape `applyObservation` in
+ * `./matchEditor.ts` established: a component registers a function through
+ * `BrowserState.registerObservationReceiver` that calls this with the envelope and
+ * installs what comes back (the wiring is 2d-6-6's), and the decision is here so a
+ * suite can drive every arm without a window. It never re-arbitrates and reads
+ * none of the window's tables.
+ *
+ * **Every verdict has a named action, switched with a `never` terminus** (entry
+ * 11, plus the seventh arm Phase 2d-6-1b added):
+ *
+ * | Verdict | What this does, for a delivery about this session's file |
+ * |---|---|
+ * | `raised` | builds the external model from the observation and the retained placement |
+ * | `raisedWithoutReload` | the same, and records that the reload is withheld until the uncertainty is acknowledged |
+ * | `supersedes` | `supersedeConflict` over the conflict shown — its placement kept, its disk side replaced |
+ * | `coalesced` | keeps the model, its source identity and the reload step |
+ * | `notLater` | changes nothing |
+ * | `retained` | records the held observation as a restriction on sending; no disk comparison, no origin |
+ * | `writtenHere` | lifts the restriction recorded for that observation, and changes nothing else |
+ *
+ * **Which deliveries are about this session is decided by the observation's
+ * file**, read once: a session is opened over one file and a delivery about
+ * another can only end a wait recorded for that very observation, by identity,
+ * under that file's key — it raises nothing here, because a reload of it would
+ * adopt a file the person never named. A `retained` about another file records
+ * nothing. The envelope's two fields and the verdict's `kind` are read once
+ * each, before anything is decided.
+ *
+ * **Every replacing verdict resets the reload step and retires a save conflict**
+ * (entries 7 and 12): the confirmation collected for the conflict that was on
+ * screen must not be spendable against the one that replaced it, and a save
+ * conflict's outcome is retired so that only one conflict is active — a
+ * committed success or a refusal in `outcome` stays as history. A displayed
+ * reapply result is invalidated by the same transition, because `reapplyToShow`
+ * in `./reapply.ts` pairs a report to a session by identity and every replacing
+ * arm answers a new session. A move holds no pending confirmation to withdraw,
+ * and the chosen destination is retained on the conflict rather than reset: it
+ * is what the person asked for, and the reapply is what decides whether the
+ * disk still has a place for it. `supersedes` builds through `supersedeConflict`
+ * when a conflict is shown and through `describeExternalConflict` over the
+ * session's draft when none is; the `superseded` origin the verdict names is not
+ * compared with the shown conflict's — the envelope is the window's decision
+ * about the file, and a session that re-checked it would be arbitrating.
+ *
+ * **During this session's own move the envelope is appended to the held list,
+ * not applied** (entry 5): see {@link MatchMoveSession.heldDeliveries}. A closed
+ * session takes nothing. **A spent session takes everything**: `moved`,
+ * `invalidated` and `mayHaveWritten` are facts about this session's identities,
+ * not about whether the file's state may be shown, so a conflict is recorded
+ * over a spent session too and the view says both.
+ *
+ * **What it forces and what it does not, in the same sentence.** It forces that
+ * every arm of `ObservationVerdict` has an action here — an eighth arm is a
+ * compile error at the terminus — and that no arm installs, adopts, spends or
+ * calls a command, which its signature cannot prove and the command spy at zero
+ * in `workspace.test.ts` does. It cannot force that a component registers it,
+ * over which files, or installs what it answers; nor that the envelope was sealed
+ * by the window rather than assembled by hand.
+ *
+ * @param session - The session.
+ * @param delivery - What the window decided, sealed with the observation.
+ * @returns The session after the decision, or the same session when the verdict
+ *   changes nothing about it.
+ */
+export function applyMoveObservation(
+  session: MatchMoveSession,
+  delivery: ObservationDelivery
+): MatchMoveSession {
+  if (session.closed) {
+    return session;
+  }
+  // **The caller-controlled reads, taken once and first.**
+  const observation = delivery.observation;
+  const kind = delivery.verdict.kind;
+  const file = observation.document;
+  if (session.phase === 'saving') {
+    return { ...session, heldDeliveries: [...session.heldDeliveries, delivery] };
+  }
+  // The decision about an awaited observation ends the wait for it, whatever
+  // the decision is and whichever file it is about; any other observation leaves
+  // every wait standing.
+  const waits = session.awaitingReconciliation;
+  const stillWaiting = waits.get(file) === observation ? withoutWait(waits, file) : waits;
+  const about = session.document === file;
+  const lifted = stillWaiting === waits ? session : { ...session, awaitingReconciliation: stillWaiting };
+  switch (kind) {
+    case 'retained':
+      // A `retained` ends no wait: a re-held reading is still held.
+      return about ? { ...session, awaitingReconciliation: withWait(waits, file, observation) } : session;
+    case 'writtenHere':
+    case 'coalesced':
+    case 'notLater':
+      return lifted;
+    case 'raised':
+    case 'supersedes':
+      return about ? replacedBy(session, observation, false, stillWaiting) : lifted;
+    case 'raisedWithoutReload':
+      return about ? replacedBy(session, observation, true, stillWaiting) : lifted;
+    default: {
+      const unreachable: never = kind;
+      return unreachable;
+    }
+  }
+} // End of function applyMoveObservation()
+
+/**
+ * The session after a verdict that puts a new origin in front of it.
+ *
+ * The shared body of the three replacing arms of {@link applyMoveObservation},
+ * which documents what happens here; this is the one place the external model
+ * is built for this surface from a delivery.
+ *
+ * @param session - The session, not closed and not saving.
+ * @param observation - The observation the verdict is about.
+ * @param uncertaintyUnresolved - Whether the verdict was `raisedWithoutReload`.
+ * @param awaitingReconciliation - The waits still held after this delivery.
+ * @returns The session showing the new conflict.
+ */
+function replacedBy(
+  session: MatchMoveSession,
+  observation: ExternalConflictObservation,
+  uncertaintyUnresolved: boolean,
+  awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>
+): MatchMoveSession {
+  const shown = conflictOf(session);
+  const externalConflict =
+    shown === null
+      ? describeExternalConflict(observation, session.draft, CONFLICT_CAPABILITIES)
+      : supersedeConflict(shown, observation, CONFLICT_CAPABILITIES);
+  // A save conflict is retired with its submission (entry 7); a refusal or a
+  // success stays, as history, with the submission a refusal's consent needs.
+  const retiring = conflictArm(session.outcome) !== null;
+  return {
+    ...session,
+    externalConflict,
+    uncertaintyUnresolved,
+    awaitingReconciliation,
+    outcome: retiring ? null : session.outcome,
+    submitted: retiring ? null : session.submitted,
+    extraMessages: retiring ? [] : session.extraMessages,
+    // Entry 12: the confirmation collected for the conflict that was on screen is
+    // not spendable against this one, and the warning it was collected under must
+    // not stay on screen saying the wrong thing (the record's §5.7).
+    reload: NOT_RELOADING
+  };
+} // End of function replacedBy()
+
+/**
+ * Records that the person has reviewed the disk snapshot and the window has ended
+ * the uncertainty hold — Phase 2d-6-4, the 2d-6 record's §3 entries 14 and 15.
+ *
+ * `acknowledgeSnapshot` in `./matchEditor.ts`, for this session, taking the same
+ * two-valued callback: it rebuilds the conflict's availability and nothing else —
+ * the ordinary reload is offered again from its idle step and the reapply is no
+ * longer refused for the uncertainty — installing nothing, minting no consent and
+ * re-observing nothing. Asked at most once per call and only when there is
+ * something to end; a `refused` leaves the session unchanged. What it cannot see
+ * is a hold the window ended without a delivery, stated on
+ * {@link MatchMoveSession.uncertaintyUnresolved}.
+ *
+ * @param session - The session showing a conflict raised under uncertainty.
+ * @param acknowledge - The window's two acknowledgement members, composed.
+ * @returns The session with its reload and reapply available again, or the same
+ *   session.
+ */
+export function acknowledgeMoveSnapshot(
+  session: MatchMoveSession,
+  acknowledge: AcknowledgeTheUncertainty
+): MatchMoveSession {
+  const conflict = session.externalConflict;
+  if (session.closed || conflict === null || !session.uncertaintyUnresolved) {
+    return session;
+  }
+  if (acknowledge(conflict.source) !== 'acknowledged') {
+    return session;
+  }
+  return { ...session, uncertaintyUnresolved: false, reload: NOT_RELOADING };
+} // End of function acknowledgeMoveSnapshot()
+
+/**
  * Why a reapply of this move could not be carried out.
  *
- * **A code, never a sentence.** There is no key function for these yet, and that is
- * 2c-4b-2's boundary: nothing draws them, so 2c-4b-3 adds the accessors together
- * with the panel that renders them.
+ * **A code, never a sentence.** {@link moveReapplyObstacleKey} maps each arm to a
+ * dictionary key and `tMoveReapplyObstacle` in `../i18n` renders it.
  *
  * **The subject's refusal and the anchor's are two arms, not one**, because the
  * wire answers them with two enums and `tReapplyResolution` and
@@ -1658,11 +2286,14 @@ export type MoveReapplyObstacle =
       /**
        * The evidence answers no anchor although this move names one.
        *
-       * **Unreachable from the running application**: `move_match` builds an
-       * anchored placement whenever it sends an `after`, so a session holding an
-       * `after` meets `Identified` or `Refused`. A `ReapplyEvidence` is a boundary
-       * value and nothing in TypeScript proves which command produced one, and
-       * treating the disagreement as a refusal writes nothing.
+       * **Unreachable from the running application for the save origin**:
+       * `move_match` builds an anchored placement whenever it sends an `after`,
+       * so a session holding an `after` meets `Identified` or `Refused`. For the
+       * external origin it is the anchor's row answering an empty `exact` tier
+       * (Phase 2d-6-4) — a base snippet the table resolved to nothing to place
+       * after. A `ReapplyEvidence` and a table row are boundary values and nothing
+       * in TypeScript proves what produced one; treating the disagreement as a
+       * refusal writes nothing.
        */
       readonly kind: 'evidenceNotAnAnchor';
     }
@@ -1704,6 +2335,49 @@ export type MoveReapplyObstacle =
       readonly kind: 'moveRefused';
       /** Which of that rule's codes, for the panel to render. */
       readonly reason: MoveSubmissionRefusal;
+    }
+  | {
+      /**
+       * The external observation's correspondence could not be used to find the
+       * snippet or its anchor — Phase 2d-6-4, the 2d-6 record's §3 entries 20
+       * and 22.
+       *
+       * Five reasons, all about the evidence and never about the file: the
+       * reading carried no table, the table's base or disk revision is not this
+       * conflict's, or the table names a full base identity — the moved
+       * snippet's, or an `after` anchor's — in no row or in more than one. Rendered
+       * through `tExternalEvidenceRefusal`.
+       */
+      readonly kind: 'externalEvidence';
+      /** Which negative claim about the evidence this is. */
+      readonly reason: ExternalEvidenceRefusal;
+    }
+  | {
+      /**
+       * Another accepted reading of the file has superseded the conflict's
+       * evidence, whichever origin it had (entry 22). Answered by the live
+       * standing-origin guard, asked last; rendered through `tSupersededEvidence`.
+       */
+      readonly kind: 'supersededEvidence';
+    }
+  | {
+      /**
+       * The conflict was raised while a write of this window's own had an unknown
+       * outcome, and the person has not acknowledged that (entries 11 and 22).
+       * Refused before any evidence is read; rendered through the uncertainty
+       * notice's own sentence.
+       */
+      readonly kind: 'writeOutcomeUnknown';
+    }
+  | {
+      /**
+       * The window holds a reading of this file it has not decided about (entries
+       * 8 and 11). A reapply hands back a session whose ordinary send is live, and
+       * one rebuilt over the adopted snapshot would carry no record of the wait;
+       * so it is refused before any evidence is read. Rendered through the
+       * retained notice's own sentence.
+       */
+      readonly kind: 'observationRetained';
     };
 
 /** What a reapply of this move became. */
@@ -1732,6 +2406,11 @@ export type MoveReapplyAttempt = ReapplyAttempt<MatchMoveSession, MoveReapplyObs
  * {@link MoveSubmissionRefusal} already have their own sentences and accessors; the
  * i18n layer composes them.
  *
+ * **The four external-origin arms reuse sentences that already exist** (Phase
+ * 2d-6-4), each through its own key function so a renamed key is a compile error
+ * there and here at once; the terminus is `never`, so an arm with no key is one
+ * too. No sentence of this module's own was added.
+ *
  * @param obstacle - What stopped the reapply.
  * @returns The key holding that obstacle's sentence.
  */
@@ -1750,8 +2429,148 @@ export function moveReapplyObstacleKey(obstacle: MoveReapplyObstacle): Translati
     case 'correspondence':
     case 'evidenceNotATarget':
       return sharedReapplyObstacleKey(obstacle);
+    case 'externalEvidence':
+      return externalEvidenceRefusalKey(obstacle.reason);
+    case 'supersededEvidence':
+      return SUPERSEDED_EVIDENCE_KEY;
+    case 'writeOutcomeUnknown':
+      return externalConflictNoticeKey({ kind: 'writeOutcomeUnknown' });
+    case 'observationRetained':
+      return externalConflictNoticeKey({ kind: 'observationRetained' });
+    default: {
+      const unreachable: never = obstacle;
+      return unreachable;
+    }
   }
 } // End of function moveReapplyObstacleKey()
+
+/**
+ * The evidence a move's reapply reads once the supersession question has been
+ * answered — every arm of `ReapplyEvidenceAccess` but `superseded`.
+ *
+ * Named so that {@link subjectOfEvidence} and {@link anchorOfEvidence} share one
+ * narrowing rather than each repeating the exclusion.
+ */
+type UsableEvidence = Exclude<ReapplyEvidenceAccess, { readonly kind: 'superseded' }>;
+
+/**
+ * The guard {@link reapplyToDiskVersion} uses when its caller hands none in.
+ *
+ * `unaskedGuard` in `./matchEditor.ts`, for this session: it answers the shown
+ * conflict's own origin, so the supersession question the entry asks last is
+ * answered *yes, it stands* without the window being asked. It exists so that the
+ * one component caller, which 2d-6-4 may not touch, keeps its save-origin reapply
+ * exactly as it was; what it costs is stated on the caller.
+ *
+ * @param conflict - The conflict shown, or `null`.
+ * @returns A guard that never asks the window.
+ */
+function unaskedGuard(conflict: ConflictModel<MovePlacement> | null): StandingOriginGuard {
+  const source: ConflictSource | null = conflict === null ? null : conflict.source;
+  return (): ConflictSource | null => source;
+} // End of function unaskedGuard()
+
+/**
+ * The snippet one conflict's evidence names for this move, or why it names none
+ * — the subject half of {@link reapplyToDiskVersion}'s origin switch, Phase
+ * 2d-6-4.
+ *
+ * **Three arms in, and each has its own answer** (the 2d-6 record's §3 entry 19;
+ * the fourth, `superseded`, is answered by the caller before anything is read).
+ * Save evidence is read through `subjectCorrespondence`, as it always was. An
+ * external table is searched through `correspondenceRowFor` for this session's
+ * **full** base identity — document, base revision and node, never an array index
+ * and never the node alone (entry 20) — and the found row's `exact` tier is read
+ * through `subjectResolution`, exactly once: a move takes the strict tier, and
+ * the flexible `editor` tier is not looked at. A refused table or row resolves to
+ * manual resolution with `tExternalEvidenceRefusal`'s sentence (entry 22).
+ * Nothing here is cast: a row is a row and a `ReapplyEvidence` is a
+ * `ReapplyEvidence`.
+ *
+ * @param evidence - What `enterReapply` found the conflict's origin to offer,
+ *   never `superseded`.
+ * @param base - This session's snippet, by the identity the base snapshot minted.
+ * @returns The subject to work from, or the manual resolution to answer with.
+ */
+function subjectOfEvidence(
+  evidence: UsableEvidence,
+  base: MatchId
+): SubjectCorrespondence | Extract<MatchMoveReapply, { kind: 'manualResolution' }> {
+  switch (evidence.kind) {
+    case 'saveEvidence':
+      return subjectCorrespondence(evidence.evidence);
+    case 'externalCorrespondence': {
+      const row = correspondenceRowFor(evidence.correspondences, base);
+      if (row.kind === 'refused') {
+        return {
+          kind: 'manualResolution',
+          obstacle: { kind: 'externalEvidence', reason: row.reason }
+        };
+      }
+      // **The row's exact tier, read once.** `exact` is the one field of the row
+      // this surface reads; `editor` is the match editor's flexible tier and is
+      // not looked at for a move.
+      return subjectResolution(row.entry.exact);
+    }
+    case 'refused':
+      return {
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: evidence.reason }
+      };
+    default: {
+      const unreachable: never = evidence;
+      return unreachable;
+    }
+  }
+} // End of function subjectOfEvidence()
+
+/**
+ * The anchor one conflict's evidence names for this move's `after` placement, or
+ * why it names none — the anchor half of {@link reapplyToDiskVersion}'s origin
+ * switch, Phase 2d-6-4.
+ *
+ * **Three arms in, and each has its own answer** (the 2d-6 record's §3 entry 19;
+ * `superseded` is answered by the caller before any placement is read). Save
+ * evidence is read through `anchorCorrespondence`, as it always was. An external
+ * table is searched through `correspondenceRowFor` for the anchor's **full** base
+ * identity — the identity this session holds for it, minted from the parse the
+ * placement was chosen against — and the found row's `exact` tier is read through
+ * `anchorResolution` (entry 20: "an anchored … move by the anchor's `exact` from
+ * the same table"), exactly once. A refused table or row resolves to manual
+ * resolution with `tExternalEvidenceRefusal`'s sentence (entry 22). The subject
+ * and the anchor are two rows of **one** validated table: `reapplyEvidenceFor`
+ * checked its two revisions once, and both lookups read the object it answered.
+ *
+ * @param evidence - What `enterReapply` found the conflict's origin to offer,
+ *   never `superseded`.
+ * @param anchor - The snippet the move places the moved one after, by the
+ *   identity the base parse minted.
+ * @returns The anchor answer to work from, or the manual resolution to answer
+ *   with.
+ */
+function anchorOfEvidence(
+  evidence: UsableEvidence,
+  anchor: MatchId
+): AnchorCorrespondence | { readonly obstacle: MoveReapplyObstacle } {
+  switch (evidence.kind) {
+    case 'saveEvidence':
+      return anchorCorrespondence(evidence.evidence);
+    case 'externalCorrespondence': {
+      const row = correspondenceRowFor(evidence.correspondences, anchor);
+      if (row.kind === 'refused') {
+        return { obstacle: { kind: 'externalEvidence', reason: row.reason } };
+      }
+      // **The row's exact tier, read once**, for the same reason the subject's is.
+      return anchorResolution(row.entry.exact);
+    }
+    case 'refused':
+      return { obstacle: { kind: 'externalEvidence', reason: evidence.reason } };
+    default: {
+      const unreachable: never = evidence;
+      return unreachable;
+    }
+  }
+} // End of function anchorOfEvidence()
 
 /**
  * Reissues this move against the newly parsed disk version.
@@ -1761,9 +2580,12 @@ export function moveReapplyObstacleKey(obstacle: MoveReapplyObstacle): Translati
  * - **The moved snippet is resolved strictly.** `move_match` asks for `ExactItem`,
  *   so an identified subject is a snippet whose own owned lines are byte-for-byte
  *   what this session was about. A unique trigger is not enough to move somebody
- *   else's snippet.
+ *   else's snippet. **The external origin takes the same tier**, off the table's
+ *   row for this session's full base identity (the 2d-6 record's §3 entry 20),
+ *   read through {@link subjectOfEvidence}.
  * - **Its `SequenceAddress` must equal the original one** — the same *sequence*,
- *   not merely the same file.
+ *   not merely the same file (D2r), decided over the disk projection the conflict
+ *   carries, for either origin.
  * - **The destination is rebuilt from the new sequence, and the old numeric index
  *   is never carried.** `startMatchMove` derives the members and the anchors from
  *   the adopted projection; nothing here reads a position from the old one.
@@ -1771,9 +2593,15 @@ export function moveReapplyObstacleKey(obstacle: MoveReapplyObstacle): Translati
  *   The evidence's anchor is read **only** for an `after`: an `end` was lowered to
  *   *after the last other snippet* before it was sent, so its wire anchor is a
  *   snippet the person never named, and refusing the move because that snippet's
- *   bytes changed would refuse a request that has nothing to do with it.
+ *   bytes changed would refuse a request that has nothing to do with it. For the
+ *   external origin the same rule means the table is asked nothing about an
+ *   anchor.
  * - **An `after` survives only on exact anchor correspondence**, which is the one
- *   thing `ReapplyEvidence`'s second operand exists to answer.
+ *   thing `ReapplyEvidence`'s second operand exists to answer — and, for the
+ *   external origin, the anchor's own row of the same table, through
+ *   {@link anchorOfEvidence}. The identified anchor must still be one of the
+ *   rebuilt sequence's own on the disk revision (`anchorNotInSequence`), which is
+ *   the same-sequence rule asked of the anchor.
  * - **A disk that already places the snippet where it was asked to go is
  *   `alreadySatisfied`**, and nothing is written. That verdict is
  *   {@link moveSubmissionRefusal}'s own `alreadyThere`, asked of the rebuilt
@@ -1784,6 +2612,44 @@ export function moveReapplyObstacleKey(obstacle: MoveReapplyObstacle): Translati
  * {@link beginMove} produces one move and nothing else. Nothing here batches, and
  * nothing here writes.
  *
+ * **Both origins since Phase 2d-6-4, through one entry** (entries 19, 20 and 22):
+ * `enterReapply` in `./reapply.ts` answers `reapplyEvidenceFor`'s four arms;
+ * superseded evidence refuses whatever the placement, before the subject or the
+ * anchor is read. **Two refusals come before the entry, so a blocked session
+ * reads no evidence at all** (this phase's review, its fourth finding — the entry
+ * reads the observation's table): an unacknowledged write uncertainty (entry 22 —
+ * a reapply ends in an adoption, which the uncertainty withholds, so adoption may
+ * not be obtained here indirectly) and a reading the window holds undecided
+ * (entry 8 — a session rebuilt over the adopted snapshot would carry no record of
+ * the wait, and the blocked send would go through it). The view withholds the
+ * control through the same facts; these are the rules for a call made past it.
+ *
+ * **The two blocks and the conflict's identity are asked again of the installed
+ * session, once, immediately before the adoption** (this phase's review, its
+ * third finding): every read between the entry and the door — the subject's row,
+ * the anchor's row, the disk projection `startMatchMove` walks, the rebuilt
+ * session's own submission rule over that projection — is a read of caller data,
+ * and a getter there can tell the window of a reading, whose receiver records a
+ * wait, an uncertainty or a new conflict on the installed session. The session
+ * handed in cannot see that; the one `current` reads can. So the adoption is
+ * refused `observationRetained` or `writeOutcomeUnknown` when the installed
+ * session now carries either, and `supersededEvidence` when the conflict it
+ * shows is no longer the one being reapplied; otherwise the rebuilt session
+ * carries the **installed** session's waits forward, for `rebuiltOver`'s reason
+ * in `./matchEditor.ts` — its own file's entry is absent, because the recheck
+ * comes first, and the map is carried so a wait about another file survives the
+ * rebuild. Without a reader the recheck is asked of the session handed in
+ * ({@link ReadTheInstalledSession} says who owes the reader).
+ *
+ * **The standing-origin guard is a parameter, and it is optional for one stated
+ * reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s: `MatchMover.svelte`
+ * calls this with three arguments and 2d-6-4 touches no component. When no guard
+ * is handed in the supersession question is not asked here; what still refuses a
+ * superseded origin on that path is `adoptDiskVersion`'s fourth check, at the
+ * door, answered `adoptionRefused` without the typed sentence. An omitted guard
+ * costs a sentence and some work, never a wrong installation. 2d-6-6, which hands
+ * the live closure down, may make the parameter required.
+ *
  * @param session - The session showing the conflict.
  * @param unsavedDraftFor - The snippet this window is holding unsaved edits for,
  *   **by the identity the newly parsed projection gives it**, or `null`. Required
@@ -1792,18 +2658,43 @@ export function moveReapplyObstacleKey(obstacle: MoveReapplyObstacle): Translati
  *   {@link moveEligibility} already states, unchanged by a reapply.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
  *   all on a refusal.
+ * @param standing - Asks what origin stands for the file **now**;
+ *   `() => browser.standingConflictFor(document)` is the honest closure. `null`,
+ *   the default, asks nothing — see above for what that costs.
+ * @param current - Reads the session the caller holds now, for the recheck
+ *   before the adoption. `null`, the default, rechecks the session handed in.
  * @returns What became of the attempt.
  */
 export function reapplyToDiskVersion(
   session: MatchMoveSession,
   unsavedDraftFor: MatchId | null,
-  adopt: AdoptTheDiskVersion<MovePlacement>
+  adopt: AdoptTheDiskVersion<MovePlacement>,
+  standing: StandingOriginGuard | null = null,
+  current: ReadTheInstalledSession | null = null
 ): MatchMoveReapply {
-  const start = beginReapply(CONFLICT_CAPABILITIES, conflictOf(session));
-  if (start.kind !== 'ready') {
-    return start;
+  const conflict = conflictOf(session);
+  if (conflict !== null) {
+    // **Before the entry, which reads the evidence.** A blocked session reads
+    // none of it.
+    if (session.uncertaintyUnresolved) {
+      return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+    }
+    if (awaitedFor(session) !== null) {
+      return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+    }
   }
-  const subject = subjectCorrespondence(start.evidence);
+  const entry = enterReapply(CONFLICT_CAPABILITIES, conflict, standing ?? unaskedGuard(conflict));
+  if (entry.kind !== 'ready') {
+    return entry;
+  }
+  const evidence = entry.evidence;
+  if (evidence.kind === 'superseded') {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  const subject = subjectOfEvidence(evidence, session.match);
+  if (subject.kind === 'manualResolution') {
+    return subject;
+  }
   if (subject.kind === 'refused') {
     return {
       kind: 'manualResolution',
@@ -1818,49 +2709,76 @@ export function reapplyToDiskVersion(
   if (held === null || found === null || !sameSequence(held, found)) {
     return { kind: 'manualResolution', obstacle: { kind: 'notTheSameSequence' } };
   }
-  const rebuilt = startMatchMove(start.conflict.disk, subject.target, unsavedDraftFor);
-  const wanted = rebuiltPlacement(session.draft.value, start.evidence, rebuilt);
+  const fresh = startMatchMove(entry.conflict.disk, subject.target, unsavedDraftFor);
+  const wanted = rebuiltPlacement(session.draft.value, evidence, fresh);
   if ('obstacle' in wanted) {
     return { kind: 'manualResolution', obstacle: wanted.obstacle };
   }
-  const chosen = choosePlacement(rebuilt, wanted.placement);
-  const refusal = moveSubmissionRefusal(chosen, [start.conflict.disk]);
+  const chosen = choosePlacement(fresh, wanted.placement);
+  const refusal = moveSubmissionRefusal(chosen, [entry.conflict.disk]);
   if (refusal !== null && refusal !== 'alreadyThere') {
     return { kind: 'manualResolution', obstacle: { kind: 'moveRefused', reason: refusal } };
   }
-  if (adoptForReapply(start.conflict, adopt) === 'refused') {
+  // **The installed session, read once, after the last caller-controlled read
+  // and immediately before the spend.** Nothing caller-controlled runs between
+  // this read and the door.
+  const installed = current === null ? session : current();
+  if (installed.uncertaintyUnresolved) {
+    return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+  }
+  if (awaitedFor(installed) !== null) {
+    return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+  }
+  if (conflictOf(installed)?.source !== entry.conflict.source) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  if (adoptForReapply(entry.conflict, adopt) === 'refused') {
     return { kind: 'adoptionRefused' };
   }
+  const rebuilt: MatchMoveSession = {
+    ...chosen,
+    awaitingReconciliation: installed.awaitingReconciliation
+  };
   return refusal === 'alreadyThere'
-    ? { kind: 'alreadySatisfied', session: chosen }
-    : { kind: 'reapplied', session: chosen };
+    ? { kind: 'alreadySatisfied', session: rebuilt }
+    : { kind: 'reapplied', session: rebuilt };
 } // End of function reapplyToDiskVersion()
 
 /**
  * The destination a reapply asks for, rebuilt against the new sequence.
  *
  * `top` and `end` are handed back untouched, because they are semantic choices the
- * rebuilt session lowers against its own members. An `after` is replaced by the
- * anchor the evidence identified — never by the old one, whose revision belongs to
- * a parse that is gone — and the replacement is checked against the rebuilt
- * session's own anchors, because {@link choosePlacement} answers *unchanged* for an
- * anchor it will not install and that answer would otherwise be read as *the
- * destination did not move*.
+ * rebuilt session lowers against its own members — **and they ask the evidence
+ * nothing**, which is why the evidence is read only for an `after`. An `after` is
+ * replaced by the anchor the evidence identified — never by the old one, whose
+ * revision belongs to a parse that is gone — and the replacement is checked
+ * against the rebuilt session's own anchors, because {@link choosePlacement}
+ * answers *unchanged* for an anchor it will not install and that answer would
+ * otherwise be read as *the destination did not move*.
+ *
+ * **Both origins since Phase 2d-6-4**, through {@link anchorOfEvidence}: a
+ * refused save's anchor is read as before; an external table is searched for the
+ * anchor's **full** base identity and the row's `exact` tier read as the anchor;
+ * a refused table or row refuses the `after` it was asked about.
  *
  * @param placement - What the retained draft asked for.
- * @param evidence - The correspondence answers from the conflict's payload.
+ * @param evidence - Which evidence the conflict's origin offers, never
+ *   `superseded`.
  * @param rebuilt - The session over the newly parsed projection, for its anchors.
  * @returns The placement to choose, or the obstacle that stops the reapply.
  */
 function rebuiltPlacement(
   placement: MovePlacement,
-  evidence: ReapplyEvidence,
+  evidence: UsableEvidence,
   rebuilt: MatchMoveSession
 ): { readonly placement: MovePlacement } | { readonly obstacle: MoveReapplyObstacle } {
   if (placement.kind !== 'after') {
     return { placement };
   }
-  const anchor = anchorCorrespondence(evidence);
+  const anchor = anchorOfEvidence(evidence, placement.anchor);
+  if ('obstacle' in anchor) {
+    return anchor;
+  }
   if (anchor.kind === 'refused') {
     return { obstacle: { kind: 'anchorCorrespondence', reason: anchor.reason } };
   }
@@ -2014,6 +2932,58 @@ export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   offersReapply: true,
   reapplySupport: 'supported'
 };
+
+/**
+ * What this surface offers about the conflict it is showing **now**, derived from
+ * the declaration and two facts about the session — Phase 2d-6-4, the 2d-6
+ * record's §3 entry 11.
+ *
+ * The declaration above is permanent; this is the "effective capabilities" the
+ * consult's Q3 names. The reload and the reapply are both withheld under an
+ * unacknowledged write uncertainty, for the match editor's reason. The reapply
+ * alone is withheld while the window holds an undecided reading, because it
+ * hands back a session whose ordinary send is live; the reload is not, because
+ * it closes the session and sends nothing. It feeds `conflictChoicesFor`, which
+ * stays the only producer of a choice list; what this cannot force is that the
+ * transitions honour the same facts, which is why each asks
+ * {@link reloadableConflictOf} or the fields themselves.
+ *
+ * @param session - The session to derive for.
+ * @returns The capabilities to offer choices from.
+ */
+function effectiveCapabilitiesOf(session: MatchMoveSession): ConflictCapabilities {
+  const reloadWithheld = session.uncertaintyUnresolved;
+  const reapplyWithheld = reloadWithheld || awaitedFor(session) !== null;
+  if (!reloadWithheld && !reapplyWithheld) {
+    return CONFLICT_CAPABILITIES;
+  }
+  return {
+    ...CONFLICT_CAPABILITIES,
+    offersReload: !reloadWithheld,
+    offersReapply: !reapplyWithheld
+  };
+} // End of function effectiveCapabilitiesOf()
+
+/**
+ * The notices one session owes, in the order the stronger claim comes first.
+ *
+ * The uncertainty first, because it is the one state under which the conflict on
+ * screen offers neither way to the disk version, and the held observation second.
+ * Each is answered from one session field and nothing is read twice.
+ *
+ * @param session - The session to describe.
+ * @returns The codes, possibly none.
+ */
+function externalNoticesOf(session: MatchMoveSession): readonly ExternalConflictNotice[] {
+  const notices: ExternalConflictNotice[] = [];
+  if (session.externalConflict !== null && session.uncertaintyUnresolved) {
+    notices.push({ kind: 'writeOutcomeUnknown' });
+  }
+  if (awaitedFor(session) !== null) {
+    notices.push({ kind: 'observationRetained' });
+  }
+  return notices;
+} // End of function externalNoticesOf()
 
 /**
  * What one retained placement asked for, as a summary code.
@@ -2308,6 +3278,23 @@ export interface MatchMoveView {
   /** The outcome's lines followed by anything to be said beside them. */
   readonly messages: readonly SaveOutcomeMessage[];
   /**
+   * The external conflict's own lines, or none — Phase 2d-6-4.
+   *
+   * Beside {@link MatchMoveView.messages} and never merged into it, for
+   * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
+   * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
+   * twice. Rendered through `tConflictMessage`. No component reads it yet;
+   * 2d-6-7 does.
+   */
+  readonly externalMessages: readonly ConflictMessage[];
+  /**
+   * The lines owed while an observation cannot be acted on — Phase 2d-6-4.
+   *
+   * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
+   * own fields. No component reads it yet; 2d-6-7 and 2d-6-9 do.
+   */
+  readonly externalNotices: readonly ExternalConflictNotice[];
+  /**
    * The presentation changes a saved arm disclosed, in report order.
    *
    * **Always empty for a move, and that is read off the core rather than
@@ -2328,7 +3315,7 @@ export interface MatchMoveView {
   readonly refusalChoices: readonly RawSaveChoice[];
   /** Whether the findings on screen are about a destination that has since changed. */
   readonly findingsAreStale: boolean;
-  /** The conflict being shown, or `null`. */
+  /** The conflict being shown, of either origin, or `null`. */
   readonly conflict: ConflictModel<MovePlacement> | null;
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
@@ -2464,8 +3451,10 @@ export function matchMoveView(
   const conflictChoices =
     conflict === null
       ? []
-      : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload));
+      : conflictChoicesFor(effectiveCapabilitiesOf(session), offeredReloadStep(session.reload));
   const cannotMove = moveSubmissionRefusal(session, views);
+  const externallyBlocked = session.externalConflict !== null || awaitedFor(session) !== null;
+  const refusalChoices = offeredRefusalChoices(refused, stale);
   return {
     match: session.match,
     document: session.document,
@@ -2482,8 +3471,15 @@ export function matchMoveView(
     recovery: moveRecoveryChoices(session.sendFailure?.reason ?? null),
     outcome,
     messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
+    externalMessages: session.externalConflict === null ? [] : session.externalConflict.messages,
+    externalNotices: externalNoticesOf(session),
     notes: saved === null ? [] : saved.notes,
-    refusalChoices: offeredRefusalChoices(refused, stale),
+    // The one offer a refusal panel may keep under an external block is the
+    // dismissal: `beginMove` would answer `null` to the other, and a control that
+    // does nothing when pressed is the defect `conflictChoicesFor` exists to stop.
+    refusalChoices: externallyBlocked
+      ? refusalChoices.filter((choice) => choice === 'keepEditing')
+      : refusalChoices,
     findingsAreStale: refused !== null && stale,
     conflict,
     conflictChoices,
@@ -2527,6 +3523,12 @@ export function moveRefusalKey(reason: MoveRefusal): TranslationKey {
 /**
  * The dictionary key holding one submission refusal's sentence.
  *
+ * **The two external blocks reuse sentences that already exist** (Phase 2d-6-4):
+ * the external origin's own first line for `externalConflict`, and the retained
+ * notice's for `observationRetained`, each through its own key function so a
+ * renamed key is a compile error there and here at once. No sentence of this
+ * module's own was added for either.
+ *
  * @param reason - Why the move cannot be sent as things stand.
  * @returns The key holding that reason's sentence.
  */
@@ -2538,8 +3540,12 @@ export function moveSubmissionRefusalKey(reason: MoveSubmissionRefusal): Transla
       return 'browser.matchMove.cannotMove.mayHaveWritten';
     case 'saveInFlight':
       return 'browser.matchMove.cannotMove.saveInFlight';
+    case 'externalConflict':
+      return externalConflictMessageKey({ kind: 'fileChangedWhileOpen' });
     case 'conflict':
       return 'browser.matchMove.cannotMove.conflict';
+    case 'observationRetained':
+      return externalConflictNoticeKey({ kind: 'observationRetained' });
     case 'notMovable':
       return 'browser.matchMove.cannotMove.notMovable';
     case 'outOfDate':

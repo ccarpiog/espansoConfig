@@ -1700,6 +1700,12 @@ export function tCreationReapplyObstacle(obstacle: CreationReapplyObstacle): str
 /**
  * Renders why a deletion's reapply refused, in one language.
  *
+ * **A `switch` with a `never` terminus since Phase 2d-6-4**, when the union grew
+ * the four external-origin arms — a refused table or row, superseded evidence, a
+ * write whose outcome is unknown, and a reading the window holds undecided — so
+ * that an arm added to `DeletionReapplyObstacle` with no sentence chosen here is
+ * a compile error rather than a fall-through.
+ *
  * @param locale - The dictionary to read from.
  * @param obstacle - What stopped the reapply.
  * @returns The translated sentence, with any nested code's under it.
@@ -1709,9 +1715,22 @@ export function describeDeletionReapplyObstacle(
   obstacle: DeletionReapplyObstacle
 ): string {
   const key = deletionReapplyObstacleKey(obstacle);
-  return obstacle.kind === 'notDeletable'
-    ? `${translate(locale, key)} ${translate(locale, deletionRefusalKey(obstacle.reason))}`
-    : describeSharedReapplyObstacle(locale, obstacle);
+  switch (obstacle.kind) {
+    case 'notDeletable':
+      return `${translate(locale, key)} ${translate(locale, deletionRefusalKey(obstacle.reason))}`;
+    case 'externalEvidence':
+    case 'supersededEvidence':
+    case 'writeOutcomeUnknown':
+    case 'observationRetained':
+      return translate(locale, key);
+    case 'correspondence':
+    case 'evidenceNotATarget':
+      return describeSharedReapplyObstacle(locale, obstacle);
+    default: {
+      const unreachable: never = obstacle;
+      return unreachable;
+    }
+  }
 } // End of function describeDeletionReapplyObstacle()
 
 /**
@@ -1727,6 +1746,12 @@ export function tDeletionReapplyObstacle(obstacle: DeletionReapplyObstacle): str
 /**
  * Renders why a duplication's reapply refused, in one language.
  *
+ * **A `switch` with a `never` terminus since Phase 2d-6-4**, when the union grew
+ * the four external-origin arms — a refused table or row, superseded evidence, a
+ * write whose outcome is unknown, and a reading the window holds undecided — so
+ * that an arm added to `DuplicationReapplyObstacle` with no sentence chosen here
+ * is a compile error rather than a fall-through.
+ *
  * @param locale - The dictionary to read from.
  * @param obstacle - What stopped the reapply.
  * @returns The translated sentence, with any nested code's under it.
@@ -1736,9 +1761,22 @@ export function describeDuplicationReapplyObstacle(
   obstacle: DuplicationReapplyObstacle
 ): string {
   const key = duplicationReapplyObstacleKey(obstacle);
-  return obstacle.kind === 'notDuplicable'
-    ? `${translate(locale, key)} ${translate(locale, duplicationRefusalKey(obstacle.reason))}`
-    : describeSharedReapplyObstacle(locale, obstacle);
+  switch (obstacle.kind) {
+    case 'notDuplicable':
+      return `${translate(locale, key)} ${translate(locale, duplicationRefusalKey(obstacle.reason))}`;
+    case 'externalEvidence':
+    case 'supersededEvidence':
+    case 'writeOutcomeUnknown':
+    case 'observationRetained':
+      return translate(locale, key);
+    case 'correspondence':
+    case 'evidenceNotATarget':
+      return describeSharedReapplyObstacle(locale, obstacle);
+    default: {
+      const unreachable: never = obstacle;
+      return unreachable;
+    }
+  }
 } // End of function describeDuplicationReapplyObstacle()
 
 /**
@@ -1758,6 +1796,12 @@ export function tDuplicationReapplyObstacle(obstacle: DuplicationReapplyObstacle
  * they are two arms in `matchMove.ts` and two enums on the wire: *the snippet you
  * moved* and *the snippet you moved it after* are different things to have lost.
  *
+ * **A `never` terminus since Phase 2d-6-4**, when the union grew the four
+ * external-origin arms — a refused table or row, superseded evidence, a write
+ * whose outcome is unknown, and a reading the window holds undecided — so that an
+ * arm added to `MoveReapplyObstacle` with no sentence chosen here is a compile
+ * error rather than a fall-through.
+ *
  * @param locale - The dictionary to read from.
  * @param obstacle - What stopped the reapply.
  * @returns The translated sentence, with any nested code's under it.
@@ -1775,10 +1819,18 @@ export function describeMoveReapplyObstacle(
     case 'evidenceNotAnAnchor':
     case 'notTheSameSequence':
     case 'anchorNotInSequence':
+    case 'externalEvidence':
+    case 'supersededEvidence':
+    case 'writeOutcomeUnknown':
+    case 'observationRetained':
       return translate(locale, key);
     case 'correspondence':
     case 'evidenceNotATarget':
       return describeSharedReapplyObstacle(locale, obstacle);
+    default: {
+      const unreachable: never = obstacle;
+      return unreachable;
+    }
   }
 } // End of function describeMoveReapplyObstacle()
 

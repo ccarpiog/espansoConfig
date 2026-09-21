@@ -29,8 +29,9 @@
  *    declaration a transition honours rather than a fact about which functions
  *    happen to exist. Since Phase 2d-6-2 {@link enterReapply} is the same gate
  *    over **both** origins, answering `reapplyEvidenceFor`'s four arms on its
- *    `ready` arm; the match editor enters there, and the other surfaces migrate
- *    in their own 2d-6 steps.
+ *    `ready` arm; the match editor, the creator, the recovery form, the deleter,
+ *    the mover and the duplicator enter there, and the raw editor migrates in
+ *    2d-6-5.
  * 2. **The evidence readers.** {@link subjectCorrespondence} and
  *    {@link anchorCorrespondence} turn `ConflictResult.reapply`'s two wire enums
  *    into the three answers a surface can act on. They are here rather than in five
@@ -45,7 +46,9 @@
  *    {@link subjectResolution} reads a row's answer with the same three-arm rule
  *    the refused save's subject gets (the 2d-6 record's §3 entry 20); since Phase
  *    2d-6-3 {@link anchorResolution} reads a row's `exact` tier as an **anchor**,
- *    with `notAnchored` as its third arm, for the creator's `after` placement.
+ *    with `notAnchored` as its third arm, for the creator's `after` placement and,
+ *    since Phase 2d-6-4, the mover's — both from the same table the subject's row
+ *    is read from.
  * 3. **The adoption.** {@link adoptForReapply} spends the conflict's one
  *    authorization through the {@link AdoptTheDiskVersion} its caller passes,
  *    which on all five match surfaces is `BrowserState.adoptDiskVersion` — the
@@ -315,10 +318,10 @@ export type ReapplyOutcome<S, O> =
  *
  * **The save-only predecessor of {@link enterReapply}, since Phase 2d-6-2.** The
  * match editor enters through that one, which takes either origin and answers
- * with `reapplyEvidenceFor`'s four distinct arms, and since Phase 2d-6-3 so do
- * the new-snippet form and the recovery form; the raw editor, the deleter, the
- * mover and the duplicator still enter here, and migrating each is its own 2d-6
- * step's (2d-6-4, 2d-6-5). Nothing in TypeScript stops a surface staying here for ever;
+ * with `reapplyEvidenceFor`'s four distinct arms; since Phase 2d-6-3 so do the
+ * new-snippet form and the recovery form, and since Phase 2d-6-4 the deleter,
+ * the mover and the duplicator. The raw editor still enters here, and migrating
+ * it is 2d-6-5's. Nothing in TypeScript stops a surface staying here for ever;
  * what it forfeits by staying is the external origin, which this signature
  * refuses at compile time.
  *

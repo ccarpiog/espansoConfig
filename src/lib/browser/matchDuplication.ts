@@ -131,6 +131,66 @@
  * here stop a component importing `duplicateMatch` from `../ipc/commands` and
  * calling it with no session at all — the hole every writing command has had
  * since 2b-2a.
+ *
+ * ## The external session — Phase 2d-6-4
+ *
+ * The shape `./matchEditor.ts` took at 2d-6-2 and `./matchDeletion.ts` takes in
+ * the same phase, for a duplicate. {@link MatchDuplicationSession.externalConflict}
+ * is the conflict a watcher observation raised over the file this session is
+ * about, a field beside `outcome` and never an arm of it (the 2d-6 record's §3
+ * entry 6); {@link applyDuplicationObservation} is the session's receiver as a
+ * value, one named action per verdict arm and a `never` terminus (entry 11);
+ * {@link conflictOf} answers the conflict shown whichever origin it has, and
+ * `refusalGiven` — the one rule {@link duplicationSubmissionRefusal} and
+ * {@link beginDuplicate} both ask — answers `externalConflict` for it and
+ * `observationRetained` for a held reading
+ * ({@link MatchDuplicationSession.awaitingReconciliation}), so a direct call past
+ * a disabled control answers `null` (entry 8), asked after the live identity has
+ * been read. A conflict raised under an unknown write outcome
+ * ({@link MatchDuplicationSession.uncertaintyUnresolved}) withholds the reload and
+ * refuses the reapply until {@link acknowledgeDuplicationSnapshot} is told the
+ * hold ended (entries 11, 22); {@link dismissDuplicationOutcome} erases none of
+ * the three (entry 9). A replacing verdict resets the reload step and, by
+ * answering a new session, invalidates a displayed reapply result (entry 12); a
+ * duplicate has no pending confirmation to withdraw, because it asks none
+ * (consult Q7 for the move, applied here).
+ *
+ * **The reapply reads both origins through one entry** — `enterReapply` in
+ * `./reapply.ts` — and takes the snippet from an external table by its **full**
+ * base identity through `correspondenceRowFor`, reading the row's `exact` tier
+ * through `subjectResolution` (entries 19, 20 and 22): the clone must be of the
+ * newly adopted item's own bytes, so the flexible tier is never enough. A refused
+ * table or row resolves to manual resolution with `tExternalEvidenceRefusal`'s
+ * sentence, superseded evidence with `tSupersededEvidence`'s.
+ *
+ * **The door and every settling transition can read the installed session**
+ * through a {@link ReadTheInstalledSession} (this phase's review): a
+ * caller-controlled read — `projected`, a table row, the disk projection, an
+ * observation being replayed — runs arbitrary code, and a receiver run from it
+ * replaces the installed session behind the transition's back. {@link beginDuplicate}
+ * spends only against the session it was handed while that is still installed;
+ * {@link reapplyToDiskVersion} rechecks the installed session's blocks and
+ * conflict immediately before adopting; {@link applyDuplication} and
+ * {@link duplicationCouldNotBeSent} replay what the receiver appended during their own
+ * replay. The reader is optional while no component passes one, and its doc says
+ * what that costs.
+ *
+ * **The door and every settling transition can read the installed session**
+ * through a {@link ReadTheInstalledSession} (this phase's review): a
+ * caller-controlled read — `projected`, a table row, the disk projection, an
+ * observation being replayed — runs arbitrary code, and a receiver run from it
+ * replaces the installed session behind the transition's back. {@link beginDuplicate}
+ * spends only against the session it was handed while that is still installed;
+ * {@link reapplyToDiskVersion} rechecks the installed session's blocks and
+ * conflict immediately before adopting; {@link applyDuplication} and
+ * {@link duplicationCouldNotBeSent} replay what the receiver appended during their own
+ * replay. The reader is optional while no component passes one, and its doc says
+ * what that costs.
+ *
+ * **No component registers this receiver yet.** 2d-6-6 wires
+ * `BrowserState.registerObservationReceiver` to it through `DetailPane`; until
+ * then every case that drives it is a model test, and `MatchDuplicator.svelte`
+ * draws neither the external conflict nor the two notices (2d-6-7's).
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -178,29 +238,48 @@ import {
 } from './editorSave';
 import type { InvalidationStatus } from './invalidation';
 import { identityInProjection, plainIdentity } from './matchDeletion';
+import type { AcknowledgeTheUncertainty } from './matchEditor';
 import { sequenceOf, type SequenceAddress } from './matchMove';
 import type { RawSaveChoice } from './rawSave';
+import type { ConflictSource, ExternalConflictObservation } from './conflictSource';
+import {
+  externalConflictNoticeKey,
+  type ExternalConflictNotice,
+  type ObservationDelivery
+} from './observationDelivery';
 import {
   adoptForReapply,
-  beginReapply,
+  correspondenceRowFor,
+  enterReapply,
+  externalEvidenceRefusalKey,
   sharedReapplyObstacleKey,
   subjectCorrespondence,
+  subjectResolution,
+  SUPERSEDED_EVIDENCE_KEY,
+  type ExternalEvidenceRefusal,
   type ReapplyAttempt,
+  type ReapplyEvidenceAccess,
   type ReapplyOutcome,
-  type SharedReapplyObstacle
+  type SharedReapplyObstacle,
+  type StandingOriginGuard,
+  type SubjectCorrespondence
 } from './reapply';
 import {
   conflictChoicesFor,
   conflictDiskText,
   describeEditSave,
+  describeExternalConflict,
+  externalConflictMessageKey,
   invalidationFailureMessage,
   reapplyIsOffered,
+  supersedeConflict,
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDiskText,
+  type ConflictMessage,
   type ConflictOperation,
   type ConflictModel,
-  type SaveConflictModel,
+  type ExternalConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -443,10 +522,12 @@ export interface MatchDuplicationSession {
   /**
    * How far a confirmed reload of the disk version has got.
    *
-   * **Reset to `idle` by every new outcome and by every dismissal**, which is what
-   * stops a confirmation collected for one conflict from being spendable while a
-   * later one is on screen. The window refuses a spent confirmation too, but this
-   * is the guard that means the situation never arises.
+   * **Reset to `idle` by every new outcome, by every dismissal and by every
+   * replacing verdict** ({@link applyDuplicationObservation}, the 2d-6 record's
+   * §3 entry 12), which is what stops a confirmation collected for one conflict
+   * from being spendable while a later one is on screen. The window refuses a
+   * spent confirmation too, but this is the guard that means the situation never
+   * arises.
    */
   readonly reload: ReloadStep;
   /**
@@ -458,6 +539,92 @@ export interface MatchDuplicationSession {
    * reads this closes itself; everything here refuses once it is `true`.
    */
   readonly closed: boolean;
+  /**
+   * The conflict a watcher observation raised over the file this session is
+   * about, or `null` — Phase 2d-6-4, the 2d-6 record's §3 entry 6.
+   *
+   * **A field of its own beside {@link MatchDuplicationSession.outcome}, never an
+   * arm of it**, for `MatchEditorSession.externalConflict`'s reason: an outcome is
+   * how *a duplicate* ended, and a conflict the watcher raised is not that.
+   * {@link conflictOf} is the one accessor that reads both and answers the
+   * conflict this session is showing, whichever origin it has. **Only one conflict
+   * is active at a time, and the transitions are what keep it so** (entry 7):
+   * {@link applyDuplicationObservation} retires a save conflict's outcome when it
+   * sets this, and {@link applyDuplication} retires this when a duplicate ends as
+   * a conflict or a success. The type admits both populated, and a session built
+   * by hand with both gets {@link conflictOf}'s stated precedence, not a
+   * guarantee.
+   *
+   * While it is non-null nothing can be sent — `refusalGiven` answers
+   * `externalConflict` — and {@link dismissDuplicationOutcome} does not clear it
+   * (entry 9). The ways out are the reload and the reapply. **It does not spend
+   * the session**: the identities this session holds are still the ones the
+   * window is projecting, exactly as they are under a save conflict.
+   */
+  readonly externalConflict: ExternalConflictModel<MatchId> | null;
+  /**
+   * Whether {@link MatchDuplicationSession.externalConflict} was raised while a
+   * write of this window's own had an unknown outcome, and this session has not
+   * been told the hold ended — Phase 2d-6-4, entry 11's `raisedWithoutReload` row.
+   *
+   * While `true` the ordinary reload is withheld and the reapply refused, for the
+   * match editor's reason: a confirmed installation of bytes a write of this
+   * window may or may not have produced would settle, silently, a question only
+   * the person can. It ends when {@link acknowledgeDuplicationSnapshot} is told
+   * the window ended the hold, or when a later verdict replaces the conflict
+   * under no uncertainty. **It records what this session was told and nothing
+   * more**: a hold the window ends by a later definite write delivers nothing to
+   * a session, and this flag cannot see it. This module never sets it without a
+   * conflict, so the send is blocked by the conflict it qualifies.
+   */
+  readonly uncertaintyUnresolved: boolean;
+  /**
+   * The observations this session was told the window is holding and has not
+   * decided about, keyed by the file each is about — Phase 2d-6-4, entry 11's
+   * `retained` row, in the shape 2d-6-3's review gave the creator.
+   *
+   * **A restriction on sending and nothing else**: while this session's own file
+   * has an entry, `refusalGiven` answers `observationRetained` and
+   * {@link beginDuplicate} answers `null` (entry 8); no disk comparison and no
+   * origin is recorded. An entry is lifted by the delivery that decides **that**
+   * observation, whatever the verdict — `writtenHere` included — compared by
+   * identity, and replaced by a later `retained` about the same file.
+   *
+   * **What the map forces and what it does not, in the same sentence.** It
+   * forces that a wait is always keyed by the file it is about and that only
+   * this session's file's wait blocks; through this module's own transitions it
+   * holds at most that one entry, because a `retained` about another file records
+   * nothing here — the map is the shape the sessions share since 2d-6-3's review,
+   * so the field reads alike on every surface, not a claim that this session can
+   * change its file. It cannot force that the deciding delivery arrives — a
+   * session whose receiver was unregistered before the window decided is never
+   * told and stays blocked until closed — nor that a wait it was *not* told of,
+   * because no receiver was registered when the window held the reading, is
+   * recorded at all; both are facts about registration, which is 2d-6-6's. What
+   * it cannot see is a reading the barrier coalesced away without announcing it.
+   */
+  readonly awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>;
+  /**
+   * Every delivery that arrived while this session's own duplicate was in flight,
+   * in the order it arrived, kept until that duplicate's answer has been applied —
+   * Phase 2d-6-4, the 2d-6 record's §3 entry 5.
+   *
+   * `MatchEditorSession.heldDeliveries`'s rule, unchanged: the window publishes a
+   * write's settlement from inside the writing wrapper, before the `await` that
+   * started it resumes, so {@link applyDuplicationObservation} appends here while
+   * the phase is `saving` and {@link applyDuplication} and
+   * {@link duplicationCouldNotBeSent} replay the whole list through it, first to
+   * last, after their own answer — and, given a {@link ReadTheInstalledSession},
+   * whatever the receiver appended to the installed session while they were
+   * doing so. **What the list forces** is that no envelope delivered during the
+   * duplicate is dropped and that first-to-last is the order; **what it does not
+   * force** is that arrival order was decision order — the window's own contract
+   * — nor that a caller passes the reader: this module has no send composition,
+   * so the caller hands the settling transition the session it holds and the
+   * reader that answers it, as 2d-6-6's `MatchDuplicator.svelte` must, and
+   * nothing in TypeScript stops a caller handing it a capture and no reader.
+   */
+  readonly heldDeliveries: readonly ObservationDelivery[];
   /**
    * Whether a duplicate has committed through this session.
    *
@@ -567,6 +734,10 @@ export function startMatchDuplication(
     sendFailure: null,
     reload: NOT_RELOADING,
     closed: false,
+    externalConflict: null,
+    uncertaintyUnresolved: false,
+    awaitingReconciliation: new Map(),
+    heldDeliveries: [],
     duplicated: false,
     invalidated: false,
     mayHaveWritten: false,
@@ -575,15 +746,64 @@ export function startMatchDuplication(
 } // End of function startMatchDuplication()
 
 /**
- * The conflict the session is showing, or `null`.
+ * The wait that restricts this session **now**, or `null` — its own file's entry
+ * of {@link MatchDuplicationSession.awaitingReconciliation}.
+ *
+ * @param session - The session to ask about.
+ * @returns The observation the session is waiting on, or `null`.
+ */
+function awaitedFor(session: MatchDuplicationSession): ExternalConflictObservation | null {
+  return session.awaitingReconciliation.get(session.document) ?? null;
+} // End of function awaitedFor()
+
+/**
+ * The waits with one file's entry replaced.
+ *
+ * @param waits - The waits held.
+ * @param document - The file the observation is about.
+ * @param observation - The observation now held for it.
+ * @returns A new map; the argument is untouched.
+ */
+function withWait(
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  document: DocumentId,
+  observation: ExternalConflictObservation
+): ReadonlyMap<DocumentId, ExternalConflictObservation> {
+  const next = new Map(waits);
+  next.set(document, observation);
+  return next;
+} // End of function withWait()
+
+/**
+ * The waits with one file's entry removed.
+ *
+ * @param waits - The waits held.
+ * @param document - The file whose wait ended.
+ * @returns A new map; the argument is untouched.
+ */
+function withoutWait(
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  document: DocumentId
+): ReadonlyMap<DocumentId, ExternalConflictObservation> {
+  const next = new Map(waits);
+  next.delete(document);
+  return next;
+} // End of function withoutWait()
+
+/**
+ * The conflict the session is showing, of either origin, or `null`.
+ *
+ * **Widened to the union at Phase 2d-6-4**, from the save arm alone. The external
+ * conflict is answered first, then the outcome's conflict arm — a definite answer
+ * for a session built by hand with both populated, and a decision about nothing
+ * for one this module built, because {@link applyDuplicationObservation} and
+ * {@link applyDuplication} keep the two exclusive (the 2d-6 record's §3 entry 7).
  *
  * @param session - The session to ask about.
  * @returns The conflict model, or `null` when the session is not in one.
  */
-export function conflictOf(
-  session: MatchDuplicationSession
-): SaveConflictModel<MatchId> | null {
-  return conflictArm(session.outcome);
+export function conflictOf(session: MatchDuplicationSession): ConflictModel<MatchId> | null {
+  return session.externalConflict ?? conflictArm(session.outcome);
 } // End of function conflictOf()
 
 /**
@@ -617,8 +837,25 @@ export type DuplicationSubmissionRefusal =
   | 'alreadyDuplicated'
   /** A duplicate is in flight. */
   | 'saveInFlight'
-  /** A conflict is on screen and has not been dismissed. */
+  /**
+   * A watcher observation raised a conflict over the file, and it has not been
+   * resolved — Phase 2d-6-4, the 2d-6 record's §3 entry 8.
+   *
+   * A code of its own rather than `conflict`, because that code's sentence says
+   * the file changed *while this duplicate was being sent*, which is false of an
+   * observation no save answered. Rendered through the external origin's own
+   * first line (`browser.externalConflict.fileChangedWhileOpen`), which is the
+   * reason exactly and adds no key.
+   */
+  | 'externalConflict'
+  /** A save conflict is on screen and has not been dismissed. */
   | 'conflict'
+  /**
+   * The window holds a reading of the file it has not decided about, and this
+   * session may not send until it has — entry 8's "unresolved retained
+   * delivery". Rendered through the retained notice's own sentence.
+   */
+  | 'observationRetained'
   /**
    * This session describes a parse the window is not holding any more.
    *
@@ -656,6 +893,16 @@ export type DuplicationSubmissionRefusal =
  * session is stale the definite claim about the snippet is the one that may no
  * longer be true.
  *
+ * **The three external blocks sit where the save conflict does** (Phase 2d-6-4,
+ * entry 8): the external conflict first, in {@link conflictOf}'s precedence, then
+ * the save conflict, then a reading the window holds undecided — each a claim
+ * about what stands over the file rather than about this session, and each
+ * rendered by a sentence that already exists. An unresolved write uncertainty
+ * blocks through the external conflict it qualifies, which this module never
+ * sets it without. **What this forces and what it does not**: it forces refusal
+ * for the session it is handed; it cannot force that session to be current
+ * (R37) — one snapshot, one synchronous decision.
+ *
  * @param session - The session to ask about.
  * @param live - Whether the projection this window holds **now** still gives
  *   this session's snippet the identity the session holds.
@@ -677,8 +924,14 @@ function refusalGiven(
   if (session.phase === 'saving') {
     return 'saveInFlight';
   }
-  if (conflictOf(session) !== null) {
+  if (session.externalConflict !== null) {
+    return 'externalConflict';
+  }
+  if (conflictArm(session.outcome) !== null) {
     return 'conflict';
+  }
+  if (awaitedFor(session) !== null) {
+    return 'observationRetained';
   }
   // **By the same rule, one pair further down**: `eligibility` was frozen at
   // this session's first parse, so once the session is stale the definite
@@ -749,6 +1002,32 @@ export function canDuplicate(
   return !session.closed && duplicationSubmissionRefusal(session, views) === null;
 } // End of function canDuplicate()
 
+/**
+ * Reads the session a caller currently holds — the one its registered receiver
+ * has been updating — for the door or a settling transition to check against.
+ *
+ * `ReadTheInstalledSession` in `./matchDeletion.ts`, for this session, and for
+ * the reason stated there (this phase's review, its first, second and third
+ * findings, one class): a caller-controlled operand is read through property
+ * access, a property read runs arbitrary code, and a receiver run from it can
+ * replace the installed session with one carrying a block that a check on the
+ * session handed in would never see. {@link beginDuplicate} reads it once after
+ * the last `projected` read and spends only against the session it was handed
+ * while that is still the one installed; {@link reapplyToDiskVersion} rechecks it
+ * once immediately before adopting; {@link applyDuplication} and
+ * {@link duplicationCouldNotBeSent} replay whatever the receiver appended to it
+ * during their own replay. **What it cannot force**: that a caller supplies one —
+ * the parameter is optional so that `MatchDuplicator.svelte`, which this phase
+ * may not touch and which registers no receiver today, keeps compiling, and a
+ * caller that registers a receiver and passes no reader gets the displaced check
+ * and the lost delivery this closes; 2d-6-6 must pass `() => session` at every
+ * door and may make the parameter required. Nor that the closure reads the
+ * installed session rather than a capture.
+ *
+ * @returns The session the caller holds now.
+ */
+export type ReadTheInstalledSession = () => MatchDuplicationSession;
+
 /** A duplicate about to be sent: the session that is waiting, and what to send. */
 export interface StartedDuplication {
   /** The session, now in flight, with the submission recorded on it. */
@@ -790,26 +1069,45 @@ export interface StartedDuplication {
  * `identityInProjection` in `./matchDeletion.ts` is the one producer a caller
  * uses instead.
  *
+ * **The submission block is asked after the last caller-controlled read, and
+ * against the installed session** (Phase 2d-6-4, the 2d-6 record's §3 entry 8
+ * and R37; this phase's review, its first finding): `projected` is read and
+ * compared first; then the installed session is read through `current`, once;
+ * and only a session that is still the one handed in and passes `refusalGiven` —
+ * which answers `externalConflict` and `observationRetained` beside the ordinary
+ * arms — spends, so a receiver run from a getter behind `projected` is seen by
+ * the block rather than overwritten by the spend. A call made past a disabled
+ * control answers `null` here, exactly as the view withholds it. What no type
+ * forces is that a caller passes a reader ({@link ReadTheInstalledSession}).
+ *
  * @param session - The session to send from.
  * @param projected - The identity the projection this window holds **now**
  *   gives the snippet, or `null` when it holds no such snippet any more.
  *   Required, and nullable rather than defaulted: a default would be this
  *   function inventing agreement for a caller that did not look.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   checks the block on the session handed in — honest only for a caller that
+ *   registers no receiver, which is every caller today.
  * @returns The waiting session and what the command takes, or `null`.
  */
 export function beginDuplicate(
   session: MatchDuplicationSession,
-  projected: MatchId | null
+  projected: MatchId | null,
+  current: ReadTheInstalledSession | null = null
 ): StartedDuplication | null {
   const live =
     projected !== null &&
     sameIdentity(projected, session.match) &&
     sameIdentity(projected, session.draft.value);
+  // **The installed session, read once, after the last caller-controlled read.**
+  // A receiver run from a getter above has replaced it; a session that is no
+  // longer the one installed spends nothing.
+  const installed = current === null ? session : current();
   // **A closed session sends nothing.** A confirmed reload adopted the disk
   // projection and ended this panel, so its identities describe a parse the window
   // has crossed away from. No refusal *code* is added for it, and that is
   // deliberate: a code is a sentence on a screen, and a closed panel is not on one.
-  if (session.closed || refusalGiven(session, live) !== null) {
+  if (installed !== session || session.closed || refusalGiven(session, live) !== null) {
     return null;
   }
   const submission = submissionOf(session.draft);
@@ -857,19 +1155,39 @@ export function beginDuplicate(
  * The clone really is in the file; telling the person the duplicate failed
  * would invite a retry of a write that already happened (`PROGRESS.md` D2).
  *
- * @param session - The session waiting for an answer.
+ * **What it does about an external conflict, and about a delivery held during
+ * the duplicate** — Phase 2d-6-4, `applySave`'s rule in `./matchEditor.ts`. A
+ * `saved` or a `conflict` answer retires
+ * {@link MatchDuplicationSession.externalConflict} (the 2d-6 record's §3 entry
+ * 7: the duplicate's own answer is the newer fact about the file); a `refused`
+ * answer wrote nothing and leaves it standing. Neither is reachable from
+ * {@link beginDuplicate} while an external conflict stands, so this keeps the
+ * invariant for a caller that drove the model directly. Then, whatever the
+ * answer, every delivery {@link applyDuplicationObservation} held while the
+ * duplicate was in flight is replayed on top, in arrival order (entry 5) — **and,
+ * with a reader supplied, every delivery the receiver appended to the installed
+ * session during this transition's own reads and replay** (this phase's review,
+ * its second finding; `applyDeletion` in `./matchDeletion.ts` says why a replay
+ * runs caller code and what a missing reader costs). This module composes no
+ * send, so `MatchDuplicator.svelte` settles its live `session` after its own
+ * `await` and, from 2d-6-6, hands the reader beside it.
+ *
+ * @param session - The session waiting for an answer, as the caller holds it.
  * @param result - How the save ended, exactly as the transaction reported it.
  * @param adoption - What became of the adoption, from
  *   `BrowserState.duplicateMatch`. Required and not defaulted: a default would
  *   be this function inventing a `notOwed` for a caller that simply did not
  *   look — and since a `notOwed` is what keeps the session usable, that
  *   invention would be the defect rather than a shortcut.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   replays only what the session handed in holds.
  * @returns The session showing what the duplicate ended as.
  */
 export function applyDuplication(
   session: MatchDuplicationSession,
   result: SaveResult,
-  adoption: InvalidationStatus
+  adoption: InvalidationStatus,
+  current: ReadTheInstalledSession | null = null
 ): MatchDuplicationSession {
   const submission = session.submitted;
   if (submission === null) {
@@ -892,31 +1210,107 @@ export function applyDuplication(
   const duplicated = session.duplicated || committed;
   const invalidated = session.invalidated || committed || adoption.kind !== 'notOwed';
   if (result.outcome !== 'saved') {
-    return {
+    const refused = result.outcome === 'refused';
+    return consumingHeldDeliveries(
+      {
+        ...session,
+        phase: 'editing',
+        invalidated,
+        outcome,
+        extraMessages,
+        // **A new outcome resets the reload**, so a confirmation collected for an
+        // earlier conflict cannot be spent while this one is on screen.
+        reload: NOT_RELOADING,
+        sendFailure: null,
+        externalConflict: refused ? session.externalConflict : null,
+        uncertaintyUnresolved: refused ? session.uncertaintyUnresolved : false
+      },
+      current
+    );
+  }
+  return consumingHeldDeliveries(
+    {
       ...session,
-      phase: 'editing',
+      duplicated,
       invalidated,
+      landed: result.moved,
+      draft: savedDraft(session.draft, submission, result.revision),
+      phase: 'editing',
       outcome,
       extraMessages,
-      // **A new outcome resets the reload**, so a confirmation collected for an
-      // earlier conflict cannot be spent while this one is on screen.
       reload: NOT_RELOADING,
-      sendFailure: null
-    };
-  }
-  return {
-    ...session,
-    duplicated,
-    invalidated,
-    landed: result.moved,
-    draft: savedDraft(session.draft, submission, result.revision),
-    phase: 'editing',
-    outcome,
-    extraMessages,
-    reload: NOT_RELOADING,
-    sendFailure: null
-  };
+      sendFailure: null,
+      // The duplicate ended on the file, so the disk side an earlier observation
+      // showed is no longer the comparison to draw (entry 7).
+      externalConflict: null,
+      uncertaintyUnresolved: false
+    },
+    current
+  );
 } // End of function applyDuplication()
+
+/**
+ * Whether one held list is the other with more appended: the same envelopes, by
+ * identity, in the same positions.
+ *
+ * A receiver appends and never reorders, so the installed session's list is the
+ * handed-in list with the deliveries that arrived since; a list that is not is
+ * one this transition cannot reason about and leaves alone.
+ *
+ * @param arrived - The installed session's list.
+ * @param replayed - The list already replayed.
+ * @returns `true` when `arrived` begins with every entry of `replayed`.
+ */
+function extendsTheReplayed(
+  arrived: readonly ObservationDelivery[],
+  replayed: readonly ObservationDelivery[]
+): boolean {
+  return replayed.every((delivery, at) => arrived[at] === delivery);
+} // End of function extendsTheReplayed()
+
+/**
+ * Replays every delivery a session held during its duplicate, in the order it
+ * arrived, once the duplicate's own answer is on it — the 2d-6 record's §3
+ * entry 5 — and then every delivery the receiver appended to the installed
+ * session while that was happening (this phase's review, its second finding).
+ *
+ * `consumingHeldDeliveries` in `./matchDeletion.ts`, for this session, which
+ * says why a replay runs caller code and what the extra round forces and cannot:
+ * each envelope goes through {@link applyDuplicationObservation} exactly as it
+ * would have on arrival, applied to the session the one before it left; after
+ * each round the installed session is read once and the envelopes it holds
+ * beyond the ones replayed are replayed too, in arrival order, until a read finds
+ * none; a list that is not an extension of the one replayed is left alone, and a
+ * getter that manufactures a fresh reading on every read does not come to rest.
+ *
+ * @param settled - The session with its duplicate's answer applied and its
+ *   phase back to `editing`.
+ * @param current - Reads the session the caller holds now, or `null`.
+ * @returns The session with every held delivery applied, or the same session
+ *   when none was held.
+ */
+function consumingHeldDeliveries(
+  settled: MatchDuplicationSession,
+  current: ReadTheInstalledSession | null
+): MatchDuplicationSession {
+  let queue = settled.heldDeliveries;
+  let replayed: MatchDuplicationSession = queue.length === 0 ? settled : { ...settled, heldDeliveries: [] };
+  let seen = 0;
+  for (;;) {
+    for (let at = seen; at < queue.length; at += 1) {
+      replayed = applyDuplicationObservation(replayed, queue[at]!);
+    } // End of the loop over the deliveries not yet replayed
+    seen = queue.length;
+    if (current === null) {
+      return replayed;
+    }
+    const arrived = current().heldDeliveries;
+    if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
+      return replayed;
+    }
+    queue = arrived;
+  } // End of the loop over the rounds of replay
+} // End of function consumingHeldDeliveries()
 
 /**
  * Records that the duplicate produced no outcome.
@@ -938,24 +1332,36 @@ export function applyDuplication(
  * `mayHaveWritten` in `../ipc/errors` from the very failure it hands on as
  * `reason`; a caller pairing an unrelated reason with a set flag is well-typed.
  *
- * @param session - The session waiting for an answer.
+ * The duplicate is over, so a delivery held while it was out is applied now: the
+ * settlement of an uncertain write arbitrates the held reading under that
+ * uncertainty, and its `raisedWithoutReload` is what this applies (entry 5), and
+ * with a reader every delivery appended to the installed session during the
+ * replay is applied too, for {@link applyDuplication}'s reason.
+ *
+ * @param session - The session waiting for an answer, as the caller holds it.
  * @param mayHaveWritten - Whether the file may already hold the clone.
  * @param reason - Why the command rejected, or `null` when nothing was sent
  *   and the boundary therefore has no rejection to hand on.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   replays only what the session handed in holds.
  * @returns The session, back to its resting state, with the right notice
  *   raised.
  */
 export function duplicationCouldNotBeSent(
   session: MatchDuplicationSession,
   mayHaveWritten: boolean,
-  reason: IpcFailure | null
+  reason: IpcFailure | null,
+  current: ReadTheInstalledSession | null = null
 ): MatchDuplicationSession {
-  return {
-    ...session,
-    phase: 'editing',
-    mayHaveWritten: session.mayHaveWritten || mayHaveWritten,
-    sendFailure: sendFailureOf(mayHaveWritten, reason)
-  };
+  return consumingHeldDeliveries(
+    {
+      ...session,
+      phase: 'editing',
+      mayHaveWritten: session.mayHaveWritten || mayHaveWritten,
+      sendFailure: sendFailureOf(mayHaveWritten, reason)
+    },
+    current
+  );
 } // End of function duplicationCouldNotBeSent()
 
 /**
@@ -992,6 +1398,17 @@ export function acknowledgeDuplicationFindings(
  * revision and conflict. The `sendFailure` it clears is the *message*; the
  * flags that spend the session are separate fields for exactly this reason.
  *
+ * **Nor does it erase an external block** — Phase 2d-6-4, the 2d-6 record's §3
+ * entry 9. {@link MatchDuplicationSession.externalConflict},
+ * {@link MatchDuplicationSession.uncertaintyUnresolved} and
+ * {@link MatchDuplicationSession.awaitingReconciliation} all survive this
+ * spread: what this dismisses under an external conflict is the save outcome's
+ * panel and the reload warning, and the conflict and both restrictions stand
+ * until an explicit resolution — the reload's confirmation, a reapply, or
+ * closing. What the spread forces is that the three fields are copied; what no
+ * type forces is that a later edit keeps them out of the literal, and the
+ * suite's case is what would notice.
+ *
  * @param session - The session showing an outcome.
  * @returns The session with nothing being said about the last attempt.
  */
@@ -1009,14 +1426,33 @@ export function dismissDuplicationOutcome(
 } // End of function dismissDuplicationOutcome()
 
 /**
+ * The conflict a reload may be asked about, or `null` when none may be — Phase
+ * 2d-6-4, the reload gate of the 2d-6 record's §3 entry 11 as one rule for the
+ * three reload steps below.
+ *
+ * Withheld under an unacknowledged write uncertainty, for the match editor's
+ * reason: a confirmed installation of bytes a write of this window may or may
+ * not have produced would settle silently what only the person can. The view
+ * withholds the control through the same fact, and the three transitions refuse
+ * it, so a call made past the withheld control changes nothing (entry 8).
+ *
+ * @param session - The session to ask about.
+ * @returns The conflict, or `null` when there is none or its reload is withheld.
+ */
+function reloadableConflictOf(session: MatchDuplicationSession): ConflictModel<MatchId> | null {
+  return session.uncertaintyUnresolved ? null : conflictOf(session);
+} // End of function reloadableConflictOf()
+
+/**
  * Asks to load the version on disk, which is the step **before** confirming.
  *
  * @param session - The session showing a conflict.
  * @returns The session at the warning, or the same session when no conflict is
- *   showing or one has already been asked about.
+ *   showing, one has already been asked about, or the reload is withheld
+ *   ({@link reloadableConflictOf}).
  */
 export function askToReloadDiskVersion(session: MatchDuplicationSession): MatchDuplicationSession {
-  const next = reloadAsked(conflictOf(session), session.reload);
+  const next = reloadAsked(reloadableConflictOf(session), session.reload);
   return next === null ? session : { ...session, reload: next };
 } // End of function askToReloadDiskVersion()
 
@@ -1031,7 +1467,7 @@ export function askToReloadDiskVersion(session: MatchDuplicationSession): MatchD
  * @returns The session holding the confirmation, or the same session.
  */
 export function confirmDiskReload(session: MatchDuplicationSession): MatchDuplicationSession {
-  const next = reloadConfirmed(conflictOf(session), session.reload);
+  const next = reloadConfirmed(reloadableConflictOf(session), session.reload);
   return next === null ? session : { ...session, reload: next };
 } // End of function confirmDiskReload()
 
@@ -1066,7 +1502,7 @@ export function reloadTheDiskVersion(
   session: MatchDuplicationSession,
   adopt: AdoptTheDiskVersion<MatchId>
 ): MatchDuplicationSession {
-  const spend = spendTheConfirmedReload(conflictOf(session), session.reload, adopt);
+  const spend = spendTheConfirmedReload(reloadableConflictOf(session), session.reload, adopt);
   if (spend === 'notAttempted') {
     return session;
   }
@@ -1088,16 +1524,203 @@ export function reloadTheDiskVersion(
     extraMessages: [],
     reload: NOT_RELOADING,
     sendFailure: null,
+    // The conflict of either origin is resolved by the reload that ends this
+    // session, and a closed session says nothing about any file any more.
+    externalConflict: null,
+    uncertaintyUnresolved: false,
+    awaitingReconciliation: new Map(),
     closed: true
   };
 } // End of function reloadTheDiskVersion()
 
 /**
+ * Takes the window's decision about one watcher observation — Phase 2d-6-4, the
+ * 2d-6 record's §3 entries 6, 7, 11 and 12.
+ *
+ * **The session's receiver, as a value**, in the shape `applyObservation` in
+ * `./matchEditor.ts` established: a component registers a function through
+ * `BrowserState.registerObservationReceiver` that calls this with the envelope and
+ * installs what comes back (the wiring is 2d-6-6's), and the decision is here so a
+ * suite can drive every arm without a window. It never re-arbitrates and reads
+ * none of the window's tables.
+ *
+ * **Every verdict has a named action, switched with a `never` terminus** (entry
+ * 11, plus the seventh arm Phase 2d-6-1b added):
+ *
+ * | Verdict | What this does, for a delivery about this session's file |
+ * |---|---|
+ * | `raised` | builds the external model from the observation and the retained draft |
+ * | `raisedWithoutReload` | the same, and records that the reload is withheld until the uncertainty is acknowledged |
+ * | `supersedes` | `supersedeConflict` over the conflict shown — its draft kept, its disk side replaced |
+ * | `coalesced` | keeps the model, its source identity and the reload step |
+ * | `notLater` | changes nothing |
+ * | `retained` | records the held observation as a restriction on sending; no disk comparison, no origin |
+ * | `writtenHere` | lifts the restriction recorded for that observation, and changes nothing else |
+ *
+ * **Which deliveries are about this session is decided by the observation's
+ * file**, read once: a session is opened over one file and a delivery about
+ * another can only end a wait recorded for that very observation, by identity,
+ * under that file's key — it raises nothing here, because a reload of it would
+ * adopt a file the person never named. A `retained` about another file records
+ * nothing. The envelope's two fields and the verdict's `kind` are read once
+ * each, before anything is decided.
+ *
+ * **Every replacing verdict resets the reload step and retires a save conflict**
+ * (entries 7 and 12): the confirmation collected for the conflict that was on
+ * screen must not be spendable against the one that replaced it, and a save
+ * conflict's outcome is retired so that only one conflict is active — a
+ * committed success or a refusal in `outcome` stays as history. A displayed
+ * reapply result is invalidated by the same transition, because `reapplyToShow`
+ * in `./reapply.ts` pairs a report to a session by identity and every replacing
+ * arm answers a new session. A duplicate holds no pending confirmation to
+ * withdraw. `supersedes` builds through `supersedeConflict` when a conflict is
+ * shown and through `describeExternalConflict` over the session's draft when
+ * none is; the `superseded` origin the verdict names is not compared with the
+ * shown conflict's — the envelope is the window's decision about the file, and
+ * a session that re-checked it would be arbitrating.
+ *
+ * **During this session's own duplicate the envelope is appended to the held
+ * list, not applied** (entry 5): see
+ * {@link MatchDuplicationSession.heldDeliveries}. A closed session takes
+ * nothing. **A spent session takes everything**: `duplicated`, `invalidated`
+ * and `mayHaveWritten` are facts about this session's identities, not about
+ * whether the file's state may be shown, so a conflict is recorded over a spent
+ * session too and the view says both.
+ *
+ * **What it forces and what it does not, in the same sentence.** It forces that
+ * every arm of `ObservationVerdict` has an action here — an eighth arm is a
+ * compile error at the terminus — and that no arm installs, adopts, spends or
+ * calls a command, which its signature cannot prove and the command spy at zero
+ * in `workspace.test.ts` does. It cannot force that a component registers it,
+ * over which files, or installs what it answers; nor that the envelope was sealed
+ * by the window rather than assembled by hand.
+ *
+ * @param session - The session.
+ * @param delivery - What the window decided, sealed with the observation.
+ * @returns The session after the decision, or the same session when the verdict
+ *   changes nothing about it.
+ */
+export function applyDuplicationObservation(
+  session: MatchDuplicationSession,
+  delivery: ObservationDelivery
+): MatchDuplicationSession {
+  if (session.closed) {
+    return session;
+  }
+  // **The caller-controlled reads, taken once and first.**
+  const observation = delivery.observation;
+  const kind = delivery.verdict.kind;
+  const file = observation.document;
+  if (session.phase === 'saving') {
+    return { ...session, heldDeliveries: [...session.heldDeliveries, delivery] };
+  }
+  // The decision about an awaited observation ends the wait for it, whatever
+  // the decision is and whichever file it is about; any other observation leaves
+  // every wait standing.
+  const waits = session.awaitingReconciliation;
+  const stillWaiting = waits.get(file) === observation ? withoutWait(waits, file) : waits;
+  const about = session.document === file;
+  const lifted = stillWaiting === waits ? session : { ...session, awaitingReconciliation: stillWaiting };
+  switch (kind) {
+    case 'retained':
+      // A `retained` ends no wait: a re-held reading is still held.
+      return about ? { ...session, awaitingReconciliation: withWait(waits, file, observation) } : session;
+    case 'writtenHere':
+    case 'coalesced':
+    case 'notLater':
+      return lifted;
+    case 'raised':
+    case 'supersedes':
+      return about ? replacedBy(session, observation, false, stillWaiting) : lifted;
+    case 'raisedWithoutReload':
+      return about ? replacedBy(session, observation, true, stillWaiting) : lifted;
+    default: {
+      const unreachable: never = kind;
+      return unreachable;
+    }
+  }
+} // End of function applyDuplicationObservation()
+
+/**
+ * The session after a verdict that puts a new origin in front of it.
+ *
+ * The shared body of the three replacing arms of
+ * {@link applyDuplicationObservation}, which documents what happens here; this
+ * is the one place the external model is built for this surface from a delivery.
+ *
+ * @param session - The session, not closed and not saving.
+ * @param observation - The observation the verdict is about.
+ * @param uncertaintyUnresolved - Whether the verdict was `raisedWithoutReload`.
+ * @param awaitingReconciliation - The waits still held after this delivery.
+ * @returns The session showing the new conflict.
+ */
+function replacedBy(
+  session: MatchDuplicationSession,
+  observation: ExternalConflictObservation,
+  uncertaintyUnresolved: boolean,
+  awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>
+): MatchDuplicationSession {
+  const shown = conflictOf(session);
+  const externalConflict =
+    shown === null
+      ? describeExternalConflict(observation, session.draft, CONFLICT_CAPABILITIES)
+      : supersedeConflict(shown, observation, CONFLICT_CAPABILITIES);
+  // A save conflict is retired with its submission (entry 7); a refusal or a
+  // success stays, as history, with the submission a refusal's consent needs.
+  const retiring = conflictArm(session.outcome) !== null;
+  return {
+    ...session,
+    externalConflict,
+    uncertaintyUnresolved,
+    awaitingReconciliation,
+    outcome: retiring ? null : session.outcome,
+    submitted: retiring ? null : session.submitted,
+    extraMessages: retiring ? [] : session.extraMessages,
+    // Entry 12: the confirmation collected for the conflict that was on screen is
+    // not spendable against this one, and the warning it was collected under must
+    // not stay on screen saying the wrong thing (the record's §5.7).
+    reload: NOT_RELOADING
+  };
+} // End of function replacedBy()
+
+/**
+ * Records that the person has reviewed the disk snapshot and the window has ended
+ * the uncertainty hold — Phase 2d-6-4, the 2d-6 record's §3 entries 14 and 15.
+ *
+ * `acknowledgeSnapshot` in `./matchEditor.ts`, for this session, taking the same
+ * two-valued callback: it rebuilds the conflict's availability and nothing else —
+ * the ordinary reload is offered again from its idle step and the reapply is no
+ * longer refused for the uncertainty — installing nothing, minting no consent and
+ * re-observing nothing. Asked at most once per call and only when there is
+ * something to end; a `refused` leaves the session unchanged. What it cannot see
+ * is a hold the window ended without a delivery, stated on
+ * {@link MatchDuplicationSession.uncertaintyUnresolved}.
+ *
+ * @param session - The session showing a conflict raised under uncertainty.
+ * @param acknowledge - The window's two acknowledgement members, composed.
+ * @returns The session with its reload and reapply available again, or the same
+ *   session.
+ */
+export function acknowledgeDuplicationSnapshot(
+  session: MatchDuplicationSession,
+  acknowledge: AcknowledgeTheUncertainty
+): MatchDuplicationSession {
+  const conflict = session.externalConflict;
+  if (session.closed || conflict === null || !session.uncertaintyUnresolved) {
+    return session;
+  }
+  if (acknowledge(conflict.source) !== 'acknowledged') {
+    return session;
+  }
+  return { ...session, uncertaintyUnresolved: false, reload: NOT_RELOADING };
+} // End of function acknowledgeDuplicationSnapshot()
+
+/**
  * Why a reapply of this duplication could not be carried out.
  *
- * **A code, never a sentence.** There is no key function for these yet, and that is
- * 2c-4b-2's boundary: nothing draws them, so 2c-4b-3 adds the accessors together
- * with the panel that renders them.
+ * **A code, never a sentence.** {@link duplicationReapplyObstacleKey} maps each
+ * arm to a dictionary key and `tDuplicationReapplyObstacle` in `../i18n` renders
+ * it.
  */
 export type DuplicationReapplyObstacle =
   | SharedReapplyObstacle
@@ -1106,6 +1729,47 @@ export type DuplicationReapplyObstacle =
       readonly kind: 'notDuplicable';
       /** Which refusal the newly parsed projection gives, as a code. */
       readonly reason: DuplicationRefusal;
+    }
+  | {
+      /**
+       * The external observation's correspondence could not be used to find the
+       * snippet — Phase 2d-6-4, the 2d-6 record's §3 entries 20 and 22.
+       *
+       * Five reasons, all about the evidence and never about the file: the
+       * reading carried no table, the table's base or disk revision is not this
+       * conflict's, or the table names this session's full base identity in no
+       * row or in more than one. Rendered through `tExternalEvidenceRefusal`.
+       */
+      readonly kind: 'externalEvidence';
+      /** Which negative claim about the evidence this is. */
+      readonly reason: ExternalEvidenceRefusal;
+    }
+  | {
+      /**
+       * Another accepted reading of the file has superseded the conflict's
+       * evidence, whichever origin it had (entry 22). Answered by the live
+       * standing-origin guard, asked last; rendered through `tSupersededEvidence`.
+       */
+      readonly kind: 'supersededEvidence';
+    }
+  | {
+      /**
+       * The conflict was raised while a write of this window's own had an unknown
+       * outcome, and the person has not acknowledged that (entries 11 and 22).
+       * Refused before any evidence is read; rendered through the uncertainty
+       * notice's own sentence.
+       */
+      readonly kind: 'writeOutcomeUnknown';
+    }
+  | {
+      /**
+       * The window holds a reading of this file it has not decided about (entries
+       * 8 and 11). A reapply hands back a session whose ordinary send is live, and
+       * one rebuilt over the adopted snapshot would carry no record of the wait;
+       * so it is refused before any evidence is read. Rendered through the
+       * retained notice's own sentence.
+       */
+      readonly kind: 'observationRetained';
     };
 
 /** What a reapply of this duplication became. */
@@ -1133,6 +1797,11 @@ export type DuplicationReapplyAttempt = ReapplyAttempt<
  * `notDuplicable` carries a {@link DuplicationRefusal}, which already has its own
  * sentences and its own accessor; the i18n layer composes the two.
  *
+ * **The four external-origin arms reuse sentences that already exist** (Phase
+ * 2d-6-4), each through its own key function so a renamed key is a compile error
+ * there and here at once; the terminus is `never`, so an arm with no key is one
+ * too. No sentence of this module's own was added.
+ *
  * @param obstacle - What stopped the reapply.
  * @returns The key holding that obstacle's sentence.
  */
@@ -1145,8 +1814,91 @@ export function duplicationReapplyObstacleKey(
     case 'correspondence':
     case 'evidenceNotATarget':
       return sharedReapplyObstacleKey(obstacle);
+    case 'externalEvidence':
+      return externalEvidenceRefusalKey(obstacle.reason);
+    case 'supersededEvidence':
+      return SUPERSEDED_EVIDENCE_KEY;
+    case 'writeOutcomeUnknown':
+      return externalConflictNoticeKey({ kind: 'writeOutcomeUnknown' });
+    case 'observationRetained':
+      return externalConflictNoticeKey({ kind: 'observationRetained' });
+    default: {
+      const unreachable: never = obstacle;
+      return unreachable;
+    }
   }
 } // End of function duplicationReapplyObstacleKey()
+
+/**
+ * The guard {@link reapplyToDiskVersion} uses when its caller hands none in.
+ *
+ * `unaskedGuard` in `./matchEditor.ts`, for this session: it answers the shown
+ * conflict's own origin, so the supersession question the entry asks last is
+ * answered *yes, it stands* without the window being asked. It exists so that the
+ * one component caller, which 2d-6-4 may not touch, keeps its save-origin reapply
+ * exactly as it was; what it costs is stated on the caller.
+ *
+ * @param conflict - The conflict shown, or `null`.
+ * @returns A guard that never asks the window.
+ */
+function unaskedGuard(conflict: ConflictModel<MatchId> | null): StandingOriginGuard {
+  const source: ConflictSource | null = conflict === null ? null : conflict.source;
+  return (): ConflictSource | null => source;
+} // End of function unaskedGuard()
+
+/**
+ * The snippet one conflict's evidence names for this duplicate, or why it names
+ * none — the origin switch of {@link reapplyToDiskVersion}, Phase 2d-6-4.
+ *
+ * **Four arms in, and each has its own answer** (the 2d-6 record's §3 entry 19).
+ * Save evidence is read through `subjectCorrespondence`, as it always was. An
+ * external table is searched through `correspondenceRowFor` for this session's
+ * **full** base identity — document, base revision and node, never an array index
+ * and never the node alone (entry 20) — and the found row's `exact` tier is read
+ * through `subjectResolution`, exactly once: the clone must be of the newly
+ * adopted item's own bytes, and the flexible `editor` tier is not looked at. A
+ * refused table or row resolves to manual resolution with
+ * `tExternalEvidenceRefusal`'s sentence, superseded evidence with
+ * `tSupersededEvidence`'s (entry 22). Nothing here is cast: a row is a row and a
+ * `ReapplyEvidence` is a `ReapplyEvidence`.
+ *
+ * @param evidence - What `enterReapply` found the conflict's origin to offer.
+ * @param base - This session's snippet, by the identity the base snapshot minted.
+ * @returns The subject to work from, or the manual resolution to answer with.
+ */
+function subjectOfEvidence(
+  evidence: ReapplyEvidenceAccess,
+  base: MatchId
+): SubjectCorrespondence | Extract<MatchDuplicationReapply, { kind: 'manualResolution' }> {
+  switch (evidence.kind) {
+    case 'saveEvidence':
+      return subjectCorrespondence(evidence.evidence);
+    case 'externalCorrespondence': {
+      const row = correspondenceRowFor(evidence.correspondences, base);
+      if (row.kind === 'refused') {
+        return {
+          kind: 'manualResolution',
+          obstacle: { kind: 'externalEvidence', reason: row.reason }
+        };
+      }
+      // **The row's exact tier, read once.** `exact` is the one field of the row
+      // this surface reads; `editor` is the match editor's flexible tier and is
+      // not looked at for a duplicate.
+      return subjectResolution(row.entry.exact);
+    }
+    case 'refused':
+      return {
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: evidence.reason }
+      };
+    case 'superseded':
+      return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+    default: {
+      const unreachable: never = evidence;
+      return unreachable;
+    }
+  }
+} // End of function subjectOfEvidence()
 
 /**
  * Reissues this duplication against the newly parsed disk version.
@@ -1154,7 +1906,10 @@ export function duplicationReapplyObstacleKey(
  * **Strict exact correspondence and nothing weaker**, which is the consult's Q4:
  * the clone must be of *the newly adopted item's own bytes*, so a snippet that
  * merely still spells its trigger the same way is not enough. The tier is
- * 2c-4b-1's and is chosen by `duplicate_match`, which asks for `ExactItem`.
+ * 2c-4b-1's and is chosen by `duplicate_match`, which asks for `ExactItem`. **The
+ * external origin takes the same tier**, off the table's row for this session's
+ * full base identity (the 2d-6 record's §3 entry 20), read through
+ * {@link subjectOfEvidence}.
  *
  * **What is duplicated is the identified snippet as the file now writes it**, not a
  * stale copy and never a projection rendering: the session handed back names the
@@ -1173,6 +1928,39 @@ export function duplicationReapplyObstacleKey(
  * makes the evidence `AmbiguousExact` — so the honest answers are a rebuilt session
  * or a refusal.
  *
+ * **Both origins since Phase 2d-6-4, through one entry** (entries 19, 20 and 22):
+ * `enterReapply` in `./reapply.ts` answers `reapplyEvidenceFor`'s four arms and
+ * {@link subjectOfEvidence} switches over them. **Two refusals come before the
+ * entry, so a blocked session reads no evidence at all** (this phase's review,
+ * its fourth finding — the entry reads the observation's table): an
+ * unacknowledged write uncertainty (entry 22 — a reapply ends in an adoption,
+ * which the uncertainty withholds, so adoption may not be obtained here
+ * indirectly) and a reading the window holds undecided (entry 8 — a session
+ * rebuilt over the adopted snapshot would carry no record of the wait, and the
+ * blocked send would go through it). The view withholds the control through the
+ * same facts; these are the rules for a call made past it.
+ *
+ * **The two blocks and the conflict's identity are asked again of the installed
+ * session, once, immediately before the adoption** (this phase's review, its
+ * third finding; `reapplyToDiskVersion` in `./matchDeletion.ts` says why every
+ * read between the entry and the door is a read of caller data): refused
+ * `observationRetained` or `writeOutcomeUnknown` when the installed session now
+ * carries either, `supersededEvidence` when the conflict it shows is no longer
+ * the one being reapplied; otherwise the rebuilt session carries the
+ * **installed** session's waits forward, for `rebuiltOver`'s reason in
+ * `./matchEditor.ts`. Without a reader the recheck is asked of the session handed
+ * in ({@link ReadTheInstalledSession} says who owes the reader).
+ *
+ * **The standing-origin guard is a parameter, and it is optional for one stated
+ * reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s:
+ * `MatchDuplicator.svelte` calls this with three arguments and 2d-6-4 touches no
+ * component. When no guard is handed in the supersession question is not asked
+ * here; what still refuses a superseded origin on that path is
+ * `adoptDiskVersion`'s fourth check, at the door, answered `adoptionRefused`
+ * without the typed sentence. An omitted guard costs a sentence and some work,
+ * never a wrong installation. 2d-6-6, which hands the live closure down, may make
+ * the parameter required.
+ *
  * @param session - The session showing the conflict.
  * @param unsavedDraftInDocument - Whether this window has a match editor open over
  *   **any** snippet of that file, dirty or not. Required for
@@ -1180,18 +1968,39 @@ export function duplicationReapplyObstacleKey(
  *   answer is about this window now rather than about the parse that was replaced.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
  *   all on a refusal.
+ * @param standing - Asks what origin stands for the file **now**;
+ *   `() => browser.standingConflictFor(document)` is the honest closure. `null`,
+ *   the default, asks nothing — see above for what that costs.
+ * @param current - Reads the session the caller holds now, for the recheck
+ *   before the adoption. `null`, the default, rechecks the session handed in.
  * @returns What became of the attempt.
  */
 export function reapplyToDiskVersion(
   session: MatchDuplicationSession,
   unsavedDraftInDocument: boolean,
-  adopt: AdoptTheDiskVersion<MatchId>
+  adopt: AdoptTheDiskVersion<MatchId>,
+  standing: StandingOriginGuard | null = null,
+  current: ReadTheInstalledSession | null = null
 ): MatchDuplicationReapply {
-  const start = beginReapply(CONFLICT_CAPABILITIES, conflictOf(session));
-  if (start.kind !== 'ready') {
-    return start;
+  const conflict = conflictOf(session);
+  if (conflict !== null) {
+    // **Before the entry, which reads the evidence.** A blocked session reads
+    // none of it.
+    if (session.uncertaintyUnresolved) {
+      return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+    }
+    if (awaitedFor(session) !== null) {
+      return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+    }
   }
-  const subject = subjectCorrespondence(start.evidence);
+  const entry = enterReapply(CONFLICT_CAPABILITIES, conflict, standing ?? unaskedGuard(conflict));
+  if (entry.kind !== 'ready') {
+    return entry;
+  }
+  const subject = subjectOfEvidence(entry.evidence, session.match);
+  if (subject.kind === 'manualResolution') {
+    return subject;
+  }
   if (subject.kind === 'refused') {
     return {
       kind: 'manualResolution',
@@ -1201,21 +2010,33 @@ export function reapplyToDiskVersion(
   if (subject.kind === 'noSubject') {
     return { kind: 'manualResolution', obstacle: { kind: 'evidenceNotATarget' } };
   }
-  const rebuilt = startMatchDuplication(
-    start.conflict.disk,
-    subject.target,
-    unsavedDraftInDocument
-  );
-  if (rebuilt.eligibility.kind !== 'duplicable') {
+  const fresh = startMatchDuplication(entry.conflict.disk, subject.target, unsavedDraftInDocument);
+  if (fresh.eligibility.kind !== 'duplicable') {
     return {
       kind: 'manualResolution',
-      obstacle: { kind: 'notDuplicable', reason: rebuilt.eligibility.reason }
+      obstacle: { kind: 'notDuplicable', reason: fresh.eligibility.reason }
     };
   }
-  if (adoptForReapply(start.conflict, adopt) === 'refused') {
+  // **The installed session, read once, after the last caller-controlled read
+  // and immediately before the spend.** Nothing caller-controlled runs between
+  // this read and the door.
+  const installed = current === null ? session : current();
+  if (installed.uncertaintyUnresolved) {
+    return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+  }
+  if (awaitedFor(installed) !== null) {
+    return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+  }
+  if (conflictOf(installed)?.source !== entry.conflict.source) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  if (adoptForReapply(entry.conflict, adopt) === 'refused') {
     return { kind: 'adoptionRefused' };
   }
-  return { kind: 'reapplied', session: rebuilt };
+  return {
+    kind: 'reapplied',
+    session: { ...fresh, awaitingReconciliation: installed.awaitingReconciliation }
+  };
 } // End of function reapplyToDiskVersion()
 
 /**
@@ -1336,6 +2157,58 @@ export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   reapplySupport: 'supported'
 };
 
+/**
+ * What this surface offers about the conflict it is showing **now**, derived from
+ * the declaration and two facts about the session — Phase 2d-6-4, the 2d-6
+ * record's §3 entry 11.
+ *
+ * The declaration above is permanent; this is the "effective capabilities" the
+ * consult's Q3 names. The reload and the reapply are both withheld under an
+ * unacknowledged write uncertainty, for the match editor's reason. The reapply
+ * alone is withheld while the window holds an undecided reading, because it
+ * hands back a session whose ordinary send is live; the reload is not, because
+ * it closes the session and sends nothing. It feeds `conflictChoicesFor`, which
+ * stays the only producer of a choice list; what this cannot force is that the
+ * transitions honour the same facts, which is why each asks
+ * {@link reloadableConflictOf} or the fields themselves.
+ *
+ * @param session - The session to derive for.
+ * @returns The capabilities to offer choices from.
+ */
+function effectiveCapabilitiesOf(session: MatchDuplicationSession): ConflictCapabilities {
+  const reloadWithheld = session.uncertaintyUnresolved;
+  const reapplyWithheld = reloadWithheld || awaitedFor(session) !== null;
+  if (!reloadWithheld && !reapplyWithheld) {
+    return CONFLICT_CAPABILITIES;
+  }
+  return {
+    ...CONFLICT_CAPABILITIES,
+    offersReload: !reloadWithheld,
+    offersReapply: !reapplyWithheld
+  };
+} // End of function effectiveCapabilitiesOf()
+
+/**
+ * The notices one session owes, in the order the stronger claim comes first.
+ *
+ * The uncertainty first, because it is the one state under which the conflict on
+ * screen offers neither way to the disk version, and the held observation second.
+ * Each is answered from one session field and nothing is read twice.
+ *
+ * @param session - The session to describe.
+ * @returns The codes, possibly none.
+ */
+function externalNoticesOf(session: MatchDuplicationSession): readonly ExternalConflictNotice[] {
+  const notices: ExternalConflictNotice[] = [];
+  if (session.externalConflict !== null && session.uncertaintyUnresolved) {
+    notices.push({ kind: 'writeOutcomeUnknown' });
+  }
+  if (awaitedFor(session) !== null) {
+    notices.push({ kind: 'observationRetained' });
+  }
+  return notices;
+} // End of function externalNoticesOf()
+
 /** Everything a screen needs about one duplication, derived on every read. */
 export interface MatchDuplicationView {
   /** The snippet this is about. */
@@ -1400,6 +2273,23 @@ export interface MatchDuplicationView {
   /** The outcome's lines followed by anything to be said beside them. */
   readonly messages: readonly SaveOutcomeMessage[];
   /**
+   * The external conflict's own lines, or none — Phase 2d-6-4.
+   *
+   * Beside {@link MatchDuplicationView.messages} and never merged into it, for
+   * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
+   * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
+   * twice. Rendered through `tConflictMessage`. No component reads it yet;
+   * 2d-6-7 does.
+   */
+  readonly externalMessages: readonly ConflictMessage[];
+  /**
+   * The lines owed while an observation cannot be acted on — Phase 2d-6-4.
+   *
+   * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
+   * own fields. No component reads it yet; 2d-6-7 and 2d-6-9 do.
+   */
+  readonly externalNotices: readonly ExternalConflictNotice[];
+  /**
    * The presentation changes a saved arm disclosed, in report order.
    *
    * **Always empty for a duplicate, and that is read off the core rather than
@@ -1414,7 +2304,7 @@ export interface MatchDuplicationView {
   readonly refusalChoices: readonly RawSaveChoice[];
   /** Whether the findings on screen are about a candidate that has since changed. */
   readonly findingsAreStale: boolean;
-  /** The conflict being shown, or `null`. */
+  /** The conflict being shown, of either origin, or `null`. */
   readonly conflict: ConflictModel<MatchId> | null;
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
@@ -1534,8 +2424,10 @@ export function matchDuplicationView(
   const conflictChoices =
     conflict === null
       ? []
-      : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload));
+      : conflictChoicesFor(effectiveCapabilitiesOf(session), offeredReloadStep(session.reload));
   const cannotDuplicate = duplicationSubmissionRefusal(session, views);
+  const externallyBlocked = session.externalConflict !== null || awaitedFor(session) !== null;
+  const refusalChoices = offeredRefusalChoices(refused, stale);
   return {
     match: session.match,
     document: session.document,
@@ -1551,8 +2443,16 @@ export function matchDuplicationView(
     recovery: duplicationRecoveryChoices(session.sendFailure?.reason ?? null),
     outcome,
     messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
+    externalMessages: session.externalConflict === null ? [] : session.externalConflict.messages,
+    externalNotices: externalNoticesOf(session),
     notes: saved === null ? [] : saved.notes,
-    refusalChoices: offeredRefusalChoices(refused, stale),
+    // The one offer a refusal panel may keep under an external block is the
+    // dismissal: `beginDuplicate` would answer `null` to the other, and a control
+    // that does nothing when pressed is the defect `conflictChoicesFor` exists to
+    // stop.
+    refusalChoices: externallyBlocked
+      ? refusalChoices.filter((choice) => choice === 'keepEditing')
+      : refusalChoices,
     findingsAreStale: refused !== null && stale,
     conflict,
     conflictChoices,
@@ -1591,6 +2491,12 @@ export function duplicationRefusalKey(reason: DuplicationRefusal): TranslationKe
 /**
  * The dictionary key holding one submission refusal's sentence.
  *
+ * **The two external blocks reuse sentences that already exist** (Phase 2d-6-4):
+ * the external origin's own first line for `externalConflict`, and the retained
+ * notice's for `observationRetained`, each through its own key function so a
+ * renamed key is a compile error there and here at once. No sentence of this
+ * module's own was added for either.
+ *
  * @param reason - Why the duplicate cannot be sent as things stand.
  * @returns The key holding that reason's sentence.
  */
@@ -1604,8 +2510,12 @@ export function duplicationSubmissionRefusalKey(
       return 'browser.matchDuplication.cannotDuplicate.alreadyDuplicated';
     case 'saveInFlight':
       return 'browser.matchDuplication.cannotDuplicate.saveInFlight';
+    case 'externalConflict':
+      return externalConflictMessageKey({ kind: 'fileChangedWhileOpen' });
     case 'conflict':
       return 'browser.matchDuplication.cannotDuplicate.conflict';
+    case 'observationRetained':
+      return externalConflictNoticeKey({ kind: 'observationRetained' });
     case 'outOfDate':
       return 'browser.matchDuplication.cannotDuplicate.outOfDate';
     case 'notDuplicable':

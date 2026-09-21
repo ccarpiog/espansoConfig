@@ -64,26 +64,48 @@ import type {
   ReconciliationUnlisten,
   ReconciliationWakeHandler
 } from '../ipc/events';
+import type { CorrespondenceEntry } from '../ipc/types';
 import type { ForegroundSource } from './reconciliationCoordinator';
 import {
   applyDeletion,
+  applyDeletionObservation,
+  askToReloadDiskVersion as askDeletionToReloadDiskVersion,
   baseRevisionOf as deletionBaseRevisionOf,
+  canRequestDelete,
   confirmDelete,
+  confirmDiskReload as confirmDeletionDiskReload,
+  identityInProjection,
+  matchDeletionView,
   reapplyToDiskVersion,
+  reloadTheDiskVersion as reloadDeletionDiskVersion,
   requestDelete,
   startMatchDeletion,
   type MatchDeletionSession
 } from './matchDeletion';
 import {
   applyMove,
+  applyMoveObservation,
   baseRevisionOf,
   beginMove,
   canChoose,
+  canMove,
   choosePlacement,
   dismissMoveOutcome,
   matchMoveView,
-  startMatchMove
+  moveSubmissionRefusal,
+  reapplyToDiskVersion as reapplyMoveToDiskVersion,
+  startMatchMove,
+  type MatchMoveSession
 } from './matchMove';
+import {
+  applyDuplicationObservation,
+  beginDuplicate,
+  canDuplicate,
+  duplicationSubmissionRefusal,
+  matchDuplicationView,
+  startMatchDuplication,
+  type MatchDuplicationSession
+} from './matchDuplication';
 import {
   openWholeDocumentSave,
   type InvalidationStatus,
@@ -10884,6 +10906,498 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       return { current: () => session, off };
     } // End of function editorOverBase()
   }); // End of the "creator's and recovery form's external sessions" suite
+
+  describe('the deleter’s, mover’s and duplicator’s external sessions — Phase 2d-6-4', () => {
+    // **Three more receivers fed by the real window.** The deleter, the mover and
+    // the duplicator apply what `observeExternalChange`, a settlement or a retry
+    // seals, through `applyDeletionObservation` in `./matchDeletion.ts`,
+    // `applyMoveObservation` in `./matchMove.ts` and `applyDuplicationObservation`
+    // in `./matchDuplication.ts`, and ask the window's own doors. No component
+    // registers anything (2d-6-6's), and the route guard holds the command spy at
+    // zero through every transition.
+
+    /**
+     * The projection of `match/base.yml` with both snippets addressed as items of
+     * its list, which a move and a duplicate need and a deletion does not.
+     *
+     * @returns The projection, at the revision the window opens on.
+     */
+    function sequencedBase(): DocumentView {
+      return makeDocument({
+        id: 2,
+        relativePath: 'match/base.yml',
+        matches: [
+          makeMatch({ node: 10, document: 2, trigger: ':sig', label: 'Signature', path: matchListPath(0) }),
+          makeMatch({ node: 11, document: 2, trigger: ':date', label: 'Today', path: matchListPath(1) })
+        ]
+      });
+    } // End of function sequencedBase()
+
+    /**
+     * The same file as another writer left it: the two snippets under a new
+     * parse, still in one list, and a third after them.
+     *
+     * @returns The projection the observation carries.
+     */
+    function sequencedDisk(): DocumentView {
+      return makeDocument({
+        id: 2,
+        relativePath: 'match/base.yml',
+        revision: 'rev-c',
+        matches: [
+          makeMatch({ node: 40, document: 2, revision: 'rev-c', trigger: ':sig', path: matchListPath(0) }),
+          makeMatch({ node: 41, document: 2, revision: 'rev-c', trigger: ':date', path: matchListPath(1) }),
+          makeMatch({ node: 42, document: 2, revision: 'rev-c', trigger: ':new', path: matchListPath(2) })
+        ]
+      });
+    } // End of function sequencedDisk()
+
+    /** The scripted projections, with the base file sequenced. */
+    function sequencedDocuments(): ReadonlyMap<number, CommandResult<DocumentView>> {
+      return new Map<number, CommandResult<DocumentView>>([
+        [1, { ok: true, value: profileDocument() }],
+        [2, { ok: true, value: sequencedBase() }],
+        [3, { ok: true, value: otherDocument() }]
+      ]);
+    } // End of function sequencedDocuments()
+
+    /**
+     * A deleter over the first snippet of `match/base.yml`, registered as a
+     * receiver over its file.
+     *
+     * @param state - The window.
+     * @returns The live session, a reader, a setter and the unregister.
+     */
+    function deleterOver(state: BrowserState): {
+      readonly current: () => MatchDeletionSession;
+      readonly set: (next: MatchDeletionSession) => void;
+      readonly off: () => void;
+    } {
+      const base = state.views.find((view) => view.id === 2);
+      if (base === undefined) {
+        throw new Error('the window projects match/base.yml');
+      }
+      let session = startMatchDeletion(base, base.matches[0]!);
+      const off = state.registerObservationReceiver(2, (delivery) => {
+        session = applyDeletionObservation(session, delivery);
+      });
+      return {
+        current: () => session,
+        set: (next) => {
+          session = next;
+        },
+        off
+      };
+    } // End of function deleterOver()
+
+    it('raises over the deleter’s file through a registered receiver, withdraws the question, refuses both doors, and resolves through the real door', async () => {
+      const commands = scriptedCommands();
+      const state = await withTheSecondSnippetSelected(commands);
+      const deleter = deleterOver(state);
+      deleter.set(requestDelete(deleter.current()));
+      expect(deleter.current().pending).not.toBeNull();
+      const seen = externalObservation();
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+      const told = deleter.current();
+      expect(told.externalConflict?.source).toBe(state.standingConflictFor(2));
+      // Entry 12 through the window: the question is withdrawn, and neither door
+      // answers anything against the live projection.
+      expect(told.pending).toBeNull();
+      expect(canRequestDelete(told)).toBe(false);
+      expect(requestDelete(told)).toBe(told);
+      expect(confirmDelete(told, identityInProjection(state.views, told.match))).toBeNull();
+      expect(matchDeletionView(told).externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
+      expect(state.scopedDocument?.revision).toBe('rev-a');
+      expect(commands.deleteMatch).not.toHaveBeenCalled();
+      // The two-step reload adopts through the door and closes the session.
+      const closed = reloadDeletionDiskVersion(
+        confirmDeletionDiskReload(askDeletionToReloadDiskVersion(told)),
+        state.adoptDiskVersion
+      );
+      expect(closed.closed).toBe(true);
+      expect(closed.externalConflict).toBeNull();
+      expect(state.scopedDocument?.revision).toBe('rev-c');
+      expect(invoked).not.toHaveBeenCalled();
+      deleter.off();
+    }); // End of the "deleter raised through the receiver" case
+
+    it('settles a deletion against the session its receiver updated during the flight, replaying the held decisions in order', async () => {
+      // The editor's interleaving, for the deleter: the deletion is out; the
+      // barrier tells the installed session `retained(A)`; the refusal settles,
+      // delivering `raised(A)`; a sibling answers that by publishing a later
+      // reading of the same bytes, which the window decides `coalesced` — all
+      // before the `await` resumes. The caller settles the session it holds.
+      const answering = deferred<CommandResult<SaveResult>>();
+      const commands: BrowserCommands = {
+        ...scriptedCommands(),
+        deleteMatch: vi.fn(() => answering.promise)
+      };
+      const state = await withTheSecondSnippetSelected(commands);
+      const deleter = deleterOver(state);
+      const started = confirmDelete(
+        requestDelete(deleter.current()),
+        identityInProjection(state.views, deleter.current().match)
+      );
+      if (started === null) {
+        throw new Error('a confirmed deletion is sendable');
+      }
+      deleter.set(started.session);
+      const sending = state.deleteMatch(
+        started.match,
+        deletionBaseRevisionOf(started.session),
+        started.submission.acknowledgement
+      );
+      let republished = false;
+      const offSibling = state.registerObservationReceiver(2, (delivery) => {
+        if (delivery.verdict.kind === 'raised' && !republished) {
+          republished = true;
+          state.observeExternalChange({ ...externalObservation(), sequence: 6 });
+        }
+      });
+      const seen = externalObservation();
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('retained');
+      expect(deleter.current().externalConflict).toBeNull();
+      answering.resolve({
+        ok: true,
+        value: {
+          outcome: 'refused',
+          verdict: 'RefusedForUnacknowledgedSuspicions',
+          findings: [suspicion()]
+        }
+      });
+      const answer = await sending;
+      if (answer.kind !== 'answered') {
+        throw new Error('the scripted refusal is an answer');
+      }
+      const holding = deleter.current();
+      expect(holding.heldDeliveries.map((delivery) => delivery.verdict.kind)).toEqual([
+        'retained',
+        'raised',
+        'coalesced'
+      ]);
+      deleter.set(applyDeletion(holding, answer.result, answer.adoption));
+      const settled = deleter.current();
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(settled.externalConflict?.source).toBe(externalConflictSource(seen));
+      expect(settled.externalConflict?.source).toBe(state.standingConflictFor(2));
+      expect(settled.awaitingReconciliation.size).toBe(0);
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.pending).toBeNull();
+      expect(canRequestDelete(settled)).toBe(false);
+      expect(invoked).not.toHaveBeenCalled();
+      offSibling();
+      deleter.off();
+    }); // End of the "deletion settled against the current session" case
+
+    it('reapplies a move over the observation’s table by full identity for the subject and the anchor, through the live guard and the real door', async () => {
+      const commands = scriptedCommands({ documents: sequencedDocuments() });
+      const state = await withTheSecondSnippetSelected(commands);
+      const base = state.views.find((view) => view.id === 2);
+      if (base === undefined) {
+        throw new Error('the window projects match/base.yml');
+      }
+      // `:sig` on its way after `:date`, which really moves it.
+      let session: MatchMoveSession = choosePlacement(startMatchMove(base, base.matches[0]!, null), {
+        kind: 'after',
+        anchor: base.matches[1]!.id
+      });
+      expect(canMove(session, state.views)).toBe(true);
+      const off = state.registerObservationReceiver(2, (delivery) => {
+        session = applyMoveObservation(session, delivery);
+      });
+      const disk = sequencedDisk();
+      const seen: ExternalConflictObservation = {
+        ...externalObservation(),
+        disk,
+        correspondences: {
+          base_revision: 'rev-a',
+          disk_revision: 'rev-c',
+          entries: [
+            { base: base.matches[0]!.id, exact: { Identified: { target: disk.matches[0]! } }, editor: { Unsupported: {} } },
+            { base: base.matches[1]!.id, exact: { Identified: { target: disk.matches[1]! } }, editor: { Unsupported: {} } }
+          ]
+        }
+      };
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+      expect(session.externalConflict?.source).toBe(state.standingConflictFor(2));
+      expect(moveSubmissionRefusal(session, state.views)).toBe('externalConflict');
+      expect(beginMove(session, identityInProjection(state.views, session.match))).toBeNull();
+      expect(matchMoveView(session, state.views).conflictOperation).toBe('moveAfterSnippet');
+
+      const answer = reapplyMoveToDiskVersion(session, null, state.adoptDiskVersion, () =>
+        state.standingConflictFor(2)
+      );
+      expect(answer.kind).toBe('reapplied');
+      if (answer.kind !== 'reapplied') {
+        throw new Error('this case is about the rebuilt session');
+      }
+      // The subject and the anchor were both followed by their own rows, and the
+      // rebuilt move is one move, sendable against the live projection.
+      expect(answer.session.match).toEqual(disk.matches[0]!.id);
+      expect(answer.session.draft.value).toEqual({ kind: 'after', anchor: disk.matches[1]!.id });
+      expect(state.scopedDocument?.revision).toBe('rev-c');
+      expect(state.scopedMatches.map((match) => match.id.node)).toEqual([40, 41, 42]);
+      expect(canMove(answer.session, state.views)).toBe(true);
+      const started = beginMove(answer.session, identityInProjection(state.views, answer.session.match));
+      expect(started?.after).toEqual(disk.matches[1]!.id);
+      expect(commands.moveMatch).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      off();
+    }); // End of the "move reapplied through the live guard" case
+
+    it('tells the duplicator retained through the barrier, blocks the send, then the settlement’s verdict, and lifts a writtenHere', async () => {
+      const held = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null,
+        replacedDocument(),
+        { documents: sequencedDocuments() }
+      );
+      const state = await withTheSecondSnippetSelected(held.commands);
+      const base = state.views.find((view) => view.id === 2);
+      if (base === undefined) {
+        throw new Error('the window projects match/base.yml');
+      }
+      let session: MatchDuplicationSession = startMatchDuplication(base, base.matches[0]!, false);
+      expect(canDuplicate(session, state.views)).toBe(true);
+      const off = state.registerObservationReceiver(2, (delivery) => {
+        session = applyDuplicationObservation(session, delivery);
+      });
+      const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      const seen = externalObservation();
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('retained');
+      expect(session.awaitingReconciliation.get(2)).toBe(seen);
+      expect(duplicationSubmissionRefusal(session, state.views)).toBe('observationRetained');
+      expect(beginDuplicate(session, identityInProjection(state.views, session.match))).toBeNull();
+      expect(matchDuplicationView(session, state.views).externalNotices).toEqual([{ kind: 'observationRetained' }]);
+      expect(await state.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'observationRetained',
+        at: 'request'
+      });
+      held.release();
+      await sending;
+      expect(session.awaitingReconciliation.size).toBe(0);
+      expect(session.externalConflict?.source).toBe(externalConflictSource(seen));
+      expect(duplicationSubmissionRefusal(session, state.views)).toBe('externalConflict');
+      expect(held.commands.duplicateMatch).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      off();
+
+      // `writtenHere`: a held reading of the bytes the commit ended on lifts the
+      // wait and raises nothing.
+      const committing = heldRawSave(
+        {
+          ok: true,
+          value: { outcome: 'saved', revision: 'rev-c', committed: true, backup_taken: false, moved: null, notes: [] },
+          reload: { kind: 'done' }
+        },
+        'rev-c',
+        replacedDocument(),
+        { documents: sequencedDocuments() }
+      );
+      const window = await withTheSecondSnippetSelected(committing.commands);
+      const listening = window.views.find((view) => view.id === 2);
+      if (listening === undefined) {
+        throw new Error('the window projects match/base.yml');
+      }
+      let later: MatchDuplicationSession = startMatchDuplication(listening, listening.matches[0]!, false);
+      const offLater = window.registerObservationReceiver(2, (delivery) => {
+        later = applyDuplicationObservation(later, delivery);
+      });
+      const writing = window.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      const same = externalObservation();
+      window.observeExternalChange(same);
+      expect(later.awaitingReconciliation.get(2)).toBe(same);
+      committing.release();
+      await writing;
+      expect(later.awaitingReconciliation.size).toBe(0);
+      expect(later.externalConflict).toBeNull();
+      expect(window.standingConflictFor(2)).toBeNull();
+      expect(invoked).not.toHaveBeenCalled();
+      offLater();
+    }); // End of the "duplicator retained then decided" case
+
+    it('refuses a confirmation whose projection read let the window displace the installed session (the review’s first blocker)', async () => {
+      // **The reviewer's interleaving, through the real door.** The identity a
+      // caller hands `confirmDelete` is read through property access; a getter
+      // behind its `document` tells the window of a reading, and the window's
+      // registered receiver replaces the installed session with one carrying the
+      // conflict. The confirmation must be refused against that session, not
+      // spent against the one captured before the read.
+      const commands = scriptedCommands();
+      const state = await withTheSecondSnippetSelected(commands);
+      const deleter = deleterOver(state);
+      deleter.set(requestDelete(deleter.current()));
+      const handedIn = deleter.current();
+      const seen = externalObservation();
+      const projected: MatchId = {
+        get document(): DocumentId {
+          state.observeExternalChange(seen);
+          return 2;
+        },
+        revision: 'rev-a',
+        node: 10
+      };
+      expect(confirmDelete(handedIn, projected, deleter.current)).toBeNull();
+      expect(deleter.current().externalConflict?.source).toBe(state.standingConflictFor(2));
+      expect(deleter.current().pending).toBeNull();
+      expect(commands.deleteMatch).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      deleter.off();
+    }); // End of the "confirmation displaced through the window" case
+
+    it('replays a delivery the window made during the settlement replay, against the installed session (the review’s second blocker)', async () => {
+      // **The reviewer's interleaving, through the real window.** The deletion is
+      // out; the barrier tells the installed session `retained(A)`; the refusal
+      // settles and `raised(A)` is delivered; both are held. While the settlement
+      // replays A, a getter behind A's `document` tells the window of a later
+      // reading B; the window delivers it at once to the installed session, still
+      // `saving`, where the receiver appends it. The settled session must carry B.
+      const answering = deferred<CommandResult<SaveResult>>();
+      const commands: BrowserCommands = {
+        ...scriptedCommands(),
+        deleteMatch: vi.fn(() => answering.promise)
+      };
+      const state = await withTheSecondSnippetSelected(commands);
+      const deleter = deleterOver(state);
+      const started = confirmDelete(
+        requestDelete(deleter.current()),
+        identityInProjection(state.views, deleter.current().match)
+      );
+      if (started === null) {
+        throw new Error('a confirmed deletion is sendable');
+      }
+      deleter.set(started.session);
+      const sending = state.deleteMatch(
+        started.match,
+        deletionBaseRevisionOf(started.session),
+        started.submission.acknowledgement
+      );
+      let armed = false;
+      const later: ExternalConflictObservation = {
+        ...externalObservation(),
+        sequence: 6,
+        diskRevision: 'rev-d',
+        disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+      };
+      const seen: ExternalConflictObservation = {
+        ...externalObservation(),
+        get document(): DocumentId {
+          if (armed) {
+            armed = false;
+            state.observeExternalChange(later);
+          }
+          return 2;
+        }
+      };
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('retained');
+      answering.resolve({
+        ok: true,
+        value: {
+          outcome: 'refused',
+          verdict: 'RefusedForUnacknowledgedSuspicions',
+          findings: [suspicion()]
+        }
+      });
+      const answer = await sending;
+      if (answer.kind !== 'answered') {
+        throw new Error('the scripted refusal is an answer');
+      }
+      expect(deleter.current().heldDeliveries.map((delivery) => delivery.verdict.kind)).toEqual(['retained', 'raised']);
+      armed = true;
+      deleter.set(applyDeletion(deleter.current(), answer.result, answer.adoption, deleter.current));
+      expect(armed).toBe(false);
+      const settled = deleter.current();
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(settled.heldDeliveries).toEqual([]);
+      // B superseded A at the window, and the session shows B.
+      expect(state.standingConflictFor(2)).toBe(externalConflictSource(later));
+      expect(settled.externalConflict?.source).toBe(externalConflictSource(later));
+      expect(canRequestDelete(settled)).toBe(false);
+      expect(invoked).not.toHaveBeenCalled();
+      deleter.off();
+    }); // End of the "delivery during the settlement replay" case
+
+    it('refuses to adopt when a reading the window held arrived during the reapply’s evidence reads (the review’s third blocker)', async () => {
+      // **The reviewer's interleaving, through the real window.** Conflict A
+      // stands with a table; while the mover's reapply reads the anchor's row, a
+      // getter behind its exact tier starts another surface's raw save and tells
+      // the window of a reading B, which the barrier holds and delivers as
+      // `retained(B)` to the installed session. `adoptDiskVersion` has no
+      // write-in-flight guard, so a reapply that went on with the session it was
+      // handed would install A's snapshot and hand back a session with no wait.
+      const held = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null,
+        replacedDocument(),
+        { documents: sequencedDocuments() }
+      );
+      const state = await withTheSecondSnippetSelected(held.commands);
+      const base = state.views.find((view) => view.id === 2);
+      if (base === undefined) {
+        throw new Error('the window projects match/base.yml');
+      }
+      let session: MatchMoveSession = choosePlacement(startMatchMove(base, base.matches[0]!, null), {
+        kind: 'after',
+        anchor: base.matches[1]!.id
+      });
+      const off = state.registerObservationReceiver(2, (delivery) => {
+        session = applyMoveObservation(session, delivery);
+      });
+      const disk = sequencedDisk();
+      let sending: Promise<unknown> | null = null;
+      const laterReading: ExternalConflictObservation = {
+        ...externalObservation(),
+        sequence: 6,
+        diskRevision: 'rev-d',
+        disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+      };
+      const anchorRow: CorrespondenceEntry = {
+        base: base.matches[1]!.id,
+        get exact(): ReapplyResolution {
+          if (sending === null) {
+            sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+            expect(state.observeExternalChange(laterReading).verdict.kind).toBe('retained');
+          }
+          return { Identified: { target: disk.matches[1]! } };
+        },
+        editor: { Unsupported: {} }
+      };
+      const seen: ExternalConflictObservation = {
+        ...externalObservation(),
+        disk,
+        correspondences: {
+          base_revision: 'rev-a',
+          disk_revision: 'rev-c',
+          entries: [
+            { base: base.matches[0]!.id, exact: { Identified: { target: disk.matches[0]! } }, editor: { Unsupported: {} } },
+            anchorRow
+          ]
+        }
+      };
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+      const handedIn = session;
+      const answer = reapplyMoveToDiskVersion(
+        handedIn,
+        null,
+        state.adoptDiskVersion,
+        () => state.standingConflictFor(2),
+        () => session
+      );
+      expect(answer).toEqual({ kind: 'manualResolution', obstacle: { kind: 'observationRetained' } });
+      // Nothing adopted, and the wait the window delivered stands on the session.
+      expect(state.scopedDocument?.revision).toBe('rev-a');
+      expect(session.awaitingReconciliation.get(2)).toBe(laterReading);
+      expect(moveSubmissionRefusal(session, state.views)).toBe('externalConflict');
+      held.release();
+      if (sending !== null) {
+        await sending;
+      }
+      expect(held.commands.moveMatch).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      off();
+    }); // End of the "wait delivered during the reapply's reads" case
+  }); // End of the "deleter's, mover's and duplicator's external sessions" suite
 }); // End of the "deferred adoption" suite
 
 /**
