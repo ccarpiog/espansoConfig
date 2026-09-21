@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T12:58:04Z",
+ "updated": "2026-09-21T12:58:32Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -446,7 +446,8 @@
    "summary": "Adds the arbitration/delivery member with settlement publication, receiver registration, the person-requested retry, the one-shot uncertainty acknowledgement and per-file reload-guard state; rung 1323/447/2549/192.",
    "risk": "high",
    "review": "docs/reviews/phase-2d-6-1b.md — Codex, ship-with-fixes, 1 blocker, 2 SHOULD-FIX, all fixed",
-   "narrative": "docs/decisions/2d-6-1b-notes.md"
+   "narrative": "docs/decisions/2d-6-1b-notes.md",
+   "commit": "874f0ae"
   },
   {
    "id": "2d-6-1c",
