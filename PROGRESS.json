@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T08:30:41Z",
+ "updated": "2026-09-21T08:31:07Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -378,7 +378,8 @@
    "summary": "The hoisted core spy and file-wide route, coordinator, lease and exact drain-budget assertions land in three test files; the review found the queue finite in one direction only, fixed.",
    "risk": "high",
    "review": "docs/reviews/phase-2d-5-6.md",
-   "narrative": "docs/decisions/2d-5-6-notes.md"
+   "narrative": "docs/decisions/2d-5-6-notes.md",
+   "commit": "7605852"
   },
   {
    "id": "2d-5-7",
