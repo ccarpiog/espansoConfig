@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T10:10:59Z",
+ "updated": "2026-09-21T10:11:48Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -404,7 +404,8 @@
    "risk": "high",
    "summary": "The harness is rebuilt, and a real window shows the wake listener registers, the open drains once, and an external edit produces a drain carrying the observation; disposal on close is not shown.",
    "review": "docs/reviews/phase-2d-5-7b.md",
-   "narrative": "docs/decisions/2d-5-7b-window-reading.md"
+   "narrative": "docs/decisions/2d-5-7b-window-reading.md",
+   "commit": "6467ba8"
   },
   {
    "id": "2d-6-design",
