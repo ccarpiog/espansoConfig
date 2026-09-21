@@ -14188,3 +14188,173 @@ recorded residues, archived 2026-09-05 at Phase 2d-5-3-C"*. The one method rule 
 **`scripts/lint/ipc-detail.test.ts` generates its cases from `scannableFiles()`**, so its count moves
 when a file is merely *added* under the scanned roots — 2d-5-7a's `AppShell.test.ts` moved it 137 → 138
 — **re-derive a test count per file, on a pristine tree, never from the total.**
+
+
+## The Next-action section the 2d-6 design consult checkpoint replaced — archived 2026-09-21
+
+_Archived verbatim from `PROGRESS.md` when the 2d-6 design consult closed. The open items it lists (0-11) and the three obligations are restated in `docs/decisions/2d-6-split-notes.md` §7, which is now the live map of them._
+
+## Next action
+
+### Phase 2d-5-7b is complete and CLOSED, and with it step 7 and the whole of 2d-5. The next action is **the 2d-6 design consult** — 2d-6 put to a design consult before any line of it is written, per the standing rule since 2b-2c.
+
+**2d-6 — components, i18n and mounted evidence** is step 6 of the 2d consult
+([`docs/reviews/phase-2d-design.md`](docs/reviews/phase-2d-design.md) item 6, ~line 128): wire the
+coordinator through the shell/`DetailPane` and all seven write surfaces; draw the external-origin
+messages, the existing compare/copy/reapply/reload/recovery offers, watcher degradation, removal and
+unreadable states; every changed renderer gets mounted interaction coverage in English and Spanish. It
+is the step that **gives the 2d-5-5 pair its production callers** (open item 5 below) and the first
+since 2c to touch components at scale, which is why it goes to a consult first, exactly as 2d-4b and
+2d-5 did. **Executable cold**: (1) write `docs/decisions/2d-6-design-brief.md` in the shape of
+[`docs/decisions/2d-5-design-brief.md`](docs/decisions/2d-5-design-brief.md), from the consult item, the
+`2d-5-split-notes.md` §5 corrections to `phase-2d-design.md`, the three obligations 2d-5-5b handed on
+(below), the *where it is thin* lists of `2d-5-5b-notes.md` §6, `2d-5-7a-notes.md` §6 and
+`2d-5-7b-window-reading.md` §10, and open items 5, 8 and 9 below; (2) put it to **Codex at high
+effort** as `docs/reviews/phase-2d-6-design.md`; (3) record the result as
+`docs/decisions/2d-6-split-notes.md` with binding rulings and a citation audit, as
+[`2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) did; (4) that record gets the phase's one
+review; (5) then the first step it names. A consult touches no source.
+
+#### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
+
+`git status --short --untracked-files=all` shows **four uncommitted instrument paths**:
+
+```
+ M src-tauri/src/main.rs      two hook lines — `mod probe;` and `probe::register_with_probe(…)`
+ M src/main.ts                two hook lines — the `startProbe` import and its call
+?? src-tauri/src/probe.rs     the four probe IPC commands and the two external writers
+?? src/probe.ts               the Svelte-driving plan driver
+```
+
+**Do not commit them, do not revert them, and do not treat them as unaccounted-for work.** They are the
+temporary window-reading instrument (`docs/decisions/2c-5-5a-instrument-rebuild.md` §1); it is never
+committed, and 2d-8 deletes it. `git diff --stat` over the two hook files is `5 insertions(+), 1
+deletion(-)` and must stay that way. **Stage by path**: `PROGRESS.md`, `PROGRESS.json`, `docs/`,
+`src/lib/browser/`, `src/lib/i18n/`, and any `src-tauri/` or `src/lib/components/` file **by name** —
+never `src-tauri/src/` as a directory, which would sweep `probe.rs` and `main.rs` in. 2d-5-7a staged
+`src-tauri/src/dispatch_check.rs`, `events.rs`, `liveness_contract.rs` and `reconciliation.rs` by name
+for exactly this reason. **`src-tauri/src/main.rs:214-227` still says `"permissions": []`, which has
+been false since 2d-5-7a** — it was left because the file carries the instrument, and 2d-8, which
+deletes the hooks, corrects it (open item 7 below).
+
+
+#### What 2d-5-7b established, and what it did not
+
+The record is [`docs/decisions/2d-5-7b-window-reading.md`](docs/decisions/2d-5-7b-window-reading.md)
+(§1-§2 the rebuild, §3 the recorder, §4 the launches, §5 what is not proved, §10 where it is thin, §11
+the review). The harness is `/private/tmp/espansoconfig-harness-2d-5-7b/` — `launch.sh`, `inert.sh`,
+five fixtures, a post-manifest and twelve retained launches (`S01-S03` shakedowns, `L01-L07`,
+`N01-N02`); `confine.sh` and `adversary.sh` were **not** rebuilt. `src/probe.ts` grew an IPC recorder
+that wraps **`window.fetch`** (the `ipc://localhost/<cmd>` transport), because
+`window.__TAURI_INTERNALS__.invoke` is non-writable and non-configurable in `@tauri-apps/api` 2.11.5;
+it buffers until a plan is known and discards and restores with none. `src-tauri/src/probe.rs` changed
+only `HARNESS_ROOT`. **Established**: `plugin:event|listen` for `workspace://reconciliation-ready`
+resolved (`-> ok answer=0`) on every plan launch, an ACL refusal being what `L06`/`L07`'s
+`plugin:window|close -> error` shows the recorder can see; the open issued exactly one
+`drain_external_changes {"afterSequence":0}` answering an empty batch at `epoch=1`; after
+`probe_second_writer` replaced the watched file a **new** drain arrived, issued 263-275 ms and answered
+265-342 ms after the pre-writer timestamp, answering `observations=1 [Changed seq=1 … disk=<the
+fixture's SHA-256>]`, then `reload_document` — on `L03` (en), `L04` (es) and `L05` (a CRLF
+block-scalar fixture, the R38 shape); `N01`/`N02` wrote a zero-byte log, changed no byte, stayed alive
+to the kill. **Not established**: `dispose()` on window close — no `beforeunload`/`pagehide`/`unmount`
+path exists in `bootstrap.ts`, `App.svelte`, `AppShell.svelte` or `main.ts`, and a real `osascript`
+quit ended the process with no `plugin:event|unlisten` (bounded: teardown lines cannot flush); wake
+delivery is **inferred from timing**, never observed; nothing about the native-watcher matrix; nothing
+about what a window draws. Two binaries ran (`S01` on `15f44bbb…`, which found two driver defects;
+everything cited on `c163c487…`). The transcripts also show the `localStorage` language override
+crossing bundles (a second `set_menu_labels`), confirming `CLAUDE.md` §6.
+
+#### What 2d-5-5b and 2d-5-7a built, so 2d-6 does not re-derive it
+
+The accounts are [`docs/decisions/2d-5-5b-notes.md`](docs/decisions/2d-5-5b-notes.md) (§6 its
+fourteen-item *where it is thin* list) and [`docs/decisions/2d-5-7a-notes.md`](docs/decisions/2d-5-7a-notes.md)
+(§6 its ten). The two paragraphs that summarized them here were moved verbatim on 2026-09-21 to
+[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"What 2d-5-7a and
+2d-5-5b built, archived at 2d-5-7b"*. **Three obligations handed to 2d-6, kept here**: (1)
+`observeExternalChange` and `supersedeConflict` have no production caller; wiring the arbitration in
+front of `tellTheSurfaceAbout` needs a new `ReconciliationWorkspace` member and a decision about what a
+`retained` verdict does to a surface (5b §6 items 2 and 7). (2) An exception-safe close charges a
+`mayHaveWritten` uncertainty only a later write can clear, and there is no surface to clear it because
+the panel is 2d-6's (5b §6 items 4 and 13). (3) A verdict decided against a state that moved underneath
+it retains its observation and may never be looked at again; a bounded re-arbitration is a deliberate
+later decision (5b §6 item 14).
+
+#### Open items, carried forward for a later phase to take deliberately
+
+**0 — the withdrawn round's review is kept as a record.** `docs/reviews/phase-2d-5-4-H.md`: Codex's
+static review of 2d-5-4-G's fix, `ship-with-fixes`, 0 blockers, 5 SHOULD-FIX — two injected-property-read
+windows (`observationTransitions.ts:1544`, `reconciliationCoordinator.ts:947`; not production-reachable,
+because wire values are JSON-parsed plain objects), two contract comments (`reconciliationCoordinator.ts:929`
+and `:1027`) and one record passage (`docs/reviews/phase-2d-5-2a.md:28`). None commissions a round.
+**2d-5-7a edited `reconciliationCoordinator.ts`'s prose**, so the two line numbers there have drifted;
+the sentences have not been touched.
+
+**1 — four cross-file `file:line` citations in comments under `src/` were stale as of 2026-09-05**
+(`browser/reapply.ts:612` and `:613`, `browser/writeSurfaceRegistry.ts:231`, `browser/restore.test.ts:2504`);
+the class is drift. The measurement is `2d-5-2b-notes.md` §17.3-§17.4. The cheap durable guard is a
+checker that resolves `file:line` references in comments; nothing pins one. Both `2d-5-6-notes.md` §2
+and `2d-5-7a-notes.md` cite line numbers on the 2026-09-21 tree and will drift.
+
+**2 — S11's partial-application window.** `accept()` advances `watermark` above the observation
+loop, so a throw from a host member at observation *k* leaves observations *k* … *n* never fetched
+again and uncounted. Recorded, not actionable until a phase rules on a half-applied batch.
+`2d-5-4-G-notes.md` §7 and §9 item 9.
+
+**3 — the save arm of `reapplyEvidenceFor` still hands its evidence back by identity.** The external
+arm was hardened twice; `saveReapplyEvidence` is the same class, `2d-5-5a-notes.md` §8 item 9.
+
+**4 — `expected?: never` was measured and not applied.** `2d-5-5a-notes.md` §8 item 10.
+
+**5 — seven surfaces of the 2d-5-5 pair have no production caller yet, as designed** —
+`describeExternalConflict`, `rememberExternalConflict`, `reapplyEvidenceFor`'s external arm, three
+dictionary entries and `tExternalEvidenceRefusal` (2d-5-5a); `observeExternalChange` and
+`supersedeConflict` (2d-5-5b). Reached by tests alone until 2d-6 draws the origin. **Since 2d-5-7a the
+coordinator itself runs in production** — `start()` registers and the real source delivers — so the
+drain path is live and the *arbitration* path is the part still test-only.
+
+**6 — the route-guard closure's own residue** (`2d-5-6-notes.md` §5 and §6): closed in three files,
+nothing in Vitest prevents a fourth from importing `$lib/ipc/commands` with no spy. **`AppShell.test.ts`
+is that fourth file, and it deliberately does not carry the exact-zero rule** — it mounts the real
+composition, so its `afterEach` asserts the exact `invoke` list per case instead (`2d-5-7a-notes.md`
+§3). A later reader must not "fix" it to zero.
+
+**7 — `src-tauri/src/main.rs:214-227` claims `"permissions": []`**, false since 2d-5-7a and left because
+the file carries the instrument hooks; 2d-8 corrects it when it deletes them (`2d-5-7a-notes.md` §8).
+
+**8 — the production foreground source is inert.** `AppShell` passes `INERT_FOREGROUND_EVENTS`
+because no real `ForegroundSource` exists: a window coming to the foreground or a machine resuming
+requests no drain today. Building one (DOM `visibilitychange` plus focus, or Tauri's
+`onFocusChanged`) is one module and one deliberate phase, not a fix (`2d-5-7a-notes.md` §6.1).
+
+**9 — `workspace.svelte.ts:346-349`'s doc on `drainExternalChanges` says "Nothing in this file calls
+it"**, stale since 2d-5-3 and noticed, not fixed, by 2d-5-7a (`2d-5-7a-notes.md` §8.2).
+
+**10 — no window-close path in this application runs `dispose()`** (`2d-5-7b-window-reading.md` §4.5,
+§5). The `onMount` cleanup of 2d-5-7a runs on unmount, and nothing unmounts on quit: the process ends
+with the listener registered. Harmless today (the process is gone), but a later phase that wants an
+orderly `unlisten` before quit — or a `pagehide` hook — takes it deliberately; the 7b record's §10
+item 4 names the cheap probe for whether WKWebView fires `pagehide` at all.
+
+**11 — the instrument now includes a `fetch` recorder** (`src/probe.ts`, 2d-5-7b §3), and 2d-7's
+"frontend invoke/event spy" (`phase-2d-design.md` item 7) is largely that recorder; 2d-7 should start
+from it rather than from the consult's description. 2d-8 deletes it with the rest.
+
+#### The rest of the 2d consult, so a step is not invented
+
+**2d-6** (components, i18n, mounted evidence — after its consult), **2d-7** (the reviewed instrument
+and the bilingual WKWebView reading), **2d-8** (instrument removal and harness-free closure; corrects
+open item 7 and deletes `/private/tmp/espansoconfig-harness-2d-5-7b/`). The three documents that bound
+every 2d-5 step, in reading order, and which a 2d-6 brief must cite:
+[`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md) (**the consult; it binds**),
+[`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) (the record — read its §5
+corrections before treating `phase-2d-design.md` as the spec) and
+[`docs/decisions/2d-5-design-brief.md`](docs/decisions/2d-5-design-brief.md) (the brief).
+
+#### Two properties a later step could make live, and the recorded residues
+
+Both lists moved verbatim on 2026-09-21 to [`next-action-history.md`](docs/progress-archive/next-action-history.md)
+under *"Two properties and the residue rule, archived at 2d-5-7b"*: `targetingSurfaceFor`'s inert
+first-wins guard (`2d-5-1-C-notes.md` §3) and `invalidateEverySurface`'s unobservable effect
+(`2d-5-2b-notes.md` §9.1). The one method rule kept here: **`scripts/lint/ipc-detail.test.ts` generates
+its cases from `scannableFiles()`**, so its count moves when a file is merely *added* under the scanned
+roots — **re-derive a test count per file, on a pristine tree, never from the total.**

@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T10:11:48Z",
+ "updated": "2026-09-21T11:03:09Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -392,7 +392,7 @@
    "title": "Production activation, capability widening, dispatcher evidence and baselines",
    "status": "done",
    "risk": "high",
-   "summary": "AppShell passes the real event source and starts and disposes the coordinator, the capability holds exactly the two event permissions with dispatcher evidence, and the rung is 1323 / 444 / 2474 / 191.",
+   "summary": "AppShell passes the real event source and starts and disposes the coordinator; the capability holds exactly the two event permissions with dispatcher evidence; rung 1323 / 444 / 2474 / 191.",
    "review": "docs/reviews/phase-2d-5-7a.md",
    "narrative": "docs/decisions/2d-5-7a-notes.md",
    "commit": "094da04"
@@ -410,15 +410,83 @@
   {
    "id": "2d-6-design",
    "title": "2d-6 design consult",
-   "status": "queued",
+   "status": "done",
    "risk": "high",
-   "summary": "Next: put 2d-6 (components, i18n and mounted evidence) to a Codex design consult and record its rulings before any line is written."
+   "summary": "Puts 2d-6 to a Codex design consult: brief, consult, a binding record of 43 rulings and a 114-row audit, one review of the record; cuts 2d-6 into eleven steps.",
+   "review": "docs/reviews/phase-2d-6-design-record-review.md",
+   "narrative": "docs/decisions/2d-6-split-notes.md"
   },
   {
    "id": "2d-6",
    "title": "Components, i18n and mounted evidence",
    "status": "queued",
-   "summary": "Not started."
+   "summary": "Components, i18n and mounted evidence for live reconciliation; split into eleven steps 2d-6-1 to 2d-6-11 by its design consult."
+  },
+  {
+   "id": "2d-6-1",
+   "title": "Delivery, retained-state and uncertainty protocol",
+   "status": "queued",
+   "summary": "Adds the delivery envelope, the arbitration member, settlement verdicts, the requested retry, guarded reloads, the uncertainty acknowledgement and EN/ES message values; no component."
+  },
+  {
+   "id": "2d-6-2",
+   "title": "Match-editor external session and reapply",
+   "status": "queued",
+   "summary": "Gives the match editor its external-conflict session, submission blocking and the reapply-for-external path."
+  },
+  {
+   "id": "2d-6-3",
+   "title": "Creation and recovery external sessions",
+   "status": "queued",
+   "summary": "Gives the creator and the recovery surface — the eighth registered kind — their external-conflict sessions."
+  },
+  {
+   "id": "2d-6-4",
+   "title": "Operation-session external conflicts",
+   "status": "queued",
+   "summary": "Gives the delete, move and duplicate operation sessions their external-conflict handling."
+  },
+  {
+   "id": "2d-6-5",
+   "title": "Raw and restore external sessions",
+   "status": "queued",
+   "summary": "Gives the raw editor and the restore surface their external-conflict sessions."
+  },
+  {
+   "id": "2d-6-6",
+   "title": "Authored-surface delivery and complete registration",
+   "status": "queued",
+   "summary": "Wires child-reported receivers through DetailPane with exhaustive registration of all eight kinds, and keeps retained sessions mounted when the last document goes."
+  },
+  {
+   "id": "2d-6-7",
+   "title": "Operation-surface rendering",
+   "status": "queued",
+   "summary": "Draws the external origin, the offers and the blocked state on the delete, move and duplicate surfaces, with bilingual mounted evidence."
+  },
+  {
+   "id": "2d-6-8",
+   "title": "Raw and restore rendering",
+   "status": "queued",
+   "summary": "Draws the external origin, the offers and the blocked state on the raw and restore surfaces, with bilingual mounted evidence."
+  },
+  {
+   "id": "2d-6-9",
+   "title": "Reconciliation status and explicit exits",
+   "status": "queued",
+   "summary": "Draws watcher degradation, removal and unreadable states and the explicit reload and acknowledgement exits, with bilingual mounted evidence."
+  },
+  {
+   "id": "2d-6-10",
+   "title": "Foreground fallback",
+   "status": "queued",
+   "summary": "Builds the DOM visibilitychange-plus-focus foreground source that replaces the inert one in AppShell."
+  },
+  {
+   "id": "2d-6-11",
+   "title": "Complete composition evidence and baseline accounting",
+   "status": "queued",
+   "summary": "Mounts the full composition for the evidence matrix, sweeps prose debts and re-derives the gate baseline with and without the instrument."
   },
   {
    "id": "2d-7",

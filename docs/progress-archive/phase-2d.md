@@ -4802,3 +4802,22 @@ committed tree builds 190**. Server-only bundle markers absent, client-only pres
 and the core-crate `tauri` check were clean; `git diff --stat` over the two hook files held at
 `5 insertions(+), 1 deletion(-)` at every gate. All four gates were run twice on the final tree — by the
 worker and by the orchestrator — and the frontend pair a third time after the fix round.
+
+
+### Phase 2d-5-7b's verification narrative — archived 2026-09-21 at the 2d-6 design consult
+
+_Archived verbatim from `PROGRESS.md`; the ladder section that follows it there is live and was kept._
+
+**`1323 / 444 / 2474 / 191`** at 2d-5-7b, unchanged from 2d-5-7a, measured twice on this tree — once by
+the worker after the launches and once by the orchestrator before the review — every gate on its own
+and every one exit 0: `cargo test --workspace -- --test-threads=1` to a file, **26** `test result`
+lines, none lacking `0 failed`, sum **1323**; `cargo clippy --workspace --all-targets -- -D warnings`;
+`cargo fmt --check`; `npm run check` **444 files, 0 errors, 0 warnings**; `npm run build` **191
+modules** with the server-only markers absent and the client-only present (2); `npm test` **2474
+passed, 62 files**; `cargo tree -p espansoconfig-core | rg tauri` finding nothing. The phase changed no
+production file and no test, so an unmoved rung is the expected reading; the instrument's contribution
+is unchanged at Rust 0, svelte-check +1, vitest +1 (the `ipc-detail` row for `src/probe.ts`), Vite +1
+(190 on a committed tree). **The review's one fix was record-only**, so no gate was re-run for it. The
+harness's own launches are not a gate and are read in `2d-5-7b-window-reading.md` §4. 2d-5-7a's
+per-case derivation of the seven-case move, formerly here, is archived verbatim in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-5-7a's verification narrative"*.
