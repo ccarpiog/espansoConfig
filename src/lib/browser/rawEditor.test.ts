@@ -43,7 +43,9 @@ import {
 } from './invalidation';
 import {
   acknowledgeFindings,
+  acknowledgeSnapshot,
   acknowledgementOf,
+  applyObservation,
   applySave,
   askToReload,
   beginSave,
@@ -67,9 +69,33 @@ import {
   type RawEditorSession,
   type RoundTripText
 } from './rawEditor';
-import type { AdoptTheDiskVersion } from './editorSave';
-import type { DiskAdoptionOutcome } from './saveOutcome';
-import { conflictChoiceKey, type ConflictChoice, type ConflictModel } from './saveOutcome';
+import { NOT_RELOADING, type AdoptTheDiskVersion, type ReloadStep } from './editorSave';
+import {
+  externalConflictSource,
+  standingConflictOf,
+  type ConflictSource,
+  type ExternalChangeConflictSource,
+  type ExternalConflictObservation,
+  type ObservationVerdict
+} from './conflictSource';
+import {
+  arbitratedDelivery,
+  retainedDelivery,
+  writtenHereDelivery,
+  type ObservationDelivery
+} from './observationDelivery';
+import { submissionOf } from './draft';
+import {
+  conflictChoiceKey,
+  isExternalConflict,
+  isSaveConflict,
+  type ConflictChoice,
+  type ConflictModel,
+  type DiskAdoptionOutcome,
+  type ExternalConflictModel,
+  type SaveConflictModel,
+  type SaveOutcomeMessage
+} from './saveOutcome';
 
 /** The document every case here edits. */
 const DOCUMENT = 7;
@@ -272,6 +298,24 @@ function inConflict(
 ): RawEditorSession {
   return roundTrip(editText(fresh(), EDITED), conflict(diskRevision, diskText)).session;
 } // End of function inConflict()
+
+/**
+ * The save conflict a session shows, narrowed, or a failure naming the case.
+ *
+ * `conflictOf` answers either origin since Phase 2d-6-5, so a case about the
+ * three save-only fields narrows through the tested type guard rather than
+ * reading them off the union.
+ *
+ * @param session - The session.
+ * @returns Its save conflict.
+ */
+function saveConflictOf(session: RawEditorSession): SaveConflictModel<RoundTripText> {
+  const shown = conflictOf(session);
+  if (shown === null || !isSaveConflict(shown)) {
+    throw new Error('this case needs a save conflict on the session');
+  }
+  return shown;
+} // End of function saveConflictOf()
 
 describe('a text this editor cannot give back unchanged', () => {
   // **The window reading's first finding** (notes section 9.10.1): a `<textarea>`'s
@@ -650,15 +694,17 @@ describe('the conflict state', () => {
     expect(rawEditorView(twice).messages.map((message) => message.kind)).toContain(
       'changedAgainSinceRefusal'
     );
-    expect(conflictOf(twice)?.changedAgain).toBe(true);
+    expect(saveConflictOf(twice).changedAgain).toBe(true);
   }); // End of the "changed again" case
 
   it('carries enough revision information to tell the disk version from the draft', () => {
-    const stuck = conflictOf(inConflict(AGAIN));
-    expect(stuck?.expected).toBe(BASE);
-    expect(stuck?.found).toBe(AFTER);
-    expect(stuck?.diskRevision).toBe(AGAIN);
-    expect(stuck?.disk.id).toBe(DOCUMENT);
+    // Read through the tested type guard since Phase 2d-6-5: `conflictOf`
+    // answers either origin, and the three save-only fields are the save arm's.
+    const stuck = saveConflictOf(inConflict(AGAIN));
+    expect(stuck.expected).toBe(BASE);
+    expect(stuck.found).toBe(AFTER);
+    expect(stuck.diskRevision).toBe(AGAIN);
+    expect(stuck.disk.id).toBe(DOCUMENT);
   }); // End of the "revision information" case
 
   it('never retries the stale candidate: there is no save anyway here', () => {
@@ -859,9 +905,10 @@ describe('the reapply this editor can never have', () => {
 
   it('answers unavailable even for a payload that identified a snippet', () => {
     // A `ReapplyEvidence` is a boundary value and nothing in TypeScript proves
-    // which command produced one. `beginReapply` reads this surface's permanent
-    // declaration **before** it looks at the evidence, which is what makes the
-    // answer a declaration rather than an accident of which arms the wire carries.
+    // which command produced one. `enterReapply` (since Phase 2d-6-5; `beginReapply`
+    // before it) reads this surface's permanent declaration **before** it looks at
+    // the evidence, which is what makes the answer a declaration rather than an
+    // accident of which arms the wire carries.
     const identified: SaveResult = makeConflict({
       disk: makeDocument({ id: DOCUMENT, revision: AFTER }),
       expected: BASE,
@@ -884,3 +931,812 @@ describe('the reapply this editor can never have', () => {
     expect(reapplyToDiskVersion).toHaveLength(1);
   });
 }); // End of the raw reapply suite
+
+describe('the external session — Phase 2d-6-5', () => {
+  // **The receiver as a value, driven without a window.** Every envelope here is
+  // sealed by the three constructors of `./observationDelivery.ts`, so the verdict
+  // inside is about the observation inside by construction; `workspace.test.ts`
+  // drives this same transition through a real `BrowserState`. Nothing here can
+  // show a component registers the receiver — 2d-6-8 wires it — and nothing here
+  // calls a command: no `BrowserState` exists in this file.
+
+  /** The disk text every observation below reads, which this editor can hold. */
+  const THEIRS = DISK;
+
+  /** A disk text this editor refuses to reseed from: two CRLF lines among LF ones. */
+  const THEIRS_WITH_CR = 'matches:\r\n  - trigger: x\n    replace: theirs\r\n';
+
+  /**
+   * One narrowed observation of the editor's file.
+   *
+   * A fresh object every call, deliberately: the memo in `./conflictSource.ts` and
+   * the session's wait are both keyed on object identity, so two calls are two
+   * observations.
+   *
+   * @param overrides - Whatever the case needs beyond the defaults.
+   * @returns The observation, as a window would have narrowed it.
+   */
+  function observation(
+    overrides: Partial<ExternalConflictObservation> = {}
+  ): ExternalConflictObservation {
+    return {
+      sequence: 5,
+      document: DOCUMENT,
+      previousRevision: BASE,
+      diskRevision: AFTER,
+      diskText: THEIRS,
+      disk: makeDocument({ id: DOCUMENT, revision: AFTER }),
+      findings: [],
+      correspondences: null,
+      ...overrides
+    };
+  } // End of function observation()
+
+  /**
+   * An observation of another file, which this editor is never about.
+   *
+   * @returns The observation.
+   */
+  function otherObservation(): ExternalConflictObservation {
+    return observation({
+      document: DOCUMENT + 1,
+      previousRevision: null,
+      diskRevision: AGAIN,
+      disk: makeDocument({ id: DOCUMENT + 1, relativePath: 'match/other.yml', revision: AGAIN })
+    });
+  } // End of function otherObservation()
+
+  /**
+   * An arbitrated envelope, asserted to have reached the arm the case is about.
+   *
+   * @param standing - What stands for the file, or `null`.
+   * @param seen - The observation.
+   * @param uncertain - Whether the last settled write may have written.
+   * @param arm - The verdict the case needs.
+   * @returns The sealed envelope.
+   */
+  function decided(
+    standing: ConflictSource | null,
+    seen: ExternalConflictObservation,
+    uncertain: boolean,
+    arm: ObservationVerdict['kind']
+  ): ObservationDelivery {
+    const delivery = arbitratedDelivery(
+      standing === null ? null : standingConflictOf(standing),
+      seen,
+      uncertain
+    );
+    expect(delivery.verdict.kind).toBe(arm);
+    return delivery;
+  } // End of function decided()
+
+  /**
+   * The `raised` envelope for one observation.
+   *
+   * @param seen - The observation.
+   * @returns The envelope.
+   */
+  function raised(seen: ExternalConflictObservation): ObservationDelivery {
+    return decided(null, seen, false, 'raised');
+  } // End of function raised()
+
+  /**
+   * The external conflict a session shows, or a failure naming the case.
+   *
+   * @param held - The session.
+   * @returns Its external conflict.
+   */
+  function externalOf(held: RawEditorSession): ExternalConflictModel<RoundTripText> {
+    const conflict = held.externalConflict;
+    if (conflict === null) {
+      throw new Error('this case needs an external conflict on the session');
+    }
+    return conflict;
+  } // End of function externalOf()
+
+  /**
+   * An edited session, dirty and sendable.
+   *
+   * @returns The session.
+   */
+  function edited(): RawEditorSession {
+    return editText(fresh(), EDITED);
+  } // End of function edited()
+
+  /**
+   * A session whose save was refused for findings — the refusal path.
+   *
+   * @returns The session showing the refusal.
+   */
+  function refusedOnce(): RawEditorSession {
+    return roundTrip(edited(), refusal()).session;
+  } // End of function refusedOnce()
+
+  /**
+   * A holder standing in for the component's `$state`: what a registered
+   * receiver would update, and what the reader answers.
+   *
+   * @param first - The session installed at the start.
+   * @returns The holder, its reader, and a receiver that applies to it.
+   */
+  function installed(first: RawEditorSession): {
+    current: () => RawEditorSession;
+    receive: (delivery: ObservationDelivery) => void;
+    set: (next: RawEditorSession) => void;
+  } {
+    let session = first;
+    return {
+      current: () => session,
+      receive: (delivery) => {
+        session = applyObservation(session, delivery);
+      },
+      set: (next) => {
+        session = next;
+      }
+    };
+  } // End of function installed()
+
+  describe('the seven arms over a session opened over one file (entries 6, 8, 11)', () => {
+    it('raises over the file, freezes the box, and refuses the save at both doors', () => {
+      const seen = observation();
+      const next = applyObservation(edited(), raised(seen));
+      const conflict = externalOf(next);
+      expect(conflict.source).toBe(externalConflictSource(seen));
+      expect(conflict.draft).toBe(next.draft);
+      expect(conflict.draft.value).toBe(EDITED);
+      expect(conflict.diskText).toBe(THEIRS);
+      expect(isExternalConflict(conflict)).toBe(true);
+      expect(conflictOf(next)).toBe(conflict);
+      // `outcome` is untouched: no save ended (entry 6).
+      expect(next.outcome).toBeNull();
+      // Entry 8: neither door answers anything, and the box is read-only so the
+      // copy is exactly the bytes the conflict is about.
+      expect(canSave(next)).toBe(false);
+      expect(beginSave(next)).toBeNull();
+      expect(isEditable(next)).toBe(false);
+      expect(editText(next, ORIGINAL)).toBe(next);
+      expect(textToCopy(next)).toBe(EDITED);
+      const view = rawEditorView(next);
+      expect(view.canSave).toBe(false);
+      expect(view.editable).toBe(false);
+      expect(view.dirty).toBe(true);
+      expect(view.conflict).toBe(conflict);
+      expect(view.externalMessages).toBe(conflict.messages);
+      expect(view.externalMessages.map((line) => line.kind)).toEqual([
+        'fileChangedWhileOpen',
+        'draftKeptInMemory',
+        'reloadDiscardsDraft'
+      ]);
+      expect(view.messages).toEqual([]);
+      expect(view.externalNotices).toEqual([]);
+      expect(view.diskText).toEqual({ kind: 'text', text: THEIRS });
+      expect(view.diskRefusal).toBeNull();
+      expect(view.canReload).toBe(true);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>([
+        'keepEditing',
+        'copyDraft',
+        'reloadDiskVersion'
+      ]);
+    }); // End of the "raised over the file" case
+
+    it('answers null from beginSave called directly under an external conflict, refusal path included', () => {
+      // **Past a disabled button.** The refusal panel's *Save anyway* would reach
+      // `beginSave`, which asks `canSave` first; a caller that consented and then
+      // pressed past the withdrawn control sends nothing.
+      const blocked = applyObservation(refusedOnce(), raised(observation()));
+      expect(blocked.outcome?.kind).toBe('refused');
+      const consented = acknowledgeFindings(blocked);
+      expect(beginSave(consented)).toBeNull();
+      const view = rawEditorView(blocked);
+      expect(view.refusalChoices).toEqual(['keepEditing']);
+      expect(view.findingsAreStale).toBe(false);
+    });
+
+    it('takes nothing from a delivery about another file, except the end of a wait recorded for it', () => {
+      // An editor over one file told another changed is the object it was: a
+      // reload of that conflict would reseed this box with the other file's text.
+      const over = edited();
+      const elsewhere = otherObservation();
+      expect(applyObservation(over, raised(elsewhere))).toBe(over);
+      expect(applyObservation(over, retainedDelivery(elsewhere))).toBe(over);
+      expect(applyObservation(over, decided(null, elsewhere, true, 'raisedWithoutReload'))).toBe(over);
+      const waiting: RawEditorSession = {
+        ...over,
+        awaitingReconciliation: new Map([[DOCUMENT + 1, elsewhere]])
+      };
+      expect(applyObservation(waiting, writtenHereDelivery(elsewhere)).awaitingReconciliation.size).toBe(0);
+      expect(applyObservation(waiting, raised(elsewhere))).toEqual({
+        ...waiting,
+        awaitingReconciliation: new Map()
+      });
+      expect(canSave(waiting)).toBe(true);
+    });
+
+    it('changes nothing on coalesced and notLater, not even the object, and resets the reload on every replacing verdict', () => {
+      const seen = observation();
+      const asked = askToReload(applyObservation(edited(), raised(seen)));
+      expect(rawEditorView(asked).awaitingReloadConfirmation).toBe(true);
+      const standing = externalConflictSource(seen);
+      expect(applyObservation(asked, decided(standing, observation({ sequence: 6 }), false, 'coalesced'))).toBe(asked);
+      expect(
+        applyObservation(asked, decided(standing, observation({ sequence: 4, diskRevision: AGAIN }), false, 'notLater'))
+      ).toBe(asked);
+      // Entry 12: a replacing verdict puts the reload back to idle.
+      const later = observation({ sequence: 7, diskRevision: AGAIN });
+      const replaced = applyObservation(confirmReload(asked), decided(standing, later, false, 'supersedes'));
+      expect(replaced.reload).toBe(NOT_RELOADING);
+      expect(externalOf(replaced).source).toBe(externalConflictSource(later));
+      expect(externalOf(replaced).draft.value).toBe(EDITED);
+      expect(rawEditorView(replaced).awaitingReloadConfirmation).toBe(false);
+      const fresh = edited();
+      expect(applyObservation(fresh, decided(null, seen, true, 'raisedWithoutReload')).reload).toBe(NOT_RELOADING);
+    }); // End of the "coalesced, notLater and the reload reset" case
+  }); // End of the "seven arms" suite
+
+  describe('the held observation, and writtenHere by identity (entries 8 and 11)', () => {
+    it('records a wait as a restriction on saving alone, and lifts it only for that observation', () => {
+      const seen = observation();
+      const waiting = applyObservation(edited(), retainedDelivery(seen));
+      expect(waiting.awaitingReconciliation.get(DOCUMENT)).toBe(seen);
+      expect(waiting.awaitingReconciliation.size).toBe(1);
+      expect(waiting.externalConflict).toBeNull();
+      expect(conflictOf(waiting)).toBeNull();
+      // Saving is refused; drafting is not.
+      expect(canSave(waiting)).toBe(false);
+      expect(beginSave(waiting)).toBeNull();
+      expect(isEditable(waiting)).toBe(true);
+      const typed = editText(waiting, `${EDITED}# more\n`);
+      expect(typed.awaitingReconciliation.get(DOCUMENT)).toBe(seen);
+      expect(undoEdit(typed).awaitingReconciliation.get(DOCUMENT)).toBe(seen);
+      const view = rawEditorView(waiting);
+      expect(view.canSave).toBe(false);
+      expect(view.editable).toBe(true);
+      expect(view.conflict).toBeNull();
+      expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
+      // Lifted by identity, and by nothing else.
+      expect(applyObservation(waiting, writtenHereDelivery(observation())).awaitingReconciliation.get(DOCUMENT)).toBe(seen);
+      const lifted = applyObservation(waiting, writtenHereDelivery(seen));
+      expect(lifted).toEqual({ ...waiting, awaitingReconciliation: new Map() });
+      expect(canSave(lifted)).toBe(true);
+      expect(beginSave(lifted)).not.toBeNull();
+      expect(applyObservation(lifted, writtenHereDelivery(seen))).toBe(lifted);
+      // Any decision about the awaited observation ends the wait; a later
+      // `retained` replaces it; a re-held reading is still held.
+      const standing = externalConflictSource(observation({ sequence: 9 }));
+      expect(applyObservation(waiting, decided(standing, seen, false, 'notLater'))).toEqual({
+        ...waiting,
+        awaitingReconciliation: new Map()
+      });
+      expect(applyObservation(waiting, raised(seen)).awaitingReconciliation.size).toBe(0);
+      const newer = observation({ sequence: 7 });
+      expect(applyObservation(waiting, retainedDelivery(newer)).awaitingReconciliation.get(DOCUMENT)).toBe(newer);
+      expect(applyObservation(waiting, retainedDelivery(seen)).awaitingReconciliation.get(DOCUMENT)).toBe(seen);
+    }); // End of the "retained and writtenHere" case
+
+    it('holds every delivery during its own save and replays them in arrival order (entry 5)', () => {
+      const started = beginSave(edited());
+      if (started === null) {
+        throw new Error('an edited session is sendable');
+      }
+      const seen = observation();
+      const later = observation({ sequence: 6 });
+      const standing = externalConflictSource(seen);
+      const held = applyObservation(
+        applyObservation(applyObservation(started.session, retainedDelivery(seen)), raised(seen)),
+        decided(standing, later, false, 'coalesced')
+      );
+      expect(held.externalConflict).toBeNull();
+      expect(held.awaitingReconciliation.size).toBe(0);
+      expect(held.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised', 'coalesced']);
+      // The save's answer lands first, the held decisions second, in one
+      // transition: the conflict `raised` announced stands, the wait `retained`
+      // recorded ended with it, and `coalesced` found the conflict it was about.
+      const settled = applySave(held, sealed(refusal()));
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(externalOf(settled).source).toBe(standing);
+      expect(settled.awaitingReconciliation.size).toBe(0);
+      expect(canSave(settled)).toBe(false);
+      // On a commit too: the draft is rebased and the conflict stands beside the
+      // success; on a seal already opened the save is over as well.
+      const committed = applySave(held, sealed(saved()));
+      expect(committed.outcome?.kind).toBe('saved');
+      expect(committed.draft.baseRevision).toBe(AFTER);
+      expect(externalOf(committed).source).toBe(standing);
+      const twice = sealed(saved());
+      applySave(held, twice);
+      const again = applySave(held, twice);
+      expect(again.phase).toBe('editing');
+      expect(again.outcome).toBeNull();
+      expect(externalOf(again).source).toBe(standing);
+      // A save that produced no outcome consumes the hold too.
+      const heldUncertain = applyObservation(started.session, decided(null, seen, true, 'raisedWithoutReload'));
+      const failed = saveCouldNotBeSent(heldUncertain, true);
+      expect(failed.heldDeliveries).toEqual([]);
+      expect(failed.sendFailure?.kind).toBe('mayHaveWritten');
+      expect(failed.uncertaintyUnresolved).toBe(true);
+      expect(externalOf(failed).source).toBe(externalConflictSource(seen));
+    }); // End of the "held during the save" case
+  }); // End of the "held observation" suite
+
+  describe('collisions: only one conflict is active (entry 7), and the dismissal erases nothing (entry 9)', () => {
+    it('retires a save conflict when an observation supersedes it, keeping the retained draft and dropping the confirmation', () => {
+      const stuck = inConflict();
+      const saveModel = saveConflictOf(stuck);
+      const confirmed = confirmReload(askToReload(stuck));
+      expect(confirmed.reload.kind).toBe('confirmed');
+      const seen = observation({ diskRevision: AGAIN });
+      const next = applyObservation(confirmed, decided(saveModel.source, seen, false, 'supersedes'));
+      expect(next.outcome).toBeNull();
+      expect(next.submitted).toBeNull();
+      expect(next.extraMessages).toEqual([]);
+      const conflict = externalOf(next);
+      expect(conflict.draft).toBe(saveModel.draft);
+      expect(conflict.draft.value).toBe(EDITED);
+      expect(conflict.diskRevision).toBe(AGAIN);
+      expect(conflictOf(next)).toBe(conflict);
+      expect(isEditable(next)).toBe(false);
+      // The reload is idle again and the confirmation is gone: nothing reseeds
+      // and the window is not asked.
+      expect(next.reload).toBe(NOT_RELOADING);
+      expect(rawEditorView(next).awaitingReloadConfirmation).toBe(false);
+      const recorder = adopting();
+      expect(loadDiskVersion(next, recorder.adopt)).toBe(next);
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "supersedes a save conflict" case
+
+    it('keeps a committed success and a refusal as history, and lets a save that conflicts retire the external one', () => {
+      const committed = roundTrip(edited(), saved()).session;
+      const overSaved = applyObservation(committed, raised(observation()));
+      expect(overSaved.outcome?.kind).toBe('saved');
+      expect(conflictOf(overSaved)).toBe(overSaved.externalConflict);
+      expect(rawEditorView(overSaved).messages.map((line) => line.kind)).toContain('fileWritten');
+      // The reverse collision, kept for a direct call: a conflict answer retires
+      // the external conflict, a refusal leaves it.
+      const blocked = applyObservation(refusedOnce(), raised(observation()));
+      const sending: RawEditorSession = { ...blocked, phase: 'saving', submitted: submissionOf(blocked.draft) };
+      const conflicted = applySave(sending, sealed(conflict()));
+      expect(conflicted.externalConflict).toBeNull();
+      expect(conflictOf(conflicted)?.source.kind).toBe('save');
+      const refusedAgain = applySave(sending, sealed(refusal()));
+      expect(refusedAgain.externalConflict).toBe(blocked.externalConflict);
+    }); // End of the "history and the reverse collision" case
+
+    it('lets keepEditing cancel the warning and the panel, and nothing external (entry 9)', () => {
+      const seen = observation();
+      const blocked = askToReload(applyObservation(refusedOnce(), raised(seen)));
+      expect(rawEditorView(blocked).awaitingReloadConfirmation).toBe(true);
+      const kept = keepEditing(blocked);
+      expect(kept.outcome).toBeNull();
+      expect(kept.submitted).toBeNull();
+      expect(kept.reload).toBe(NOT_RELOADING);
+      expect(kept.externalConflict).toBe(blocked.externalConflict);
+      // The box is not given back: the conflict stands, so the copy stays exact.
+      expect(isEditable(kept)).toBe(false);
+      expect(canSave(kept)).toBe(false);
+      expect(textToCopy(kept)).toBe(EDITED);
+      const withheld = applyObservation(edited(), decided(null, observation(), true, 'raisedWithoutReload'));
+      expect(keepEditing(withheld).uncertaintyUnresolved).toBe(true);
+      const waiting = applyObservation(edited(), retainedDelivery(seen));
+      expect(keepEditing(waiting).awaitingReconciliation.get(DOCUMENT)).toBe(seen);
+      expect(canSave(keepEditing(waiting))).toBe(false);
+    }); // End of the "keepEditing erases nothing" case
+  }); // End of the "collisions" suite
+
+  describe('the uncertainty and its exits (entries 11, 14, 15; the record’s §5.5)', () => {
+    it('withholds the reload on raisedWithoutReload until the snapshot is acknowledged', () => {
+      const seen = observation();
+      const withheld = applyObservation(edited(), decided(null, seen, true, 'raisedWithoutReload'));
+      expect(withheld.uncertaintyUnresolved).toBe(true);
+      const view = rawEditorView(withheld);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'copyDraft']);
+      expect(view.canReload).toBe(false);
+      expect(view.externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
+      expect(askToReload(withheld)).toBe(withheld);
+      // A confirmation assembled by hand spends nothing and reseeds nothing.
+      const recorder = adopting();
+      const byHand: RawEditorSession = { ...withheld, reload: confirmReload(askToReload(inConflict())).reload };
+      expect(loadDiskVersion(byHand, recorder.adopt)).toBe(byHand);
+      expect(recorder.adoptions).toEqual([]);
+      // Exit three: the acknowledgement, refused and then accepted.
+      const asked: ExternalChangeConflictSource[] = [];
+      expect(
+        acknowledgeSnapshot(withheld, (source) => {
+          asked.push(source);
+          return 'refused';
+        })
+      ).toBe(withheld);
+      expect(asked).toEqual([externalOf(withheld).source]);
+      const acknowledged = acknowledgeSnapshot(withheld, () => 'acknowledged');
+      expect(acknowledged).toEqual({ ...withheld, uncertaintyUnresolved: false, reload: NOT_RELOADING });
+      expect(rawEditorView(acknowledged).conflictChoices).toContain('reloadDiskVersion');
+      expect(rawEditorView(acknowledged).canReload).toBe(true);
+      expect(rawEditorView(askToReload(acknowledged)).awaitingReloadConfirmation).toBe(true);
+      // Nothing to acknowledge asks nothing.
+      let askedWithoutCause = 0;
+      const plain = applyObservation(edited(), raised(seen));
+      expect(
+        acknowledgeSnapshot(plain, () => {
+          askedWithoutCause += 1;
+          return 'acknowledged';
+        })
+      ).toBe(plain);
+      expect(askedWithoutCause).toBe(0);
+    }); // End of the "raisedWithoutReload" case
+
+    it('clears the uncertainty when a later verdict under none replaces the conflict', () => {
+      const first = observation();
+      const withheld = applyObservation(edited(), decided(null, first, true, 'raisedWithoutReload'));
+      const later = observation({ sequence: 6, diskRevision: AGAIN });
+      const replaced = applyObservation(withheld, decided(externalConflictSource(first), later, false, 'supersedes'));
+      expect(replaced.uncertaintyUnresolved).toBe(false);
+      expect(externalOf(replaced).source).toBe(externalConflictSource(later));
+      expect(rawEditorView(replaced).conflictChoices).toContain('reloadDiskVersion');
+    });
+  }); // End of the "uncertainty" suite
+
+  describe('the reseed from an observation: the carriage-return refusal, consent, and the three adoption outcomes (entries 12, 23)', () => {
+    it('refuses to reseed from a disk version holding a carriage return, and never normalizes it', () => {
+      // **`CLAUDE.md` §6, at the external origin.** The observation's own disk
+      // text is what a reload would reseed from; two CRLF lines among LF ones is
+      // the committed fixture's shape, and re-applying a dominant convention
+      // would reformat lines the person never touched.
+      const seen = observation({ diskText: THEIRS_WITH_CR });
+      const stuck = applyObservation(edited(), raised(seen));
+      const view = rawEditorView(stuck);
+      expect(view.diskRefusal).toEqual({ kind: 'lineEndingsNotPreserved' });
+      expect(view.canReload).toBe(false);
+      expect(view.diskText).toEqual({ kind: 'text', text: THEIRS_WITH_CR });
+      const confirmed = confirmReload(askToReload(stuck));
+      expect(confirmed.reload.kind).toBe('confirmed');
+      const recorder = adopting();
+      expect(loadDiskVersion(confirmed, recorder.adopt)).toBe(confirmed);
+      expect(recorder.adoptions).toEqual([]);
+      // The draft is untouched, the conflict stands, and nothing was written.
+      expect(confirmed.draft.value).toBe(EDITED);
+      expect(externalOf(confirmed).source).toBe(externalConflictSource(seen));
+      expect(rawEditorRefusal(externalOf(confirmed).diskText)).not.toBeNull();
+    }); // End of the "carriage return refused" case
+
+    it('withdraws consent with the reseed: an acknowledgement for one draft cannot be spent on the reseeded one', () => {
+      // A refusal consented to, then the watcher's conflict, then the reload.
+      const consented = acknowledgeFindings(refusedOnce());
+      expect(submissionOf(consented.draft).acknowledgement.accepted).toHaveLength(1);
+      const seen = observation();
+      const blocked = applyObservation(consented, raised(seen));
+      // The refusal stays as history with its consent — and nothing can spend
+      // it: the box is frozen and the save refused.
+      expect(blocked.outcome?.kind).toBe('refused');
+      expect(submissionOf(blocked.draft).acknowledgement.accepted).toHaveLength(1);
+      expect(beginSave(blocked)).toBeNull();
+      const recorder = adopting();
+      const reseeded = loadDiskVersion(confirmReload(askToReload(blocked)), recorder.adopt);
+      expect(recorder.adoptions).toEqual([externalOf(blocked)]);
+      expect(reseeded.draft.value).toBe(THEIRS);
+      expect(reseeded.draft.baseRevision).toBe(AFTER);
+      expect(isDirty(reseeded.draft)).toBe(false);
+      expect(reseeded.outcome).toBeNull();
+      expect(reseeded.submitted).toBeNull();
+      expect(reseeded.externalConflict).toBeNull();
+      expect(submissionOf(reseeded.draft).acknowledgement.accepted).toEqual([]);
+      expect(acknowledgeFindings(reseeded)).toBe(reseeded);
+      // A save of the reseeded draft, once edited, carries no consent.
+      const started = beginSave(editText(reseeded, `${THEIRS}# edited\n`));
+      expect(started).not.toBeNull();
+      expect(acknowledgementOf(started!.submission).accepted).toEqual([]);
+    }); // End of the "consent withdrawn" case
+
+    it('answers every adoption outcome for the external origin', () => {
+      const seen = observation();
+      const confirmed = confirmReload(askToReload(applyObservation(edited(), raised(seen))));
+      expect(rawEditorView(confirmed).conflictChoices).toEqual<readonly ConflictChoice[]>([
+        'keepEditing',
+        'copyDraft',
+        'confirmReload'
+      ]);
+      // `installed` and `alreadyThere` both reseed.
+      for (const answer of ['installed', 'alreadyThere'] as const) {
+        const recorder = adopting(answer);
+        const reseeded = loadDiskVersion(confirmed, recorder.adopt);
+        expect(recorder.adoptions).toHaveLength(1);
+        expect(reseeded.draft.value).toBe(THEIRS);
+        expect(reseeded.draft.baseRevision).toBe(AFTER);
+        expect(reseeded.externalConflict).toBeNull();
+        expect(reseeded.uncertaintyUnresolved).toBe(false);
+        expect(reseeded.reload).toBe(NOT_RELOADING);
+        expect(isEditable(reseeded)).toBe(true);
+      } // End of the loop over the two satisfied answers
+      // `refused` reseeds nothing and stops offering the control; the conflict
+      // stands, and *Keep editing* resets the step for a fresh attempt.
+      const recorder = adopting('refused');
+      const refused = loadDiskVersion(confirmed, recorder.adopt);
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(refused.draft).toBe(confirmed.draft);
+      expect(refused.reload).toEqual({ kind: 'refused' });
+      expect(externalOf(refused).source).toBe(externalConflictSource(seen));
+      const view = rawEditorView(refused);
+      expect(view.reloadUnavailable).toBe(true);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'copyDraft']);
+      expect(keepEditing(refused).reload).toBe(NOT_RELOADING);
+      expect(externalOf(keepEditing(refused)).source).toBe(externalConflictSource(seen));
+      // A wait about another observation survives the reseed: an adoption
+      // decides nothing about it.
+      const waitingToo = applyObservation(confirmed, retainedDelivery(observation({ sequence: 8 })));
+      const reseededWaiting = loadDiskVersion(waitingToo, adopting().adopt);
+      expect(reseededWaiting.draft.value).toBe(THEIRS);
+      expect(reseededWaiting.awaitingReconciliation.size).toBe(1);
+      expect(canSave(editText(reseededWaiting, EDITED))).toBe(false);
+    }); // End of the "three adoption outcomes" case
+
+    it('reapplies nothing for a conflict of either origin, and still takes no adoption function (entry 22)', () => {
+      const seen = observation({
+        correspondences: { base_revision: BASE, disk_revision: AFTER, entries: [] }
+      });
+      expect(reapplyToDiskVersion(applyObservation(edited(), raised(seen)))).toEqual({ kind: 'unavailable' });
+      expect(reapplyToDiskVersion(applyObservation(edited(), retainedDelivery(seen)))).toEqual({ kind: 'unavailable' });
+      expect(reapplyToDiskVersion(inConflict())).toEqual({ kind: 'unavailable' });
+      expect(reapplyToDiskVersion).toHaveLength(1);
+    });
+  }); // End of the "reseed from an observation" suite
+
+  describe('the door and the settlement against the installed session (2d-6-4’s review, taken)', () => {
+    it('refuses a save when the draft read displaced the installed session', () => {
+      // A getter behind the draft's value is caller code that runs between the
+      // block and the spend; a window's receiver, run from it, replaces the
+      // installed session with one carrying an external conflict. The save must
+      // be refused against that session, not spent against the one handed in.
+      const holder = installed(edited());
+      const handedIn = holder.current();
+      const seen = observation();
+      const trapped: RawEditorSession = {
+        ...handedIn,
+        draft: {
+          ...handedIn.draft,
+          get value(): RoundTripText {
+            holder.receive(raised(seen));
+            return handedIn.draft.value;
+          }
+        }
+      };
+      holder.set(trapped);
+      expect(beginSave(trapped, holder.current)).toBeNull();
+      expect(holder.current().externalConflict?.source).toBe(externalConflictSource(seen));
+      // The same read that displaces nothing spends as before.
+      const quiet = installed(edited());
+      expect(beginSave(quiet.current(), quiet.current)).not.toBeNull();
+      // And a reader answering a session that carries a block is refused too.
+      const waiting = installed(applyObservation(edited(), retainedDelivery(seen)));
+      expect(beginSave(edited(), waiting.current)).toBeNull();
+    }); // End of the "displaced during the draft read" case
+
+    it('refuses a save when a later read of this door displaced the installed session (the review’s first blocker)', () => {
+      // **The installed session is read once, and it must be read last.** The
+      // door reads the draft's value more than once — the carriage-return check,
+      // the dirtiness `canSave` derives, the submission — and spreads the
+      // session; a getter that stays quiet on the first read and delivers on a
+      // later one, or on the spread, ran after a check made too early. Three
+      // shapes, one rule: nothing caller-controlled runs after the reader.
+      const seen = observation();
+      /**
+       * A holder whose installed session delivers `raised` on the given read of
+       * the draft's value, counting from one, and counts the reads.
+       *
+       * @param on - The read that delivers, or `null` to deliver never.
+       * @returns The holder, the trapped session it installs, and the count.
+       */
+      function deliveringOnRead(on: number | null): {
+        readonly holder: ReturnType<typeof installed>;
+        readonly trapped: RawEditorSession;
+        readonly reads: () => number;
+      } {
+        const holder = installed(edited());
+        const handedIn = holder.current();
+        let reads = 0;
+        const trapped: RawEditorSession = {
+          ...handedIn,
+          draft: {
+            ...handedIn.draft,
+            get value(): RoundTripText {
+              reads += 1;
+              if (reads === on) {
+                holder.receive(raised(seen));
+              }
+              return handedIn.draft.value;
+            }
+          }
+        };
+        holder.set(trapped);
+        return { holder, trapped, reads: () => reads };
+      } // End of function deliveringOnRead()
+      // How many times the door reads the value, measured rather than assumed;
+      // a delivery on any one of them, the last included, must be refused.
+      const quiet = deliveringOnRead(null);
+      expect(beginSave(quiet.trapped, quiet.holder.current)).not.toBeNull();
+      const total = quiet.reads();
+      expect(total).toBeGreaterThanOrEqual(2);
+      for (let on = 1; on <= total; on += 1) {
+        const displaced = deliveringOnRead(on);
+        expect(beginSave(displaced.trapped, displaced.holder.current)).toBeNull();
+        expect(externalOf(displaced.holder.current()).source).toBe(externalConflictSource(seen));
+      } // End of the loop over the reads of the draft's value
+      // The spread that builds the waiting session reads every own property.
+      // Armed once: the receiver's own spread reads it again.
+      const spreading = installed(edited());
+      const beforeSpread = spreading.current();
+      let armed = true;
+      const trappedSpread: RawEditorSession = {
+        ...beforeSpread,
+        get extraMessages(): readonly SaveOutcomeMessage[] {
+          if (armed) {
+            armed = false;
+            spreading.receive(raised(seen));
+          }
+          return [];
+        }
+      };
+      spreading.set(trappedSpread);
+      expect(beginSave(trappedSpread, spreading.current)).toBeNull();
+      expect(externalOf(spreading.current()).source).toBe(externalConflictSource(seen));
+    }); // End of the "displaced during a later read" case
+
+    it('checks the carriage-return refusal on the exact bytes it would send', () => {
+      // A getter answering a clean text to the first read and a text holding a
+      // carriage return to the next one: the check that passed was made on
+      // bytes that never reach the wire. The submission's own candidate is what
+      // must be checked, so the door answers nothing.
+      const handedIn = edited();
+      let reads = 0;
+      const shifting: RawEditorSession = {
+        ...handedIn,
+        draft: {
+          ...handedIn.draft,
+          get value(): RoundTripText {
+            reads += 1;
+            return (reads === 1 ? handedIn.draft.value : CRLF) as RoundTripText;
+          }
+        }
+      };
+      const started = beginSave(shifting);
+      expect(started === null || rawEditorRefusal(started.submission.candidate) === null).toBe(true);
+    }); // End of the "checked on the exact bytes" case
+
+    it('reseeds over the installed session, and answers it untouched when the adoption itself replaced the conflict (the review’s third finding)', () => {
+      // **The adoption runs the window's own reads of the observation's
+      // projection**, and a getter there can tell the window of a later reading;
+      // the receiver installs what the window decides while the adoption is
+      // still inside `adopt`. A reseed built over the session handed in would
+      // hand the caller a session with no record of that decision.
+      const seen = observation();
+      /**
+       * A holder over a session confirmed to reload from `seen`.
+       *
+       * @returns The holder.
+       */
+      function confirmedToReload(): ReturnType<typeof installed> {
+        return installed(confirmReload(askToReload(applyObservation(edited(), raised(seen)))));
+      } // End of function confirmedToReload()
+      // A wait recorded during a satisfied adoption is carried by the reseed.
+      const waiting = confirmedToReload();
+      const later = observation({ sequence: 8 });
+      const recorder = adopting('installed');
+      const reseeded = loadDiskVersion(
+        waiting.current(),
+        (conflict, confirmation) => {
+          waiting.receive(retainedDelivery(later));
+          return recorder.adopt(conflict, confirmation);
+        },
+        waiting.current
+      );
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(reseeded.draft.value).toBe(THEIRS);
+      expect(reseeded.draft.baseRevision).toBe(AFTER);
+      expect(reseeded.externalConflict).toBeNull();
+      expect(reseeded.awaitingReconciliation.get(DOCUMENT)).toBe(later);
+      expect(canSave(editText(reseeded, EDITED))).toBe(false);
+      // A supersession delivered during the adoption, which the window then
+      // refuses: the installed session — the newer conflict, its reload reset —
+      // is answered untouched, and nothing is reseeded over it.
+      const superseded = confirmedToReload();
+      const newer = observation({ sequence: 6, diskRevision: AGAIN });
+      const refusing = adopting('refused');
+      const answered = loadDiskVersion(
+        superseded.current(),
+        (conflict, confirmation) => {
+          superseded.receive(decided(externalConflictSource(seen), newer, false, 'supersedes'));
+          return refusing.adopt(conflict, confirmation);
+        },
+        superseded.current
+      );
+      expect(refusing.adoptions).toHaveLength(1);
+      expect(answered).toBe(superseded.current());
+      expect(externalOf(answered).source).toBe(externalConflictSource(newer));
+      expect(answered.reload).toBe(NOT_RELOADING);
+      expect(answered.draft.value).toBe(EDITED);
+      // Displaced before the window is asked: the installed session is answered
+      // and the window never asked.
+      const early = confirmedToReload();
+      const before = early.current();
+      // Armed once: the receiver's own spread reads the step again.
+      let armed = true;
+      const trapped: RawEditorSession = {
+        ...before,
+        get reload(): ReloadStep {
+          if (armed) {
+            armed = false;
+            early.receive(retainedDelivery(later));
+          }
+          return before.reload;
+        }
+      };
+      early.set(trapped);
+      const untouched = adopting('installed');
+      expect(loadDiskVersion(trapped, untouched.adopt, early.current)).toBe(early.current());
+      expect(untouched.adoptions).toEqual([]);
+      expect(early.current().awaitingReconciliation.get(DOCUMENT)).toBe(later);
+      // Without a reader the transition reseeds what it was handed, and says so.
+      const alone = confirmedToReload();
+      const lost = loadDiskVersion(alone.current(), (conflict, confirmation) => {
+        alone.receive(retainedDelivery(later));
+        return adopting('installed').adopt(conflict, confirmation);
+      });
+      expect(lost.awaitingReconciliation.size).toBe(0);
+    }); // End of the "reseed over the installed session" case
+
+    it('settles against the installed session and replays a delivery that arrived during its own replay', () => {
+      // With `retained(A), raised(A)` held, a getter behind A's `document`
+      // publishes B while A is being replayed; the window delivers B to the
+      // installed session — still `saving`, so it is appended there — and a
+      // settlement that returned only its own replay would let the caller
+      // overwrite that append. The settled session must carry B.
+      const started = beginSave(edited());
+      if (started === null) {
+        throw new Error('an edited session is sendable');
+      }
+      const later = observation({ sequence: 6, diskRevision: AGAIN });
+      /**
+       * A holder over the in-flight session with A held twice, A's `document`
+       * armed to deliver B's supersession once.
+       *
+       * @returns The holder, and the observation A.
+       */
+      function armed(): { readonly holder: ReturnType<typeof installed>; readonly seen: ExternalConflictObservation; readonly fired: () => boolean } {
+        const holder = installed(started!.session);
+        let live = false;
+        let fired = false;
+        const seen: ExternalConflictObservation = {
+          ...observation(),
+          get document(): number {
+            if (live) {
+              live = false;
+              fired = true;
+              holder.receive(decided(externalConflictSource(this), later, false, 'supersedes'));
+            }
+            return DOCUMENT;
+          }
+        };
+        holder.receive(retainedDelivery(seen));
+        holder.receive(raised(seen));
+        expect(holder.current().heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised']);
+        live = true;
+        return { holder, seen, fired: () => fired };
+      } // End of function armed()
+      const first = armed();
+      const settled = applySave(first.holder.current(), sealed(refusal()), first.holder.current);
+      expect(first.fired()).toBe(true);
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.awaitingReconciliation.size).toBe(0);
+      expect(externalOf(settled).source).toBe(externalConflictSource(later));
+      // The same through a send that produced no outcome.
+      const second = armed();
+      const failed = saveCouldNotBeSent(second.holder.current(), false, second.holder.current);
+      expect(failed.heldDeliveries).toEqual([]);
+      expect(externalOf(failed).source).toBe(externalConflictSource(later));
+      // Without a reader the transition settles what it was handed, and says so.
+      const alone = armed();
+      expect(externalOf(applySave(alone.holder.current(), sealed(refusal()))).source).toBe(
+        externalConflictSource(alone.seen)
+      );
+    }); // End of the "delivery during the replay" case
+  }); // End of the "against the installed session" suite
+}); // End of the "external session" suite

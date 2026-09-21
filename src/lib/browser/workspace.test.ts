@@ -188,18 +188,25 @@ import type {
 } from './saveOutcome';
 import {
   acknowledgeRestoreFindings,
+  applyRestoreObservation,
+  askToReloadDiskVersion as askRestoreToReloadDiskVersion,
   batchesLoaded,
+  cancelRestore,
   candidateRead,
   candidateText,
   chooseBatch,
   chooseEntry,
+  confirmDiskReload as confirmRestoreDiskReload,
   confirmRestore,
   entriesLoaded,
   loadingBatches,
   loadingEntries,
   prepareRestore,
+  reloadTheDiskVersion as reloadRestoreDiskVersion,
   restoreRefusal,
+  restoreView,
   revisionInProjection,
+  sendRestore,
   startRestore,
   targetRevisionObserved,
   type InvalidateEverySurface,
@@ -208,6 +215,19 @@ import {
   type RestoreSession,
   type StartedRestore
 } from './restore';
+import {
+  applyObservation as applyRawObservation,
+  applySave as applyRawSave,
+  askToReload as askRawToReload,
+  beginSave as beginRawSave,
+  canSave as canRawSave,
+  confirmReload as confirmRawReload,
+  editText as editRawText,
+  loadDiskVersion as loadRawDiskVersion,
+  rawEditorView,
+  startRawEditor,
+  type RawEditorSession
+} from './rawEditor';
 import {
   createBrowserState as createUnrecordedBrowserState,
   type BackupCommands,
@@ -11398,6 +11418,639 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       off();
     }); // End of the "wait delivered during the reapply's reads" case
   }); // End of the "deleter's, mover's and duplicator's external sessions" suite
+
+  describe('the raw editor’s and restore’s external sessions — Phase 2d-6-5', () => {
+    // **The last two receivers fed by the real window.** The raw editor and the
+    // restore apply what `observeExternalChange`, a settlement or a retry seals,
+    // through `applyObservation` in `./rawEditor.ts` and
+    // `applyRestoreObservation` in `./restore.ts`, and ask the window's own
+    // doors. No component registers anything (2d-6-8's), and the route guard
+    // holds the command spy at zero through every transition.
+
+    /** The text the raw editor opens over, and edits. */
+    const OPENED = 'matches: []\n';
+
+    /**
+     * A raw editor over `match/base.yml` with one edit made, registered as a
+     * receiver over its file.
+     *
+     * @param state - The window.
+     * @returns The live session, a reader, a setter and the unregister.
+     */
+    function rawEditorOver(state: BrowserState): {
+      readonly current: () => RawEditorSession;
+      readonly set: (next: RawEditorSession) => void;
+      readonly off: () => void;
+    } {
+      const opened = startRawEditor(2, 'rev-a', OPENED);
+      if (opened === null) {
+        throw new Error('this text is one the editor can hold unchanged');
+      }
+      let session = editRawText(opened, `${OPENED}# edited\n`);
+      const off = state.registerObservationReceiver(2, (delivery) => {
+        session = applyRawObservation(session, delivery);
+      });
+      return {
+        current: () => session,
+        set: (next) => {
+          session = next;
+        },
+        off
+      };
+    } // End of function rawEditorOver()
+
+    /**
+     * A restore over `match/base.yml` with a candidate retained and the
+     * question asked, registered as a receiver over its destination.
+     *
+     * @param state - The window, whose backup surface answers the walk.
+     * @returns The live session, a reader, a setter and the unregister.
+     */
+    async function restoreOver(state: BrowserState): Promise<{
+      readonly current: () => RestoreSession;
+      readonly set: (next: RestoreSession) => void;
+      readonly off: () => void;
+    }> {
+      const withCandidate = await walkToACandidate(state, openRestore(state));
+      let session = prepareRestore(withCandidate, windowFor(state, withCandidate));
+      expect(session.pending).not.toBeNull();
+      const off = state.registerObservationReceiver(2, (delivery) => {
+        session = applyRestoreObservation(session, delivery);
+      });
+      return {
+        current: () => session,
+        set: (next) => {
+          session = next;
+        },
+        off
+      };
+    } // End of function restoreOver()
+
+    it('raises over the raw editor’s file through a registered receiver, refuses both doors, and reseeds through the real door', async () => {
+      const commands = scriptedCommands();
+      const state = await withTheSecondSnippetSelected(commands);
+      const editor = rawEditorOver(state);
+      expect(canRawSave(editor.current())).toBe(true);
+      const seen = externalObservation();
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+      const told = editor.current();
+      expect(told.externalConflict?.source).toBe(state.standingConflictFor(2));
+      // Entry 8 through the window: neither door answers anything, the box is
+      // frozen, and the copy is exactly the edited text.
+      expect(canRawSave(told)).toBe(false);
+      expect(beginRawSave(told)).toBeNull();
+      expect(beginRawSave(told, editor.current)).toBeNull();
+      const view = rawEditorView(told);
+      expect(view.editable).toBe(false);
+      expect(view.externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
+      expect(view.diskText).toEqual({ kind: 'text', text: DISK_TEXT });
+      expect(view.canReload).toBe(true);
+      expect(state.scopedDocument?.revision).toBe('rev-a');
+      // The two-step reload adopts through the door and reseeds the box from the
+      // observation's own text (entry 23's "reseed").
+      const reseeded = loadRawDiskVersion(confirmRawReload(askRawToReload(told)), state.adoptDiskVersion);
+      expect(reseeded.draft.value).toBe(DISK_TEXT);
+      expect(reseeded.draft.baseRevision).toBe('rev-c');
+      expect(reseeded.externalConflict).toBeNull();
+      expect(rawEditorView(reseeded).editable).toBe(true);
+      expect(state.scopedDocument?.revision).toBe('rev-c');
+      expect(commands.saveRawDocument).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+    }); // End of the "raw editor raised through the receiver" case
+
+    it('refuses to reseed the raw editor from a disk version holding a carriage return, through the real door', async () => {
+      // **`CLAUDE.md` §6 at the external origin, with a real window.** The
+      // observation's disk text has two CRLF lines among LF ones; the reload is
+      // confirmed and the door is never asked, so the window stays where it was.
+      const commands = scriptedCommands();
+      const state = await withTheSecondSnippetSelected(commands);
+      const editor = rawEditorOver(state);
+      const seen: ExternalConflictObservation = {
+        ...externalObservation(),
+        diskText: 'matches:\r\n  - trigger: x\n    replace: theirs\r\n'
+      };
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+      const told = editor.current();
+      const view = rawEditorView(told);
+      expect(view.diskRefusal).toEqual({ kind: 'lineEndingsNotPreserved' });
+      expect(view.canReload).toBe(false);
+      const confirmed = confirmRawReload(askRawToReload(told));
+      expect(confirmed.reload.kind).toBe('confirmed');
+      expect(loadRawDiskVersion(confirmed, state.adoptDiskVersion)).toBe(confirmed);
+      expect(confirmed.draft.value).toBe(`${OPENED}# edited\n`);
+      expect(state.scopedDocument?.revision).toBe('rev-a');
+      expect(state.standingConflictFor(2)).toBe(externalConflictSource(seen));
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+    }); // End of the "carriage return refused through the door" case
+
+    it('answers all three adoption outcomes to the raw editor through the real door, the outlived origin refused without resetting the warning', async () => {
+      const commands = scriptedCommands();
+      const state = await withTheSecondSnippetSelected(commands);
+      // Two editors over one file receive the same envelope; the first reload
+      // installs, the second finds the window already there and reseeds too.
+      const first = rawEditorOver(state);
+      const second = rawEditorOver(state);
+      const seen = externalObservation();
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+      expect(first.current().externalConflict?.source).toBe(second.current().externalConflict?.source);
+      const installed = loadRawDiskVersion(confirmRawReload(askRawToReload(first.current())), state.adoptDiskVersion);
+      expect(installed.draft.value).toBe(DISK_TEXT);
+      expect(state.scopedDocument?.revision).toBe('rev-c');
+      const alreadyThere = loadRawDiskVersion(confirmRawReload(askRawToReload(second.current())), state.adoptDiskVersion);
+      expect(alreadyThere.draft.value).toBe(DISK_TEXT);
+      expect(alreadyThere.externalConflict).toBeNull();
+      first.off();
+      second.off();
+      // The refusal of an outlived origin, in a fresh window: A is confirmed, B
+      // supersedes it at the window; the installed session's reload was reset
+      // by the transition (entry 12), and a session that kept A's confirmation
+      // by hand is refused at the door — which does not reset its warning.
+      const window = await withTheSecondSnippetSelected(scriptedCommands());
+      const editor = rawEditorOver(window);
+      const a = externalObservation();
+      expect(window.observeExternalChange(a).verdict.kind).toBe('raised');
+      const confirmedA = confirmRawReload(askRawToReload(editor.current()));
+      editor.set(confirmedA);
+      const b: ExternalConflictObservation = {
+        ...externalObservation(),
+        sequence: 6,
+        diskRevision: 'rev-d',
+        disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+      };
+      expect(window.observeExternalChange(b).verdict.kind).toBe('supersedes');
+      expect(editor.current().reload.kind).toBe('idle');
+      expect(editor.current().externalConflict?.source).toBe(window.standingConflictFor(2));
+      const refused = loadRawDiskVersion(confirmedA, window.adoptDiskVersion);
+      expect(refused.reload).toEqual({ kind: 'refused' });
+      expect(refused.draft).toBe(confirmedA.draft);
+      expect(rawEditorView(refused).reloadUnavailable).toBe(true);
+      expect(window.scopedDocument?.revision).toBe('rev-a');
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+    }); // End of the "three adoption outcomes for the raw editor" case
+
+    it('holds a reading during the raw editor’s own save and settles it against the installed session through the real boundary', async () => {
+      // The raw save is out; the barrier tells the installed session
+      // `retained(A)`; the refusal settles and the window delivers its verdict
+      // about A — both held, because the session is still `saving` when the
+      // wrapper publishes. The caller settles what it holds after its `await`.
+      const held = heldRawSave(
+        {
+          ok: true,
+          value: { outcome: 'refused', verdict: 'RefusedForUnacknowledgedSuspicions', findings: [suspicion()] },
+          reload: { kind: 'done' }
+        },
+        null
+      );
+      const state = await withTheSecondSnippetSelected(held.commands);
+      const editor = rawEditorOver(state);
+      const started = beginRawSave(editor.current(), editor.current);
+      if (started === null) {
+        throw new Error('an edited raw session is sendable');
+      }
+      editor.set(started.session);
+      const sending = state.saveRawDocument(
+        2,
+        started.session.draft.baseRevision,
+        started.submission.candidate,
+        started.submission.acknowledgement
+      );
+      const seen = externalObservation();
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('retained');
+      expect(editor.current().heldDeliveries.map((delivery) => delivery.verdict.kind)).toEqual(['retained']);
+      expect(editor.current().awaitingReconciliation.size).toBe(0);
+      held.release();
+      const answer = await sending;
+      if (answer.kind !== 'sealed') {
+        throw new Error('the scripted refusal is sealed');
+      }
+      expect(editor.current().heldDeliveries.map((delivery) => delivery.verdict.kind)).toEqual(['retained', 'raised']);
+      editor.set(applyRawSave(editor.current(), answer.sealed, editor.current));
+      const settled = editor.current();
+      expect(settled.phase).toBe('editing');
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.awaitingReconciliation.size).toBe(0);
+      expect(settled.externalConflict?.source).toBe(externalConflictSource(seen));
+      expect(settled.externalConflict?.source).toBe(state.standingConflictFor(2));
+      expect(canRawSave(settled)).toBe(false);
+      expect(rawEditorView(settled).refusalChoices).toEqual(['keepEditing']);
+      expect(held.commands.saveRawDocument).toHaveBeenCalledTimes(1);
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+    }); // End of the "raw save settled against the installed session" case
+
+    it('raises over the restore’s destination through a registered receiver, withdraws the question, refuses all three doors, and retargets through the real door', async () => {
+      const state = createBrowserState(scriptedCommands(), () => undefined, scriptedBackups());
+      await state.open(null);
+      const restore = await restoreOver(state);
+      const asked = restore.current();
+      const seen = externalObservation();
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+      const told = restore.current();
+      expect(told.externalConflict?.source).toBe(state.standingConflictFor(2));
+      // Entry 12 through the window: the question is withdrawn — the retained
+      // session confirms nothing either — and the candidate is kept.
+      expect(told.pending).toBeNull();
+      expect(confirmRestore(asked, windowFor(state, asked))).toBeNull();
+      expect(candidateText(told.preview!)).toBe(CANDIDATE);
+      expect(told.baseRevision).toBe('rev-a');
+      // Entry 8, all three doors.
+      expect(restoreRefusal(told, windowFor(state, told))).toEqual({ kind: 'externalConflict' });
+      expect(prepareRestore(told, windowFor(state, told), restore.current)).toBe(told);
+      const byHand: RestoreSession = { ...told, pending: asked.pending };
+      expect(confirmRestore(byHand, windowFor(state, told))).toBeNull();
+      const view = restoreView(told, windowFor(state, told));
+      expect(view.canPrepare).toBe(false);
+      expect(view.externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
+      expect(view.conflictOperation).toBe('replaceFileFromBackup');
+      expect(revisionInProjection(state.views, 2)).toBe('rev-a');
+      // The two-step reload adopts through the door and re-points the kept
+      // candidate at the observation's disk revision (entry 23's "retarget").
+      const reloaded = reloadRestoreDiskVersion(
+        confirmRestoreDiskReload(askRestoreToReloadDiskVersion(told)),
+        state.adoptDiskVersion
+      );
+      expect(reloaded.baseRevision).toBe('rev-c');
+      expect(reloaded.preview!.draft.baseRevision).toBe('rev-c');
+      expect(candidateText(reloaded.preview!)).toBe(CANDIDATE);
+      expect(reloaded.externalConflict).toBeNull();
+      expect(revisionInProjection(state.views, 2)).toBe('rev-c');
+      // Prepared again against what the window now holds — once the reloaded
+      // session is the installed one: a reader answering the session the
+      // receiver last installed makes the door answer that session, and ask
+      // nothing over the captured one.
+      expect(prepareRestore(reloaded, windowFor(state, reloaded), restore.current)).toBe(restore.current());
+      restore.set(reloaded);
+      const again = prepareRestore(reloaded, windowFor(state, reloaded), restore.current);
+      expect(again.pending).not.toBeNull();
+      expect(invoked).not.toHaveBeenCalled();
+      restore.off();
+    }); // End of the "restore raised through the receiver" case
+
+    it('answers all three adoption outcomes to the restore through the real door, the outlived origin refused without resetting the warning', async () => {
+      const state = createBrowserState(scriptedCommands(), () => undefined, scriptedBackups());
+      await state.open(null);
+      const first = await restoreOver(state);
+      const second = await restoreOver(state);
+      const seen = externalObservation();
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+      const installed = reloadRestoreDiskVersion(
+        confirmRestoreDiskReload(askRestoreToReloadDiskVersion(first.current())),
+        state.adoptDiskVersion
+      );
+      expect(installed.baseRevision).toBe('rev-c');
+      expect(revisionInProjection(state.views, 2)).toBe('rev-c');
+      const alreadyThere = reloadRestoreDiskVersion(
+        confirmRestoreDiskReload(askRestoreToReloadDiskVersion(second.current())),
+        state.adoptDiskVersion
+      );
+      expect(alreadyThere.baseRevision).toBe('rev-c');
+      expect(candidateText(alreadyThere.preview!)).toBe(CANDIDATE);
+      first.off();
+      second.off();
+      // The outlived origin, in a fresh window.
+      const window = createBrowserState(scriptedCommands(), () => undefined, scriptedBackups());
+      await window.open(null);
+      const restore = await restoreOver(window);
+      const a = externalObservation();
+      expect(window.observeExternalChange(a).verdict.kind).toBe('raised');
+      const confirmedA = confirmRestoreDiskReload(askRestoreToReloadDiskVersion(restore.current()));
+      restore.set(confirmedA);
+      const b: ExternalConflictObservation = {
+        ...externalObservation(),
+        sequence: 6,
+        diskRevision: 'rev-d',
+        disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+      };
+      expect(window.observeExternalChange(b).verdict.kind).toBe('supersedes');
+      expect(restore.current().reload.kind).toBe('idle');
+      const refused = reloadRestoreDiskVersion(confirmedA, window.adoptDiskVersion);
+      expect(refused.reload).toEqual({ kind: 'refused' });
+      expect(refused.baseRevision).toBe('rev-a');
+      expect(restoreView(refused, windowFor(window, refused)).reloadUnavailable).toBe(true);
+      expect(revisionInProjection(window.views, 2)).toBe('rev-a');
+      expect(invoked).not.toHaveBeenCalled();
+      restore.off();
+    }); // End of the "three adoption outcomes for the restore" case
+
+    it('tells the restore retained through the barrier, blocks all three doors including the final permit, then the settlement’s verdict', async () => {
+      const held = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null
+      );
+      const state = createBrowserState(held.commands, () => undefined, scriptedBackups());
+      await state.open(null);
+      const restore = await restoreOver(state);
+      const asked = restore.current();
+      // Another surface's raw save is out; the reading is held.
+      const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      const seen = externalObservation();
+      expect(state.observeExternalChange(seen).verdict.kind).toBe('retained');
+      const waiting = restore.current();
+      expect(waiting.awaitingReconciliation.get(2)).toBe(seen);
+      // The question was carried to the installed session and is refused at
+      // every door until the wait lifts; the retained one authorizes nothing.
+      expect(waiting.pending).toBe(asked.pending);
+      expect(restoreRefusal(waiting, windowFor(state, waiting))).toEqual({ kind: 'observationRetained' });
+      expect(prepareRestore(waiting, windowFor(state, waiting), restore.current)).toBe(waiting);
+      expect(confirmRestore(waiting, windowFor(state, waiting), restore.current)).toBeNull();
+      expect(confirmRestore(asked, windowFor(state, asked))).toBeNull();
+      expect(restoreView(waiting, windowFor(state, waiting)).externalNotices).toEqual([{ kind: 'observationRetained' }]);
+      // The final permit: a confirmation minted in a window with no wait, sent
+      // beside the installed session, is consumed unspent and the sender is
+      // never reached.
+      const quiet = createBrowserState(scriptedCommands(), () => undefined, scriptedBackups());
+      await quiet.open(null);
+      const other = await restoreOver(quiet);
+      const started = confirmRestore(other.current(), windowFor(quiet, other.current()));
+      if (started === null) {
+        throw new Error('a pending restore confirms');
+      }
+      const carrying: RestoreSession = { ...started.session, awaitingReconciliation: waiting.awaitingReconciliation };
+      const sent = await sendRestore(started, carrying, windowFor(quiet, carrying), (document, base, text, ack) =>
+        quiet.saveRawDocument(document, base, text, ack)
+      );
+      expect(sent).toEqual({ kind: 'withdrawn' });
+      other.off();
+      // The settlement delivers the verdict about the held reading.
+      held.release();
+      await sending;
+      expect(restore.current().awaitingReconciliation.size).toBe(0);
+      expect(restore.current().externalConflict?.source).toBe(externalConflictSource(seen));
+      expect(restoreRefusal(restore.current(), windowFor(state, restore.current()))).toEqual({ kind: 'externalConflict' });
+      expect(held.commands.saveRawDocument).toHaveBeenCalledTimes(1);
+      expect(invoked).not.toHaveBeenCalled();
+      restore.off();
+    }); // End of the "restore retained then decided" case
+
+    it('refuses a raw save whose later draft read let the window displace the installed session (the review’s first blocker)', async () => {
+      // **The reviewer's interleaving, through the real door.** The draft's
+      // value is read more than once on the way to a submission; a getter that
+      // is quiet on the first read and tells the window of a reading on the
+      // second ran after a check made too early. The window's registered
+      // receiver installs the conflict; the save must be refused against that
+      // session and nothing sent.
+      const commands = scriptedCommands();
+      const state = await withTheSecondSnippetSelected(commands);
+      const editor = rawEditorOver(state);
+      const handedIn = editor.current();
+      const seen = externalObservation();
+      let reads = 0;
+      const trapped: RawEditorSession = {
+        ...handedIn,
+        draft: {
+          ...handedIn.draft,
+          get value() {
+            reads += 1;
+            if (reads === 2) {
+              expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+            }
+            return handedIn.draft.value;
+          }
+        }
+      };
+      editor.set(trapped);
+      expect(beginRawSave(trapped, editor.current)).toBeNull();
+      expect(reads).toBeGreaterThanOrEqual(2);
+      expect(editor.current().externalConflict?.source).toBe(state.standingConflictFor(2));
+      expect(canRawSave(editor.current())).toBe(false);
+      expect(commands.saveRawDocument).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+    }); // End of the "raw save displaced through the window on a later read" case
+
+    it('answers the installed session from a refused preparation whose context read let the window displace it (the review’s second blocker)', async () => {
+      // **The reviewer's interleaving, through the real window.** The context's
+      // revision is read by the block; a getter there tells the window of a
+      // reading and answers a revision the session is not measured against, so
+      // the preparation refuses `targetMoved` — and a refusal that answered its
+      // argument would have the caller overwrite the conflict the receiver
+      // installed.
+      const state = createBrowserState(scriptedCommands(), () => undefined, scriptedBackups());
+      await state.open(null);
+      const restore = await restoreOver(state);
+      restore.set(cancelRestore(restore.current()));
+      const handedIn = restore.current();
+      expect(handedIn.pending).toBeNull();
+      const seen = externalObservation();
+      // Armed once: the block reads the revision twice, and the window hands
+      // each decision out once.
+      let armed = true;
+      const context: RestoreContext = {
+        get observed(): ContentRevision {
+          if (armed) {
+            armed = false;
+            expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+          }
+          return 'rev-z';
+        },
+        surfaces: []
+      };
+      const answered = prepareRestore(handedIn, context, restore.current);
+      expect(answered).toBe(restore.current());
+      expect(answered).not.toBe(handedIn);
+      expect(answered.externalConflict?.source).toBe(state.standingConflictFor(2));
+      expect(answered.pending).toBeNull();
+      expect(restoreRefusal(answered, windowFor(state, answered))).toEqual({ kind: 'externalConflict' });
+      expect(invoked).not.toHaveBeenCalled();
+      restore.off();
+    }); // End of the "refused preparation displaced through the window" case
+
+    it('keeps what the window delivered during the adoption itself, on both surfaces (the review’s third finding)', async () => {
+      // **The reviewer's interleaving, through the real `adoptDiskVersion`.**
+      // The door copies the observation's projection before it decides; a
+      // getter behind that projection's `id` tells the window of a strictly
+      // later reading B, which supersedes A at the window and reaches the
+      // registered receiver while the adoption is still inside the door. The
+      // door then refuses A as outlived — and a reload that built its answer
+      // over the session it was handed would hand back A's conflict at the
+      // refused step, with B gone.
+      /**
+       * An observation of `match/base.yml` whose projection's `id`, once armed,
+       * publishes a strictly later reading through the given window.
+       *
+       * @param state - The window.
+       * @returns The observation, the later reading, and the arming switch.
+       */
+      function observationPublishingOnAdoption(state: BrowserState): {
+        readonly seen: ExternalConflictObservation;
+        readonly later: ExternalConflictObservation;
+        readonly arm: () => void;
+      } {
+        let armed = false;
+        const later: ExternalConflictObservation = {
+          ...externalObservation(),
+          sequence: 6,
+          diskRevision: 'rev-d',
+          disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+        };
+        const plain = replacedDocument();
+        const seen: ExternalConflictObservation = {
+          ...externalObservation(),
+          disk: {
+            ...plain,
+            get id(): DocumentId {
+              if (armed) {
+                armed = false;
+                expect(state.observeExternalChange(later).verdict.kind).toBe('supersedes');
+              }
+              return plain.id;
+            }
+          }
+        };
+        return {
+          seen,
+          later,
+          arm: () => {
+            armed = true;
+          }
+        };
+      } // End of function observationPublishingOnAdoption()
+      // The raw editor.
+      const commands = scriptedCommands();
+      const state = await withTheSecondSnippetSelected(commands);
+      const editor = rawEditorOver(state);
+      const raw = observationPublishingOnAdoption(state);
+      expect(state.observeExternalChange(raw.seen).verdict.kind).toBe('raised');
+      const confirmedRaw = confirmRawReload(askRawToReload(editor.current()));
+      editor.set(confirmedRaw);
+      raw.arm();
+      const rawAnswer = loadRawDiskVersion(confirmedRaw, state.adoptDiskVersion, editor.current);
+      expect(state.standingConflictFor(2)).toBe(externalConflictSource(raw.later));
+      expect(rawAnswer).toBe(editor.current());
+      expect(rawAnswer.externalConflict?.source).toBe(externalConflictSource(raw.later));
+      expect(rawAnswer.reload.kind).toBe('idle');
+      expect(rawAnswer.draft.value).toBe(`${OPENED}# edited\n`);
+      expect(state.scopedDocument?.revision).toBe('rev-a');
+      expect(commands.saveRawDocument).not.toHaveBeenCalled();
+      editor.off();
+      // The restore.
+      const window = createBrowserState(scriptedCommands(), () => undefined, scriptedBackups());
+      await window.open(null);
+      const restore = await restoreOver(window);
+      const kept = observationPublishingOnAdoption(window);
+      expect(window.observeExternalChange(kept.seen).verdict.kind).toBe('raised');
+      const confirmedRestore = confirmRestoreDiskReload(askRestoreToReloadDiskVersion(restore.current()));
+      restore.set(confirmedRestore);
+      kept.arm();
+      const restoreAnswer = reloadRestoreDiskVersion(confirmedRestore, window.adoptDiskVersion, restore.current);
+      expect(window.standingConflictFor(2)).toBe(externalConflictSource(kept.later));
+      expect(restoreAnswer).toBe(restore.current());
+      expect(restoreAnswer.externalConflict?.source).toBe(externalConflictSource(kept.later));
+      expect(restoreAnswer.reload.kind).toBe('idle');
+      expect(restoreAnswer.baseRevision).toBe('rev-a');
+      expect(candidateText(restoreAnswer.preview!)).toBe(CANDIDATE);
+      expect(revisionInProjection(window.views, 2)).toBe('rev-a');
+      expect(invoked).not.toHaveBeenCalled();
+      restore.off();
+    }); // End of the "delivery during the adoption kept on both surfaces" case
+
+    it('carries a wait the window recorded during a satisfied adoption into the reseed and the retarget (the review’s third finding, the installed arm)', async () => {
+      // The other outcome of the same interleaving: the getter starts another
+      // surface's raw save before it tells the window of B, so the barrier holds
+      // B and the receiver records a wait while the door goes on to install A's
+      // snapshot. The reseed and the retarget must carry that wait, so the next
+      // send is refused until the window decides B.
+      /**
+       * An observation whose projection's `id`, once armed, starts a held raw
+       * save and publishes a reading the barrier retains.
+       *
+       * @param state - The window.
+       * @returns The observation, the retained reading, the arming switch and
+       *   the send to await once released.
+       */
+      function observationRetainingOnAdoption(state: BrowserState): {
+        readonly seen: ExternalConflictObservation;
+        readonly later: ExternalConflictObservation;
+        readonly arm: () => void;
+        readonly sending: () => Promise<unknown> | null;
+      } {
+        let armed = false;
+        let sending: Promise<unknown> | null = null;
+        const later: ExternalConflictObservation = {
+          ...externalObservation(),
+          sequence: 6,
+          diskRevision: 'rev-d',
+          disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+        };
+        const plain = replacedDocument();
+        const seen: ExternalConflictObservation = {
+          ...externalObservation(),
+          disk: {
+            ...plain,
+            get id(): DocumentId {
+              if (armed) {
+                armed = false;
+                sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+                expect(state.observeExternalChange(later).verdict.kind).toBe('retained');
+              }
+              return plain.id;
+            }
+          }
+        };
+        return {
+          seen,
+          later,
+          arm: () => {
+            armed = true;
+          },
+          sending: () => sending
+        };
+      } // End of function observationRetainingOnAdoption()
+      // The raw editor.
+      const heldForRaw = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null
+      );
+      const state = await withTheSecondSnippetSelected(heldForRaw.commands);
+      const editor = rawEditorOver(state);
+      const raw = observationRetainingOnAdoption(state);
+      expect(state.observeExternalChange(raw.seen).verdict.kind).toBe('raised');
+      const confirmedRaw = confirmRawReload(askRawToReload(editor.current()));
+      editor.set(confirmedRaw);
+      raw.arm();
+      const reseeded = loadRawDiskVersion(confirmedRaw, state.adoptDiskVersion, editor.current);
+      expect(raw.sending()).not.toBeNull();
+      expect(state.scopedDocument?.revision).toBe('rev-c');
+      expect(reseeded.draft.value).toBe(DISK_TEXT);
+      expect(reseeded.externalConflict).toBeNull();
+      expect(reseeded.awaitingReconciliation.get(2)).toBe(raw.later);
+      expect(canRawSave(editRawText(reseeded, `${DISK_TEXT}# again\n`))).toBe(false);
+      heldForRaw.release();
+      await raw.sending();
+      expect(heldForRaw.commands.saveRawDocument).toHaveBeenCalledTimes(1);
+      editor.off();
+      // The restore.
+      const heldForRestore = heldRawSave(
+        { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } },
+        null
+      );
+      const window = createBrowserState(heldForRestore.commands, () => undefined, scriptedBackups());
+      await window.open(null);
+      const restore = await restoreOver(window);
+      const kept = observationRetainingOnAdoption(window);
+      expect(window.observeExternalChange(kept.seen).verdict.kind).toBe('raised');
+      const confirmedRestore = confirmRestoreDiskReload(askRestoreToReloadDiskVersion(restore.current()));
+      restore.set(confirmedRestore);
+      kept.arm();
+      const retargeted = reloadRestoreDiskVersion(confirmedRestore, window.adoptDiskVersion, restore.current);
+      expect(kept.sending()).not.toBeNull();
+      expect(revisionInProjection(window.views, 2)).toBe('rev-c');
+      expect(retargeted.baseRevision).toBe('rev-c');
+      expect(candidateText(retargeted.preview!)).toBe(CANDIDATE);
+      expect(retargeted.externalConflict).toBeNull();
+      expect(retargeted.awaitingReconciliation.get(2)).toBe(kept.later);
+      expect(restoreRefusal(retargeted, windowFor(window, retargeted))).toEqual({ kind: 'observationRetained' });
+      heldForRestore.release();
+      await kept.sending();
+      expect(heldForRestore.commands.saveRawDocument).toHaveBeenCalledTimes(1);
+      expect(invoked).not.toHaveBeenCalled();
+      restore.off();
+    }); // End of the "wait during a satisfied adoption carried" case
+  }); // End of the "raw editor's and restore's external sessions" suite
 }); // End of the "deferred adoption" suite
 
 /**

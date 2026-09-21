@@ -24,14 +24,17 @@
  *
  * ## The three things this module owns
  *
- * 1. **The gate.** {@link beginReapply} is the one place a surface's permanent
- *    {@link ConflictReapplySupport} is read, so the raw editor's *unavailable* is a
- *    declaration a transition honours rather than a fact about which functions
- *    happen to exist. Since Phase 2d-6-2 {@link enterReapply} is the same gate
- *    over **both** origins, answering `reapplyEvidenceFor`'s four arms on its
- *    `ready` arm; the match editor, the creator, the recovery form, the deleter,
- *    the mover and the duplicator enter there, and the raw editor migrates in
- *    2d-6-5.
+ * 1. **The gate.** {@link beginReapply} and, since Phase 2d-6-2,
+ *    {@link enterReapply} are the two places a surface's permanent
+ *    {@link ConflictReapplySupport} is read, so the raw editor's and restore's
+ *    *unavailable* is a declaration a transition honours rather than a fact about
+ *    which functions happen to exist. `enterReapply` is the same gate over
+ *    **both** origins, answering `reapplyEvidenceFor`'s four arms on its `ready`
+ *    arm; since Phase 2d-6-5 all eight surfaces enter there — the six that can
+ *    reapply, and the raw editor and restore, which it answers `unavailable`
+ *    before it looks at the conflict — and `beginReapply` has no production
+ *    caller left: it is kept as the save-only predecessor its doc names, driven
+ *    by `reapply.test.ts` alone.
  * 2. **The evidence readers.** {@link subjectCorrespondence} and
  *    {@link anchorCorrespondence} turn `ConflictResult.reapply`'s two wire enums
  *    into the three answers a surface can act on. They are here rather than in five
@@ -89,8 +92,8 @@
  * composed directly and TypeScript will not object; what holds is the
  * implementation fact that **every reapply transition in this repository that
  * adopts anything takes this route** — the five match surfaces, the raw editor's
- * having no adoption function at all — and each surface's own suite is what keeps
- * it that way. What is closed regardless of the route taken to that door — by a
+ * and restore's having no adoption function at all — and each surface's own suite
+ * is what keeps it that way. What is closed regardless of the route taken to that door — by a
  * run-time check inside it rather than by a type — is narrower: no adoption can be
  * had for a conflict the window never registered, because
  * `BrowserState.adoptDiskVersion` looks the conflict's wire value up in its own
@@ -287,7 +290,7 @@ export type ReapplyOutcome<S, O> =
       readonly kind: 'adoptionRefused';
     }
   | {
-      /** This surface can never reapply. The raw editor, and only it. */
+      /** This surface can never reapply. The raw editor and restore, and only they. */
       readonly kind: 'unavailable';
     }
   | {
@@ -319,11 +322,14 @@ export type ReapplyOutcome<S, O> =
  * **The save-only predecessor of {@link enterReapply}, since Phase 2d-6-2.** The
  * match editor enters through that one, which takes either origin and answers
  * with `reapplyEvidenceFor`'s four distinct arms; since Phase 2d-6-3 so do the
- * new-snippet form and the recovery form, and since Phase 2d-6-4 the deleter,
- * the mover and the duplicator. The raw editor still enters here, and migrating
- * it is 2d-6-5's. Nothing in TypeScript stops a surface staying here for ever;
- * what it forfeits by staying is the external origin, which this signature
- * refuses at compile time.
+ * new-snippet form and the recovery form, since Phase 2d-6-4 the deleter, the
+ * mover and the duplicator, and since Phase 2d-6-5 the raw editor and restore,
+ * whose `unavailable` it answers before it looks at the conflict. **No production
+ * transition enters here any more**; `reapply.test.ts` still drives it, and it
+ * stays because the save-origin gate is what `enterReapply` generalized and the
+ * suite's cases about it are the record of that. Nothing in TypeScript stops a
+ * surface entering here again; what it would forfeit is the external origin,
+ * which this signature refuses at compile time.
  *
  * @typeParam T - The drafted value the conflict retained.
  * @param capabilities - The calling surface's own declaration.

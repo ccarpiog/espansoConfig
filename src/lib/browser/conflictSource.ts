@@ -514,8 +514,11 @@ export function standingConflictOf(source: ConflictSource): StandingConflict {
  * and `applyRecoveryObservation` in `./recovery.ts` (Phase 2d-6-3), in the same
  * shape, as are the deleter's `applyDeletionObservation` in `./matchDeletion.ts`,
  * the mover's `applyMoveObservation` in `./matchMove.ts` and the duplicator's
- * `applyDuplicationObservation` in `./matchDuplication.ts` (Phase 2d-6-4); the
- * raw editor's and restore's are 2d-6-5's.
+ * `applyDuplicationObservation` in `./matchDuplication.ts` (Phase 2d-6-4), and
+ * the raw editor's `applyObservation` in `./rawEditor.ts` and restore's
+ * `applyRestoreObservation` in `./restore.ts` (Phase 2d-6-5). All eight exist as
+ * values; which of them a component registers, and over which files, is
+ * 2d-6-6's and 2d-6-8's.
  */
 export type ObservationVerdict =
   | {

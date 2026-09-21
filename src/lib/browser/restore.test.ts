@@ -52,12 +52,29 @@ import type {
   RefusedResult,
   SaveResult
 } from '../ipc/types';
-import type { AdoptTheDiskVersion } from './editorSave';
+import { NOT_RELOADING, type AdoptTheDiskVersion, type ReloadStep } from './editorSave';
 import { makeDocument, makeSummary } from './fixtures';
 import { sealWholeDocumentSave, type SealedWholeDocumentSave } from './invalidation';
 import {
+  externalConflictSource,
+  standingConflictOf,
+  type ConflictSource,
+  type ExternalChangeConflictSource,
+  type ExternalConflictObservation,
+  type ObservationVerdict
+} from './conflictSource';
+import { submissionOf } from './draft';
+import {
+  arbitratedDelivery,
+  retainedDelivery,
+  writtenHereDelivery,
+  type ObservationDelivery
+} from './observationDelivery';
+import {
   acknowledgeRestoreFindings,
+  acknowledgeRestoreSnapshot,
   applyRestore,
+  applyRestoreObservation,
   askToReloadDiskVersion,
   baseRevisionOf,
   batchesLoaded,
@@ -79,6 +96,7 @@ import {
   loadingEntries,
   openWriteSurfaceKey,
   prepareRestore,
+  reapplyToDiskVersion,
   reloadTheDiskVersion,
   restoreConfirmationWithdrawn,
   restoreCouldNotBeSent,
@@ -101,7 +119,15 @@ import {
   type StartedRestore,
   type WriteSurfaceTarget
 } from './restore';
-import type { ConflictModel, DiskAdoptionOutcome, SaveOutcomeModel } from './saveOutcome';
+import {
+  isExternalConflict,
+  isSaveConflict,
+  type ConflictChoice,
+  type ConflictModel,
+  type DiskAdoptionOutcome,
+  type ExternalConflictModel,
+  type SaveOutcomeModel
+} from './saveOutcome';
 
 /** The file every case here restores into. */
 const TARGET = 7;
@@ -664,6 +690,84 @@ function adopting(answer: DiskAdoptionOutcome = 'installed'): {
     adoptions
   };
 } // End of function adopting()
+
+/**
+ * The watcher's side, for the external session (Phase 2d-6-5): observations of
+ * the destination and of another file, and the sealed envelopes the window would
+ * deliver about them.
+ *
+ * Every envelope is sealed by the three constructors of `./observationDelivery.ts`,
+ * so the verdict inside is about the observation inside by construction;
+ * `workspace.test.ts` drives the same receiver through a real `BrowserState`.
+ * A fresh observation every call, deliberately: the memo in `./conflictSource.ts`
+ * and the session's wait are both keyed on object identity.
+ */
+const watched = {
+  /**
+   * One narrowed observation of the destination.
+   *
+   * @param overrides - Whatever the case needs beyond the defaults.
+   * @returns The observation, as a window would have narrowed it.
+   */
+  observation(overrides: Partial<ExternalConflictObservation> = {}): ExternalConflictObservation {
+    return {
+      sequence: 5,
+      document: TARGET,
+      previousRevision: BASE,
+      diskRevision: ELSEWHERE,
+      diskText: DISK,
+      disk: makeDocument({ id: TARGET, relativePath: 'match/base.yml', revision: ELSEWHERE }),
+      findings: [],
+      correspondences: null,
+      ...overrides
+    };
+  }, // End of function observation()
+  /**
+   * An observation of another file, which a restore is never about.
+   *
+   * @returns The observation.
+   */
+  otherObservation(): ExternalConflictObservation {
+    return watched.observation({
+      document: TARGET + 1,
+      previousRevision: null,
+      diskRevision: AGAIN,
+      disk: makeDocument({ id: TARGET + 1, relativePath: 'match/other.yml', revision: AGAIN })
+    });
+  }, // End of function otherObservation()
+  /**
+   * An arbitrated envelope, asserted to have reached the arm the case is about.
+   *
+   * @param standing - What stands for the file, or `null`.
+   * @param seen - The observation.
+   * @param uncertain - Whether the last settled write may have written.
+   * @param arm - The verdict the case needs.
+   * @returns The sealed envelope.
+   */
+  decided(
+    standing: ConflictSource | null,
+    seen: ExternalConflictObservation,
+    uncertain: boolean,
+    arm: ObservationVerdict['kind']
+  ): ObservationDelivery {
+    const delivery = arbitratedDelivery(
+      standing === null ? null : standingConflictOf(standing),
+      seen,
+      uncertain
+    );
+    expect(delivery.verdict.kind).toBe(arm);
+    return delivery;
+  }, // End of function decided()
+  /**
+   * The `raised` envelope for one observation.
+   *
+   * @param seen - The observation.
+   * @returns The envelope.
+   */
+  raised(seen: ExternalConflictObservation): ObservationDelivery {
+    return watched.decided(null, seen, false, 'raised');
+  } // End of function raised()
+};
 
 describe('the catalogue', () => {
   it('starts asked for nothing at all', () => {
@@ -2144,7 +2248,67 @@ describe('what a session presents and what it authorizes', () => {
       ['dismissRestoreOutcome', (session) => dismissRestoreOutcome(session)],
       ['askToReloadDiskVersion', (session) => askToReloadDiskVersion(session)],
       ['confirmDiskReload', (session) => confirmDiskReload(session)],
-      ['reloadTheDiskVersion', (session) => reloadTheDiskVersion(session, adopting().adopt)]
+      ['reloadTheDiskVersion', (session) => reloadTheDiskVersion(session, adopting().adopt)],
+      // The receiver's arms (Phase 2d-6-5): the replacing ones withdraw, the
+      // others carry. A `retained` about the destination carries too, and is
+      // outside this table's scope because the block it records is a second
+      // reason for the confirmation to refuse; its own case pins the carry.
+      [
+        'applyRestoreObservation, raised over the destination',
+        (session) => applyRestoreObservation(session, watched.raised(watched.observation()))
+      ],
+      [
+        'applyRestoreObservation, raisedWithoutReload over the destination',
+        (session) =>
+          applyRestoreObservation(session, watched.decided(null, watched.observation(), true, 'raisedWithoutReload'))
+      ],
+      [
+        'applyRestoreObservation, supersedes over the destination',
+        (session) =>
+          applyRestoreObservation(
+            session,
+            watched.decided(
+              externalConflictSource(watched.observation({ sequence: 1, diskRevision: AGAIN })),
+              watched.observation(),
+              false,
+              'supersedes'
+            )
+          )
+      ],
+      [
+        'applyRestoreObservation, coalesced',
+        (session) =>
+          applyRestoreObservation(
+            session,
+            watched.decided(externalConflictSource(watched.observation({ sequence: 1 })), watched.observation(), false, 'coalesced')
+          )
+      ],
+      [
+        'applyRestoreObservation, notLater',
+        (session) =>
+          applyRestoreObservation(
+            session,
+            watched.decided(externalConflictSource(watched.observation({ sequence: 9 })), watched.observation(), false, 'notLater')
+          )
+      ],
+      [
+        'applyRestoreObservation, raised over another file',
+        (session) => applyRestoreObservation(session, watched.raised(watched.otherObservation()))
+      ],
+      [
+        'applyRestoreObservation, retained about another file',
+        (session) => applyRestoreObservation(session, retainedDelivery(watched.otherObservation()))
+      ],
+      [
+        'applyRestoreObservation, writtenHere lifting a wait',
+        (session) => {
+          const seen = watched.observation();
+          return applyRestoreObservation(
+            applyRestoreObservation(session, retainedDelivery(seen)),
+            writtenHereDelivery(seen)
+          );
+        }
+      ]
     ];
   } // End of function transitions()
 
@@ -2786,7 +2950,9 @@ describe('the conflict', () => {
     );
     const second = conflictOf(session);
     expect(second).not.toBeNull();
-    expect(second!.expected).toBe(ELSEWHERE);
+    // Read through the tested type guard since Phase 2d-6-5: `conflictOf` answers
+    // either origin, and `expected` is the save arm's.
+    expect(second !== null && isSaveConflict(second) ? second.expected : null).toBe(ELSEWHERE);
     expect(second!.diskRevision).toBe(AGAIN);
     // Nothing was written by either attempt, and the candidate is still the same
     // bytes it was read as.
@@ -2854,7 +3020,9 @@ describe('the sentences behind the codes', () => {
       { kind: 'noCandidate' } as const,
       { kind: 'targetMoved' } as const,
       { kind: 'inFlight' } as const,
+      { kind: 'externalConflict' } as const,
       { kind: 'conflictShowing' } as const,
+      { kind: 'observationRetained' } as const,
       { kind: 'alreadyRestored' } as const
     ];
   } // End of function everyRefusal()
@@ -2863,8 +3031,15 @@ describe('the sentences behind the codes', () => {
     const keys = everyRefusal().map(restoreRefusalKey);
     expect(new Set(keys).size).toBe(keys.length);
     for (const key of keys) {
-      expect(key.startsWith('browser.restore.refused.'), key).toBe(true);
+      // Restore's own sentences, plus the two shared external-conflict sentences
+      // the two Phase 2d-6-5 codes render — no key of their own, deliberately.
+      expect(
+        key.startsWith('browser.restore.refused.') || key.startsWith('browser.externalConflict.'),
+        key
+      ).toBe(true);
     }
+    expect(restoreRefusalKey({ kind: 'externalConflict' })).toBe('browser.externalConflict.fileChangedWhileOpen');
+    expect(restoreRefusalKey({ kind: 'observationRetained' })).toBe('browser.externalConflict.observationRetained');
   });
 
   it.each(LOCALES)('all read as a sentence in %s, and are translated', (locale) => {
@@ -2968,3 +3143,886 @@ describe('the sentences behind the codes', () => {
     expect(DICTIONARIES.es['browser.rawEditor.undo'].toLowerCase()).toContain('deshacer');
   }); // End of the "capable of firing" case
 }); // End of the "sentences behind the codes" suite
+
+describe('the external session — Phase 2d-6-5', () => {
+  // **The receiver as a value, driven without a window.** `watched` seals every
+  // envelope through the three constructors of `./observationDelivery.ts`;
+  // `workspace.test.ts` drives this same transition through a real `BrowserState`.
+  // Nothing here can show a component registers the receiver — 2d-6-8 wires it —
+  // and nothing here calls a command: no `BrowserState` exists in this file.
+
+  /**
+   * The external conflict a session shows, or a failure naming the case.
+   *
+   * @param held - The session.
+   * @returns Its external conflict.
+   */
+  function externalOf(held: RestoreSession): ExternalConflictModel<string> {
+    const conflict = held.externalConflict;
+    if (conflict === null) {
+      throw new Error('this case needs an external conflict on the session');
+    }
+    return conflict;
+  } // End of function externalOf()
+
+  /**
+   * A session whose replacement was refused for findings — the refusal path.
+   *
+   * @returns The session showing the refusal.
+   */
+  async function refusedOnce(): Promise<RestoreSession> {
+    const { session } = await roundTrip(pending(), refusal());
+    expect(session.outcome?.kind).toBe('refused');
+    return session;
+  } // End of function refusedOnce()
+
+  /**
+   * A session whose replacement met a save conflict — the save origin.
+   *
+   * @returns The session showing the save conflict.
+   */
+  async function saveConflicted(): Promise<RestoreSession> {
+    const { session } = await roundTrip(pending(), conflictResult(ELSEWHERE));
+    return session;
+  } // End of function saveConflicted()
+
+  /**
+   * A holder standing in for the component's `$state`: what a registered
+   * receiver would update, and what the reader answers.
+   *
+   * @param first - The session installed at the start.
+   * @returns The holder, its reader, and a receiver that applies to it.
+   */
+  function installed(first: RestoreSession): {
+    current: () => RestoreSession;
+    receive: (delivery: ObservationDelivery) => void;
+    set: (next: RestoreSession) => void;
+  } {
+    let session = first;
+    return {
+      current: () => session,
+      receive: (delivery) => {
+        session = applyRestoreObservation(session, delivery);
+      },
+      set: (next) => {
+        session = next;
+      }
+    };
+  } // End of function installed()
+
+  describe('the seven arms over a session opened over one destination (entries 6, 8, 11, 12)', () => {
+    it('raises over the destination, keeps the candidate, withdraws the question and its consent, and refuses all three doors', () => {
+      const asked = pending();
+      expect(asked.pending).not.toBeNull();
+      const seen = watched.observation();
+      const next = applyRestoreObservation(asked, watched.raised(seen));
+      const conflict = externalOf(next);
+      expect(conflict.source).toBe(externalConflictSource(seen));
+      expect(conflict.diskText).toBe(DISK);
+      expect(conflict.diskRevision).toBe(ELSEWHERE);
+      expect(isExternalConflict(conflict)).toBe(true);
+      expect(conflictOf(next)).toBe(conflict);
+      // The retained candidate's draft, byte for byte, and the candidate itself
+      // untouched (entry 23's "candidate" — retention across a replacing verdict).
+      expect(conflict.draft.value).toBe(CANDIDATE);
+      expect(candidateText(next.preview!)).toBe(CANDIDATE);
+      expect(next.preview!.draft.baseRevision).toBe(BASE);
+      expect(next.baseRevision).toBe(BASE);
+      expect(next.entry).toEqual(asked.entry);
+      expect(next.batch).toEqual(asked.batch);
+      // `outcome` is untouched: no replacement ended (entry 6).
+      expect(next.outcome).toBeNull();
+      // Entry 12: the question is withdrawn — presented by nobody and authorized
+      // for nobody, the caller's retained session included — its consent gone
+      // and the preview generation moved.
+      expect(next.pending).toBeNull();
+      expect(confirmRestore(next, at(BASE))).toBeNull();
+      expect(confirmRestore(asked, at(BASE))).toBeNull();
+      expect(next.previewGeneration).toBeGreaterThan(asked.previewGeneration);
+      expect(next.preview!.draft.consent).toBeNull();
+      // Entry 8, all three doors: preparation, confirmation and the final permit.
+      expect(restoreRefusal(next, at(BASE))).toEqual({ kind: 'externalConflict' });
+      expect(prepareRestore(next, at(BASE))).toBe(next);
+      const byHand: RestoreSession = { ...next, pending: asked.pending };
+      expect(confirmRestore(byHand, at(BASE))).toBeNull();
+      const view = restoreView(next, at(BASE));
+      expect(view.canPrepare).toBe(false);
+      expect(view.confirming).toBe(false);
+      expect(view.refusal).toEqual({ kind: 'externalConflict' });
+      expect(view.conflict).toBe(conflict);
+      expect(view.externalMessages).toBe(conflict.messages);
+      expect(view.externalMessages.map((line) => line.kind)).toEqual([
+        'fileChangedWhileOpen',
+        'operationKeptInMemory',
+        'reloadRetargetsCandidate'
+      ]);
+      expect(view.messages).toEqual([]);
+      expect(view.externalNotices).toEqual([]);
+      expect(view.preview).toBe(next.preview);
+      expect(view.conflictOperation).toBe('replaceFileFromBackup');
+      expect(view.diskText).toEqual({ kind: 'text', text: DISK });
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'reloadDiskVersion']);
+    }); // End of the "raised over the destination" case
+
+    it('refuses the final permit directly under an external conflict, and sends nothing', async () => {
+      // **Past a disabled button, at the last door.** A confirmation minted
+      // before the conflict, handed to the send beside a session that now
+      // carries one, is consumed unspent; the sender is never called.
+      const started = confirmRestore(pending(), at(BASE));
+      if (started === null) {
+        throw new Error('a pending restore confirms');
+      }
+      const seen = watched.observation();
+      const blocked: RestoreSession = {
+        ...started.session,
+        externalConflict: externalOf(applyRestoreObservation(withCandidate(), watched.raised(seen)))
+      };
+      const send = sender();
+      expect(await sendRestore(started, blocked, at(BASE), send)).toEqual({ kind: 'withdrawn' });
+      expect(send).not.toHaveBeenCalled();
+      // Consumed: the same confirmation sends nothing afterwards either.
+      expect(await sendRestore(started, started.session, at(BASE), send)).toEqual({ kind: 'notAttempted' });
+      expect(send).not.toHaveBeenCalled();
+    }); // End of the "final permit under an external conflict" case
+
+    it('answers the same session from prepareRestore under an external conflict, refusal path included', async () => {
+      // The refusal panel's *Save anyway* would consent and prepare; the consent
+      // is recorded and the preparation refused, so nothing is sendable.
+      const blocked = applyRestoreObservation(await refusedOnce(), watched.raised(watched.observation()));
+      expect(blocked.outcome?.kind).toBe('refused');
+      const view = restoreView(blocked, at(BASE));
+      expect(view.refusalChoices).toEqual(['keepEditing']);
+      expect(prepareRestore(acknowledgeRestoreFindings(blocked), at(BASE)).pending).toBeNull();
+    });
+
+    it('raises over a session with no candidate, over a placeholder draft, and says the file first', () => {
+      // A destination told of a change before any entry was read: the block
+      // applies and the reload is the way out; the draft the model must carry is
+      // the documented placeholder and never a candidate.
+      const empty = startRestore(target());
+      const next = applyRestoreObservation(empty, watched.raised(watched.observation()));
+      const conflict = externalOf(next);
+      expect(conflict.draft.value).toBe('');
+      expect(conflict.draft.baseRevision).toBe(BASE);
+      expect(next.preview).toBeNull();
+      expect(restoreRefusal(next, at(BASE))).toEqual({ kind: 'externalConflict' });
+      expect(restoreView(next, at(BASE)).preview).toBeNull();
+      // The reload retargets the session with nothing to keep, and a candidate
+      // read afterwards is measured against the adopted revision.
+      const reloaded = reloadTheDiskVersion(confirmDiskReload(askToReloadDiskVersion(next)), adopting().adopt);
+      expect(reloaded.baseRevision).toBe(ELSEWHERE);
+      expect(reloaded.externalConflict).toBeNull();
+      expect(restoreRefusal(reloaded, at(ELSEWHERE))).toEqual({ kind: 'noCandidate' });
+    }); // End of the "no candidate" case
+
+    it('takes nothing from a delivery about another file, except the end of a wait recorded for it', () => {
+      const over = pending();
+      const elsewhere = watched.otherObservation();
+      expect(applyRestoreObservation(over, watched.raised(elsewhere))).toBe(over);
+      expect(applyRestoreObservation(over, retainedDelivery(elsewhere))).toBe(over);
+      expect(applyRestoreObservation(over, watched.decided(null, elsewhere, true, 'raisedWithoutReload'))).toBe(over);
+      // The question survived every one of them, authorization included.
+      expect(confirmRestore(over, at(BASE))).not.toBeNull();
+      const waiting: RestoreSession = {
+        ...withCandidate(),
+        awaitingReconciliation: new Map([[TARGET + 1, elsewhere]])
+      };
+      expect(applyRestoreObservation(waiting, writtenHereDelivery(elsewhere)).awaitingReconciliation.size).toBe(0);
+      expect(applyRestoreObservation(waiting, watched.raised(elsewhere))).toEqual({
+        ...waiting,
+        awaitingReconciliation: new Map()
+      });
+      expect(restoreRefusal(waiting, at(BASE))).toBeNull();
+    });
+
+    it('takes a delivery on a spent session, where the conflict stands beside the success and nothing is sendable', async () => {
+      // The deleter's rule for a session a commit spent: the conflict is
+      // recorded, the committed outcome stays, and the doors refuse for the
+      // commit before they refuse for the conflict.
+      const { session } = await roundTrip(pending(), saved());
+      expect(session.restored).toBe(true);
+      const seen = watched.observation({ previousRevision: AFTER });
+      const told = applyRestoreObservation(session, watched.raised(seen));
+      expect(told.outcome?.kind).toBe('saved');
+      expect(told.restored).toBe(true);
+      expect(externalOf(told).source).toBe(externalConflictSource(seen));
+      expect(restoreRefusal(told, at(AFTER))).toEqual({ kind: 'alreadyRestored' });
+      expect(prepareRestore(told, at(AFTER))).toBe(told);
+      const waiting = applyRestoreObservation(session, retainedDelivery(seen));
+      expect(waiting.awaitingReconciliation.get(TARGET)).toBe(seen);
+      expect(waiting.restored).toBe(true);
+    });
+
+    it('withdraws the question on every replacing verdict, and carries it on coalesced, notLater and a wait', () => {
+      const seen = watched.observation();
+      // A fresh question per verdict, because a withdrawal revokes the *argument*:
+      // the caller's retained session authorizes nothing afterwards either.
+      const raisedOver = pending();
+      expect(applyRestoreObservation(raisedOver, watched.raised(seen)).pending).toBeNull();
+      expect(confirmRestore(raisedOver, at(BASE))).toBeNull();
+      const withheldOver = pending();
+      expect(applyRestoreObservation(withheldOver, watched.decided(null, seen, true, 'raisedWithoutReload')).pending).toBeNull();
+      expect(confirmRestore(withheldOver, at(BASE))).toBeNull();
+      const standing = externalConflictSource(watched.observation({ sequence: 1, diskRevision: AGAIN }));
+      const supersededOver = pending();
+      expect(applyRestoreObservation(supersededOver, watched.decided(standing, seen, false, 'supersedes')).pending).toBeNull();
+      expect(confirmRestore(supersededOver, at(BASE))).toBeNull();
+      // A verdict that changes nothing about the file changes nothing about the
+      // question either: the session is the object it was, authorization included.
+      const asked = pending();
+      const sameBytes = externalConflictSource(watched.observation({ sequence: 1 }));
+      const coalesced = applyRestoreObservation(asked, watched.decided(sameBytes, seen, false, 'coalesced'));
+      expect(coalesced).toBe(asked);
+      const later = externalConflictSource(watched.observation({ sequence: 9 }));
+      expect(applyRestoreObservation(asked, watched.decided(later, seen, false, 'notLater'))).toBe(asked);
+      expect(restoreView(asked, at(BASE)).confirming).toBe(true);
+      expect(confirmRestore(asked, at(BASE))).not.toBeNull();
+      // A wait carries the question to the successor and blocks the doors until
+      // it lifts; the same question then confirms.
+      const waiting = applyRestoreObservation(pending(), retainedDelivery(seen));
+      expect(waiting.pending).not.toBeNull();
+      expect(restoreView(waiting, at(BASE)).confirming).toBe(true);
+      expect(confirmRestore(waiting, at(BASE))).toBeNull();
+      const lifted = applyRestoreObservation(waiting, writtenHereDelivery(seen));
+      expect(lifted.pending).toBe(waiting.pending);
+      expect(confirmRestore(lifted, at(BASE))).not.toBeNull();
+      // And the one it was carried from authorizes nothing any more.
+      expect(confirmRestore(waiting, at(BASE))).toBeNull();
+    }); // End of the "question withdrawn or carried" case
+  }); // End of the "seven arms" suite
+
+  describe('the held observation, and writtenHere by identity (entries 8 and 11)', () => {
+    it('records a wait as a restriction on the three doors, and lifts it only for that observation', async () => {
+      const seen = watched.observation();
+      const waiting = applyRestoreObservation(withCandidate(), retainedDelivery(seen));
+      expect(waiting.awaitingReconciliation.get(TARGET)).toBe(seen);
+      expect(waiting.awaitingReconciliation.size).toBe(1);
+      expect(waiting.externalConflict).toBeNull();
+      expect(conflictOf(waiting)).toBeNull();
+      expect(restoreRefusal(waiting, at(BASE))).toEqual({ kind: 'observationRetained' });
+      expect(prepareRestore(waiting, at(BASE))).toBe(waiting);
+      const byHand: RestoreSession = { ...waiting, pending: pending().pending };
+      expect(confirmRestore(byHand, at(BASE))).toBeNull();
+      // The final permit, with a session that carries the wait beside a
+      // confirmation minted before it.
+      const started = confirmRestore(pending(), at(BASE));
+      const send = sender();
+      expect(await sendRestore(started, { ...started!.session, awaitingReconciliation: waiting.awaitingReconciliation }, at(BASE), send)).toEqual({ kind: 'withdrawn' });
+      expect(send).not.toHaveBeenCalled();
+      const view = restoreView(waiting, at(BASE));
+      expect(view.canPrepare).toBe(false);
+      expect(view.refusal).toEqual({ kind: 'observationRetained' });
+      expect(view.conflict).toBeNull();
+      expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
+      // The catalogue and the candidate stay free to change, and carry the wait.
+      expect(chooseBatch(waiting, OTHER_BATCH).awaitingReconciliation.get(TARGET)).toBe(seen);
+      expect(targetRevisionObserved(waiting, AGAIN).awaitingReconciliation.get(TARGET)).toBe(seen);
+      // Lifted by identity, and by nothing else.
+      expect(applyRestoreObservation(waiting, writtenHereDelivery(watched.observation())).awaitingReconciliation.get(TARGET)).toBe(seen);
+      const lifted = applyRestoreObservation(waiting, writtenHereDelivery(seen));
+      expect(lifted).toEqual({ ...waiting, awaitingReconciliation: new Map() });
+      expect(restoreRefusal(lifted, at(BASE))).toBeNull();
+      expect(applyRestoreObservation(lifted, writtenHereDelivery(seen))).toBe(lifted);
+      // Any decision about the awaited observation ends the wait; a later
+      // `retained` replaces it; a re-held reading is still held.
+      const standing = externalConflictSource(watched.observation({ sequence: 9 }));
+      expect(applyRestoreObservation(waiting, watched.decided(standing, seen, false, 'notLater'))).toEqual({
+        ...waiting,
+        awaitingReconciliation: new Map()
+      });
+      expect(applyRestoreObservation(waiting, watched.raised(seen)).awaitingReconciliation.size).toBe(0);
+      const newer = watched.observation({ sequence: 7 });
+      expect(applyRestoreObservation(waiting, retainedDelivery(newer)).awaitingReconciliation.get(TARGET)).toBe(newer);
+      expect(applyRestoreObservation(waiting, retainedDelivery(seen)).awaitingReconciliation.get(TARGET)).toBe(seen);
+    }); // End of the "retained and writtenHere" case
+
+    it('holds every delivery during its own replacement and replays them in arrival order (entry 5)', async () => {
+      const started = confirmRestore(pending(), at(BASE));
+      if (started === null) {
+        throw new Error('a pending restore confirms');
+      }
+      const seen = watched.observation();
+      const later = watched.observation({ sequence: 6 });
+      const standing = externalConflictSource(seen);
+      const held = applyRestoreObservation(
+        applyRestoreObservation(applyRestoreObservation(started.session, retainedDelivery(seen)), watched.raised(seen)),
+        watched.decided(standing, later, false, 'coalesced')
+      );
+      expect(held.externalConflict).toBeNull();
+      expect(held.awaitingReconciliation.size).toBe(0);
+      expect(held.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised', 'coalesced']);
+      // A held envelope blocks the final permit: the send is consumed unspent.
+      const send = sender();
+      expect(await sendRestore(started, held, at(BASE), send)).toEqual({ kind: 'withdrawn' });
+      expect(send).not.toHaveBeenCalled();
+      // The withdrawal replays the held decisions: the conflict `raised` announced
+      // stands, the wait `retained` recorded ended with it, and `coalesced` found
+      // the conflict it was about.
+      const withdrawn = restoreConfirmationWithdrawn(held);
+      expect(withdrawn.phase).toBe('editing');
+      expect(withdrawn.heldDeliveries).toEqual([]);
+      expect(externalOf(withdrawn).source).toBe(standing);
+      expect(restoreRefusal(withdrawn, at(BASE))).toEqual({ kind: 'externalConflict' });
+      // The answer lands first and the replay has the last word, on a refusal, on
+      // a commit — the session spent, the conflict beside the success — and on a
+      // seal already opened.
+      const refused = applyRestore(held, sealed(refusal()), NO_SURFACES);
+      expect(refused.heldDeliveries).toEqual([]);
+      expect(refused.outcome?.kind).toBe('refused');
+      expect(externalOf(refused).source).toBe(standing);
+      expect(restoreRefusal(refused, at(BASE))).toEqual({ kind: 'externalConflict' });
+      const committed = applyRestore(held, sealed(saved()), NO_SURFACES);
+      expect(committed.outcome?.kind).toBe('saved');
+      expect(committed.restored).toBe(true);
+      expect(externalOf(committed).source).toBe(standing);
+      const twice = sealed(saved());
+      applyRestore(held, twice, NO_SURFACES);
+      const again = applyRestore(held, twice, NO_SURFACES);
+      expect(again.phase).toBe('editing');
+      expect(again.heldDeliveries).toEqual([]);
+      expect(externalOf(again).source).toBe(standing);
+      // A send that produced no outcome consumes the hold too.
+      const heldUncertain = applyRestoreObservation(started.session, watched.decided(null, seen, true, 'raisedWithoutReload'));
+      const failed = restoreCouldNotBeSent(heldUncertain, true);
+      expect(failed.heldDeliveries).toEqual([]);
+      expect(failed.sendFailure?.kind).toBe('mayHaveWritten');
+      expect(failed.uncertaintyUnresolved).toBe(true);
+      expect(externalOf(failed).source).toBe(externalConflictSource(seen));
+    }); // End of the "held during the replacement" case
+  }); // End of the "held observation" suite
+
+  describe('collisions: only one conflict is active (entry 7), and the dismissal erases nothing (entry 9)', () => {
+    it('retires a save conflict when an observation supersedes it, keeping the candidate and dropping the confirmation', async () => {
+      const stuck = await saveConflicted();
+      const saveModel = conflictOf(stuck);
+      if (saveModel === null || !isSaveConflict(saveModel)) {
+        throw new Error('this case starts from a save conflict');
+      }
+      const confirmed = confirmDiskReload(askToReloadDiskVersion(stuck));
+      expect(confirmed.reload.kind).toBe('confirmed');
+      const seen = watched.observation({ diskRevision: AGAIN });
+      const next = applyRestoreObservation(confirmed, watched.decided(saveModel.source, seen, false, 'supersedes'));
+      expect(next.outcome).toBeNull();
+      expect(next.submitted).toBeNull();
+      const conflict = externalOf(next);
+      expect(conflict.draft).toBe(saveModel.draft);
+      expect(conflict.diskRevision).toBe(AGAIN);
+      expect(conflictOf(next)).toBe(conflict);
+      expect(candidateText(next.preview!)).toBe(CANDIDATE);
+      expect(next.baseRevision).toBe(BASE);
+      // The reload is idle again and the confirmation is gone: nothing is
+      // re-pointed and the window is not asked.
+      expect(next.reload).toBe(NOT_RELOADING);
+      expect(restoreView(next, at(BASE)).awaitingReloadConfirmation).toBe(false);
+      const recorder = adopting();
+      const unmoved = reloadTheDiskVersion(next, recorder.adopt);
+      expect(unmoved.baseRevision).toBe(BASE);
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "supersedes a save conflict" case
+
+    it('keeps a committed success and a refusal as history, and lets a replacement that conflicts retire the external one', async () => {
+      const blocked = applyRestoreObservation(await refusedOnce(), watched.raised(watched.observation()));
+      expect(blocked.outcome?.kind).toBe('refused');
+      expect(conflictOf(blocked)).toBe(blocked.externalConflict);
+      // The reverse collision, kept for a direct call: a conflict answer retires
+      // the external conflict, a refusal leaves it.
+      const sending = confirmRestore(pending(), at(BASE));
+      if (sending === null) {
+        throw new Error('a pending restore confirms');
+      }
+      const carrying: RestoreSession = { ...sending.session, externalConflict: blocked.externalConflict };
+      const conflicted = applyRestore(carrying, sealed(conflictResult()), NO_SURFACES);
+      expect(conflicted.externalConflict).toBeNull();
+      expect(conflictOf(conflicted)?.source.kind).toBe('save');
+      const refusedAgain = applyRestore(carrying, sealed(refusal()), NO_SURFACES);
+      expect(refusedAgain.externalConflict).toBe(blocked.externalConflict);
+    }); // End of the "history and the reverse collision" case
+
+    it('lets the dismissal cancel the warning and the panel, and nothing external (entry 9)', async () => {
+      const seen = watched.observation();
+      const blocked = askToReloadDiskVersion(applyRestoreObservation(await refusedOnce(), watched.raised(seen)));
+      expect(restoreView(blocked, at(BASE)).awaitingReloadConfirmation).toBe(true);
+      const kept = dismissRestoreOutcome(blocked);
+      expect(kept.outcome).toBeNull();
+      expect(kept.reload).toBe(NOT_RELOADING);
+      expect(kept.externalConflict).toBe(blocked.externalConflict);
+      expect(restoreRefusal(kept, at(BASE))).toEqual({ kind: 'externalConflict' });
+      const withheld = applyRestoreObservation(withCandidate(), watched.decided(null, watched.observation(), true, 'raisedWithoutReload'));
+      expect(dismissRestoreOutcome(withheld).uncertaintyUnresolved).toBe(true);
+      const waiting = applyRestoreObservation(withCandidate(), retainedDelivery(seen));
+      expect(dismissRestoreOutcome(waiting).awaitingReconciliation.get(TARGET)).toBe(seen);
+      expect(restoreRefusal(dismissRestoreOutcome(waiting), at(BASE))).toEqual({ kind: 'observationRetained' });
+    }); // End of the "dismissal erases nothing" case
+  }); // End of the "collisions" suite
+
+  describe('the uncertainty and its exits (entries 11, 14, 15; the record’s §5.5)', () => {
+    it('withholds the reload on raisedWithoutReload until the snapshot is acknowledged', () => {
+      const seen = watched.observation();
+      const withheld = applyRestoreObservation(pending(), watched.decided(null, seen, true, 'raisedWithoutReload'));
+      expect(withheld.uncertaintyUnresolved).toBe(true);
+      expect(withheld.pending).toBeNull();
+      const view = restoreView(withheld, at(BASE));
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing']);
+      expect(view.externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
+      expect(askToReloadDiskVersion(withheld)).toBe(withheld);
+      // A confirmation assembled by hand spends nothing and re-points nothing.
+      const recorder = adopting();
+      const byHand: RestoreSession = { ...withheld, reload: confirmDiskReload(askToReloadDiskVersion(withheld.externalConflict === null ? withheld : { ...withheld, uncertaintyUnresolved: false })).reload };
+      expect(reloadTheDiskVersion(byHand, recorder.adopt).baseRevision).toBe(BASE);
+      expect(recorder.adoptions).toEqual([]);
+      // Exit three: the acknowledgement, refused and then accepted.
+      const asked: ExternalChangeConflictSource[] = [];
+      expect(
+        acknowledgeRestoreSnapshot(withheld, (source) => {
+          asked.push(source);
+          return 'refused';
+        })
+      ).toBe(withheld);
+      expect(asked).toEqual([externalOf(withheld).source]);
+      const acknowledged = acknowledgeRestoreSnapshot(withheld, () => 'acknowledged');
+      expect(acknowledged).toEqual({ ...withheld, uncertaintyUnresolved: false, reload: NOT_RELOADING });
+      expect(restoreView(acknowledged, at(BASE)).conflictChoices).toContain('reloadDiskVersion');
+      expect(restoreView(askToReloadDiskVersion(acknowledged), at(BASE)).awaitingReloadConfirmation).toBe(true);
+      // Nothing to acknowledge asks nothing.
+      let askedWithoutCause = 0;
+      const plain = applyRestoreObservation(withCandidate(), watched.raised(seen));
+      expect(
+        acknowledgeRestoreSnapshot(plain, () => {
+          askedWithoutCause += 1;
+          return 'acknowledged';
+        })
+      ).toBe(plain);
+      expect(askedWithoutCause).toBe(0);
+    }); // End of the "raisedWithoutReload" case
+
+    it('clears the uncertainty when a later verdict under none replaces the conflict', () => {
+      const first = watched.observation();
+      const withheld = applyRestoreObservation(withCandidate(), watched.decided(null, first, true, 'raisedWithoutReload'));
+      const later = watched.observation({ sequence: 6, diskRevision: AGAIN });
+      const replaced = applyRestoreObservation(withheld, watched.decided(externalConflictSource(first), later, false, 'supersedes'));
+      expect(replaced.uncertaintyUnresolved).toBe(false);
+      expect(externalOf(replaced).source).toBe(externalConflictSource(later));
+      expect(restoreView(replaced, at(BASE)).conflictChoices).toContain('reloadDiskVersion');
+    });
+  }); // End of the "uncertainty" suite
+
+  describe('the retargeting reload from an observation, consent, and the three adoption outcomes (entries 12, 23)', () => {
+    it('re-points the kept candidate at the observation’s disk revision when the window installs it, and confirms again from there', async () => {
+      const seen = watched.observation();
+      const stuck = applyRestoreObservation(pending(), watched.raised(seen));
+      const confirmed = confirmDiskReload(askToReloadDiskVersion(stuck));
+      expect(restoreView(confirmed, at(BASE)).conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'confirmReloadKeeping']);
+      const { adopt, adoptions } = adopting('installed');
+      const reloaded = reloadTheDiskVersion(confirmed, adopt);
+      expect(adoptions).toEqual([externalOf(stuck)]);
+      // The candidate stays; what moves is the revision it is measured against.
+      expect(candidateText(reloaded.preview!)).toBe(CANDIDATE);
+      expect(reloaded.baseRevision).toBe(ELSEWHERE);
+      expect(reloaded.preview!.draft.baseRevision).toBe(ELSEWHERE);
+      expect(reloaded.externalConflict).toBeNull();
+      expect(reloaded.uncertaintyUnresolved).toBe(false);
+      expect(reloaded.outcome).toBeNull();
+      expect(reloaded.pending).toBeNull();
+      expect(reloaded.reload).toBe(NOT_RELOADING);
+      expect(restoreRefusal(reloaded, at(ELSEWHERE))).toBeNull();
+      // And a fresh confirmation sends the same bytes against the adopted revision.
+      const send = sender();
+      await confirmAndSend(prepareRestore(reloaded, at(ELSEWHERE)), at(ELSEWHERE, []), send);
+      expect(send).toHaveBeenCalledWith(TARGET, ELSEWHERE, CANDIDATE, { accepted: [] });
+      expect(reloaded.previewGeneration).toBeGreaterThan(confirmed.previewGeneration);
+    }); // End of the "re-points the kept candidate" case
+
+    it('withdraws consent on the verdict: an acknowledgement for one transaction cannot be spent after a retarget', async () => {
+      const consented = acknowledgeRestoreFindings(await refusedOnce());
+      expect(submissionOf(consented.preview!.draft).acknowledgement.accepted).toHaveLength(1);
+      const seen = watched.observation();
+      const blocked = applyRestoreObservation(consented, watched.raised(seen));
+      // The refusal stays as history; the consent went with the withdrawal.
+      expect(blocked.outcome?.kind).toBe('refused');
+      expect(submissionOf(blocked.preview!.draft).acknowledgement.accepted).toEqual([]);
+      expect(candidateText(blocked.preview!)).toBe(CANDIDATE);
+      const reloaded = reloadTheDiskVersion(confirmDiskReload(askToReloadDiskVersion(blocked)), adopting().adopt);
+      expect(submissionOf(reloaded.preview!.draft).acknowledgement.accepted).toEqual([]);
+      const send = sender();
+      await confirmAndSend(prepareRestore(reloaded, at(ELSEWHERE)), at(ELSEWHERE, []), send);
+      expect(send).toHaveBeenCalledWith(TARGET, ELSEWHERE, CANDIDATE, { accepted: [] });
+    }); // End of the "consent withdrawn" case
+
+    it('answers every adoption outcome for the external origin', () => {
+      const seen = watched.observation();
+      const confirmed = confirmDiskReload(askToReloadDiskVersion(applyRestoreObservation(withCandidate(), watched.raised(seen))));
+      // `installed` and `alreadyThere` both re-point.
+      for (const answer of ['installed', 'alreadyThere'] as const) {
+        const recorder = adopting(answer);
+        const reloaded = reloadTheDiskVersion(confirmed, recorder.adopt);
+        expect(recorder.adoptions).toHaveLength(1);
+        expect(reloaded.baseRevision).toBe(ELSEWHERE);
+        expect(candidateText(reloaded.preview!)).toBe(CANDIDATE);
+        expect(reloaded.externalConflict).toBeNull();
+        expect(reloaded.reload).toBe(NOT_RELOADING);
+      } // End of the loop over the two satisfied answers
+      // `refused` moves nothing and stops offering the control; the conflict
+      // stands, and the dismissal resets the step for a fresh attempt.
+      const recorder = adopting('refused');
+      const refused = reloadTheDiskVersion(confirmed, recorder.adopt);
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(refused.baseRevision).toBe(BASE);
+      expect(refused.preview).toBe(confirmed.preview);
+      expect(refused.reload).toEqual({ kind: 'refused' });
+      expect(externalOf(refused).source).toBe(externalConflictSource(seen));
+      const view = restoreView(refused, at(BASE));
+      expect(view.reloadUnavailable).toBe(true);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing']);
+      expect(dismissRestoreOutcome(refused).reload).toBe(NOT_RELOADING);
+      expect(externalOf(dismissRestoreOutcome(refused)).source).toBe(externalConflictSource(seen));
+      // A wait about another observation survives the retarget: an adoption
+      // decides nothing about it.
+      const waitingToo = applyRestoreObservation(confirmed, retainedDelivery(watched.observation({ sequence: 8 })));
+      const reloadedWaiting = reloadTheDiskVersion(waitingToo, adopting().adopt);
+      expect(reloadedWaiting.baseRevision).toBe(ELSEWHERE);
+      expect(reloadedWaiting.awaitingReconciliation.size).toBe(1);
+      expect(restoreRefusal(reloadedWaiting, at(ELSEWHERE))).toEqual({ kind: 'observationRetained' });
+    }); // End of the "three adoption outcomes" case
+
+    it('reapplies nothing for a conflict of either origin, and takes no adoption function (entry 22)', async () => {
+      const seen = watched.observation({
+        correspondences: { base_revision: BASE, disk_revision: ELSEWHERE, entries: [] }
+      });
+      expect(reapplyToDiskVersion(applyRestoreObservation(withCandidate(), watched.raised(seen)))).toEqual({ kind: 'unavailable' });
+      expect(reapplyToDiskVersion(await saveConflicted())).toEqual({ kind: 'unavailable' });
+      expect(reapplyToDiskVersion(withCandidate())).toEqual({ kind: 'unavailable' });
+      expect(reapplyToDiskVersion).toHaveLength(1);
+    });
+  }); // End of the "retargeting reload" suite
+
+  describe('the doors and the settlement against the installed session (2d-6-4’s review, taken)', () => {
+    it('asks and confirms nothing when a context read displaced the installed session', () => {
+      // A getter behind the context's revision is caller code that runs between
+      // the block and the spend; a window's receiver, run from it, replaces the
+      // installed session with one carrying an external conflict. The
+      // preparation answers the installed session and registers no question; the
+      // confirmation answers null and spends nothing.
+      const holder = installed(withCandidate());
+      const handedIn = holder.current();
+      const seen = watched.observation();
+      const context: RestoreContext = {
+        get observed(): ContentRevision {
+          holder.receive(watched.raised(seen));
+          return BASE;
+        },
+        surfaces: []
+      };
+      const answered = prepareRestore(handedIn, context, holder.current);
+      expect(answered).toBe(holder.current());
+      expect(answered.pending).toBeNull();
+      expect(externalOf(answered).source).toBe(externalConflictSource(seen));
+      expect(confirmRestore(handedIn, at(BASE))).toBeNull();
+      // The same for the confirmation: the question is not spent on the session
+      // handed in, and the receiver's replacing verdict withdrew it anyway.
+      const asking = installed(pending());
+      const asked = asking.current();
+      const trapping: RestoreContext = {
+        get observed(): ContentRevision {
+          asking.receive(watched.raised(seen));
+          return BASE;
+        },
+        surfaces: []
+      };
+      expect(confirmRestore(asked, trapping, asking.current)).toBeNull();
+      expect(asking.current().pending).toBeNull();
+      expect(externalOf(asking.current()).source).toBe(externalConflictSource(seen));
+      // The same read that displaces nothing asks and spends as before.
+      const quiet = installed(withCandidate());
+      const prepared = prepareRestore(quiet.current(), at(BASE), quiet.current);
+      expect(prepared.pending).not.toBeNull();
+      quiet.set(prepared);
+      expect(confirmRestore(quiet.current(), at(BASE), quiet.current)).not.toBeNull();
+    }); // End of the "displaced during the context read" case
+
+    it('answers the installed session from every refusal of the preparation, never the session handed in (the review’s second blocker)', () => {
+      // **A refusal is a return path too.** The preparation refuses after it has
+      // read the preview, the context and the submission; a receiver run from a
+      // getter behind any of those has replaced the installed session, and a
+      // refusal that answered its argument would have the caller's
+      // `session = prepareRestore(session, …)` overwrite what the receiver
+      // installed. Three refusals, one rule: the installed session is answered.
+      const seen = watched.observation();
+      // The context read, refused `targetMoved` by the very read that delivered.
+      const moved = installed(withCandidate());
+      const movedIn = moved.current();
+      const movedContext: RestoreContext = {
+        get observed(): ContentRevision {
+          moved.receive(watched.raised(seen));
+          return AFTER;
+        },
+        surfaces: []
+      };
+      const answeredMoved = prepareRestore(movedIn, movedContext, moved.current);
+      expect(answeredMoved).toBe(moved.current());
+      expect(externalOf(answeredMoved).source).toBe(externalConflictSource(seen));
+      // The surfaces read, refused `writeSurfaceOpen` by the read that delivered.
+      const competing = installed(withCandidate());
+      const competingIn = competing.current();
+      const competingContext: RestoreContext = {
+        observed: BASE,
+        get surfaces(): readonly OpenWriteSurface[] {
+          competing.receive(watched.raised(seen));
+          return [{ kind: 'rawEditor', target: { kind: 'document', document: TARGET } }];
+        }
+      };
+      expect(prepareRestore(competingIn, competingContext, competing.current)).toBe(competing.current());
+      // The submission read, refused because the draft's base disagrees with
+      // the session's — a hand-built shape — by a value read that delivered.
+      const disagreeing = installed(withCandidate());
+      const disagreeingIn = disagreeing.current();
+      const preview = disagreeingIn.preview!;
+      const trapped: RestoreSession = {
+        ...disagreeingIn,
+        preview: {
+          ...preview,
+          draft: {
+            ...preview.draft,
+            baseRevision: AFTER,
+            get value(): string {
+              disagreeing.receive(watched.raised(seen));
+              return CANDIDATE;
+            }
+          }
+        }
+      };
+      disagreeing.set(trapped);
+      expect(prepareRestore(trapped, at(BASE), disagreeing.current)).toBe(disagreeing.current());
+      expect(externalOf(disagreeing.current()).source).toBe(externalConflictSource(seen));
+      // The preview read itself, answering nothing after it delivered. Armed
+      // once: the receiver's own withdrawal reads it again.
+      const emptied = installed(withCandidate());
+      const emptiedIn = emptied.current();
+      let armed = true;
+      const previewTrapped: RestoreSession = {
+        ...emptiedIn,
+        get preview(): RestorePreview | null {
+          if (armed) {
+            armed = false;
+            emptied.receive(watched.raised(seen));
+          }
+          return null;
+        }
+      };
+      emptied.set(previewTrapped);
+      expect(prepareRestore(previewTrapped, at(BASE), emptied.current)).toBe(emptied.current());
+      // A refusal that displaced nothing still answers its argument.
+      const still = installed(withCandidate());
+      expect(prepareRestore(still.current(), at(AFTER), still.current)).toBe(still.current());
+    }); // End of the "installed session from every refusal" case
+
+    it('retargets over the installed session, and answers it untouched when the adoption itself replaced the conflict (the review’s third finding)', () => {
+      // **The adoption runs the window's own reads of the observation's
+      // projection**, and a getter there can tell the window of a later reading;
+      // the receiver installs what the window decides while the adoption is
+      // still inside `adopt`. A retarget built over the session handed in would
+      // hand the caller a session with no record of that decision.
+      const seen = watched.observation();
+      /**
+       * A holder over a session confirmed to reload from `seen`.
+       *
+       * @returns The holder.
+       */
+      function confirmedToReload(): ReturnType<typeof installed> {
+        return installed(confirmDiskReload(askToReloadDiskVersion(applyRestoreObservation(withCandidate(), watched.raised(seen)))));
+      } // End of function confirmedToReload()
+      // A wait recorded during a satisfied adoption is carried by the retarget.
+      const waiting = confirmedToReload();
+      const later = watched.observation({ sequence: 8 });
+      const recorder = adopting('installed');
+      const retargeted = reloadTheDiskVersion(
+        waiting.current(),
+        (conflict, confirmation) => {
+          waiting.receive(retainedDelivery(later));
+          return recorder.adopt(conflict, confirmation);
+        },
+        waiting.current
+      );
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(retargeted.baseRevision).toBe(ELSEWHERE);
+      expect(candidateText(retargeted.preview!)).toBe(CANDIDATE);
+      expect(retargeted.externalConflict).toBeNull();
+      expect(retargeted.awaitingReconciliation.get(TARGET)).toBe(later);
+      expect(restoreRefusal(retargeted, at(ELSEWHERE))).toEqual({ kind: 'observationRetained' });
+      // A supersession delivered during the adoption, which the window then
+      // refuses: the installed session — the newer conflict, its reload reset —
+      // is answered untouched, and nothing is re-pointed over it.
+      const superseded = confirmedToReload();
+      const newer = watched.observation({ sequence: 6, diskRevision: AGAIN });
+      const refusing = adopting('refused');
+      const answered = reloadTheDiskVersion(
+        superseded.current(),
+        (conflict, confirmation) => {
+          superseded.receive(watched.decided(externalConflictSource(seen), newer, false, 'supersedes'));
+          return refusing.adopt(conflict, confirmation);
+        },
+        superseded.current
+      );
+      expect(refusing.adoptions).toHaveLength(1);
+      expect(answered).toBe(superseded.current());
+      expect(externalOf(answered).source).toBe(externalConflictSource(newer));
+      expect(answered.reload).toBe(NOT_RELOADING);
+      expect(answered.baseRevision).toBe(BASE);
+      // Displaced before the window is asked: the installed session is answered
+      // and the window never asked.
+      const early = confirmedToReload();
+      const before = early.current();
+      // Armed once: the receiver's own spread reads the step again.
+      let armed = true;
+      const trapped: RestoreSession = {
+        ...before,
+        get reload(): ReloadStep {
+          if (armed) {
+            armed = false;
+            early.receive(retainedDelivery(later));
+          }
+          return before.reload;
+        }
+      };
+      early.set(trapped);
+      const untouched = adopting('installed');
+      expect(reloadTheDiskVersion(trapped, untouched.adopt, early.current)).toBe(early.current());
+      expect(untouched.adoptions).toEqual([]);
+      expect(early.current().awaitingReconciliation.get(TARGET)).toBe(later);
+      // Without a reader the transition retargets what it was handed, and says so.
+      const alone = confirmedToReload();
+      const lost = reloadTheDiskVersion(alone.current(), (conflict, confirmation) => {
+        alone.receive(retainedDelivery(later));
+        return adopting('installed').adopt(conflict, confirmation);
+      });
+      expect(lost.awaitingReconciliation.size).toBe(0);
+    }); // End of the "retarget over the installed session" case
+
+    it('claims no candidate for an external conflict raised over none (the review’s fourth finding)', () => {
+      // **The placeholder draft is not a candidate, and the lines must not say
+      // it is.** A session told of a change before any entry was read has no
+      // candidate to have kept and no confirmation to have withdrawn; the two
+      // lines the ordinary capabilities write say both. Only the file's own
+      // line is owed, and the view claims no operation either.
+      const empty = startRestore(target());
+      const seen = watched.observation();
+      const raised = applyRestoreObservation(empty, watched.raised(seen));
+      expect(raised.preview).toBeNull();
+      expect(raised.pending).toBeNull();
+      const conflict = externalOf(raised);
+      expect(conflict.messages.map((line) => line.kind)).toEqual(['fileChangedWhileOpen']);
+      const view = restoreView(raised, at(BASE));
+      expect(view.externalMessages.map((line) => line.kind)).toEqual(['fileChangedWhileOpen']);
+      expect(view.conflictOperation).toBeNull();
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'reloadDiskVersion']);
+      // A supersession over that conflict still has no candidate to claim.
+      const newer = watched.observation({ sequence: 6, diskRevision: AGAIN });
+      const superseded = applyRestoreObservation(raised, watched.decided(externalConflictSource(seen), newer, false, 'supersedes'));
+      expect(externalOf(superseded).messages.map((line) => line.kind)).toEqual(['fileChangedWhileOpen']);
+      expect(restoreView(superseded, at(BASE)).conflictOperation).toBeNull();
+      // With a candidate retained the two lines are owed, and the operation named.
+      const over = applyRestoreObservation(withCandidate(), watched.raised(watched.observation()));
+      expect(externalOf(over).messages.map((line) => line.kind)).toEqual([
+        'fileChangedWhileOpen',
+        'operationKeptInMemory',
+        'reloadRetargetsCandidate'
+      ]);
+      expect(restoreView(over, at(BASE)).conflictOperation).toBe('replaceFileFromBackup');
+    }); // End of the "no candidate claimed" case
+
+    it('consumes the permit unspent when a permit read displaced the installed session, and sends nothing', async () => {
+      const started = confirmRestore(pending(), at(BASE));
+      if (started === null) {
+        throw new Error('a pending restore confirms');
+      }
+      const holder = installed(started.session);
+      const seen = watched.observation();
+      // Armed once: `permitHolds` reads the revision twice, and the window hands
+      // each decision out once.
+      let armed = true;
+      const context: RestoreContext = {
+        get observed(): ContentRevision {
+          if (armed) {
+            armed = false;
+            holder.receive(retainedDelivery(seen));
+          }
+          return BASE;
+        },
+        surfaces: []
+      };
+      const send = sender();
+      expect(await sendRestore(started, started.session, context, send, holder.current)).toEqual({ kind: 'withdrawn' });
+      expect(send).not.toHaveBeenCalled();
+      // The installed session holds the delivery, and the withdrawal replays it.
+      expect(holder.current().heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained']);
+      const withdrawn = restoreConfirmationWithdrawn(started.session, holder.current);
+      expect(withdrawn.awaitingReconciliation.get(TARGET)).toBe(seen);
+      expect(restoreRefusal(withdrawn, at(BASE))).toEqual({ kind: 'observationRetained' });
+    }); // End of the "displaced during the permit read" case
+
+    it('settles against the installed session and replays a delivery that arrived during its own replay', () => {
+      // With `retained(A), raised(A)` held, a getter behind A's `document`
+      // publishes B while A is being replayed; the window delivers B to the
+      // installed session — still `saving`, so it is appended there — and a
+      // settlement that returned only its own replay would let the caller
+      // overwrite that append. The settled session must carry B.
+      const started = confirmRestore(pending(), at(BASE));
+      if (started === null) {
+        throw new Error('a pending restore confirms');
+      }
+      const later = watched.observation({ sequence: 6, diskRevision: AGAIN });
+      /**
+       * A holder over the in-flight session with A held twice, A's `document`
+       * armed to deliver B's supersession once.
+       *
+       * @returns The holder, the observation A, and whether the getter fired.
+       */
+      function armed(): {
+        readonly holder: ReturnType<typeof installed>;
+        readonly seen: ExternalConflictObservation;
+        readonly fired: () => boolean;
+      } {
+        const holder = installed(started!.session);
+        let live = false;
+        let fired = false;
+        const seen: ExternalConflictObservation = {
+          ...watched.observation(),
+          get document(): number {
+            if (live) {
+              live = false;
+              fired = true;
+              holder.receive(watched.decided(externalConflictSource(this), later, false, 'supersedes'));
+            }
+            return TARGET;
+          }
+        };
+        holder.receive(retainedDelivery(seen));
+        holder.receive(watched.raised(seen));
+        expect(holder.current().heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised']);
+        live = true;
+        return { holder, seen, fired: () => fired };
+      } // End of function armed()
+      const first = armed();
+      const settled = applyRestore(first.holder.current(), sealed(refusal()), NO_SURFACES, first.holder.current);
+      expect(first.fired()).toBe(true);
+      expect(settled.outcome?.kind).toBe('refused');
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.awaitingReconciliation.size).toBe(0);
+      expect(externalOf(settled).source).toBe(externalConflictSource(later));
+      // The same through a send that produced no outcome, and through a
+      // withdrawal.
+      const second = armed();
+      const failed = restoreCouldNotBeSent(second.holder.current(), false, second.holder.current);
+      expect(failed.heldDeliveries).toEqual([]);
+      expect(externalOf(failed).source).toBe(externalConflictSource(later));
+      const third = armed();
+      const withdrawn = restoreConfirmationWithdrawn(third.holder.current(), third.holder.current);
+      expect(withdrawn.heldDeliveries).toEqual([]);
+      expect(externalOf(withdrawn).source).toBe(externalConflictSource(later));
+      // Without a reader the transition settles what it was handed, and says so.
+      const alone = armed();
+      expect(externalOf(applyRestore(alone.holder.current(), sealed(refusal()), NO_SURFACES)).source).toBe(
+        externalConflictSource(alone.seen)
+      );
+    }); // End of the "delivery during the replay" case
+  }); // End of the "against the installed session" suite
+}); // End of the "external session" suite

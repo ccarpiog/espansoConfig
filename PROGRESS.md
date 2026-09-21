@@ -50,7 +50,8 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | **2d-6-2** | Step 2 of 2d-6 — the match-editor external session and reapply: `externalConflict` on each immutable session with `conflictOf` widened to `ConflictModel`; the submission block at `canSave` **and** `beginSave` (a direct call answers `null`); `applyObservation` over all seven verdict arms with a `never` terminus, `writtenHere` lifting by the observation's identity, a replacing verdict retiring a standing save conflict and resetting `reload`; deliveries arriving during the session's own save queued in **arrival order** and replayed after the answer; `enterReapply`, `correspondenceRowFor` (full base identity — document, revision, node — zero and two rows both refuse) and `subjectResolution` in `reapply.ts` for 2d-6-3/4 to share; refusals resolving to manual resolution with the typed sentence, uncertainty refused before adoption; the register review (six `browser.reapply.*` sentences reworded, two new `externalEvidence.*` keys EN/ES); entry 41 corrections in four files. Binding rulings **6, 7, 8, 9, 11, 12, 19, 20, 22**. **Components: none; no Rust; no new module** | ✅ **complete and CLOSED.** Risk class **high**; worker model **opus** (one implementation worker, resumed once for the fix round; review by **Codex**, `autoclaude-review.sh` exiting 0 so no fallback agent ran). Review **`ship-with-fixes`, 2 BLOCKERS, 0 SHOULD-FIX** ([`docs/reviews/phase-2d-6-2.md`](docs/reviews/phase-2d-6-2.md)), bodies truncated as always, so both were re-derived by writing the failing case first — **both held and both were fixed in this commit**, four new cases pinning them, two through the real door (`adoptDiskVersion`, envelopes via `observeExternalChange`): the first — a reapply under a held observation rebuilt the session **without** its `awaitingReconciliation` block, so a blocked submission became allowed — fixed with a new `EditorReapplyObstacle` arm `observationRetained` (the existing notice sentence, no new key), the refusal placed before any evidence is read, and both success rebuilds routed through `rebuiltOver` carrying the block forward; the second — the single-slot `heldDelivery` kept only the latest envelope, so a `raised` delivered during the session's own save was erased by a sibling's later `coalesced` and the file changed under an editor showing **no** conflict — fixed by `heldDeliveries`, a list in arrival order replayed first-to-last, its doc saying what the list forces (nothing dropped, arrival order) and what it does not (that arrival order was decision order). The reviewer checked and did **not** uphold `writtenHere` identity confusion, omitted-guard superseded adoption or repeated correspondence-row reads. **The phase closes here** — one review, blockers fixed, verification re-run, no re-review. New rung **`1323 / 447 / 2618 / 192`**, the Rust cell held. Record: [`docs/decisions/2d-6-2-notes.md`](docs/decisions/2d-6-2-notes.md) (§5 the two findings re-derived, pre-fix failures verbatim) |
 | **2d-6-3** | Step 3 of 2d-6 — the creation and recovery external sessions: the four session fields (`externalConflict`, `uncertaintyUnresolved`, `awaitingReconciliation`, `heldDeliveries`) on `MatchCreationSession` and `RecoverySession`, `conflictOf` / `recoveryConflictOf` widened to `ConflictModel`; the submission block at `beginCreate` **and** `beginRecoveryCreate` through `CreationRefusal` / `RecoveryRefusal` arms `externalConflict` and `observationRetained` (existing sentences, **no new key**); `applyObservation` / `applyRecoveryObservation` over all seven verdict arms with a `never` terminus, held deliveries replayed in arrival order by the four settling transitions; ruling 21 — a destination-less form keeps its fields, stays `unknown`, withholds reload and reapply under a `destinationRequired` obstacle and resolves only through `chooseDestination` (`canChooseDestination` wider than `isEditable` by exactly that state); ruling 25 — `RecoveryOrigin.conflict` written once and read by nothing that adopts, pinned through the real window over a cross-file recovery; `creationTargetOf` / `recoveryTargetOf` as the values the eighth kind is assembled from; `anchorResolution` in `reapply.ts` (the one primitive widened), the creator's `after` anchor read by full base identity through `correspondenceRowFor`; entry 41 corrections in four files (`restore.ts`: `OpenWriteSurfaceKind` has seven members and is not complete). Binding rulings **6-9, 11, 12, 19-22, 25**. **Components: none; no Rust; no new module** | ✅ **complete and CLOSED.** Risk class **high**; worker model **opus** (one implementation worker, resumed once for the fix round; review by **Codex**, `autoclaude-review.sh` exiting 0 so no fallback agent ran). Review **`ship-with-fixes`, 2 BLOCKERS, 0 SHOULD-FIX** ([`docs/reviews/phase-2d-6-3.md`](docs/reviews/phase-2d-6-3.md)), bodies truncated as always, so both were re-derived by writing the failing case first — **both held and both were fixed in this commit**, four new cases pinning them: the first — `sendRecoveryCreate` settled `started.session`, captured **before** the `await`, so a delivery applied to the installed form during the request was discarded and a refused create showed no conflict — fixed with an optional fourth parameter `current: ReadTheInstalledForm | null` read once after the `await`, every answer (`answered`, `notAttempted`, `failed`, and a thrown `create` settled as a failed send then re-thrown) settled against that form, optional because `RecoveryPanel.svelte` is untouched and its doc says 2d-6-6 must pass `() => session`; the creator has no send composition and was checked, not changed; the second — `chooseDestination` rebuilt the session without the wait recorded over the previous file, so A → `retained(A)` → B → A let `beginCreate` through a block the window still held — fixed by making `awaitingReconciliation` on both sessions a `ReadonlyMap<DocumentId, ExternalConflictObservation>` (waits keyed by file; only the chosen file's entry blocks; a change of destination neither drops nor restores an entry; decisions lift by identity under the file's key), the field doc saying what the map forces and what it cannot (a decision delivered while the receiver was elsewhere — 2d-6-6's registration fact). The reviewer checked and did **not** uphold `RecoveryOrigin` being spent, `writtenHere` lifting another observation's wait, or an anchor falling back silently. **The phase closes here** — one review, blockers fixed, verification re-run, no re-review. New rung **`1323 / 447 / 2669 / 192`**, the Rust cell held. Record: [`docs/decisions/2d-6-3-notes.md`](docs/decisions/2d-6-3-notes.md) (§6 the two findings re-derived, pre-fix failures verbatim) |
 | **2d-6-4** | Step 4 of 2d-6 — the operation-session external conflicts: the four session fields (`externalConflict`, `uncertaintyUnresolved`, `awaitingReconciliation` as a file-keyed `ReadonlyMap`, `heldDeliveries`) on `MatchDeletionSession`, `MatchDuplicationSession` and `MatchMoveSession`, `conflictOf` widened to `ConflictModel`; three seven-arm receivers `applyDeletionObservation` / `applyDuplicationObservation` / `applyMoveObservation` with a `never` terminus, `replacedBy` retiring a standing save conflict, resetting `reload` and (the deleter) withdrawing a pending confirmation; the submission block at every door — `canRequestDelete` / `confirmDelete`, `refusalGiven` → `beginDuplicate` / `beginMove` — with new `externalConflict` / `observationRetained` codes over **existing** keys; the `exact` subject through `correspondenceRowFor` / `subjectResolution` and the mover's `after` anchor through `anchorResolution` **from the same table**, the same-sequence check over the disk version (`notTheSameSequence`, `anchorNotInSequence`); four new obstacle arms per surface in the i18n describers; entry 41 corrections in four files. `reapply.ts` primitives sufficient, nothing widened; D2r and R25 unchanged. Binding rulings **6-9, 11, 12, 19, 20, 22**. **Components: none; no Rust; no new module; no new i18n key** | ✅ **complete and CLOSED.** Risk class **high**; worker model **opus** (one implementation worker, resumed once for the fix round; review by **Codex**, `autoclaude-review.sh` exiting 0 so no fallback agent ran). Review **`ship-with-fixes`, 3 BLOCKERS, 1 SHOULD-FIX** ([`docs/reviews/phase-2d-6-4.md`](docs/reviews/phase-2d-6-4.md)), bodies truncated as always, so all four were re-derived by writing the failing case first — **all four held and all four were fixed in this commit**, fifteen new cases pinning them, four of them through the real door in `workspace.test.ts`. All four were one class — a caller-controlled getter delivering an observation between a check and a spend: (1) the doors checked the block on the session handed in, which a `projected` getter could displace through the registered receiver — fixed with a per-module `ReadTheInstalledSession` reader, optional `current` on `confirmDelete` / `beginDuplicate` / `beginMove`, read once after the last `projected` read, `installed !== session` refusing before the block; (2) a delivery the receiver made *during* a settlement replay was overwritten by the replay's result — the envelope carries the getter, the window freezes the envelope and not the observation, and an ingress copy is not viable because the origin is memoized on the observation's identity, so `apply*` / `*CouldNotBeSent` take `current` and `consumingHeldDeliveries` replays in rounds until a read finds nothing new (`extendsTheReplayed`; unbounded-rounds caveat stated); (3) a reapply adopted after a correspondence row's `exact` getter let the window deliver `retained(B)` to the installed session — fixed with `current` read once immediately before `adoptForReapply` (installed uncertainty → `writeOutcomeUnknown`, own-file wait → `observationRetained`, changed source → `supersededEvidence`); (4) the record claimed refusal before any evidence read while `enterReapply` ran first — both blocks moved ahead of it and a counting-getter case pins zero reads. **The phase closes here** — one review, blockers fixed, verification re-run, no re-review. New rung **`1323 / 447 / 2754 / 192`**, the Rust cell held. Record: [`docs/decisions/2d-6-4-notes.md`](docs/decisions/2d-6-4-notes.md) (§7 the four findings re-derived, pre-fix failures verbatim) |
-| **2d-6 … 2d-8** | The remaining three steps of the 2d consult's eight; 2d-6 is eleven sub-steps `2d-6-1` … `2d-6-11` per its consult, 2d-6-1 cut into `1a`/`1b`/`1c` | 🔶 **2d-6-1 … 2d-6-4 done**; **2d-6-5 is next** |
+| **2d-6-5** | Step 5 of 2d-6 — the raw and restore external sessions, the last of the four model-only session steps: the four session fields on `RawEditorSession` and `RestoreSession`, `conflictOf` widened to `ConflictModel` external-first; two seven-arm receivers `applyObservation` (raw) / `applyRestoreObservation` with a `never` terminus, replacing verdicts resetting `reload`, retiring a standing save conflict and (restore) withdrawing the question through `withdrawn(…, 'kept')` — consent gone, candidate kept; the submission block at raw `canSave` / `beginSave` and at restore's `prepareRestore` / `confirmRestore` / `sendRestore` / `permitHolds`, `RestoreRefusal` widened by `externalConflict` / `observationRetained` over **existing** sentences; the raw reseed through the same `\r`-refusing `roundTripText` for either origin; restore retargeting on reload; reapply declared `unavailable` on both (ruling 22); a restore external model over no candidate built over a documented placeholder draft with its messages reduced to `fileChangedWhileOpen`; the replay in rounds after `applySave` / `saveCouldNotBeSent` and the three restore settlements; entry 41 corrections in four files. Binding rulings **6-9, 11, 12, 22, 23**. **Components: none; no Rust; no new module; no new i18n key** | ✅ **complete and CLOSED.** Risk class **high**; worker model **opus** (one implementation worker, a second for the fix round; review by **Codex**, `autoclaude-review.sh` exiting 0 so no fallback agent ran). Review **`ship-with-fixes`, 2 BLOCKERS, 2 SHOULD-FIX** ([`docs/reviews/phase-2d-6-5.md`](docs/reviews/phase-2d-6-5.md)), bodies truncated as always, so all four were re-derived by writing the failing case first — **all four held and all four were fixed in this commit**, ten new cases pinning them, four through the real door in `workspace.test.ts`. Three were 2d-6-4's class again — a caller-controlled getter delivering an observation between a check and a spend: (1) `beginSave` read `draft.value` twice and spread the session **after** its `current()` read (and checked the CR on one read while sending another) — fixed by taking the submission, checking `\r` on `submission.candidate`, `canSave` and the spread first, then one final `current()` read with nothing caller-controlled after it; (2) `prepareRestore`'s early refusals returned a session captured before the context, surfaces, submission and preview reads, dropping an observation a getter delivered — every read moved into a private `questionFor`, the reader read once after them, every return path answering the installed session when displaced; (3) both reload transitions built their successor over the pre-adoption session, so a `supersedes` or `retained` published during `adoptDiskVersion`'s projection copy was overwritten — `loadDiskVersion` and `reloadTheDiskVersion` take an optional `current`, read before adoption and again after it. The fourth was a false claim: the empty restore state's external model carried the ordinary candidate-retaining messages — reduced by a private `overNoCandidate`, `RestoreView.conflictOperation` `null` there, field and record docs corrected. **The phase closes here** — one review, blockers fixed, verification re-run, no re-review. New rung **`1323 / 447 / 2817 / 192`**, the Rust cell held. Record: [`docs/decisions/2d-6-5-notes.md`](docs/decisions/2d-6-5-notes.md) (§7 the four findings re-derived, pre-fix failures verbatim; §4 thirteen open items, 11 the operation doors' read-after-reader for 2d-6-6) |
+| **2d-6 … 2d-8** | The remaining three steps of the 2d consult's eight; 2d-6 is eleven sub-steps `2d-6-1` … `2d-6-11` per its consult, 2d-6-1 cut into `1a`/`1b`/`1c` | 🔶 **2d-6-1 … 2d-6-5 done**; **2d-6-6 is next** — the first component-changing step of 2d-6, five components, bilingual mounted tests and a narrow window reading; consider cutting it at selection |
 | **2d** | External change reconciliation — plan §6.5 | 🔶 in progress |
 | **3–5** | Validation, packaging, hardening | ⬜️ not started |
 | **M — checkpoint split** | This file cut from 21,803 lines to the live head; the rest archived verbatim under `docs/progress-archive/` | ✅ complete (2026-08-29) — preflight maintenance, unreviewed by rule |
@@ -141,13 +142,13 @@ any of them anything.
 ---
 ## Next action
 
-### Phase 2d-6-4 is complete and CLOSED. The next action is **Phase 2d-6-5 — raw and restore external sessions**, the last of the four model-only session steps (2d-6-2 … 2d-6-5).
+### Phase 2d-6-5 is complete and CLOSED, and with it the four model-only session steps (2d-6-2 … 2d-6-5). The next action is **Phase 2d-6-6 — authored-surface delivery and complete registration**, the first component-changing step of 2d-6.
 
 **The three documents that bind every 2d-6 step, in reading order**:
 [`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (**the consult; it binds** — Codex at
 high effort, 2026-09-21, eleven rulings, no gate run and none claimed),
 [`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (the record — §2 the eleven-step
-split with per-step scope, acceptance and the rulings that bind it, **the 2d-6-5 entry at lines 122-128**; §3
+split with per-step scope, acceptance and the rulings that bind it, **the 2d-6-6 entry at lines 130-141**; §3
 forty-three binding rulings; §4 the citation audit; **§5 nine corrections that override `phase-2d-design.md`
 item 6 and `2d-5-split-notes.md` — read them before treating either as the spec**; §6 what was not settled; §7
 the map of the handed-on obligations and open items 0-11; §8 its review) and
@@ -167,65 +168,79 @@ verdict arm `writtenHere` on `BrowserState`, the coordinator and workspace membe
 (`2d-6-2-notes.md`): the editor's session shape and **the shared primitives in `src/lib/browser/reapply.ts`**
 — `enterReapply`, `correspondenceRowFor(table, base)`, `subjectResolution`. **2d-6-3** (`2d-6-3-notes.md`): the
 creator and the recovery form, `anchorResolution`. **2d-6-4** (`2d-6-4-notes.md`): the delete, duplicate and
-move sessions, and — from its review's fix round, all four findings one class — **the three patterns every
-later session must copy**: (a) **every door and every settling transition takes an optional reader of the
-installed session** (`ReadTheInstalledSession`, the `current` parameter), read **once, after the last
-caller-controlled read**, refusing when the installed session is not the one handed in or now carries a block;
-optional only while the components are untouched, its doc saying 2d-6-6 must pass `() => session` everywhere
-and may make it required; (b) **a settlement replay runs in rounds** (`consumingHeldDeliveries`): the
-session's own held list first, then whatever the receiver appended to the installed session during the replay,
-until a read finds nothing new — because the sealed envelope carries the observation's getters (the window
-freezes the envelope, not the observation) and an ingress copy is not viable while the origin is memoized on
-the observation's identity; (c) **a reapply asks the installed session once, immediately before adoption**, after
-every correspondence and projection read — installed uncertainty → `writeOutcomeUnknown`, an own-file wait →
-`observationRetained`, a changed conflict source → `supersededEvidence` — and asks its blocks **before**
-`enterReapply`, so an already-blocked session reads no evidence (pinned with a counting getter). The session
-shape itself is unchanged from 2d-6-3: `externalConflict` beside the outcome, `conflictOf` widened to
-`ConflictModel` (external first), `applyObservation` over all seven verdict arms with a `never` terminus,
-`writtenHere` lifting by identity only, a replacing verdict retiring a standing save conflict and resetting
-`reload`, `heldDeliveries` a list in arrival order, `awaitingReconciliation` a `ReadonlyMap<DocumentId,
-ExternalConflictObservation>`, every rebuild carrying the four fields forward.
+move sessions and the three patterns — (a) the optional `ReadTheInstalledSession` reader (`current`) on every
+door and settling transition, read **once, after the last caller-controlled read**; (b) `consumingHeldDeliveries`
+replaying in rounds; (c) a reapply asking the installed session once immediately before adoption. **2d-6-5**
+(`2d-6-5-notes.md`): the raw editor's `applyObservation` and restore's `applyRestoreObservation` — **all eight
+receivers now exist as values**; the block at raw `canSave` / `beginSave` and at restore's `prepareRestore` /
+`confirmRestore` / `sendRestore` / `permitHolds`; reapply declared `unavailable` on both (ruling 22); the raw
+reseed through the same `\r`-refusing `roundTripText` for either origin; restore's replacing verdict withdrawing
+the question through `withdrawn(…, 'kept')` — consent gone, candidate kept — and retargeting on reload;
+`RestoreRefusal` widened by `externalConflict` / `observationRetained` over existing sentences; a restore
+external model over **no candidate** built over a documented placeholder `Draft<string>` of `''`, its messages
+reduced to `fileChangedWhileOpen` alone and `RestoreView.conflictOperation` `null` there. **From its review's fix
+round, one finding class again — a caller-controlled read after the installed-session read**: `beginSave` now
+takes the submission, the CR check on `submission.candidate`, `canSave` and the spread **before** its one
+`current()` read; `prepareRestore` moved every read into a private `questionFor` and answers the installed
+session on **every** return path, refusals included; `loadDiskVersion` and `reloadTheDiskVersion` take an
+optional `current`, read before adoption (displaced → the installed session, window never asked) and after it
+(another conflict → the installed session untouched). Pinned by ten cases, four through the real door.
 
-**Executable cold — 2d-6-5**, the record's §2 entry quoted in full: *"**Delivers** raw and restore conflict
-handling, the declared unsupported reapply, the raw reseed and `\r` refusal, restore's candidate-preserving
-retargeting. **Acceptance:** model tests for CR handling, consent withdrawal, candidate retention, all three
-adoption outcomes. **Components: none.** **Bound by** entries 6-9, 11, 12, 22, 23. **Depends on** 2d-6-1."*
-Decisions are values in `src/lib/browser/rawEditor.ts` and `src/lib/browser/restore.ts` (the worker locates
-the raw session and the restore preparation/confirmation/permit doors); **ruling 8's doors for these two
-surfaces are the raw `canSave`/`beginSave` and restore's preparation, confirmation and final permit**; ruling
-22 keeps raw and restore reapply at `unavailable` (the declared unsupported reapply — never a `supported`
-reapply that always falls back); ruling 23 is theirs alone — read it verbatim. **The raw `\r` refusal stands**
-(`CLAUDE.md` §6, *Text on the wire*): a reseed from a disk version holding a `\r` is refused, never normalized.
-**No component is touched**; the tests feed the sessions their envelopes through `observeExternalChange` /
-`registerObservationReceiver` for at least one case per session, as 2d-6-3 and 2d-6-4 did in
-`workspace.test.ts`. **The command spy stays at zero** through every session transition. **Inherited for this
-step to take or leave deliberately**: the three 2d-6-4 patterns above; item 12 of 2d-6-2 (`adoptDiskVersion`
-has no write-in-flight guard — answered by refusing under a held reading); item 4 (the standing-origin guard
-optional until 2d-6-6, passed explicitly by every new caller); item 3 (the `superseded` origin a `supersedes`
-verdict names is not compared with the shown conflict's) still left.
+**Executable cold — 2d-6-6**, the record's §2 entry quoted in full: *"**Delivers** receiver reporting and
+delivery for editor, creator and recovery; recovery as the eighth centrally assembled kind; delivery to every
+affected session; the shell kept mounted while a retained surface exists over an empty list; origin, evidence,
+comparison, copy and recovery rendering on the three authored panels. **The first live component path for
+`observeExternalChange` and `supersedeConflict`.** **Acceptance:** bilingual mounted tests through the real
+registry and coordinator boundary — a pristine editor conflicts; an unknown-target creator blocks every eligible
+target; recovery over B protects B while its host stays over A; host and recovery over one file get one
+decision; a reopened editor cannot receive an old instance's delivery; a settlement lands in order — plus a
+narrow window reading. **Components:** `DetailPane.svelte`, `AppShell.svelte`, `MatchEditor.svelte`,
+`MatchCreator.svelte`, `RecoveryPanel.svelte`. **Bound by** entries 1-5, 10, 23, 25, 31, 34-36, 38. **Depends
+on** 2d-6-1, 2d-6-2, 2d-6-3."* **This step is large — five components, the registration wiring, bilingual mounted
+tests and a window reading — and the next orchestrator should decide at selection whether to cut it** (a
+natural seam: the model-side obligations below and the `DetailPane` / `AppShell` wiring first, the three
+panels' rendering second), recording the cut in the split record's §2 as 2d-6-1's was.
+
+**What 2d-6-6 owes the closed steps, all deliberately left to it and named in their records**: (1) **the
+`current` reader becomes required** — every door and settling transition of all eight sessions, and every
+caller passes `() => session` (2d-6-4 §1.6, 2d-6-5 §4 item 4; `BrowserState.restoreDocument` passes none today
+and may need a parameter); (2) **the three operation doors have the same defect class 2d-6-5's review found in
+`beginSave`** — `confirmDelete` / `beginMove` / `beginDuplicate` still call `submissionOf` and spread **after**
+their reader (2d-6-5 §4 item 11, noticed in the fix round and not fixed there by `CLAUDE.md` §7) — take it with
+pinning cases, as 2d-6-5 §7 finding 1 did; (3) **the editor's, the creator's and the recovery form's reapplies
+still enter `enterReapply` before their blocks and recheck nothing before adopting** (2d-6-4 §4 item 4) — take
+them with counting-getter cases; (4) `MatchCreator.svelte` gates the destination control on `editable`; 2d-6-6
+reads `canChooseDestination` (2d-6-3); it does not settle a thrown `create`; `OpenWriteSurface` cannot yet
+carry a `recovery` kind — 2d-6-6 makes recovery the eighth assembled kind; (5) the first component registers
+a listener → `src-tauri/capabilities/default.json` needs both `core:event:allow-listen` and
+`core:event:allow-unlisten` and `dispatch_check.rs` re-run (*Key paths*) — **that is a `src-tauri/` change,
+staged by file name, never as a directory**; (6) the raw editor's module header still says nothing renders it
+(2d-6-5 §4 item 10) — 2d-6-8's, not this step's. **Only the three authored panels are drawn here**; the operation
+panels are 2d-6-7's, raw and restore 2d-6-8's.
 
 **Orchestrator's rulings standing from 1b's close**: (1) **the `ReconciliationWorkspace` interface is not
-widened** before 2d-6-6. (2) **The acknowledgement operand stays `ConflictSource`**; 2d-6-9 draws the exit. (3)
-**The `projectionReplaced` refusal at an outlived arrival generation stands**; 2d-6-9's.
+widened** before 2d-6-6 — 2d-6-6 may widen it as its entries require. (2) **The acknowledgement operand stays
+`ConflictSource`**; 2d-6-9 draws the exit. (3) **The `projectionReplaced` refusal at an outlived arrival
+generation stands**; 2d-6-9's.
 
 **Open items the closed steps deliberately left, none a defect of any** (each record's §4 or §5; the live map
-is the split record's §7). **From 2d-6-4** (§4, eight items): no component draws the new fields or codes
-(2d-6-7's); no component registers any of the three receivers, and over which files each is registered is
-2d-6-6's; no `removed`-status transition for any of the three (the record's §6 item 12); the reader is optional
-and no component passes one; **the editor's, the creator's and the recovery form's reapplies still enter
-`enterReapply` before their blocks and recheck nothing before adopting** — the same three findings 2d-6-4's
-review made against the operation sessions, in files that review did not name, recorded rather than fixed by
-`CLAUDE.md` §7 — **2d-6-6, which makes the reader required, is the step that takes them, deliberately, with
-their own pinning cases**; `awaitedFor` / `withWait` / `withoutWait` are now five private copies with no shared
-home; no new Spanish. **From 2d-6-3**: `MatchCreator.svelte` gates the destination control on `editable`
-(2d-6-6 reads `canChooseDestination`); it does not settle a thrown `create`; `OpenWriteSurface` cannot yet
-carry a `recovery` kind. **From 2d-6-2**: a hold the window ends without a delivery is unseen by the session
-(2d-6-9's); a reading the barrier coalesced away is never announced; the Spanish of the reworded sentences awaits
-ruling 40's bilingual review (**2d-6-11's**); `ExternalConflictAction` still has one arm. **From 1c**: a disposal
-from `host.openGeneration()` still costs one refused drain; the registration rejection reaches no developer
-channel. **From 1b**: `classifyFailure`'s "never throws" sentence in `src/lib/ipc/errors.ts` is false for a
-thrown value with a hostile `code` getter. **From 1a**: the stale "nine codes" sentence in `saveOutcome.ts` /
-`index.ts`.
+is the split record's §7). **From 2d-6-5** (§4, thirteen items): items 1-8 carry 2d-6-4's forward for the two
+new surfaces (no component draws the fields; no component registers either receiver — 2d-6-8's; no `removed`
+transition; the optional reader; `awaitedFor` / `withWait` / `withoutWait` now **seven** private copies; no
+new Spanish); 9 — a delivery reached from inside an outer inspection carries no question (safe direction); 10 —
+the raw module header; 11 — the operation doors' read-after-reader (above); 12 — a candidate dropped under a
+standing conflict leaves candidate lines and operation claims (pre-existing on the save arm); 13 —
+`reloadTheDiskVersion`'s displaced-before-adoption arm leaves the installed session's confirmation state
+untouched (unreachable with a pending question through module transitions; documented). **From 2d-6-4**: the
+editor's, creator's and recovery form's reapplies (above). **From 2d-6-3**: the creator's `editable` gate and
+the unsettled thrown `create` (above). **From 2d-6-2**: a hold the window ends without a delivery is unseen by
+the session (2d-6-9's); a reading the barrier coalesced away is never announced; the Spanish of the reworded
+sentences awaits ruling 40's bilingual review (**2d-6-11's**); `ExternalConflictAction` still has one arm; item 3
+(the `superseded` origin a `supersedes` verdict names is not compared with the shown conflict's) still left.
+**From 1c**: a disposal from `host.openGeneration()` still costs one refused drain; the registration rejection
+reaches no developer channel. **From 1b**: `classifyFailure`'s "never throws" sentence in `src/lib/ipc/errors.ts`
+is false for a thrown value with a hostile `code` getter. **From 1a**: the stale "nine codes" sentence in
+`saveOutcome.ts` / `index.ts`.
 
 #### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
 
@@ -241,7 +256,10 @@ Vite module count (one per module, two per styled component) and the `ipc-detail
 under the scanned roots) — re-derive per file, never from the total, and remember the instrument's known
 contribution (`Verification baseline`). **A worker must never run `git stash`**: 1a's worker did so by accident
 inside a compound command and reversed it at once (`2d-6-1a-notes.md` §6); the instrument survived, but a stash
-that is not popped loses the instrument silently. Say so in every worker brief.
+that is not popped loses the instrument silently. Say so in every worker brief. **2d-6-6 is the first 2d-6 step
+that touches `src/lib/components/` and, through the capability file, `src-tauri/`**: the window-reading plan of
+`docs/decisions/2d-5-7b-window-reading.md` §3-§4 is the reading's starting point, one plan per launch into a
+fresh bundle path, the language set through the picker.
 
 #### Open items — the live map is the record's §7
 
@@ -253,7 +271,7 @@ and (3) of the 2d-5 hand-off by 1b in the code's own doc comments.
 
 #### The rest of the 2d consult, so a step is not invented
 
-**2d-6** (its eleven steps; 2d-6-1 closed as three sub-phases, 2d-6-2, 2d-6-3 and 2d-6-4 closed, 2d-6-5 next),
+**2d-6** (its eleven steps; 2d-6-1 closed as three sub-phases, 2d-6-2 … 2d-6-5 closed, 2d-6-6 next),
 **2d-7** (the reviewed instrument and the bilingual WKWebView reading — start from the `fetch` recorder already
 in `src/probe.ts`, not from the consult's description), **2d-8** (instrument removal and harness-free closure;
 corrects the `main.rs` comment and deletes `/private/tmp/espansoconfig-harness-2d-5-7b/`).
@@ -261,26 +279,27 @@ corrects the `main.rs` comment and deletes `/private/tmp/espansoconfig-harness-2
 
 ## Verification baseline
 
-### Phase 2d-6-4's verification: three frontend gates re-measured twice, the Rust cell held
+### Phase 2d-6-5's verification: three frontend gates re-measured twice, the Rust cell held
 
-**`1323 / 447 / 2754 / 192`** at 2d-6-4, from `1323 / 447 / 2669 / 192`. Measured by the orchestrator on the
-tree the worker reported (`2739`) and again on the final tree after the review's fix round (`2754`), each gate
+**`1323 / 447 / 2817 / 192`** at 2d-6-5, from `1323 / 447 / 2754 / 192`. Measured by the orchestrator on the
+tree the worker reported (`2807`) and again on the final tree after the review's fix round (`2817`), each gate
 on its own, each exit read directly (never through a pipe): `npm run check` **447 files, 0 errors, 0 warnings**
-(unchanged — no new file); `npm test` **2754 passed, 64 files** (+85 from 2669, re-derived per file by the
-worker: `matchDeletion.test.ts` 39 → 64, `matchDuplication.test.ts` 51 → 76, `matchMove.test.ts` 78 → 106,
-`workspace.test.ts` 303 → 310, `reapplyCodes.test.ts` 20 → 20 — +70 for the deliverables, then +15 pinning
-the review's four findings, four of the fifteen through the real door; `scripts/lint/ipc-detail.test.ts` 141 →
-141, no new `.ts` file); `npm run build` **192 modules** (unchanged), the server-only bundle markers **absent**
-(`rg -c` prints nothing) and the client-only **present (2)**. **The Rust cell is held at 1323 and was not
-re-measured**: no path under `src-tauri/` or `crates/` changed beyond the instrument's `main.rs` hook, whose
-pair diff is still `5 insertions(+), 1 deletion(-)`; the instrument's contribution is unchanged (Rust 0,
-svelte-check +1, vitest +1, Vite +1). 2d-6-3's narrative, formerly here, is archived verbatim in
-[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-3's verification narrative"*.
+(unchanged — no new file); `npm test` **2817 passed, 64 files** (+63 from 2754, re-derived per file:
+`rawEditor.test.ts` 46 → 63 → 66, `restore.test.ts` 221 → 250 → 253, `workspace.test.ts` 310 → 317 → 321,
+`restoreCodes.test.ts` 18 → 18 with its list widened 12 → 14 keys — +53 for the deliverables, then +10 pinning
+the review's four findings, four of the ten through the real door; the changed files' sums `648` and `640`
+confirmed by separate runs; `scripts/lint/ipc-detail.test.ts` 141 → 141, no new `.ts` file); `npm run build`
+**192 modules** (unchanged), the server-only bundle markers **absent** (`rg -c` prints nothing) and the
+client-only **present (2)**. **The Rust cell is held at 1323 and was not re-measured**: no path under
+`src-tauri/` or `crates/` changed beyond the instrument's `main.rs` hook, whose pair diff is still `5
+insertions(+), 1 deletion(-)`; the instrument's contribution is unchanged (Rust 0, svelte-check +1, vitest +1,
+Vite +1). 2d-6-4's narrative, formerly here, is archived verbatim in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-4's verification narrative"*.
 
 ### The ladder's live rung
 
-**`1323 / 447 / 2754 / 192`** at 2d-6-4, **with the instrument in the tree** (a committed tree builds 191
-modules). The rung below it is `1323 / 447 / 2669 / 192` at 2d-6-3, below that `2618` at 2d-6-2, `2574` at 2d-6-1c, `2549` at 2d-6-1b and `2520` at
+**`1323 / 447 / 2817 / 192`** at 2d-6-5, **with the instrument in the tree** (a committed tree builds 191
+modules). The rung below it is `1323 / 447 / 2754 / 192` at 2d-6-4, below that `2669` at 2d-6-3, `2618` at 2d-6-2, `2574` at 2d-6-1c, `2549` at 2d-6-1b and `2520` at
 2d-6-1a, below that
 `1323 / 444 / 2474 / 191` at 2d-5-7a, held through 2d-5-7b and the 2d-6 design consult; below that
 `1320 / 443 / 2467 / 189` at 2d-5-6, below that `2466` at 2d-5-5b, `2433` at 2d-5-5a and `2415` at 2d-5-4-G,
@@ -321,7 +340,8 @@ beside it. These are the ones the next phase needs.
 | [`docs/decisions/2d-4-split-notes.md`](docs/decisions/2d-4-split-notes.md) | **2d-4b's whole spec is §2.** §3 says why the EN/ES JSON landed in 4a and the accessors in 4b; §4 says what neither step does. Read this before the design consult, not after |
 | [`docs/reviews/phase-2d-5-design.md`](docs/reviews/phase-2d-5-design.md) · [`docs/decisions/2d-5-split-notes.md`](docs/decisions/2d-5-split-notes.md) · [`docs/decisions/2d-5-design-brief.md`](docs/decisions/2d-5-design-brief.md) | **2d-5's binding rulings, its record and the brief that produced them.** Read the consult first, then the record's §5 corrections — the consult overrides `phase-2d-design.md` step 5 in two places. §6 carries seven unsettled items, §7 the inherited drain-guard counts |
 | [`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) · [`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) · [`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md) · [`docs/reviews/phase-2d-6-design-record-review.md`](docs/reviews/phase-2d-6-design-record-review.md) | **2d-6's binding rulings, its record, the brief that produced them, and the record's review.** Read the consult first, then the record's §5 nine corrections — the consult overrides `phase-2d-design.md` item 6 and `2d-5-split-notes.md` where they disagree. §2 is the eleven-step split with each step's scope, acceptance and binding entries; §7 is the live map of the handed-on obligations and open items 0-11 |
-| [`docs/decisions/2d-6-4-notes.md`](docs/decisions/2d-6-4-notes.md) · [`docs/reviews/phase-2d-6-4.md`](docs/reviews/phase-2d-6-4.md) · [`src/lib/browser/matchDeletion.ts`](src/lib/browser/matchDeletion.ts) · [`matchDuplication.ts`](src/lib/browser/matchDuplication.ts) · [`matchMove.ts`](src/lib/browser/matchMove.ts) | **What 2d-6-5 and 2d-6-6 read from 2d-6-4.** §1.2 the doors with the `current` reader asked after the last `projected` read; §1.3 the three receivers and `consumingHeldDeliveries` replaying in rounds; §1.5 the `exact` subject and anchor from one table and the same-sequence check over the disk version; §1.6 why the reader is optional until 2d-6-6; §2 the rulings taken and what each does not force; §4 eight open items — item 4 names the editor's, creator's and recovery form's reapplies as owing the same recheck 2d-6-4's review made the operation sessions take; §7 the four findings re-derived with the pre-fix failures verbatim |
+| [`docs/decisions/2d-6-5-notes.md`](docs/decisions/2d-6-5-notes.md) · [`docs/reviews/phase-2d-6-5.md`](docs/reviews/phase-2d-6-5.md) · [`src/lib/browser/rawEditor.ts`](src/lib/browser/rawEditor.ts) · [`restore.ts`](src/lib/browser/restore.ts) | **What 2d-6-6 and 2d-6-8 read from 2d-6-5.** §1.2 the doors — raw `canSave` / `beginSave`, restore `prepareRestore` / `confirmRestore` / `sendRestore` / `permitHolds` (which over-refuses any held envelope, the safe direction, §5 item 2); §1.3 the two receivers; §1.4 the replacing verdict's reset and the candidate-keeping withdrawal; §1.5 the raw reseed and the `\r` refusal; §1.6 the declared unsupported reapply; §1.7 the reader on every door **and both reload transitions**, read before and after adoption; §2 item 4 the placeholder draft over no candidate; §4 thirteen open items — **item 11 names the three operation doors as owing the read-after-reader fix `beginSave` took**, item 4 names `BrowserState.restoreDocument` as passing no reader; §7 the four findings re-derived with the pre-fix failures verbatim |
+| [`docs/decisions/2d-6-4-notes.md`](docs/decisions/2d-6-4-notes.md) · [`docs/reviews/phase-2d-6-4.md`](docs/reviews/phase-2d-6-4.md) · [`src/lib/browser/matchDeletion.ts`](src/lib/browser/matchDeletion.ts) · [`matchDuplication.ts`](src/lib/browser/matchDuplication.ts) · [`matchMove.ts`](src/lib/browser/matchMove.ts) | **What 2d-6-6 reads from 2d-6-4 (and what 2d-6-5 copied).** §1.2 the doors with the `current` reader asked after the last `projected` read; §1.3 the three receivers and `consumingHeldDeliveries` replaying in rounds; §1.5 the `exact` subject and anchor from one table and the same-sequence check over the disk version; §1.6 why the reader is optional until 2d-6-6; §2 the rulings taken and what each does not force; §4 eight open items — item 4 names the editor's, creator's and recovery form's reapplies as owing the same recheck 2d-6-4's review made the operation sessions take; §7 the four findings re-derived with the pre-fix failures verbatim |
 | [`docs/decisions/2d-6-2-notes.md`](docs/decisions/2d-6-2-notes.md) · [`docs/reviews/phase-2d-6-2.md`](docs/reviews/phase-2d-6-2.md) · [`src/lib/browser/reapply.ts`](src/lib/browser/reapply.ts) | **What 2d-6-3 and 2d-6-4 read from 2d-6-2.** §1.6 the shared primitives in `reapply.ts` — `enterReapply` (either origin, the guard asked last), `correspondenceRowFor` (full base identity; zero and two rows refuse) and `subjectResolution` — built so the creator, the recovery form and the three operation sessions take `exact` from the same table; §1.3 the seven-arm `applyObservation` and the arrival-order replay queue as the shape every later session copies; §2 the eight rulings taken (the hold lives on the session; the standing-origin guard is an **optional** parameter until 2d-6-6 makes it required); §4 twelve open items, item 12 `adoptDiskVersion`'s missing write-in-flight guard; §5 the two findings re-derived with the pre-fix failures verbatim |
 | [`docs/decisions/2d-6-1c-notes.md`](docs/decisions/2d-6-1c-notes.md) · [`docs/reviews/phase-2d-6-1c.md`](docs/reviews/phase-2d-6-1c.md) | **The last third of 2d-6-1.** §1 the member names with signatures, refusal reasons and line numbers (`reconciliationRevision()`, the two reload requests, `requestFileReread` and `ownedScalarOf` at ingress); §3 the whole 2d-6-1 acceptance checked in one place; §5 the open items it left |
 | [`src/lib/browser/reconciliationCoordinator.ts`](src/lib/browser/reconciliationCoordinator.ts) · [`src/lib/browser/reconciliationCoordinator.test.ts`](src/lib/browser/reconciliationCoordinator.test.ts) | **2d-5-3's product, and what 2d-5-3-A reviews.** The single-flight pump, `drainMayStart()` and its four readers, the `openInProgress` gate set by `workspaceOpened()` and cleared by `workspaceReady()`, `runOneDrain()`'s captures and its post-await `staleOpen` arm, the cursor and `watchState()`. **2d-5-4 replaces the one line in `accept()` that drops a batch's observations**, and 2d-5-4/2d-5-5 give `transitionFor` its first caller |
@@ -395,6 +415,7 @@ all of it is in `git log`._
 | **2d-6-2 — the match-editor external session and reapply, the second of the eleven 2d-6 steps.** `externalConflict` on the session, the submission block at `canSave`/`beginSave`, `applyObservation` over seven arms, the arrival-order replay queue for deliveries held during the session's own save, `enterReapply` / `correspondenceRowFor` / `subjectResolution` in `reapply.ts`, three new `EditorReapplyObstacle` arms, the register review with two new `browser.reapply.externalEvidence.*` keys EN/ES, entry 41 corrections. Review **Codex, `ship-with-fixes`, 2 BLOCKERS, 0 SHOULD-FIX**, both re-derived, both held, both fixed in this commit with four pinning cases. New rung `1323 / 447 / 2618 / 192`. Also archives the superseded Next-action handoff and 1c's verification narrative. Stages `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/` and `src/lib/i18n/` **by path** — **no path under `src-tauri/` at all**; the four instrument paths stay uncommitted | **`a9dec80`** | ✅ pushed to `origin/main` (`2513bd6..a9dec80`); this SHA record is the following commit |
 | **2d-6-3 — the creation and recovery external sessions, the third of the eleven 2d-6 steps.** The four session fields on `MatchCreationSession` and `RecoverySession`, the submission block at `beginCreate`/`beginRecoveryCreate`, the two seven-arm receivers, ruling 21's destination-less refusal, ruling 25's origin kept unspent, `creationTargetOf`/`recoveryTargetOf`, `anchorResolution` in `reapply.ts`, entry 41 corrections in four files, the review brief and file. Review **Codex, `ship-with-fixes`, 2 BLOCKERS, 0 SHOULD-FIX**, both re-derived, both held, both fixed in this commit with four pinning cases (`sendRecoveryCreate` settling the installed form read after the `await`; `awaitingReconciliation` a map keyed by file). New rung `1323 / 447 / 2669 / 192`. Stages `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/` and `src/lib/i18n/` **by path**; the four instrument paths stay uncommitted | **`1c48d52`** | ✅ pushed to `origin/main` (`aa8da57..1c48d52`); this SHA record is the following commit |
 | **2d-6-4 — the operation-session external conflicts, the fourth of the eleven 2d-6 steps.** The four session fields on the delete, duplicate and move sessions, the three seven-arm receivers, the submission block at every door with the `current` reader, the `exact` subject and anchor from one table, the same-sequence check over the disk version, four new obstacle arms per surface in the describers, entry 41 corrections in four files, the review brief and file. Review **Codex, `ship-with-fixes`, 3 BLOCKERS, 1 SHOULD-FIX**, all four re-derived, all four held, all four fixed in this commit with fifteen pinning cases. New rung `1323 / 447 / 2754 / 192`. Also archives the superseded 2d-6-3 → 2d-6-4 handoff (111 lines) to `next-action-history.md` and 2d-6-3's verification narrative (15 lines) to `phase-2d.md`. Stages `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/` and `src/lib/i18n/` **by path** — **no path under `src-tauri/` at all**; the four instrument paths stay uncommitted | **`60585fc`** | ✅ pushed to `origin/main` (`ae81a27..60585fc`); this SHA record is the following commit |
+| **2d-6-5 — the raw and restore external sessions, the fifth of the eleven 2d-6 steps and the last model-only one.** The four session fields on the raw and restore sessions, the two seven-arm receivers, the submission block at raw `canSave` / `beginSave` and restore's preparation, confirmation, send and final permit with the `current` reader, the `\r`-refusing reseed for either origin, restore's candidate-keeping withdrawal and retargeting, reapply declared `unavailable` on both, `RestoreRefusal` widened over existing sentences, entry 41 corrections in four files, the review brief and file. Review **Codex, `ship-with-fixes`, 2 BLOCKERS, 2 SHOULD-FIX**, all four re-derived, all four held, all four fixed in this commit with ten pinning cases. New rung `1323 / 447 / 2817 / 192`. Also archives the superseded 2d-6-4 → 2d-6-5 handoff to `next-action-history.md` and 2d-6-4's verification narrative to `phase-2d.md`. Stages `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/` and `src/lib/i18n/` **by path** — **no path under `src-tauri/` at all**; the four instrument paths stay uncommitted | _pending — filled by the SHA record commit_ | _pending_ |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed

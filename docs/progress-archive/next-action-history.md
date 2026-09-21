@@ -14922,3 +14922,126 @@ and (3) of the 2d-5 hand-off by 1b in the code's own doc comments.
 reviewed instrument and the bilingual WKWebView reading — start from the `fetch` recorder already in
 `src/probe.ts`, not from the consult's description), **2d-8** (instrument removal and harness-free closure;
 corrects the `main.rs` comment and deletes `/private/tmp/espansoconfig-harness-2d-5-7b/`).
+
+## The 2d-6-4 → 2d-6-5 handoff, superseded 2026-09-21 at 2d-6-5
+
+_Archived verbatim from `PROGRESS.md` when Phase 2d-6-5 closed. The three binding documents it names, the consult's verdict paragraph, the instrument warning, the open-items map and the orchestrator's three rulings at 1b's close are restated in the live section; what 2d-6-4 left for 2d-6-5 was consumed by 2d-6-5 and is recorded in `docs/decisions/2d-6-5-notes.md` §2 and §4._
+
+## Next action
+
+### Phase 2d-6-4 is complete and CLOSED. The next action is **Phase 2d-6-5 — raw and restore external sessions**, the last of the four model-only session steps (2d-6-2 … 2d-6-5).
+
+**The three documents that bind every 2d-6 step, in reading order**:
+[`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (**the consult; it binds** — Codex at
+high effort, 2026-09-21, eleven rulings, no gate run and none claimed),
+[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (the record — §2 the eleven-step
+split with per-step scope, acceptance and the rulings that bind it, **the 2d-6-5 entry at lines 122-128**; §3
+forty-three binding rulings; §4 the citation audit; **§5 nine corrections that override `phase-2d-design.md`
+item 6 and `2d-5-split-notes.md` — read them before treating either as the spec**; §6 what was not settled; §7
+the map of the handed-on obligations and open items 0-11; §8 its review) and
+[`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md) (the brief).
+
+**The consult's verdict, in one paragraph**: 2d-6 is not seven callbacks plus translated markup; it needs a
+complete observation-to-session protocol — delivery after write settlement, model-owned submission blocking,
+origin-correct messages. Two corrections to the inherited design: **recovery is an eighth live write surface**,
+and **removing the last document must not unmount retained sessions**. Native backend-status exposure stays
+outside the phase; the DOM foreground source (open item 8) comes in as step 2d-6-10; every component-changing
+step owes a narrow window regression reading; mounted evidence is bilingual.
+
+**What the closed steps landed — read each record's §1 for signatures and line numbers, never re-derive from
+the code**: 2d-6-1 (`docs/decisions/2d-6-1a-notes.md`, `2d-6-1b-notes.md`, `2d-6-1c-notes.md`): the delivery
+envelope, `observeExternalChange` / `registerObservationReceiver` / `retryRetainedObservation` and the seventh
+verdict arm `writtenHere` on `BrowserState`, the coordinator and workspace members. **2d-6-2**
+(`2d-6-2-notes.md`): the editor's session shape and **the shared primitives in `src/lib/browser/reapply.ts`**
+— `enterReapply`, `correspondenceRowFor(table, base)`, `subjectResolution`. **2d-6-3** (`2d-6-3-notes.md`): the
+creator and the recovery form, `anchorResolution`. **2d-6-4** (`2d-6-4-notes.md`): the delete, duplicate and
+move sessions, and — from its review's fix round, all four findings one class — **the three patterns every
+later session must copy**: (a) **every door and every settling transition takes an optional reader of the
+installed session** (`ReadTheInstalledSession`, the `current` parameter), read **once, after the last
+caller-controlled read**, refusing when the installed session is not the one handed in or now carries a block;
+optional only while the components are untouched, its doc saying 2d-6-6 must pass `() => session` everywhere
+and may make it required; (b) **a settlement replay runs in rounds** (`consumingHeldDeliveries`): the
+session's own held list first, then whatever the receiver appended to the installed session during the replay,
+until a read finds nothing new — because the sealed envelope carries the observation's getters (the window
+freezes the envelope, not the observation) and an ingress copy is not viable while the origin is memoized on
+the observation's identity; (c) **a reapply asks the installed session once, immediately before adoption**, after
+every correspondence and projection read — installed uncertainty → `writeOutcomeUnknown`, an own-file wait →
+`observationRetained`, a changed conflict source → `supersededEvidence` — and asks its blocks **before**
+`enterReapply`, so an already-blocked session reads no evidence (pinned with a counting getter). The session
+shape itself is unchanged from 2d-6-3: `externalConflict` beside the outcome, `conflictOf` widened to
+`ConflictModel` (external first), `applyObservation` over all seven verdict arms with a `never` terminus,
+`writtenHere` lifting by identity only, a replacing verdict retiring a standing save conflict and resetting
+`reload`, `heldDeliveries` a list in arrival order, `awaitingReconciliation` a `ReadonlyMap<DocumentId,
+ExternalConflictObservation>`, every rebuild carrying the four fields forward.
+
+**Executable cold — 2d-6-5**, the record's §2 entry quoted in full: *"**Delivers** raw and restore conflict
+handling, the declared unsupported reapply, the raw reseed and `\r` refusal, restore's candidate-preserving
+retargeting. **Acceptance:** model tests for CR handling, consent withdrawal, candidate retention, all three
+adoption outcomes. **Components: none.** **Bound by** entries 6-9, 11, 12, 22, 23. **Depends on** 2d-6-1."*
+Decisions are values in `src/lib/browser/rawEditor.ts` and `src/lib/browser/restore.ts` (the worker locates
+the raw session and the restore preparation/confirmation/permit doors); **ruling 8's doors for these two
+surfaces are the raw `canSave`/`beginSave` and restore's preparation, confirmation and final permit**; ruling
+22 keeps raw and restore reapply at `unavailable` (the declared unsupported reapply — never a `supported`
+reapply that always falls back); ruling 23 is theirs alone — read it verbatim. **The raw `\r` refusal stands**
+(`CLAUDE.md` §6, *Text on the wire*): a reseed from a disk version holding a `\r` is refused, never normalized.
+**No component is touched**; the tests feed the sessions their envelopes through `observeExternalChange` /
+`registerObservationReceiver` for at least one case per session, as 2d-6-3 and 2d-6-4 did in
+`workspace.test.ts`. **The command spy stays at zero** through every session transition. **Inherited for this
+step to take or leave deliberately**: the three 2d-6-4 patterns above; item 12 of 2d-6-2 (`adoptDiskVersion`
+has no write-in-flight guard — answered by refusing under a held reading); item 4 (the standing-origin guard
+optional until 2d-6-6, passed explicitly by every new caller); item 3 (the `superseded` origin a `supersedes`
+verdict names is not compared with the shown conflict's) still left.
+
+**Orchestrator's rulings standing from 1b's close**: (1) **the `ReconciliationWorkspace` interface is not
+widened** before 2d-6-6. (2) **The acknowledgement operand stays `ConflictSource`**; 2d-6-9 draws the exit. (3)
+**The `projectionReplaced` refusal at an outlived arrival generation stands**; 2d-6-9's.
+
+**Open items the closed steps deliberately left, none a defect of any** (each record's §4 or §5; the live map
+is the split record's §7). **From 2d-6-4** (§4, eight items): no component draws the new fields or codes
+(2d-6-7's); no component registers any of the three receivers, and over which files each is registered is
+2d-6-6's; no `removed`-status transition for any of the three (the record's §6 item 12); the reader is optional
+and no component passes one; **the editor's, the creator's and the recovery form's reapplies still enter
+`enterReapply` before their blocks and recheck nothing before adopting** — the same three findings 2d-6-4's
+review made against the operation sessions, in files that review did not name, recorded rather than fixed by
+`CLAUDE.md` §7 — **2d-6-6, which makes the reader required, is the step that takes them, deliberately, with
+their own pinning cases**; `awaitedFor` / `withWait` / `withoutWait` are now five private copies with no shared
+home; no new Spanish. **From 2d-6-3**: `MatchCreator.svelte` gates the destination control on `editable`
+(2d-6-6 reads `canChooseDestination`); it does not settle a thrown `create`; `OpenWriteSurface` cannot yet
+carry a `recovery` kind. **From 2d-6-2**: a hold the window ends without a delivery is unseen by the session
+(2d-6-9's); a reading the barrier coalesced away is never announced; the Spanish of the reworded sentences awaits
+ruling 40's bilingual review (**2d-6-11's**); `ExternalConflictAction` still has one arm. **From 1c**: a disposal
+from `host.openGeneration()` still costs one refused drain; the registration rejection reaches no developer
+channel. **From 1b**: `classifyFailure`'s "never throws" sentence in `src/lib/ipc/errors.ts` is false for a
+thrown value with a hostile `code` getter. **From 1a**: the stale "nine codes" sentence in `saveOutcome.ts` /
+`index.ts`.
+
+#### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
+
+`git status --short --untracked-files=all` shows **four uncommitted instrument paths** — `M
+src-tauri/src/main.rs` and `M src/main.ts` (two hook lines each; `git diff --stat` over the pair is `5
+insertions(+), 1 deletion(-)` and must stay that way), `?? src-tauri/src/probe.rs` and `?? src/probe.ts`.
+**Do not commit them, do not revert them, and do not treat them as unaccounted-for work.** They are the
+temporary window-reading instrument (`CLAUDE.md` §6, *Window readings*); 2d-8 deletes it. The driver names
+them in `AUTOCLAUDE_PREFLIGHT_DIRTY`. **Stage by path**: `PROGRESS.md`, `PROGRESS.json`, `docs/`,
+`src/lib/browser/`, `src/lib/i18n/`, `src/lib/ipc/`, and any `src-tauri/` or `src/lib/components/` file **by
+name** — never `src-tauri/src/` as a directory. The 2d-6 steps that add a component or a `.ts` module move the
+Vite module count (one per module, two per styled component) and the `ipc-detail` row count (one per file
+under the scanned roots) — re-derive per file, never from the total, and remember the instrument's known
+contribution (`Verification baseline`). **A worker must never run `git stash`**: 1a's worker did so by accident
+inside a compound command and reversed it at once (`2d-6-1a-notes.md` §6); the instrument survived, but a stash
+that is not popped loses the instrument silently. Say so in every worker brief.
+
+#### Open items — the live map is the record's §7
+
+`docs/decisions/2d-6-split-notes.md` §7 states, per item, whether the consult **took it into 2d-6** (obligations
+(1)-(3), open items 5, 6, 8, 9), **deferred it** (1 — the `file:line` drift checker; 7 — the `"permissions": []`
+comment in `main.rs`, 2d-8's; 10 — the `dispose()`-on-close path) or **left it untouched** (0, 2, 3, 4, 11).
+Item 11 was discharged by 1c (`reconciliationWatchState()`, `reconciliationRegistration()`); obligations (2)
+and (3) of the 2d-5 hand-off by 1b in the code's own doc comments.
+
+#### The rest of the 2d consult, so a step is not invented
+
+**2d-6** (its eleven steps; 2d-6-1 closed as three sub-phases, 2d-6-2, 2d-6-3 and 2d-6-4 closed, 2d-6-5 next),
+**2d-7** (the reviewed instrument and the bilingual WKWebView reading — start from the `fetch` recorder already
+in `src/probe.ts`, not from the consult's description), **2d-8** (instrument removal and harness-free closure;
+corrects the `main.rs` comment and deletes `/private/tmp/espansoconfig-harness-2d-5-7b/`).

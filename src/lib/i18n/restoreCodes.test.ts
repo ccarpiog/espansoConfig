@@ -61,7 +61,9 @@ const COMPETING = [
  *
  * The `writeSurfaceOpen` arm appears six times, once per competing surface,
  * because its key is chosen by the surface it carries and a single value would
- * exercise one of six sentences.
+ * exercise one of six sentences. The two external arms (Phase 2d-6-5) render the
+ * shared external-conflict sentences under `browser.externalConflict.*`, so they
+ * are in the accessor's list and not in the pane's own namespace.
  */
 const REFUSALS: readonly RestoreRefusal[] = [
   ...COMPETING.map((surface): RestoreRefusal => ({ kind: 'writeSurfaceOpen', surface })),
@@ -69,7 +71,9 @@ const REFUSALS: readonly RestoreRefusal[] = [
   { kind: 'noCandidate' },
   { kind: 'targetMoved' },
   { kind: 'inFlight' },
+  { kind: 'externalConflict' },
   { kind: 'conflictShowing' },
+  { kind: 'observationRetained' },
   { kind: 'alreadyRestored' }
 ];
 
@@ -88,8 +92,8 @@ function restoreKeys(): TranslationKey[] {
 describe('the restore refusal accessor', () => {
   it('names a distinct key for every arm, so no two refusals share a sentence', () => {
     const keys = REFUSALS.map(restoreRefusalKey);
-    expect(keys).toHaveLength(12);
-    expect(new Set(keys).size).toBe(12);
+    expect(keys).toHaveLength(14);
+    expect(new Set(keys).size).toBe(14);
   });
 
   it('delegates the open-surface arm rather than carrying a sentence of its own', () => {

@@ -260,6 +260,58 @@
  * this application wrote or preserved these bytes, or that a restore is an *undo*.
  * The i18n suites check key parity and placeholder agreement and never meaning
  * (`CLAUDE.md` section 6), so nothing executable holds those sentences to it.
+ *
+ * ## The external session — Phase 2d-6-5
+ *
+ * The shape `./matchEditor.ts` took at 2d-6-2 and the operation sessions at
+ * 2d-6-4, for a restore. {@link RestoreSession.externalConflict} is the conflict
+ * a watcher observation raised over the destination, a field beside `outcome`
+ * and never an arm of it (the 2d-6 record's §3 entry 6);
+ * {@link applyRestoreObservation} is the session's receiver as a value, one
+ * named action per verdict arm and a `never` terminus (entry 11);
+ * {@link conflictOf} answers the conflict shown whichever origin it has, and
+ * {@link restoreRefusal} — asked by {@link prepareRestore}, by
+ * {@link confirmRestore} and, through {@link permitHolds}, by the final permit
+ * {@link sendRestore} spends — refuses under both, with a code of its own for
+ * the external origin and one for a held reading (entry 8: preparation,
+ * confirmation and the final permit). A conflict raised under an unknown write
+ * outcome ({@link RestoreSession.uncertaintyUnresolved}) withholds the reload
+ * until {@link acknowledgeRestoreSnapshot} is told the hold ended (entries 11,
+ * 15); {@link dismissRestoreOutcome} erases none of the three (entry 9).
+ *
+ * **A replacing verdict is a withdrawal that keeps the candidate** (entry 12,
+ * and entry 23's "retarget"): `raised`, `raisedWithoutReload` and `supersedes`
+ * go through {@link withdrawn} with the candidate `'kept'` — the question's
+ * authorization is revoked as the first thing that happens once the verdict is
+ * known, the confirmation and any consent go, the preview generation moves —
+ * and the reload step is reset. What the reload then does is what it always
+ * did here: install the disk observation through `BrowserState.adoptDiskVersion`,
+ * keep the candidate, and move the base revision to the conflict's
+ * `diskRevision` so the person confirms again against what the window now
+ * holds. The candidate is never touched by any of it. **The reapply stays
+ * `unavailable`** (entry 22): {@link reapplyToDiskVersion} says so as a value,
+ * through `enterReapply`, for a conflict of either origin.
+ *
+ * **The receiver honours the memberships above.** It cannot know whether it
+ * withdraws until it has read the verdict's kind and the observation's file, so
+ * it *suspends* the question across those reads exactly as
+ * {@link targetRevisionObserved} does, withdraws through {@link withdrawn} when
+ * the verdict replaces, and carries the question through {@link carryTheQuestion}
+ * when it only records or lifts a wait — a wait changes nothing a confirmation
+ * binds, and the doors are what refuse under it.
+ *
+ * **Every door and every settling transition can read the installed session**
+ * through a {@link ReadTheInstalledSession} (2d-6-4's review, its three
+ * blockers): {@link prepareRestore} asks nothing and {@link confirmRestore} and
+ * {@link sendRestore} spend nothing against a session that is no longer the one
+ * installed; {@link applyRestore}, {@link restoreConfirmationWithdrawn} and
+ * {@link restoreCouldNotBeSent} replay what the receiver appended during their
+ * own replay. The reader is optional while `RestorePane.svelte` and
+ * `BrowserState.restoreDocument` pass none, and its doc says what that costs.
+ *
+ * **No component registers this receiver yet.** 2d-6-8 wires
+ * `BrowserState.registerObservationReceiver` to it through `DetailPane` and
+ * draws the result; until then every case that drives it is a model test.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -312,18 +364,35 @@ import {
 } from './editorSave';
 import { openWholeDocumentSave, type SealedWholeDocumentSave } from './invalidation';
 import { destinationEligibility } from './matchCreation';
+import type { AcknowledgeTheUncertainty } from './matchEditor';
+import type { ConflictSource, ExternalConflictObservation } from './conflictSource';
+import {
+  externalConflictNoticeKey,
+  type ExternalConflictNotice,
+  type ObservationDelivery
+} from './observationDelivery';
 import type { RawSaveChoice } from './rawSave';
+import {
+  enterReapply,
+  type ReapplyOutcome,
+  type SharedReapplyObstacle,
+  type StandingOriginGuard
+} from './reapply';
 import {
   conflictChoicesFor,
   conflictDiskText,
+  describeExternalConflict,
   describeWholeDocumentSave,
+  externalConflictMessageKey,
   invalidationFailureMessage,
+  supersedeConflict,
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDiskText,
+  type ConflictMessage,
   type ConflictModel,
   type ConflictOperation,
-  type SaveConflictModel,
+  type ExternalConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -694,8 +763,32 @@ export type RestoreRefusal =
       readonly kind: 'inFlight';
     }
   | {
-      /** A conflict is on screen and has not been resolved. */
+      /**
+       * A watcher observation raised a conflict over the destination and it has
+       * not been resolved — Phase 2d-6-5, the 2d-6 record's §3 entry 8.
+       *
+       * **A code of its own rather than `conflictShowing`**, because that code's
+       * sentence says the file changed *while this replacement was being
+       * written* and this attempt wrote nothing — false of an observation no
+       * save answered (entry 41's class). It renders the external origin's own
+       * first line, through `externalConflictMessageKey`.
+       */
+      readonly kind: 'externalConflict';
+    }
+  | {
+      /** A conflict a refused replacement raised is on screen and has not been resolved. */
       readonly kind: 'conflictShowing';
+    }
+  | {
+      /**
+       * The window holds a reading of the destination it has not decided about —
+       * Phase 2d-6-5, entry 11's `retained` row as a restriction on sending.
+       *
+       * Renders the retained notice's sentence, through
+       * `externalConflictNoticeKey`, and claims nothing beyond it: not that the
+       * reading will be decided, nor what it will be decided as.
+       */
+      readonly kind: 'observationRetained';
     }
   | {
       /** A replacement has already committed through this session. */
@@ -746,7 +839,10 @@ export function openWriteSurfaceKey(surface: CompetingWriteSurfaceKind): Transla
  * The dictionary key holding one refusal's sentence.
  *
  * The `writeSurfaceOpen` arm delegates to {@link openWriteSurfaceKey} rather than
- * carrying a sentence of its own, so *which* surface is open is said once.
+ * carrying a sentence of its own, so *which* surface is open is said once; the
+ * two external arms delegate to the shared external-conflict key functions for
+ * the same reason (Phase 2d-6-5, no key added), so the sentence a restore shows
+ * for a held reading is the sentence every surface shows for one.
  *
  * @param refusal - Why the restore may not go ahead.
  * @returns The key holding that reason's sentence.
@@ -763,8 +859,12 @@ export function restoreRefusalKey(refusal: RestoreRefusal): TranslationKey {
       return 'browser.restore.refused.targetMoved';
     case 'inFlight':
       return 'browser.restore.refused.inFlight';
+    case 'externalConflict':
+      return externalConflictMessageKey({ kind: 'fileChangedWhileOpen' });
     case 'conflictShowing':
       return 'browser.restore.refused.conflictShowing';
+    case 'observationRetained':
+      return externalConflictNoticeKey({ kind: 'observationRetained' });
     case 'alreadyRestored':
       return 'browser.restore.refused.alreadyRestored';
   }
@@ -1388,9 +1488,10 @@ export interface RestoreSession {
   /**
    * How far a confirmed reload of the disk version has got.
    *
-   * Reset to `idle` by every new outcome and by every dismissal, which is what
-   * stops a confirmation collected for one conflict being spendable while a later
-   * one is on screen.
+   * **Reset to `idle` by every new outcome, by every dismissal and by every
+   * replacing verdict** ({@link applyRestoreObservation}, the 2d-6 record's §3
+   * entry 12), which is what stops a confirmation collected for one conflict
+   * being spendable while a later one is on screen.
    */
   readonly reload: ReloadStep;
   /**
@@ -1404,6 +1505,116 @@ export interface RestoreSession {
    * out.
    */
   readonly restored: boolean;
+  /**
+   * The conflict a watcher observation raised over the destination, or `null` —
+   * Phase 2d-6-5, the 2d-6 record's §3 entry 6.
+   *
+   * **A field of its own beside {@link RestoreSession.outcome}, never an arm of
+   * it**, for `MatchEditorSession.externalConflict`'s reason: an outcome is how
+   * *a replacement* ended, and a conflict the watcher raised is not that.
+   * {@link conflictOf} is the one accessor that reads both and answers the
+   * conflict this session is showing, whichever origin it has. **Only one
+   * conflict is active at a time, and the transitions are what keep it so**
+   * (entry 7): {@link applyRestoreObservation} retires a save conflict's outcome
+   * when it sets this, and {@link applyRestore} retires this when a replacement
+   * ends as a conflict or a success. The type admits both populated, and a
+   * session built by hand with both gets {@link conflictOf}'s stated precedence,
+   * not a guarantee.
+   *
+   * **Its `draft` is the retained candidate's draft as it stood when the
+   * conflict was raised, and a draft of the empty string at the session's base
+   * revision when no candidate was retained** — a placeholder the model's type
+   * requires and never a candidate — **and over that placeholder its `messages`
+   * are the file's own line alone**, never the two that say a candidate is kept
+   * and that a reload keeps it (`overNoCandidate`; this phase's review, its
+   * fourth finding). What a screen draws the candidate from is
+   * {@link RestoreView.preview}; this surface offers no copy
+   * (`offersCopyDraft: false`), the reload re-points the *session's* candidate
+   * and never reads this draft, `supersedeConflict` carries it as history
+   * exactly as the save arm's is carried, and {@link RestoreView.conflictOperation}
+   * names no operation over it. Nothing in TypeScript stops a renderer
+   * reading it as the candidate, and this sentence is what says it must not.
+   *
+   * While it is non-null nothing can be prepared, confirmed or sent
+   * ({@link restoreRefusal}'s `externalConflict` arm) and any pending question
+   * has been withdrawn (entry 12); {@link dismissRestoreOutcome} does not clear
+   * it (entry 9). The way out is the reload, which keeps the candidate and moves
+   * the base revision to the observation's disk revision.
+   */
+  readonly externalConflict: ExternalConflictModel<string> | null;
+  /**
+   * Whether {@link RestoreSession.externalConflict} was raised while a write of
+   * this window's own had an unknown outcome, and this session has not been told
+   * the hold ended — Phase 2d-6-5, entry 11's `raisedWithoutReload` row.
+   *
+   * While `true` the reload is withheld, for the match editor's reason: a
+   * confirmed re-targeting onto bytes a write of this window may or may not have
+   * produced would settle, silently, a question only the person can. It ends
+   * when {@link acknowledgeRestoreSnapshot} is told the window ended the hold, or
+   * when a later verdict replaces the conflict under no uncertainty. **It records
+   * what this session was told and nothing more**: a hold the window ends by a
+   * later definite write delivers nothing to a session, and this flag cannot see
+   * it. This module never sets it without a conflict, so the doors are blocked
+   * by the conflict it qualifies.
+   */
+  readonly uncertaintyUnresolved: boolean;
+  /**
+   * The observations this session was told the window is holding and has not
+   * decided about, keyed by the file each is about — Phase 2d-6-5, entry 11's
+   * `retained` row, in the shape the other seven sessions share.
+   *
+   * **A restriction on preparing, confirming and sending, and nothing else**:
+   * while the destination has an entry, {@link restoreRefusal} answers
+   * `observationRetained`, so {@link prepareRestore} answers the same session,
+   * {@link confirmRestore} answers `null` and {@link sendRestore} consumes its
+   * permit unspent (entry 8); the catalogue, the selection and the candidate
+   * stay free to change, because a wait is a restriction on sending and freezing
+   * them for a decision the window has not made would claim more than the fact
+   * supports. No disk comparison and no origin is recorded. An entry is lifted
+   * by the delivery that decides **that** observation, whatever the verdict —
+   * `writtenHere` included — compared by identity, and replaced by a later
+   * `retained` about the same file. **A pending question survives a wait**: it
+   * changes nothing the confirmation binds, so the receiver carries it and the
+   * doors are what refuse until the wait lifts.
+   *
+   * **What the map forces and what it does not, in the same sentence.** It
+   * forces that a wait is always keyed by the file it is about and that only the
+   * destination's wait blocks; through this module's own transitions it holds
+   * at most that one entry, because a `retained` about another file records
+   * nothing here — the map is the shape the sessions share since 2d-6-3's
+   * review, so the field reads alike on every surface, not a claim that a
+   * restore can change its destination. It cannot force that the deciding
+   * delivery arrives — a session whose receiver was unregistered before the
+   * window decided is never told and stays blocked until closed — nor that a
+   * wait it was *not* told of, because no receiver was registered when the
+   * window held the reading, is recorded at all; both are facts about
+   * registration, which is 2d-6-8's. What it cannot see is a reading the barrier
+   * coalesced away without announcing it.
+   */
+  readonly awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>;
+  /**
+   * Every delivery that arrived while this session's own replacement was in
+   * flight, in the order it arrived, kept until that replacement's answer has
+   * been applied — Phase 2d-6-5, the 2d-6 record's §3 entry 5.
+   *
+   * `MatchEditorSession.heldDeliveries`'s rule, unchanged: the window publishes a
+   * write's settlement from inside the writing wrapper, before the `await` that
+   * started it resumes, so {@link applyRestoreObservation} appends here while the
+   * phase is `saving` and {@link applyRestore}, {@link restoreCouldNotBeSent} and
+   * {@link restoreConfirmationWithdrawn} replay the whole list through it, first
+   * to last, after their own answer — and, given a {@link ReadTheInstalledSession},
+   * whatever the receiver appended to the installed session while they were
+   * doing so. **A held envelope also blocks the final permit**: a session in
+   * `saving` with anything here has been told of a decision about its
+   * destination it has not applied, and {@link permitHolds} refuses to send past
+   * it. **What the list forces** is that no envelope delivered during the
+   * replacement is dropped and that first-to-last is the order; **what it does
+   * not force** is that arrival order was decision order — the window's own
+   * contract — nor that a caller passes the reader: `BrowserState.restoreDocument`
+   * settles the confirmation's own session and passes none today, and nothing
+   * in TypeScript stops a caller handing a capture and no reader.
+   */
+  readonly heldDeliveries: readonly ObservationDelivery[];
 }
 
 /**
@@ -1441,7 +1652,8 @@ export interface RestoreSession {
  * (consult Q4 of 2c-4b): the candidate is a whole document, so there is no target,
  * no field intent and no operation to re-resolve against a newly parsed file, and
  * "reapply" could only mean overwriting the newly read disk text with a stale
- * string or inventing a text merge.
+ * string or inventing a text merge. Since Phase 2d-6-5 {@link reapplyToDiskVersion}
+ * says so as a value, for a conflict of either origin.
  */
 export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
   draftKind: 'operationChoice',
@@ -1530,9 +1742,58 @@ export function startRestore(document: DocumentView): RestoreSession {
     extraMessages: [],
     sendFailure: null,
     reload: NOT_RELOADING,
-    restored: false
+    restored: false,
+    externalConflict: null,
+    uncertaintyUnresolved: false,
+    awaitingReconciliation: new Map(),
+    heldDeliveries: []
   };
 } // End of function startRestore()
+
+/**
+ * The wait that restricts this session **now**, or `null` — the destination's
+ * entry of {@link RestoreSession.awaitingReconciliation}.
+ *
+ * @param session - The session to ask about.
+ * @returns The observation the session is waiting on, or `null`.
+ */
+function awaitedFor(session: RestoreSession): ExternalConflictObservation | null {
+  return session.awaitingReconciliation.get(session.target) ?? null;
+} // End of function awaitedFor()
+
+/**
+ * The waits with one file's entry replaced.
+ *
+ * @param waits - The waits held.
+ * @param document - The file the observation is about.
+ * @param observation - The observation now held for it.
+ * @returns A new map; the argument is untouched.
+ */
+function withWait(
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  document: DocumentId,
+  observation: ExternalConflictObservation
+): ReadonlyMap<DocumentId, ExternalConflictObservation> {
+  const next = new Map(waits);
+  next.set(document, observation);
+  return next;
+} // End of function withWait()
+
+/**
+ * The waits with one file's entry removed.
+ *
+ * @param waits - The waits held.
+ * @param document - The file whose wait ended.
+ * @returns A new map; the argument is untouched.
+ */
+function withoutWait(
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  document: DocumentId
+): ReadonlyMap<DocumentId, ExternalConflictObservation> {
+  const next = new Map(waits);
+  next.delete(document);
+  return next;
+} // End of function withoutWait()
 
 /**
  * Whether the catalogue, the selection, the candidate and the base revision are
@@ -1945,13 +2206,19 @@ export function targetRevisionObserved(
 } // End of function targetRevisionObserved()
 
 /**
- * The conflict the session is showing, or `null`.
+ * The conflict the session is showing, of either origin, or `null`.
+ *
+ * **Widened to the union at Phase 2d-6-5**, from the save arm alone. The external
+ * conflict is answered first, then the outcome's conflict arm — a definite answer
+ * for a session built by hand with both populated, and a decision about nothing
+ * for one this module built, because {@link applyRestoreObservation} and
+ * {@link applyRestore} keep the two exclusive (the 2d-6 record's §3 entry 7).
  *
  * @param session - The session to ask about.
  * @returns The conflict model, or `null` when the session is not in one.
  */
-export function conflictOf(session: RestoreSession): SaveConflictModel<string> | null {
-  return conflictArm(session.outcome);
+export function conflictOf(session: RestoreSession): ConflictModel<string> | null {
+  return session.externalConflict ?? conflictArm(session.outcome);
 } // End of function conflictOf()
 
 /**
@@ -1960,19 +2227,32 @@ export function conflictOf(session: RestoreSession): SaveConflictModel<string> |
  * **The order is a claim about which fact is the most fundamental**, and it decides
  * which sentence a person sees when two are true at once: what has already happened
  * to the file, then whether this application may write it at all, then what is
- * happening to it, then whether there is anything to send, then whether this window
- * still holds the reading the candidate is measured against, and last the rule that
- * is about the person's other open panels rather than about the file.
+ * happening to it — a replacement in flight, a conflict of either origin, a
+ * reading the window holds undecided — then whether there is anything to send,
+ * then whether this window still holds the reading the candidate is measured
+ * against, and last the rule that is about the person's other open panels rather
+ * than about the file.
+ *
+ * **The two external arms sit where the save conflict sits** (Phase 2d-6-5, the
+ * 2d-6 record's §3 entry 8): the external conflict first, in {@link conflictOf}'s
+ * precedence, then the save conflict, then the held reading — each a claim about
+ * what stands over the file, before the claims about this session's own
+ * emptiness and the window's reading. An unresolved write uncertainty blocks
+ * through the conflict it qualifies, which this module never sets it without.
  *
  * **It is exactly the set {@link confirmRestore} rechecks**, over exactly the same
  * two window observations, so a control this answers `null` for and a confirmation
  * that then refuses cannot disagree about anything but the five values a pending
- * confirmation carries — which are the session's own and are compared there.
+ * confirmation carries — which are the session's own and are compared there; and
+ * {@link permitHolds} asks the same restrictions of the final permit.
  *
  * It is an **affordance derived from current state, never authorization**: the
  * transaction's own locked read is what actually stands between a restore and a
  * file that has moved, and every arm here is rechecked at the moment a submission
- * would be produced.
+ * would be produced. What it forces is refusal for the session it is given; **it
+ * cannot force that session to be current** (R37) — one synchronous decision over
+ * one snapshot is the whole of the guarantee, and the doors' reader is what lets
+ * a caller ask about the installed one.
  *
  * @param session - The session.
  * @param context - What this window observes about the destination and about its
@@ -1992,8 +2272,14 @@ export function restoreRefusal(
   if (session.phase === 'saving') {
     return { kind: 'inFlight' };
   }
-  if (conflictOf(session) !== null) {
+  if (session.externalConflict !== null) {
+    return { kind: 'externalConflict' };
+  }
+  if (conflictArm(session.outcome) !== null) {
     return { kind: 'conflictShowing' };
+  }
+  if (awaitedFor(session) !== null) {
+    return { kind: 'observationRetained' };
   }
   if (session.preview === null) {
     return { kind: 'noCandidate' };
@@ -2024,10 +2310,11 @@ export function canPrepareRestore(
  * Asks the person to confirm replacing the destination's whole text.
  *
  * The first of the two phases, and the **only** producer of a
- * {@link PendingRestore}. It records the five values consult Q5 binds, so the
- * answer cannot be spent on a different entry, a different destination, a different
- * candidate, a different base revision, or a later preview that happens to
- * reproduce the other four.
+ * {@link PendingRestore} — through its private half, {@link questionFor}, which
+ * makes every read, builds the record and registers nothing. It records the five values
+ * consult Q5 binds, so the answer cannot be spent on a different entry, a
+ * different destination, a different candidate, a different base revision, or a
+ * later preview that happens to reproduce the other four.
  *
  * It is also the only place a question is registered in
  * {@link PENDING_AUTHORIZATIONS}, which is what {@link confirmRestore} spends. Asking
@@ -2076,20 +2363,49 @@ export function canPrepareRestore(
  * one module along: consent reaching the wire must share no object with a value a
  * caller could still be holding.
  *
+ * **It asks nothing against a session that is no longer the one installed, and
+ * it never answers a session that is not** (Phase 2d-6-5, 2d-6-4's review, its
+ * first finding, and this phase's review, its second): every read this door
+ * makes — the preview, the block's reads of the session and the context, the
+ * submission, the entry, the spread — is a caller-controlled read, and a receiver
+ * run from a getter behind any of them replaces the installed session with one
+ * carrying an external conflict or a wait — a session whose
+ * {@link restoreRefusal} would say so. So every one of those reads happens
+ * first, in {@link questionFor}; then the installed session is read through
+ * `current`, once; and **every return path from there answers through it**:
+ * when the installed session is not the one handed in, **it is answered,
+ * unchanged**, whether the question was refused or would have been asked — a
+ * refusal that answered its argument would have the caller's
+ * `session = prepareRestore(session, …)` overwrite what the receiver installed
+ * with a capture that has never heard of the conflict. Only a session still
+ * installed is refused by returning itself or asked by registering the question
+ * under the session this returns. A receiver replaces a session and never
+ * mutates one, so a session still installed carries what it carried when the
+ * block was asked. What that cannot force is a caller that redefines a property
+ * of the session it handed in between the two — that caller's own session is
+ * what it defeats — nor that a caller passes a reader at all
+ * ({@link ReadTheInstalledSession} says what a missing one costs).
+ *
  * @param session - The session.
  * @param context - What this window observes about the destination and about its
  *   own open surfaces.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   asks on the session handed in — honest only for a caller that registers no
+ *   receiver, which is `RestorePane.svelte` today.
  * @returns The session with the question pending, or the same session when it may
- *   not be asked or one is already authorized.
+ *   not be asked or one is already authorized, or the installed session when the
+ *   one handed in is no longer it.
  */
 export function prepareRestore(
   session: RestoreSession,
-  context: RestoreContext
+  context: RestoreContext,
+  current: ReadTheInstalledSession | null = null
 ): RestoreSession {
   // **Asked of the map rather than of `session.pending`**, because the map is the
   // authority: a session presenting a question that no longer authorizes anything is
   // a session that may be asked again, and this is a bare reference operation that
-  // reads no property at all.
+  // reads no property at all — so nothing caller-controlled has run when this
+  // answers, and the session handed in is still the one installed.
   //
   // **A suspension counts, and that is the second confirmation review's High closed at
   // its far end.** This test is what a re-entrant caller reaches from inside
@@ -2102,16 +2418,59 @@ export function prepareRestore(
   if (PENDING_AUTHORIZATIONS.has(session)) {
     return session;
   }
+  // **Every caller-controlled read of this door, taken here.**
+  const question = questionFor(session, context);
+  // **The installed session, read once, after the last of those reads, and
+  // before any answer.** A receiver run from a getter behind any read above has
+  // replaced it; what is installed is answered, refusal or not, so the caller
+  // keeps what its receiver installed.
+  const installed = current === null ? session : current();
+  if (installed !== session) {
+    return installed;
+  }
+  if (question === null) {
+    return session;
+  }
+  // Registered here and nowhere else, and under the session this returns — so the
+  // exact object a caller installs, never a copy of it and never the one it handed
+  // in, is what a confirmation spends. The spread inside `questionFor` is the last
+  // caller-controlled operation on this path, deliberately: a getter reached by it
+  // can confirm the *previous* question, which is a state this call has already
+  // refused to be in.
+  PENDING_AUTHORIZATIONS.set(question.asked, question.authorized);
+  return question.asked;
+} // End of function prepareRestore()
+
+/**
+ * The question {@link prepareRestore} would ask, built and not yet registered,
+ * or `null` when the session may not be asked.
+ *
+ * **Every caller-controlled read of the door lives here**, so that the door's
+ * one read of the installed session can come after all of them and before any
+ * of its answers (this phase's review, its second finding). It registers
+ * nothing: the record it builds authorizes nothing until the door files it, and
+ * a caller of this function holds a value that no confirmation can find.
+ *
+ * @param session - The session.
+ * @param context - What this window observes about the destination and about
+ *   its own open surfaces.
+ * @returns The session that would present the question and the permit that
+ *   would authorize it, or `null`.
+ */
+function questionFor(
+  session: RestoreSession,
+  context: RestoreContext
+): { readonly asked: RestoreSession; readonly authorized: RestorePermit } | null {
   const preview = session.preview;
   if (preview === null || !canPrepareRestore(session, context)) {
-    return session;
+    return null;
   }
   // **One read, and both representations of the base revision come from it.** The two
   // used to be read separately and only one of them was ever rechecked.
   const baseRevision = session.baseRevision;
   const submission = submissionOf(preview.draft);
   if (submission.baseRevision !== baseRevision) {
-    return session;
+    return null;
   }
   // Read once each, into locals, so the record cannot describe two entries.
   const entryId = preview.entry.id;
@@ -2147,15 +2506,8 @@ export function prepareRestore(
     candidateRevision: authorized.candidateRevision,
     generation: authorized.generation
   } as unknown as PendingRestore;
-  const asked: RestoreSession = { ...session, pending, sendFailure: null };
-  // Registered here and nowhere else, and under the session this returns — so the
-  // exact object a caller installs, never a copy of it and never the one it handed
-  // in, is what a confirmation spends. The spread above is the last caller-controlled
-  // operation on this path, deliberately: a getter reached by it can confirm the
-  // *previous* question, which is a state this call has already refused to be in.
-  PENDING_AUTHORIZATIONS.set(asked, authorized);
-  return asked;
-} // End of function prepareRestore()
+  return { asked: { ...session, pending, sendFailure: null }, authorized };
+} // End of function questionFor()
 
 /**
  * Takes the question back, and takes its authorization with it.
@@ -2272,6 +2624,52 @@ interface RestorePermit {
 }
 
 /**
+ * Reads the session a caller currently holds — the one its registered receiver
+ * has been updating — for a door or a settling transition to check against.
+ *
+ * **`ReadTheInstalledSession` in `./matchDeletion.ts`, for this session**, and it
+ * exists for the reason 2d-6-4's review gave (its first, second and third
+ * findings, one class): a door's caller-controlled operand — the context's
+ * revision and surfaces, the preview, the session's own fields, an observation
+ * being replayed, the observation's projection the window copies inside
+ * {@link reloadTheDiskVersion}'s adoption — is read through property access,
+ * and a property read runs arbitrary code; a getter there can call
+ * `BrowserState.observeExternalChange`, whose registered receiver replaces the
+ * *installed* session with one carrying an external conflict or a wait. A
+ * transition that then checked the block on the session it was handed would
+ * check a session no longer installed, and spend. So every spending door, every
+ * settling transition and the reload ask for the installed session through
+ * this, once, after the last caller-controlled read and immediately before the
+ * spend — the reload once more after its adoption — and refuse, or answer the
+ * installed session, when what is installed is not what they were handed.
+ *
+ * **What it forces and what it does not, in the same sentence.** With one
+ * supplied, {@link prepareRestore} registers no question over a displaced
+ * session and answers the installed one from every refusal, {@link confirmRestore}
+ * spends the question only while the session it
+ * was handed is still the one installed, {@link sendRestore} consumes the permit
+ * unspent when it is not, {@link reloadTheDiskVersion} re-points over the
+ * installed session and answers it untouched when the adoption replaced the
+ * conflict, and {@link applyRestore},
+ * {@link restoreConfirmationWithdrawn} and {@link restoreCouldNotBeSent} settle
+ * every delivery the receiver appended to the installed session during the
+ * flight and during their own replay. It cannot force a caller to supply one:
+ * **the parameter is optional so that `RestorePane.svelte` and
+ * `BrowserState.restoreDocument`, which this phase may not touch and which
+ * register no receiver today, keep compiling** — and a caller that registers a
+ * receiver and passes no reader gets the displaced check and the lost delivery
+ * this closes. **2d-6-6, which makes the reader required across the sessions, or
+ * 2d-6-8, which registers this receiver — whichever comes first — must pass
+ * `() => session` at every one of these calls, and either may make the parameter
+ * required.** Nor can it
+ * force that the closure reads the installed session rather than a capture;
+ * `() => session` over the component's `$state.raw` is the honest one.
+ *
+ * @returns The session the caller holds now.
+ */
+export type ReadTheInstalledSession = () => RestoreSession;
+
+/**
  * Every permit a confirmation has released and no send has spent, keyed by the
  * confirmed object.
  *
@@ -2378,14 +2776,35 @@ const PERMITS = new WeakMap<StartedRestore, RestorePermit>();
  * returns; what stops that permit being spent twice, or being spent after anything it
  * binds has moved, is {@link sendRestore}.
  *
+ * **It spends nothing against a session that is no longer the one installed**
+ * (Phase 2d-6-5, 2d-6-4's review, its first finding). The block — an external
+ * conflict, a held reading, the uncertainty the conflict carries, beside the
+ * ordinary arms — is asked through {@link canPrepareRestore} before the frozen
+ * record is compared, on the session handed in; then every read this function
+ * makes happens, the spread that builds the waiting session last; then the
+ * installed session is read through `current`, once, and only a session that is
+ * still the one handed in reaches the checked deletion. A receiver run from a
+ * getter behind any of those reads is therefore seen — it replaced the installed
+ * session, and this refuses — rather than overwritten by the spend, and the
+ * question it withdrew is not spent here either, because the deletion finds the
+ * map no longer holding it. A receiver replaces a session and never mutates one,
+ * so a session still installed carries what it carried when the block was
+ * asked; what that cannot force is a caller that redefines a property of the
+ * session it handed in between the two, nor that a caller passes a reader at all
+ * ({@link ReadTheInstalledSession} says what a missing one costs).
+ *
  * @param session - The session holding the person's answer.
  * @param context - What this window observes about the destination and about its
  *   own open surfaces.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   checks the block on the session handed in — honest only for a caller that
+ *   registers no receiver, which is `RestorePane.svelte` today.
  * @returns The waiting session, keyed to its permit, or `null`.
  */
 export function confirmRestore(
   session: RestoreSession,
-  context: RestoreContext
+  context: RestoreContext,
+  current: ReadTheInstalledSession | null = null
 ): StartedRestore | null {
   // Looked up **first**, and by the session itself: a bare reference operation that
   // reads no property, so every comparison below is against this module's own frozen
@@ -2439,6 +2858,13 @@ export function confirmRestore(
       sendFailure: null
     }
   } as unknown as StartedRestore;
+  // **The installed session, read once, after the last caller-controlled read
+  // and immediately before the spend.** A receiver run from a getter above has
+  // replaced it; a session that is no longer the one installed spends nothing.
+  const installed = current === null ? session : current();
+  if (installed !== session) {
+    return null;
+  }
   // **The spend is the membership test.** Every check above compares numbers and
   // strings, so a clone of an answered question would pass them all; what tells this
   // session from a copy of it, and from itself already answered or withdrawn, is that
@@ -2540,10 +2966,21 @@ export type RestoreSend =
  * It is deliberately **not** {@link restoreRefusal} with an argument: that predicate
  * answers *may a restore be prepared*, and a send is the one moment when
  * `phase === 'saving'` is required rather than refused. Every other arm of it is
- * here — a committed session, a read-only file, a conflict on screen, no candidate,
- * a destination the window no longer gives this revision, and a competing surface —
- * so the two cannot disagree about anything but the arm that is inverted by
- * construction.
+ * here — a committed session, a read-only file, a conflict on screen of either
+ * origin, a reading the window holds undecided, no candidate, a destination the
+ * window no longer gives this revision, and a competing surface — so the two
+ * cannot disagree about anything but the arm that is inverted by construction.
+ *
+ * **The final permit is a submission boundary too** (Phase 2d-6-5, the 2d-6
+ * record's §3 entry 8): an external conflict and a held reading refuse here
+ * exactly as they refuse the preparation and the confirmation, and so does a
+ * delivery the session holds unapplied — while a session is `saving` its
+ * receiver appends every envelope to {@link RestoreSession.heldDeliveries}
+ * rather than applying it, so a non-empty list is a decision about the
+ * destination this session has been told of and has not looked at, and a send
+ * past it would be a send past that decision. What that forces is refusal for
+ * the session handed in; what it cannot force is that the session is the
+ * installed one, which is {@link sendRestore}'s reader.
  *
  * **Every read below is caller-controlled and may run arbitrary code.** `session`
  * and `context` are ordinary values a caller assembled, `readonly` freezes nothing at
@@ -2568,6 +3005,9 @@ function permitHolds(
     return false;
   }
   if (session.readOnly || conflictOf(session) !== null) {
+    return false;
+  }
+  if (awaitedFor(session) !== null || session.heldDeliveries.length > 0) {
     return false;
   }
   if (permit.document !== session.target || permit.baseRevision !== session.baseRevision) {
@@ -2648,6 +3088,18 @@ function permitHolds(
  * `saveRawDocument` directly, with any text it likes; that is the hole every writing
  * command has had since 2b-2a and no type in this repository closes it.
  *
+ * **The installed session is read once, after {@link permitHolds} and before the
+ * spend** (Phase 2d-6-5, 2d-6-4's review, its first finding): the predicate's
+ * dozen reads are the caller-controlled reads of this door, and a receiver run
+ * from a getter behind one of them replaces the installed session with one that
+ * holds a delivery this session has not applied; a permit whose session is no
+ * longer the one installed no longer describes the session, and is consumed
+ * unspent exactly as one that failed the predicate is. What that cannot force
+ * is that a caller passes a reader ({@link ReadTheInstalledSession}) —
+ * `BrowserState.restoreDocument` passes none today and hands this the
+ * confirmation's own session, so a delivery held on the installed one during
+ * this call is what {@link restoreConfirmationWithdrawn}'s reader replays.
+ *
  * @param started - What {@link confirmRestore} produced, or `null`.
  * @param session - The session as it stands now, which is the one the confirmation
  *   answered with unless something moved it.
@@ -2655,6 +3107,8 @@ function permitHolds(
  *   own open surfaces, read **now** rather than when the question was answered.
  * @param send - `BrowserState.saveRawDocument`. Called at most once, and never at
  *   all without an unspent permit that still holds.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   checks the permit against the session handed in alone.
  * @returns What became of the attempt: nothing held, a permit consumed by a
  *   mismatch, or the sender's own answer.
  */
@@ -2662,7 +3116,8 @@ export async function sendRestore(
   started: StartedRestore | null,
   session: RestoreSession,
   context: RestoreContext,
-  send: SendRestore
+  send: SendRestore,
+  current: ReadTheInstalledSession | null = null
 ): Promise<RestoreSend> {
   if (started === null) {
     return { kind: 'notAttempted' };
@@ -2671,7 +3126,10 @@ export async function sendRestore(
   if (permit === undefined) {
     return { kind: 'notAttempted' };
   }
-  if (!permitHolds(permit, session, context)) {
+  const holds = permitHolds(permit, session, context);
+  // **The installed session, read once, after the last caller-controlled read.**
+  const installed = current === null ? session : current();
+  if (!holds || installed !== session) {
     // **Consumed rather than left for a retry**, and consumed by a *checked*
     // deletion for the same reason the authorizing one is: a call that finds the
     // permit already gone did not consume anything, so it has no claim on the
@@ -2766,17 +3224,37 @@ export type InvalidateEverySurface = (invalidation: RawSaveInvalidation) => void
  *   nothing in flight, because the outcome was delivered once already and inventing
  *   a second one would be this session claiming a save that did not happen.
  *
- * @param session - The session waiting for an answer.
+ * **What it does about an external conflict, and about a delivery held during
+ * the replacement** — Phase 2d-6-5, `applySave`'s rule in `./matchEditor.ts`. A
+ * `saved` or a `conflict` answer retires {@link RestoreSession.externalConflict}
+ * (the 2d-6 record's §3 entry 7: the replacement's own answer is the newer fact
+ * about the file); a `refused` answer wrote nothing and leaves it standing.
+ * Neither is reachable from {@link confirmRestore} while an external conflict
+ * stands, so this keeps the invariant for a caller that drove the model
+ * directly. Then, whatever the answer — a seal already opened included, because
+ * the replacement is over either way — every delivery
+ * {@link applyRestoreObservation} held while it was in flight is replayed on
+ * top, in arrival order (entry 5), **and, with a reader supplied, every delivery
+ * the receiver appended to the installed session during this transition's own
+ * reads and replay** (2d-6-4's review, its second finding). Without a reader the
+ * transition settles what it was handed and such a delivery is lost when the
+ * caller installs the result; {@link ReadTheInstalledSession} says who owes the
+ * reader.
+ *
+ * @param session - The session waiting for an answer, as the caller holds it.
  * @param sealed - What `BrowserState.saveRawDocument` answered.
  * @param invalidate - What the coordinator does about every write surface over the
  *   replaced file. Required, with no default: a default would be this module
  *   deciding for a caller that has surfaces it never told anyone about.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   replays only what the session handed in holds.
  * @returns The session showing what the restore ended as.
  */
 export function applyRestore(
   session: RestoreSession,
   sealed: SealedWholeDocumentSave,
-  invalidate: InvalidateEverySurface
+  invalidate: InvalidateEverySurface,
+  current: ReadTheInstalledSession | null = null
 ): RestoreSession {
   // **Revoked first, on every path, and before any property of the argument is
   // read.** On the ordinary path `confirmRestore` already spent the question, so this
@@ -2795,12 +3273,13 @@ export function applyRestore(
     invalidate(invalidation);
   });
   if (opening.kind === 'alreadyOpened') {
-    return { ...session, phase: 'editing', inFlight: null };
+    return consumingHeldDeliveries({ ...session, phase: 'editing', inFlight: null }, current);
   }
   const outcome = opening.outcome;
   const failed =
     invalidationFailureMessage(opening.invalidation) ??
     invalidationFailureMessage(opening.issuerInvalidation);
+  const refused = outcome.outcome === 'refused';
   const answered: RestoreSession = {
     ...session,
     phase: 'editing',
@@ -2823,29 +3302,118 @@ export function applyRestore(
         : describeWholeDocumentSave(outcome, submitted.preview.draft, CONFLICT_CAPABILITIES),
     extraMessages: failed === null ? [] : [failed],
     reload: NOT_RELOADING,
-    sendFailure: null
+    sendFailure: null,
+    // The replacement ended on the file, so the disk side an earlier observation
+    // showed is no longer the comparison to draw (entry 7); a refusal wrote
+    // nothing and says nothing about the file.
+    externalConflict: refused ? session.externalConflict : null,
+    uncertaintyUnresolved: refused ? session.uncertaintyUnresolved : false
   };
   if (outcome.outcome !== 'saved') {
-    return answered;
+    return consumingHeldDeliveries(answered, current);
   }
   const revision = replaced.revision ?? outcome.revision;
-  return {
-    ...answered,
-    baseRevision: revision,
-    restored: outcome.committed,
-    // The frozen preview, rebased. It is the session's own on every path a
-    // transition can reach — nothing can replace a preview under a send — and
-    // taking it from the frozen record is what makes the draft the save's consent
-    // is spent on the draft the save was taken from.
-    preview:
-      submitted === null
-        ? session.preview
-        : {
-            ...submitted.preview,
-            draft: savedDraft(submitted.preview.draft, submitted.submission, revision)
-          }
-  };
+  return consumingHeldDeliveries(
+    {
+      ...answered,
+      baseRevision: revision,
+      restored: outcome.committed,
+      // The frozen preview, rebased. It is the session's own on every path a
+      // transition can reach — nothing can replace a preview under a send — and
+      // taking it from the frozen record is what makes the draft the save's consent
+      // is spent on the draft the save was taken from.
+      preview:
+        submitted === null
+          ? session.preview
+          : {
+              ...submitted.preview,
+              draft: savedDraft(submitted.preview.draft, submitted.submission, revision)
+            }
+    },
+    current
+  );
 } // End of function applyRestore()
+
+/**
+ * Whether one held list is the other with more appended: the same envelopes, by
+ * identity, in the same positions.
+ *
+ * A receiver appends and never reorders, so the installed session's list is the
+ * handed-in list with the deliveries that arrived since; a list that is not is
+ * one this transition cannot reason about and leaves alone.
+ *
+ * @param arrived - The installed session's list.
+ * @param replayed - The list already replayed.
+ * @returns `true` when `arrived` begins with every entry of `replayed`.
+ */
+function extendsTheReplayed(
+  arrived: readonly ObservationDelivery[],
+  replayed: readonly ObservationDelivery[]
+): boolean {
+  return replayed.every((delivery, at) => arrived[at] === delivery);
+} // End of function extendsTheReplayed()
+
+/**
+ * Replays every delivery a session held during its replacement, in the order it
+ * arrived, once the replacement's own answer is on it — the 2d-6 record's §3
+ * entry 5 — and then every delivery the receiver appended to the installed
+ * session while that was happening (2d-6-4's review, its second finding).
+ *
+ * `consumingHeldDeliveries` in `./matchDeletion.ts`, for this session, rounds
+ * included, with one thing that is this module's own: emptying the list is a
+ * fresh session, so the question the settled session carries — there is one on
+ * no ordinary path, because the confirmation spent it, and {@link carryTheQuestion}
+ * is what makes the rule true of every path — is carried to it. Each envelope
+ * then goes through {@link applyRestoreObservation} exactly as it would have on
+ * arrival, which carries or withdraws the question itself, and each is applied
+ * to the session the one before it left. **Replaying an envelope reads its
+ * observation, and a read runs caller code**: a getter there can tell the window
+ * of a reading, and the window delivers it at once to the installed session —
+ * which is still `saving`, so the receiver appends it there, to a list this
+ * transition was handed a copy of. So after each round the installed session is
+ * read through `current`, once, and the envelopes it holds beyond the ones
+ * replayed are replayed too, in the order they arrived, until a read finds none.
+ * **What this forces** is that no envelope delivered during the replacement, or
+ * during this settlement, is dropped when a reader is supplied, and that
+ * first-to-last is the order; **what it cannot force** is that the window
+ * delivered them in the order it decided them, that a reader is supplied at
+ * all, or that the installed session is the one handed in with more appended —
+ * a list that is not an extension of the one replayed is left alone, since the
+ * transition cannot say what it is. Nor can it force the rounds to end: a getter
+ * that tells the window of a fresh reading on every read does not come to rest
+ * here, exactly as it does not at the window's own drain
+ * (`registerObservationReceiver`'s doc), and one that re-tells a reading already
+ * decided does, because the window hands each decision out once.
+ *
+ * @param settled - The session with its replacement's answer applied and its
+ *   phase back to `editing`.
+ * @param current - Reads the session the caller holds now, or `null`.
+ * @returns The session with every held delivery applied, or the same session
+ *   when none was held.
+ */
+function consumingHeldDeliveries(
+  settled: RestoreSession,
+  current: ReadTheInstalledSession | null
+): RestoreSession {
+  let queue = settled.heldDeliveries;
+  let replayed: RestoreSession =
+    queue.length === 0 ? settled : carryTheQuestion(settled, { ...settled, heldDeliveries: [] });
+  let seen = 0;
+  for (;;) {
+    for (let at = seen; at < queue.length; at += 1) {
+      replayed = applyRestoreObservation(replayed, queue[at]!);
+    } // End of the loop over the deliveries not yet replayed
+    seen = queue.length;
+    if (current === null) {
+      return replayed;
+    }
+    const arrived = current().heldDeliveries;
+    if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
+      return replayed;
+    }
+    queue = arrived;
+  } // End of the loop over the rounds of replay
+} // End of function consumingHeldDeliveries()
 
 /**
  * Records that a confirmation was consumed without anything reaching a command.
@@ -2877,17 +3445,31 @@ export function applyRestore(
  * already hold the candidate. Here no command ran, there is nothing to be uncertain
  * about, and no failure is raised.
  *
+ * The send is over, so a delivery held while the session was `saving` is applied
+ * now (Phase 2d-6-5, the 2d-6 record's §3 entry 5) — the very delivery that may
+ * have made {@link permitHolds} refuse — and with a reader every delivery
+ * appended to the installed session during the replay is applied too, for
+ * {@link applyRestore}'s reason.
+ *
  * @param session - The session the consumed confirmation was minted with.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   replays only what the session handed in holds.
  * @returns The session back to its resting state, with the candidate retained.
  */
-export function restoreConfirmationWithdrawn(session: RestoreSession): RestoreSession {
+export function restoreConfirmationWithdrawn(
+  session: RestoreSession,
+  current: ReadTheInstalledSession | null = null
+): RestoreSession {
   // Revoked before anything is built, so this transition's name is true of the
   // authorization and not only of what a screen draws.
   revokeConfirmation(session);
   // `pending` is already `null` on every session a confirmation minted; setting it
   // is what makes that true of every path rather than of the ordinary one, which is
   // `applyRestore`'s reason for the same line.
-  return { ...session, phase: 'editing', inFlight: null, pending: null };
+  return consumingHeldDeliveries(
+    { ...session, phase: 'editing', inFlight: null, pending: null },
+    current
+  );
 } // End of function restoreConfirmationWithdrawn()
 
 /**
@@ -2904,28 +3486,41 @@ export function restoreConfirmationWithdrawn(session: RestoreSession): RestoreSe
  * 2c-1b's sealed boundary is not this sub-phase's to widen. The raw editor has the
  * identical limit and states it.
  *
- * @param session - The session waiting for an answer.
+ * The send is over, so a delivery held while it was out is applied now: the
+ * settlement of an uncertain write arbitrates the held reading under that
+ * uncertainty, and its `raisedWithoutReload` is what this applies (Phase 2d-6-5,
+ * the 2d-6 record's §3 entry 5), and with a reader every delivery appended to
+ * the installed session during the replay is applied too, for
+ * {@link applyRestore}'s reason.
+ *
+ * @param session - The session waiting for an answer, as the caller holds it.
  * @param mayHaveWritten - Whether the file may already hold the candidate.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   replays only what the session handed in holds.
  * @returns The session, back to its resting state, with the right notice raised.
  */
 export function restoreCouldNotBeSent(
   session: RestoreSession,
-  mayHaveWritten: boolean
+  mayHaveWritten: boolean,
+  current: ReadTheInstalledSession | null = null
 ): RestoreSession {
   // Carried rather than revoked, and carried rather than left behind: nothing a
   // confirmation binds moved, and on the ordinary path there is nothing to carry
   // because the confirmation spent the question before the send. It is written for
   // the same reason the `pending: null` lines elsewhere are — so the rule is true of
   // every path rather than of the ordinary one.
-  return carryTheQuestion(session, {
-    ...session,
-    phase: 'editing',
-    // The send is over however it ended, so nothing is in flight any more. What was
-    // submitted stays on the session: there may be findings to consent to, and this
-    // arm has no answer that would spend them.
-    inFlight: null,
-    sendFailure: sendFailureOf(mayHaveWritten, null)
-  });
+  return consumingHeldDeliveries(
+    carryTheQuestion(session, {
+      ...session,
+      phase: 'editing',
+      // The send is over however it ended, so nothing is in flight any more. What
+      // was submitted stays on the session: there may be findings to consent to,
+      // and this arm has no answer that would spend them.
+      inFlight: null,
+      sendFailure: sendFailureOf(mayHaveWritten, null)
+    }),
+    current
+  );
 } // End of function restoreCouldNotBeSent()
 
 /**
@@ -2993,6 +3588,16 @@ export function acknowledgeRestoreFindings(session: RestoreSession): RestoreSess
  * {@link RestoreSession.inFlight} record — but a panel that emptied under a person
  * mid-send is the change that sentence says cannot happen.
  *
+ * **Nor does it erase an external block** — Phase 2d-6-5, the 2d-6 record's §3
+ * entry 9. {@link RestoreSession.externalConflict},
+ * {@link RestoreSession.uncertaintyUnresolved} and
+ * {@link RestoreSession.awaitingReconciliation} all survive this spread: what
+ * this dismisses under an external conflict is the save outcome's panel and the
+ * reload warning, and the conflict and both restrictions stand until an explicit
+ * resolution — the reload's confirmation, or closing. What the spread forces is
+ * that the three fields are copied; what no type forces is that a later edit
+ * keeps them out of the literal, and the suite's case is what would notice.
+ *
  * @param session - The session showing an outcome.
  * @returns The session with nothing being said about the last attempt, or the same
  *   session while a send is in flight.
@@ -3016,14 +3621,33 @@ export function dismissRestoreOutcome(session: RestoreSession): RestoreSession {
 } // End of function dismissRestoreOutcome()
 
 /**
+ * The conflict a reload may be asked about, or `null` when none may be — Phase
+ * 2d-6-5, the reload gate of the 2d-6 record's §3 entry 11 as one rule for the
+ * three reload steps below.
+ *
+ * Withheld under an unacknowledged write uncertainty, for the match editor's
+ * reason: a confirmed re-targeting onto bytes a write of this window may or may
+ * not have produced would settle silently what only the person can. The view
+ * withholds the control through the same fact, and the three transitions refuse
+ * it, so a call made past the withheld control changes nothing (entry 8).
+ *
+ * @param session - The session to ask about.
+ * @returns The conflict, or `null` when there is none or its reload is withheld.
+ */
+function reloadableConflictOf(session: RestoreSession): ConflictModel<string> | null {
+  return session.uncertaintyUnresolved ? null : conflictOf(session);
+} // End of function reloadableConflictOf()
+
+/**
  * Asks to load the version on disk, which is the step **before** confirming.
  *
  * @param session - The session showing a conflict.
  * @returns The session at the warning, or the same session when no conflict is
- *   showing or one has already been asked about.
+ *   showing, one has already been asked about, or the reload is withheld
+ *   ({@link reloadableConflictOf}).
  */
 export function askToReloadDiskVersion(session: RestoreSession): RestoreSession {
-  const next = reloadAsked(conflictOf(session), session.reload);
+  const next = reloadAsked(reloadableConflictOf(session), session.reload);
   return next === null ? session : carryTheQuestion(session, { ...session, reload: next });
 } // End of function askToReloadDiskVersion()
 
@@ -3038,7 +3662,7 @@ export function askToReloadDiskVersion(session: RestoreSession): RestoreSession 
  * @returns The session holding the confirmation, or the same session.
  */
 export function confirmDiskReload(session: RestoreSession): RestoreSession {
-  const next = reloadConfirmed(conflictOf(session), session.reload);
+  const next = reloadConfirmed(reloadableConflictOf(session), session.reload);
   return next === null ? session : carryTheQuestion(session, { ...session, reload: next });
 } // End of function confirmDiskReload()
 
@@ -3083,23 +3707,82 @@ export function confirmDiskReload(session: RestoreSession): RestoreSession {
  * control except on a conflict. What the unconditional revocation buys is that the
  * claim is about the function rather than about which of its arms a screen can reach.
  *
+ * **Since Phase 2d-6-5 the conflict may be a watcher observation's** (the 2d-6
+ * record's §3 entry 23's "retarget"): the same adoption, the same candidate
+ * kept, the same base moved to the observation's disk revision, and the
+ * external conflict and the uncertainty it carried resolved by it — the waits
+ * recorded for other observations stand, because an adoption decides nothing
+ * about them. Under an unacknowledged write uncertainty the reload is withheld
+ * through {@link reloadableConflictOf}, and this answers the session with
+ * nothing pending.
+ *
  * **What no type here forces**: that `adopt`'s body does anything, and that the
  * window really holds the revision it reported.
  *
+ * **The installed session is read twice: once after this function's own reads
+ * and immediately before the adoption, and once more after it** (this phase's
+ * review, its third finding; 2d-6-4's pattern (c)). The adoption is the window's,
+ * and `BrowserState.adoptDiskVersion` copies the observation's projection before
+ * it decides — a read of caller data, and a getter there can tell the window of
+ * a later reading, which the window decides and hands to the registered receiver
+ * while this function is still inside `adopt`. So: a session displaced before
+ * the adoption is not re-pointed and the installed session is answered, the
+ * window never asked and that session's own confirmation state untouched — a
+ * caller that installs the answer keeps what its receiver installed, and
+ * through this module's own transitions no question can be pending on a
+ * session showing a conflict, so nothing reachable is answered presenting a
+ * question it does not authorize. After the adoption the installed session is read again; when it now
+ * shows **another conflict** (by source identity) the person must decide about
+ * that one, whether the window installed this snapshot or refused it as
+ * outlived, so the installed session is answered untouched and nothing is
+ * re-pointed over it; when it shows the same conflict with more recorded — a
+ * wait, most of all — the retarget and the refused step are built over **it**,
+ * revoked as this function revokes its argument, so what the receiver recorded
+ * during the adoption survives. What that cannot force is that a caller passes
+ * a reader ({@link ReadTheInstalledSession} says what a missing one costs):
+ * without one the transition re-points what it was handed, and a delivery the
+ * receiver made during the adoption is lost when the caller installs the answer.
+ *
  * @param session - The session holding a confirmation.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
+ * @param current - Reads the session the caller holds now. `null`, the default,
+ *   builds over the session handed in.
  * @returns The session re-pointed at the disk revision, the session at the terminal
- *   refused step, or the same session with nothing pending.
+ *   refused step, the same session with nothing pending, or the installed session
+ *   when the one handed in is no longer it.
  */
 export function reloadTheDiskVersion(
   session: RestoreSession,
-  adopt: AdoptTheDiskVersion<string>
+  adopt: AdoptTheDiskVersion<string>,
+  current: ReadTheInstalledSession | null = null
 ): RestoreSession {
   revokeConfirmation(session);
-  const conflict = conflictOf(session);
-  const spend = spendTheConfirmedReload(conflict, session.reload, adopt);
+  // **Every read of this function's own, taken first.**
+  const step = session.reload;
+  const conflict = reloadableConflictOf(session);
+  // **The installed session, read once, after those reads and immediately
+  // before the adoption.** A session no longer installed is not re-pointed, and
+  // what is installed is answered so the caller keeps it.
+  const installed = current === null ? session : current();
+  if (installed !== session) {
+    return installed;
+  }
+  const spend = spendTheConfirmedReload(conflict, step, adopt);
   if (spend === 'notAttempted' || conflict === null) {
     return withNothingPending(session);
+  }
+  // **Read once more, after the adoption**, which ran the window's own reads.
+  const settled = current === null ? session : current();
+  if (settled !== session) {
+    if (conflictOf(settled)?.source !== conflict.source) {
+      // A replacing verdict landed during the adoption: the conflict the
+      // receiver installed is the one to decide about now, and nothing is
+      // re-pointed over it.
+      return settled;
+    }
+    // The same conflict with more recorded; built over, and revoked as the
+    // argument was, so the answer presents what it authorizes.
+    revokeConfirmation(settled);
   }
   if (spend === 'refused') {
     // **A terminal step rather than the session unchanged**, which is the 2c-4a-3a
@@ -3108,7 +3791,7 @@ export function reloadTheDiskVersion(
     // offered and the panel says so. That is a decision about what to draw and
     // **not** a claim that a later ask would be refused too — a refusal spends
     // nothing.
-    return { ...session, reload: RELOAD_REFUSED, pending: null };
+    return { ...settled, reload: RELOAD_REFUSED, pending: null };
   }
   // **`measuredAgainst` rather than `targetRevisionObserved`**, and the difference
   // is load-bearing: that transition answers *unchanged* when the revision it is
@@ -3118,11 +3801,395 @@ export function reloadTheDiskVersion(
   // the panel with nothing pending and no consent, because a confirmation given
   // before the adoption was given about a different reading of the world.
   const moved = measuredAgainst(
-    { ...session, submitted: null, outcome: null, extraMessages: [], sendFailure: null },
+    {
+      ...settled,
+      submitted: null,
+      outcome: null,
+      extraMessages: [],
+      sendFailure: null,
+      // The conflict of either origin is resolved by the adoption, and with it
+      // the uncertainty it was raised under; the waits are about other
+      // observations, and those the receiver recorded during the adoption are
+      // carried too.
+      externalConflict: null,
+      uncertaintyUnresolved: false
+    },
     conflict.diskRevision
   );
   return { ...moved, reload: NOT_RELOADING };
 } // End of function reloadTheDiskVersion()
+
+/**
+ * Takes the window's decision about one watcher observation — Phase 2d-6-5, the
+ * 2d-6 record's §3 entries 6, 7, 11 and 12.
+ *
+ * **The session's receiver, as a value**, in the shape `applyObservation` in
+ * `./matchEditor.ts` established: a component registers a function through
+ * `BrowserState.registerObservationReceiver` that calls this with the envelope and
+ * installs what comes back (the wiring is 2d-6-8's), and the decision is here so a
+ * suite can drive every arm without a window. It never re-arbitrates and reads
+ * none of the window's tables.
+ *
+ * **Every verdict has a named action, switched with a `never` terminus** (entry
+ * 11, plus the seventh arm Phase 2d-6-1b added):
+ *
+ * | Verdict | What this does, for a delivery about this session's destination |
+ * |---|---|
+ * | `raised` | builds the external model over the retained candidate, and withdraws the pending question — candidate kept, consent gone |
+ * | `raisedWithoutReload` | the same, and records that the reload is withheld until the uncertainty is acknowledged |
+ * | `supersedes` | `supersedeConflict` over the conflict shown — its draft kept, its disk side replaced — and withdraws the pending question |
+ * | `coalesced` | keeps the model, its source identity, the reload step and the pending question |
+ * | `notLater` | changes nothing |
+ * | `retained` | records the held observation as a restriction on preparing, confirming and sending; no disk comparison, no origin, the question carried |
+ * | `writtenHere` | lifts the restriction recorded for that observation, and changes nothing else |
+ *
+ * **Which deliveries are about this session is decided by the observation's
+ * file**, read once, for the three operation sessions' reason: a restore is
+ * opened over one destination, and a delivery about another file can only end a
+ * wait recorded for that very observation, by identity, under that file's key —
+ * it raises nothing here, because a reload of it would re-point the candidate at
+ * a file the person never named. A `retained` about another file records
+ * nothing. The envelope's two fields and the verdict's `kind` are read once
+ * each, before anything is decided.
+ *
+ * **A replacing verdict is a withdrawal that keeps the candidate** (entries 7
+ * and 12): it goes through {@link withdrawn} with the candidate `'kept'`, so the
+ * question's authorization is revoked, the confirmation and any consent go, the
+ * preview generation moves, and the candidate is untouched; the reload step is
+ * reset, so a confirmation collected for the conflict that was on screen is not
+ * spendable against the one that replaced it, and a save conflict's outcome is
+ * retired so that only one conflict is active — a committed success or a
+ * refusal in `outcome` stays as history. `supersedes` builds through
+ * `supersedeConflict` when a conflict is shown and through
+ * `describeExternalConflict` over the candidate's draft when none is; the
+ * `superseded` origin the verdict names is not compared with the shown
+ * conflict's — the envelope is the window's decision about the file, and a
+ * session that re-checked it would be arbitrating.
+ *
+ * **The question is suspended across the reads, for {@link targetRevisionObserved}'s
+ * reason**: this cannot know whether it withdraws until it has read the verdict's
+ * kind and the observation's file, both caller-controlled, and a question absent
+ * from the map during those reads is a licence for a re-entrant caller to ask a
+ * second one. A replacing verdict about the destination then revokes through
+ * {@link withdrawn}, whose deletion the `finally` finds and puts nothing back
+ * over; every other arm that answers a new session ends this call's own
+ * suspension first and carries the question through {@link carryTheQuestion} —
+ * bare `WeakMap` operations, with no user code between the two — and an arm that
+ * changes nothing answers through {@link unchangedByInspection}. A question an
+ * *outer* inspection owns is not this call's to carry, so a delivery reached
+ * from inside {@link targetRevisionObserved} or {@link candidateRead} answers a
+ * session presenting none; that is the safe direction, and the phase record
+ * says so.
+ *
+ * **During this session's own replacement the envelope is appended to the held
+ * list, not applied** (entry 5): see {@link RestoreSession.heldDeliveries}. **A
+ * spent session takes a delivery too**, as the deleter's does after a committed
+ * deletion: the conflict stands beside the committed outcome, the reload is
+ * offered — it installs the disk observation into the window, which is a fact
+ * about the window and not about this candidate — and the doors refuse for the
+ * commit before they refuse for the conflict. This surface has no "closed"
+ * state; the pane is closed by the person.
+ *
+ * **What it forces and what it does not, in the same sentence.** It forces that
+ * every arm of `ObservationVerdict` has an action here — an eighth arm is a
+ * compile error at the terminus — and that no arm installs, adopts, spends or
+ * calls a command, which its signature cannot prove and the command spy at zero
+ * in `workspace.test.ts` does. It cannot force that a component registers it,
+ * over which files, or installs what it answers; nor that the envelope was sealed
+ * by the window rather than assembled by hand.
+ *
+ * @param session - The session.
+ * @param delivery - What the window decided, sealed with the observation.
+ * @returns The session after the decision, or the same session when the verdict
+ *   changes nothing about it.
+ */
+export function applyRestoreObservation(
+  session: RestoreSession,
+  delivery: ObservationDelivery
+): RestoreSession {
+  const suspension = suspendTheQuestion(session);
+  try {
+    // **The caller-controlled reads, taken once and first.**
+    const observation = delivery.observation;
+    const kind = delivery.verdict.kind;
+    const file = observation.document;
+    if (session.phase === 'saving') {
+      return carriedPast(session, suspension, {
+        ...session,
+        heldDeliveries: [...session.heldDeliveries, delivery]
+      });
+    }
+    // The decision about an awaited observation ends the wait for it, whatever
+    // the decision is and whichever file it is about; any other observation
+    // leaves every wait standing.
+    const waits = session.awaitingReconciliation;
+    const stillWaiting = waits.get(file) === observation ? withoutWait(waits, file) : waits;
+    const about = session.target === file;
+    switch (kind) {
+      case 'retained':
+        // A `retained` ends no wait: a re-held reading is still held.
+        return about
+          ? carriedPast(session, suspension, {
+              ...session,
+              awaitingReconciliation: withWait(waits, file, observation)
+            })
+          : unchangedByInspection(session, suspension);
+      case 'writtenHere':
+      case 'coalesced':
+      case 'notLater':
+        return stillWaiting === waits
+          ? unchangedByInspection(session, suspension)
+          : carriedPast(session, suspension, { ...session, awaitingReconciliation: stillWaiting });
+      case 'raised':
+      case 'supersedes':
+        return about
+          ? replacedBy(session, observation, false, stillWaiting)
+          : liftedPast(session, suspension, waits, stillWaiting);
+      case 'raisedWithoutReload':
+        return about
+          ? replacedBy(session, observation, true, stillWaiting)
+          : liftedPast(session, suspension, waits, stillWaiting);
+      default: {
+        const unreachable: never = kind;
+        return unreachable;
+      }
+    }
+  } finally {
+    restoreTheQuestion(session, suspension);
+  }
+} // End of function applyRestoreObservation()
+
+/**
+ * The session with its waits replaced by a replacing verdict about another file,
+ * question carried — the arm of {@link applyRestoreObservation} that lifts a
+ * wait and raises nothing.
+ *
+ * @param session - The session being inspected.
+ * @param suspension - What {@link suspendTheQuestion} answered for it.
+ * @param waits - The waits it held.
+ * @param stillWaiting - The waits after this delivery.
+ * @returns The same session when no wait ended, or a successor carrying the
+ *   question.
+ */
+function liftedPast(
+  session: RestoreSession,
+  suspension: SuspendedQuestion | undefined,
+  waits: ReadonlyMap<DocumentId, ExternalConflictObservation>,
+  stillWaiting: ReadonlyMap<DocumentId, ExternalConflictObservation>
+): RestoreSession {
+  return stillWaiting === waits
+    ? unchangedByInspection(session, suspension)
+    : carriedPast(session, suspension, { ...session, awaitingReconciliation: stillWaiting });
+} // End of function liftedPast()
+
+/**
+ * Ends this call's own suspension and moves the question to the session that
+ * replaces the inspected one.
+ *
+ * **Two bare `WeakMap` sequences with no user code between them**, and the order
+ * is the point: {@link carryTheQuestion} refuses a suspended question, because
+ * another call may own it, so the cell this call owns is put back first through
+ * {@link restoreTheQuestion} — which puts nothing back over a cell a getter's
+ * withdrawal deleted — and then taken across. `to` was built before this is
+ * entered, so the one caller-controlled operation on the path happened while the
+ * question was still suspended. A suspension this call does not own — an outer
+ * inspection's, or none — is left exactly where it is, and the successor then
+ * presents no question, which is the safe direction. The `finally` that follows
+ * finds nothing of this call's under the old key and does nothing.
+ *
+ * @param from - The session the question was asked on.
+ * @param suspension - What {@link suspendTheQuestion} answered for it.
+ * @param to - The session that replaces it, already built.
+ * @returns `to`, carrying the question when this call held it.
+ */
+function carriedPast(
+  from: RestoreSession,
+  suspension: SuspendedQuestion | undefined,
+  to: RestoreSession
+): RestoreSession {
+  restoreTheQuestion(from, suspension);
+  return carryTheQuestion(from, to);
+} // End of function carriedPast()
+
+/**
+ * The session after a verdict that puts a new origin in front of it.
+ *
+ * The shared body of the three replacing arms of
+ * {@link applyRestoreObservation}, which documents what happens here; this is
+ * the one place the external model is built for this surface from a delivery,
+ * and the one place a pending question is withdrawn by a fact about the file
+ * rather than by the person (entry 12). {@link withdrawn} is its first act — its
+ * revocation deletes the suspension cell the caller holds, so the caller's
+ * `finally` puts nothing back — and the candidate is `'kept'`.
+ *
+ * The draft the model retains is the candidate's own when one is retained, and a
+ * draft of the empty string at the session's base revision when none is —
+ * {@link RestoreSession.externalConflict} says what that placeholder is and is
+ * not. A shown conflict's draft is carried instead, as history, through
+ * `supersedeConflict`. **Over no candidate the model's lines are the file's own
+ * first line alone** (this phase's review, its fourth finding): the two lines
+ * the surface's declaration writes say a candidate is kept and that a reload
+ * keeps it and withdraws a confirmation, and a session that retains none has
+ * nothing either sentence is about — see {@link overNoCandidate}.
+ *
+ * @param session - The session, not saving.
+ * @param observation - The observation the verdict is about.
+ * @param uncertaintyUnresolved - Whether the verdict was `raisedWithoutReload`.
+ * @param awaitingReconciliation - The waits still held after this delivery.
+ * @returns The session showing the new conflict, with nothing pending.
+ */
+function replacedBy(
+  session: RestoreSession,
+  observation: ExternalConflictObservation,
+  uncertaintyUnresolved: boolean,
+  awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>
+): RestoreSession {
+  const cleared = withdrawn(session, 'kept');
+  const shown = conflictOf(cleared);
+  const preview = cleared.preview;
+  const described =
+    shown === null
+      ? describeExternalConflict(
+          observation,
+          preview?.draft ?? startDraft(cleared.baseRevision, '', textDraftRules),
+          CONFLICT_CAPABILITIES
+        )
+      : supersedeConflict(shown, observation, CONFLICT_CAPABILITIES);
+  const externalConflict = preview === null ? overNoCandidate(described) : described;
+  // A save conflict is retired with its submission (entry 7); a refusal or a
+  // success stays, as history, with the submission a refusal's consent needed —
+  // the consent itself went with the withdrawal above.
+  const retiring = conflictArm(cleared.outcome) !== null;
+  return {
+    ...cleared,
+    externalConflict,
+    uncertaintyUnresolved,
+    awaitingReconciliation,
+    outcome: retiring ? null : cleared.outcome,
+    submitted: retiring ? null : cleared.submitted,
+    extraMessages: retiring ? [] : cleared.extraMessages,
+    // Entry 12: the confirmation collected for the conflict that was on screen
+    // is not spendable against this one, nor may its warning stay on screen
+    // saying the wrong thing (the record's §5.7).
+    reload: NOT_RELOADING
+  };
+} // End of function replacedBy()
+
+/**
+ * The external model with every line about a candidate left out, for a session
+ * that retains none — this phase's review, its fourth finding.
+ *
+ * `describeExternalConflict` writes three lines from a surface's declaration:
+ * the file's own, then *what you asked for here is still set up* and *loading the
+ * version on disk … leaves this panel open with the same text still selected
+ * here … your confirmation is withdrawn*. Over the placeholder draft the second
+ * and third describe a candidate that was never chosen and a confirmation that
+ * was never given, so only the first is kept — the tuple type admits one line,
+ * and it is the one line that is true of the file. **What this forces** is that
+ * a model built over no candidate carries no sentence about one; **what it does
+ * not** is that a candidate chosen *afterwards*, under the standing conflict,
+ * regains the two lines — the model is built when the verdict lands and a later
+ * selection rebuilds nothing, which the phase record's §4 admits.
+ *
+ * @param model - The model as the declaration described it.
+ * @returns The same disk side and draft, with the file's line alone.
+ */
+function overNoCandidate(model: ExternalConflictModel<string>): ExternalConflictModel<string> {
+  return { ...model, messages: [model.messages[0]] };
+} // End of function overNoCandidate()
+
+/**
+ * Records that the person has reviewed the disk snapshot and the window has ended
+ * the uncertainty hold — Phase 2d-6-5, the 2d-6 record's §3 entries 14 and 15.
+ *
+ * `acknowledgeSnapshot` in `./matchEditor.ts`, for this session, taking the same
+ * two-valued callback: it rebuilds the conflict's availability and nothing else —
+ * the reload is offered again from its idle step — installing nothing, minting no
+ * consent and re-observing nothing. Asked at most once per call and only when
+ * there is something to end; a `refused` leaves the session unchanged. A question
+ * cannot be pending under an external conflict through this module's own
+ * transitions, and one a session assembled by hand carries is moved to the
+ * answer through {@link carryTheQuestion}, as the two reload steps move it: an
+ * acknowledgement changes nothing a confirmation binds. What it cannot see is a
+ * hold the window ended without a delivery, stated on
+ * {@link RestoreSession.uncertaintyUnresolved}.
+ *
+ * @param session - The session showing a conflict raised under uncertainty.
+ * @param acknowledge - The window's two acknowledgement members, composed.
+ * @returns The session with its reload available again, or the same session.
+ */
+export function acknowledgeRestoreSnapshot(
+  session: RestoreSession,
+  acknowledge: AcknowledgeTheUncertainty
+): RestoreSession {
+  const conflict = session.externalConflict;
+  if (conflict === null || !session.uncertaintyUnresolved) {
+    return session;
+  }
+  if (acknowledge(conflict.source) !== 'acknowledged') {
+    return session;
+  }
+  return carryTheQuestion(session, {
+    ...session,
+    uncertaintyUnresolved: false,
+    reload: NOT_RELOADING
+  });
+} // End of function acknowledgeRestoreSnapshot()
+
+/**
+ * Why a reapply of this session's candidate could not be carried out.
+ *
+ * **The shared obstacles and nothing else**, and neither of them is reachable
+ * from this surface: {@link reapplyToDiskVersion} answers `unavailable` before
+ * it has looked at any evidence. The alias exists so that {@link RestoreReapply}'s
+ * shape is the one the five match surfaces answer with.
+ */
+export type RestoreReapplyObstacle = SharedReapplyObstacle;
+
+/** What a reapply of this session's candidate became. Always `unavailable`. */
+export type RestoreReapply = ReapplyOutcome<RestoreSession, RestoreReapplyObstacle>;
+
+/**
+ * The guard {@link reapplyToDiskVersion} hands `enterReapply`, which never asks
+ * it: the entry reads this surface's permanent `reapplySupport` before it looks
+ * at the conflict, and `unavailable` returns before the guard could be reached.
+ * Were it ever asked it would answer `null` — the conservative *superseded* —
+ * rather than vouch for an origin it cannot see.
+ */
+const NEVER_ASKED: StandingOriginGuard = (): ConflictSource | null => null;
+
+/**
+ * Refuses to reapply this session's candidate, permanently and by construction —
+ * Phase 2d-6-5, the 2d-6 record's §3 entry 22, as a value.
+ *
+ * `reapplyToDiskVersion` in `./rawEditor.ts`, for this surface, and for the same
+ * reason (consult Q4 of 2c-4b): the candidate is a whole document, so there is
+ * no target, no field intent and no operation to re-resolve against a newly
+ * parsed file, and "reapply" could only mean overwriting the newly read disk
+ * text with a stale string or inventing a text merge. **It takes no adoption
+ * function and cannot spend one.** It enters through `enterReapply` in
+ * `./reapply.ts`, which answers `unavailable` from this surface's own permanent
+ * `ConflictCapabilities.reapplySupport` **before** it looks at the conflict, so a
+ * conflict of either origin changes nothing here — the declared unsupported
+ * reapply, never a supported one that always falls back. The honest way to the
+ * disk version stays the reload, which keeps the candidate.
+ *
+ * **What no type forces**: that a caller does not simply build a `reapplied`
+ * outcome of its own. What is closed is that nothing in this module produces
+ * one, and that no adoption of a disk snapshot can be reached from this
+ * surface's reapply path at all.
+ *
+ * @param session - The session, showing a conflict of either origin or not. Read
+ *   only to ask which conflict it holds, which does not change the answer.
+ * @returns The `unavailable` arm, always.
+ */
+export function reapplyToDiskVersion(session: RestoreSession): RestoreReapply {
+  const start = enterReapply(CONFLICT_CAPABILITIES, conflictOf(session), NEVER_ASKED);
+  // **`start` is `unavailable` here, every time**, for the raw editor's reason;
+  // the narrowing exists because `ReapplyEntry` has three arms whatever this
+  // surface declares.
+  return start.kind === 'ready' ? { kind: 'unavailable' } : start;
+} // End of function reapplyToDiskVersion()
 
 /** Everything a screen needs about one restore, derived on every read. */
 export interface RestoreView {
@@ -3161,9 +4228,34 @@ export interface RestoreView {
   readonly outcome: SaveOutcomeModel<string> | null;
   /** The outcome's lines followed by anything to be said beside them. */
   readonly messages: readonly SaveOutcomeMessage[];
+  /**
+   * The external conflict's own lines, or none — Phase 2d-6-5.
+   *
+   * Beside {@link RestoreView.messages} and never merged into it, for
+   * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
+   * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
+   * twice. Rendered through `tConflictMessage`. No component reads it yet;
+   * 2d-6-8 does.
+   */
+  readonly externalMessages: readonly ConflictMessage[];
+  /**
+   * The lines owed while an observation cannot be acted on — Phase 2d-6-5.
+   *
+   * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
+   * own fields. No component reads it yet; 2d-6-8 and 2d-6-9 do.
+   */
+  readonly externalNotices: readonly ExternalConflictNotice[];
   /** The presentation changes a saved arm disclosed, in report order. */
   readonly notes: readonly PresentationNote[];
-  /** What to offer about a refusal, withdrawn once its findings are stale. */
+  /**
+   * What to offer about a refusal, withdrawn once its findings are stale.
+   *
+   * Under an external block — a conflict the watcher raised or a held reading —
+   * the dismissal alone (Phase 2d-6-5): *Save anyway* would reach
+   * {@link prepareRestore}, which answers the same session to it, and a control
+   * that does nothing when pressed is the defect `conflictChoicesFor` exists to
+   * stop.
+   */
   readonly refusalChoices: readonly RawSaveChoice[];
   /**
    * Whether the findings on screen are about a candidate that has since changed.
@@ -3190,14 +4282,62 @@ export interface RestoreView {
   readonly diskText: ConflictDiskText | null;
   /**
    * What the retained candidate **asked for**, or `null` when no conflict is
-   * showing.
+   * showing — or when the conflict showing is the watcher's and no candidate is
+   * retained (Phase 2d-6-5's review, its fourth finding): the sentence names
+   * *the backup entry selected here*, and a session told of a change before any
+   * entry was read has selected none. A save conflict always names it, because
+   * a send happened and it was of a candidate.
    *
-   * Constant while a conflict is showing, because a restore asks for one thing. It
-   * is decided here rather than assembled in markup, because a description written
-   * into one renderer is carried by that renderer's mounted suite alone.
+   * Constant while a conflict is showing over a candidate, because a restore
+   * asks for one thing. It is decided here rather than assembled in markup,
+   * because a description written into one renderer is carried by that
+   * renderer's mounted suite alone.
    */
   readonly conflictOperation: ConflictOperation | null;
 }
+
+/**
+ * What this surface offers about the conflict it is showing **now**, derived from
+ * the declaration and one fact about the session — Phase 2d-6-5, the 2d-6
+ * record's §3 entry 11.
+ *
+ * The declaration {@link CONFLICT_CAPABILITIES} is permanent; this is the
+ * "effective capabilities" the consult's Q3 names. The reload is withheld under
+ * an unacknowledged write uncertainty, for the match editor's reason; the reapply
+ * is never offered here, so a held reading withholds nothing this surface
+ * declares. It feeds `conflictChoicesFor`, which stays the only producer of a
+ * choice list; what this cannot force is that the transitions honour the same
+ * fact, which is why each reload step asks {@link reloadableConflictOf}.
+ *
+ * @param session - The session to derive for.
+ * @returns The capabilities to offer choices from.
+ */
+function effectiveCapabilitiesOf(session: RestoreSession): ConflictCapabilities {
+  return session.uncertaintyUnresolved
+    ? { ...CONFLICT_CAPABILITIES, offersReload: false }
+    : CONFLICT_CAPABILITIES;
+} // End of function effectiveCapabilitiesOf()
+
+/**
+ * The notices one session owes, in the order the stronger claim comes first.
+ *
+ * The uncertainty first, because it is the one state under which the conflict on
+ * screen offers no way to the disk version, and the held observation second.
+ * Each is answered from one session field and nothing is read twice.
+ *
+ * @param session - The session to describe.
+ * @returns The codes, possibly none.
+ */
+function externalNoticesOf(session: RestoreSession): readonly ExternalConflictNotice[] {
+  const notices: ExternalConflictNotice[] = [];
+  if (session.externalConflict !== null && session.uncertaintyUnresolved) {
+    notices.push({ kind: 'writeOutcomeUnknown' });
+  }
+  if (awaitedFor(session) !== null) {
+    notices.push({ kind: 'observationRetained' });
+  }
+  return notices;
+} // End of function externalNoticesOf()
 
 /**
  * Everything a screen needs about one restore.
@@ -3226,7 +4366,9 @@ export function restoreView(
   const conflictChoices =
     conflict === null
       ? []
-      : conflictChoicesFor(CONFLICT_CAPABILITIES, offeredReloadStep(session.reload));
+      : conflictChoicesFor(effectiveCapabilitiesOf(session), offeredReloadStep(session.reload));
+  const externallyBlocked = session.externalConflict !== null || awaitedFor(session) !== null;
+  const refusalChoices = offeredRefusalChoices(refused, stale);
   return {
     target: session.target,
     baseRevision: session.baseRevision,
@@ -3244,15 +4386,24 @@ export function restoreView(
     failureLines: sendFailureLines(session.sendFailure?.reason ?? null),
     outcome,
     messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
+    externalMessages: session.externalConflict === null ? [] : session.externalConflict.messages,
+    externalNotices: externalNoticesOf(session),
     notes: saved === null ? [] : saved.notes,
-    refusalChoices: offeredRefusalChoices(refused, stale),
+    refusalChoices: externallyBlocked
+      ? refusalChoices.filter((choice) => choice === 'keepEditing')
+      : refusalChoices,
     findingsAreStale: refused !== null && stale,
     conflict,
     conflictChoices,
     awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
     reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
     diskText: conflictDiskText(conflict),
-    conflictOperation: conflict === null ? null : 'replaceFileFromBackup'
+    // An external conflict over no retained candidate names no operation: the
+    // sentence would describe an entry nobody selected.
+    conflictOperation:
+      conflict === null || (session.externalConflict !== null && session.preview === null)
+        ? null
+        : 'replaceFileFromBackup'
   };
 } // End of function restoreView()
 

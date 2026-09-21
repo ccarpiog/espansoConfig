@@ -465,7 +465,7 @@ export type ConflictReloadStep = 'idle' | 'confirming' | 'unavailable';
 export type ConflictReapplySupport =
   /** This surface has a reapply transition. The five match surfaces. */
   | 'supported'
-  /** It can never have one. The raw editor, and only it. */
+  /** It can never have one. The raw editor and restore, whose candidates are whole documents. */
   | 'unavailable';
 
 /**
@@ -492,11 +492,13 @@ export type ConflictReapplySupport =
  * authored-text match surfaces over machinery that was already there and already
  * tested, 2c-4a-3b flipped `offersReload` on the other three the same way, and
  * 2c-4b-3 flipped {@link ConflictCapabilities.offersReapply} on the five match
- * surfaces over the transitions 2c-4b-2 had already built and driven. All six now
- * offer the reload; three of them will never offer the copy, because that one is
- * refused by {@link conflictChoicesFor} for what their draft *is*; and the raw
- * editor will never offer the reapply, because its
- * {@link ConflictCapabilities.reapplySupport} refuses it for what its candidate is.
+ * surfaces over the transitions 2c-4b-2 had already built and driven. Every
+ * declaring surface now offers the reload; the four `operationChoice` surfaces
+ * will never offer the copy, because that one is refused by
+ * {@link conflictChoicesFor} for what their draft *is*; and the raw editor and
+ * restore will never offer the reapply, because their
+ * {@link ConflictCapabilities.reapplySupport} refuses it for what their
+ * candidate is.
  */
 export interface ConflictCapabilities {
   /** What the retained draft is, which decides whether a copy could ever be honest. */
@@ -945,14 +947,18 @@ export interface SaveConflictModel<T> extends ConflictModelCommon<T> {
  * model over the editor's draft, holding it in `MatchEditorSession.externalConflict`;
  * since Phase 2d-6-3 the new-snippet form's `applyObservation` in
  * `./matchCreation.ts` and the recovery form's `applyRecoveryObservation` in
- * `./recovery.ts` do the same over their own drafts, and since Phase 2d-6-4 so
- * do the deleter's `applyDeletionObservation` in `./matchDeletion.ts`, the
- * mover's `applyMoveObservation` in `./matchMove.ts` and the duplicator's
- * `applyDuplicationObservation` in `./matchDuplication.ts`. **No production code
- * registers any of those receivers yet**, so in the running application the
- * delivery still reaches nobody — the wiring is 2d-6-6's, the raw editor's and
- * restore's transitions are 2d-6-5's, and the panel that draws the result is
- * 2d-6-6's and 2d-6-7's.
+ * `./recovery.ts` do the same over their own drafts, since Phase 2d-6-4 so do
+ * the deleter's `applyDeletionObservation` in `./matchDeletion.ts`, the mover's
+ * `applyMoveObservation` in `./matchMove.ts` and the duplicator's
+ * `applyDuplicationObservation` in `./matchDuplication.ts`, and since Phase
+ * 2d-6-5 the raw editor's `applyObservation` in `./rawEditor.ts` — over the
+ * whole text its box holds — and restore's `applyRestoreObservation` in
+ * `./restore.ts`, over its retained candidate's draft or, with no candidate
+ * retained, over a placeholder draft of the empty string that its own field doc
+ * names for what it is. **No production code registers any of those eight
+ * receivers yet**, so in the running application the delivery still reaches
+ * nobody — the wiring is 2d-6-6's and 2d-6-8's, and the panels that draw the
+ * result are 2d-6-6's, 2d-6-7's and 2d-6-8's.
  *
  * @typeParam T - The drafted value.
  */
@@ -1240,8 +1246,11 @@ function describeConflict<T>(
  * there is no refusal for anything to have changed again since.
  *
  * **What this forces and what it does not, in the same sentence.** It forces that
- * every external conflict this repository builds carries the memoized source and
- * the three lines above; the tuple type {@link ExternalConflictMessages} forces
+ * every external conflict this function builds carries the memoized source and
+ * the three lines above — restore's `replacedBy` in `./restore.ts` then keeps
+ * the first line alone for a model built over its placeholder draft, since
+ * Phase 2d-6-5's fix round, because the other two describe a candidate that
+ * session does not retain; the tuple type {@link ExternalConflictMessages} forces
  * that the **first** line is an {@link ExternalConflictMessage} and so cannot be
  * `changedElsewhere`; and nothing in the type forbids `changedElsewhere` at a later
  * index — the rest is `SaveOutcomeMessage` — so its absence there rests on this
@@ -1811,7 +1820,7 @@ const REAPPLY_AUTHORIZATIONS = new WeakMap<ConflictSource, ReloadConfirmation>()
  * projection-generation check. What holds today is an implementation fact and not a
  * type: every reapply transition that adopts anything — the five match surfaces —
  * takes its token from this function, through `adoptForReapply` in `./reapply.ts`,
- * and the raw editor's takes no adoption function at all.
+ * and the raw editor's and restore's take no adoption function at all.
  *
  * @typeParam T - The drafted value.
  * @param conflict - The conflict state a reapply is being attempted from.

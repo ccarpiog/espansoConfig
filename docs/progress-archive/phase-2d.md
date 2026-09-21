@@ -5015,3 +5015,23 @@ no path under `src-tauri/` or `crates/` changed beyond the instrument's `main.rs
 still `5 insertions(+), 1 deletion(-)`; the instrument's contribution is unchanged (Rust 0, svelte-check +1,
 vitest +1, Vite +1). 2d-6-2's narrative, formerly here, is archived verbatim in
 [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-2's verification narrative"*.
+
+### Phase 2d-6-4's verification narrative — archived 2026-09-21 at Phase 2d-6-5
+
+_Archived verbatim from `PROGRESS.md` when Phase 2d-6-5 closed._
+
+### Phase 2d-6-4's verification: three frontend gates re-measured twice, the Rust cell held
+
+**`1323 / 447 / 2754 / 192`** at 2d-6-4, from `1323 / 447 / 2669 / 192`. Measured by the orchestrator on the
+tree the worker reported (`2739`) and again on the final tree after the review's fix round (`2754`), each gate
+on its own, each exit read directly (never through a pipe): `npm run check` **447 files, 0 errors, 0 warnings**
+(unchanged — no new file); `npm test` **2754 passed, 64 files** (+85 from 2669, re-derived per file by the
+worker: `matchDeletion.test.ts` 39 → 64, `matchDuplication.test.ts` 51 → 76, `matchMove.test.ts` 78 → 106,
+`workspace.test.ts` 303 → 310, `reapplyCodes.test.ts` 20 → 20 — +70 for the deliverables, then +15 pinning
+the review's four findings, four of the fifteen through the real door; `scripts/lint/ipc-detail.test.ts` 141 →
+141, no new `.ts` file); `npm run build` **192 modules** (unchanged), the server-only bundle markers **absent**
+(`rg -c` prints nothing) and the client-only **present (2)**. **The Rust cell is held at 1323 and was not
+re-measured**: no path under `src-tauri/` or `crates/` changed beyond the instrument's `main.rs` hook, whose
+pair diff is still `5 insertions(+), 1 deletion(-)`; the instrument's contribution is unchanged (Rust 0,
+svelte-check +1, vitest +1, Vite +1). 2d-6-3's narrative, formerly here, is archived verbatim in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-3's verification narrative"*.

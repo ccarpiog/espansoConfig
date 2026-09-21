@@ -17,10 +17,11 @@
  * form's `applyRecoveryObservation` in `./recovery.ts`, and since 2d-6-4 the
  * deleter's `applyDeletionObservation` in `./matchDeletion.ts`, the mover's
  * `applyMoveObservation` in `./matchMove.ts` and the duplicator's
- * `applyDuplicationObservation` in `./matchDuplication.ts`. **No component
- * registers any of those receivers yet** (2d-6-6's), so in production every
- * envelope still reaches the receivers a test registered, or nobody; the raw
- * editor's and restore's transitions are 2d-6-5's.
+ * `applyDuplicationObservation` in `./matchDuplication.ts`, and since 2d-6-5 the
+ * raw editor's `applyObservation` in `./rawEditor.ts` and restore's
+ * `applyRestoreObservation` in `./restore.ts`. **No component registers any of
+ * those eight receivers yet** (2d-6-6's and 2d-6-8's), so in production every
+ * envelope still reaches the receivers a test registered, or nobody.
  *
  * 1. **The delivery envelope** ({@link ObservationDelivery}): the narrowed
  *    observation plus the verdict the window reached about it, sealed together so
@@ -387,8 +388,9 @@ export function decideAutomaticReload(inputs: AutomaticReloadGuardInputs): Autom
  * (`MatchCreationView.externalNotices`, `RecoveryView.externalNotices`), the
  * deleter's, mover's and duplicator's since 2d-6-4
  * (`MatchDeletionView.externalNotices`, `MatchMoveView.externalNotices`,
- * `MatchDuplicationView.externalNotices`), and no
- * component reads any of those fields; the acknowledgement that ends the second exists
+ * `MatchDuplicationView.externalNotices`), the raw editor's and restore's
+ * since 2d-6-5 (`RawEditorView.externalNotices`, `RestoreView.externalNotices`),
+ * and no component reads any of those fields; the acknowledgement that ends the second exists
  * (`BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, since
  * 2d-6-1b) and no component calls it — 2d-6-9 draws the control. The codes exist
  * because a code with no string is worse than a code with no caller, and because

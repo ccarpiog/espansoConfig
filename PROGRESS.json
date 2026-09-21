@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T18:52:12Z",
+ "updated": "2026-09-21T20:23:17Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -421,7 +421,7 @@
    "id": "2d-6",
    "title": "Components, i18n and mounted evidence",
    "status": "in_progress",
-   "summary": "Eleven steps per its design consult; 2d-6-1 (three sub-phases), 2d-6-2, 2d-6-3 and 2d-6-4 are done, 2d-6-5 is next."
+   "summary": "Eleven steps per its design consult; 2d-6-1 (three sub-phases) and 2d-6-2 through 2d-6-5 are done, 2d-6-6 is next."
   },
   {
    "id": "2d-6-1",
@@ -492,8 +492,11 @@
   {
    "id": "2d-6-5",
    "title": "Raw and restore external sessions",
-   "status": "queued",
-   "summary": "Gives the raw editor and the restore surface their external-conflict sessions."
+   "status": "done",
+   "summary": "Gives the raw editor and the restore surface their external-conflict sessions: seven-arm receivers, the block at every door, the CR-refusing reseed, candidate-keeping withdrawal, reapply unavailable.",
+   "risk": "high",
+   "review": "docs/reviews/phase-2d-6-5.md",
+   "narrative": "docs/decisions/2d-6-5-notes.md"
   },
   {
    "id": "2d-6-6",
