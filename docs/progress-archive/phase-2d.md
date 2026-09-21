@@ -4775,3 +4775,30 @@ held from 2d-5-3-A to 2d-5-3-N. **The instrument landed at 2d-5-2c-1**, whose ru
 2255 / 187`, so every rung at or after it is a *with-instrument* figure and the two groups may not be
 compared without subtracting the instrument's known contribution. The full per-rung list, and
 2d-5-5b's own verification narrative, are in [`phase-2d.md`](docs/progress-archive/phase-2d.md).
+
+### Phase 2d-5-7a's verification narrative — archived 2026-09-21 at Phase 2d-5-7b
+
+Moved verbatim from `PROGRESS.md` *Verification baseline* when 2d-5-7b closed.
+
+### The rung moved by seven, and every one of the seven is a new case
+
+**`1323 / 444 / 2474 / 191`** at 2d-5-7a, from `1320 / 443 / 2467 / 189` at 2d-5-6. **Rust +3** — the
+three dispatcher tests in `dispatch_check.rs` (`the_capability_grants_exactly_the_two_event_permissions`,
+`a_local_webview_registers_the_wake_listener_through_the_event_plugin`,
+`the_registered_listener_is_removable_through_the_event_plugin`); 26 `test result` lines, none
+lacking `0 failed`, sum 1323, read from a file and never through a pipe. **svelte-check +1** — the new
+`AppShell.test.ts`. **Vitest +7** — six cases in `AppShell.test.ts` plus one generated row in
+`scripts/lint/ipc-detail.test.ts` (137 → 138, because the new file sits under its scanned roots; the
+pristine copy shows 136, so the instrument's `probe.ts` is the other row); per-file counts re-derived
+with `--reporter=verbose`: AppShell 6, DetailPane 24, RestorePane 61, workspace 245, all three
+unchanged. The review's fix round added no case and moved no figure — its two negative controls were
+temporary and are recorded with their failure text in `2d-5-7a-notes.md` §9. **Vite +2, not +1**, and
+this is the one figure that needed accounting: the design's "+1" (`events.ts` becoming reachable)
+counted only the first-party module, but `events.ts` is the sole production importer of
+`@tauri-apps/api/event` (`rg -ln "@tauri-apps/api/event" src --glob '!*.test.ts'` names it alone), so
+reaching it pulls Tauri's `event.js` too. On a pristine `git archive HEAD` copy the build is **188**;
+188 + `probe.ts` = the recorded 189; + `events.ts` + `event.js` = 191 on the working tree, and **a
+committed tree builds 190**. Server-only bundle markers absent, client-only present (2). Clippy, fmt
+and the core-crate `tauri` check were clean; `git diff --stat` over the two hook files held at
+`5 insertions(+), 1 deletion(-)` at every gate. All four gates were run twice on the final tree — by the
+worker and by the orchestrator — and the frontend pair a third time after the fix round.

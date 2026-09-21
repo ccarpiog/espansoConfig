@@ -14124,3 +14124,67 @@ recorded residues, archived 2026-09-05 at Phase 2d-5-3-C"*. The one method rule 
 **`scripts/lint/ipc-detail.test.ts` generates its cases from `scannableFiles()`**, so its count moves
 when a file is merely *added* under the scanned roots — **re-derive a test count per file, on a
 pristine tree, never from the total.**
+
+## What 2d-5-7a and 2d-5-5b built, archived at 2d-5-7b (2026-09-21)
+
+Moved verbatim from `PROGRESS.md` *Next action* when 2d-5-7b closed; the authoritative accounts are the two notes files each paragraph names.
+
+#### What 2d-5-7a built
+
+The authoritative account is [`docs/decisions/2d-5-7a-notes.md`](docs/decisions/2d-5-7a-notes.md);
+its §6 is the *where it is thin* list and §9 the review's two dispositions. In outline:
+`AppShell.svelte` passes `REAL_COMMANDS`, `reportIpcFailure`, `REAL_BACKUP_COMMANDS`,
+`REAL_RECONCILIATION_EVENTS` and `INERT_FOREGROUND_EVENTS` to `createBrowserState` explicitly — the
+first production import of `src/lib/ipc/events.ts`, `createBrowserState`'s own defaults staying inert
+— and its `onMount` calls `browser.start()` **before** `open(null)` (notes §2: either order is correct
+because `workspaceOpened()` closes the drain gate synchronously; Q4's order was kept) and returns a
+cleanup calling `browser.dispose()`. `src-tauri/capabilities/default.json` holds exactly
+`core:event:allow-listen` and `core:event:allow-unlisten`, its description rewritten to the present
+state. `dispatch_check.rs` gained three tests — the capability's exact contents resolved through the
+shipped `RuntimeAuthority` (listen/unlisten local-only, emit/emit_to refused, the seventeen
+application commands unresolved from both origins), a local `plugin:event|listen` answering an id, a
+`plugin:event|unlisten` answering null — and a separate two-row plugin table in the remote sweep, the
+application table asserted at seventeen and the plugin rows asserted absent from `generate_handler!`;
+every "empty capability set" sentence and test name was corrected. `AppShell.test.ts` (jsdom, six
+cases) is the mounted lifecycle evidence, with a file-wide `afterEach` asserting the exact `invoke`
+list, exact registration and unlisten counts, every shell stopped and the report count; the review's
+two findings hardened its teardown and its listener mock (§9). Roughly two hundred lines of doc
+comment across `workspace.svelte.ts`, `events.ts`, `reconciliationCoordinator.ts`, three Rust files
+and two test files went from "no production caller" to the present state.
+
+#### What 2d-5-5b built, so 2d-6 does not re-derive it
+
+[`docs/decisions/2d-5-5b-notes.md`](docs/decisions/2d-5-5b-notes.md) is the account, its §6 the
+fourteen-item *where it is thin* list. The decisions are pure values in `src/lib/browser/conflictSource.ts`
+(`standingConflictOf`, `arbitrateObservation`, `releaseBarrier`, `newestObservationOf`); the tables
+they are asked about are on `BrowserState`; `BrowserState.observeExternalChange` is the one door
+applying rulings 25-27; `supersedeConflict` in `saveOutcome.ts` builds the replacing model with the
+draft preserved; `adoptDiskVersion` has an ordered step 4 refusing an origin that no longer stands;
+`reapplyEvidenceFor` takes a `StandingOriginGuard`, asked once and last.
+
+**Three obligations handed to 2d-6.** (1) `observeExternalChange` and `supersedeConflict` have no
+production caller; wiring the arbitration in front of `tellTheSurfaceAbout` needs a new
+`ReconciliationWorkspace` member and a decision about what a `retained` verdict does to a surface
+(§6 items 2 and 7). (2) An exception-safe close charges a `mayHaveWritten` uncertainty only a later
+write can clear, and there is no surface to clear it because the panel is 2d-6's (§6 items 4 and 13).
+(3) A verdict decided against a state that moved underneath it retains its observation and may never
+be looked at again; a bounded re-arbitration is a deliberate later decision (§6 item 14).
+
+## Two properties and the residue rule, archived at 2d-5-7b (2026-09-21)
+
+Moved verbatim from `PROGRESS.md` *Next action* when 2d-5-7b closed.
+
+#### Two properties a later step could make live
+
+1. **`targetingSurfaceFor`'s first-wins guard (`restore.ts:623`) is behaviourally inert today**: only
+   the `matchCreator` arm of `OpenWriteSurface` carries a `WriteSurfaceTarget`. `2d-5-1-C-notes.md` §3.
+2. **`invalidateEverySurface`'s body is executed by a test and its *effect* is still unobservable**
+   while `busy` keeps the seven surfaces mutually exclusive. `2d-5-2b-notes.md` §9.1 and §11 item 6.
+
+#### Residues that are recorded, not work — **archived at 2d-5-3-C**
+
+All four are in [`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The
+recorded residues, archived 2026-09-05 at Phase 2d-5-3-C"*. The one method rule kept here:
+**`scripts/lint/ipc-detail.test.ts` generates its cases from `scannableFiles()`**, so its count moves
+when a file is merely *added* under the scanned roots — 2d-5-7a's `AppShell.test.ts` moved it 137 → 138
+— **re-derive a test count per file, on a pristine tree, never from the total.**

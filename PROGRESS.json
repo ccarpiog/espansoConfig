@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T09:27:11Z",
+ "updated": "2026-09-21T10:10:59Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -112,9 +112,9 @@
   {
    "id": "2d-5",
    "title": "2d step 5 — live reconciliation, seven steps",
-   "status": "in_progress",
+   "status": "done",
    "risk": "high",
-   "summary": "Seven steps; 1 through 6 are closed, step 7 is split into 7a (closed) and 7b (the window reading, next)."
+   "summary": "All seven steps are closed; the coordinator runs in production and its lifecycle was read in a real window."
   },
   {
    "id": "2d-5-1",
@@ -384,8 +384,8 @@
   {
    "id": "2d-5-7",
    "title": "Production activation, capability widening and baseline re-measure",
-   "status": "in_progress",
-   "summary": "Step 7, split on 2026-09-21: 2d-5-7a (activation, capability, dispatcher, baselines) is closed; 2d-5-7b (the harness rebuild and the window lifecycle reading) is next."
+   "status": "done",
+   "summary": "Split into 7a and 7b on 2026-09-21; both halves are closed, so step 7 is done."
   },
   {
    "id": "2d-5-7a",
@@ -400,9 +400,18 @@
   {
    "id": "2d-5-7b",
    "title": "The harness rebuild and the narrow window lifecycle reading",
+   "status": "done",
+   "risk": "high",
+   "summary": "The harness is rebuilt, and a real window shows the wake listener registers, the open drains once, and an external edit produces a drain carrying the observation; disposal on close is not shown.",
+   "review": "docs/reviews/phase-2d-5-7b.md",
+   "narrative": "docs/decisions/2d-5-7b-window-reading.md"
+  },
+  {
+   "id": "2d-6-design",
+   "title": "2d-6 design consult",
    "status": "queued",
    "risk": "high",
-   "summary": "Next: rebuild the window-reading harness from 2d-5-2c-1's record and read the coordinator's registration, delivery and disposal in a real window."
+   "summary": "Next: put 2d-6 (components, i18n and mounted evidence) to a Codex design consult and record its rulings before any line is written."
   },
   {
    "id": "2d-6",
@@ -427,7 +436,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 4 are closed and step 5 is under way with 2d-5-7a closed and 2d-5-7b next; steps 6 to 8 are queued."
+   "summary": "Steps 1 to 5 are closed; 2d-6 is next and goes to a design consult first; 2d-7 and 2d-8 are queued."
   },
   {
    "id": "3",
