@@ -368,7 +368,8 @@
    "risk": "high",
    "summary": "A save conflict beats an equal-revision observation, a higher-sequence different revision supersedes it, and an in-flight write retains observations behind a per-file barrier.",
    "review": "docs/reviews/phase-2d-5-5b.md",
-   "narrative": "docs/decisions/2d-5-5b-notes.md"
+   "narrative": "docs/decisions/2d-5-5b-notes.md",
+   "commit": "72243f1"
   },
   {
    "id": "2d-5-6",
