@@ -43,34 +43,39 @@
  * and Phase 2d-7 owns it. Nothing here may be read as a claim that anything is
  * listening — the Rust emitter's own doc says it cannot establish that either.
  *
- * ## Two known reasons the real adapter would be refused today
+ * ## The two capability entries the real adapter needs, and has
  *
  * Tauri's `listen` is a **plugin** command — it invokes `plugin:event|listen` —
- * and `src-tauri/capabilities/default.json` is deliberately `"permissions": []`,
- * narrowed by Phase 1b-1's review. Application commands are dispatched without
- * consulting that list; a plugin command is not. So a real registration through
- * {@link REAL_RECONCILIATION_EVENTS} needs `core:event:allow-listen` — the
- * narrowest entry that grants it — added to that file first.
+ * and a plugin command is access-checked against
+ * `src-tauri/capabilities/default.json` even from the application's own origin,
+ * where an application command is not. So a real registration through
+ * {@link REAL_RECONCILIATION_EVENTS} needs `core:event:allow-listen`, the
+ * narrowest entry that grants it, and that file has granted it since Phase
+ * 2d-5-7a.
  *
  * **That entry buys the registration only, and this module's lifetime contract
  * needs both halves.** The unlisten function `listen` resolves with invokes a
  * *second* plugin command, `plugin:event|unlisten`, gated by the separate
- * `core:event:allow-unlisten`. So `core:event:allow-listen` grants the
- * subscription the section above describes, and `core:event:allow-unlisten`
- * grants the disposal the section on lifetime hands to Phase 2d-5. Widening by
- * the first alone yields a listener that cannot be disposed rather than a
- * failure at registration: the JS-side listener is unregistered locally, the
- * `invoke` behind it rejects with nothing awaiting it, and the Rust-side
- * listener is never removed. Both identifiers exist in
- * `src-tauri/gen/schemas/desktop-schema.json`.
+ * `core:event:allow-unlisten`, which the same file grants beside the first. So
+ * `core:event:allow-listen` grants the subscription the section above describes,
+ * and `core:event:allow-unlisten` grants the disposal the section on lifetime
+ * hands to the coordinator. Widening by the first alone would yield a listener
+ * that cannot be disposed rather than a failure at registration: the JS-side
+ * listener is unregistered locally, the `invoke` behind it rejects with nothing
+ * awaiting it, and the Rust-side listener is never removed. Both identifiers
+ * exist in `src-tauri/gen/schemas/desktop-schema.json`, and neither
+ * `core:event:default` — which also grants emit and emit-to — nor a wildcard is
+ * used.
  *
- * **Phase 2d-4b deliberately adds neither, and nothing in this phase
- * registers a listener**: no production module imports this one yet, so the call
- * below never runs in the shipped window. The phase that first registers the
- * listener is the phase that has to widen the capability and re-run
- * `src-tauri/src/dispatch_check.rs` over the widened file, because that widening
- * is a change to what a compromised renderer may reach and belongs beside the
- * evidence that it was needed.
+ * **One production module imports this one: `src/lib/components/AppShell.svelte`**,
+ * which hands {@link REAL_RECONCILIATION_EVENTS} to `createBrowserState` and
+ * starts the coordinator from `onMount`, so the call below runs once in the
+ * shipped window. The two capability entries landed in that same step, together
+ * with `src-tauri/src/dispatch_check.rs` driving both plugin commands through the
+ * real dispatcher over the widened file, because a widening is a change to what
+ * a compromised renderer may reach and belongs beside the evidence that it was
+ * needed. Nothing in TypeScript stops a second production module importing this
+ * one and subscribing again; the count of one is a fact about today's tree.
  */
 
 import { listen, type Event, type UnlistenFn } from '@tauri-apps/api/event';
@@ -184,10 +189,14 @@ export function reconciliationEventSource(
  * The real source, for the running application.
  *
  * `REAL_COMMANDS`'s twin for the push half of the boundary. Tauri's `listen` is
- * called in exactly one place because of it, and — as Q8 of this phase's design
- * consult says — this object is the one part of the module no automated test in
- * this repository can exercise: every gate can be green while a real wake never
- * arrives here.
+ * called in exactly one place because of it, and `src/lib/components/AppShell.svelte`
+ * is the one production module that hands it on. As Q8 of the 2d-5 design
+ * consult says, this object is the one part of the module no automated test in
+ * this repository can exercise **against the real `listen`**:
+ * `src/lib/components/AppShell.test.ts` mounts the shell over a mocked
+ * `@tauri-apps/api/event`, which proves the shell subscribes through this object
+ * and calls the unlisten it is given, and proves nothing about delivery — every
+ * gate can be green while a real wake never arrives here.
  */
 export const REAL_RECONCILIATION_EVENTS: ReconciliationEventSource =
   reconciliationEventSource(listen);

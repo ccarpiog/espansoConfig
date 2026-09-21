@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T08:31:07Z",
+ "updated": "2026-09-21T09:26:43Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -114,7 +114,7 @@
    "title": "2d step 5 — live reconciliation, seven steps",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Seven steps; 1 through 6 are closed, 2d-5-7 (production activation, capability and baseline) is next."
+   "summary": "Seven steps; 1 through 6 are closed, step 7 is split into 7a (closed) and 7b (the window reading, next)."
   },
   {
    "id": "2d-5-1",
@@ -384,8 +384,24 @@
   {
    "id": "2d-5-7",
    "title": "Production activation, capability widening and baseline re-measure",
+   "status": "in_progress",
+   "summary": "Step 7, split on 2026-09-21: 2d-5-7a (activation, capability, dispatcher, baselines) is closed; 2d-5-7b (the harness rebuild and the window lifecycle reading) is next."
+  },
+  {
+   "id": "2d-5-7a",
+   "title": "Production activation, capability widening, dispatcher evidence and baselines",
+   "status": "done",
+   "risk": "high",
+   "summary": "AppShell passes the real event source and starts and disposes the coordinator, the capability holds exactly the two event permissions with dispatcher evidence, and the rung is 1323 / 444 / 2474 / 191.",
+   "review": "docs/reviews/phase-2d-5-7a.md",
+   "narrative": "docs/decisions/2d-5-7a-notes.md"
+  },
+  {
+   "id": "2d-5-7b",
+   "title": "The harness rebuild and the narrow window lifecycle reading",
    "status": "queued",
-   "summary": "Next: the real event source reachable, AppShell starting and disposing the coordinator, both event permissions, the dispatcher extension, all four baselines re-measured."
+   "risk": "high",
+   "summary": "Next: rebuild the window-reading harness from 2d-5-2c-1's record and read the coordinator's registration, delivery and disposal in a real window."
   },
   {
    "id": "2d-6",
@@ -410,7 +426,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 4 are closed and step 5 is under way with its first half 2d-5-5a closed; steps 6 to 8 are queued."
+   "summary": "Steps 1 to 4 are closed and step 5 is under way with 2d-5-7a closed and 2d-5-7b next; steps 6 to 8 are queued."
   },
   {
    "id": "3",

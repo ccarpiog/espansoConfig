@@ -56,12 +56,16 @@
  *   {@link ReconciliationCoordinator.membershipReloadWanted} is a request the
  *   `Named` and `Unnamed` arms raise and **nothing here acts on it**; only a
  *   `discarded` loss reopens a workspace.
- * - **It reaches nothing in the shipped window.** `createBrowserState` defaults
- *   both injected sources to the inert ones declared below, no production module
- *   imports `src/lib/ipc/events.ts`, and no production caller invokes
- *   {@link ReconciliationCoordinator.start} — `AppShell.svelte` is **2d-5-7's** to
- *   change. So although this module now *changes* a window when it runs, no
- *   shipped window runs it.
+ * - **It runs in the shipped window on three of its four triggers.** Since Phase
+ *   2d-5-7a `AppShell.svelte` builds its state over the real event source of
+ *   `src/lib/ipc/events.ts`, calls {@link ReconciliationCoordinator.start} from
+ *   `onMount` and returns {@link ReconciliationCoordinator.dispose} as the
+ *   cleanup, so registration, a finished open and a current-epoch wake all drain
+ *   there. The foreground trigger does not: the shell passes
+ *   {@link INERT_FOREGROUND_EVENTS}, because no DOM `visibilitychange`/focus
+ *   source exists yet, and that is an open item rather than a design.
+ *   `createBrowserState`'s *defaults* stay the two inert sources declared below,
+ *   so a state built without naming a source still registers nothing.
  *
  * ## What it cannot force
  *
@@ -423,11 +427,13 @@ export const NO_RECONCILIATION_TRANSPORT = 'no reconciliation event source was i
  * which is the honest description of a window with no wake transport.
  *
  * **The real source is deliberately not the default.** Importing the real adapter
- * `src/lib/ipc/events.ts` declares would make that file a production module and
- * pull Tauri's `listen` into the bundle; the split reserves the first production
- * import of it for **2d-5-7**, together with the two capability entries it needs.
- * That reservation is machine-checkable — the real adapter's name occurs in `src/`
- * only in the file that declares it — so this comment names it by description
+ * `src/lib/ipc/events.ts` declares would make every state built with the defaults
+ * — every test state in this repository — subscribe through Tauri's `listen`. The
+ * one production import of it is `src/lib/components/AppShell.svelte`'s, which
+ * names it at its `createBrowserState` call, beside the two capability entries
+ * `src-tauri/capabilities/default.json` grants for it. That the import is the
+ * shell's alone is machine-checkable — the real adapter's identifier occurs
+ * under `src/lib/browser/` in no file — so this comment names it by description
  * rather than by identifier, and the check stays an oracle rather than a
  * convention.
  */
@@ -1687,11 +1693,14 @@ export function createReconciliationCoordinator(
         // has not reported `ready` reaches this line with the gate already closed,
         // and the flush is `workspaceReady()`'s.
         //
-        // **No production code calls `start()` at all today.** `BrowserState.start()`
-        // in `./workspace.svelte.ts` is its only wrapper and nothing invokes that
-        // wrapper either; wiring it to a host's `onMount` is 2d-5-7's business. This
-        // comment is aimed at that author, so it states the gate and not a call
-        // order this repository does not yet contain.
+        // **The one production caller is `AppShell.svelte`'s `onMount`**, through
+        // `BrowserState.start()` in `./workspace.svelte.ts`, and it calls this
+        // *before* `open(null)` — so in the shipped window nothing is requested
+        // yet when this line is reached and the flush below is a no-op; the
+        // registration's request lands while the open's gate is closed and is
+        // issued by `workspaceReady()`. This comment states the gate rather than
+        // that call order, because a host that opened first would be equally
+        // correct and nothing in TypeScript fixes the order.
         ensurePumping();
       }
     }, // End of function start()

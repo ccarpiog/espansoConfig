@@ -9096,8 +9096,8 @@ describe('the reconciliation lifecycle', () => {
     // No event source injected: `createBrowserState` defaults to the inert one,
     // which refuses rather than reporting a subscription this application does not
     // have. The other triggers are unaffected, which is the honest description of
-    // a window with no wake transport — and the whole of what a shipped window has
-    // until 2d-5-7 injects the real one.
+    // a window with no wake transport — a state a test builds this way, and not
+    // the shipped window, since `AppShell.svelte` injects the real one (2d-5-7a).
     const state = createBrowserState(
       scriptedCommands({ drains: [reconciliationBatch()] }),
       () => undefined

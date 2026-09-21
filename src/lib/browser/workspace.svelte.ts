@@ -68,12 +68,13 @@ import type {
 import { mayHaveWritten, reportIpcFailure } from '../ipc/errors';
 import type { IpcFailure } from '../ipc/errors';
 // **A type-only import, and that is load-bearing.** `../ipc/events` builds its real
-// adapter at module scope from Tauri's `listen`, so a *value* import here would make
-// it a production module and pull the plugin call into the bundle — which is exactly
-// the first production import 2d-5-7 owns. `import type` is erased, so this file
-// names the interface and imports nothing. The adapter is described rather than
-// named here so that searching `src/` for its identifier stays the oracle for that
-// reservation.
+// adapter at module scope from Tauri's `listen`, and the one production module that
+// imports that value is `../components/AppShell.svelte`, which hands it to
+// `createBrowserState` explicitly. `import type` is erased, so this file names the
+// interface and imports nothing — which is what keeps the default below inert and
+// every test state that takes the default off Tauri's `listen`. The adapter is
+// described rather than named here so that searching `src/lib/browser/` for its
+// identifier stays the oracle that no state in this directory reaches it.
 import type { ReconciliationEventSource } from '../ipc/events';
 import type {
   Acknowledgement,
@@ -2092,12 +2093,14 @@ export interface BrowserState {
    * source, and drains once registration resolves. **Idempotent**: a host with
    * two `onMount`s must not end up with two subscriptions.
    *
-   * **No production caller invokes it, and that is this step's boundary.**
-   * `AppShell.svelte` is 2d-5-7's to change, and until it does, both injected
-   * sources default to the inert ones in `./reconciliationCoordinator.ts` — so a
-   * shipped window registers nothing, drains nothing and derives nothing from a
-   * batch. Nothing in TypeScript makes a host call this, or call
-   * {@link BrowserState.dispose} afterwards.
+   * **The one production caller is `AppShell.svelte`'s `onMount`** — Phase
+   * 2d-5-7a — which calls it before `open(null)` over the real event source and
+   * the inert foreground source, and returns {@link BrowserState.dispose} as its
+   * cleanup. Both injected sources still *default* to the inert ones in
+   * `./reconciliationCoordinator.ts`, so a state built without naming a source
+   * registers nothing. Nothing in TypeScript makes a host call this, or call
+   * {@link BrowserState.dispose} afterwards; `AppShell.test.ts` asserts the exact
+   * registration and unlisten counts instead.
    */
   start(): void;
 
@@ -2264,13 +2267,15 @@ const ALWAYS_PERMITTED = (): boolean => true;
  *   which is a constraint on the step that added it rather than a property of
  *   the design.
  * @param events - Where a reconciliation wake arrives — Phase 2d-5-3. **Defaults
- *   to the inert source, never to the real adapter**: the split reserves the first
- *   production import of `src/lib/ipc/events.ts` for 2d-5-7, together with the two
- *   capability entries that registration needs.
+ *   to the inert source, never to the real adapter**: `AppShell.svelte` passes the
+ *   real one from `src/lib/ipc/events.ts` explicitly (Phase 2d-5-7a, beside the two
+ *   capability entries that registration needs), and every state built without
+ *   naming a source keeps registering nothing.
  * @param foreground - Where a foreground or resume signal arrives — Phase
  *   2d-5-3. Defaults to the inert source, which registers a real handler that
- *   nothing ever calls. Its type names neither the DOM nor Tauri, exactly as
- *   `ReconciliationEventSource` does not.
+ *   nothing ever calls — and `AppShell.svelte` passes that same inert source
+ *   deliberately, because no DOM source exists yet. Its type names neither the
+ *   DOM nor Tauri, exactly as `ReconciliationEventSource` does not.
  * @returns Reactive state a component can read directly.
  */
 export function createBrowserState(
@@ -2568,11 +2573,11 @@ export function createBrowserState(
   // drain counter measures, and the route around it — a call made through one of
   // those bindings — is what 2d-5-6 closes for all three suites.
   //
-  // **Created here, started by nobody.** Construction registers nothing: `start()`
-  // is what subscribes, and no production caller invokes it at this step. What that
-  // buys is stated where it is decided, in `./reconciliationCoordinator.ts`'s
-  // header — a coordinator that cannot run in the shipped window is a coordinator
-  // whose dropped observations cannot be seen by anyone.
+  // **Created here, started by the host.** Construction registers nothing: `start()`
+  // is what subscribes, and `AppShell.svelte`'s `onMount` is its one production
+  // caller (Phase 2d-5-7a). A state built by a test and never started stays a
+  // coordinator that registers nothing, which is what lets every suite in this
+  // directory drive `open()` without a transport.
   const reconciliation: ReconciliationCoordinator = createReconciliationCoordinator(
     {
       /**

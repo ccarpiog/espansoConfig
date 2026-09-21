@@ -10,15 +10,24 @@
 //!    `DocumentId`, and `MatchId` has to survive its hand-written
 //!    `ContentRevision` deserializer. A direct call passes a typed value and
 //!    proves nothing about the JSON.
-//! 3. **The capability set.** `capabilities/default.json` is `"permissions":
-//!    []`, narrowed by Phase 1b-1's review, and the question this phase had to
-//!    answer is whether five new application commands need it widened. Reading
-//!    `tauri`'s dispatcher and concluding that an application command from a
-//!    local origin is not access-checked unless the application publishes an
-//!    ACL manifest is an *argument*. Running one through the dispatcher with
-//!    the real configuration and the real capability file is *evidence*, and
-//!    1b-1's review is on file about a smoke test that proved nothing because
-//!    it was never really exercising the path it claimed.
+//! 3. **The capability set.** `capabilities/default.json` holds exactly two
+//!    entries, `core:event:allow-listen` and `core:event:allow-unlisten`, and no
+//!    entry for any application command — Phase 1b-1's review narrowed it to
+//!    empty, and Phase 2d-5-7a widened it by those two when `AppShell.svelte`
+//!    first registered the frontend's event listener. Two questions follow, and
+//!    both are asked here. Whether an application command needs an entry:
+//!    reading `tauri`'s dispatcher and concluding that an application command
+//!    from a local origin is not access-checked unless the application
+//!    publishes an ACL manifest is an *argument*; running one through the
+//!    dispatcher with the real configuration and the real capability file is
+//!    *evidence*, and 1b-1's review is on file about a smoke test that proved
+//!    nothing because it was never really exercising the path it claimed. And
+//!    whether the two entries grant exactly what the listener needs and nothing
+//!    more: `plugin:event|listen` and `plugin:event|unlisten` are driven from
+//!    the local origin, `plugin:event|emit` and `plugin:event|emit_to` — which
+//!    `core:event:default` would also have granted — are asserted refused
+//!    through the resolved access-control list, and every plugin command is in
+//!    the remote-origin sweep beside the seventeen application commands.
 //!
 //! `mock_builder()` swaps the platform webview for a mock; it does **not** swap
 //! the IPC dispatcher, the access-control resolution or the command macros, all
@@ -113,10 +122,11 @@
 use std::fs;
 
 use serde_json::{json, Value};
-use tauri::ipc::{CallbackFn, InvokeBody};
+use tauri::ipc::{CallbackFn, InvokeBody, Origin};
 use tauri::test::{get_ipc_response, mock_builder, MockRuntime, INVOKE_KEY};
+use tauri::utils::acl::ExecutionContext;
 use tauri::webview::InvokeRequest;
-use tauri::{App, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{App, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tempfile::TempDir;
 
 /// Builds the application exactly as `main()` does, on the mock runtime.
@@ -146,6 +156,26 @@ fn main_window(app: &App<MockRuntime>) -> WebviewWindow<MockRuntime> {
 /// path while claiming to measure the local one. `a_remote_origin_is_refused`
 /// pins the other side of that condition.
 const LOCAL_ORIGIN: &str = "tauri://localhost";
+
+/// The origin a page that is not this application would have.
+///
+/// Any non-local URL would do; this one is spelled so that a failure message
+/// names something recognisably foreign. It is what `a_remote_origin_is_refused`
+/// sweeps with, and what the capability test resolves the access-control list
+/// against, so the two measure the same origin.
+const REMOTE_ORIGIN: &str = "https://an-unrelated-site.example";
+
+/// The event plugin's registration command, as `@tauri-apps/api/event`'s
+/// `listen` spells it.
+///
+/// A **plugin** command, which is what separates it from the seventeen: the
+/// dispatcher access-checks it even from the local origin, so it is reachable
+/// only because `capabilities/default.json` grants `core:event:allow-listen`.
+const EVENT_LISTEN: &str = "plugin:event|listen";
+
+/// The event plugin's removal command, as the unlisten function `listen`
+/// resolves with spells it — granted by the separate `core:event:allow-unlisten`.
+const EVENT_UNLISTEN: &str = "plugin:event|unlisten";
 
 /// Invokes one command over IPC from `origin`, returning the raw value.
 fn invoke_from(
@@ -181,6 +211,35 @@ fn invoke(
     args: Value,
 ) -> Result<Value, Value> {
     invoke_from(webview, LOCAL_ORIGIN, command, args)
+}
+
+/// The arguments `@tauri-apps/api/event`'s `listen` really sends, for this
+/// application's one event.
+///
+/// Read off `node_modules/@tauri-apps/api/event.js` rather than guessed: `event`
+/// is the name, `target` is `{ "kind": "Any" }` when `listen` is given no
+/// options — which is how `src/lib/ipc/events.ts` calls it — and `handler` is
+/// the callback identifier `transformCallback` would have minted, which the mock
+/// runtime never invokes. The name is [`crate::events::RECONCILIATION_READY`],
+/// the one Rust emits, so what is registered here is the listener the shipped
+/// window registers and not a name written in this file. `handler` is the
+/// callback identifier to send.
+fn listen_arguments(handler: u32) -> Value {
+    json!({
+        "event": crate::events::RECONCILIATION_READY,
+        "target": { "kind": "Any" },
+        "handler": handler,
+    })
+}
+
+/// The arguments the unlisten function sends: the event name and the identifier
+/// `plugin:event|listen` answered, under the camelCase key the plugin's
+/// `event_id` parameter is renamed to on the wire.
+fn unlisten_arguments(event_id: u64) -> Value {
+    json!({
+        "event": crate::events::RECONCILIATION_READY,
+        "eventId": event_id,
+    })
 }
 
 /// A complete menu label set, derived from the Rust declaration.
@@ -280,13 +339,15 @@ fn opened_over_ipc(source: &str) -> OverIpc {
     }
 } // End of function opened_over_ipc()
 
-/// All six read-only commands are reachable, in order, with `"permissions": []`.
+/// All six read-only commands are reachable, in order, with a capability set
+/// that names no application command.
 ///
 /// Half of the answer to the capability question — the menu command is the
-/// other half, below. If the empty capability set blocked an application
-/// command, the very first `invoke` would
-/// come back as a **string** — the dispatcher's rejection message — instead of
-/// the object below, and every assertion after it would fail.
+/// other half, below. `capabilities/default.json` grants two event-plugin
+/// permissions and nothing else, so if an application command needed an entry
+/// of its own, the very first `invoke` would come back as a **string** — the
+/// dispatcher's rejection message — instead of the object below, and every
+/// assertion after it would fail.
 ///
 /// `document_text` is the sixth, added at Phase 1c-2b-2a, and it is driven here
 /// for the same reason as the other five rather than argued to be like them: a
@@ -294,7 +355,7 @@ fn opened_over_ipc(source: &str) -> OverIpc {
 /// direct call to [`WorkspaceSession::text`] would notice. What its answer
 /// *contains* is a separate question, asked over the byte-exact corpus below.
 #[test]
-fn the_six_read_only_commands_are_reachable_with_an_empty_capability_set() {
+fn the_six_read_only_commands_are_reachable_with_no_application_permission() {
     let dir = synthetic_tree();
     let app = mock_app();
     let webview = main_window(&app);
@@ -362,17 +423,18 @@ fn the_six_read_only_commands_are_reachable_with_an_empty_capability_set() {
     let reloaded =
         invoke(&webview, "reload_document", json!({ "id": document_id })).expect("the file reads");
     assert_eq!(reloaded["revision"], view["revision"]);
-} // End of function the_six_read_only_commands_are_reachable_with_an_empty_capability_set()
+} // End of function the_six_read_only_commands_are_reachable_with_no_application_permission()
 
 /// The one command that writes is reachable, and its answer is a flat outcome.
 ///
 /// **The measurement Phase 2b-2a owes**, and it is three claims a direct call to
 /// [`crate::commands::WorkspaceSession::move_match`] cannot make.
 ///
-/// 1. **It is registered and the empty capability set does not block it.** A
-///    command absent from `generate_handler!` comes back as the dispatcher's
-///    rejection *string*; an ACL denial does the same. Both are told from a real
-///    answer by the answer being a JSON object with an `outcome`.
+/// 1. **It is registered and a capability set naming no application command
+///    does not block it.** A command absent from `generate_handler!` comes back
+///    as the dispatcher's rejection *string*; an ACL denial does the same. Both
+///    are told from a real answer by the answer being a JSON object with an
+///    `outcome`.
 /// 2. **Its arguments deserialize from the shapes the frontend really sends** —
 ///    a whole `MatchId` for `id`, a `null` for `after`, a **camelCase**
 ///    `baseRevision` for the snake_case parameter Tauri renames, and an
@@ -449,7 +511,8 @@ fn move_match_is_reachable_and_answers_a_flat_outcome() {
 /// **The measurement Phase 2b-2b-3 owes**, and it is four claims a direct call to
 /// [`crate::commands::WorkspaceSession::save_match`] cannot make.
 ///
-/// 1. **It is registered and the empty capability set does not block it.**
+/// 1. **It is registered and a capability set naming no application command
+///    does not block it.**
 /// 2. **A whole `MatchDraft` deserializes off the wire**, from a JSON object that
 ///    names one field and omits the other twenty — every field carries
 ///    `#[serde(default)]`, so an omitted one is `Unchanged` and contributes no
@@ -538,7 +601,8 @@ fn save_match_is_reachable_and_its_draft_deserializes_from_the_wire() {
 /// **The measurement Phase 2b-2c-2 owes**, and it is four claims a direct call to
 /// [`crate::commands::WorkspaceSession::create_match`] cannot make.
 ///
-/// 1. **Both are registered and the empty capability set does not block them.**
+/// 1. **Both are registered and a capability set naming no application command
+///    does not block them.**
 /// 2. **`NewMatch` deserializes off the wire.** The payload here names the two
 ///    **required** keys and none of the four optional ones — the type carries two
 ///    required and four optional schema-known scalar fields since Phase 2c-4c-1 —
@@ -659,7 +723,8 @@ fn create_and_delete_match_are_reachable_and_their_arguments_deserialize() {
 /// **The measurement Phase 2b-2c-3b owes**, and it is four claims a direct call
 /// to [`crate::commands::WorkspaceSession::save_raw_document`] cannot make.
 ///
-/// 1. **It is registered and the empty capability set does not block it.**
+/// 1. **It is registered and a capability set naming no application command
+///    does not block it.**
 /// 2. **A whole document's text deserializes off the wire as a bare JSON
 ///    string** — the *inbound* half of the question
 ///    `document_text_answers_every_synthetic_fixture_byte_for_byte` asks
@@ -795,7 +860,8 @@ fn save_raw_document_is_reachable_and_its_text_reaches_the_disk_unchanged() {
 /// **The measurement Phase 2c-3c-2 owes**, and it is four claims a direct call
 /// to [`crate::commands::WorkspaceSession::duplicate_match`] cannot make.
 ///
-/// 1. **It is registered and the empty capability set does not block it.**
+/// 1. **It is registered and a capability set naming no application command
+///    does not block it.**
 /// 2. **Its arguments deserialize from the shapes the frontend really sends** —
 ///    a whole `MatchId` for `id`, a camelCase `baseRevision`, and an
 ///    `Acknowledgement` through its hand-written `Deserialize`. There is no
@@ -1654,12 +1720,14 @@ fn unregistered(command: &str) -> String {
 /// a code.
 ///
 /// **The command Phase 1b-1's review predicted would need the first
-/// permission.** It does not, and this test is why rather than an assertion
-/// that it does not: the labels go to an **application** command, which the
-/// dispatcher does not access-check from a local origin, and Rust builds the
-/// menu itself. A frontend that built the menu through `@tauri-apps/api/menu`
-/// would be calling `plugin:menu|…`, which *is* access-checked, and would need
-/// `core:menu`'s permissions granted to the renderer.
+/// permission.** It does not — the first two permissions, added at 2d-5-7a, are
+/// the event plugin's and name no application command — and this test is why
+/// rather than an assertion that it does not: the labels go to an
+/// **application** command, which the dispatcher does not access-check from a
+/// local origin, and Rust builds the menu itself. A frontend that built the
+/// menu through `@tauri-apps/api/menu` would be calling `plugin:menu|…`, which
+/// *is* access-checked, and would need `core:menu`'s permissions granted to the
+/// renderer.
 ///
 /// **Why the payload is deliberately incomplete.** A complete one would build a
 /// menu, which no test in this harness can do; the module documentation says
@@ -1676,7 +1744,7 @@ fn unregistered(command: &str) -> String {
 /// exactly that, and so pinned serde prose reaching the webview as though it
 /// were the design. It is now the version-skew code, with the field it wanted.
 #[test]
-fn the_menu_command_is_registered_and_reachable_with_an_empty_capability_set() {
+fn the_menu_command_is_registered_and_reachable_with_no_menu_permission() {
     let app = mock_app();
     let webview = main_window(&app);
     let mut labels = every_label();
@@ -1693,7 +1761,7 @@ fn the_menu_command_is_registered_and_reachable_with_an_empty_capability_set() {
     // found" and would satisfy the registration needle too.
     assert!(
         !message.contains(NOT_ALLOWED),
-        "the empty capability set blocked set_menu_labels, so it needs a permission after all: {error}"
+        "the capability set blocked set_menu_labels, so it needs a menu permission after all: {error}"
     );
     assert!(
         !message.contains(&unregistered("set_menu_labels")),
@@ -1710,7 +1778,7 @@ fn the_menu_command_is_registered_and_reachable_with_an_empty_capability_set() {
         "the refusal names the field this build wanted: {error}"
     );
     assert_eq!(error["unexpected"], json!([]));
-} // End of function the_menu_command_is_registered_and_reachable_with_an_empty_capability_set()
+} // End of function the_menu_command_is_registered_and_reachable_with_no_menu_permission()
 
 /// A label the Rust side does not declare is refused rather than dropped.
 ///
@@ -1770,14 +1838,203 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
     );
 } // End of function a_menu_envelope_that_is_not_an_object_is_refused_with_a_code()
 
-/// A page that is not this application cannot reach any of the seventeen commands.
+/// The capability grants exactly the two event-plugin permissions, to the local
+/// context only — Phase 2d-5-7a.
+///
+/// Two readings of one fact, and both are needed. **The file, as written**: a
+/// third entry, a wildcard, a `remote` block or a second capability file in the
+/// directory fails here by name. **And what the entries resolve to**, asked of
+/// the shipped context's own `RuntimeAuthority` — `tauri::Context` exposes the
+/// same object the dispatcher consults — so that the grant is measured rather
+/// than inferred from two identifiers. The second reading is where
+/// `core:event:default` is ruled out: that set would also have resolved
+/// `plugin:event|emit` and `plugin:event|emit_to`, and both resolve to nothing.
+/// It is also where "to the local context only" is a measurement: every
+/// resolved command carries `ExecutionContext::Local`, the remote origin
+/// resolves neither, and a window that is not `main` resolves neither.
+///
+/// And the seventeen application commands resolve to nothing from either
+/// origin, which is the other half of what "names no application command"
+/// means: a local origin reaches them because the dispatcher does not consult
+/// this list for an application command, not because the list allows them, and
+/// a remote origin is refused because nothing allows them.
+#[test]
+fn the_capability_grants_exactly_the_two_event_permissions() {
+    // 1. The file.
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/capabilities");
+    let mut files: Vec<String> = fs::read_dir(dir)
+        .expect("the capabilities directory can be read")
+        .map(|entry| {
+            entry
+                .expect("an entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    files.sort();
+    assert_eq!(
+        files,
+        ["default.json"],
+        "one capability file, so no second one widens what this test reads"
+    );
+    let capability: Value = serde_json::from_str(
+        &fs::read_to_string(format!("{dir}/default.json")).expect("the capability file reads"),
+    )
+    .expect("the capability file is JSON");
+    assert_eq!(capability["identifier"], "default");
+    assert_eq!(capability["windows"], json!(["main"]));
+    assert_eq!(
+        capability["permissions"],
+        json!(["core:event:allow-listen", "core:event:allow-unlisten"]),
+        "exactly the two entries the listener needs, in the order the file lists them"
+    );
+    assert!(
+        capability.get("remote").is_none(),
+        "no remote block: nothing grants a foreign origin anything"
+    );
+    assert!(
+        capability.get("webviews").is_none(),
+        "the grant is by window label, not by webview label"
+    );
+
+    // 2. What the entries resolve to, through the same context `main()` builds.
+    let mut context = crate::context::<MockRuntime>();
+    let authority = context.runtime_authority_mut();
+    let local = Origin::Local;
+    let remote = Origin::Remote {
+        url: REMOTE_ORIGIN.parse::<Url>().expect("a URL"),
+    };
+    for command in [EVENT_LISTEN, EVENT_UNLISTEN] {
+        let resolved = authority
+            .resolve_access(command, "main", "main", &local)
+            .unwrap_or_else(|| panic!("{command} must resolve for the local main webview"));
+        assert!(
+            !resolved.is_empty()
+                && resolved
+                    .iter()
+                    .all(|cmd| matches!(cmd.context, ExecutionContext::Local)),
+            "{command} must be granted in the local context only: {resolved:?}"
+        );
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &remote)
+                .is_none(),
+            "{command} must resolve to nothing for a remote origin"
+        );
+        assert!(
+            authority
+                .resolve_access(command, "other", "other", &local)
+                .is_none(),
+            "{command} is granted to the main window, not to any window"
+        );
+    } // End of the loop over the two granted plugin commands
+    for command in ["plugin:event|emit", "plugin:event|emit_to"] {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_none(),
+            "{command} is what core:event:default would have granted, and must not be"
+        );
+    } // End of the loop over the two plugin commands the default set would have added
+    for command in crate::wire_contract::registered_commands() {
+        assert!(
+            authority.resolve_access(&command, "main", "main", &local).is_none(),
+            "{command} must not be named by the capability: it is reachable because it is not access-checked locally"
+        );
+        assert!(
+            authority
+                .resolve_access(&command, "main", "main", &remote)
+                .is_none(),
+            "{command} must resolve to nothing for a remote origin"
+        );
+    } // End of the loop over the seventeen application commands
+} // End of function the_capability_grants_exactly_the_two_event_permissions()
+
+/// A local `main` webview registers the wake listener through the event plugin.
+///
+/// The registration the shipped window makes, over the real dispatcher and the
+/// shipped capability file: `listen` invokes `plugin:event|listen` with exactly
+/// [`listen_arguments`], and the answer it awaits is the listener's identifier —
+/// a JSON number, which is what its unlisten function later sends back. A
+/// refusal would come back as a string containing [`NOT_ALLOWED`] and a missing
+/// plugin as [`unregistered`]'s phrase; a number can only have come from the
+/// plugin's own body. Two registrations are made and answer different
+/// identifiers, so the plugin is numbering listeners rather than answering a
+/// constant.
+///
+/// **What this cannot see is the listener itself.** The plugin records it in a
+/// table `tauri` keeps crate-private and evaluates a script on the webview that
+/// the mock runtime discards, so what is measured is the grant and the crossing,
+/// not that a wake would reach a page. That is a window reading's, and 2d-5-7b's.
+#[test]
+fn a_local_webview_registers_the_wake_listener_through_the_event_plugin() {
+    let app = mock_app();
+    let webview = main_window(&app);
+
+    let first = invoke(&webview, EVENT_LISTEN, listen_arguments(1))
+        .expect("the local main webview may register a listener");
+    assert!(
+        first.is_u64(),
+        "the plugin answers the listener's identifier, never a message: {first}"
+    );
+    let second = invoke(&webview, EVENT_LISTEN, listen_arguments(2))
+        .expect("a second registration is a second listener");
+    assert!(second.is_u64(), "{second}");
+    assert_ne!(
+        first, second,
+        "two listeners have two identifiers, so the answer is a real one"
+    );
+} // End of function a_local_webview_registers_the_wake_listener_through_the_event_plugin()
+
+/// The listener `plugin:event|listen` answered is removable through
+/// `plugin:event|unlisten`.
+///
+/// The disposal half at the boundary: the unlisten function `listen` resolves
+/// with invokes this second command with the event name and the identifier, and
+/// `core:event:allow-unlisten` is what lets it through. The answer is the unit
+/// value, `null`; a refusal would be a string. Granting `allow-listen` alone
+/// would make this the call that fails, which is the failure mode
+/// `src/lib/ipc/events.ts` describes — a listener that cannot be disposed.
+///
+/// **What this cannot establish is that the removal happened.** The plugin's
+/// `unlisten_js` answers `Ok(())` for an identifier it never held too, and its
+/// table is crate-private, so the claim here is exactly *the command is granted
+/// and reaches the plugin* — which is the claim the capability entry exists to
+/// make true. That a listener is gone afterwards is `tauri`'s own contract, and
+/// nothing here restates it as this application's.
+#[test]
+fn the_registered_listener_is_removable_through_the_event_plugin() {
+    let app = mock_app();
+    let webview = main_window(&app);
+
+    let answered = invoke(&webview, EVENT_LISTEN, listen_arguments(1))
+        .expect("the local main webview may register a listener");
+    let event_id = answered.as_u64().expect("a listener identifier");
+
+    let removed = invoke(&webview, EVENT_UNLISTEN, unlisten_arguments(event_id))
+        .expect("the local main webview may remove the listener it registered");
+    assert_eq!(
+        removed,
+        Value::Null,
+        "unlisten answers the unit value, never a message: {removed}"
+    );
+} // End of function the_registered_listener_is_removable_through_the_event_plugin()
+
+/// A page that is not this application cannot reach any of the seventeen
+/// commands, nor either event-plugin command.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
-/// R20: pin both sides, never one inside). With `"permissions": []` and no
-/// `remote` capability, the dispatcher access-checks every command from a
-/// non-local origin and finds nothing that allows it — so a compromised or
-/// navigated webview gets a refusal rather than the user's configuration
-/// directory, and cannot rewrite the application's menu either. The refusal is a
+/// R20: pin both sides, never one inside). The capability file names no
+/// application command and has no `remote` block, so the dispatcher
+/// access-checks every application command from a non-local origin and finds
+/// nothing that allows it — a compromised or navigated webview gets a refusal
+/// rather than the user's configuration directory, and cannot rewrite the
+/// application's menu either. The two permissions it does grant,
+/// `core:event:allow-listen` and `core:event:allow-unlisten`, are granted in
+/// the local execution context only, so `plugin:event|listen` and
+/// `plugin:event|unlisten` are refused from the same origin — a remote page
+/// cannot subscribe to this application's wake either. The refusal is a
 /// **string**, not one of our codes, which is exactly why `classifyFailure` in
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
@@ -1789,7 +2046,10 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// would have left it green. The attempt table is now compared with the names
 /// parsed out of `generate_handler!` by [`crate::rust_source`], so a command
 /// added to the application and forgotten here fails this test rather than
-/// silently leaving the sweep.
+/// silently leaving the sweep. **The two plugin commands are a second table**,
+/// kept apart so that the application count stays seventeen: they are not in
+/// `generate_handler!`, this test asserts they are not, and folding them into
+/// the first table would make the count claim about two different things.
 #[test]
 fn a_remote_origin_is_refused() {
     let dir = synthetic_tree();
@@ -1926,7 +2186,7 @@ fn a_remote_origin_is_refused() {
     assert_eq!(attempted.len(), 17, "the surface is seventeen commands");
 
     for (command, args) in attempts {
-        let error = invoke_from(&webview, "https://an-unrelated-site.example", command, args)
+        let error = invoke_from(&webview, REMOTE_ORIGIN, command, args)
             .expect_err("a remote origin must not reach an application command");
         assert!(
             error.is_string(),
@@ -1937,14 +2197,39 @@ fn a_remote_origin_is_refused() {
             "the refusal must say so: {error}"
         );
     } // End of the loop over the commands a remote page must not reach
+
+    // The event plugin's two commands, from the same origin. Both are granted to
+    // the local context only, and neither is an application command — asserted,
+    // because a plugin command that found its way into `generate_handler!` would
+    // be counted above as an eighteenth.
+    let plugin_attempts: [(&str, Value); 2] = [
+        (EVENT_LISTEN, listen_arguments(1)),
+        (EVENT_UNLISTEN, unlisten_arguments(1)),
+    ];
+    for (command, args) in plugin_attempts {
+        assert!(
+            !crate::wire_contract::registered_commands().contains(command),
+            "{command} is a plugin command and must not be in generate_handler!"
+        );
+        let error = invoke_from(&webview, REMOTE_ORIGIN, command, args)
+            .expect_err("a remote origin must not reach an event-plugin command");
+        assert!(
+            error.is_string(),
+            "{command} must reject with the dispatcher's message, not with a code: {error}"
+        );
+        assert!(
+            error.as_str().unwrap_or_default().contains(NOT_ALLOWED),
+            "the refusal must say so: {error}"
+        );
+    } // End of the loop over the plugin commands a remote page must not reach
 } // End of function a_remote_origin_is_refused()
 
-/// `drain_external_changes` is registered, reachable with `"permissions": []`,
-/// and its one argument survives the crossing.
+/// `drain_external_changes` is registered, reachable with a capability set that
+/// names no application command, and its one argument survives the crossing.
 ///
 /// The three things only the dispatcher decides, asked of the sixteenth
 /// workspace command: it is in `generate_handler!` (a missing name would come
-/// back as `Command … not found`), the empty capability set does not block it (a
+/// back as `Command … not found`), the capability set does not block it (a
 /// denial would come back as a **string** rather than as an object), and
 /// `after_sequence` arrives as `afterSequence` and deserializes into a `u64`.
 ///

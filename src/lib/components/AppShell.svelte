@@ -1,8 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createBrowserState } from '../browser/workspace.svelte';
+  import { INERT_FOREGROUND_EVENTS } from '../browser/reconciliationCoordinator';
+  import {
+    createBrowserState,
+    REAL_BACKUP_COMMANDS,
+    REAL_COMMANDS
+  } from '../browser/workspace.svelte';
   import { t, tIpcFailure, tLocaleName } from '../i18n';
+  import { reportIpcFailure } from '../ipc/errors';
   import type { IpcFailure } from '../ipc/errors';
+  import { REAL_RECONCILIATION_EVENTS } from '../ipc/events';
   import { locale } from '../stores/locale.svelte';
   import DetailPane from './DetailPane.svelte';
   import LanguagePicker from './LanguagePicker.svelte';
@@ -21,14 +28,65 @@
    * is in, from "something went wrong", which is not.
    */
 
-  const browser = createBrowserState();
+  /*
+   * The production composition, every source named at the call rather than
+   * left to a default — Phase 2d-5-7a.
+   *
+   * The first three are the same values `createBrowserState` would default to;
+   * they are written out so that the fourth can be, and so that a reader sees
+   * the whole composition in one place. The fourth is the one that matters: it
+   * is the first and only production import of `src/lib/ipc/events.ts`, which
+   * is what makes Tauri's `listen` reachable from the shipped window and is why
+   * `src-tauri/capabilities/default.json` grants `core:event:allow-listen` and
+   * `core:event:allow-unlisten`. `createBrowserState`'s own default for it stays
+   * the inert source, on purpose: every suite that builds a state without naming
+   * a source must keep registering nothing.
+   *
+   * The fifth is deliberately the inert one. No production `ForegroundSource`
+   * exists yet — a DOM `visibilitychange`/focus source is a later phase's, and
+   * would be a module of its own — so in the shipped window the foreground and
+   * resume trigger never asks for a drain; registration, a finished open and a
+   * current-epoch wake are the three that do.
+   */
+  const browser = createBrowserState(
+    REAL_COMMANDS,
+    reportIpcFailure,
+    REAL_BACKUP_COMMANDS,
+    REAL_RECONCILIATION_EVENTS,
+    INERT_FOREGROUND_EVENTS
+  );
 
   onMount(() => {
+    // **The lifecycle, in the order the design consult's Q4 lists its triggers:
+    // registration first, then the open.** `start()` fires the registration
+    // and returns — it never awaits, so it cannot delay the open — and putting
+    // it first means the registration is in flight before `open_workspace` is
+    // asked for; a wake this window is not yet listening for costs a later
+    // drain, and the drain after the open is what pays it. Either order is
+    // correct, and that is the coordinator's doing rather than this line's:
+    // `open()` closes the drain gate synchronously through `workspaceOpened()`
+    // before its first await, so a registration that resolves while the load
+    // is in flight is recorded and issued by `workspaceReady()`, and one
+    // physical drain then satisfies both reasons. A refused open leaves the
+    // gate closed, and the *Retry* control below re-runs `open(null)` without
+    // touching the subscription.
+    browser.start();
     // `null` means "probe the standard locations in order", which is what a
     // user who has never opened the settings expects. A directory the user
     // chose is Phase 2's picker; there is nowhere to store one yet.
     void browser.open(null);
-  });
+    // **The disposal is what makes `dispose()` a disposal rather than an unused
+    // method.** Svelte runs the function `onMount` returns when this component
+    // is destroyed; the coordinator then removes the foreground listener
+    // synchronously and calls the held unlisten exactly once — and a
+    // registration still in flight at that moment is ended by the coordinator
+    // when it resolves (ruling 16), which is nothing this host has to do.
+    // Nothing in TypeScript forces a host to return this; `AppShell.test.ts`
+    // asserts the exact unlisten count instead.
+    return () => {
+      browser.dispose();
+    };
+  }); // End of the onMount that starts and disposes the reconciliation lifecycle
 
   /**
    * The heading a failed load gets.

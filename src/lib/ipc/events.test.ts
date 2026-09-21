@@ -9,9 +9,11 @@
  * **What is deliberately not under test, because nothing here could test it.**
  * That a real wake arrives. `REAL_RECONCILIATION_EVENTS` registers through
  * Tauri's `listen`, which needs a running application and — as `events.ts` says
- * — a capability entry this repository has not added; every assertion below can
- * pass while a real window is never told anything. That observation belongs to
- * Phase 2d-7.
+ * — the two capability entries `src-tauri/capabilities/default.json` grants;
+ * every assertion below can pass while a real window is never told anything.
+ * `src/lib/components/AppShell.test.ts` drives the real adapter over a mocked
+ * `listen` and proves the shell subscribes through it, not that anything is
+ * delivered. That observation belongs to a window reading.
  *
  * Per `1b-2a-notes.md` §14, an `it` callback whose description is already its
  * sibling argument carries no JSDoc of its own; ordinary helpers do.

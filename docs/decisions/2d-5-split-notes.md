@@ -115,6 +115,14 @@ the complete machine-checkable gate set, with **all four baselines re-measured h
 yes — `AppShell.svelte` only**, justified by the lifetime contract: with no host cleanup, `dispose()`
 is an unused method rather than a disposal.
 
+**Split on 2026-09-21, the shape 2d-5-2 took.** The window-reading harness under
+`/private/tmp/espansoconfig-harness-2d-5/` had been cleared with the temporary directory, so the
+reading needs the harness rebuilt first, which was a phase of its own at 2d-5-2c-1. **2d-5-7a** is
+everything above except the window reading: the production import, `AppShell`'s `onMount` start and
+disposal, both capability entries, the `dispatch_check.rs` extension, the mounted lifecycle evidence
+and all four baselines re-measured. **2d-5-7b** rebuilds the harness from `2d-5-2c-1-instrument-rebuild.md`
+and takes the narrow window lifecycle reading. The step closes when both halves have.
+
 ---
 
 ## 3. The binding rulings

@@ -498,13 +498,13 @@ const INVENTORY: &[Judged] = &[
         file: "src-tauri/src/events.rs",
         phrase: "drains again",
         count: 1,
-        reason: "a pointer: `wake_emitter` restating the 2d consult's Q3 obligation on a future consumer, and denying in the next paragraph that anything local performs it",
+        reason: "a pointer: `wake_emitter` restating the 2d consult's Q3 obligation on the frontend coordinator, and naming in the next paragraph which of its triggers perform it — nothing local does",
     },
     Judged {
         file: "src-tauri/src/reconciliation.rs",
         phrase: "drains again",
         count: 1,
-        reason: "a pointer: the same Q3 obligation at `ReconciliationQueue::wake`, handed to 2d-4b and 2d-5 — the wire's recovery from a dropped hint, implemented by nothing here",
+        reason: "a pointer: the same Q3 obligation at `ReconciliationQueue::wake`, discharged by the frontend coordinator since 2d-5-7a — the wire's recovery from a dropped hint, implemented by nothing here",
     },
     Judged {
         file: "src-tauri/src/reconciliation.rs",

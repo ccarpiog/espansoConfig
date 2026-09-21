@@ -4746,3 +4746,32 @@ move of the 2d-5 chain. The rung below it is `1320 / 443 / 2433 / 189` at 2d-5-5
 187`, so every rung at or after it is a *with-instrument* figure and the two groups may not be
 compared without subtracting the instrument's known contribution. The full per-rung list, and
 2d-5-5a's own verification narrative, are in [`phase-2d.md`](docs/progress-archive/phase-2d.md).
+
+### Phase 2d-5-6's verification narrative and ladder section — archived 2026-09-21 at Phase 2d-5-7a
+
+**Verbatim and unedited**, as `PROGRESS.md` carried them from 2d-5-6's close until 2d-5-7a closed.
+
+### The rung moved by one, and the one is the review's negative control
+
+**`1320 / 443 / 2467 / 189`** at 2d-5-6, from `1320 / 443 / 2466 / 189` at 2d-5-5b. The implementation
+added **no case**: every change is inside an existing harness (`workspace.test.ts`'s drain stub,
+budget and `afterEach`; the two component files' spies, `afterEach` and `stop()`) or an existing case
+(33 `expectDrains` declarations rewritten to carry cursors). The review's one fix added exactly one
+case, `counts a drain the scripted queue had no answer for`, the negative control of the new
+unscripted-drain counter. Per-file the workspace suite went 244 → 245 (239 `it(` lines + the
+six-row `it.each(WRITERS)`); `DetailPane.test.ts` holds 24 and `RestorePane.test.ts` 61, both
+unchanged — the notes' §2 table re-derived all three rather than inheriting the 2026-09-05 figures
+(186 / 8 / 27), which three phases had moved. No Rust source changed and the Rust gate was run
+anyway, 26 `test result` lines summing to 1320; no file was added except the notes, so svelte-check
+held at 443; no production module, so Vite held at 189, server-only markers absent, client-only
+present (2). `git diff --stat src/lib/browser/workspace.svelte.ts` was empty at every gate.
+
+### The ladder's live rung
+
+**`1320 / 443 / 2467 / 189`**, at 2d-5-6. The rung below it is `1320 / 443 / 2466 / 189` at 2d-5-5b,
+below that `2433` at 2d-5-5a and `2415` at 2d-5-4-G, with the seven below that running `2413 / 2409 /
+2406 / 2404 / 2395 / 2389 / 2380` across 2d-5-4-F … 2d-5-4. Below them is `1320 / 441 / 2307 / 188`,
+held from 2d-5-3-A to 2d-5-3-N. **The instrument landed at 2d-5-2c-1**, whose rung was `1320 / 439 /
+2255 / 187`, so every rung at or after it is a *with-instrument* figure and the two groups may not be
+compared without subtracting the instrument's known contribution. The full per-rung list, and
+2d-5-5b's own verification narrative, are in [`phase-2d.md`](docs/progress-archive/phase-2d.md).
