@@ -33,7 +33,10 @@
  *    into the three answers a surface can act on. They are here rather than in five
  *    surfaces because a rule written once is a rule that cannot be relaxed in four
  *    places by somebody who read one of them — `./editorSave.ts`'s founding
- *    argument.
+ *    argument. Since Phase 2d-5-5a {@link reapplyEvidenceFor} sits above them and
+ *    decides *which* evidence there is to read: a refused save's own
+ *    `ReapplyEvidence`, or a watcher observation's whole-file correspondence table
+ *    with its two revisions checked (rulings 23 and 24).
  * 3. **The adoption.** {@link adoptForReapply} spends the conflict's one
  *    authorization through the {@link AdoptTheDiskVersion} its caller passes,
  *    which on all five match surfaces is `BrowserState.adoptDiskVersion` — the
@@ -83,13 +86,20 @@
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
-import type { MatchView, ReapplyEvidence, ReapplyRefusal } from '../ipc/types';
+import type {
+  CorrespondenceTable,
+  MatchView,
+  ReapplyEvidence,
+  ReapplyRefusal
+} from '../ipc/types';
+import type { SaveConflictSource } from './conflictSource';
 import type { AdoptTheDiskVersion } from './editorSave';
 import {
   reapplyAuthorizationFor,
   type ConflictCapabilities,
   type ConflictModel,
-  type DiskAdoptionOutcome
+  type DiskAdoptionOutcome,
+  type SaveConflictModel
 } from './saveOutcome';
 
 /**
@@ -279,14 +289,26 @@ export type ReapplyOutcome<S, O> =
  * permanent fact and *there is nothing to do* is a state, and answering the second
  * for the raw editor would invite a caller to conclude the first was temporary.
  *
+ * **It takes a save-origin conflict, and the restriction is the parameter type
+ * rather than an arm** — Phase 2d-5-5a. Every one of this type's arms is a sentence
+ * about a save: `ready` hands back a {@link ReapplyEvidence}, which is the subject
+ * and placement one refused *operation* was resolved for, and an external change
+ * resolves no operation at all — it carries a whole-file
+ * {@link CorrespondenceTable} instead, read through {@link reapplyEvidenceFor}.
+ * Answering `unavailable` or `notAttempted` for an external conflict would each
+ * have been a false sentence, so the compiler refuses one here instead.
+ * **What that does not force**: nothing stops a later caller widening this
+ * parameter back to the union and reintroducing the choice; what would then be
+ * needed is a new arm, not a reused one.
+ *
  * @typeParam T - The drafted value the conflict retained.
  * @param capabilities - The calling surface's own declaration.
- * @param conflict - The conflict it is showing, or `null`.
+ * @param conflict - The save conflict it is showing, or `null`.
  * @returns The conflict and its evidence, or the arm to answer with.
  */
 export function beginReapply<T>(
   capabilities: ConflictCapabilities,
-  conflict: ConflictModel<T> | null
+  conflict: SaveConflictModel<T> | null
 ): ReapplyStart<T> {
   if (capabilities.reapplySupport === 'unavailable') {
     return { kind: 'unavailable' };
@@ -294,8 +316,199 @@ export function beginReapply<T>(
   if (conflict === null) {
     return { kind: 'notAttempted' };
   }
-  return { kind: 'ready', conflict, evidence: conflict.source.reapply };
+  return { kind: 'ready', conflict, evidence: saveReapplyEvidence(conflict.source) };
 } // End of function beginReapply()
+
+/**
+ * The correspondence answers one refusal carried, off its origin.
+ *
+ * **The one place `ConflictResult.reapply` is read** (ruling 23), so the save half
+ * of the origin switch is written once: {@link beginReapply} reads it here and
+ * {@link reapplyEvidenceFor}'s `save` arm reads it here, rather than each reaching
+ * into the payload for itself.
+ *
+ * @param source - The `save` origin, carrying the refusal whole.
+ * @returns The evidence, exactly as it arrived on that payload.
+ */
+export function saveReapplyEvidence(source: SaveConflictSource): ReapplyEvidence {
+  return source.conflict.reapply;
+} // End of function saveReapplyEvidence()
+
+/**
+ * Why an external observation's correspondence table may not be used as evidence.
+ *
+ * **Three refusals and no fourth**, because the table carries exactly two revisions
+ * and either can be the wrong one; the third is the absence of a table at all,
+ * which the wire allows whenever either side had no projection.
+ */
+export type ExternalEvidenceRefusal =
+  /** The observation carried no correspondence table. */
+  | 'noCorrespondence'
+  /** Its rows were minted from a revision this draft was not made against. */
+  | 'baseRevisionMoved'
+  /** Its answers were resolved against a revision this conflict is not about. */
+  | 'diskRevisionMoved';
+
+/**
+ * Where one conflict's reapply evidence comes from, and whether it may be used.
+ *
+ * **Three arms for two origins**, because the external origin can answer *no
+ * evidence* for a reason the save origin cannot have: its table is snapshot-bound
+ * and the snapshot may not be this conflict's.
+ */
+export type ReapplyEvidenceAccess =
+  | {
+      /** A refused save: the subject and placement the command resolved. */
+      readonly kind: 'saveEvidence';
+      /** The evidence, exactly as it arrived on the refusal's payload. */
+      readonly evidence: ReapplyEvidence;
+    }
+  | {
+      /**
+       * A watcher observation whose table really is about this conflict.
+       *
+       * Both revisions were compared before this arm was built; what no type says
+       * is that the rows inside describe the projection this conflict carries.
+       */
+      readonly kind: 'externalCorrespondence';
+      /**
+       * The validated table: {@link reapplyEvidenceFor}'s **own** frozen object,
+       * carrying the two revisions it compared and a copy of the row array.
+       *
+       * **Not the observation's table by identity**, and deliberately so since this
+       * phase's review: the observation's is a value a caller assembled, so reading
+       * `base_revision` off it a second time can answer something the check never
+       * saw. **What that forces is the two revisions and the set of rows, and
+       * nothing further** — each row inside is still the object the observation
+       * carried.
+       */
+      readonly correspondences: CorrespondenceTable;
+    }
+  | {
+      /** The external table may not be used, and nothing is offered in its place. */
+      readonly kind: 'refused';
+      /** Which of the three negative claims about the table this is. */
+      readonly reason: ExternalEvidenceRefusal;
+    };
+
+/**
+ * Which evidence one conflict's reapply may work from, switched on its origin.
+ *
+ * **Rulings 23 and 24, as one function.** A save conflict's evidence is
+ * `ConflictResult.reapply`, resolved by the command that was refused and about that
+ * one operation. An external conflict's is the observation's whole-file
+ * {@link CorrespondenceTable}, and it is usable **only** when its `base_revision`
+ * equals the retained draft's base and its `disk_revision` equals the disk
+ * observation this conflict is about. Both comparisons are made here, against the
+ * conflict's own two fields, so no caller can supply a mismatched pair.
+ *
+ * **The accepted arm carries a snapshot this function owns, not the observation's
+ * table** (this phase's review, finding 2). Every operand — the table's two
+ * revisions and its rows, the draft's base and the conflict's disk revision — is
+ * read **once, before** the comparisons, and the frozen object built from those
+ * captured values is what goes back; a second read of a caller-controlled getter
+ * can therefore not hand a consumer a pair this function never validated. What the
+ * snapshot forces is those two revisions and that set of rows: it is shallow, and
+ * a row's own fields are the observation's objects still.
+ *
+ * **Nothing in TypeScript expresses that pairing, and this comment is what carries
+ * it.** A {@link CorrespondenceTable} is four ordinary fields; substituting a later
+ * read's table for this one's type-checks perfectly and is wrong, and the wire says
+ * so in its own words (`src/lib/ipc/types.ts:2891-2911`). What the equality of two
+ * revisions establishes is that the table *names* the same two snapshots this
+ * conflict names — never that one Rust call built both, which is the only thing
+ * that would make the rows trustworthy, and which rests on
+ * `externalConflictObservationOf` in `./observationTransitions.ts` having narrowed
+ * one wire snapshot rather than on anything checkable here.
+ *
+ * **It is evidence access and not a transition.** It reads nothing from the window,
+ * installs nothing, spends no authorization and offers no control:
+ * `conflictChoicesFor` in `./saveOutcome.ts` remains the only producer of a choice
+ * list and `BrowserState.adoptDiskVersion` the only confirmed-install door
+ * (ruling 23).
+ *
+ * @typeParam T - The drafted value the conflict retained.
+ * @param conflict - The conflict a reapply would work from, of either origin.
+ * @returns Which evidence is available, or why the external table is refused.
+ */
+export function reapplyEvidenceFor<T>(conflict: ConflictModel<T>): ReapplyEvidenceAccess {
+  const source = conflict.source;
+  switch (source.kind) {
+    case 'save':
+      return { kind: 'saveEvidence', evidence: saveReapplyEvidence(source) };
+    case 'externalChange': {
+      const carried = source.observation.correspondences;
+      if (carried === null) {
+        return { kind: 'refused', reason: 'noCorrespondence' };
+      }
+      // **Every operand read exactly once, and before anything is compared**
+      // (Phase 2d-5-5a's review, finding 2). All five reads below cross into a
+      // value a caller assembled — three off the observation's table, two off the
+      // conflict model — and a property read runs arbitrary code through a getter
+      // or a `Proxy` trap: `readonly` is a compile-time word and freezes nothing at
+      // runtime. Comparing `carried.base_revision` and then handing
+      // `carried` on is therefore a check and a spend of two different values: the
+      // second read can answer whatever it likes, and the consumer would work from
+      // a table this function never validated.
+      const tableBase = carried.base_revision;
+      const tableDisk = carried.disk_revision;
+      const rows = carried.entries;
+      const draftBase = conflict.draft.baseRevision;
+      const conflictDisk = conflict.diskRevision;
+      if (tableBase !== draftBase) {
+        // **The draft was made against other bytes than the rows were minted
+        // from**, so every identity in the table belongs to a snapshot this draft
+        // never saw. Hashes carry no order, so this says the two differ and never
+        // which is older (ruling 26).
+        return { kind: 'refused', reason: 'baseRevisionMoved' };
+      }
+      if (tableDisk !== conflictDisk) {
+        // The answers were resolved against a disk snapshot that is not the one
+        // this conflict is comparing against, which is the supersession case of
+        // ruling 26 read from the evidence's side.
+        return { kind: 'refused', reason: 'diskRevisionMoved' };
+      }
+      // **What is handed on is this function's own object**, built from the values
+      // the two equalities above were made against, so no later read of the
+      // observation's table can substitute anything for them. **It is a shallow
+      // snapshot, and that is the whole of what it forces**: the array spine is
+      // copied and frozen so a row cannot be added or removed after the check, and
+      // each row inside is the object the observation carried — this function reads
+      // no field of any row and can vouch for none of them.
+      const correspondences: CorrespondenceTable = Object.freeze({
+        base_revision: tableBase,
+        disk_revision: tableDisk,
+        entries: Object.freeze(Array.from(rows))
+      });
+      return { kind: 'externalCorrespondence', correspondences };
+    }
+    default: {
+      const unreachable: never = source;
+      return unreachable;
+    }
+  }
+} // End of function reapplyEvidenceFor()
+
+/**
+ * The dictionary key holding one external-evidence refusal's sentence.
+ *
+ * A `switch` over literal keys rather than a template, the idiom every describer in
+ * `src/lib/browser/` follows: a renamed key is a compile error here, and a new
+ * member of {@link ExternalEvidenceRefusal} with no sentence is one too.
+ *
+ * @param reason - Which negative claim about the table this is.
+ * @returns The key holding that reason's sentence.
+ */
+export function externalEvidenceRefusalKey(reason: ExternalEvidenceRefusal): TranslationKey {
+  switch (reason) {
+    case 'noCorrespondence':
+      return 'browser.reapply.externalEvidence.noCorrespondence';
+    case 'baseRevisionMoved':
+      return 'browser.reapply.externalEvidence.baseRevisionMoved';
+    case 'diskRevisionMoved':
+      return 'browser.reapply.externalEvidence.diskRevisionMoved';
+  }
+} // End of function externalEvidenceRefusalKey()
 
 /**
  * What {@link beginReapply} answered.
@@ -304,17 +517,18 @@ export function beginReapply<T>(
  */
 export type ReapplyStart<T> =
   | {
-      /** There is a conflict and this surface may work from it. */
+      /** There is a save conflict and this surface may work from it. */
       readonly kind: 'ready';
       /** The conflict, carrying the disk snapshot and the retained draft. */
-      readonly conflict: ConflictModel<T>;
+      readonly conflict: SaveConflictModel<T>;
       /**
        * The correspondence answers, as they arrived on that conflict's payload.
        *
-       * Read off {@link ConflictModel.source} — the wire value itself — rather than
-       * from a second call, which is consult Q9's second failure mode designed out:
-       * a later `get_document` would answer a *different* observation, and a
-       * perfectly correct algorithm would then resolve the wrong one.
+       * Read off `SaveConflictModel.source` — the origin wrapping the wire value —
+       * rather than from a second call, which is consult Q9's second failure mode
+       * designed out: a later `get_document` would answer a *different*
+       * observation, and a perfectly correct algorithm would then resolve the wrong
+       * one.
        */
       readonly evidence: ReapplyEvidence;
     }

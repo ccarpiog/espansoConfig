@@ -200,6 +200,7 @@ import {
   type ConflictDiskText,
   type ConflictOperation,
   type ConflictModel,
+  type SaveConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -579,7 +580,9 @@ export function startMatchDuplication(
  * @param session - The session to ask about.
  * @returns The conflict model, or `null` when the session is not in one.
  */
-export function conflictOf(session: MatchDuplicationSession): ConflictModel<MatchId> | null {
+export function conflictOf(
+  session: MatchDuplicationSession
+): SaveConflictModel<MatchId> | null {
   return conflictArm(session.outcome);
 } // End of function conflictOf()
 

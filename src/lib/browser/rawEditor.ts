@@ -126,6 +126,7 @@ import {
   type ConflictChoice,
   type ConflictDiskText,
   type ConflictModel,
+  type SaveConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -461,7 +462,7 @@ export function startRawEditor(
  * @param session - The session to ask about.
  * @returns The conflict model, or `null` when the session is not in one.
  */
-export function conflictOf(session: RawEditorSession): ConflictModel<RoundTripText> | null {
+export function conflictOf(session: RawEditorSession): SaveConflictModel<RoundTripText> | null {
   return conflictArm(session.outcome);
 } // End of function conflictOf()
 

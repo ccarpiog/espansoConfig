@@ -149,6 +149,9 @@
   "browser.reapply.obstacle.evidenceNotATarget": "The correspondence evidence this conflict carried names no snippet to look for, and this panel needs one.",
   "browser.reapply.obstacle.anchorCorrespondence": "espansoConfig could not identify, in the version on disk, the snippet this one was to be placed after.",
   "browser.reapply.obstacle.evidenceNotAnAnchor": "This change names a snippet to be placed after, and the correspondence evidence this conflict carried names none.",
+  "browser.reapply.externalEvidence.noCorrespondence": "The reading that told espansoConfig this file had changed carried no correspondence for it, so there is nothing here to match what you kept against. Nothing was written.",
+  "browser.reapply.externalEvidence.baseRevisionMoved": "The correspondence that reading carried was worked out from a different version of this file than the one you started from, so it says nothing about what you kept. Nothing was written.",
+  "browser.reapply.externalEvidence.diskRevisionMoved": "The correspondence that reading carried was worked out against a different version on disk than the one shown here, so it is evidence about a state you were not shown. Nothing was written.",
 
   "browser.saveOutcome.fileWritten": "The file was written. What is on disk now is exactly the text that was sent.",
   "browser.saveOutcome.nothingToWrite": "The text was already exactly what the file held, so nothing was written. Both checks still ran; this is a save with nothing to do.",

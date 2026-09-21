@@ -65,8 +65,10 @@ import {
   type ReprojectionRefusal
 } from '../browser/matchEditor';
 import {
+  externalEvidenceRefusalKey,
   reapplyOutcomeKey,
   sharedReapplyObstacleKey,
+  type ExternalEvidenceRefusal,
   type ReapplyOutcomeCode,
   type SharedReapplyObstacle
 } from '../browser/reapply';
@@ -1394,6 +1396,46 @@ export function describeReapplyReadiness(
 export function tReapplyReadiness(draftKind: ConflictDraftKind): string {
   return describeReapplyReadiness(locale.current, draftKind);
 } // End of function tReapplyReadiness()
+
+/**
+ * Renders why an external observation's correspondence was refused, in one
+ * language.
+ *
+ * The accessor over `externalEvidenceRefusalKey` in `../browser/reapply`, here for
+ * `tReapplyOutcome`'s reason: a component that turned the code into a key in markup
+ * would be doing the one thing CLAUDE.md section 2 forbids.
+ *
+ * **None of the three sentences carries an operand**, so nothing is substituted
+ * here. None names a revision: a content revision is a hex digest, and showing one
+ * beside a refusal would invite a person to compare two strings that carry no
+ * order.
+ *
+ * **Nothing draws this yet.** The origin switch is Phase 2d-5-5a's vocabulary and
+ * 2d-6 is where a panel shows one of its refusals; the only caller today is
+ * `../browser/reapply.test.ts`. An accessor with no component caller is deliberate,
+ * because a code with no string is worse than a code with no caller.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - Which negative claim about the table this is.
+ * @returns The translated sentence.
+ */
+export function describeExternalEvidenceRefusal(
+  locale: Locale,
+  reason: ExternalEvidenceRefusal
+): string {
+  return translate(locale, externalEvidenceRefusalKey(reason));
+} // End of function describeExternalEvidenceRefusal()
+
+/**
+ * Renders why an external observation's correspondence was refused, in the current
+ * language.
+ *
+ * @param reason - Which negative claim about the table this is.
+ * @returns The translated sentence.
+ */
+export function tExternalEvidenceRefusal(reason: ExternalEvidenceRefusal): string {
+  return describeExternalEvidenceRefusal(locale.current, reason);
+} // End of function tExternalEvidenceRefusal()
 
 /**
  * One obstacle's own sentence followed by the wire code's, as one string.

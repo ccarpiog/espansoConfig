@@ -82,7 +82,6 @@ import type {
   BackupEntryId,
   BackupEntryListing,
   BackupTextResponse,
-  ConflictResult,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -96,6 +95,12 @@ import type {
   SaveResult,
   WorkspaceSummary
 } from '../ipc/types';
+import { externalConflictSource, saveConflictSource } from './conflictSource';
+import type {
+  ConflictSource,
+  ExternalChangeConflictSource,
+  ExternalConflictObservation
+} from './conflictSource';
 import {
   sealWholeDocumentSave,
   type InvalidationStatus,
@@ -1056,7 +1061,9 @@ export interface BrowserState {
    * 2. it has not already been spent through this state — one click, one install;
    * 3. **this state produced that conflict**, and about the file the payload names.
    *    `rememberTheConflict` wrote the entry when the conflict arrived, keyed by
-   *    the wire value itself, so a conflict from a *second* `BrowserState` — whose
+   *    the conflict's origin — the one object `saveConflictSource` or
+   *    `externalConflictSource` memoizes per wire value — so a conflict from a
+   *    *second* `BrowserState` — whose
    *    session-local `DocumentId` may collide with one of this state's — installs
    *    nothing. That is the confirmation pass's residual half of the brand finding;
    * 4. the document is still projected here;
@@ -1141,6 +1148,48 @@ export interface BrowserState {
     conflict: ConflictModel<T>,
     confirmation: ReloadConfirmation
   ): DiskAdoptionOutcome;
+  /**
+   * Registers one **external** observation as a conflict this window produced.
+   *
+   * **The seventh registration door, and it is the same door** — Phase 2d-5-5a.
+   * The six writing wrappers above register a refused save's origin as the conflict
+   * arrives; nothing registers a watcher observation, because until 2d-5-5b nothing
+   * routes one to a surface. This method is what that routing will call, and it is
+   * declared here rather than left for that step because without it an
+   * external-origin conflict could never be adopted at all: `adoptDiskVersion`
+   * looks the origin up in this state's own map, and an origin no `BrowserState`
+   * ever registered installs nothing.
+   *
+   * **It registers and installs nothing else** — the snippet list, the selection
+   * and the viewer are untouched, exactly as a save conflict's registration leaves
+   * them. Registering is not adopting.
+   *
+   * **The file is read off the observation and is never a second argument**, so a
+   * caller cannot register an observation of one file against another window's
+   * projection of a second.
+   *
+   * **Registering one observation twice registers it once** (this phase's review,
+   * finding 1). The origin is memoized on the observation, so a second call lands
+   * on the entry the first wrote and that entry stands: the generation a conflict
+   * arrived at is what `adoptDiskVersion` refuses a backwards install by, and
+   * renewing it would hand an outlived conflict its authority back. A caller that
+   * really has a *newer* observation registers that observation, which is a
+   * different object and gets its own entry.
+   *
+   * **What it forces, and what it does not, in the same sentence.** It forces that
+   * the origin it returns is the one memoized object for that observation, so a
+   * `ConflictModel` built from the same observation carries the identical source
+   * and is found here; it cannot force that the observation was ever narrowed from
+   * a wire snapshot by this window, because `ExternalConflictObservation` is an
+   * ordinary interface a caller can satisfy by hand.
+   *
+   * @param observation - The narrowed observation, exactly as this window narrowed
+   *   it.
+   * @returns The memoized `externalChange` origin now registered.
+   */
+  rememberExternalConflict(
+    observation: ExternalConflictObservation
+  ): ExternalChangeConflictSource;
   /**
    * Opens a configuration directory and loads every file that holds matches.
    *
@@ -2162,8 +2211,17 @@ export function createBrowserState(
   // holds once its session is gone — this must not keep it alive.
   const spentConfirmations = new WeakSet<ReloadConfirmation>();
   // **Every conflict this state has seen, and the window it was seen against.**
-  // Keyed by the wire value itself, so a conflict some *other* `BrowserState`
-  // produced — or one a caller assembled — has no entry and can install nothing:
+  // **Keyed by the conflict's *origin* since Phase 2d-5-5a** (ruling 22), not by the
+  // wire `ConflictResult`: `ConflictSource` is what `ConflictModel.source` now
+  // carries, and one wire value yields exactly one source object because
+  // `saveConflictSource` and `externalConflictSource` in `./conflictSource.ts`
+  // memoize on it. The substitution is therefore lossless for the save origin and is
+  // what lets the external origin be registered at all. **Nothing forces a caller
+  // through those memos** — a hand-built wrapper of the same shape type-checks, is
+  // in no map, and installs nothing, which fails safe and silently.
+  //
+  // A conflict some *other* `BrowserState` produced — or one a caller assembled —
+  // has no entry and can install nothing:
   // a `DocumentId` is session-local, and without this the two states' document
   // number 2 were indistinguishable here. The recorded generation is the second
   // half: if anything replaced that document's projection between the conflict
@@ -2173,7 +2231,7 @@ export function createBrowserState(
   // generation rather than `conflict.expected` because a session's frozen base
   // legitimately differs from what the window projects.
   const conflictOrigins = new WeakMap<
-    ConflictResult,
+    ConflictSource,
     { readonly document: DocumentId; readonly generation: number }
   >();
   // **Every write surface this window has told this state about** — Phase 2d-5-2a.
@@ -2607,11 +2665,40 @@ export function createBrowserState(
    * be checked against it. Registering is not adopting — the snippet list, the
    * selection and the viewer are all untouched by this call.
    *
-   * @param document - The file the conflicted save aimed at.
-   * @param conflict - The conflict exactly as it crossed the boundary.
+   * **It takes the origin, not the wire value** (ruling 22, Phase 2d-5-5a), which is
+   * what makes one function serve both origins: a refused save arrives as a
+   * `ConflictResult` and is wrapped by `saveConflictSource` at each of the six call
+   * sites, and a watcher observation arrives narrowed and is wrapped by
+   * `externalConflictSource` in {@link rememberExternalConflict}. **Nothing in
+   * TypeScript forces either caller through the memo**: a fresh wrapper of the same
+   * shape is a different object, so the entry written here would never be found
+   * again and the adoption would be refused — safe, and silent.
+   *
+   * **The first registration of one origin is the only one, and that is the whole
+   * of what this forces** (Phase 2d-5-5a's review, finding 1). The memos in
+   * `./conflictSource.ts` answer one object per wire refusal and one per narrowed
+   * observation, so registering the same conflict twice lands on the *same* key —
+   * and overwriting the entry would write **today's** projection generation over
+   * the one the conflict really arrived at, which is exactly the fact
+   * {@link BrowserState.adoptDiskVersion} reads to refuse an install that would
+   * move the window backwards. A second registration is not a second conflict, so
+   * it is ignored outright rather than merged: both halves of the entry are kept,
+   * which also means a re-registration cannot re-point an origin at another file.
+   * What it does **not** force is that a *different* origin object for the same
+   * change be recognised — two narrowings of one wire snapshot are two keys and the
+   * second gets its own entry, as it always has.
+   *
+   * @param document - The file the conflict is about.
+   * @param source - Where the conflict came from, as the memoized origin object.
    */
-  function rememberTheConflict(document: DocumentId, conflict: ConflictResult): void {
-    conflictOrigins.set(conflict, {
+  function rememberTheConflict(document: DocumentId, source: ConflictSource): void {
+    if (conflictOrigins.has(source)) {
+      // Already registered, at the generation it really arrived at. `WeakMap.has`
+      // on an object key runs no user code, so nothing can run between this test
+      // and the write below.
+      return;
+    }
+    conflictOrigins.set(source, {
       document,
       generation: projectionGenerationOf(document)
     });
@@ -3506,6 +3593,19 @@ export function createBrowserState(
       return 'installed';
     }, // End of function adoptDiskVersion()
 
+    rememberExternalConflict(
+      observation: ExternalConflictObservation
+    ): ExternalChangeConflictSource {
+      // **The caller-controlled read taken first, and once.** `observation` is a
+      // value a caller assembled, so `document` can be a getter or a proxy trap
+      // that re-enters this state; taking it before the memo means the whole
+      // registration below runs on this state's own data.
+      const document = observation.document;
+      const source = externalConflictSource(observation);
+      rememberTheConflict(document, source);
+      return source;
+    }, // End of function rememberExternalConflict()
+
     async open(root: string | null): Promise<void> {
       const generation = ++openGeneration;
       // **The reconciliation cursor goes with the workspace, and it goes first.**
@@ -3956,7 +4056,7 @@ export function createBrowserState(
         // What this arm does do is **write down** which projection the conflict
         // describes, which is what lets that adoption refuse a window that has
         // moved on since. Registering is not adopting.
-        rememberTheConflict(match.document, answer.value);
+        rememberTheConflict(match.document, saveConflictSource(answer.value));
       }
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function moveMatch()
@@ -4048,7 +4148,7 @@ export function createBrowserState(
         // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
         // says why, and the rule is one rule for all six writing wrappers. What is
         // written down is which projection the conflict describes.
-        rememberTheConflict(id.document, answer.value);
+        rememberTheConflict(id.document, saveConflictSource(answer.value));
       }
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function saveMatch()
@@ -4125,7 +4225,7 @@ export function createBrowserState(
         // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
         // says why, and the rule is one rule for all six writing wrappers. What is
         // written down is which projection the conflict describes.
-        rememberTheConflict(document, answer.value);
+        rememberTheConflict(document, saveConflictSource(answer.value));
       }
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function createMatch()
@@ -4185,7 +4285,7 @@ export function createBrowserState(
         // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
         // says why, and the rule is one rule for all six writing wrappers. What is
         // written down is which projection the conflict describes.
-        rememberTheConflict(id.document, answer.value);
+        rememberTheConflict(id.document, saveConflictSource(answer.value));
       }
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function deleteMatch()
@@ -4308,7 +4408,7 @@ export function createBrowserState(
         // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
         // says why, and the rule is one rule for all six writing wrappers. What is
         // written down is which projection the conflict describes.
-        rememberTheConflict(match.document, answer.value);
+        rememberTheConflict(match.document, saveConflictSource(answer.value));
       }
       return { kind: 'answered', result: answer.value, adoption };
     }, // End of function duplicateMatch()
@@ -4390,7 +4490,7 @@ export function createBrowserState(
       // race to lose (`docs/decisions/2c-4a-1-notes.md` section 4.1). What is
       // written down is which projection the conflict describes.
       if (answer.value.outcome === 'conflict') {
-        rememberTheConflict(document, answer.value);
+        rememberTheConflict(document, saveConflictSource(answer.value));
       }
       //
       // Sealed here and nowhere else: this is the one place that knows which

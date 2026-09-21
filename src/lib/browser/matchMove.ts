@@ -298,6 +298,7 @@ import {
   type ConflictDiskText,
   type ConflictOperation,
   type ConflictModel,
+  type SaveConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -865,7 +866,7 @@ export function startMatchMove(
  * @param session - The session to ask about.
  * @returns The conflict model, or `null` when the session is not in one.
  */
-export function conflictOf(session: MatchMoveSession): ConflictModel<MovePlacement> | null {
+export function conflictOf(session: MatchMoveSession): SaveConflictModel<MovePlacement> | null {
   return conflictArm(session.outcome);
 } // End of function conflictOf()
 

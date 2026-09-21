@@ -257,6 +257,7 @@ import {
   type ConflictModel,
   type DraftFieldStatus,
   type RetainedDraftField,
+  type SaveConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -1075,7 +1076,7 @@ export function startMatchEditor(match: MatchView, clock: Clock): MatchEditorSes
  * @param session - The session to ask about.
  * @returns The conflict model, or `null` when the session is not in one.
  */
-export function conflictOf(session: MatchEditorSession): ConflictModel<MatchBuffers> | null {
+export function conflictOf(session: MatchEditorSession): SaveConflictModel<MatchBuffers> | null {
   return conflictArm(session.outcome);
 } // End of function conflictOf()
 

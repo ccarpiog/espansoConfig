@@ -83,8 +83,13 @@ import {
   type InvalidationStatus,
   type WholeDocumentOutcome
 } from './invalidation';
+import type { ExternalConflictObservation } from './conflictSource';
 import { startDraft, structuredDraftRules, textDraftRules } from './draft';
-import { confirmReloadDiskVersion, describeEditSave } from './saveOutcome';
+import {
+  confirmReloadDiskVersion,
+  describeEditSave,
+  describeExternalConflict
+} from './saveOutcome';
 import {
   CONFLICT_CAPABILITIES as MATCH_EDITOR_CAPABILITIES,
   baselineOf,
@@ -103,7 +108,12 @@ import {
   type InstallTheWaitingForm,
   type RecoverySession
 } from './recovery';
-import type { ConflictModel, DiskAdoptionOutcome, ReloadConfirmation } from './saveOutcome';
+import type {
+  ConflictModel,
+  DiskAdoptionOutcome,
+  ReloadConfirmation,
+  SaveConflictModel
+} from './saveOutcome';
 import {
   acknowledgeRestoreFindings,
   batchesLoaded,
@@ -6430,7 +6440,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
    * @param answer - The conflict as it crossed the boundary.
    * @returns The model, which carries the retained draft.
    */
-  function modelOf(answer: CommandResult<SaveResult> = CONFLICT): ConflictModel<string> {
+  function modelOf(answer: CommandResult<SaveResult> = CONFLICT): SaveConflictModel<string> {
     if (!answer.ok) {
       throw new Error('this case needs an outcome');
     }
@@ -6498,6 +6508,150 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('alreadyThere');
     expect(state.scopedDocument?.revision).toBe('rev-c');
   }); // End of the "one-shot confirmation" case
+
+  /**
+   * One narrowed external observation of `match/base.yml`.
+   *
+   * It carries the same replacement parse the scripted save conflict does, so a
+   * window that installed it could not fail to show: two rows become one and every
+   * identity this window holds for that file stops resolving.
+   *
+   * A fresh object every call, on purpose: the memo in `./conflictSource.ts` is
+   * keyed on object identity, so two calls are two origins.
+   *
+   * @returns The observation, as this window would have narrowed it.
+   */
+  function externalObservation(): ExternalConflictObservation {
+    return {
+      sequence: 5,
+      document: 2,
+      previousRevision: 'rev-a',
+      diskRevision: 'rev-c',
+      diskText: DISK_TEXT,
+      disk: replacedDocument(),
+      findings: [],
+      correspondences: null
+    };
+  } // End of function externalObservation()
+
+  /**
+   * The conflict model a surface would hold for one external observation.
+   *
+   * @param observation - The observation the surface was told about.
+   * @returns The model, which carries the retained draft.
+   */
+  function externalModelOf(observation: ExternalConflictObservation) {
+    return describeExternalConflict(
+      observation,
+      startDraft('rev-a', 'matches: []\n', textDraftRules),
+      // Any surface's declaration would do here, exactly as it would for a save
+      // conflict: this case is about the adoption door.
+      MATCH_EDITOR_CAPABILITIES
+    );
+  } // End of function externalModelOf()
+
+  it('refuses an external conflict this window never registered', async () => {
+    // **The origin map is the whole of the check, and it is one check for both
+    // origins.** An observation this state was never told about has no entry, so
+    // the door installs nothing — the same answer a save conflict from a second
+    // `BrowserState` gets.
+    const state = await withTheSecondSnippetSelected(scriptedCommands());
+    const model = externalModelOf(externalObservation());
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('refused');
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+    expect(state.scopedMatches).toHaveLength(2);
+  }); // End of the "refuses an unregistered external conflict" case
+
+  it('registers an external conflict without installing anything', async () => {
+    // **Registering is not adopting** (ruling 23), and this is the half that says
+    // so: the snippet list, the selection and the projection are all exactly where
+    // they were after the registration, and only the confirmed reload moves them.
+    const commands = scriptedCommands();
+    const state = await withTheSecondSnippetSelected(commands);
+    const before = state.selected;
+
+    state.rememberExternalConflict(externalObservation());
+
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+    expect(state.scopedMatches).toHaveLength(2);
+    expect(state.selected).toBe(before);
+    expect(state.notice).toBeNull();
+    expect(commands.reloadDocument).not.toHaveBeenCalled();
+  }); // End of the "registration installs nothing" case
+
+  it('answers all three adoption outcomes for an external-origin conflict', async () => {
+    // **Ruling 23's other half: origin may not change who installs.**
+    // `adoptDiskVersion` is still the only door and still answers its own three
+    // values — and it answers them for a conflict no save produced.
+    const state = await withTheSecondSnippetSelected(scriptedCommands());
+    const observation = externalObservation();
+    const registered = state.rememberExternalConflict(observation);
+    const model = externalModelOf(observation);
+    // The memo is what ties the two together: the model built from the observation
+    // carries the identical origin object the registration wrote down.
+    expect(model.source).toBe(registered);
+
+    const confirmation = confirmReloadDiskVersion(model);
+    expect(state.adoptDiskVersion(model, confirmation)).toBe('installed');
+    // The window really moved, so `installed` is not a word for doing nothing.
+    expect(state.scopedDocument?.revision).toBe('rev-c');
+    expect(state.scopedMatches).toHaveLength(1);
+    // One click, one install: the same token a second time is refused.
+    expect(state.adoptDiskVersion(model, confirmation)).toBe('refused');
+    // And a fresh confirmation is `alreadyThere`, because the window now holds
+    // exactly the bytes that were asked for.
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('alreadyThere');
+  }); // End of the "three adoption outcomes for an external origin" case
+
+  it('refuses a second model built from an equal but distinct observation', async () => {
+    // **Object identity, never value equality.** Two narrowings of one wire
+    // snapshot are two observations here, and only the registered one can install.
+    // Nothing in TypeScript says so, which is why this is a case.
+    const state = await withTheSecondSnippetSelected(scriptedCommands());
+    state.rememberExternalConflict(externalObservation());
+    const lookalike = externalModelOf(externalObservation());
+    expect(state.adoptDiskVersion(lookalike, confirmReloadDiskVersion(lookalike))).toBe('refused');
+    expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+  }); // End of the "an equal observation is a different origin" case
+
+  it('does not renew a registration when one observation is registered twice', async () => {
+    // **A second registration is not a second conflict, and it may not restore an
+    // authority the window has already outlived** (Phase 2d-5-5a's review, finding
+    // 1). The origin object is memoized on the observation, so registering the same
+    // observation again lands on the *same* key — and writing the current
+    // projection generation there would erase the very fact the generation is kept
+    // for: that the window moved after this conflict arrived. The scenario is the
+    // "projection replaced" case above with one extra call in the middle, and
+    // without the first-registration-wins rule it installs `rev-c` over `rev-d` and
+    // reports `installed` for moving the window backwards.
+    const later = makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-d',
+      matches: [makeMatch({ node: 70, document: 2, revision: 'rev-d', trigger: ':later' })]
+    });
+    const state = await withTheSecondSnippetSelected(
+      scriptedCommands({ reload: { ok: true, value: later } })
+    );
+    const observation = externalObservation();
+    state.rememberExternalConflict(observation);
+    const model = externalModelOf(observation);
+    const confirmation = confirmReloadDiskVersion(model);
+
+    // Something else replaces the projection between the registration and the
+    // confirmed reload.
+    expect(await state.rereadDocument(2)).toBeNull();
+    expect(state.scopedDocument?.revision).toBe('rev-d');
+
+    // The same observation is registered again — a coalescing pass re-telling this
+    // state about a change it already knows, which is exactly what 2d-5-5b will do.
+    state.rememberExternalConflict(observation);
+
+    expect(state.adoptDiskVersion(model, confirmation)).toBe('refused');
+    // The window is exactly where the re-read left it.
+    expect(state.scopedDocument?.revision).toBe('rev-d');
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([70]);
+  }); // End of the "a second registration renews nothing" case
 
   it('installs nothing over a projection replaced since the conflict arrived', async () => {
     // **The confirmation pass's High, driven in its own order.** A conflict arrives
@@ -6646,7 +6800,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     // One model, one confirmation, and four getters that answer for whichever conflict
     // the flag names. Every one of them is a property of a value a surface assembled,
     // which is all a getter needs to be reachable from inside this method.
-    const alternating: ConflictModel<string> = {
+    const alternating: SaveConflictModel<string> = {
       ...here,
       get source() {
         if (!reentered) {
@@ -6842,9 +6996,9 @@ describe('what a conflict does to this window, and what only a confirmed reload 
 
   it('refuses a second reapply of one conflict, because one conflict has one token', async () => {
     // A reapply asks no second question, so there is no step to hold a token on;
-    // the memo on the conflict's **wire value** — `ConflictModel.source`, not the
-    // model — is what hands the second attempt the token this window has already
-    // spent.
+    // the memo on the conflict's **origin** — `ConflictModel.source`, the one
+    // object memoized per wire value, and not the model — is what hands the second
+    // attempt the token this window has already spent.
     const commands = scriptedCommands({ deletes: [deletionConflict()] });
     const state = await withTheSecondSnippetSelected(commands);
     const stuck = await conflictedDeletion(state);

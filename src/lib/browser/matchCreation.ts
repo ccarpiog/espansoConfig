@@ -197,6 +197,7 @@ import {
   type ConflictDiskText,
   type ConflictModel,
   type RetainedDraftField,
+  type SaveConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -727,7 +728,9 @@ export function chosenDestination(session: MatchCreationSession): CreationDestin
  * @param session - The form to ask about.
  * @returns The conflict model, or `null` when the form is not in one.
  */
-export function conflictOf(session: MatchCreationSession): ConflictModel<CreationBuffers> | null {
+export function conflictOf(
+  session: MatchCreationSession
+): SaveConflictModel<CreationBuffers> | null {
   return conflictArm(session.outcome);
 } // End of function conflictOf()
 

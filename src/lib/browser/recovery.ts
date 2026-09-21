@@ -129,7 +129,6 @@ import type { TranslationKey } from '../i18n/dictionaries';
 import type { IpcFailure } from '../ipc/errors';
 import type {
   Acknowledgement,
-  ConflictResult,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -140,6 +139,7 @@ import type {
   PresentationNote,
   SaveResult
 } from '../ipc/types';
+import type { ConflictSource } from './conflictSource';
 import type { DetailFieldName } from './detail';
 import {
   canRedo,
@@ -215,6 +215,7 @@ import {
   type ConflictDiskText,
   type ConflictDraftKind,
   type ConflictModel,
+  type SaveConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -815,18 +816,24 @@ const BUFFER_RULES: DraftValueRules<CreationBuffers> = structuredDraftRules<Crea
 /**
  * The conflict this recovery came from, carried and never spent.
  *
- * **The wire value whole**, exactly as `ConflictModel.source` carries it, because
+ * **The origin object whole**, exactly as `ConflictModel.source` carries it, because
  * that is the identity `BrowserState` registered when the conflict arrived and the
  * only thing that ties an adoption to the state that produced it. Nothing here
  * adopts anything — this is carried so that a caller can check that the conflict
  * it is still drawing is the one recovery was opened from, and so that a test can
  * see that recovery neither replaced nor consumed it.
+ *
+ * **It widened from the wire `ConflictResult` to the `ConflictSource` at Phase
+ * 2d-5-5a**, with the wire value still reachable through the `save` arm. The field
+ * exists for **identity**, and the identity a window registers is now the origin,
+ * so carrying the payload instead would have been carrying something no map is
+ * keyed by.
  */
 export interface RecoveryOrigin {
   /** The file the conflict was about. */
   readonly document: DocumentId;
-  /** The conflict exactly as it crossed the boundary. */
-  readonly conflict: ConflictResult;
+  /** Where the conflict came from, as the memoized origin object. */
+  readonly conflict: ConflictSource;
   /** The revision of the disk projection it carried. */
   readonly diskRevision: ContentRevision;
 }
@@ -1215,7 +1222,7 @@ export type SourceConflictState =
  */
 export function recoveryConflictOf(
   session: RecoverySession
-): ConflictModel<CreationBuffers> | null {
+): SaveConflictModel<CreationBuffers> | null {
   return conflictArm(session.outcome);
 } // End of function recoveryConflictOf()
 

@@ -19,12 +19,16 @@
  * per wire value** so identity-keyed bookkeeping keeps working, and it names the
  * origin-specific line a conflict panel will show. It arbitrates nothing, installs
  * nothing and routes nothing: which observations become conflicts at all is
- * `./observationTransitions.ts`'s (2d-5-4), and generalizing the six existing
- * conflict registrations onto {@link ConflictSource} is 2d-5-5's. **No production
- * caller reads a {@link ConflictSource} yet** — only this module's own suite does —
- * and that is still true after 2d-5-4: that step produces an
- * {@link ExternalConflictObservation} and hands it straight to a surface's
- * transition, without wrapping it in a source.
+ * `./observationTransitions.ts`'s (2d-5-4).
+ *
+ * **Phase 2d-5-5a gave it its first production readers.** `ConflictModel.source` in
+ * `./saveOutcome.ts` is a {@link ConflictSource}, the six conflict registrations in
+ * `./workspace.svelte.ts` go through {@link saveConflictSource}, and both
+ * identity-keyed maps — that module's `conflictOrigins` and this one's sibling, the
+ * reapply authorization memo — are keyed on a {@link ConflictSource}. What still has
+ * no production caller is {@link externalConflictSource}'s half of the arbitration:
+ * choosing between a save conflict and a watcher observation for one document is
+ * 2d-5-5b's, and drawing either origin is 2d-6's.
  *
  * **Two things this module does not touch, and may not.** `conflictChoicesFor` in
  * `./saveOutcome.ts` stays the only producer of a choice list — what is exported
@@ -102,9 +106,10 @@ export interface ExternalConflictObservation {
    *
    * **Usable as reapply evidence only when both of its revisions match**: its
    * `base_revision` against the retained draft's base and its `disk_revision`
-   * against this observation's. Nothing here checks either, and nothing in
-   * TypeScript expresses the pairing — that check is 2d-5-5's, and this comment is
-   * the whole of what carries the obligation until then.
+   * against this observation's. Nothing *here* checks either — `reapplyEvidenceFor`
+   * in `./reapply.ts` is the one function that does (ruling 24), and nothing in
+   * TypeScript expresses the pairing, so a caller that reads this field directly
+   * rather than through that function gets no check at all.
    */
   readonly correspondences: CorrespondenceTable | null;
 }
@@ -125,29 +130,47 @@ export interface ExternalConflictObservation {
  * the same shape type-checks — and such a wrapper would install nothing rather than
  * install the wrong thing, so it fails safe and silently.
  */
-export type ConflictSource =
-  | {
-      /** A save this application attempted was refused under the write lock. */
-      readonly kind: 'save';
-      /** The refusal exactly as it crossed the boundary. */
-      readonly conflict: ConflictResult;
-    }
-  | {
-      /** The watcher observed the file changing while a surface was open over it. */
-      readonly kind: 'externalChange';
-      /** The narrowed observation, exactly as this window narrowed it. */
-      readonly observation: ExternalConflictObservation;
-    };
+export type ConflictSource = SaveConflictSource | ExternalChangeConflictSource;
+
+/**
+ * The `save` arm of {@link ConflictSource}, named so a model can require it.
+ *
+ * **Declared apart from the union so a type can say "this one came from a save"**,
+ * which is what `SaveConflictModel` in `./saveOutcome.ts` needs: the revisions a
+ * refusal reports — `expected` and `found` — exist on this arm and on no other, and
+ * a model that carried them beside an `externalChange` source would be the optional
+ * top-level field ruling 21 forbids.
+ */
+export interface SaveConflictSource {
+  /** A save this application attempted was refused under the write lock. */
+  readonly kind: 'save';
+  /** The refusal exactly as it crossed the boundary. */
+  readonly conflict: ConflictResult;
+}
+
+/**
+ * The `externalChange` arm of {@link ConflictSource}.
+ *
+ * {@link SaveConflictSource}'s twin, and named for the same reason: the
+ * correspondence table an external conflict's reapply evidence comes from exists
+ * here and nowhere else.
+ */
+export interface ExternalChangeConflictSource {
+  /** The watcher observed the file changing while a surface was open over it. */
+  readonly kind: 'externalChange';
+  /** The narrowed observation, exactly as this window narrowed it. */
+  readonly observation: ExternalConflictObservation;
+}
 
 /**
  * One stable `save` source per wire `ConflictResult`.
  *
  * **A `WeakMap` keyed on the wire value**, so the same refusal described twice
- * recovers the identical object and every identity-keyed map — `conflictOrigins` and
- * the reapply authorization memo in `./workspace.svelte.ts` — goes on working when
- * `ConflictModel.source` widens at 2d-5-5. Weak because the key is the payload the
- * command layer handed over: when nothing holds the refusal any more, nothing should
- * hold a wrapper for it either.
+ * recovers the identical object and both identity-keyed maps — `conflictOrigins` in
+ * `./workspace.svelte.ts` and the reapply authorization memo in `./saveOutcome.ts` —
+ * go on working now that `ConflictModel.source` is a {@link ConflictSource}. Weak
+ * because the key is the payload the command layer handed over: when nothing holds
+ * the refusal any more, nothing should hold a wrapper for it either.
  *
  * **What "stable" means here, exactly.** Two calls with the **same object** answer
  * the same wrapper. Two calls with **structurally equal but distinct** objects — two
@@ -155,10 +178,13 @@ export type ConflictSource =
  * two different wrappers, and no type prevents that. It is object identity, never
  * value equality, and the wire value is the identity this application has.
  */
-const SAVE_SOURCES = new WeakMap<ConflictResult, ConflictSource>();
+const SAVE_SOURCES = new WeakMap<ConflictResult, SaveConflictSource>();
 
 /** One stable `externalChange` source per narrowed observation. */
-const EXTERNAL_SOURCES = new WeakMap<ExternalConflictObservation, ConflictSource>();
+const EXTERNAL_SOURCES = new WeakMap<
+  ExternalConflictObservation,
+  ExternalChangeConflictSource
+>();
 
 /**
  * The `save` origin of one refusal, memoized on the refusal itself.
@@ -171,12 +197,12 @@ const EXTERNAL_SOURCES = new WeakMap<ExternalConflictObservation, ConflictSource
  * @param conflict - The refusal exactly as it crossed the boundary.
  * @returns The one `save` source for it, the same object every time.
  */
-export function saveConflictSource(conflict: ConflictResult): ConflictSource {
+export function saveConflictSource(conflict: ConflictResult): SaveConflictSource {
   const held = SAVE_SOURCES.get(conflict);
   if (held !== undefined) {
     return held;
   }
-  const source: ConflictSource = Object.freeze({ kind: 'save' as const, conflict });
+  const source: SaveConflictSource = Object.freeze({ kind: 'save' as const, conflict });
   SAVE_SOURCES.set(conflict, source);
   return source;
 } // End of function saveConflictSource()
@@ -194,12 +220,12 @@ export function saveConflictSource(conflict: ConflictResult): ConflictSource {
  */
 export function externalConflictSource(
   observation: ExternalConflictObservation
-): ConflictSource {
+): ExternalChangeConflictSource {
   const held = EXTERNAL_SOURCES.get(observation);
   if (held !== undefined) {
     return held;
   }
-  const source: ConflictSource = Object.freeze({
+  const source: ExternalChangeConflictSource = Object.freeze({
     kind: 'externalChange' as const,
     observation
   });

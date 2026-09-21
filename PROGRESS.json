@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-20T20:53:26Z",
+ "updated": "2026-09-21T06:25:00Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -348,8 +348,24 @@
   {
    "id": "2d-5-5",
    "title": "External conflicts and save arbitration",
+   "status": "in_progress",
+   "risk": "high",
+   "summary": "Seven steps; 1 to 4 closed, step 5 split on 2026-09-21 into 2d-5-5a (closed) and 2d-5-5b (next)."
+  },
+  {
+   "id": "2d-5-5a",
+   "title": "The ConflictSource union, the memoized save source and the six registrations",
+   "status": "done",
+   "risk": "high",
+   "summary": "ConflictModel splits into save and external arms, both identity-keyed maps re-key to the origin union, and reapply evidence switches on origin behind a two-revision gate.",
+   "review": "docs/reviews/phase-2d-5-5a.md",
+   "narrative": "docs/decisions/2d-5-5a-notes.md"
+  },
+  {
+   "id": "2d-5-5b",
+   "title": "Save arbitration — coalescing, supersession and the in-flight write barrier",
    "status": "queued",
-   "summary": "Not started."
+   "summary": "Not started; it needs 2d-5-5a's origin union before it can arbitrate between a save conflict and a watcher observation."
   },
   {
    "id": "2d-5-6",
@@ -386,7 +402,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 4 are closed and step 5 is under way at its fourth sub-step; steps 6 to 8 are queued."
+   "summary": "Steps 1 to 4 are closed and step 5 is under way with its first half 2d-5-5a closed; steps 6 to 8 are queued."
   },
   {
    "id": "3",

@@ -42,6 +42,7 @@ import type {
   DiskAdoptionOutcome,
   RefusedModel,
   ReloadConfirmation,
+  SaveConflictModel,
   SaveOutcomeModel
 } from './saveOutcome';
 
@@ -220,11 +221,16 @@ export function refusedArm<T>(outcome: SaveOutcomeModel<T> | null): RefusedModel
 /**
  * The conflict arm of an outcome, or `null`.
  *
+ * **A `SaveConflictModel` and not the origin union**, because a `SaveOutcomeModel`
+ * is what a save ended as: its conflict arm can only have come from a refused write
+ * attempt, and saying so here is what keeps `expected` and `found` reachable from
+ * the panels that draw them.
+ *
  * @typeParam T - The drafted value.
  * @param outcome - How the last save ended, or `null`.
  * @returns The conflict model, which carries the retained draft, or `null`.
  */
-export function conflictArm<T>(outcome: SaveOutcomeModel<T> | null): ConflictModel<T> | null {
+export function conflictArm<T>(outcome: SaveOutcomeModel<T> | null): SaveConflictModel<T> | null {
   return outcome !== null && outcome.kind === 'conflict' ? outcome : null;
 } // End of function conflictArm()
 

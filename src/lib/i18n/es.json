@@ -149,6 +149,9 @@
   "browser.reapply.obstacle.evidenceNotATarget": "La evidencia de correspondencia que traía este conflicto no nombra ningún fragmento que buscar, y este panel necesita uno.",
   "browser.reapply.obstacle.anchorCorrespondence": "espansoConfig no ha podido identificar en la versión en disco el fragmento tras el cual debía colocarse este.",
   "browser.reapply.obstacle.evidenceNotAnAnchor": "Este cambio nombra un fragmento tras el cual colocarse, y la evidencia de correspondencia que traía este conflicto no nombra ninguno.",
+  "browser.reapply.externalEvidence.noCorrespondence": "La lectura que avisó a espansoConfig de que este archivo había cambiado no traía ninguna correspondencia, así que aquí no hay nada con lo que comparar lo que has conservado. No se ha escrito nada.",
+  "browser.reapply.externalEvidence.baseRevisionMoved": "La correspondencia que traía esa lectura se calculó a partir de una versión de este archivo distinta de aquella desde la que empezaste, así que no dice nada sobre lo que has conservado. No se ha escrito nada.",
+  "browser.reapply.externalEvidence.diskRevisionMoved": "La correspondencia que traía esa lectura se calculó frente a una versión en disco distinta de la que se muestra aquí, así que es evidencia sobre un estado que no se te ha mostrado. No se ha escrito nada.",
 
   "browser.saveOutcome.fileWritten": "Se ha escrito el archivo. Lo que hay ahora en el disco es exactamente el texto que se envió.",
   "browser.saveOutcome.nothingToWrite": "El texto ya era exactamente el que tenía el archivo, así que no se ha escrito nada. Las dos comprobaciones se han hecho igualmente; es un guardado que no tenía nada que hacer.",

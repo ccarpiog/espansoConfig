@@ -162,6 +162,7 @@ import {
   type ConflictDiskText,
   type ConflictOperation,
   type ConflictModel,
+  type SaveConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -467,7 +468,7 @@ export function startMatchDeletion(
  * @param session - The session to ask about.
  * @returns The conflict model, or `null` when the session is not in one.
  */
-export function conflictOf(session: MatchDeletionSession): ConflictModel<MatchId> | null {
+export function conflictOf(session: MatchDeletionSession): SaveConflictModel<MatchId> | null {
   return conflictArm(session.outcome);
 } // End of function conflictOf()
 

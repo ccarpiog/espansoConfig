@@ -1,12 +1,13 @@
 /**
  * The conflict-origin vocabulary — Phase 2d-5-1.
  *
- * **Model and type tests only.** Nothing in this repository consumes
- * `ConflictSource` yet: 2d-5-5 is where the six existing conflict registrations are
- * generalized onto it and 2d-6 is where a panel draws an origin line. What is
- * checkable now is what this step actually shipped — that one wire value yields one
- * object, that two origins are told apart by a `switch` a third arm would break, and
- * that both origin lines reach a real sentence in both dictionaries.
+ * **Model and type tests only, and they are about this module alone.** Phase 2d-5-5a
+ * generalized the six conflict registrations and both identity-keyed maps onto
+ * `ConflictSource`, and those are driven in `saveOutcome.test.ts` and
+ * `workspace.test.ts`; 2d-6 is where a panel draws an origin line, and nothing draws
+ * one yet. What this file pins is what this step shipped — that one wire value yields
+ * one object, that two origins are told apart by a `switch` a third arm would break,
+ * and that both origin lines reach a real sentence in both dictionaries.
  *
  * **What no case here establishes**, said in the same breath as what they do:
  * nothing pins what either sentence *means*. The i18n suites check key parity and

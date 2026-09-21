@@ -323,6 +323,7 @@ import {
   type ConflictDiskText,
   type ConflictModel,
   type ConflictOperation,
+  type SaveConflictModel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel
 } from './saveOutcome';
@@ -1939,7 +1940,7 @@ export function targetRevisionObserved(
  * @param session - The session to ask about.
  * @returns The conflict model, or `null` when the session is not in one.
  */
-export function conflictOf(session: RestoreSession): ConflictModel<string> | null {
+export function conflictOf(session: RestoreSession): SaveConflictModel<string> | null {
   return conflictArm(session.outcome);
 } // End of function conflictOf()
 

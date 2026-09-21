@@ -4587,3 +4587,48 @@ assumed**: the third case, re-run against the whole fix minus only the hoisted `
 identically — so it is evidence for the materialization and not for the blocked arm's recheck.
 **Nothing was discarded**: no candidate passed against both trees. The eleven comment and record
 fixes have no case and the record says so rather than implying one.
+
+## Phase 2d-5-4-G's verification narrative — archived 2026-09-21 at Phase 2d-5-5a
+
+**Verbatim and unedited.** It is the block `PROGRESS.md` carried at the rung `1320 / 443 / 2415 / 189`,
+replaced when Phase 2d-5-5a moved the rung to `1320 / 443 / 2433 / 189`. Nothing in it is superseded:
+each figure was true of the tree that committed it, and the three method rules it states — the two
+complementary questions asked of the Rust gate, both bundle oracles read, and a pinning case confirmed
+against the **whole** pre-fix tree rather than a partial revert — are still binding.
+
+### The rung moved by two, and only by this round's own two cases
+
+**With the instrument in the working tree the four commands answer `1320 / 443 / 2415 / 189`** —
+`cargo test --workspace` / `npm run check` files / `npm test` / `npm run build` modules. **Measured in
+full by the orchestrator at 2d-5-4-G**, on the final tree, each command run on its own and **nothing
+run concurrently with `cargo`**:
+
+| Gate | Was at 2d-5-4-F | Now | Why it moved, or did not |
+|---|---|---|---|
+| `cargo test --workspace` | 1320 | **1320** | no Rust source changed — the only tracked change under `src-tauri/` is the instrument's `main.rs` hook |
+| `npm run check` files | 443 | **443** | no file added or removed; the fix is inside five existing files |
+| `npm test` | 2413 | **2415** | +2, one case per behavioural fix |
+| `npm run build` modules | 189 | **189** | no new module and no new styled component; `MatchCreator.svelte`'s change is a comment |
+
+**Both complementary questions were asked of the Rust gate**, not one: the sum over **26** `test result`
+lines, **no line lacking `0 failed`** and **no line lacking `0 filtered out`**. It completed on the
+first attempt, so the stale-`target/` host finding has not recurred for **ten** phases. Clippy
+(`cargo clippy --workspace --all-targets -- -D warnings`, exit 0), `cargo fmt --check` (exit 0) and
+`cargo tree -p espansoconfig-core | rg tauri` (finds nothing) are clean. `npm run check` → **443 files,
+0 errors, 0 warnings**; `npm test` → **2415 passed in 61 files**; `npm run build` → **189 modules**, and
+**both bundle oracles were read and both lines are reported**: server-only markers **absent**,
+client-only markers **present (2)**. **The instrument's pin was re-checked** and holds at
+`5 insertions(+), 1 deletion(-)`.
+
+**No gate caught either blocker and none could have** — both are reachable only through an injected
+accessor, which is this chain's standing coverage bound and is recorded as such (§9 item 4 of the
+notes). **Two cases pin the two behavioural fixes, and each was confirmed to fail against the whole
+`git show HEAD:` tree** rather than a partial revert, with the messages verbatim in
+`2d-5-4-G-notes.md` §8.1: `AssertionError: expected [ { document: 9, status: { …(1) } } ] to deeply
+equal []` for the removal fence, and `AssertionError: expected [ '/tmp/espanso' ] to deeply equal []`
+for the recovery's comparison. **Three further placement probes were measured rather than assumed**:
+the comparison moved above the registry read fails identically, moved below the two state writes it
+fails instead on `expected 'running' to be 'blockedByLostHistory'`, and the pre-2d-5-4-F removal shape
+**passes** the new case while failing 2d-5-4-F's own — so the **pair** of cases pins both fences and
+neither alone does. **Nothing was discarded**: no candidate passed against both trees. The thirteen
+comment and record fixes have no case and the record says so rather than implying one.

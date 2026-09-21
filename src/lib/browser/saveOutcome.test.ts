@@ -20,6 +20,12 @@
  *
  * And the scope is no longer a caller's word: there are two describers, and the
  * whole-document one can only be reached with an outcome that came out of a seal.
+ *
+ * Since Phase 2d-5-5a the conflict arm has **two origins**, and the suite about them
+ * pins the half that is this module's: one wire refusal yields one origin object
+ * however many times it is described, the three save-only fields are on the save arm
+ * and on no other, and an external conflict says nothing about a save. The window
+ * side of the same ruling — who may install one — is `workspace.test.ts`'s.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -33,6 +39,12 @@ import type {
   RefusedResult,
   SavedResult
 } from '../ipc/types';
+import {
+  conflictOriginMessage,
+  externalConflictSource,
+  saveConflictSource,
+  type ExternalConflictObservation
+} from './conflictSource';
 import { editDraft, startDraft, textDraftRules, type Draft } from './draft';
 import { makeDocument } from './fixtures';
 import type { WholeDocumentSaved } from './invalidation';
@@ -44,6 +56,7 @@ import {
   confirmReloadDiskVersion,
   copyOfDraft,
   describeEditSave,
+  describeExternalConflict,
   describeWholeDocumentSave,
   draftFieldStatusKey,
   invalidationFailureMessage,
@@ -57,11 +70,11 @@ import {
   type ConflictCapabilities,
   type ConflictChoice,
   type ConflictDraftKind,
-  type ConflictModel,
   type ConflictOperation,
   type DraftFieldStatus,
   type OutcomeArm,
   type RetainedDraftField,
+  type SaveConflictModel,
   type SaveOutcomeMessage
 } from './saveOutcome';
 import { draftKindWording } from './draftKind';
@@ -253,7 +266,7 @@ function conflictModel(
   diskRevision: ContentRevision = AFTER,
   draft: Draft<string> = draftInHand(),
   surface: ConflictCapabilities = RAW_EDITOR
-): ConflictModel<string> {
+): SaveConflictModel<string> {
   const model = describeWholeDocumentSave(conflictWith(diskRevision), draft, surface);
   if (model.kind !== 'conflict') {
     throw new Error('the conflict arm is what this case is about');
@@ -545,6 +558,140 @@ describe('a conflict, which is terminal and honest', () => {
     );
   }); // End of the "names the reapply control" case
 }); // End of the "conflict" suite
+
+describe('the two conflict origins', () => {
+  /**
+   * One narrowed observation of the same file, with no correspondence table.
+   *
+   * A fresh object every call, so a case about identity can tell *the same*
+   * observation from an equal one.
+   *
+   * @returns The observation, as this window would have narrowed it.
+   */
+  function observation(): ExternalConflictObservation {
+    return {
+      sequence: 4,
+      document: 3,
+      previousRevision: BASE,
+      diskRevision: AFTER,
+      diskText: DISK_TEXT,
+      disk: makeDocument({ id: 3, revision: AFTER }),
+      findings: [],
+      correspondences: null
+    };
+  } // End of function observation()
+
+  it('gives two descriptions of one refusal the identical origin object', () => {
+    // **The memo is what makes the identity-keyed maps work across descriptions.**
+    // `describeWholeDocumentSave` builds a fresh model per call, so the model is
+    // not an identity; the origin is, and both models must carry the same one or
+    // `conflictOrigins` and the reapply authorization memo would each answer for
+    // one description and not the other.
+    const result = conflictWith();
+    const first = describeWholeDocumentSave(result, draftInHand(), RAW_EDITOR);
+    const second = describeWholeDocumentSave(result, draftInHand(), RAW_EDITOR);
+    expect(first).not.toBe(second);
+    expect(first.kind).toBe('conflict');
+    expect(second.kind).toBe('conflict');
+    if (first.kind !== 'conflict' || second.kind !== 'conflict') {
+      throw new Error('the conflict arm is what this case is about');
+    }
+    expect(first.source).toBe(second.source);
+    // And it is the memo's object, not a wrapper this describer minted for itself.
+    expect(first.source).toBe(saveConflictSource(result));
+    // What it is *not*: value equality. A structurally equal refusal is a second
+    // wire value and gets a second object, and no type prevents that.
+    expect(saveConflictSource(conflictWith())).not.toBe(first.source);
+  }); // End of the "one refusal, one origin object" case
+
+  it('carries the refusal whole inside the save arm, and the three save-only fields beside it', () => {
+    const result = conflictWith();
+    const model = describeWholeDocumentSave(result, draftInHand(), RAW_EDITOR);
+    if (model.kind !== 'conflict') {
+      throw new Error('the conflict arm is what this case is about');
+    }
+    expect(model.source.kind).toBe('save');
+    expect(model.source.conflict).toBe(result);
+    // `expected`, `found` and `changedAgain` are required on this arm and exist on
+    // no other. **The type is what forbids reading one off an external conflict**;
+    // this case is the run-time half, and it can only show that the save arm really
+    // has them.
+    expect(model.expected).toBe(BASE);
+    expect(model.found).toBe(AFTER);
+    expect(model.changedAgain).toBe(false);
+  }); // End of the "save arm carries the save-only fields" case
+
+  it('builds an external conflict with no save behind it and none of those fields', () => {
+    const seen = observation();
+    const model = describeExternalConflict(seen, draftInHand(), RAW_EDITOR);
+    expect(model.kind).toBe('conflict');
+    expect(model.source.kind).toBe('externalChange');
+    expect(model.source.observation).toBe(seen);
+    expect(model.source).toBe(externalConflictSource(seen));
+    // The disk side is the observation's, unchanged: the same three bytes a
+    // normaliser would touch come through as they were narrowed.
+    expect(model.diskRevision).toBe(AFTER);
+    expect(model.diskText).toBe(DISK_TEXT);
+    // **None of the three save-only fields is present.** The type says so and this
+    // is the run-time half: an optional field at the top level is exactly what
+    // would let this origin masquerade as the other.
+    for (const absent of ['expected', 'found', 'changedAgain']) {
+      expect(Object.hasOwn(model, absent), absent).toBe(false);
+    } // End of the loop over the three save-only field names
+  }); // End of the "external conflict carries none of the save-only fields" case
+
+  it('says nothing about a save in the lines an external conflict shows', () => {
+    // Ruling 23: an external conflict may say only that the file changed while the
+    // surface was open and that no write was made in response. *Nothing was
+    // written* would be read as *your save wrote nothing*, and there was no save;
+    // *changed again since the refusal* names a refusal that never happened.
+    const model = describeExternalConflict(observation(), draftInHand(), RAW_EDITOR);
+    expect(model.messages).not.toContainEqual({ kind: 'nothingWasWritten' });
+    expect(model.messages).not.toContainEqual({ kind: 'changedAgainSinceRefusal' });
+    expect(model.messages).toContainEqual({ kind: 'changedElsewhere' });
+    // **The surface's declared capabilities are unchanged by the origin**
+    // (ruling 23): the raw editor's reload still reseeds its draft and the mover's
+    // still abandons an operation nobody typed, and the same two declarations
+    // decide both lines here as they do for a refusal.
+    expect(model.messages).toContainEqual({ kind: 'draftKeptInMemory' });
+    expect(model.messages).toContainEqual({ kind: 'reloadDiscardsDraft' });
+    const operation = describeExternalConflict(observation(), draftInHand(), MOVER);
+    expect(operation.messages).toContainEqual({ kind: 'operationKeptInMemory' });
+    expect(operation.messages).toContainEqual({ kind: 'reloadAbandonsOperation' });
+    // What did and did not happen is the origin line's, and it is a different line
+    // from the one a refusal shows.
+    expect(conflictOriginMessage(model.source)).toEqual({ kind: 'changedWhileOpen' });
+    expect(conflictOriginMessage(saveConflictSource(conflictWith()))).toEqual({
+      kind: 'refusedSave'
+    });
+  }); // End of the "external conflict says nothing about a save" case
+
+  it('offers an external conflict its controls through the one producer, and no other', () => {
+    // **Ruling 23's half that origin may not change.** `conflictChoicesFor` takes
+    // the surface's declaration and the reload step and nothing else — it cannot be
+    // told which origin is showing — so the list an external conflict offers is the
+    // same list, decided in the same place. What this case can show is that neither
+    // model carries a choice list of its own for a renderer to prefer, which is the
+    // second-answer defect the field `conflictChoicesFor` replaced once was.
+    const external = describeExternalConflict(observation(), draftInHand(), RAW_EDITOR);
+    const save = conflictModel();
+    for (const model of [external, save]) {
+      expect(Object.hasOwn(model, 'choices')).toBe(false);
+    } // End of the loop over the two origins
+    expect(conflictChoicesFor(RAW_EDITOR, 'idle')).toEqual([
+      'keepEditing',
+      'copyDraft',
+      'reloadDiskVersion'
+    ]);
+  }); // End of the "one choice producer for both origins" case
+
+  it('keeps the retained draft of an external conflict exactly as it was', () => {
+    const draft = draftInHand();
+    const model = describeExternalConflict(observation(), draft, RAW_EDITOR);
+    expect(model.draft).toBe(draft);
+    expect(copyOfDraft(model)).toBe(draft.value);
+  });
+}); // End of the "two conflict origins" suite
 
 describe('the one authority that decides what a conflict offers', () => {
   /**

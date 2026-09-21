@@ -54,6 +54,24 @@
  * adoption path takes, and it can only be obtained from a conflict together with
  * the confirmation issued **for that conflict**.
  *
+ * ## The conflict arm has two origins since Phase 2d-5-5a
+ *
+ * A conflict used to mean one thing: a save this application attempted was refused
+ * under the write lock. The watcher adds a second — the file changed on disk while a
+ * surface was open over it — and the design consult's Q6 rules that the two are told
+ * apart by a **discriminated `ConflictSource`** (`./conflictSource.ts`) rather than
+ * by widening the save type. So {@link ConflictModel} is a union: the save arm
+ * carries `expected`, `found` and `changedAgain`, which are facts about a refused
+ * write attempt, and the external arm carries none of them. Optional fields at the
+ * top level would have let each origin masquerade as the other, and the sentences a
+ * person reads are exactly what must not be interchangeable.
+ *
+ * **{@link SaveOutcomeModel}'s conflict arm is the *save* arm and stays so**,
+ * because its only two producers take a save's own result. What origin may not
+ * change is who installs and who offers: {@link conflictChoicesFor} is still the
+ * only producer of a choice list, and `BrowserState.adoptDiskVersion` is still the
+ * only confirmed-install door.
+ *
  * ## Why there are two describers and no `scope` parameter
  *
  * `describeRawSave`'s first line is *this replaces the entire document*, which is
@@ -80,6 +98,14 @@ import type {
   SaveResult,
   SaveVerdict
 } from '../ipc/types';
+import {
+  externalConflictSource,
+  saveConflictSource,
+  type ConflictSource,
+  type ExternalChangeConflictSource,
+  type ExternalConflictObservation,
+  type SaveConflictSource
+} from './conflictSource';
 import { reloadedDraft, type Draft } from './draft';
 import { draftKindWording, type ConflictDraftKind } from './draftKind';
 import type { InvalidationStatus, WholeDocumentOutcome } from './invalidation';
@@ -695,24 +721,20 @@ export interface RefusedModel {
 }
 
 /**
- * The file moved on under the save, **nothing was written**, and the draft is
- * here.
+ * Everything both conflict origins carry, and nothing either one carries alone.
  *
- * The terminal, honest conflict state of `docs/decisions/2c-split-notes.md`
- * section 6 — a complete first implementation rather than half of 2c-4's rebase.
- * It **carries the retained draft** rather than asserting that one was retained,
- * and reloading is a transition off this state rather than a boolean on it.
+ * **Not exported, and not a value anything holds**: the two arms below are what a
+ * caller names, and {@link ConflictModel} is their union. It exists so the fields
+ * that really are common — the disk side, the retained draft and the lines —
+ * are written once rather than twice, which is what stops the two arms drifting
+ * into two descriptions of the same fact.
  *
  * @typeParam T - The drafted value.
  */
-export interface ConflictModel<T> {
+interface ConflictModelCommon<T> {
   /** Which arm this is. */
   readonly kind: 'conflict';
-  /** The revision the save was based on — what the editor loaded. */
-  readonly expected: ContentRevision;
-  /** The revision the locked read found: the bytes that refused the save. */
-  readonly found: ContentRevision;
-  /** The revision of the fresh read taken after the refusal. */
+  /** The revision of the disk observation this conflict is about. */
   readonly diskRevision: ContentRevision;
   /**
    * The projection of that fresh read.
@@ -739,10 +761,11 @@ export interface ConflictModel<T> {
    * ordinary fields — and what it rests on is that one production function in Rust
    * builds them.
    *
-   * **Not the text at {@link ConflictModel.found}.** When
-   * {@link ConflictModel.changedAgain} is true the file moved twice and this is
-   * the later of the two observations, so no message may present it as the bytes
-   * that refused the save.
+   * **Not the text at {@link SaveConflictModel.found}, on the save arm.** When
+   * {@link SaveConflictModel.changedAgain} is true the file moved twice and this
+   * is the later of the two observations, so no message may present it as the
+   * bytes that refused the save. On the external arm there is no `found` at all,
+   * because nothing was attempted and nothing refused it.
    *
    * **This is the disk side of the comparison, and it supersedes a second read.**
    * Until 2c-4a-2 the raw editor was handed the text by a separate `document_text`
@@ -754,27 +777,7 @@ export interface ConflictModel<T> {
    */
   readonly diskText: string;
   /**
-   * The conflict exactly as it crossed the boundary.
-   *
-   * **Carried whole rather than reduced to its fields**, which is
-   * {@link RefusedModel.refusal}'s reason one arm along: it is the identity
-   * `BrowserState` registered when this conflict arrived, and the only thing that
-   * ties an adoption to *the state that produced it* and to *the projection it was
-   * produced against*. A model assembled from loose fields names no conflict any
-   * window ever saw, and `adoptDiskVersion` refuses it — which is what closes the
-   * 2c-4a-2 confirmation pass's High.
-   */
-  readonly source: ConflictResult;
-  /**
-   * Whether the file changed **again** between the refusal and the read after it.
-   *
-   * `found` and `diskRevision` are two observations, not two names for one: when
-   * they differ, some writer changed the file a second time, and presenting the
-   * two as descriptions of the same bytes would be a false statement.
-   */
-  readonly changedAgain: boolean;
-  /**
-   * The draft, exactly as it was when the save was refused.
+   * The draft, exactly as it was when this conflict was raised.
    *
    * **This is what "nothing was discarded" means here.** A model that had thrown
    * the draft away could not be built, because the field is required and there is
@@ -783,14 +786,119 @@ export interface ConflictModel<T> {
   readonly draft: Draft<T>;
   /** The lines to show, in order. */
   readonly messages: readonly SaveOutcomeMessage[];
-}
+} // End of interface ConflictModelCommon
+
+/**
+ * The file moved on under the save, **nothing was written**, and the draft is
+ * here.
+ *
+ * The terminal, honest conflict state of `docs/decisions/2c-split-notes.md`
+ * section 6 — a complete first implementation rather than half of 2c-4's rebase.
+ * It **carries the retained draft** rather than asserting that one was retained,
+ * and reloading is a transition off this state rather than a boolean on it.
+ *
+ * **It is one arm of {@link ConflictModel} since Phase 2d-5-5a, and the split is
+ * what keeps the two origins from masquerading as one another** (ruling 21). The
+ * three fields below are facts about a *refused write attempt*: there is no
+ * revision a watcher observation was "based on", and nothing for it to have been
+ * "found" by. Declaring them optional at the top level would have made each origin
+ * expressible as the other; declaring them required on this arm makes reading one
+ * off an external conflict a compile error.
+ *
+ * @typeParam T - The drafted value.
+ */
+export interface SaveConflictModel<T> extends ConflictModelCommon<T> {
+  /**
+   * Where this conflict came from, and the refusal whole inside it.
+   *
+   * **Carried whole rather than reduced to its fields**, which is
+   * {@link RefusedModel.refusal}'s reason one arm along: it is the identity
+   * `BrowserState` registered when this conflict arrived, and the only thing that
+   * ties an adoption to *the state that produced it* and to *the projection it was
+   * produced against*. A model assembled from loose fields names no conflict any
+   * window ever saw, and `adoptDiskVersion` refuses it — which is what closes the
+   * 2c-4a-2 confirmation pass's High.
+   *
+   * **One object per wire refusal, because `saveConflictSource` memoizes it.**
+   * `describeEditSave` builds a fresh model on every call, so the wrapper — not the
+   * model — is what the identity-keyed maps are keyed on. Nothing in TypeScript
+   * forces this field to have come from that memo: a hand-built wrapper of the same
+   * shape type-checks, is not the object any map holds, and therefore installs
+   * nothing — which fails safe, and silently.
+   */
+  readonly source: SaveConflictSource;
+  /** The revision the save was based on — what the editor loaded. */
+  readonly expected: ContentRevision;
+  /** The revision the locked read found: the bytes that refused the save. */
+  readonly found: ContentRevision;
+  /**
+   * Whether the file changed **again** between the refusal and the read after it.
+   *
+   * `found` and `diskRevision` are two observations, not two names for one: when
+   * they differ, some writer changed the file a second time, and presenting the
+   * two as descriptions of the same bytes would be a false statement.
+   */
+  readonly changedAgain: boolean;
+} // End of interface SaveConflictModel
+
+/**
+ * The watcher saw the file change while this surface was open, **no write was
+ * attempted**, and the draft is here.
+ *
+ * **The second origin, and it carries strictly less** (ruling 21). There was no
+ * save, so there is no `expected`, no `found` and no `changedAgain`: what this arm
+ * knows is the observation it was narrowed from — its sequence, the disk revision,
+ * the disk text, the projection and the correspondence table — and every one of
+ * those lives on {@link ExternalChangeConflictSource.observation} rather than being
+ * copied out beside it.
+ *
+ * **Nothing in production builds one yet, and the record says so rather than
+ * implying otherwise.** {@link describeExternalConflict} is its only producer and
+ * its callers today are this repository's tests; the arbitration that decides when
+ * a watcher observation becomes a surface's conflict is 2d-5-5b's, and drawing
+ * either origin is 2d-6's.
+ *
+ * @typeParam T - The drafted value.
+ */
+export interface ExternalConflictModel<T> extends ConflictModelCommon<T> {
+  /**
+   * Where this conflict came from, and the narrowed observation whole inside it.
+   *
+   * {@link SaveConflictModel.source}'s twin, and the same identity rule holds: one
+   * object per observation, because `externalConflictSource` memoizes it, and a
+   * hand-built wrapper installs nothing.
+   */
+  readonly source: ExternalChangeConflictSource;
+} // End of interface ExternalConflictModel
+
+/**
+ * The file moved on under an open surface, **nothing was written**, and the draft
+ * is here.
+ *
+ * **Two arms since Phase 2d-5-5a, told apart by `source.kind`** — and the
+ * discriminant is nested, which TypeScript narrows for a *property* and not for the
+ * object that holds it. A consumer that needs one arm's own fields therefore
+ * narrows the model by hand, or takes the arm's type directly the way
+ * `beginReapply` in `./reapply.ts` does; nothing here forces either.
+ *
+ * @typeParam T - The drafted value.
+ */
+export type ConflictModel<T> = SaveConflictModel<T> | ExternalConflictModel<T>;
 
 /**
  * How one save ended, as the thing a screen draws.
  *
+ * **Its conflict arm is the *save* arm and not the union** (Phase 2d-5-5a). The two
+ * functions that produce a value of this type — {@link describeEditSave} and
+ * {@link describeWholeDocumentSave} — both take a `SaveResult` or a
+ * {@link WholeDocumentOutcome}, so a save outcome's conflict can only ever have come
+ * from a refused write attempt. Widening this arm to the union would have said
+ * something false about where a save's own conflict came from, and would have taken
+ * `expected` and `found` away from the eight panels that draw them.
+ *
  * @typeParam T - The drafted value, which only the conflict arm carries.
  */
-export type SaveOutcomeModel<T> = SavedModel | RefusedModel | ConflictModel<T>;
+export type SaveOutcomeModel<T> = SavedModel | RefusedModel | SaveConflictModel<T>;
 
 /**
  * Builds the `saved` arm.
@@ -905,13 +1013,14 @@ function reloadWarningFor(capabilities: ConflictCapabilities): SaveOutcomeMessag
  * @typeParam T - The drafted value.
  * @param result - The conflict, exactly as it arrived.
  * @param draft - The draft the save was made from, retained untouched.
+ * @param capabilities - The calling surface's own declaration.
  * @returns The model.
  */
 function describeConflict<T>(
   result: ConflictResult,
   draft: Draft<T>,
   capabilities: ConflictCapabilities
-): ConflictModel<T> {
+): SaveConflictModel<T> {
   const changedAgain = result.found !== result.disk_revision;
   const messages: SaveOutcomeMessage[] = [
     { kind: 'nothingWasWritten' },
@@ -944,14 +1053,86 @@ function describeConflict<T>(
     diskRevision: result.disk_revision,
     disk: result.disk,
     diskText: result.disk_text,
-    // The wire value itself, so an adoption can be matched against the conflict
-    // `BrowserState` registered rather than against a look-alike.
-    source: result,
+    // **The memoized wrapper of the wire value, not a fresh one** (ruling 22), so
+    // an adoption can be matched against the conflict `BrowserState` registered
+    // rather than against a look-alike, and so a second description of one refusal
+    // recovers the same object every identity-keyed map already holds an entry
+    // for. Nothing in TypeScript forces this call to be the memo's — a literal of
+    // the same shape type-checks here — and such a wrapper would be in no map, so
+    // it would install nothing: safe, and silent.
+    source: saveConflictSource(result),
     changedAgain,
     draft,
     messages
   };
 } // End of function describeConflict()
+
+/**
+ * Builds the `conflict` arm around a **watcher observation**, with no save behind
+ * it.
+ *
+ * **The external origin's only producer** (ruling 21), and it is deliberately not
+ * `describeConflict` widened: there is no `SaveResult` here, nothing was attempted,
+ * and the three save-only fields have no honest value to take. What it carries is
+ * the narrowed observation whole, inside the memoized source, exactly as the save
+ * arm carries its refusal.
+ *
+ * **Three lines and not five, and each omission is a decision.**
+ * {@link SaveOutcomeMessage} `nothingWasWritten` is left out because *nothing was
+ * written* here would be read as *your save wrote nothing*, and no save was made —
+ * what did and did not happen is the origin line's, `conflictOriginMessage` in
+ * `./conflictSource.ts` (ruling 23). `changedAgainSinceRefusal` is left out because
+ * there is no refusal for anything to have changed again since.
+ *
+ * **What this forces and what it does not, in the same sentence.** It forces that
+ * every external conflict this repository builds carries the memoized source and
+ * the three lines above; it cannot force that a caller supplies an observation this
+ * window really narrowed, because {@link ExternalConflictObservation} is an
+ * ordinary interface a caller can satisfy by hand.
+ *
+ * **What an unregistered observation cannot do, stated as the narrow thing it is**
+ * (this phase's review, finding 4). A model built here installs nothing *until the
+ * observation it was built from has been registered*: `adoptDiskVersion` looks the
+ * origin up in `BrowserState`'s own map, and an observation no registration ever
+ * put there is refused. It is **not** true that a hand-built observation is refused
+ * as such — `BrowserState.rememberExternalConflict` is exported, accepts any value
+ * of this interface and registers it, **trusting its caller** exactly as the six
+ * save registrations trust theirs. Provenance is not checked anywhere and no type
+ * here can check it; what the map really answers is *did this state register this
+ * object*, never *where did this object come from*.
+ *
+ * @typeParam T - The drafted value.
+ * @param observation - The narrowed observation, exactly as this window narrowed it.
+ * @param draft - The draft the surface is holding, retained untouched.
+ * @param capabilities - The calling surface's own declaration, which decides what
+ *   the conflict arm warns a reload would do.
+ * @returns The model.
+ */
+export function describeExternalConflict<T>(
+  observation: ExternalConflictObservation,
+  draft: Draft<T>,
+  capabilities: ConflictCapabilities
+): ExternalConflictModel<T> {
+  return {
+    kind: 'conflict',
+    diskRevision: observation.diskRevision,
+    disk: observation.disk,
+    diskText: observation.diskText,
+    source: externalConflictSource(observation),
+    draft,
+    messages: [
+      { kind: 'changedElsewhere' },
+      // The same shared rule the save arm uses, for the same reason: what was
+      // retained is what the drafted value *is*, and three of the six surfaces
+      // never typed anything.
+      draftKindWording<SaveOutcomeMessage>(capabilities.draftKind, {
+        authoredText: { kind: 'draftKeptInMemory' },
+        operationChoice: { kind: 'operationKeptInMemory' }
+      }),
+      reloadWarningFor(capabilities)
+    ]
+  };
+} // End of function describeExternalConflict()
 
 /**
  * Builds what a screen says about a **whole-document** save.
@@ -1349,13 +1530,17 @@ export function reloadDiskVersion<T>(
 /**
  * The one authorization each conflict's reapply may ever spend.
  *
- * **Keyed by the wire value, not by the model.** `describeEditSave` builds a fresh
- * {@link ConflictModel} on every call, so a memo keyed on the model would hand a
- * second description of *the same* conflict a second unspent token. The wire value
- * is the key `rememberTheConflict` already uses in `./workspace.svelte.ts`, for the
- * same reason; the review round of 2c-4b-2 found this map disagreeing with it.
+ * **Keyed by the conflict's origin, not by the model.** `describeEditSave` builds a
+ * fresh {@link ConflictModel} on every call, so a memo keyed on the model would hand
+ * a second description of *the same* conflict a second unspent token. The origin is
+ * the key `rememberTheConflict` uses in `./workspace.svelte.ts`, for the same
+ * reason; the review round of 2c-4b-2 found this map disagreeing with it, and Phase
+ * 2d-5-5a re-keyed both from the wire `ConflictResult` to the
+ * {@link ConflictSource} that wraps it (ruling 22) so the external origin gets the
+ * same one-token guarantee. The memo in `./conflictSource.ts` is what makes that
+ * substitution lossless: one wire value yields one source object.
  */
-const REAPPLY_AUTHORIZATIONS = new WeakMap<ConflictResult, ReloadConfirmation>();
+const REAPPLY_AUTHORIZATIONS = new WeakMap<ConflictSource, ReloadConfirmation>();
 
 /**
  * The authorization a reapply of one conflict spends.
@@ -1370,9 +1555,10 @@ const REAPPLY_AUTHORIZATIONS = new WeakMap<ConflictResult, ReloadConfirmation>()
  * attempt mints it, every later attempt for the same wire conflict gets that same
  * token back, and the window refuses it.
  *
- * **The key is {@link ConflictModel.source}, the wire value the payload carried
- * whole** — the same key `rememberTheConflict` uses in `./workspace.svelte.ts`, and
- * for the same reason. `describeEditSave` builds a fresh model per call, so a memo
+ * **The key is `ConflictModel.source`, the origin wrapping the payload the wire
+ * carried whole** — the same key `rememberTheConflict` uses in
+ * `./workspace.svelte.ts`, and for the same reason. `describeEditSave` builds a
+ * fresh model per call, so a memo
  * keyed on the model object would give a second description of one conflict a
  * second unspent token; the window would then authorize it, find the projection
  * already at the disk revision, and answer `alreadyThere` — a successful adoption
