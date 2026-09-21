@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T20:23:17Z",
+ "updated": "2026-09-21T20:23:44Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -496,7 +496,8 @@
    "summary": "Gives the raw editor and the restore surface their external-conflict sessions: seven-arm receivers, the block at every door, the CR-refusing reseed, candidate-keeping withdrawal, reapply unavailable.",
    "risk": "high",
    "review": "docs/reviews/phase-2d-6-5.md",
-   "narrative": "docs/decisions/2d-6-5-notes.md"
+   "narrative": "docs/decisions/2d-6-5-notes.md",
+   "commit": "c5ffed3"
   },
   {
    "id": "2d-6-6",
