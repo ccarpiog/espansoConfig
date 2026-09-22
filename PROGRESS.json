@@ -512,7 +512,8 @@
    "status": "done",
    "risk": "high",
    "summary": "The installed-session reader is required on all eight sessions, the operation doors read it last, and authored reapplies recheck around adoption.",
-   "review": "docs/reviews/phase-2d-6-6a.md"
+   "review": "docs/reviews/phase-2d-6-6a.md",
+   "commit": "3e1657e"
   },
   {
    "id": "2d-6-6b",
