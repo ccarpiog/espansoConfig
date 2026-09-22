@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-22T22:36:03Z",
+ "updated": "2026-09-22T22:36:21Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -522,7 +522,8 @@
    "summary": "Editor, creator and recovery receivers are registered from the detail pane; recovery is the eighth kind; reloads read the installed session last.",
    "risk": "high",
    "review": "docs/reviews/phase-2d-6-6b.md",
-   "narrative": "docs/decisions/2d-6-6b-notes.md"
+   "narrative": "docs/decisions/2d-6-6b-notes.md",
+   "commit": "2237dca"
   },
   {
    "id": "2d-6-6c",
