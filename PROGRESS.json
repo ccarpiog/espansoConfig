@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-22T23:36:36Z",
+ "updated": "2026-09-22T23:36:57Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -549,7 +549,8 @@
    "risk": "high",
    "summary": "The editor, creator and recovery panels read in a real window in English and Spanish, two carried editor fixes landed, and 2d-6-6 closes.",
    "review": "docs/reviews/phase-2d-6-6c-2.md",
-   "narrative": "docs/decisions/2d-6-6c-2-notes.md"
+   "narrative": "docs/decisions/2d-6-6c-2-notes.md",
+   "commit": "ae941cb"
   },
   {
    "id": "2d-6-7",
