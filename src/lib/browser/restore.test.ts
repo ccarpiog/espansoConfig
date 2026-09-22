@@ -422,14 +422,15 @@ const COMPETING: readonly CompetingWriteSurfaceKind[] = [
   'matchDeleter',
   'matchMover',
   'matchDuplicator',
-  'rawEditor'
+  'rawEditor',
+  'recovery'
 ];
 
 /**
  * Every surface kind, including restore's own.
  *
  * Written out with a `satisfies` for the reason every enumerated union in this
- * repository is: a union has no run-time extent, so a seventh member with no entry
+ * repository is: a union has no run-time extent, so a new member with no entry
  * here is a compile error in this file rather than a case nobody drives.
  */
 const EVERY_SURFACE = Object.keys({
@@ -439,7 +440,8 @@ const EVERY_SURFACE = Object.keys({
   matchMover: true,
   matchDuplicator: true,
   rawEditor: true,
-  restore: true
+  restore: true,
+  recovery: true
 } satisfies Record<OpenWriteSurfaceKind, true>) as readonly OpenWriteSurfaceKind[];
 
 /** A parse rejection, content-addressed to the candidate it is about. */
@@ -581,6 +583,12 @@ function closedByReplacementOf(surface: OpenWriteSurface, replaced: DocumentId):
   }
   if (surface.kind === 'restore') {
     return false;
+  }
+  // **The recovery form (Phase 2d-6-6b) is closed with the surface that mounts
+  // it**, which the pane closes by the rules above; modelled here on its own
+  // target, conservatively — a form naming no file closes as the creator does.
+  if (surface.target.kind === 'unknown') {
+    return true;
   }
   return surface.target.document === replaced;
 } // End of function closedByReplacementOf()
@@ -886,7 +894,7 @@ describe('the candidate', () => {
   }); // End of the "handed unchanged" case
 }); // End of the "candidate" suite
 
-describe('the six write surfaces a restore refuses to run beside', () => {
+describe('the seven write surfaces a restore refuses to run beside', () => {
   it('names every one of them, and never restore itself', () => {
     for (const kind of EVERY_SURFACE) {
       const surfaces: readonly OpenWriteSurface[] = [
@@ -904,7 +912,7 @@ describe('the six write surfaces a restore refuses to run beside', () => {
     ).toBeNull();
   });
 
-  it('refuses to prepare, and to confirm, for each of the six', () => {
+  it('refuses to prepare, and to confirm, for each of the seven', () => {
     for (const kind of COMPETING) {
       const surfaces: readonly OpenWriteSurface[] = [
         { kind, target: { kind: 'document', document: TARGET } }
@@ -921,10 +929,10 @@ describe('the six write surfaces a restore refuses to run beside', () => {
       // post-commit safety proof": the coordinator is rechecked immediately before a
       // submission is produced, not only when the question is put.
       expect(((onHand) => confirmRestore(onHand, at(BASE, surfaces), () => onHand))(pending()), kind).toBeNull();
-    } // End of the loop over the six competing surface kinds
+    } // End of the loop over the seven competing surface kinds
   }); // End of the "refuses to prepare and to confirm" case
 
-  it('gives each of the six its own sentence, and none of the six claims unsaved edits', () => {
+  it('gives each of the seven its own sentence, and none of the seven claims unsaved edits', () => {
     // **The dirty-unknown wording predicate.** `competingSurfaceFor` answers *a
     // surface is open*, not *a surface is dirty*: `isDirty` is derived inside each
     // surface's own session, so no coordinator can observe it (R36). The sentences
@@ -940,7 +948,7 @@ describe('the six write surfaces a restore refuses to run beside', () => {
         expect(value, `${locale}:${key}`).not.toContain('unsaved changes');
         expect(value, `${locale}:${key}`).not.toContain('cambios sin guardar');
         expect(value, `${locale}:${key}`).not.toContain('sin guardar.');
-      } // End of the loop over the six sentences
+      } // End of the loop over the seven sentences
     } // End of the loop over the two locales
     // The check is only evidence if it can fire, and the sentence this application
     // shipped with the defect is what proves it can.
@@ -964,7 +972,7 @@ describe('the six write surfaces a restore refuses to run beside', () => {
       } // End of the loop over the two editors
     } // End of the loop over the two locales
   }); // End of the "cannot read a dirty state" case
-}); // End of the "six write surfaces" suite
+}); // End of the "seven write surfaces" suite
 
 /**
  * Every arm of a write surface's target, one key each.

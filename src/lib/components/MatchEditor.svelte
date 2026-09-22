@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import {
     acknowledgeFindings,
     acknowledgementOf,
+    applyObservation,
     applySave,
     askToReloadDiskVersion,
     baseRevisionOf,
@@ -28,7 +30,9 @@
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { CreationBuffers } from '../browser/matchCreation';
   import type { MatchBuffers } from '../browser/matchEditor';
+  import type { ConflictSource } from '../browser/conflictSource';
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
+  import type { BindObservationReceiver } from '../browser/surfaceReceivers';
   import {
     recoveryAvailability,
     startMatchFieldRecovery,
@@ -68,6 +72,7 @@
   import type {
     Acknowledgement,
     ContentRevision,
+    DocumentId,
     DocumentSummary,
     DocumentView,
     MatchDraft,
@@ -184,6 +189,9 @@
     reproject,
     adoptDiskVersion,
     adoptRecoveryDiskVersion,
+    reportReceiver,
+    reportRecovery,
+    standingConflictFor,
     close,
     clock = () => Date.now()
   }: {
@@ -290,6 +298,37 @@
      * panel is the only thing here that is handed this one.
      */
     adoptRecoveryDiskVersion: AdoptTheDiskVersion<CreationBuffers>;
+    /**
+     * Reports this editor's observation receiver to the host — Phase 2d-6-6b, the
+     * 2d-6 record's §3 entry 1.
+     *
+     * **Required**, so a host cannot mount this editor without a way to be told
+     * what the window decided about its file. It is called once, when this
+     * component starts, and the binding it answers is withdrawn when it is
+     * destroyed; what the receiver does is `applyObservation` in
+     * `../browser/matchEditor.ts`, installed over whatever this editor holds.
+     * **What the required prop forces is that a host supplies one; nothing in
+     * TypeScript forces this component to call it or to withdraw** — the mounted
+     * suites are what establish both.
+     */
+    reportReceiver: BindObservationReceiver;
+    /**
+     * The same reporter, for the recovery form this editor mounts — handed to
+     * `RecoveryPanel` untouched, because the form's session and destination live
+     * inside that panel and the host registers it as a surface of its own
+     * (entry 3).
+     */
+    reportRecovery: BindObservationReceiver;
+    /**
+     * What origin the window holds as standing for one file **now** —
+     * `BrowserState.standingConflictFor`.
+     *
+     * The live half of the reapply's `StandingOriginGuard` (`../browser/reapply.ts`):
+     * this editor asks it about its own file at the end of the entry, and the
+     * recovery panel about its destination. Nothing in TypeScript forces a host to
+     * hand the window's answer rather than a captured one.
+     */
+    standingConflictFor: (document: DocumentId) => ConflictSource | null;
     close: () => void;
     /**
      * Where the typing group's boundary readings come from.
@@ -316,6 +355,26 @@
   // svelte-ignore state_referenced_locally
   let session = $state.raw(startMatchEditor(match, clock));
   const view = $derived(matchEditorView(session));
+
+  /*
+   * **The receiver, reported when this editor starts and withdrawn when it is
+   * destroyed** — Phase 2d-6-6b. A synchronous call in the component's own
+   * initialisation rather than an effect: the host registers this editor as a
+   * write surface from an effect of its own, which runs after this, so a surface
+   * the coordinator can see always has its receiver. The receiver installs
+   * `applyObservation`'s answer over the session held **now**, so a delivery that
+   * arrives during this editor's own save is held inside the session and
+   * consumed by `applySave` (entry 5). The binding is instance-bound: a later
+   * editor's report displaces this one, and this one's withdrawal then reaches
+   * nothing.
+   */
+  // svelte-ignore state_referenced_locally
+  const receiving = reportReceiver((delivery) => {
+    session = applyObservation(session, delivery);
+  });
+  onDestroy(() => {
+    receiving.withdraw();
+  });
 
   /**
    * The last *Keep my draft* attempt, or `null` when this panel has made none.
@@ -594,7 +653,16 @@
     // review, its third finding): a refused reapply leaves whatever a receiver
     // installed during it, and folding it into a session read beforehand would
     // reinstall the capture.
-    const outcome = reapplyToDiskVersion(session, adoptDiskVersion, null, () => session);
+    //
+    // **The standing-origin guard is the window's own answer** (Phase 2d-6-6b),
+    // asked about this editor's file, which is the file its conflict is about.
+    const document = session.match.document;
+    const outcome = reapplyToDiskVersion(
+      session,
+      adoptDiskVersion,
+      () => standingConflictFor(document),
+      () => session
+    );
     const attempt = attemptOfReapply(session, outcome);
     reapplyAttempt = attempt;
     session = attempt.session;
@@ -638,7 +706,16 @@
         // is what decides whether the adoption happened, and the session ends
         // only if it did — so a refusal leaves this panel open rather than
         // closing over a window that never moved.
-        const reloaded = reloadTheDiskVersion(confirmDiskReload(session), adoptDiskVersion);
+        //
+        // **The reader answers the confirmed session while the installed one is
+        // still the session it was derived from**, and the installed session
+        // otherwise, so a delivery that displaced it is answered rather than
+        // overwritten (Phase 2d-6-6b; `reloadTheDiskVersion` in `matchEditor.ts`).
+        const held = session;
+        const confirmed = confirmDiskReload(held);
+        const reloaded = reloadTheDiskVersion(confirmed, adoptDiskVersion, () =>
+          session === held ? confirmed : session
+        );
         session = reloaded;
         if (reloaded.closed) {
           close();
@@ -922,6 +999,8 @@
       )}
     {create}
     adoptDiskVersion={adoptRecoveryDiskVersion}
+    reportSurface={reportRecovery}
+    {standingConflictFor}
   />
 
   {#if view.outcome !== null}

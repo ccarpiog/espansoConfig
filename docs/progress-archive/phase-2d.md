@@ -5056,3 +5056,22 @@ client-only **present (2)**. **The Rust cell is held at 1323 and was not re-meas
 insertions(+), 1 deletion(-)`; the instrument's contribution is unchanged (Rust 0, svelte-check +1, vitest +1,
 Vite +1). 2d-6-4's narrative, formerly here, is archived verbatim in
 [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-4's verification narrative"*.
+
+### Phase 2d-6-6a's verification narrative — archived 2026-09-22 at Phase 2d-6-6b
+
+Moved verbatim from `PROGRESS.md` when 2d-6-6b closed.
+
+### Phase 2d-6-6a's verification: three frontend gates re-measured twice, the Rust cell held
+
+**`1323 / 447 / 2833 / 192`** at 2d-6-6a, from `1323 / 447 / 2817 / 192`. Measured by the orchestrator on the
+tree the worker reported (`2827`) and again on the final tree after the review's fix round (`2833`), each gate
+on its own, each exit read directly (never through a pipe): `npm run check` **447 files, 0 errors, 0 warnings**
+(unchanged — no new file); `npm test` **2833 passed, 64 files** (+16 from 2817, re-derived per file: +10 for the
+deliverables — `matchDeletion` 64 → 65, `matchMove` 106 → 107, `matchDuplication` 76 → 77, `matchEditor`
+128 → 130, `matchCreation` 96 → 98, `recovery` 90 → 92, `workspace` 321 → 322 — then +6 pinning the review's
+three findings — `workspace` 322 → 326, `recovery` 92 → 93, `matchEditor` 130 → 131; no new `.ts` file);
+`npm run build` **192 modules** (unchanged), the server-only bundle markers **absent** (`rg -c` prints nothing)
+and the client-only **present (2)**. **The Rust cell is held at 1323 and was not re-measured**: no path under
+`src-tauri/` or `crates/` changed beyond the instrument's `main.rs` hook, whose pair diff is still `5
+insertions(+), 1 deletion(-)`. 2d-6-5's narrative, formerly here, is archived verbatim in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-5's verification narrative"*.

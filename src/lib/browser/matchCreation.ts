@@ -157,11 +157,13 @@
  * `end` placement asks the table nothing, as it asks a refused save's anchor
  * nothing.
  *
- * **No component registers this receiver yet.** 2d-6-6 wires
- * `BrowserState.registerObservationReceiver` to it through `DetailPane`, which
- * also decides over which files a destination-less form is registered; until then
- * every case that drives it is a model test. {@link creationTargetOf} is the target
- * that wiring reports upward, and nothing reads it yet.
+ * **Registered since Phase 2d-6-6b.** `MatchCreator.svelte` reports a receiver that
+ * installs this module's `applyObservation` through the binding `DetailPane` hands
+ * down, and the pane registers it over the chosen file — or, while none is chosen,
+ * over every creator-eligible file (`./surfaceReceivers.ts`). The pane still builds
+ * the form's target from the `DocumentId | null` `reportDestination` carries, so
+ * {@link creationTargetOf} is a second home for that mapping, and nothing reads it
+ * yet.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -209,7 +211,8 @@ import {
   sendFailureLines,
   sendFailureOf,
   reloadWasRefused,
-  spendTheConfirmedReload,
+  confirmationOf,
+  settledAnswer,
   submissionIsStale,
   NOT_RELOADING,
   RELOAD_REFUSED,
@@ -233,7 +236,6 @@ import {
   type ObservationDelivery
 } from './observationDelivery';
 import {
-  adoptForReapply,
   anchorCorrespondence,
   anchorResolution,
   correspondenceRowFor,
@@ -269,7 +271,8 @@ import {
   type ExternalConflictModel,
   type RetainedDraftField,
   type SaveOutcomeMessage,
-  type SaveOutcomeModel
+  type SaveOutcomeModel,
+  reapplyAuthorizationFor
 } from './saveOutcome';
 import { holdsMatches } from './sidebar';
 import { recordTyping, type Clock, type TypingRun } from './typing';
@@ -725,7 +728,8 @@ export interface MatchCreationSession {
    * blocked over A until it is closed — nor that a wait the form was *not* told of,
    * because it was not registered over A when the window held the reading, is
    * recorded at all. Both are facts about where a form's receiver is registered,
-   * which is 2d-6-6's; `BrowserState.automaticReloadGuardFor(document)` answers
+   * which `DetailPane` decides since Phase 2d-6-6b (`./surfaceReceivers.ts`);
+   * `BrowserState.automaticReloadGuardFor(document)` answers
    * the window's own state for a caller that wants to reconcile the two. What the
    * map cannot see is a reading the barrier coalesced away without announcing it,
    * exactly as the editor's single slot cannot.
@@ -1479,7 +1483,9 @@ export interface StartedCreation {
  * starts nothing for a form no longer installed; {@link reapplyToDiskVersion}
  * rechecks the installed form's blocks and conflict once, immediately before
  * adopting; {@link applyCreate} / {@link createCouldNotBeSent} replay whatever
- * the receiver appended to it during their own replay, round after round.
+ * the receiver appended to it during their own replay, round after round. Since
+ * Phase 2d-6-6b {@link reloadTheDiskVersion} reads it too, before its adoption and
+ * once more after it (raw's and restore's reload shape).
  *
  * **What it forces and what it does not, in the same sentence.** It is required,
  * so no call compiles without one, and `MatchCreator.svelte` passes one at every
@@ -1881,17 +1887,68 @@ export function confirmDiskReload(session: MatchCreationSession): MatchCreationS
  * **What no type here forces**: that `adopt`'s body does anything, and that the
  * panel reading the view's `closed` really closes.
  *
+ * **The installed session is read three times: once after this function's own
+ * reads and immediately before the adoption, once more after it, and once last,
+ * after the answer is built** (the last since 2d-6-6b's review: the confirmation
+ * is snapshot through `confirmationOf` before the first read, and every read and
+ * spread of the settled session happens before `settledAnswer` in `./editorSave.ts`
+ * takes the last look, so a getter or `Proxy` trap that displaces it is answered
+ * with what it installed and nothing caller-controlled runs after that look) (Phase 2d-6-6b —
+ * 2d-6-5's review, its third finding, carried from raw's and restore's reloads).
+ * The adoption is the window's, and `BrowserState.adoptDiskVersion` copies the
+ * observation's projection before it decides — a read of caller data, and a getter
+ * there can tell the window of a later reading, which the window decides and hands
+ * to the registered receiver while this function is still inside `adopt`. So: a
+ * session displaced before the adoption is not closed and the installed session is
+ * answered, the window never asked. After the adoption the installed session is
+ * read again; when it now shows **another conflict** (by source identity) the
+ * person must decide about that one, whether the window installed this snapshot
+ * or refused it as outlived, so the installed session is answered untouched and
+ * nothing is closed over it; when it shows the same conflict with more recorded —
+ * a wait, most of all — the refused step and the closed session are built over
+ * **it**, so a wait the receiver recorded during a refused adoption survives. What
+ * that cannot force is that the required reader is honest
+ * ({@link ReadTheInstalledSession}): one answering a capture closes or refuses
+ * what it was handed, and a delivery the receiver made during the adoption is lost
+ * when the caller installs the answer.
+ *
  * @param session - The session holding a confirmation.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
- * @returns The closed session, or the same session.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
+ * @returns The closed session, the session at the terminal refused step, the same
+ *   session, or the installed session when the one handed in is no longer it or
+ *   another conflict landed during the adoption.
  */
 export function reloadTheDiskVersion(
   session: MatchCreationSession,
-  adopt: AdoptTheDiskVersion<CreationBuffers>
+  adopt: AdoptTheDiskVersion<CreationBuffers>,
+  current: ReadTheInstalledSession
 ): MatchCreationSession {
-  const spend = spendTheConfirmedReload(reloadableConflictOf(session), session.reload, adopt);
-  if (spend === 'notAttempted') {
+  // **Every read of this function's own, taken first.**
+  const step = session.reload;
+  const conflict = reloadableConflictOf(session);
+  // **The confirmation this spends, snapshot before the installed-session read**
+  // (2d-6-6b's review, its one blocker): the step is caller data, and asking it
+  // after that read would run a getter past the last look.
+  const confirmation = conflict === null ? null : confirmationOf(step);
+  // **The installed session, read once, after those reads and immediately
+  // before the adoption.** A session no longer installed is not closed, and
+  // what is installed is answered so the caller keeps it.
+  const installed = current();
+  if (installed !== session) {
+    return installed;
+  }
+  if (conflict === null || confirmation === null) {
     return session;
+  }
+  const spend = adopt(conflict, confirmation) === 'refused' ? 'refused' : 'satisfied';
+  // **Read once more, after the adoption**, which ran the window's own reads.
+  const settled = current();
+  if (settled !== session && conflictOf(settled)?.source !== conflict.source) {
+    // A replacing verdict landed during the adoption: the conflict the receiver
+    // installed is the one to decide about now, and nothing is closed over it.
+    return settledAnswer(settled, settled, current);
   }
   if (spend === 'refused') {
     // **A terminal step rather than the session unchanged**, which is the
@@ -1900,23 +1957,32 @@ export function reloadTheDiskVersion(
     // being offered and the panel says so. That is a decision about what to draw
     // and **not** a claim that a later ask would be refused too — a refusal spends
     // nothing. *Keep editing* writes NOT_RELOADING back.
-    return { ...session, reload: RELOAD_REFUSED };
+    // Built over the settled session, so a wait recorded during the adoption
+    // is carried forward.
+    return settledAnswer(settled, { ...settled, reload: RELOAD_REFUSED }, current);
   }
-  return {
-    ...session,
-    group: null,
-    submitted: null,
-    outcome: null,
-    extraMessages: [],
-    reload: NOT_RELOADING,
-    sendFailure: null,
-    // The conflict of either origin is resolved by the reload that ends this
-    // form, and a closed form says nothing about any file any more.
-    externalConflict: null,
-    uncertaintyUnresolved: false,
-    awaitingReconciliation: new Map(),
-    closed: true
-  };
+  // **Built first, then the final installed-session read** (2d-6-6b's review):
+  // the spread reads the settled session, and nothing caller-controlled may run
+  // after the look `settledAnswer` takes.
+  return settledAnswer(
+    settled,
+    {
+      ...settled,
+      group: null,
+      submitted: null,
+      outcome: null,
+      extraMessages: [],
+      reload: NOT_RELOADING,
+      sendFailure: null,
+      // The conflict of either origin is resolved by the reload that ends this
+      // form, and a closed form says nothing about any file any more.
+      externalConflict: null,
+      uncertaintyUnresolved: false,
+      awaitingReconciliation: new Map(),
+      closed: true
+    },
+    current
+  );
 } // End of function reloadTheDiskVersion()
 
 /**
@@ -1926,7 +1992,7 @@ export function reloadTheDiskVersion(
  * **The form's receiver, as a value**, in the shape `applyObservation` in
  * `./matchEditor.ts` established: a component registers a function through
  * `BrowserState.registerObservationReceiver` that calls this with the envelope and
- * installs what comes back (the wiring is 2d-6-6's), and the decision is here so a
+ * installs what comes back (`MatchCreator.svelte`, since Phase 2d-6-6b), and the decision is here so a
  * suite can drive every arm without a window. It never re-arbitrates and reads
  * none of the window's tables.
  *
@@ -2408,10 +2474,10 @@ function anchorOfEvidence(
  *
  * `unaskedGuard` in `./matchEditor.ts`, for this form: it answers the shown
  * conflict's own origin, so the supersession question the entry asks last is answered
- * *yes, it stands* without the window being asked. It exists so that the one
- * component caller, which passes `null` until 2d-6-6b hands the live closure down,
- * keeps its save-origin reapply exactly as it was; what it costs is stated on the
- * caller.
+ * *yes, it stands* without the window being asked. It exists for a caller that
+ * passes `null`; since Phase 2d-6-6b no component does — each hands the live
+ * `BrowserState.standingConflictFor` closure down — so only a model suite reaches
+ * it, and what it costs is stated on the caller.
  *
  * @param conflict - The conflict shown, or `null`.
  * @returns A guard that never asks the window.
@@ -2483,8 +2549,11 @@ function unaskedGuard(conflict: ConflictModel<CreationBuffers> | null): Standing
  * now carries either, and `supersededEvidence` when the conflict it shows is no
  * longer the one being reapplied; otherwise the rebuilt form carries the
  * **installed** form's waits forward, so a wait about another file recorded
- * during the reads survives the rebuild. Nothing caller-controlled runs between
- * that read and the adoption. **The installed form is read once more after the
+ * during the reads survives the rebuild. The three facts are read off the
+ * installed form and — since 2d-6-6b's review, its one blocker — one last look
+ * follows them (a form displaced meanwhile is answered `supersededEvidence`), so
+ * nothing caller-controlled runs between the last look and the adoption; after
+ * the adoption the answer is likewise built before a last look. **The installed form is read once more after the
  * adoption** (the 2d-6-6a review, its first finding — 2d-6-5's reload shape):
  * `adoptDiskVersion` copies the observation's projection, and a getter there can
  * tell the window of a reading the receiver records while the door is still
@@ -2495,8 +2564,9 @@ function unaskedGuard(conflict: ConflictModel<CreationBuffers> | null): Standing
  *
  * **The standing-origin guard is a parameter, and `null` is accepted for one
  * stated reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s:
- * `MatchCreator.svelte` does not yet hand the live
- * `BrowserState.standingConflictFor` closure down, and passes `null`; the
+ * `MatchCreator.svelte` has handed the live
+ * `BrowserState.standingConflictFor` closure down since Phase 2d-6-6b and passes
+ * no `null`, and the parameter stays nullable; the
  * parameter is nullable rather than defaulted since Phase 2d-6-6a, so that the
  * required reader can follow it. When no guard is handed in the supersession
  * question is not asked by the entry; what still refuses a
@@ -2595,9 +2665,9 @@ export function reapplyToDiskVersion(
   if (refusal !== null) {
     return { kind: 'manualResolution', obstacle: { kind: 'creationRefused', reason: refusal } };
   }
-  // **The installed form, read once, after the last caller-controlled read and
-  // immediately before the spend.** Nothing caller-controlled runs between this
-  // read and the door.
+  // **The installed form, read after the last caller-controlled read of the
+  // reapply's own**; its three facts below are read off it, and a last look
+  // follows them, before the door (2d-6-6b's review).
   const installed = current();
   if (installed.uncertaintyUnresolved) {
     return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
@@ -2608,7 +2678,17 @@ export function reapplyToDiskVersion(
   if (conflictOf(installed)?.source !== entry.conflict.source) {
     return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
   }
-  if (adoptForReapply(entry.conflict, adopt) === 'refused') {
+  // **Everything the spend needs, taken now, then one last look** (2d-6-6b's
+  // review, its one blocker): the three reads above are of the installed
+  // session, which is caller data, and a getter or `Proxy` trap among them can
+  // displace it. The authorization reads the conflict's origin, so it is minted
+  // before the look too; after it nothing caller-controlled runs before the door.
+  const adopted = entry.conflict;
+  const authorization = reapplyAuthorizationFor(adopted);
+  if (current() !== installed) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  if (adopt(adopted, authorization) === 'refused') {
     return { kind: 'adoptionRefused' };
   }
   // **Read again after the adoption**, which read caller data of its own (the
@@ -2618,10 +2698,18 @@ export function reapplyToDiskVersion(
   if (conflictOf(settled)?.source !== entry.conflict.source) {
     return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
   }
-  return {
+  // **Built first, then one last look at the installed session** (2d-6-6b's
+  // review): every read of the settled session above is caller data, and a
+  // session displaced during them is not rebuilt over; nothing caller-controlled
+  // runs after the look.
+  const result: MatchCreationReapply = {
     kind: 'reapplied',
     session: { ...rebuilt, awaitingReconciliation: settled.awaitingReconciliation }
   };
+  if (current() !== settled) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  return result;
 } // End of function reapplyToDiskVersion()
 
 /**
@@ -2792,8 +2880,8 @@ export interface MatchCreationView {
    * {@link canChooseDestination}: `editable`, widened by exactly the state above.
    * A renderer that gates the destination control on `editable` alone leaves a
    * destination-less form under an external conflict with no way forward, which
-   * is why this is a field of its own rather than a rule in markup. No component
-   * reads it yet.
+   * is why this is a field of its own rather than a rule in markup.
+   * `MatchCreator.svelte` gates its destination buttons on it since Phase 2d-6-6b.
    */
   readonly canChooseDestination: boolean;
   /** The presentation changes a saved arm disclosed, in report order. */
@@ -3152,9 +3240,10 @@ export function baseRevisionOf(session: MatchCreationSession): ContentRevision {
  * through an external conflict over a destination-less form**: the wildcard
  * protection entry 21 keeps is exactly that this answer does not change until the
  * person names a file, and nothing in this module writes `chosen` but
- * {@link chooseDestination}. Whether a component reports this value, and over
- * which files an `unknown` target is registered as a receiver, is 2d-6-6's;
- * nothing reads it yet.
+ * {@link chooseDestination}. Over which files an `unknown` target is registered as
+ * a receiver is decided in `DetailPane` since Phase 2d-6-6b — every
+ * creator-eligible file (`./surfaceReceivers.ts`); nothing reads this value yet,
+ * because the pane builds the target from what `reportDestination` carries.
  *
  * @param session - The form to ask about.
  * @returns The target, by the identity this window holds.

@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { triggerLabel } from '../browser/labels';
   import {
     acknowledgeCreationFindings,
     acknowledgementOf,
     applyCreate,
+    applyObservation,
     askToReloadDiskVersion,
     baseRevisionOf,
     beginCreate,
@@ -27,8 +29,10 @@
   } from '../browser/matchCreation';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { CreationBuffers } from '../browser/matchCreation';
+  import type { ConflictSource } from '../browser/conflictSource';
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
   import { recoveryAvailability, startCreationFieldRecovery } from '../browser/recovery';
+  import type { BindObservationReceiver } from '../browser/surfaceReceivers';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { Clock } from '../browser/typing';
@@ -165,6 +169,9 @@
     create,
     adoptDiskVersion,
     reportDestination,
+    reportReceiver,
+    reportRecovery,
+    standingConflictFor,
     close,
     clock = () => Date.now()
   }: {
@@ -234,6 +241,27 @@
      * @param document - The file chosen, or `null` when none is.
      */
     reportDestination: (document: DocumentId | null) => void;
+    /**
+     * Reports this form's observation receiver to the host — Phase 2d-6-6b, the
+     * 2d-6 record's §3 entry 1.
+     *
+     * **Required**, for `reportDestination`'s reason. Called once when this form
+     * starts and withdrawn when it is destroyed; the receiver installs
+     * `applyObservation` in `../browser/matchCreation.ts` over the form held now.
+     * The host registers it over the chosen file, or over every creator-eligible
+     * file while none is chosen (`../browser/surfaceReceivers.ts`). **Nothing in
+     * TypeScript forces this component to call it or to withdraw** — the mounted
+     * suites establish both.
+     */
+    reportReceiver: BindObservationReceiver;
+    /** The same reporter for the recovery form this one mounts, handed down untouched. */
+    reportRecovery: BindObservationReceiver;
+    /**
+     * What origin the window holds as standing for one file **now** —
+     * `BrowserState.standingConflictFor`, the live half of the reapply's guard.
+     * Nothing in TypeScript forces a host to hand the window's answer.
+     */
+    standingConflictFor: (document: DocumentId) => ConflictSource | null;
     /** Leaves the form. */
     close: () => void;
     /**
@@ -257,6 +285,20 @@
   // svelte-ignore state_referenced_locally
   let session = $state.raw(startMatchCreation(documents(), projections(), held(), clock));
   const view = $derived(matchCreationView(session));
+
+  /*
+   * **The receiver, reported when this form starts and withdrawn when it is
+   * destroyed** — Phase 2d-6-6b, for `MatchEditor.svelte`'s reason: a synchronous
+   * call before the host's registration effect runs, installed over the form held
+   * now, instance-bound so a later form's report displaces this one.
+   */
+  // svelte-ignore state_referenced_locally
+  const receiving = reportReceiver((delivery) => {
+    session = applyObservation(session, delivery);
+  });
+  onDestroy(() => {
+    receiving.withdraw();
+  });
 
   /**
    * The last *Keep my draft* attempt, or `null` when this panel has made none.
@@ -348,8 +390,9 @@
 
   /*
    * **The destination, reported upward — Phase 2d-5-2b.** The host registers this
-   * form as an open write surface, and a form that has not chosen a file is the
-   * one surface `OpenWriteSurface` lets name none. Until this effect existed the
+   * form as an open write surface, and a form that has not chosen a file is one of
+   * the two surfaces `OpenWriteSurface` lets name none (the recovery form is the
+   * other, since Phase 2d-6-6b). Until this effect existed the
    * choice stayed inside this component and the host could only ever say
    * *unknown*.
    *
@@ -606,7 +649,17 @@
     // review, its third finding): a refused reapply leaves whatever a receiver
     // installed during it, and folding it into a session read beforehand would
     // reinstall the capture.
-    const outcome = reapplyToDiskVersion(session, adoptDiskVersion, null, () => session);
+    //
+    // **The standing-origin guard is the window's own answer** (Phase 2d-6-6b),
+    // asked about the file this form names; a form naming none is refused
+    // `destinationRequired` before the guard is ever asked.
+    const chosen = session.chosen;
+    const outcome = reapplyToDiskVersion(
+      session,
+      adoptDiskVersion,
+      () => (chosen === null ? null : standingConflictFor(chosen)),
+      () => session
+    );
     const attempt = attemptOfReapply(session, outcome);
     reapplyAttempt = attempt;
     session = attempt.session;
@@ -651,7 +704,15 @@
         // is what decides whether the adoption happened, and the session ends
         // only if it did — so a refusal leaves this panel open rather than
         // closing over a window that never moved.
-        const reloaded = reloadTheDiskVersion(confirmDiskReload(session), adoptDiskVersion);
+        //
+        // The reader answers the confirmed form while the installed one is still
+        // the form it was derived from, and the installed form otherwise (Phase
+        // 2d-6-6b; `reloadTheDiskVersion` in `matchCreation.ts`).
+        const held = session;
+        const confirmed = confirmDiskReload(held);
+        const reloaded = reloadTheDiskVersion(confirmed, adoptDiskVersion, () =>
+          session === held ? confirmed : session
+        );
         session = reloaded;
         if (reloaded.closed) {
           close();
@@ -736,7 +797,7 @@
             type="button"
             class="choice"
             aria-pressed={view.chosen !== null && view.chosen.document === destination.document}
-            disabled={!view.editable || destination.eligibility.kind !== 'eligible'}
+            disabled={!view.canChooseDestination || destination.eligibility.kind !== 'eligible'}
             onclick={() => onDestination(destination.document)}
           >
             {destination.path}
@@ -902,6 +963,8 @@
       )}
     {create}
     {adoptDiskVersion}
+    reportSurface={reportRecovery}
+    {standingConflictFor}
   />
 
   {#if view.outcome !== null}

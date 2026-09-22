@@ -41,6 +41,7 @@ import {
 } from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { saveConflictSource, type ConflictSource } from '../browser/conflictSource';
 import { makeDocument, makeMatch, makeSummary } from '../browser/fixtures';
 import type { InvalidationStatus } from '../browser/invalidation';
 import {
@@ -49,6 +50,7 @@ import {
   type DestinationRefusal
 } from '../browser/matchCreation';
 import { recoveryChoiceKey, sourceConflictStateKey } from '../browser/recovery';
+import type { SurfaceBinding } from '../browser/surfaceReceivers';
 import type { MatchSaveAnswer } from '../browser/workspace.svelte';
 import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
 import { t, tDraftCopy } from '../i18n';
@@ -233,6 +235,39 @@ interface ScriptedAnswer {
   readonly failure?: IpcFailure;
 }
 
+/**
+ * Records the origin a window would hold as standing after one scripted answer —
+ * Phase 2d-6-6b.
+ *
+ * **The stand-in for `BrowserState.standingConflictFor`**, for
+ * `MatchEditor.test.ts`'s reason: the window registers a save conflict's origin
+ * for its file when the command answers `conflict`, and the reapply's live guard
+ * asks it; answering `null` would make every reapply refuse as superseded.
+ *
+ * @param standing - The table this suite's `standingConflictFor` reads.
+ * @param document - The file the answer is about.
+ * @param next - The scripted answer.
+ */
+function noteStanding(
+  standing: Map<DocumentId, ConflictSource>,
+  document: DocumentId,
+  next: ScriptedAnswer | undefined
+): void {
+  if (next?.result?.outcome === 'conflict') {
+    standing.set(document, saveConflictSource(next.result));
+  }
+} // End of function noteStanding()
+
+/**
+ * A reporter that binds nothing — Phase 2d-6-6b. This suite mounts the form
+ * alone; delivery through a real window is `DetailPane.test.ts`'s.
+ *
+ * @returns A binding whose two methods do nothing.
+ */
+function inertBinding(): SurfaceBinding {
+  return { reportTarget: () => undefined, withdraw: () => undefined };
+} // End of function inertBinding()
+
 /** A mounted form and everything a case needs to drive it. */
 interface Mounted {
   /** The element the component was mounted into. */
@@ -294,6 +329,7 @@ function mountCreator(
   const calls: RecordedCreate[] = [];
   const adoptions: ConflictModel<CreationBuffers>[] = [];
   const reports: (DocumentId | null)[] = [];
+  const standing = new Map<DocumentId, ConflictSource>();
   let closes = 0;
   let views: readonly DocumentView[] = [
     profile(),
@@ -319,6 +355,7 @@ function mountCreator(
       ): Promise<MatchSaveAnswer> => {
         calls.push({ document: into, newMatch, position, baseRevision, acknowledgement });
         const next = remaining.shift();
+        noteStanding(standing, into, next);
         if (next?.failure !== undefined) {
           return Promise.resolve({
             kind: 'failed',
@@ -353,6 +390,10 @@ function mountCreator(
       reportDestination: (into: DocumentId | null): void => {
         reports.push(into);
       },
+      reportReceiver: inertBinding,
+      reportRecovery: inertBinding,
+      standingConflictFor: (document: DocumentId): ConflictSource | null =>
+        standing.get(document) ?? null,
       close: (): void => {
         closes += 1;
       }

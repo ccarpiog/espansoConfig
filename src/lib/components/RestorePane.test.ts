@@ -1337,10 +1337,10 @@ describe('the mounted restore pane: the conflict', () => {
 }); // End of the "conflict" suite
 
 /**
- * The six surface kinds a restore refuses to run beside.
+ * The seven surface kinds a restore refuses to run beside.
  *
  * Written out with a `satisfies` for the reason every enumerated union in this
- * repository is: a union has no run-time extent, so a seventh competing kind with
+ * repository is: a union has no run-time extent, so a new competing kind with
  * no entry here is a compile error in this file rather than a refusal nobody
  * renders.
  */
@@ -1350,7 +1350,8 @@ const COMPETING_SURFACES = Object.keys({
   matchDeleter: true,
   matchMover: true,
   matchDuplicator: true,
-  rawEditor: true
+  rawEditor: true,
+  recovery: true
 } satisfies Record<CompetingWriteSurfaceKind, true>) as readonly CompetingWriteSurfaceKind[];
 
 /**

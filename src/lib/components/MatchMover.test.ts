@@ -61,6 +61,7 @@ import {
 } from '../browser/saveOutcome';
 import type { MovePlacement } from '../browser/matchMove';
 import { flushSync, mount, unmount } from 'svelte';
+import { saveConflictSource, type ConflictSource } from '../browser/conflictSource';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeDocument, makeMatch, makeSummary, matchListPath } from '../browser/fixtures';
 import type { InvalidationStatus } from '../browser/invalidation';
@@ -352,6 +353,11 @@ function mountMover(answers: readonly ScriptedAnswer[] = [], opened: Opened = {}
   let reloads = 0;
   const target = document.createElement('div');
   document.body.append(target);
+  // **The stand-in for `BrowserState.standingConflictFor`** — Phase 2d-6-6b. The
+  // window registers a conflict's origin for its file when the command answers
+  // `conflict`, and the reapply's live guard asks it at the end of its entry;
+  // answering `null` would make every reapply refuse as superseded.
+  const standing = new Map<DocumentId, ConflictSource>();
   const component = mount(MatchMover, {
     target,
     props: {
@@ -368,6 +374,9 @@ function mountMover(answers: readonly ScriptedAnswer[] = [], opened: Opened = {}
       ): Promise<MatchSaveAnswer> => {
         calls.push({ id, after, baseRevision, acknowledgement });
         const next = remaining.shift();
+        if (next?.result?.outcome === 'conflict') {
+          standing.set(id.document, saveConflictSource(next.result));
+        }
         if (next?.failure !== undefined) {
           return Promise.resolve({
             kind: 'failed',
@@ -397,6 +406,8 @@ function mountMover(answers: readonly ScriptedAnswer[] = [], opened: Opened = {}
         adoptions.push(conflict);
         return opened.adoption ?? 'installed';
       },
+      standingConflictFor: (document: DocumentId): ConflictSource | null =>
+        standing.get(document) ?? null,
       close: (): void => {
         closes += 1;
       }
@@ -1234,6 +1245,8 @@ describe('a move panel over the real workspace state', () => {
         // reload has been asked for *and* confirmed. The conflict suite above
         // records every call instead.
         adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
+        standingConflictFor: (document: DocumentId): ConflictSource | null =>
+          state.standingConflictFor(document),
         close: (): void => undefined
       }
     });
@@ -1331,6 +1344,8 @@ describe('a move panel over the real workspace state', () => {
         // Never reached: this case never confirms a reload, and a conflict
         // installs nothing on its own.
         adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
+        standingConflictFor: (document: DocumentId): ConflictSource | null =>
+          state.standingConflictFor(document),
         close: (): void => undefined
       }
     });

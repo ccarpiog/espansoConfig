@@ -128,7 +128,17 @@
         </button>
       </p>
     </main>
-  {:else if browser.documents.length === 0}
+  {:else if browser.documents.length === 0 && browser.openWriteSurfaces().length === 0}
+    <!-- **An empty list does not unmount a surface that is still open** — Phase
+         2d-6-6b, the 2d-6 record's §3 entry 31 and §5.2. The empty state used to
+         replace the panes the moment the last row went, which unmounted
+         `DetailPane` and every session inside it: a draft over a file that was
+         removed on disk vanished with it. `openWriteSurfaces()` is the registry's
+         reactive answer, so the panes stay while any surface is registered and
+         give way once the person closes the last one. What it cannot keep is a
+         surface the pane has not registered yet — the pane registers from an
+         effect — and nothing in TypeScript ties the condition to the pane's
+         registrations rather than to some other list. -->
     <main class="state">
       <h2>{t('browser.status.empty.heading')}</h2>
       {#if browser.summary !== null}

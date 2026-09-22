@@ -576,8 +576,10 @@ export interface ReconciliationWorkspace {
    *
    * **It is the only way an observation reaches a component**, and what a surface
    * does with one is that surface's business — `WriteSurfaceTransition` answers
-   * `void`, so nothing here learns whether a conflict was raised. Today every
-   * registered transition is a no-op, which 2d-5-5 changes.
+   * `void`, so nothing here learns whether a conflict was raised. Since Phase
+   * 2d-6-6b the transition `DetailPane.svelte` registers hands the observation to
+   * `BrowserState.observeExternalChange` for the editor, the new-snippet form and
+   * the recovery form, and is still a no-op for the other five kinds.
    *
    * @param kind - Which kind of surface.
    * @returns Its transition, or `null` when no surface of that kind is live.

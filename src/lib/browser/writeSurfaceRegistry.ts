@@ -35,19 +35,18 @@
  *
  * ## What this module does **not** ship, said plainly
  *
- * **A transition stored here is now called, and every one of them is still a
- * no-op.** The sentence this replaces said no stored transition had ever been
- * called, which was true until Phase 2d-5-4:
- * `./observationTransitions.ts` reads one through {@link
- * WriteSurfaceRegistry.transitionFor} and invokes it when an observation names a
- * file an open surface may be about. What has **not** changed is the other end —
- * `src/lib/components/DetailPane.svelte` registers all seven kinds from one
+ * **A transition stored here is called, and since Phase 2d-6-6b three kinds'
+ * transitions do something.** `./observationTransitions.ts` reads one through
+ * {@link WriteSurfaceRegistry.transitionFor} and invokes it when an observation
+ * names a file an open surface may be about (since Phase 2d-5-4).
+ * `src/lib/components/DetailPane.svelte` registers all eight kinds from one
  * `satisfies Record<OpenWriteSurfaceKind, …>` assembly, `MatchCreator.svelte`
  * reports its chosen destination through {@link
- * UnregisterWriteSurface.replaceTarget}, and every one of those surfaces registers
- * the same **no-op** transition, so nothing on a screen is derived from one yet.
- * 2d-5-5 is where the six existing conflict registrations are generalized and a
- * surface does something with what it is told.
+ * UnregisterWriteSurface.replaceTarget}, and the transition it registers hands the
+ * observation to `BrowserState.observeExternalChange` — one arbitration, delivered
+ * to every receiver over the file — for the editor, the new-snippet form and the
+ * recovery form while a receiver of that kind is reported, and is a **no-op** for
+ * the other five kinds, whose receivers are 2d-6-7's and 2d-6-8's.
  *
  * **This module deliberately contains no exhaustive assembly**, and that has not
  * changed: an exhaustiveness check that lives anywhere but the composition file
@@ -103,10 +102,10 @@ import type {
  * invokes it when an admitted observation names a file an open surface may be
  * about — the consult's Q5, *"send the observation to that surface's
  * external-conflict transition and install no projection"*
- * (`docs/reviews/phase-2d-5-design.md:149-152`). **Every transition registered in
- * production is still a no-op**, so being called changes nothing on a screen;
- * 2d-5-5 is where the six existing conflict registrations are generalized onto
- * `ConflictSource` and a surface answers by raising one.
+ * (`docs/reviews/phase-2d-5-design.md:149-152`). **Since Phase 2d-6-6b the one
+ * registered in production arbitrates** through `BrowserState.observeExternalChange`
+ * for the three kinds whose receivers are reported — the editor, the new-snippet
+ * form and the recovery form — and is still a no-op for the other five.
  *
  * **Only a `Changed`/`Addressable`/`Projected` observation can be delivered
  * through it**, because that is what its parameter is. A removal and an unreadable
@@ -167,7 +166,7 @@ export type WriteSurfaceTargetReplacement = 'replaced' | 'staleLease';
  * (`docs/reviews/phase-2d-5-design.md:42`) — and it is directly usable as what a
  * Svelte host returns from `$effect` or `onMount` as its cleanup — **which the one
  * host that exists does not do, and the reason is worth recording rather than
- * hiding.** `DetailPane.svelte` holds up to seven of these at once and reconciles
+ * hiding.** `DetailPane.svelte` holds up to eight of these at once and reconciles
  * them against an assembly, so its teardown is a loop over the leases it is
  * holding; returning one directly is available to a host that registers exactly one
  * surface for exactly as long as one effect lives, and no host in this repository
@@ -205,8 +204,8 @@ export interface UnregisterWriteSurface {
    * `MatchCreator.svelte` reports the file the person chose.
    *
    * **A document target only, and that is a shape argument rather than a
-   * restriction on purpose.** `OpenWriteSurface` lets only `matchCreator` carry an
-   * unknown target, so a parameter of the wider `WriteSurfaceTarget` would either
+   * restriction on purpose.** `OpenWriteSurface` lets only `matchCreator` and
+   * `recovery` carry an unknown target, so a parameter of the wider `WriteSurfaceTarget` would either
    * need a cast to build an unrepresentable surface or a third refusal arm for
    * something no caller wants. A surface that must go back to naming no file
    * unregisters and registers again — a re-key, where by design the newest
@@ -261,7 +260,7 @@ export interface WriteSurfaceRegistry {
    * to run inside.
    *
    * **A pairing `OpenWriteSurface` cannot represent is refused by throwing a
-   * `TypeError`.** A `kind` other than `matchCreator` read together with a
+   * `TypeError`.** A `kind` other than `matchCreator` or `recovery` read together with a
    * `target.kind` of `'unknown'` is not a value of that union — nor is a
    * `target.kind` that is neither arm — and reaching either takes a caller that has
    * defeated the compiler: a cast, or an accessor whose answer differs from its
@@ -413,8 +412,8 @@ interface LiveRegistration {
  * silently from sloppy-mode code — the registry is unchanged either way.
  *
  * Written as a branch on the kind rather than one literal so that no cast is needed:
- * TypeScript checks the `matchCreator` arm and the other arm separately, and neither
- * is built from the other.
+ * TypeScript checks the destination-choosing arm and the other arm separately, and
+ * neither is built from the other.
  *
  * @param kind - The kind, already read once by the caller.
  * @param document - The file, already read once by the caller.
@@ -426,7 +425,7 @@ function ownedDocumentSurface(kind: OpenWriteSurfaceKind, document: DocumentId):
     document
   });
   return Object.freeze(
-    kind === 'matchCreator' ? { kind: 'matchCreator' as const, target } : { kind, target }
+    kind === 'matchCreator' || kind === 'recovery' ? { kind, target } : { kind, target }
   );
 } // End of function ownedDocumentSurface()
 
@@ -439,8 +438,8 @@ function ownedDocumentSurface(kind: OpenWriteSurfaceKind, document: DocumentId):
  * so nothing can answer one kind to the key and another to the stored surface.
  *
  * **Exactly two pairings are representable, and anything else throws.** Any kind over
- * the document arm is one; `matchCreator` over the unknown arm is the other. A kind
- * other than `matchCreator` that names no file is the pairing the review named, and a
+ * the document arm is one; `matchCreator` or `recovery` over the unknown arm is the
+ * other. A kind other than those two that names no file is the pairing the review named, and a
  * discriminant that is *neither* arm is the same problem arriving by a different
  * route — both are tested for positively, so neither is coerced into the arm it looks
  * closest to. {@link WriteSurfaceRegistry.registerWriteSurface} carries the argument
@@ -460,7 +459,7 @@ function ownedSurface(kind: OpenWriteSurfaceKind, target: WriteSurfaceTarget): O
   if (targetKind === 'document') {
     return ownedDocumentSurface(kind, target.document);
   }
-  if (targetKind === 'unknown' && kind === 'matchCreator') {
+  if (targetKind === 'unknown' && (kind === 'matchCreator' || kind === 'recovery')) {
     return Object.freeze({ kind, target: Object.freeze({ kind: 'unknown' as const }) });
   }
   throw new TypeError(

@@ -10105,10 +10105,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       const installing = await withTheSecondSnippetSelected(scriptedCommands());
       const first = editorOver(installing);
       installing.observeExternalChange(externalObservation());
-      const closed = reloadTheDiskVersion(
-        confirmDiskReload(askToReloadDiskVersion(first.current())),
-        installing.adoptDiskVersion
-      );
+      const closed = ((onHand) => reloadTheDiskVersion(onHand, installing.adoptDiskVersion, () => onHand))(confirmDiskReload(askToReloadDiskVersion(first.current())));
       expect(closed.closed).toBe(true);
       expect(closed.externalConflict).toBeNull();
       expect(installing.scopedDocument?.revision).toBe('rev-c');
@@ -10124,10 +10121,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       const elsewhere = externalModelOf(seen);
       expect(satisfied.adoptDiskVersion(elsewhere, confirmReloadDiskVersion(elsewhere))).toBe('installed');
       const before = satisfied.scopedDocument;
-      const alsoClosed = reloadTheDiskVersion(
-        confirmDiskReload(askToReloadDiskVersion(second.current())),
-        satisfied.adoptDiskVersion
-      );
+      const alsoClosed = ((onHand) => reloadTheDiskVersion(onHand, satisfied.adoptDiskVersion, () => onHand))(confirmDiskReload(askToReloadDiskVersion(second.current())));
       expect(alsoClosed.closed).toBe(true);
       // Nothing was installed a second time: the projection is the object it was.
       expect(satisfied.scopedDocument).toBe(before);
@@ -10147,10 +10141,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
         diskRevision: 'rev-d',
         disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
       });
-      const stuck = reloadTheDiskVersion(
-        confirmDiskReload(askToReloadDiskVersion(third.current())),
-        refusing.adoptDiskVersion
-      );
+      const stuck = ((onHand) => reloadTheDiskVersion(onHand, refusing.adoptDiskVersion, () => onHand))(confirmDiskReload(askToReloadDiskVersion(third.current())));
       expect(stuck.closed).toBe(false);
       expect(matchEditorView(stuck).reloadUnavailable).toBe(true);
       expect(stuck.externalConflict).toBe(third.current().externalConflict);
@@ -10393,10 +10384,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       // A second acknowledgement has nothing to end and asks nothing that spends.
       expect(acknowledgeSnapshot(acknowledged, acknowledgingThrough(state))).toBe(acknowledged);
       // And the reload now goes through, two steps and the door.
-      const closed = reloadTheDiskVersion(
-        confirmDiskReload(askToReloadDiskVersion(acknowledged)),
-        state.adoptDiskVersion
-      );
+      const closed = ((onHand) => reloadTheDiskVersion(onHand, state.adoptDiskVersion, () => onHand))(confirmDiskReload(askToReloadDiskVersion(acknowledged)));
       expect(closed.closed).toBe(true);
       expect(state.scopedDocument?.revision).toBe('rev-c');
       expect(invoked).not.toHaveBeenCalled();
@@ -10702,10 +10690,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(creationTargetOf(told)).toEqual({ kind: 'document', document: 2 });
       expect(state.scopedDocument?.revision).toBe('rev-a');
       // The two-step reload adopts through the door and closes the form.
-      const closed = reloadCreatorDiskVersion(
-        confirmCreatorDiskReload(askCreatorToReloadDiskVersion(told)),
-        state.adoptDiskVersion
-      );
+      const closed = ((onHand) => reloadCreatorDiskVersion(onHand, state.adoptDiskVersion, () => onHand))(confirmCreatorDiskReload(askCreatorToReloadDiskVersion(told)));
       expect(closed.closed).toBe(true);
       expect(state.scopedDocument?.revision).toBe('rev-c');
       expect(invoked).not.toHaveBeenCalled();
@@ -10723,10 +10708,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
         diskRevision: 'rev-d',
         disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
       });
-      const stuck = reloadCreatorDiskVersion(
-        confirmCreatorDiskReload(askCreatorToReloadDiskVersion(second.current())),
-        refusing.adoptDiskVersion
-      );
+      const stuck = ((onHand) => reloadCreatorDiskVersion(onHand, refusing.adoptDiskVersion, () => onHand))(confirmCreatorDiskReload(askCreatorToReloadDiskVersion(second.current())));
       expect(stuck.closed).toBe(false);
       expect(matchCreationView(stuck).reloadUnavailable).toBe(true);
       expect(refusing.scopedDocument?.revision).toBe('rev-a');
@@ -10808,10 +10790,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(state.standingConflictFor(2)).not.toBe(origin.conflict);
       // The recovery's reload spends the destination conflict's own authorization
       // through the real door, installing the other file's snapshot, and closes.
-      const closed = reloadRecoveryDiskVersion(
-        confirmRecoveryDiskReload(askToReloadRecoveryDiskVersion(told)),
-        state.adoptDiskVersion
-      );
+      const closed = ((onHand) => reloadRecoveryDiskVersion(onHand, state.adoptDiskVersion, () => onHand))(confirmRecoveryDiskReload(askToReloadRecoveryDiskVersion(told)));
       expect(closed.closed).toBe(true);
       expect(closed.origin.conflict).toBe(origin.conflict);
       expect(state.views.find((view) => view.id === 3)?.revision).toBe('rev-o');
@@ -11092,10 +11071,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(acknowledged.uncertaintyUnresolved).toBe(false);
       expect(state.writeOutcomeUncertain(2)).toBe(false);
       expect(acknowledged.origin.conflict).toBe(withheld.origin.conflict);
-      const closed = reloadRecoveryDiskVersion(
-        confirmRecoveryDiskReload(askToReloadRecoveryDiskVersion(acknowledged)),
-        state.adoptDiskVersion
-      );
+      const closed = ((onHand) => reloadRecoveryDiskVersion(onHand, state.adoptDiskVersion, () => onHand))(confirmRecoveryDiskReload(askToReloadRecoveryDiskVersion(acknowledged)));
       expect(closed.closed).toBe(true);
       expect(state.scopedDocument?.revision).toBe('rev-c');
       expect(commands.createMatch).not.toHaveBeenCalled();
@@ -11279,10 +11255,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(state.scopedDocument?.revision).toBe('rev-a');
       expect(commands.deleteMatch).not.toHaveBeenCalled();
       // The two-step reload adopts through the door and closes the session.
-      const closed = reloadDeletionDiskVersion(
-        confirmDeletionDiskReload(askDeletionToReloadDiskVersion(told)),
-        state.adoptDiskVersion
-      );
+      const closed = ((onHand) => reloadDeletionDiskVersion(onHand, state.adoptDiskVersion, () => onHand))(confirmDeletionDiskReload(askDeletionToReloadDiskVersion(told)));
       expect(closed.closed).toBe(true);
       expect(closed.externalConflict).toBeNull();
       expect(state.scopedDocument?.revision).toBe('rev-c');

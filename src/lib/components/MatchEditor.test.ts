@@ -45,6 +45,7 @@ import {
 } from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { saveConflictSource, type ConflictSource } from '../browser/conflictSource';
 import { detailFieldKey } from '../browser/detail';
 import { makeDocument, makeMatch, makeSummary } from '../browser/fixtures';
 import type { InvalidationStatus } from '../browser/invalidation';
@@ -58,6 +59,7 @@ import {
 } from '../browser/matchEditor';
 import { conflictChoiceKey, type ConflictChoice } from '../browser/saveOutcome';
 import { sourceSegments, type InvisibleSegment } from '../browser/sourceText';
+import type { SurfaceBinding } from '../browser/surfaceReceivers';
 import type { MatchSaveAnswer } from '../browser/workspace.svelte';
 import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
 import {
@@ -394,6 +396,43 @@ function answerOf(next: ScriptedAnswer | undefined): MatchSaveAnswer {
 } // End of function answerOf()
 
 /**
+ * Records the origin a window would hold as standing after one scripted answer —
+ * Phase 2d-6-6b.
+ *
+ * **The stand-in for `BrowserState.standingConflictFor`.** The window registers a
+ * save conflict's origin for its file when the command answers `conflict`, and
+ * the reapply's live guard asks it at the end of its entry; a suite that answered
+ * `null` would make every reapply refuse as superseded. What this imitates is that
+ * registration, keyed by file, and nothing else — a mounted editor with a real
+ * window is `DetailPane.test.ts`'s.
+ *
+ * @param standing - The table this suite's `standingConflictFor` reads.
+ * @param document - The file the answer is about.
+ * @param next - The scripted answer.
+ */
+function noteStanding(
+  standing: Map<DocumentId, ConflictSource>,
+  document: DocumentId,
+  next: ScriptedAnswer | undefined
+): void {
+  if (next?.result?.outcome === 'conflict') {
+    standing.set(document, saveConflictSource(next.result));
+  }
+} // End of function noteStanding()
+
+/**
+ * A reporter that binds nothing — Phase 2d-6-6b.
+ *
+ * This suite mounts the component alone, so nothing registers a receiver; the
+ * delivery path through a real window is `DetailPane.test.ts`'s.
+ *
+ * @returns A binding whose two methods do nothing.
+ */
+function inertBinding(): SurfaceBinding {
+  return { reportTarget: () => undefined, withdraw: () => undefined };
+} // End of function inertBinding()
+
+/**
  * Mounts the editor over a scripted boundary.
  *
  * @param answers - What each successive save answers, in order. A save with no
@@ -424,6 +463,7 @@ function mountEditor(
   const recoveryAdoptions: ConflictModel<CreationBuffers>[] = [];
   let closes = 0;
   let now = 0;
+  const standing = new Map<DocumentId, ConflictSource>();
   const target = document.createElement('div');
   document.body.append(target);
   const component = mount(MatchEditor, {
@@ -441,7 +481,9 @@ function mountEditor(
         acknowledgement: Acknowledgement
       ): Promise<MatchSaveAnswer> => {
         created.push({ document: into, newMatch, position, baseRevision, acknowledgement });
-        return Promise.resolve(answerOf(remainingCreates.shift()));
+        const nextCreate = remainingCreates.shift();
+        noteStanding(standing, into, nextCreate);
+        return Promise.resolve(answerOf(nextCreate));
       },
       adoptRecoveryDiskVersion: (
         conflict: ConflictModel<CreationBuffers>
@@ -458,6 +500,7 @@ function mountEditor(
       ): Promise<MatchSaveAnswer> => {
         calls.push({ id, draft, baseRevision, acknowledgement });
         const next = remaining.shift();
+        noteStanding(standing, id.document, next);
         if (next?.pending === true) {
           // Never resolves: the case is about what the screen does while a save
           // is in flight, which is a state no resolved promise can be observed in.
@@ -490,6 +533,10 @@ function mountEditor(
         adoptions.push(conflict);
         return adoption;
       },
+      reportReceiver: inertBinding,
+      reportRecovery: inertBinding,
+      standingConflictFor: (document: DocumentId): ConflictSource | null =>
+        standing.get(document) ?? null,
       close: (): void => {
         closes += 1;
       }

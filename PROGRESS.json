@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-22T21:48:54Z",
+ "updated": "2026-09-22T22:36:03Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -504,7 +504,7 @@
    "title": "Authored-surface delivery and complete registration",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Cut into 6a (model-side obligations, done), 6b (registration and delivery wiring, next) and 6c (the three authored panels)."
+   "summary": "Cut into 6a (model-side obligations, done), 6b (registration and delivery wiring, done) and 6c (the three authored panels, next)."
   },
   {
    "id": "2d-6-6a",
@@ -518,8 +518,11 @@
   {
    "id": "2d-6-6b",
    "title": "Registration and delivery wiring",
-   "status": "queued",
-   "summary": "Registers receivers from DetailPane and AppShell, makes recovery the eighth kind, keeps the shell mounted over retained surfaces."
+   "status": "done",
+   "summary": "Editor, creator and recovery receivers are registered from the detail pane; recovery is the eighth kind; reloads read the installed session last.",
+   "risk": "high",
+   "review": "docs/reviews/phase-2d-6-6b.md",
+   "narrative": "docs/decisions/2d-6-6b-notes.md"
   },
   {
    "id": "2d-6-6c",

@@ -967,11 +967,11 @@ describe('the confirmed reload', () => {
     const stuck = conflicted();
     const recorder = adopting();
     // Straight to the destructive transition, with no warning behind it.
-    expect(reloadTheDiskVersion(stuck, recorder.adopt)).toBe(stuck);
+    expect(reloadTheDiskVersion(stuck, recorder.adopt, () => stuck)).toBe(stuck);
     const asked = askToReloadDiskVersion(stuck);
     expect(matchCreationView(asked).awaitingReloadConfirmation).toBe(true);
     // The warning alone is not a confirmation either.
-    expect(reloadTheDiskVersion(asked, recorder.adopt)).toBe(asked);
+    expect(reloadTheDiskVersion(asked, recorder.adopt, () => asked)).toBe(asked);
     expect(recorder.adoptions).toEqual([]);
     expect(matchCreationView(asked).closed).toBe(false);
   }); // End of the "two steps" case
@@ -979,7 +979,7 @@ describe('the confirmed reload', () => {
   it('adopts the disk projection once, and closes the session', () => {
     const recorder = adopting();
     const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
-    const after = reloadTheDiskVersion(confirmed, recorder.adopt);
+    const after = reloadTheDiskVersion(confirmed, recorder.adopt, () => confirmed);
 
     // **The conflict itself crosses**, not a payload assembled from it: the window
     // authorizes and installs in one call, so nothing here can retain an adoption.
@@ -999,7 +999,7 @@ describe('the confirmed reload', () => {
     // the answer as a failure would leave a confirm control that could never work.
     const satisfied = adopting('alreadyThere');
     const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
-    const after = reloadTheDiskVersion(confirmed, satisfied.adopt);
+    const after = reloadTheDiskVersion(confirmed, satisfied.adopt, () => confirmed);
     expect(after.closed).toBe(true);
     expect(conflictOf(after)).toBeNull();
   }); // End of the "already at the disk version" case
@@ -1009,7 +1009,7 @@ describe('the confirmed reload', () => {
     // happen, and take the conflict panel off the screen with it.
     const refusing = adopting('refused');
     const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
-    const after = reloadTheDiskVersion(confirmed, refusing.adopt);
+    const after = reloadTheDiskVersion(confirmed, refusing.adopt, () => confirmed);
     expect(after.closed).toBe(false);
     // **And the reload stops being offered rather than staying pressable.** The
     // window said no with no word about which guard produced it, so the step is
@@ -1023,7 +1023,7 @@ describe('the confirmed reload', () => {
     expect(matchCreationView(after).conflictChoices).not.toContain('reloadDiskVersion');
     expect(matchCreationView(after).conflictChoices).toContain('keepEditing');
     // Asking again cannot spend anything a second time.
-    expect(reloadTheDiskVersion(after, refusing.adopt)).toBe(after);
+    expect(reloadTheDiskVersion(after, refusing.adopt, () => after)).toBe(after);
     expect(refusing.adoptions).toHaveLength(1);
     expect(conflictOf(after)).not.toBeNull();
   }); // End of the "window refused" case
@@ -1050,7 +1050,7 @@ describe('the confirmed reload', () => {
     const confirmed = confirmDiskReload(askToReloadDiskVersion(conflicted()));
     const dismissed = keepDrafting(confirmed);
     expect(dismissed.reload.kind).toBe('idle');
-    expect(reloadTheDiskVersion(dismissed, recorder.adopt)).toBe(dismissed);
+    expect(reloadTheDiskVersion(dismissed, recorder.adopt, () => dismissed)).toBe(dismissed);
     expect(recorder.adoptions).toEqual([]);
   }); // End of the "dismissal forgets the confirmation" case
 }); // End of the "confirmed reload" suite
@@ -1529,10 +1529,7 @@ describe('the external session — Phase 2d-6-3', () => {
     });
 
     it('takes nothing once closed', () => {
-      const closed = reloadTheDiskVersion(
-        confirmDiskReload(askToReloadDiskVersion(saveConflicted())),
-        adopting().adopt
-      );
+      const closed = ((onHand) => reloadTheDiskVersion(onHand, adopting().adopt, () => onHand))(confirmDiskReload(askToReloadDiskVersion(saveConflicted())));
       expect(closed.closed).toBe(true);
       expect(applyObservation(closed, raised(observation()))).toBe(closed);
       expect(applyObservation(closed, retainedDelivery(observation()))).toBe(closed);
@@ -1578,7 +1575,7 @@ describe('the external session — Phase 2d-6-3', () => {
         ...told,
         reload: { kind: 'confirmed', confirmation: confirmReloadDiskVersion(conflict) }
       };
-      expect(reloadTheDiskVersion(forced, recorder.adopt)).toBe(forced);
+      expect(reloadTheDiskVersion(forced, recorder.adopt, () => forced)).toBe(forced);
       // And the reapply refuses before any evidence is read, adopting nothing —
       // the unknown-target reapply is a refusal, not a choice.
       expect(reapplyToDiskVersion(told, recorder.adopt, () => conflict.source, () => told)).toEqual({
@@ -1622,10 +1619,7 @@ describe('the external session — Phase 2d-6-3', () => {
       ]);
       // From there the reload goes through the door and closes the form.
       const recorder = adopting();
-      const closed = reloadTheDiskVersion(
-        confirmDiskReload(askToReloadDiskVersion(affected)),
-        recorder.adopt
-      );
+      const closed = ((onHand) => reloadTheDiskVersion(onHand, recorder.adopt, () => onHand))(confirmDiskReload(askToReloadDiskVersion(affected)));
       expect(closed.closed).toBe(true);
       expect(recorder.adoptions).toEqual([conflict]);
 
@@ -1822,7 +1816,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(next.reload).toBe(NOT_RELOADING);
       expect(matchCreationView(next).awaitingReloadConfirmation).toBe(false);
       const recorder = adopting();
-      expect(reloadTheDiskVersion(next, recorder.adopt)).toBe(next);
+      expect(reloadTheDiskVersion(next, recorder.adopt, () => next)).toBe(next);
       expect(recorder.adoptions).toEqual([]);
       expect(reapplyToShow(attempt, next)).toBeNull();
       // The typed values survive.
@@ -2295,5 +2289,264 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(reapplyToDiskVersion(quiet.current(), recorder.adopt, quiet.stands, quiet.current).kind).toBe('reapplied');
       expect(recorder.adoptions).toHaveLength(1);
     }); // End of the "recheck before adoption" case
+
+    it('answers supersededEvidence and rebuilds nothing when another conflict landed during a satisfied adoption (Phase 2d-6-6b)', () => {
+      // **The arm the 2d-6-6a fix round wrote and did not pin** (its §4 item 5):
+      // the window installs this snapshot, and while it is still inside `adopt`
+      // the receiver records a later reading superseding the conflict. The
+      // person must decide about that one; no form is rebuilt over it.
+      const { stuck, stands } = raisedOver(observed([row(ANCHOR, { Identified: { target: TWIN } })]));
+      let holder = stuck;
+      const newer = observation({ sequence: 6, diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      const recorder = adopting('installed');
+      const answer = reapplyToDiskVersion(
+        stuck,
+        (conflict, confirmation) => {
+          holder = applyObservation(holder, decided(externalOf(holder).source, newer, false, 'supersedes'));
+          return recorder.adopt(conflict, confirmation);
+        },
+        stands,
+        () => holder
+      );
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(answer).toEqual({ kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } });
+      expect(holder).not.toBe(stuck);
+      expect(externalOf(holder).source).toBe(externalConflictSource(newer));
+      expect(holder.placement).toBe(stuck.placement);
+      expect(baseRevisionOf(holder)).toBe(BASE);
+    }); // End of the "another conflict after a satisfied adoption" case
+
+    /**
+     * A Proxy over one session whose first property read after it is armed runs
+     * a body once — 2d-6-6b's review, its one blocker, on the reapply.
+     *
+     * @param over - The session to stand in for.
+     * @param body - What that read does before answering.
+     * @returns The proxy, and the call that arms it.
+     */
+    function trappedForReapply(over: MatchCreationSession, body: () => void): { readonly proxy: MatchCreationSession; arm(): void } {
+      let armed = false;
+      const proxy = new Proxy(over, {
+        /**
+         * Runs the body on the first read after arming, then reads through.
+         *
+         * @param of - The session.
+         * @param key - The property.
+         * @param receiver - The receiver.
+         * @returns The property's value.
+         */
+        get(of, key, receiver): unknown {
+          if (armed) {
+            armed = false;
+            body();
+          }
+          return Reflect.get(of, key, receiver) as unknown;
+        }
+      });
+      return {
+        proxy,
+        arm: () => {
+          armed = true;
+        }
+      };
+    } // End of function trappedForReapply()
+
+    it('refuses, and asks the window nothing, when a read of the installed session displaced it before the adoption (the review’s blocker)', () => {
+      const { stuck, stands } = raisedOver(observed([row(ANCHOR, { Identified: { target: TWIN } })]));
+      const displaced = applyObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
+      let holder: MatchCreationSession = stuck;
+      const trap = trappedForReapply(stuck, () => {
+        holder = displaced;
+      });
+      holder = trap.proxy;
+      const recorder = adopting('installed');
+      const answer = reapplyToDiskVersion(trap.proxy, recorder.adopt, stands, () => {
+        const now = holder;
+        trap.arm();
+        return now;
+      });
+      expect(holder).toBe(displaced);
+      expect(answer.kind).toBe('manualResolution');
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "displaced before the reapply's adoption" case
+
+    it('rebuilds nothing when a read of the settled session displaced it after the adoption (the review’s blocker)', () => {
+      const { stuck, stands } = raisedOver(observed([row(ANCHOR, { Identified: { target: TWIN } })]));
+      const displaced = applyObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
+      let holder: MatchCreationSession = stuck;
+      const trap = trappedForReapply(stuck, () => {
+        holder = displaced;
+      });
+      holder = trap.proxy;
+      const recorder = adopting('installed');
+      const answer = reapplyToDiskVersion(
+        trap.proxy,
+        (conflict, confirmation) => {
+          trap.arm();
+          return recorder.adopt(conflict, confirmation);
+        },
+        stands,
+        () => holder
+      );
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(holder).toBe(displaced);
+      expect(answer).toEqual({ kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } });
+    }); // End of the "displaced after the reapply's adoption" case
   }); // End of the "reapply over the external origin" suite
+
+  describe('the reload against the installed session (Phase 2d-6-6b)', () => {
+    // **The adoption runs the window's own reads of the observation's
+    // projection** (2d-6-5's review, its third finding), and a getter there can
+    // tell the window of a later reading whose receiver installs a new form
+    // while the reload is still inside `adopt`. `holder` stands in for the
+    // component's `$state`.
+
+    /**
+     * A form showing an external conflict about its destination, confirmed to
+     * reload from it.
+     *
+     * @param seen - The observation raised over it.
+     * @returns The confirmed form.
+     */
+    function confirmedOver(seen: ExternalConflictObservation): MatchCreationSession {
+      const confirmed = confirmDiskReload(askToReloadDiskVersion(applyObservation(ready(), raised(seen))));
+      expect(confirmed.reload.kind).toBe('confirmed');
+      return confirmed;
+    } // End of function confirmedOver()
+
+    it('answers the installed session and asks the window nothing when the session was displaced before the adoption', () => {
+      const confirmed = confirmedOver(observation());
+      const installed = applyObservation(confirmed, retainedDelivery(observation({ sequence: 6 })));
+      expect(installed).not.toBe(confirmed);
+      const recorder = adopting();
+      expect(reloadTheDiskVersion(confirmed, recorder.adopt, () => installed)).toBe(installed);
+      expect(recorder.adoptions).toEqual([]);
+    });
+
+    it('answers the installed session untouched when another conflict landed during the adoption', () => {
+      const seen = observation();
+      let holder = confirmedOver(seen);
+      const newer = observation({ sequence: 6, diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      const recorder = adopting('installed');
+      const answered = reloadTheDiskVersion(
+        holder,
+        (conflict, confirmation) => {
+          holder = applyObservation(holder, decided(externalConflictSource(seen), newer, false, 'supersedes'));
+          return recorder.adopt(conflict, confirmation);
+        },
+        () => holder
+      );
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(answered).toBe(holder);
+      expect(answered.closed).toBe(false);
+      expect(externalOf(answered).source).toBe(externalConflictSource(newer));
+    }); // End of the "another conflict during the reload's adoption" case
+
+    it('carries a wait recorded during a refused adoption', () => {
+      let holder = confirmedOver(observation());
+      const later = observation({ sequence: 6 });
+      const refusing = adopting('refused');
+      const refused = reloadTheDiskVersion(
+        holder,
+        (conflict, confirmation) => {
+          holder = applyObservation(holder, retainedDelivery(later));
+          return refusing.adopt(conflict, confirmation);
+        },
+        () => holder
+      );
+      expect(refusing.adoptions).toHaveLength(1);
+      expect(refused.reload.kind).toBe('refused');
+      expect(refused.awaitingReconciliation.get(2)).toBe(later);
+      expect(refused.closed).toBe(false);
+    }); // End of the "wait carried through a refused reload" case
+
+    /**
+     * A Proxy over one session whose first property read after it is armed runs
+     * a body once — 2d-6-6b's review, its one blocker.
+     *
+     * @param target - The session to stand in for.
+     * @param body - What that read does before answering.
+     * @returns The proxy, and the call that arms it.
+     */
+    function trappedSession(target: MatchCreationSession, body: () => void): { readonly proxy: MatchCreationSession; arm(): void } {
+      let armed = false;
+      const proxy = new Proxy(target, {
+        /**
+         * Runs the body on the first read after arming, then reads through.
+         *
+         * @param of - The session.
+         * @param key - The property.
+         * @param receiver - The receiver.
+         * @returns The property's value.
+         */
+        get(of, key, receiver): unknown {
+          if (armed) {
+            armed = false;
+            body();
+          }
+          return Reflect.get(of, key, receiver) as unknown;
+        }
+      });
+      return {
+        proxy,
+        arm: () => {
+          armed = true;
+        }
+      };
+    } // End of function trappedSession()
+
+    it.each(['installed', 'refused'] as const)(
+      'answers what a read of the settled session installed, after a %s adoption (the review’s blocker)',
+      (answer) => {
+        const confirmed = confirmedOver(observation());
+        const displaced = applyObservation(confirmed, retainedDelivery(observation({ sequence: 6 })));
+        let holder: MatchCreationSession = confirmed;
+        const trap = trappedSession(confirmed, () => {
+          holder = displaced;
+        });
+        holder = trap.proxy;
+        const recorder = adopting(answer);
+        const answered = reloadTheDiskVersion(
+          trap.proxy,
+          (conflict, confirmation) => {
+            trap.arm();
+            return recorder.adopt(conflict, confirmation);
+          },
+          () => holder
+        );
+        expect(recorder.adoptions).toHaveLength(1);
+        expect(holder).toBe(displaced);
+        expect(answered).toBe(displaced);
+      }
+    ); // End of the "read of the settled session" case
+
+    it('answers what a read of the reload step installed, on a reload not attempted (the review’s blocker)', () => {
+      const asked = askToReloadDiskVersion(applyObservation(ready(), raised(observation())));
+      expect(asked.reload.kind).not.toBe('confirmed');
+      const displaced = applyObservation(asked, retainedDelivery(observation({ sequence: 6 })));
+      let holder: MatchCreationSession = asked;
+      const step = asked.reload;
+      const tricked: MatchCreationSession = {
+        ...asked,
+        reload: new Proxy(step, {
+          /**
+           * Installs the displacing session on every read, then reads through.
+           *
+           * @param of - The step.
+           * @param key - The property.
+           * @param receiver - The receiver.
+           * @returns The property's value.
+           */
+          get(of, key, receiver): unknown {
+            holder = displaced;
+            return Reflect.get(of, key, receiver) as unknown;
+          }
+        })
+      };
+      holder = tricked;
+      const recorder = adopting();
+      expect(reloadTheDiskVersion(tricked, recorder.adopt, () => holder)).toBe(displaced);
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "read of the reload step" case
+  }); // End of the "reload against the installed session" suite
 }); // End of the "external session" suite

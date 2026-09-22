@@ -402,21 +402,21 @@ import type { RawSaveAnswer } from './workspace.svelte';
 /**
  * One kind of surface this window can have open that writes a file.
  *
- * **Seven kinds, and restore is one of them**, which is consult Q4 read exactly:
+ * **Eight kinds, and restore is one of them**, which is consult Q4 read exactly:
  * a restore is a write surface for its target like any other, so a coordinator's
- * value has to be able to say so. The six that *compete* with restore are
- * {@link CompetingWriteSurfaceKind}, and the phrase in the consult — "all six
- * competing surface kinds" — is those six.
+ * value has to be able to say so. The seven that *compete* with restore are
+ * {@link CompetingWriteSurfaceKind}.
  *
- * **Seven members, and not a complete list of the surfaces that write** — the
- * 2d-6 record's §5.1 and §3 entry 3. The recovery form chooses its own
- * destination and calls `BrowserState.createMatch`, and may stay open beside the
- * editor it was opened from, so an editor over one file protects no recovery
- * destination in another; it is the eighth kind, and `recoveryTargetOf` in
- * `./recovery.ts` answers the file it would write since Phase 2d-6-3. Adding the
- * member here, with the assembly in `DetailPane` that a new member breaks at
- * compile time, is 2d-6-6's; until then a recovery form is a write surface this
- * type cannot name.
+ * **The recovery form is the eighth, since Phase 2d-6-6b** — the 2d-6 record's
+ * §5.1 and §3 entry 3. It chooses its own destination and calls
+ * `BrowserState.createMatch`, and may stay open beside the editor or the
+ * new-snippet form it was opened from, so an editor over one file protects no
+ * recovery destination in another. `recoveryTargetOf` in `./recovery.ts` answers
+ * the file it would write, and `DetailPane.svelte`'s `satisfies
+ * Record<OpenWriteSurfaceKind, …>` assembly is where a ninth member would be a
+ * compile error. **What the union forces is that every member is assembled
+ * there; it cannot force that the list of surfaces that write is complete** —
+ * the seven-member version of this sentence was the claim §5.1 overturned.
  */
 export type OpenWriteSurfaceKind =
   /** A snippet of the file is open in the small editor. */
@@ -432,12 +432,25 @@ export type OpenWriteSurfaceKind =
   /** The file's whole text is open in the raw editor. */
   | 'rawEditor'
   /** A restore over the file is open. */
-  | 'restore';
+  | 'restore'
+  /**
+   * A recovery form writing a new snippet **into this file** is open, beside the
+   * editor or the new-snippet form it was opened from.
+   */
+  | 'recovery';
 
 /**
- * The six surface kinds a restore refuses to run beside.
+ * The two kinds that choose their own destination, and so may name no file yet.
  *
- * **Derived by exclusion rather than written out**, so a seventh member of
+ * **Written out, not derived**: what the two share — a destination chosen inside
+ * the component — is not a property of the union a type could compute.
+ */
+export type DestinationChoosingKind = Extract<OpenWriteSurfaceKind, 'matchCreator' | 'recovery'>;
+
+/**
+ * The seven surface kinds a restore refuses to run beside.
+ *
+ * **Derived by exclusion rather than written out**, so a new member of
  * {@link OpenWriteSurfaceKind} joins this type automatically and becomes a compile
  * error in {@link openWriteSurfaceKey} rather than a silently unrefused surface.
  */
@@ -477,9 +490,10 @@ export type WriteSurfaceTarget =
       /**
        * The surface is open and names no file yet.
        *
-       * **Only the new-snippet form reaches this state.** It chooses its own
-       * destination, and until it reports that choice upward this window holds a
-       * surface it cannot attribute to any file.
+       * **Only the new-snippet form and the recovery form reach this state**
+       * ({@link DestinationChoosingKind}). Each chooses its own destination, and
+       * until it reports that choice upward this window holds a surface it cannot
+       * attribute to any file.
        */
       readonly kind: 'unknown';
     }
@@ -489,13 +503,15 @@ export type WriteSurfaceTarget =
  * One write surface this window has open, and which file it is about.
  *
  * **One discriminated union, never two registries**, which is the design consult's
- * Q1 (`docs/reviews/phase-2d-5-design.md:49-63`). The new-snippet form is the only
- * kind whose target may be `unknown`; every other kind carries a file, so a
- * consumer that has narrowed to one of them has a `DocumentId` without asking.
+ * Q1 (`docs/reviews/phase-2d-5-design.md:49-63`). The new-snippet form and, since
+ * Phase 2d-6-6b, the recovery form are the only kinds whose target may be
+ * `unknown`; every other kind carries a file, so a consumer that has narrowed to
+ * one of them has a `DocumentId` without asking.
  *
  * **What the shape forces, and what it does not, in one sentence each.** It forces
- * that `matchCreator` is the only kind that can be open without naming a file, so
- * inventing a document for a destination-less form is not representable. It does
+ * that a {@link DestinationChoosingKind} is the only kind that can be open without
+ * naming a file, so inventing a document for a destination-less form is not
+ * representable. It does
  * not force any consumer to *classify* a new component as a write surface at all —
  * that is 2d-5-2's exhaustive assembly and its mounted tests — and it does not make
  * the list of surfaces complete: an empty array still claims there are none, which
@@ -503,14 +519,14 @@ export type WriteSurfaceTarget =
  */
 export type OpenWriteSurface =
   | {
-      /** The new-snippet form, which may not have chosen its destination yet. */
-      readonly kind: 'matchCreator';
+      /** The new-snippet form or the recovery form, which may not have chosen its destination yet. */
+      readonly kind: DestinationChoosingKind;
       /** The file it would write, or that it has not named one. */
       readonly target: WriteSurfaceTarget;
     }
   | {
       /** What kind of surface it is. */
-      readonly kind: Exclude<OpenWriteSurfaceKind, 'matchCreator'>;
+      readonly kind: Exclude<OpenWriteSurfaceKind, DestinationChoosingKind>;
       /** The file it would write, by the identity this window holds. */
       readonly target: WriteSurfaceDocumentTarget;
     };
@@ -635,7 +651,9 @@ export function creatorEligibilityOf(
  * **The watcher half of consult Q1's two predicates, and it answers the `unknown`
  * arm the other way round on purpose.** {@link competingSurfaceFor} treats a
  * creator that has named no file as competing with **no** document; this treats it
- * as targeting **every** creator-eligible match document, because the question is
+ * as targeting **every** creator-eligible match document — and, since Phase
+ * 2d-6-6b, a recovery form that names no file the same way, since the arm is
+ * switched on and not the kind — because the question is
  * different: a restore asks *may I replace this file's text*, where over-refusing
  * costs one closed form, and reconciliation asks *may I silently reload this file
  * under an open surface*, where under-refusing is the loss of somebody's work.
@@ -666,8 +684,8 @@ export function creatorEligibilityOf(
  * however many such creators the list holds. It does **not** make the answer
  * canonical — this is still one answer out of possibly several exact matches, and
  * **array order still decides among those**, so two match editors over one file
- * answer whichever the caller listed first. It does not rank the **seven** members
- * of {@link OpenWriteSurfaceKind} against each other in any way — all seven,
+ * answer whichever the caller listed first. It does not rank the **eight** members
+ * of {@link OpenWriteSurfaceKind} against each other in any way — all eight,
  * `restore` included, since this predicate counts the kind
  * {@link CompetingWriteSurfaceKind} excludes. And it changes **no yes/no answer at
  * all**: an exact match and an eligible unknown creator each make the answer
@@ -803,7 +821,8 @@ export type RestoreRefusal =
  * describer in this directory: a renamed key is a compile error here, and a new
  * member of {@link CompetingWriteSurfaceKind} with no sentence is one too.
  *
- * **Every one of the six sentences claims an open surface and nothing more.** None
+ * **Every one of the seven sentences claims an open surface and nothing more.**
+ * The seventh, `recoveryOpen`, is Phase 2d-6-6b's, for the recovery form. None
  * of them says *unsaved changes*: `isDirty` is derived inside each surface's own
  * session, so no coordinator can observe it (R36), and this application has shipped
  * a sentence claiming otherwise twice already
@@ -833,6 +852,8 @@ export function openWriteSurfaceKey(surface: CompetingWriteSurfaceKind): Transla
       return 'browser.restore.refused.matchDuplicatorOpen';
     case 'rawEditor':
       return 'browser.restore.refused.rawEditorOpen';
+    case 'recovery':
+      return 'browser.restore.refused.recoveryOpen';
   }
 } // End of function openWriteSurfaceKey()
 

@@ -160,12 +160,14 @@
  * destination (entry 21) — the reload and the reapply are withheld, and
  * {@link chooseRecoveryDestination} is the one transition open to it.
  *
- * **What this form reports upward** — the values 2d-6-6 wires through
+ * **What this form reports upward** — the values Phase 2d-6-6b wires through
  * `MatchEditor` and `MatchCreator` into `DetailPane`'s assembly (entry 3) — are
  * {@link recoveryTargetOf}, the file it would write, and
- * {@link applyRecoveryObservation}, the receiver as a value. No component reads
- * either yet, `OpenWriteSurfaceKind` in `./restore.ts` has no `recovery` member
- * yet, and nothing registers this receiver; all three are that step's.
+ * {@link applyRecoveryObservation}, the receiver as a value. `RecoveryPanel.svelte`
+ * reports both through the binding `DetailPane` hands down
+ * (`./surfaceReceivers.ts`), the pane registers the form as the eighth
+ * `OpenWriteSurfaceKind`, `recovery`, and registers the receiver over the file it
+ * names — or over every creator-eligible file while it names none.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -216,7 +218,8 @@ import {
   reloadWasRefused,
   sendFailureLines,
   sendFailureOf,
-  spendTheConfirmedReload,
+  confirmationOf,
+  settledAnswer,
   submissionIsStale,
   NOT_RELOADING,
   RELOAD_REFUSED,
@@ -246,7 +249,6 @@ import {
 } from './matchEditor';
 import type { RawSaveChoice } from './rawSave';
 import {
-  adoptForReapply,
   enterReapply,
   sharedReapplyObstacleKey,
   subjectIsTargetless,
@@ -273,7 +275,8 @@ import {
   type ConflictModel,
   type ExternalConflictModel,
   type SaveOutcomeMessage,
-  type SaveOutcomeModel
+  type SaveOutcomeModel,
+  reapplyAuthorizationFor
 } from './saveOutcome';
 import { recordTyping, type Clock, type TypingRun } from './typing';
 
@@ -1097,7 +1100,8 @@ export interface RecoverySession {
    * forces and what it cannot** is stated there and holds here unchanged: every
    * wait told is kept until decided, only the chosen file's blocks; a decision
    * delivered while the form's receiver was elsewhere, or a reading held while it
-   * was not registered, are facts about registration, which is 2d-6-6's.
+   * was not registered, are facts about registration, which `DetailPane` wires
+   * since Phase 2d-6-6b (`./surfaceReceivers.ts`).
    */
   readonly awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>;
   /**
@@ -2313,7 +2317,7 @@ export type InstallTheWaitingForm = (waiting: RecoverySession) => void;
  * **The other half of {@link InstallTheWaitingForm}, and it exists for the same
  * reason.** That callback hands the waiting form out before the request; while
  * the request is out, the window may deliver observations to the receiver a
- * component registered (2d-6-6's), and that receiver applies them to the form the
+ * component registered (since Phase 2d-6-6b), and that receiver applies them to the form the
  * component holds — `applyRecoveryObservation` appends each to
  * {@link RecoverySession.heldDeliveries}. The composition's own `await` then
  * resumes holding the form it captured **before** any of that; settling that form
@@ -2326,7 +2330,8 @@ export type InstallTheWaitingForm = (waiting: RecoverySession) => void;
  * form immediately before adopting, and {@link applyRecoveryCreate} /
  * {@link recoveryCreateCouldNotBeSent} replay what the receiver appended to it
  * during their own replay — the three patterns 2d-6-4 set for the operation
- * sessions.
+ * sessions. Since Phase 2d-6-6b {@link reloadRecoveryDiskVersion} reads it too,
+ * before its adoption and once more after it (raw's and restore's reload shape).
  *
  * **What it forces and what it does not, in the same sentence.** Through it,
  * {@link sendRecoveryCreate} settles every answer — answered, refused, not
@@ -2555,13 +2560,44 @@ export function confirmRecoveryDiskReload(session: RecoverySession): RecoverySes
  * messages described a reload the value could not perform (the 2c-4c-2 review's
  * third finding).
  *
+ * **The installed form is read three times: once after this function's own
+ * reads and immediately before the adoption, once more after it, and once last,
+ * after the answer is built** (the last since 2d-6-6b's review: the confirmation
+ * is snapshot through `confirmationOf` before the first read, and every read and
+ * spread of the settled form happens before `settledAnswer` in `./editorSave.ts`
+ * takes the last look, so a getter or `Proxy` trap that displaces it is answered
+ * with what it installed and nothing caller-controlled runs after that look) (Phase 2d-6-6b —
+ * 2d-6-5's review, its third finding, carried from raw's and restore's reloads).
+ * The adoption is the window's, and `BrowserState.adoptDiskVersion` copies the
+ * observation's projection before it decides — a read of caller data, and a getter
+ * there can tell the window of a later reading, which the window decides and hands
+ * to the registered receiver while this function is still inside `adopt`. So: a
+ * form displaced before the adoption is not closed and the installed form is
+ * answered, the window never asked and nothing recorded about it. After the
+ * adoption the installed form is read again; when it now shows **another
+ * conflict** (by source identity) the person must decide about that one, whether
+ * the window installed this snapshot or refused it as outlived, so the installed
+ * form is answered untouched — nothing closed over it and no
+ * {@link RecoverySession.windowWasReconciled} recorded on it; when it shows the
+ * same conflict with more recorded — a wait, most of all — the refused step and
+ * the closed form are built over **it**, so a wait the receiver recorded during a
+ * refused adoption survives. What that cannot force is that the required reader is
+ * honest ({@link ReadTheInstalledForm}): one answering a capture closes or refuses
+ * what it was handed, and a delivery the receiver made during the adoption is lost
+ * when the caller installs the answer.
+ *
  * @param session - The form holding a confirmation.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
- * @returns The closed form, or the same form.
+ * @param current - Reads the form the caller holds now — `() => session` over the
+ *   caller's state. Required.
+ * @returns The closed form, the form at the terminal refused step, the same form,
+ *   or the installed form when the one handed in is no longer it or another
+ *   conflict landed during the adoption.
  */
 export function reloadRecoveryDiskVersion(
   session: RecoverySession,
-  adopt: AdoptTheDiskVersion<CreationBuffers>
+  adopt: AdoptTheDiskVersion<CreationBuffers>,
+  current: ReadTheInstalledForm
 ): RecoverySession {
   // **Before the spend, and this is the guard that keeps a terminal form away from
   // the window** (round 4's second finding): a closed session that still carried a
@@ -2570,36 +2606,65 @@ export function reloadRecoveryDiskVersion(
   if (session.closed) {
     return session;
   }
-  const spend = spendTheConfirmedReload(reloadableConflictOf(session), session.reload, adopt);
-  if (spend === 'notAttempted') {
+  // **Every read of this function's own, taken first.**
+  const step = session.reload;
+  const conflict = reloadableConflictOf(session);
+  // **The confirmation this spends, snapshot before the installed-session read**
+  // (2d-6-6b's review, its one blocker): the step is caller data, and asking it
+  // after that read would run a getter past the last look.
+  const confirmation = conflict === null ? null : confirmationOf(step);
+  // **The installed form, read once, after those reads and immediately before
+  // the adoption.** A form no longer installed is not closed, and what is
+  // installed is answered so the caller keeps it.
+  const installed = current();
+  if (installed !== session) {
+    return installed;
+  }
+  if (conflict === null || confirmation === null) {
     return session;
+  }
+  const spend = adopt(conflict, confirmation) === 'refused' ? 'refused' : 'satisfied';
+  // **Read once more, after the adoption**, which ran the window's own reads.
+  const settled = current();
+  if (settled !== session && recoveryConflictOf(settled)?.source !== conflict.source) {
+    // A replacing verdict landed during the adoption: the conflict the receiver
+    // installed is the one to decide about now, and nothing is closed over it.
+    return settledAnswer(settled, settled, current);
   }
   if (spend === 'refused') {
     // The window said no and named no cause, so the control stops being offered
     // and the form says so — a decision about what to draw, never a claim that a
-    // later ask would be refused too.
-    return { ...session, reload: RELOAD_REFUSED };
+    // later ask would be refused too. Built over the settled form, so a wait
+    // recorded during the adoption is carried forward.
+    return settledAnswer(settled, { ...settled, reload: RELOAD_REFUSED }, current);
   }
-  return {
-    ...session,
-    group: null,
-    submitted: null,
-    outcome: null,
-    extraMessages: [],
-    reload: NOT_RELOADING,
-    sendFailure: null,
-    // The adoption that was just spent may have installed a projection here — a
-    // `satisfied` spend does not say which — so the window the source conflict was
-    // registered against is no longer one this form can vouch for.
-    windowWasReconciled: true,
-    // The conflict of either origin is resolved by the reload that ends this
-    // form; a closed form says nothing about the file any more. The origin is
-    // not read: what was spent is the destination conflict's own authorization.
-    externalConflict: null,
-    uncertaintyUnresolved: false,
-    awaitingReconciliation: new Map(),
-    closed: true
-  };
+  // **Built first, then the final installed-session read** (2d-6-6b's review):
+  // the spread reads the settled session, and nothing caller-controlled may run
+  // after the look `settledAnswer` takes.
+  return settledAnswer(
+    settled,
+    {
+      ...settled,
+      group: null,
+      submitted: null,
+      outcome: null,
+      extraMessages: [],
+      reload: NOT_RELOADING,
+      sendFailure: null,
+      // The adoption that was just spent may have installed a projection here — a
+      // `satisfied` spend does not say which — so the window the source conflict was
+      // registered against is no longer one this form can vouch for.
+      windowWasReconciled: true,
+      // The conflict of either origin is resolved by the reload that ends this
+      // form; a closed form says nothing about the file any more. The origin is
+      // not read: what was spent is the destination conflict's own authorization.
+      externalConflict: null,
+      uncertaintyUnresolved: false,
+      awaitingReconciliation: new Map(),
+      closed: true
+    },
+    current
+  );
 } // End of function reloadRecoveryDiskVersion()
 
 /**
@@ -2610,8 +2675,8 @@ export function reloadRecoveryDiskVersion(
  * **The form's receiver, as a value, and the receiver it reports upward** (entry
  * 3): a component registers a function through
  * `BrowserState.registerObservationReceiver` that calls this with the envelope and
- * installs what comes back — the wiring through `MatchEditor` and `MatchCreator`
- * into `DetailPane` is 2d-6-6's — and the decision is here so a suite can drive
+ * installs what comes back — wired through `MatchEditor` and `MatchCreator` into
+ * `DetailPane` since Phase 2d-6-6b — and the decision is here so a suite can drive
  * every arm without a window. It never re-arbitrates and reads none of the
  * window's tables. `applyObservation` in `./matchCreation.ts` is the same
  * transition for the new-snippet form, and this is its table:
@@ -2853,10 +2918,10 @@ export type RecoveryReapply = ReapplyOutcome<RecoverySession, RecoveryReapplyObs
  * in — `unaskedGuard` in `./matchEditor.ts`, for this form.
  *
  * It answers the shown conflict's own origin, so the supersession question the entry
- * asks last is answered *yes, it stands* without the window being asked. It exists so
- * that the one component caller, which passes `null` until 2d-6-6b hands the live
- * closure down, keeps its save-origin reapply exactly as it was; what it costs is
- * stated on the caller.
+ * asks last is answered *yes, it stands* without the window being asked. It exists for
+ * a caller that passes `null`; since Phase 2d-6-6b no component does —
+ * `RecoveryPanel.svelte` hands the live `BrowserState.standingConflictFor` closure
+ * down — so only a model suite reaches it, and what it costs is stated on the caller.
  *
  * @param conflict - The conflict shown, or `null`.
  * @returns A guard that never asks the window.
@@ -2936,7 +3001,11 @@ function unaskedGuard(conflict: ConflictModel<CreationBuffers> | null): Standing
  * `writeOutcomeUnknown` when the installed form now carries either, and
  * `supersededEvidence` when the conflict it shows is no longer the one being
  * reapplied; otherwise the rebuilt form carries the **installed** form's waits
- * forward. Nothing caller-controlled runs between that read and the adoption.
+ * forward. The three facts are read off the installed form and — since 2d-6-6b's
+ * review, its one blocker — one last look follows them (a form displaced meanwhile
+ * is answered `supersededEvidence`), so nothing caller-controlled runs between
+ * the last look and the adoption; after the adoption the answer is likewise built
+ * before a last look.
  * **The installed form is read once more after the adoption** (the 2d-6-6a
  * review, its first finding — 2d-6-5's reload shape): `adoptDiskVersion` copies
  * the observation's projection, and a getter there can tell the window of a
@@ -2948,8 +3017,9 @@ function unaskedGuard(conflict: ConflictModel<CreationBuffers> | null): Standing
  *
  * **The standing-origin guard is a parameter, and `null` is accepted for one
  * stated reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s:
- * `RecoveryPanel.svelte` does not yet hand the live
- * `BrowserState.standingConflictFor` closure down, and passes `null`; the
+ * `RecoveryPanel.svelte` has handed the live
+ * `BrowserState.standingConflictFor` closure down since Phase 2d-6-6b and passes
+ * no `null`, and the parameter stays nullable; the
  * parameter is nullable rather than defaulted since Phase 2d-6-6a, so that the
  * required reader can follow it. When no guard is handed in the supersession
  * question is not asked by the entry; what still refuses a superseded origin on
@@ -3038,9 +3108,9 @@ export function reapplyRecoveryToDiskVersion(
   if (refusal !== null) {
     return { kind: 'manualResolution', obstacle: { kind: 'recoveryRefused', reason: refusal } };
   }
-  // **The installed form, read once, after the last caller-controlled read and
-  // immediately before the spend.** Nothing caller-controlled runs between this
-  // read and the door.
+  // **The installed form, read after the last caller-controlled read of the
+  // reapply's own**; its three facts below are read off it, and a last look
+  // follows them, before the door (2d-6-6b's review).
   const installed = current();
   if (installed.uncertaintyUnresolved) {
     return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
@@ -3051,7 +3121,17 @@ export function reapplyRecoveryToDiskVersion(
   if (recoveryConflictOf(installed)?.source !== entry.conflict.source) {
     return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
   }
-  if (adoptForReapply(entry.conflict, adopt) === 'refused') {
+  // **Everything the spend needs, taken now, then one last look** (2d-6-6b's
+  // review, its one blocker): the three reads above are of the installed
+  // session, which is caller data, and a getter or `Proxy` trap among them can
+  // displace it. The authorization reads the conflict's origin, so it is minted
+  // before the look too; after it nothing caller-controlled runs before the door.
+  const adopted = entry.conflict;
+  const authorization = reapplyAuthorizationFor(adopted);
+  if (current() !== installed) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  if (adopt(adopted, authorization) === 'refused') {
     return { kind: 'adoptionRefused' };
   }
   // **Read again after the adoption**, which read caller data of its own (the
@@ -3068,10 +3148,18 @@ export function reapplyRecoveryToDiskVersion(
   // `sourceConflictState` answering `retained`. The waits are the installed
   // form's, read with the recheck, so a wait about another file recorded during
   // the reads survives the rebuild.
-  return {
+  // **Built first, then one last look at the installed session** (2d-6-6b's
+  // review): every read of the settled session above is caller data, and a
+  // session displaced during them is not rebuilt over; nothing caller-controlled
+  // runs after the look.
+  const result: RecoveryReapply = {
     kind: 'reapplied',
     session: { ...rebuilt, awaitingReconciliation: waits, windowWasReconciled: true }
   };
+  if (current() !== settled) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  return result;
 } // End of function reapplyRecoveryToDiskVersion()
 
 /**
@@ -3425,11 +3513,12 @@ export function recoveryBaseRevisionOf(session: RecoverySession): ContentRevisio
  * is a registration over B, and this is the file it names. `unknown` while no
  * file is chosen, the chosen file otherwise, and **never the origin's file by
  * virtue of being the origin's**: a same-file recovery answers it because the
- * person chose it, and a cross-file one answers the other file. `OpenWriteSurface`
- * in `./restore.ts` admits an `unknown` target for the new-snippet form alone
- * today; whether a destination-less recovery is registered as an unknown target
- * or not at all is 2d-6-6's, which reports this value through `MatchEditor` and
- * `MatchCreator` into `DetailPane`'s assembly. Nothing reads it yet.
+ * person chose it, and a cross-file one answers the other file. Since Phase
+ * 2d-6-6b `OpenWriteSurface` in `./restore.ts` admits an `unknown` target for the
+ * recovery form as well as the new-snippet form, and `RecoveryPanel.svelte` reports
+ * this value — `null` while no form is open or once it has closed — through
+ * `MatchEditor` and `MatchCreator` into `DetailPane`'s assembly, so a
+ * destination-less recovery is registered as an unknown target.
  *
  * @param session - The form to ask about.
  * @returns The target, by the identity this window holds.

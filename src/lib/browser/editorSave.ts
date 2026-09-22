@@ -420,6 +420,51 @@ export function spendTheConfirmedReload<T>(
 } // End of function spendTheConfirmedReload()
 
 /**
+ * The confirmation a reload would spend, read off its step **once**, or `null`
+ * when the step holds none — Phase 2d-6-6b's review, its one blocker.
+ *
+ * **A snapshot for a function that reads the installed session afterwards.** A
+ * step is caller data, so a reload that asked `step.kind` after its last look at
+ * the installed session would run a getter or a `Proxy` trap past that look.
+ * The six authored and operation reloads take this before their pre-adoption
+ * check and spend what it answered. What it cannot force is that a caller takes
+ * it first; that ordering is each reload's, pinned in its own suite.
+ *
+ * @param step - Where the reload has got to.
+ * @returns The confirmation, or `null`.
+ */
+export function confirmationOf(step: ReloadStep): ReloadConfirmation | null {
+  return step.kind === 'confirmed' ? step.confirmation : null;
+} // End of function confirmationOf()
+
+/**
+ * The answer a settling transition built over the session it last read, or the
+ * session installed now when that one has been displaced — Phase 2d-6-6b's
+ * review, its one blocker.
+ *
+ * **The final installed-session read, with nothing caller-controlled after it.**
+ * A caller builds its proposed answer — every spread and every property read of
+ * the settled session included, each of which can run a getter or a `Proxy`
+ * trap that tells the window of a later reading — and passes it here; JavaScript
+ * evaluates the argument before the call, so this reads `current()` last and
+ * compares identities, which runs no user code. A settled session displaced
+ * during the build is answered as installed, untouched, so a caller that installs
+ * the answer keeps what its receiver installed. What no type forces is that the
+ * reader is honest, or that a caller builds everything before calling this.
+ *
+ * @typeParam S - The session type.
+ * @param settled - The session the proposal was built over, as last read.
+ * @param proposed - The answer built over it.
+ * @param current - Reads the session the caller holds now.
+ * @returns `proposed` while `settled` is still installed, the installed session
+ *   otherwise.
+ */
+export function settledAnswer<S>(settled: S, proposed: S, current: () => S): S {
+  const last = current();
+  return last === settled ? proposed : last;
+} // End of function settledAnswer()
+
+/**
  * Which choices the conflict panel is at, for {@link conflictChoicesFor}.
  *
  * `confirmed` is spent in the same handler that reaches it, so it never draws a

@@ -51,6 +51,7 @@
 
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { saveConflictSource, type ConflictSource } from '../browser/conflictSource';
 import { detailFieldKey } from '../browser/detail';
 import { startDraft, structuredDraftRules } from '../browser/draft';
 import type { AdoptTheDiskVersion } from '../browser/editorSave';
@@ -88,6 +89,7 @@ import {
   type ConflictModel,
   type DiskAdoptionOutcome
 } from '../browser/saveOutcome';
+import type { SurfaceBinding } from '../browser/surfaceReceivers';
 import type { MatchSaveAnswer } from '../browser/workspace.svelte';
 import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
 import { locale } from '../stores/locale.svelte';
@@ -383,6 +385,11 @@ function mountPanel(options: {
   const calls: RecordedCreate[] = [];
   const pending: ((answer: MatchSaveAnswer) => void)[] = [];
   const adoptions: ConflictModel<CreationBuffers>[] = [];
+  // **The stand-in for `BrowserState.standingConflictFor`** — Phase 2d-6-6b. The
+  // window registers a create conflict's origin for its file when the command
+  // answers `conflict`, and the form's reapply asks it at the end of its entry;
+  // answering `null` would make every reapply refuse as superseded.
+  const standing = new Map<DocumentId, ConflictSource>();
 
   const availability: RecoveryAvailability = recoveryAvailability(
     'matchFields',
@@ -408,6 +415,9 @@ function mountPanel(options: {
       ): Promise<MatchSaveAnswer> => {
         calls.push({ document: into, newMatch, position, baseRevision, acknowledgement });
         const next = remaining.shift();
+        if (next?.result?.outcome === 'conflict') {
+          standing.set(into, saveConflictSource(next.result));
+        }
         if (next?.defer === true) {
           return new Promise<MatchSaveAnswer>((resolve) => {
             pending.push(resolve);
@@ -434,7 +444,15 @@ function mountPanel(options: {
       adoptDiskVersion: ((conflict: ConflictModel<CreationBuffers>): DiskAdoptionOutcome => {
         adoptions.push(conflict);
         return options.adoption ?? 'installed';
-      }) as AdoptTheDiskVersion<CreationBuffers>
+      }) as AdoptTheDiskVersion<CreationBuffers>,
+      // This suite mounts the panel alone, so nothing registers a receiver; the
+      // delivery path through a real window is `DetailPane.test.ts`'s.
+      reportSurface: (): SurfaceBinding => ({
+        reportTarget: () => undefined,
+        withdraw: () => undefined
+      }),
+      standingConflictFor: (document: DocumentId): ConflictSource | null =>
+        standing.get(document) ?? null
     }
   });
   return {

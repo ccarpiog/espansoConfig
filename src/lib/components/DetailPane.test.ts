@@ -35,6 +35,8 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeDocument, makeMatch, makeSummary, matchListPath } from '../browser/fixtures';
+import { recoveryChoiceKey } from '../browser/recovery';
+import { conflictChoiceKey } from '../browser/saveOutcome';
 import type { OpenWriteSurface, OpenWriteSurfaceKind } from '../browser/restore';
 import {
   createBrowserState,
@@ -42,9 +44,17 @@ import {
   type BrowserCommands,
   type BrowserState
 } from '../browser/workspace.svelte';
+import type { ExternalConflictObservation } from '../browser/conflictSource';
+import type { ObservationDelivery } from '../browser/observationDelivery';
 import { DICTIONARIES, translate, type TranslationKey } from '../i18n/dictionaries';
+import { LOCALES, type Locale } from '../i18n/locale';
 import { locale } from '../stores/locale.svelte';
 import type { CommandResult, RawSaveOutcome, ReloadAfterRawSave } from '../ipc/commands';
+import type {
+  ReconciliationEventSource,
+  ReconciliationUnlisten,
+  ReconciliationWakeHandler
+} from '../ipc/events';
 import type {
   Acknowledgement,
   BackupBatchId,
@@ -56,7 +66,9 @@ import type {
   DocumentId,
   DocumentSummary,
   DocumentView,
+  ExternalObservation,
   MatchView,
+  ReconciliationBatch,
   SaveResult,
   WorkspaceSummary
 } from '../ipc/types';
@@ -233,6 +245,35 @@ interface RecordedRawSave {
 let drains = 0;
 
 /**
+ * How many drains the running case scripted and expects — Phase 2d-6-6b, the
+ * 2d-6 record's §3 entry 36.
+ *
+ * **Zero unless a case says otherwise**, which is every case before 2d-6-6b: those
+ * start no reconciliation. A delivery case starts the coordinator over a finite
+ * queue of batches ({@link PaneScript.batches}) and sets this to the exact number
+ * of drains it expects — never a relaxed allowance. The `afterEach` compares and
+ * resets it.
+ */
+let expectedDrains = 0;
+
+/**
+ * What a case scripts beyond the two files — Phase 2d-6-6b.
+ *
+ * Every field is optional and absent means what every earlier case had: the two
+ * files above, a refused `save_match`, and a drain that refuses.
+ */
+interface PaneScript {
+  /** The files the workspace lists, in window order. */
+  readonly files?: readonly DocumentSummary[];
+  /** Their projections, which `get_document` answers by identity. */
+  readonly views?: readonly DocumentView[];
+  /** What `save_match` answers, called once per save. */
+  readonly saveMatch?: () => Promise<CommandResult<SaveResult>>;
+  /** The batches the drain answers, in order; past the end it refuses. */
+  readonly batches?: CommandResult<ReconciliationBatch>[];
+}
+
+/**
  * A command surface that answers the two documents above.
  *
  * Only the commands this pane's path reaches are given real answers; the rest
@@ -249,21 +290,24 @@ let drains = 0;
  *   the sequence the real command performs.
  * @returns The commands, with `vi.fn` wrappers so calls can be inspected.
  */
-function scriptedCommands(saves: RecordedRawSave[] | null = null): BrowserCommands {
+function scriptedCommands(
+  saves: RecordedRawSave[] | null = null,
+  script: PaneScript = {}
+): BrowserCommands {
   const refusal: CommandResult<never> = {
     ok: false,
     failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
   };
-  const views = new Map<number, DocumentView>([
-    [1, documentA()],
-    [2, documentB()]
-  ]);
+  const views = new Map<number, DocumentView>(
+    (script.views ?? [documentA(), documentB()]).map((view) => [view.id, view])
+  );
+  const batches = [...(script.batches ?? [])];
   return {
     openWorkspace: vi.fn(async (): Promise<CommandResult<WorkspaceSummary>> => {
       return { ok: true, value: SUMMARY };
     }),
     listDocuments: vi.fn(async (): Promise<CommandResult<readonly DocumentSummary[]>> => {
-      return { ok: true, value: FILES };
+      return { ok: true, value: script.files ?? FILES };
     }),
     getDocument: vi.fn(async (id: number): Promise<CommandResult<DocumentView>> => {
       const held = views.get(id);
@@ -281,7 +325,10 @@ function scriptedCommands(saves: RecordedRawSave[] | null = null): BrowserComman
       return id === 1 ? { ok: true, value: FILE_TEXT } : refusal;
     }),
     moveMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
-    saveMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+    saveMatch: vi.fn(
+      async (): Promise<CommandResult<SaveResult>> =>
+        script.saveMatch === undefined ? refusal : script.saveMatch()
+    ),
     createMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     deleteMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
@@ -318,9 +365,13 @@ function scriptedCommands(saves: RecordedRawSave[] | null = null): BrowserComman
     // call and asserts nothing about it, so a fire-and-forget drain that ignored
     // this answer would pass every case here. The `afterEach` below is the
     // assertion, bounded as the count's own doc comment states.
-    drainExternalChanges: vi.fn(async () => {
+    //
+    // **Since Phase 2d-6-6b a case may script batches** (entry 36): the queue is
+    // finite, a drain past its end refuses, and the case states how many drains it
+    // expects in {@link expectedDrains}.
+    drainExternalChanges: vi.fn(async (): Promise<CommandResult<ReconciliationBatch>> => {
       drains += 1;
-      return refusal;
+      return batches.shift() ?? refusal;
     })
   };
 } // End of function scriptedCommands()
@@ -412,14 +463,34 @@ interface Mounted {
  *
  * @param stocked - Whether the backup catalogue holds a batch, an entry and a
  *   readable text. Only the cases that drive a restore to a commit need one.
+ * @param script - What the commands answer beyond the defaults (Phase 2d-6-6b).
+ * @param events - A wake transport, when the case starts the reconciliation
+ *   lifecycle; `null` leaves it unstarted, as every case before 2d-6-6b did.
  * @returns The mounted pane.
  */
-async function mountPane(stocked = false): Promise<Mounted> {
+async function mountPane(
+  stocked = false,
+  script: PaneScript = {},
+  events: ReconciliationEventSource | null = null
+): Promise<Mounted> {
   const saves: RecordedRawSave[] = [];
-  const commands = scriptedCommands(stocked ? saves : null);
+  const commands = scriptedCommands(stocked ? saves : null, script);
   const backup = scriptedBackup(stocked);
-  const state = createBrowserState(commands, () => undefined, backup);
+  const state =
+    events === null
+      ? createBrowserState(commands, () => undefined, backup)
+      : createBrowserState(commands, () => undefined, backup, events);
+  if (events !== null) {
+    // **The lifecycle in `AppShell.svelte`'s order** (Phase 2d-6-6b): the
+    // registration drains first and alone, then the open drains, so a case can
+    // count both before it wakes the window.
+    state.start();
+    await settle();
+  }
   await state.open(null);
+  if (events !== null) {
+    await settle();
+  }
   const target = document.createElement('div');
   document.body.append(target);
   const component = mount(DetailPane, { target, props: { browser: state } });
@@ -434,9 +505,9 @@ async function mountPane(stocked = false): Promise<Mounted> {
       void unmount(component);
       target.remove();
       // Every coordinator created is disposed before its case ends (ruling 35).
-      // Nothing this pane draws starts one, so this releases nothing today; it is
-      // here so that the rule holds for every state this file builds rather than
-      // for the ones a case remembers.
+      // Only the delivery cases of Phase 2d-6-6b start one; it is here so that
+      // the rule holds for every state this file builds rather than for the ones
+      // a case remembers.
       state.dispose();
     }
   };
@@ -591,15 +662,16 @@ afterEach(() => {
   // real `invoke` is reported here by command name, and zero is the number in
   // every case because even an intended drain must use the injected boundary.
   const drained = drains;
+  const expected = expectedDrains;
   drains = 0;
+  expectedDrains = 0;
   expect(invoked).not.toHaveBeenCalled();
-  // Then the drain budget (ruling 35), which in this file is an exact zero for
-  // every case rather than a scripted queue: nothing this pane draws starts the
-  // coordinator, so no case here reconciles, and a case that began to would owe
-  // the scripted answers `workspace.test.ts` scripts rather than a larger
-  // allowance here. This is the assertion `scriptedCommands()`'s refusal cannot
-  // make on its own.
-  expect(drained).toBe(0);
+  // Then the drain budget (ruling 35; entry 36), an exact count per case: zero for
+  // every case that starts no reconciliation, and for the delivery cases of Phase
+  // 2d-6-6b the number of drains their finite script answers — never a larger
+  // allowance. This is the assertion `scriptedCommands()`'s refusal cannot make on
+  // its own.
+  expect(drained).toBe(expected);
 }); // End of the afterEach that closes the route and the drain budget
 
 describe('the mounted detail pane', () => {
@@ -816,8 +888,10 @@ describe('the mounted detail pane', () => {
   }); // End of the "creation reachable" case
 }); // End of the "mounted detail pane" suite
 
-/** How one of the pane's seven write surfaces is opened, and how it is closed. */
+/** How one of the pane's eight write surfaces is opened, and how it is closed. */
 interface SurfaceWalk {
+  /** What the commands answer beyond the defaults, when the walk needs it. */
+  readonly script?: PaneScript;
   /**
    * Gets the pane into the state where the opener is drawn, and presses it.
    *
@@ -826,8 +900,88 @@ interface SurfaceWalk {
   readonly open: (pane: Mounted) => Promise<void>;
   /** The control that closes it again. */
   readonly close: TranslationKey;
+  /** A confirmation the close asks for, pressed after it when it is drawn. */
+  readonly confirm?: TranslationKey;
+  /**
+   * The surface open **beside** it, which closing it leaves registered — the
+   * recovery form's host (the 2d-6 record's §5.1). Absent for the other seven.
+   */
+  readonly beside?: OpenWriteSurface;
   /** What the registry must hold while it is open. */
   readonly expected: OpenWriteSurface;
+}
+
+/**
+ * A `save_match` answer that ran into a conflict over `match/a.yml` — Phase
+ * 2d-6-6b.
+ *
+ * Its evidence names no snippet (`Unsupported`), so *Keep my draft* resolves
+ * nothing and the editor offers recovery: the one route to a recovery form
+ * through the pane's real controls.
+ *
+ * @returns The command's answer.
+ */
+async function conflictedSave(): Promise<CommandResult<SaveResult>> {
+  return {
+    ok: true,
+    value: {
+      outcome: 'conflict',
+      reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
+      expected: 'a'.repeat(64),
+      found: 'c'.repeat(64),
+      disk_revision: 'c'.repeat(64),
+      disk_text: 'matches:\n  - trigger: ":a"\n    replace: theirs\n',
+      disk: makeDocument({
+        id: 1,
+        relativePath: 'match/a.yml',
+        revision: 'c'.repeat(64),
+        matches: [
+          makeMatch({
+            node: 10,
+            document: 1,
+            revision: 'c'.repeat(64),
+            trigger: ':a',
+            replace: 'theirs',
+            path: matchListPath(0)
+          })
+        ]
+      })
+    }
+  };
+} // End of function conflictedSave()
+
+/**
+ * Opens the editor over `match/a.yml`'s snippet, edits it, and saves into the
+ * scripted conflict — Phase 2d-6-6b.
+ *
+ * @param pane - A pane mounted with {@link conflictedSave} as its `save_match`.
+ */
+async function editorInSaveConflict(pane: Mounted): Promise<void> {
+  await pane.state.select(snippetOf(pane.state, 1));
+  flushSync();
+  control(pane.target, 'browser.matchEditor.open').click();
+  flushSync();
+  const body = pane.target.querySelector('.matchEditor textarea');
+  if (!(body instanceof HTMLTextAreaElement)) {
+    throw new Error('this case needs the editor’s body box');
+  }
+  body.value = 'mine';
+  body.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  control(pane.target, 'browser.matchEditor.save').click();
+  await settle();
+} // End of function editorInSaveConflict()
+
+/**
+ * Takes the editor's save conflict to recovery and opens the form — Phase 2d-6-6b.
+ *
+ * @param pane - A pane whose editor shows {@link conflictedSave}'s conflict.
+ */
+function openRecoveryForm(pane: Mounted): void {
+  control(pane.target, conflictChoiceKey('keepMyDraft', 'authoredText')).click();
+  flushSync();
+  control(pane.target, recoveryChoiceKey('createFromSupportedFields')).click();
+  flushSync();
 }
 
 /**
@@ -856,7 +1010,7 @@ const WALKS: Record<OpenWriteSurfaceKind, SurfaceWalk> = {
       return Promise.resolve();
     },
     close: 'browser.matchCreation.close',
-    // **The one kind that may name no file**, and the state it registers in: the
+    // **One of the two kinds that may name no file**, and the state it registers in: the
     // form has been opened and nobody has chosen a destination.
     expected: { kind: 'matchCreator', target: { kind: 'unknown' } }
   },
@@ -906,6 +1060,21 @@ const WALKS: Record<OpenWriteSurfaceKind, SurfaceWalk> = {
     },
     close: 'browser.restore.close',
     expected: { kind: 'restore', target: { kind: 'document', document: 1 } }
+  },
+  // **The eighth kind, and the one opened beside another** (Phase 2d-6-6b). The
+  // form reports its own target up through the editor that mounts it, so the
+  // registry holds the editor and the form at once, and closing the form leaves
+  // the editor registered.
+  recovery: {
+    script: { saveMatch: conflictedSave },
+    open: async (pane) => {
+      await editorInSaveConflict(pane);
+      openRecoveryForm(pane);
+    },
+    close: 'browser.recovery.close',
+    confirm: 'browser.recovery.discard',
+    beside: { kind: 'matchEditor', target: { kind: 'document', document: 1 } },
+    expected: { kind: 'recovery', target: { kind: 'document', document: 1 } }
   }
 };
 
@@ -917,19 +1086,25 @@ describe('the pane as a write-surface host', () => {
       // `DetailPane.svelte`; it cannot force the entry filed under a key to be
       // true of the surface that key names, and it cannot force the host to
       // register or to dispose at all. This is where each of those is measured.
-      const pane = await mountPane();
+      const pane = await mountPane(false, walk.script);
       expect(registered(pane.state)).toEqual([]);
 
       await walk.open(pane);
       flushSync();
-      expect(registered(pane.state)).toEqual([walk.expected]);
+      const beside = walk.beside === undefined ? [] : [walk.beside];
+      expect(registered(pane.state)).toEqual([...beside, walk.expected]);
 
       control(pane.target, walk.close).click();
       flushSync();
-      expect(registered(pane.state)).toEqual([]);
+      const confirm = walk.confirm;
+      if (confirm !== undefined && pane.target.textContent?.includes(DICTIONARIES.en[confirm])) {
+        control(pane.target, confirm).click();
+        flushSync();
+      }
+      expect(registered(pane.state)).toEqual(beside);
       pane.stop();
     }); // End of the per-kind registration case
-  } // End of the loop over the seven kinds
+  } // End of the loop over the eight kinds
 
   it('returns every lease when the pane is unmounted', async () => {
     // Nothing in TypeScript forces a host to call the unregister it was handed —
@@ -1312,3 +1487,602 @@ describe('the pane as a write-surface host', () => {
     pane.stop();
   }); // End of the "the invalidation runs" case
 }); // End of the "pane as a write-surface host" suite
+
+/**
+ * A wake transport this file drives — Phase 2d-6-6b.
+ *
+ * Its registration resolves at once, so `start()` drains for the registration and
+ * `open()` drains again, and each {@link PaneEvents.wake} asks for one more.
+ */
+interface PaneEvents {
+  /** What `createBrowserState` is given. */
+  readonly source: ReconciliationEventSource;
+  /**
+   * Delivers one wake.
+   *
+   * @param epoch - Its `workspace_epoch`.
+   * @param newest - Its `newest_sequence`.
+   */
+  wake(epoch: number, newest: number): void;
+}
+
+/**
+ * Builds a wake transport whose registration resolves on its own.
+ *
+ * @returns The source, and the handle that wakes the window.
+ */
+function paneEvents(): PaneEvents {
+  let handler: ReconciliationWakeHandler | null = null;
+  /** Ends the subscription; nothing here counts it. */
+  const unlisten: ReconciliationUnlisten = () => undefined;
+  return {
+    source: {
+      /**
+       * Registers, and resolves immediately.
+       *
+       * @param wakeHandler - Where a wake goes.
+       * @returns The unlisten.
+       */
+      subscribe(wakeHandler: ReconciliationWakeHandler): Promise<ReconciliationUnlisten> {
+        handler = wakeHandler;
+        return Promise.resolve(unlisten);
+      }
+    },
+    wake: (epoch: number, newest: number): void => {
+      handler?.({ workspace_epoch: epoch, newest_sequence: newest });
+    }
+  };
+} // End of function paneEvents()
+
+/**
+ * One drained batch.
+ *
+ * @param newest - Its `newest_sequence`.
+ * @param observations - What it carries.
+ * @returns A successful command answer.
+ */
+function batch(
+  newest: number,
+  observations: readonly ExternalObservation[] = []
+): CommandResult<ReconciliationBatch> {
+  return {
+    ok: true,
+    value: { epoch: 5, newest_sequence: newest, observations: [...observations], discarded: 0 }
+  };
+} // End of function batch()
+
+/**
+ * The disk projection an observation of one file carries.
+ *
+ * @param document - The file.
+ * @param relativePath - Its path.
+ * @param revision - The disk revision.
+ * @returns The projection.
+ */
+function diskView(document: DocumentId, relativePath: string, revision: ContentRevision): DocumentView {
+  return makeDocument({
+    id: document,
+    relativePath,
+    revision,
+    matches: [
+      makeMatch({
+        node: 90,
+        document,
+        revision,
+        trigger: ':disk',
+        replace: 'ondisk',
+        path: matchListPath(0)
+      })
+    ]
+  });
+} // End of function diskView()
+
+/**
+ * One `Changed` observation whose bytes projected, as the drain carries it.
+ *
+ * @param sequence - The sequence it was admitted under.
+ * @param document - The file.
+ * @param relativePath - Its path.
+ * @param revision - The disk revision it read.
+ * @returns The wire observation.
+ */
+function changed(
+  sequence: number,
+  document: DocumentId,
+  relativePath: string,
+  revision: ContentRevision = 'c'.repeat(64)
+): ExternalObservation {
+  return {
+    Changed: {
+      sequence,
+      document: { Addressable: { document, relative_path: relativePath } },
+      previous_revision: 'a'.repeat(64),
+      disk_revision: revision,
+      content: {
+        Projected: {
+          disk_text: 'matches:\n  - trigger: ":disk"\n    replace: ondisk\n',
+          disk: diskView(document, relativePath, revision),
+          findings: [],
+          correspondences: null
+        }
+      }
+    }
+  };
+} // End of function changed()
+
+/**
+ * One narrowed observation, for the case that tells the window directly.
+ *
+ * @param sequence - Its sequence.
+ * @param document - The file.
+ * @param relativePath - Its path.
+ * @param revision - The disk revision it read.
+ * @returns The observation, as the window narrows one.
+ */
+function narrowed(
+  sequence: number,
+  document: DocumentId,
+  relativePath: string,
+  revision: ContentRevision
+): ExternalConflictObservation {
+  return {
+    sequence,
+    document,
+    previousRevision: 'a'.repeat(64),
+    diskRevision: revision,
+    diskText: 'matches:\n  - trigger: ":disk"\n    replace: ondisk\n',
+    disk: diskView(document, relativePath, revision),
+    findings: [],
+    correspondences: null
+  };
+} // End of function narrowed()
+
+/** The third file the cross-file cases need: writable, and creator-eligible. */
+const FILE_C: DocumentSummary = makeSummary({ id: 3, relativePath: 'match/c.yml' });
+
+/**
+ * The projection of `match/c.yml`.
+ *
+ * @returns The document view.
+ */
+function documentC(): DocumentView {
+  return makeDocument({
+    id: 3,
+    relativePath: 'match/c.yml',
+    revision: 'd'.repeat(64),
+    matches: [
+      makeMatch({
+        node: 30,
+        document: 3,
+        revision: 'd'.repeat(64),
+        trigger: ':c',
+        replace: 'cy',
+        path: matchListPath(0)
+      })
+    ]
+  });
+} // End of function documentC()
+
+/** Three files: two writable (`a`, `c`) and one read-only (`b`). */
+const THREE_FILES: PaneScript = {
+  files: [...FILES, FILE_C],
+  views: [documentA(), documentB(), documentC()]
+};
+
+/** One envelope one registration was handed. */
+interface Delivered {
+  /** Which registration, counted from zero in the order they were made. */
+  readonly registration: number;
+  /** The file it was registered over. */
+  readonly document: DocumentId;
+  /** The envelope. */
+  readonly delivery: ObservationDelivery;
+}
+
+/** What {@link watchDeliveries} records. */
+interface DeliveryLog {
+  /** Every envelope handed to a registration made since the watch began. */
+  readonly delivered: readonly Delivered[];
+  /**
+   * The files the registrations still live were made over, in order.
+   *
+   * @returns The files.
+   */
+  live(): readonly DocumentId[];
+}
+
+/**
+ * Records every receiver registration the pane makes, and what each is handed.
+ *
+ * **Through the real door.** The pane registers through
+ * `browser.registerObservationReceiver`, read at the call, so replacing the
+ * method on the state records each registration and wraps its receiver without
+ * changing what the window does: the wrapped receiver is what the window
+ * delivers to, and it calls the pane's own.
+ *
+ * @param state - The state to watch.
+ * @returns The log.
+ */
+function watchDeliveries(state: BrowserState): DeliveryLog {
+  const direct = state.registerObservationReceiver.bind(state);
+  const delivered: Delivered[] = [];
+  const registrations: { document: DocumentId; live: boolean }[] = [];
+  state.registerObservationReceiver = (document, receiver) => {
+    const registration = registrations.length;
+    const entry = { document, live: true };
+    registrations.push(entry);
+    const unregister = direct(document, (delivery) => {
+      delivered.push({ registration, document, delivery });
+      receiver(delivery);
+    });
+    return (): void => {
+      entry.live = false;
+      unregister();
+    };
+  };
+  return {
+    delivered,
+    live: () => registrations.filter((one) => one.live).map((one) => one.document)
+  };
+} // End of function watchDeliveries()
+
+/**
+ * The button whose label is one key's rendering in one locale.
+ *
+ * @param target - Where the pane was mounted.
+ * @param lang - The locale the pane is drawing in.
+ * @param key - The key holding the label.
+ * @returns The button.
+ */
+function controlIn(target: HTMLElement, lang: Locale, key: TranslationKey): HTMLButtonElement {
+  const label = DICTIONARIES[lang][key];
+  const found = [...target.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent?.trim() === label
+  );
+  if (found === undefined) {
+    throw new Error(`this case needs the control labelled ${label}`);
+  }
+  return found;
+} // End of function controlIn()
+
+/**
+ * The first text box inside one element of the pane.
+ *
+ * @param target - Where the pane was mounted.
+ * @param selector - The box's selector.
+ * @returns The box.
+ */
+function box(target: HTMLElement, selector: string): HTMLInputElement | HTMLTextAreaElement {
+  const found = target.querySelector(selector);
+  if (!(found instanceof HTMLInputElement) && !(found instanceof HTMLTextAreaElement)) {
+    throw new Error(`this case needs the box ${selector}`);
+  }
+  return found;
+} // End of function box()
+
+/**
+ * The destination button naming one file, inside one form.
+ *
+ * @param target - Where the pane was mounted.
+ * @param scope - The form's selector.
+ * @param path - The file's path.
+ * @returns The button.
+ */
+function destinationIn(target: HTMLElement, scope: string, path: string): HTMLButtonElement {
+  const found = [...target.querySelectorAll(`${scope} button`)].find(
+    (candidate) => candidate.textContent?.trim() === path
+  );
+  if (!(found instanceof HTMLButtonElement)) {
+    throw new Error(`this case needs the destination ${path} in ${scope}`);
+  }
+  return found;
+} // End of function destinationIn()
+
+/**
+ * Lets a wake's drain, the coordinator and the pane's handlers finish.
+ */
+async function settleWake(): Promise<void> {
+  await settle();
+  await settle();
+} // End of function settleWake()
+
+describe('the pane as a delivery host — Phase 2d-6-6b', () => {
+  // **Through the real registry and the real coordinator boundary** (the 2d-6
+  // record's §3 entry 34): every case below opens its surfaces through the pane's
+  // controls, starts the reconciliation lifecycle over a finite scripted queue of
+  // drains (entry 36, counted exactly in `expectedDrains`), and wakes the window —
+  // so the observation is admitted by the coordinator, routed by
+  // `targetingSurfaceFor`, handed to the transition this pane registered, and
+  // arbitrated once by `BrowserState.observeExternalChange`. What these cases
+  // assert is what 6b wires — the session's state as its controls show it, a
+  // submission refused, one decision — and not the conflict panel's new
+  // rendering, which is 2d-6-6c's.
+
+  it.each(LOCALES)('a pristine editor conflicts, and refuses to submit (%s)', async (lang) => {
+    expectedDrains = 3;
+    const events = paneEvents();
+    const pane = await mountPane(
+      false,
+      { batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])] },
+      events.source
+    );
+    locale.setOverride(lang);
+    const log = watchDeliveries(pane.state);
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+    controlIn(pane.target, lang, 'browser.matchEditor.open').click();
+    flushSync();
+    expect(box(pane.target, '.matchEditor textarea').readOnly).toBe(false);
+    expect(log.live()).toEqual([1]);
+
+    events.wake(5, 5);
+    await settleWake();
+
+    // **Pristine, and told all the same** (R36): the arbitration asks nothing
+    // about whether the draft was edited.
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['raised']);
+    expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+    expect(box(pane.target, '.matchEditor textarea').readOnly).toBe(true);
+    const save = controlIn(pane.target, lang, 'browser.matchEditor.save');
+    expect(save.disabled).toBe(true);
+    // The file is protected rather than reloaded under the editor.
+    expect(pane.state.externalDocumentStatus(1)).toEqual({ kind: 'stale' });
+    expect(pane.commands.reloadDocument).not.toHaveBeenCalled();
+    expect(pane.commands.saveMatch).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "pristine editor conflicts" case
+
+  it.each([
+    [1, 'match/a.yml'],
+    [3, 'match/c.yml']
+  ] as const)(
+    'an unknown-target creator is delivered about every eligible file, and blocked by a change to %i',
+    async (affected, path) => {
+      expectedDrains = 3;
+      const events = paneEvents();
+      const pane = await mountPane(
+        false,
+        { ...THREE_FILES, batches: [batch(0), batch(0), batch(5, [changed(5, affected, path)])] },
+        events.source
+      );
+      const log = watchDeliveries(pane.state);
+      control(pane.target, 'browser.matchCreation.open').click();
+      flushSync();
+      expect(registered(pane.state)).toEqual([
+        { kind: 'matchCreator', target: { kind: 'unknown' } }
+      ]);
+      // **Every creator-eligible file and only those** — the read-only `b` is not
+      // one, which is `targetingSurfaceFor`'s attribution of an unknown target.
+      expect(log.live()).toEqual([1, 3]);
+
+      events.wake(5, 5);
+      await settleWake();
+
+      expect(log.delivered.map((one) => [one.document, one.delivery.verdict.kind])).toEqual([
+        [affected, 'raised']
+      ]);
+      expect(creatorTrigger(pane.target).readOnly).toBe(true);
+      // **The destination stays choosable** (`canChooseDestination`, 2d-6-3's
+      // carry-over): naming a file is the one way forward entry 21 leaves open.
+      const destination = destinationIn(pane.target, '.creator', path);
+      expect(destination.disabled).toBe(false);
+      destination.click();
+      flushSync();
+      // Naming the affected file keeps the conflict, and the send stays refused.
+      expect(registered(pane.state)).toEqual([
+        { kind: 'matchCreator', target: { kind: 'document', document: affected } }
+      ]);
+      expect(log.live()).toEqual([affected]);
+      expect(control(pane.target, 'browser.matchCreation.create').disabled).toBe(true);
+      expect(creatorTrigger(pane.target).readOnly).toBe(true);
+      expect(pane.commands.createMatch).not.toHaveBeenCalled();
+      expect(pane.commands.reloadDocument).not.toHaveBeenCalled();
+      pane.stop();
+    }
+  ); // End of the "unknown-target creator" case
+
+  it('protects a recovery destination B while the host editor stays over A', async () => {
+    expectedDrains = 3;
+    const events = paneEvents();
+    const pane = await mountPane(
+      false,
+      {
+        ...THREE_FILES,
+        saveMatch: conflictedSave,
+        batches: [batch(0), batch(0), batch(5, [changed(5, 3, 'match/c.yml')])]
+      },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    await editorInSaveConflict(pane);
+    openRecoveryForm(pane);
+    destinationIn(pane.target, '.recovery', 'match/c.yml').click();
+    flushSync();
+    expect(registered(pane.state)).toEqual([
+      { kind: 'matchEditor', target: { kind: 'document', document: 1 } },
+      { kind: 'recovery', target: { kind: 'document', document: 3 } }
+    ]);
+    expect(log.live()).toEqual([1, 3]);
+    const hostOrigin = pane.state.standingConflictFor(1);
+    expect(hostOrigin?.kind).toBe('save');
+
+    events.wake(5, 5);
+    await settleWake();
+
+    // **One delivery, to the form's registration over `c`, and none to the host.**
+    expect(log.delivered.map((one) => [one.document, one.delivery.verdict.kind])).toEqual([
+      [3, 'raised']
+    ]);
+    expect(box(pane.target, '.recovery textarea').readOnly).toBe(true);
+    expect(control(pane.target, 'browser.recovery.create').disabled).toBe(true);
+    expect(pane.state.externalDocumentStatus(3)).toEqual({ kind: 'stale' });
+    // The host is where it was: still over `a`, its own origin still standing.
+    expect(registered(pane.state)[0]).toEqual({
+      kind: 'matchEditor',
+      target: { kind: 'document', document: 1 }
+    });
+    expect(pane.state.standingConflictFor(1)).toBe(hostOrigin);
+    expect(pane.commands.reloadDocument).not.toHaveBeenCalled();
+    expect(pane.commands.createMatch).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "recovery over B" case
+
+  it('gives a host and its recovery form over one file one decision', async () => {
+    expectedDrains = 3;
+    const events = paneEvents();
+    const pane = await mountPane(
+      false,
+      {
+        saveMatch: conflictedSave,
+        batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml', 'd'.repeat(64))])]
+      },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    await editorInSaveConflict(pane);
+    openRecoveryForm(pane);
+    expect(registered(pane.state)).toEqual([
+      { kind: 'matchEditor', target: { kind: 'document', document: 1 } },
+      { kind: 'recovery', target: { kind: 'document', document: 1 } }
+    ]);
+
+    events.wake(5, 5);
+    await settleWake();
+
+    // **Two recipients, one envelope** (entry 2): never `raised` for one and
+    // `coalesced` for the other.
+    expect(log.delivered).toHaveLength(2);
+    const [first, second] = log.delivered;
+    expect(new Set(log.delivered.map((one) => one.registration)).size).toBe(2);
+    expect(second?.delivery).toBe(first?.delivery);
+    expect(first?.delivery.verdict.kind).toBe('supersedes');
+    expect(box(pane.target, '.recovery textarea').readOnly).toBe(true);
+    expect(control(pane.target, 'browser.recovery.create').disabled).toBe(true);
+    expect(pane.commands.createMatch).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "one decision" case
+
+  it('never hands a reopened editor what its previous instance was told', async () => {
+    expectedDrains = 4;
+    const events = paneEvents();
+    const pane = await mountPane(
+      false,
+      {
+        batches: [
+          batch(0),
+          batch(0),
+          batch(5, [changed(5, 1, 'match/a.yml')]),
+          batch(6, [changed(6, 1, 'match/a.yml', 'd'.repeat(64))])
+        ]
+      },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+    control(pane.target, 'browser.matchEditor.open').click();
+    flushSync();
+    events.wake(5, 5);
+    await settleWake();
+    expect(box(pane.target, '.matchEditor textarea').readOnly).toBe(true);
+
+    control(pane.target, 'browser.matchEditor.close').click();
+    flushSync();
+    expect(log.live()).toEqual([]);
+    control(pane.target, 'browser.matchEditor.open').click();
+    flushSync();
+    // **A fresh session**: the old instance's delivery did not follow it.
+    expect(box(pane.target, '.matchEditor textarea').readOnly).toBe(false);
+    expect(log.live()).toEqual([1]);
+
+    events.wake(5, 6);
+    await settleWake();
+    // The first registration was told once and never again; only the second —
+    // the reopened editor's — was told of the later reading.
+    expect(log.delivered.map((one) => one.registration)).toEqual([0, 1]);
+    expect(box(pane.target, '.matchEditor textarea').readOnly).toBe(true);
+    pane.stop();
+  }); // End of the "reopened editor" case
+
+  it('lands a settlement after the save it settles, in the order it was decided', async () => {
+    expectedDrains = 3;
+    const events = paneEvents();
+    let answer: ((value: CommandResult<SaveResult>) => void) | null = null;
+    const pane = await mountPane(
+      false,
+      {
+        saveMatch: () =>
+          new Promise<CommandResult<SaveResult>>((resolve) => {
+            answer = resolve;
+          }),
+        batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])]
+      },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+    control(pane.target, 'browser.matchEditor.open').click();
+    flushSync();
+    const body = box(pane.target, '.matchEditor textarea');
+    body.value = 'mine';
+    body.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    control(pane.target, 'browser.matchEditor.save').click();
+    await settle();
+    expect(pane.commands.saveMatch).toHaveBeenCalledTimes(1);
+
+    // **Arrives while the save is in flight**: the barrier holds it (ruling 27).
+    events.wake(5, 5);
+    await settleWake();
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['retained']);
+
+    // The command refuses: nothing was written, so the settlement arbitrates the
+    // held reading and publishes it — before the save's own continuation runs.
+    const settleSave = answer as ((value: CommandResult<SaveResult>) => void) | null;
+    settleSave?.({ ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } });
+    await settleWake();
+
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['retained', 'raised']);
+    // **Entry 5, on screen**: the continuation did not overwrite what the
+    // settlement delivered — the editor ends showing the external conflict.
+    expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+    expect(box(pane.target, '.matchEditor textarea').readOnly).toBe(true);
+    expect(control(pane.target, 'browser.matchEditor.save').disabled).toBe(true);
+    expect(pane.commands.saveMatch).toHaveBeenCalledTimes(1);
+    pane.stop();
+  }); // End of the "settlement lands in order" case
+
+  it('keeps what a receiver installed during a refused *Keep my draft* (the reapply handler’s order)', async () => {
+    // **The 2d-6-6a review's third finding, mounted.** A delivery that lands
+    // while the synchronous handler is inside `reapplyToDiskVersion` replaces the
+    // session; the reapply then refuses, and the handler must fold the outcome
+    // into the session installed **now** — folding it into the one read before
+    // the reapply would reinstall the save conflict the delivery retired.
+    const pane = await mountPane(false, { saveMatch: conflictedSave });
+    await editorInSaveConflict(pane);
+    const keep = conflictChoiceKey('keepMyDraft', 'authoredText');
+    expect(control(pane.target, keep)).toBeDefined();
+    const direct = pane.state.standingConflictFor.bind(pane.state);
+    let armed = true;
+    // The guard is asked at the end of the reapply's entry, inside the handler;
+    // the first ask tells the window of a later reading of the editor's file.
+    pane.state.standingConflictFor = (document) => {
+      if (armed) {
+        armed = false;
+        pane.state.observeExternalChange(narrowed(7, 1, 'match/a.yml', 'd'.repeat(64)));
+      }
+      return direct(document);
+    };
+    control(pane.target, keep).click();
+    flushSync();
+    expect(armed).toBe(false);
+    expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+    // The receiver's session stands: its external conflict retired the save
+    // outcome, so the save conflict's controls are gone, and the boxes stay frozen.
+    expect(pane.target.textContent).not.toContain(DICTIONARIES.en[keep]);
+    expect(box(pane.target, '.matchEditor textarea').readOnly).toBe(true);
+    expect(pane.commands.saveMatch).toHaveBeenCalledTimes(1);
+    pane.stop();
+  }); // End of the "reapply handler order" case
+}); // End of the "delivery host" suite

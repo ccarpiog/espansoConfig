@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { ConflictSource } from '../browser/conflictSource';
   import { labelText, triggerLabel } from '../browser/labels';
   import { identityInProjection } from '../browser/matchDeletion';
   import {
@@ -193,6 +194,7 @@
     move,
     reload,
     adoptDiskVersion,
+    standingConflictFor,
     close
   }: {
     /**
@@ -295,6 +297,16 @@
      * transition finishes on.
      */
     adoptDiskVersion: AdoptTheDiskVersion<MovePlacement>;
+    /**
+     * What origin the window holds as standing for one file **now** —
+     * `BrowserState.standingConflictFor`, since Phase 2d-6-6b.
+     *
+     * The live half of the reapply's `StandingOriginGuard`
+     * (`../browser/reapply.ts`), asked about this panel's own file at the end of
+     * the reapply's entry. Nothing in TypeScript forces a host to hand the
+     * window's answer rather than a captured one.
+     */
+    standingConflictFor: (document: DocumentId) => ConflictSource | null;
     close: () => void;
   } = $props();
 
@@ -573,7 +585,15 @@
     // review, its third finding): a refused reapply leaves whatever a receiver
     // installed during it, and folding it into a session read beforehand would
     // reinstall the capture.
-    const outcome = reapplyToDiskVersion(session, unsavedDraftFor(), adoptDiskVersion, null, () => session);
+    // The standing-origin guard is the window's own answer, asked about this
+    // panel's file (Phase 2d-6-6b).
+    const outcome = reapplyToDiskVersion(
+      session,
+      unsavedDraftFor(),
+      adoptDiskVersion,
+      () => standingConflictFor(projection.id),
+      () => session
+    );
     const attempt = attemptOfReapply(session, outcome);
     reapplyAttempt = attempt;
     session = attempt.session;
@@ -616,7 +636,14 @@
         // is what decides whether the adoption happened, and the session ends
         // only if it did — so a refusal leaves this panel open rather than
         // closing over a window that never moved.
-        const reloaded = reloadTheDiskVersion(confirmDiskReload(session), adoptDiskVersion);
+        // The reader answers the confirmed session while the installed one is
+        // still the session it was derived from, and the installed session
+        // otherwise (Phase 2d-6-6b; `reloadTheDiskVersion` in `matchMove.ts`).
+        const held = session;
+        const confirmed = confirmDiskReload(held);
+        const reloaded = reloadTheDiskVersion(confirmed, adoptDiskVersion, () =>
+          session === held ? confirmed : session
+        );
         session = reloaded;
         if (reloaded.closed) {
           close();

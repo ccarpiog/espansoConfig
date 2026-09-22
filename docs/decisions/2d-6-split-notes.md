@@ -161,9 +161,12 @@ plus the three hand-on obligations; the acceptance above is checked in full when
 - **2d-6-6b — registration and delivery wiring.** `DetailPane.svelte` / `AppShell.svelte`
   registration and delivery for the editor, the creator and recovery; recovery as the eighth
   centrally assembled `OpenWriteSurface` kind; the shell kept mounted while a retained surface
-  exists over an empty list; `src-tauri/capabilities/default.json` gaining
-  `core:event:allow-listen` and `core:event:allow-unlisten` (staged by file name); mounted
-  delivery tests through the real registry and coordinator boundary.
+  exists over an empty list; mounted delivery tests through the real registry and
+  coordinator boundary. (The cut also listed `src-tauri/capabilities/default.json` gaining
+  `core:event:allow-listen` and `core:event:allow-unlisten`; both have been granted since
+  2d-5-7a, and 6b registers no Tauri listener — its receivers are in-process — so the file
+  is unchanged: [`2d-6-6b-notes.md`](2d-6-6b-notes.md) §2 ruling 7.) Record:
+  [`2d-6-6b-notes.md`](2d-6-6b-notes.md).
 - **2d-6-6c — the three authored panels' rendering.** Origin, evidence, comparison, copy and
   recovery rendering on `MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte`;
   the bilingual mounted tests of the acceptance above; the narrow window reading.

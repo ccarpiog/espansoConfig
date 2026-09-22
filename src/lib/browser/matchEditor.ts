@@ -202,10 +202,13 @@
  * with the typed sentence when the table, the row or the standing origin say no
  * (entry 22).
  *
- * **No component registers this receiver yet.** 2d-6-6 wires
- * `BrowserState.registerObservationReceiver` to it through `DetailPane`; until
- * then every case that drives it is a model test, and the mounted ordering of a
- * delivery against this editor's own `await save(...)` is that step's to show.
+ * **Registered since Phase 2d-6-6b.** `MatchEditor.svelte` reports a receiver that
+ * installs this module's `applyObservation` through the binding `DetailPane`
+ * hands down, and the pane registers it through
+ * `BrowserState.registerObservationReceiver` over the editor's file
+ * (`./surfaceReceivers.ts`); `DetailPane.test.ts` shows the mounted ordering of a
+ * delivery against this editor's own `await save(...)`. Drawing the external
+ * conflict and its notices is 2d-6-6c's.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -254,7 +257,8 @@ import {
   sendFailureLines,
   sendFailureOf,
   reloadWasRefused,
-  spendTheConfirmedReload,
+  confirmationOf,
+  settledAnswer,
   submissionIsStale,
   NOT_RELOADING,
   RELOAD_REFUSED,
@@ -277,7 +281,6 @@ import {
   type ObservationDelivery
 } from './observationDelivery';
 import {
-  adoptForReapply,
   correspondenceRowFor,
   enterReapply,
   externalEvidenceRefusalKey,
@@ -311,7 +314,8 @@ import {
   type ExternalConflictModel,
   type RetainedDraftField,
   type SaveOutcomeMessage,
-  type SaveOutcomeModel
+  type SaveOutcomeModel,
+  reapplyAuthorizationFor
 } from './saveOutcome';
 
 /**
@@ -1580,7 +1584,9 @@ function writesACarriageReturn(draft: MatchDraft): boolean {
  * was handed is still the one installed; {@link reapplyToDiskVersion} rechecks the
  * installed session's blocks and conflict once, immediately before adopting; and
  * {@link applySave} / {@link saveCouldNotBeSent} replay whatever the receiver
- * appended to it during their own replay, round after round.
+ * appended to it during their own replay, round after round. Since Phase 2d-6-6b
+ * {@link reloadTheDiskVersion} reads it too, before its adoption and once more
+ * after it (raw's and restore's reload shape).
  *
  * **What it forces and what it does not, in the same sentence.** It is required,
  * so no call compiles without one, and `MatchEditor.svelte` passes one at every
@@ -2069,17 +2075,68 @@ export function confirmDiskReload(session: MatchEditorSession): MatchEditorSessi
  * **What no type here forces**: that `adopt`'s body does anything, and that the
  * panel reading {@link MatchEditorView.closed} really closes.
  *
+ * **The installed session is read three times: once after this function's own
+ * reads and immediately before the adoption, once more after it, and once last,
+ * after the answer is built** (the last since 2d-6-6b's review: the confirmation
+ * is snapshot through `confirmationOf` before the first read, and every read and
+ * spread of the settled session happens before `settledAnswer` in `./editorSave.ts`
+ * takes the last look, so a getter or `Proxy` trap that displaces it is answered
+ * with what it installed and nothing caller-controlled runs after that look) (Phase 2d-6-6b —
+ * 2d-6-5's review, its third finding, carried from raw's and restore's reloads).
+ * The adoption is the window's, and `BrowserState.adoptDiskVersion` copies the
+ * observation's projection before it decides — a read of caller data, and a getter
+ * there can tell the window of a later reading, which the window decides and hands
+ * to the registered receiver while this function is still inside `adopt`. So: a
+ * session displaced before the adoption is not closed and the installed session is
+ * answered, the window never asked. After the adoption the installed session is
+ * read again; when it now shows **another conflict** (by source identity) the
+ * person must decide about that one, whether the window installed this snapshot
+ * or refused it as outlived, so the installed session is answered untouched and
+ * nothing is closed over it; when it shows the same conflict with more recorded —
+ * a wait, most of all — the refused step and the closed session are built over
+ * **it**, so a wait the receiver recorded during a refused adoption survives. What
+ * that cannot force is that the required reader is honest
+ * ({@link ReadTheInstalledSession}): one answering a capture closes or refuses
+ * what it was handed, and a delivery the receiver made during the adoption is lost
+ * when the caller installs the answer.
+ *
  * @param session - The session holding a confirmation.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
- * @returns The closed session, or the same session.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
+ * @returns The closed session, the session at the terminal refused step, the same
+ *   session, or the installed session when the one handed in is no longer it or
+ *   another conflict landed during the adoption.
  */
 export function reloadTheDiskVersion(
   session: MatchEditorSession,
-  adopt: AdoptTheDiskVersion<MatchBuffers>
+  adopt: AdoptTheDiskVersion<MatchBuffers>,
+  current: ReadTheInstalledSession
 ): MatchEditorSession {
-  const spend = spendTheConfirmedReload(reloadableConflictOf(session), session.reload, adopt);
-  if (spend === 'notAttempted') {
+  // **Every read of this function's own, taken first.**
+  const step = session.reload;
+  const conflict = reloadableConflictOf(session);
+  // **The confirmation this spends, snapshot before the installed-session read**
+  // (2d-6-6b's review, its one blocker): the step is caller data, and asking it
+  // after that read would run a getter past the last look.
+  const confirmation = conflict === null ? null : confirmationOf(step);
+  // **The installed session, read once, after those reads and immediately
+  // before the adoption.** A session no longer installed is not closed, and
+  // what is installed is answered so the caller keeps it.
+  const installed = current();
+  if (installed !== session) {
+    return installed;
+  }
+  if (conflict === null || confirmation === null) {
     return session;
+  }
+  const spend = adopt(conflict, confirmation) === 'refused' ? 'refused' : 'satisfied';
+  // **Read once more, after the adoption**, which ran the window's own reads.
+  const settled = current();
+  if (settled !== session && conflictOf(settled)?.source !== conflict.source) {
+    // A replacing verdict landed during the adoption: the conflict the receiver
+    // installed is the one to decide about now, and nothing is closed over it.
+    return settledAnswer(settled, settled, current);
   }
   if (spend === 'refused') {
     // **A terminal step rather than the session unchanged**, which is the
@@ -2087,24 +2144,32 @@ export function reloadTheDiskVersion(
     // of `adoptDiskVersion`'s ordered guards produced it, so the control stops
     // being offered and the panel says so. That is a decision about what to draw
     // and **not** a claim that a later ask would be refused too — a refusal spends
-    // nothing. *Keep editing* writes NOT_RELOADING back.
-    return { ...session, reload: RELOAD_REFUSED };
+    // nothing. *Keep editing* writes NOT_RELOADING back. Built over the settled
+    // session, so a wait recorded during the adoption is carried forward.
+    return settledAnswer(settled, { ...settled, reload: RELOAD_REFUSED }, current);
   }
-  return {
-    ...session,
-    submitted: null,
-    outcome: null,
-    extraMessages: [],
-    group: null,
-    reload: NOT_RELOADING,
-    sendFailure: null,
-    // The conflict of either origin is resolved by the reload that ends this
-    // session, and a closed session says nothing about the file any more.
-    externalConflict: null,
-    uncertaintyUnresolved: false,
-    awaitingReconciliation: null,
-    closed: true
-  };
+  // **Built first, then the final installed-session read** (2d-6-6b's review):
+  // the spread reads the settled session, and nothing caller-controlled may run
+  // after the look `settledAnswer` takes.
+  return settledAnswer(
+    settled,
+    {
+      ...settled,
+      submitted: null,
+      outcome: null,
+      extraMessages: [],
+      group: null,
+      reload: NOT_RELOADING,
+      sendFailure: null,
+      // The conflict of either origin is resolved by the reload that ends this
+      // session, and a closed session says nothing about the file any more.
+      externalConflict: null,
+      uncertaintyUnresolved: false,
+      awaitingReconciliation: null,
+      closed: true
+    },
+    current
+  );
 } // End of function reloadTheDiskVersion()
 
 /**
@@ -2113,7 +2178,7 @@ export function reloadTheDiskVersion(
  *
  * **The session's receiver, as a value.** A component registers a function through
  * `BrowserState.registerObservationReceiver` that calls this with the envelope and
- * installs what comes back (the wiring is 2d-6-6's); the decision itself is here,
+ * installs what comes back (`MatchEditor.svelte`, since Phase 2d-6-6b); the decision itself is here,
  * so that a suite can drive every arm without a window. It never re-arbitrates:
  * the envelope carries one decision the window reached, the same object every
  * receiver over the file was handed, and this combines it with the session's own
@@ -2766,21 +2831,27 @@ function reapplied(
  * session. So the adoption is refused `observationRetained` or
  * `writeOutcomeUnknown` when the installed session now carries either, and
  * `supersededEvidence` when the conflict it shows is no longer the one being
- * reapplied; the rebuilt session is built before that read, and nothing
- * caller-controlled runs between the read and the adoption. **And once more after
+ * reapplied; the rebuilt session is built before that read, the three facts are
+ * read off it, and — since 2d-6-6b's review, its one blocker — one last look
+ * follows them (a session displaced while they were read is answered
+ * `supersededEvidence`), so nothing caller-controlled runs between the last look
+ * and the adoption. **And once more after
  * the adoption** (the 2d-6-6a review, its first finding — 2d-6-5's reload shape):
  * `adoptDiskVersion` copies the observation's projection, and a getter there can
  * tell the window of a reading that the receiver records on the installed session
  * while the door is still inside `adopt`. A session that now shows **another
  * conflict** is not rebuilt over — `supersededEvidence`, and the caller keeps
  * the installed session — and the same conflict with a wait recorded hands the
- * rebuilt session that wait, so its ordinary *Save* stays refused. What no type
+ * rebuilt session that wait, so its ordinary *Save* stays refused; the answer is
+ * built before a last look, and a session displaced while the settled one was
+ * read is answered `supersededEvidence` and not rebuilt over. What no type
  * forces is that the reader is honest ({@link ReadTheInstalledSession}).
  *
  * **The standing-origin guard is a parameter, and `null` is accepted for one
- * stated reason.** `MatchEditor.svelte` does not yet hand the live
- * `BrowserState.standingConflictFor` closure down — the narrow function prop that
- * would is 2d-6-6b's wiring — and passes `null`; the parameter is nullable rather
+ * stated reason.** `MatchEditor.svelte` has handed the live
+ * `BrowserState.standingConflictFor` closure down since Phase 2d-6-6b, through
+ * the narrow function prop `standingConflictFor`, and passes no `null`, and the
+ * parameter stays nullable; the parameter is nullable rather
  * than defaulted since Phase 2d-6-6a, so that the required reader can follow it.
  * **When no guard is handed in, the supersession question is not asked by the
  * entry**: the entry is given a closure answering the
@@ -2855,9 +2926,9 @@ export function reapplyToDiskVersion(
   const answer: MatchEditorReapply = plan.writesAnything
     ? { kind: 'reapplied', session: reapplied(target, plan, session) }
     : { kind: 'alreadySatisfied', session: rebuiltOver(target, session) };
-  // **The installed session, read once, after the last caller-controlled read
-  // and immediately before the spend.** Nothing caller-controlled runs between
-  // this read and the door.
+  // **The installed session, read after the last caller-controlled read of the
+  // reapply's own**; its three facts below are read off it, and a last look
+  // follows them, before the door (2d-6-6b's review).
   const installed = current();
   if (installed.uncertaintyUnresolved) {
     return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
@@ -2868,7 +2939,17 @@ export function reapplyToDiskVersion(
   if (conflictOf(installed)?.source !== entry.conflict.source) {
     return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
   }
-  if (adoptForReapply(entry.conflict, adopt) === 'refused') {
+  // **Everything the spend needs, taken now, then one last look** (2d-6-6b's
+  // review, its one blocker): the three reads above are of the installed
+  // session, which is caller data, and a getter or `Proxy` trap among them can
+  // displace it. The authorization reads the conflict's origin, so it is minted
+  // before the look too; after it nothing caller-controlled runs before the door.
+  const adopted = entry.conflict;
+  const authorization = reapplyAuthorizationFor(adopted);
+  if (current() !== installed) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  if (adopt(adopted, authorization) === 'refused') {
     return { kind: 'adoptionRefused' };
   }
   // **Read again after the adoption**, which read caller data of its own.
@@ -2877,9 +2958,17 @@ export function reapplyToDiskVersion(
     return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
   }
   const waiting = settled.awaitingReconciliation;
-  return answer.kind === 'reapplied' || answer.kind === 'alreadySatisfied'
+  // **Built first, then one last look at the installed session** (2d-6-6b's
+  // review): every read of the settled session above is caller data, and a
+  // session displaced during them is not rebuilt over; nothing caller-controlled
+  // runs after the look.
+  const result: MatchEditorReapply = answer.kind === 'reapplied' || answer.kind === 'alreadySatisfied'
     ? { ...answer, session: { ...answer.session, awaitingReconciliation: waiting } }
     : answer;
+  if (current() !== settled) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  return result;
 } // End of function reapplyToDiskVersion()
 
 /**
@@ -2913,10 +3002,10 @@ function rebuiltOver(target: MatchView, session: MatchEditorSession): MatchEdito
  *
  * It answers the shown conflict's own origin, so the supersession question the entry
  * asks last is answered *yes, it stands* without the window being asked — the closure
- * `StandingOriginGuard`'s doc names as defeating the check. It exists so that the one
- * component caller, which passes `null` until 2d-6-6b hands the live closure down,
- * keeps its save-origin reapply exactly as it was; what it costs is stated on the
- * caller. The origin is read once, here, off the model this module built.
+ * `StandingOriginGuard`'s doc names as defeating the check. It exists for a caller that
+ * passes `null`; since Phase 2d-6-6b no component does — each hands the live
+ * `BrowserState.standingConflictFor` closure down — so only a model suite reaches
+ * it, and what it costs is stated on the caller. The origin is read once, here, off the model this module built.
  *
  * @param conflict - The conflict shown, or `null`.
  * @returns A guard that never asks the window.

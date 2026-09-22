@@ -18,7 +18,17 @@
   // is checked against `InvalidateEverySurface` where it is passed, which is the
   // prop that requires one — so no type from `../ipc/commands` is needed for it
   // beyond that one.
-  import type { OpenWriteSurface, OpenWriteSurfaceKind } from '../browser/restore';
+  import {
+    creatorEligibilityOf,
+    type OpenWriteSurface,
+    type OpenWriteSurfaceKind,
+    type WriteSurfaceTarget
+  } from '../browser/restore';
+  import {
+    createReceiverRoster,
+    type BindObservationReceiver,
+    type ReceivingSurfaceKind
+  } from '../browser/surfaceReceivers';
   import type {
     UnregisterWriteSurface,
     WriteSurfaceTransition
@@ -503,17 +513,77 @@
   } // End of function startRestoring()
 
   /**
+   * The file the open recovery form would write, `unknown` while it names none,
+   * or `null` while no form is open — Phase 2d-6-6b, the 2d-6 record's §3 entry 3.
+   *
+   * **The eighth write surface's identity, and the second this pane does not
+   * own.** A recovery form lives inside `RecoveryPanel`, which the editor or the
+   * new-snippet form mounts, and chooses its own destination; the panel reports
+   * the target through the binding {@link receivers} hands down, and this is where
+   * it lands. It is `null` whenever no panel holds an open form, including after
+   * the host surface closed, because the panel's teardown withdraws its binding.
+   */
+  let recoveryTarget = $state.raw<WriteSurfaceTarget | null>(null);
+
+  /**
+   * Whether two optional targets say the same thing.
+   *
+   * @param one - One target, or `null`.
+   * @param other - The other, or `null`.
+   * @returns Whether they agree, `null` agreeing only with `null`.
+   */
+  function sameOptionalTarget(
+    one: WriteSurfaceTarget | null,
+    other: WriteSurfaceTarget | null
+  ): boolean {
+    if (one === null || other === null) {
+      return one === other;
+    }
+    return sameTarget(one, other);
+  } // End of function sameOptionalTarget()
+
+  /**
+   * **The parent's binding record** — the consult's Q1, Phase 2d-6-6b. Each
+   * receiving child reports its receiver through the required prop this pane
+   * hands down ({@link bindReceiver}); the roster keeps one instance-bound binding
+   * per kind and registers it through `BrowserState.registerObservationReceiver`
+   * over the file its surface names — or over every creator-eligible file while
+   * it names none — following {@link openSurfaces} from the effect below.
+   *
+   * A reported target is assigned only when it differs, so a report repeated on
+   * every transition of the form moves nothing here.
+   */
+  const receivers = createReceiverRoster({
+    register: (document, receiver) => browser.registerObservationReceiver(document, receiver),
+    reportTarget: (kind, target) => {
+      if (kind === 'recovery' && !sameOptionalTarget(recoveryTarget, target)) {
+        recoveryTarget = target;
+      }
+    }
+  });
+
+  /**
+   * The required reporter for one receiving kind, as the prop a child is handed.
+   *
+   * @param kind - The kind the child is a surface of.
+   * @returns The reporter.
+   */
+  function bindReceiver(kind: ReceivingSurfaceKind): BindObservationReceiver {
+    return (receiver) => receivers.bind(kind, receiver);
+  } // End of function bindReceiver()
+
+  /**
    * One of this pane's write surfaces while it is open, or `null` while it is
    * not.
    *
    * `null` is *this kind is not open*, and it is a different fact from an
    * `unknown` target, which is *this kind is open and names no file*. Only the
-   * new-snippet form can be in the second state.
+   * new-snippet form and the recovery form can be in the second state.
    */
   type PaneWriteSurface = OpenWriteSurface | null;
 
   /**
-   * This pane's seven write surfaces, keyed by kind.
+   * This pane's eight write surfaces, keyed by kind.
    *
    * **The exhaustive assembly consult Q1 rules**
    * (`docs/reviews/phase-2d-5-design.md:39-45`), and the whole reason the type is
@@ -525,16 +595,17 @@
    *
    * **`OpenWriteSurface & { kind: K }` rather than a second copy of the union.**
    * It intersects the shipped union with the key, so each entry can only be a
-   * surface *of the kind it is filed under*: the six non-creator keys reduce to
-   * the arm that requires a file, and `matchCreator` reduces to the arm that
-   * allows `unknown`. Writing the seven arms out again would be a second
-   * definition of `OpenWriteSurface` that can drift from the first.
+   * surface *of the kind it is filed under*: the six keys that are opened over a
+   * file reduce to the arm that requires one, and `matchCreator` and `recovery`
+   * reduce to the arm that allows `unknown`. Writing the eight arms out again
+   * would be a second definition of `OpenWriteSurface` that can drift from the
+   * first.
    *
    * **What that forces, and what it does not.** It forces that every kind is
    * mentioned and that no entry can describe another kind's surface; it does
    * **not** force that the value filed under a key is *true* — a key wired to the
    * wrong session, or to a document identity taken from the wrong side of a
-   * session, type-checks perfectly. `DetailPane.test.ts` opens each of the seven
+   * session, type-checks perfectly. `DetailPane.test.ts` opens each of the eight
    * and reads back what the registry holds, which is the only thing that can
    * catch that.
    */
@@ -563,10 +634,16 @@
    * production or in any test — 2d-5-1-C's measurement, quoted rather than
    * re-derived: its one caller sat inside the `{:else if restoring !== null}` arm,
    * so `restoring` was non-null and {@link busy} had already made the other five
-   * null. Nothing here is conditioned on which arm is being drawn, so all seven
+   * null. Nothing here is conditioned on which arm is being drawn, so all eight
    * entries are live. **What `busy` still means for the live set** is that at most
-   * one of them is non-null at a time, so the registry holds at most one entry from
-   * this pane and its documented array order decides nothing here.
+   * one of the seven it counts is non-null at a time; the eighth, `recovery`, is
+   * the exception the consult's §5.1 names — a recovery form is open *beside* the
+   * editor or the new-snippet form that mounts it, so the registry can hold two
+   * entries from this pane, and `targetingSurfaceFor`'s array order then decides
+   * which kind's transition the coordinator calls. That choice decides nothing a
+   * session sees: both kinds' transitions hand the observation to the one
+   * `BrowserState.observeExternalChange`, whose single arbitration is delivered to
+   * every receiver over the file (entry 2).
    */
   const openSurfaces: PaneWriteSurfaces = $derived({
     matchEditor:
@@ -613,7 +690,8 @@
     restore:
       restoring === null
         ? null
-        : { kind: 'restore', target: { kind: 'document', document: restoring.projection.id } }
+        : { kind: 'restore', target: { kind: 'document', document: restoring.projection.id } },
+    recovery: recoveryTarget === null ? null : { kind: 'recovery', target: recoveryTarget }
   } satisfies Record<OpenWriteSurfaceKind, PaneWriteSurface>);
 
   /**
@@ -640,33 +718,50 @@
   const heldRegistrations = new Map<OpenWriteSurfaceKind, HeldRegistration>();
 
   /**
-   * What a registered surface is told about an external observation of its file.
+   * What a registered surface of one kind is told about an external observation
+   * of its file — Phase 2d-6-6b, the first live component path for
+   * `BrowserState.observeExternalChange`.
    *
-   * **A no-op, and the same one for all seven kinds** — Phase 2d-5-2b. **It is
-   * now called**, which it was not when it was written: since 2d-5-4
-   * `tellTheSurfaceAbout()` in `src/lib/browser/observationTransitions.ts` reads
-   * `transitionFor(kind)` and invokes what it returns, so the inertness is this
-   * body's and no longer the absence of a caller. The sentence here used to say
-   * that nothing in the repository invoked a stored transition; 2d-5-4 falsified
-   * it by routing an admitted observation to the surface a reload would strand.
+   * **It hands the observation to the window's one arbitration** while a receiver
+   * of this kind is reported, and that is what the 2d-6 record's §3 entry 2 asks
+   * for: `tellTheSurfaceAbout()` in `src/lib/browser/observationTransitions.ts`
+   * picks **one** targeting kind and calls its transition, and
+   * `observeExternalChange` decides once and delivers the same envelope to every
+   * receiver registered over the file — the editor and a recovery form over one
+   * file get one decision, never `raised` and then `coalesced`. A `supersedes`
+   * verdict reaches `supersedeConflict` inside each receiver's transition. **It
+   * reads the roster at the call**, not at registration, so a kind whose receiver
+   * is displaced or withdrawn stops arbitrating at once.
    *
-   * **What being called and doing nothing means, said here rather than discovered
-   * on screen.** Under consult Q5 the coordinator installs no projection when a
-   * surface may target the document and hands the observation to that surface
-   * instead — so with this body the person's draft survives and they are never
-   * told the file moved. That is the conservative half of the rule and the wrong
-   * half of the answer, and replacing it is 2d-5-5's work rather than a defect
-   * here.
+   * **It is still a no-op for the five kinds whose receivers are not reported**
+   * — the three operation panels (2d-6-7) and the raw editor and restore
+   * (2d-6-8) — and for a receiving kind with no live binding. Arbitrating there
+   * would register a standing origin no session is told of, so the coordinator's
+   * own effect is what remains: the file is marked stale and nothing is reloaded
+   * under the surface; the save command's revision check is what refuses a stale
+   * write. That no-binding state is not reachable through this pane — every
+   * receiving child reports during its own initialisation, before the effect
+   * below registers its surface, and withdraws at teardown in the same flush that
+   * unregisters it — but no type forces that ordering (entry 1's "a missing
+   * receiver must retain delivery and block submission" is met by ordering here,
+   * not by a retention).
    *
-   * **Two of the three arms cannot reach this function at all**, which is a
-   * property of the type rather than of this body: `WriteSurfaceTransition` takes
-   * the narrowed `Changed`/`Projected` snapshot that
+   * **Two of the three observation arms cannot reach this function at all**,
+   * which is a property of the type rather than of this body:
+   * `WriteSurfaceTransition` takes the narrowed `Changed`/`Projected` snapshot
    * `externalConflictObservationOf()` builds, so a `Removed` or an `Unreadable`
-   * observation — and a `Changed` one whose content is not `Projected` — is
-   * decided without any surface being told. Telling a surface its file is gone is
-   * 2d-5-5's too.
+   * observation is decided without any surface being told.
+   *
+   * @param kind - The kind the transition is registered for.
+   * @returns The transition.
    */
-  const tellNobodyYet: WriteSurfaceTransition = () => undefined;
+  function transitionOf(kind: OpenWriteSurfaceKind): WriteSurfaceTransition {
+    return (observation) => {
+      if (receivers.receives(kind)) {
+        browser.observeExternalChange(observation);
+      }
+    };
+  } // End of function transitionOf()
 
   /**
    * Whether two targets name the same thing.
@@ -700,7 +795,7 @@
    * literals written in this file, checked against the shipped union by
    * {@link PaneWriteSurfaces}, and built with no cast and no assertion. The
    * registry's refusal fires on what a *read* answers rather than on what was
-   * declared, and neither read can run anything here — the seven sources are
+   * declared, and neither read can run anything here — the eight sources are
    * `$state.raw` or a boolean, so no reactive proxy stands between the registry
    * and a plain data property, and none of these objects has an accessor.
    *
@@ -714,7 +809,7 @@
   function registerSurface(surface: OpenWriteSurface): void {
     heldRegistrations.set(surface.kind, {
       surface,
-      lease: browser.registerWriteSurface(surface, tellNobodyYet)
+      lease: browser.registerWriteSurface(surface, transitionOf(surface.kind))
     });
   } // End of function registerSurface()
 
@@ -722,7 +817,7 @@
    * Brings the registry into step with {@link openSurfaces}.
    *
    * **A reconciliation rather than a re-registration.** This runs on every change
-   * to any of the seven sessions — a keystroke in the raw editor replaces
+   * to any of the eight sessions — a keystroke in the raw editor replaces
    * {@link openSurfaces} whole — and every registration moves the registry's
    * generation, which consult Q5 makes a coordinator's guard. Tearing down and
    * rebuilding here would move that counter for changes nobody made. What this does
@@ -758,7 +853,7 @@
       if (surface !== null) {
         open.set(surface.kind, surface);
       }
-    } // End of the loop over the assembly's seven entries
+    } // End of the loop over the assembly's eight entries
     for (const kind of [...heldRegistrations.keys()]) {
       if (!open.has(kind)) {
         heldRegistrations.get(kind)?.lease();
@@ -797,9 +892,9 @@
 
   /*
    * **The registration itself.** An effect rather than a call in each opener and
-   * each closer: there are seven of the first and more than seven of the second —
-   * a `close` prop on six components, {@link invalidateEverySurface}, and the
-   * form's own re-seed — and a rule spread over that many call sites is a rule one
+   * each closer: there are eight of the first and more than eight of the second —
+   * a `close` prop on six components, {@link invalidateEverySurface}, the form's
+   * own re-seed, and the recovery panel's own report — and a rule spread over that many call sites is a rule one
    * of them can omit, with no type to notice. Reading {@link openSurfaces} here is
    * what subscribes this to every one of them.
    *
@@ -814,13 +909,44 @@
     reconcileWriteSurfaces(openSurfaces);
   });
 
+  /**
+   * Every file a surface naming no file is delivered about: each listed file the
+   * new-snippet form would offer as a destination, by `creatorEligibilityOf` in
+   * `../browser/restore.ts` over this window's summary and projection — the set
+   * `targetingSurfaceFor` attributes an unknown target to.
+   */
+  const eligibleDocuments: readonly DocumentId[] = $derived(
+    browser.documents
+      .filter((one) => creatorEligibilityOf(one, projectionOf(one.id)) === 'creatorEligible')
+      .map((one) => one.id)
+  );
+
+  /*
+   * **The receivers follow the surfaces** — Phase 2d-6-6b. A second effect rather
+   * than a line in the first, so the write-surface registry's own reconciliation
+   * stays exactly what it was; both read {@link openSurfaces} and run in the same
+   * flush. No cleanup is returned, for the first effect's reason; teardown is
+   * `onDestroy` below.
+   */
+  $effect(() => {
+    const open: OpenWriteSurface[] = [];
+    for (const surface of Object.values(openSurfaces) as readonly PaneWriteSurface[]) {
+      if (surface !== null) {
+        open.push(surface);
+      }
+    } // End of the loop over the assembly's eight entries
+    receivers.reconcile(open, eligibleDocuments);
+  });
+
   /*
    * **Disposal, which no type can force.** `UnregisterWriteSurface` is callable so
    * that a host can return it straight from a cleanup; this one is a loop instead,
    * because {@link heldRegistrations} is keyed by kind and this pane reconciles it
    * rather than owning a single registration for the life of one effect. **How many
-   * leases it actually holds is one**, since {@link busy} keeps the seven mutually
-   * exclusive — the loop is written over the map rather than over that coincidence.
+   * leases it actually holds is at most two** — one of the seven {@link busy}
+   * keeps mutually exclusive, and a recovery form beside the editor or the form
+   * that mounts it — and the loop is written over the map rather than over that
+   * count. The receiver roster is disposed here too.
    * Nothing in TypeScript makes a host call any of them: a pane that dropped its
    * leases would leave its surfaces registered for the life of the window, and
    * `DetailPane.test.ts` is what establishes that this one does not.
@@ -830,6 +956,7 @@
       registration.lease();
     } // End of the loop over every lease this pane holds
     heldRegistrations.clear();
+    receivers.dispose();
   });
 
   /**
@@ -910,8 +1037,8 @@
    * a coordinator is not.
    *
    * **Today it always answers `null` while a move panel is open**, and that is a
-   * fact about this pane rather than about the rule: the seven write surfaces are
-   * mutually exclusive through {@link busy}, so a snippet with an open editor is
+   * fact about this pane rather than about the rule: the seven write surfaces
+   * {@link busy} counts are mutually exclusive through it, so a snippet with an open editor is
    * not offered a move in the first place — which is the same conservative refusal
    * reached one step earlier. The wiring is here so the model's own arm becomes
    * live the first moment that stops being true, and `MatchMover.test.ts` is what
@@ -991,7 +1118,11 @@
   } // End of function projectionOf()
 
   /**
-   * Whether one of this pane's seven write surfaces is open.
+   * Whether one of this pane's seven top-level write surfaces is open.
+   *
+   * **Seven, not eight**: the recovery form is not counted, because it opens
+   * inside the editor or the new-snippet form, which already count — the eighth
+   * kind is the one surface that is open *beside* another (the 2d-6 record's §5.1).
    *
    * They outrank the pane's read-only subjects and each other: a draft, a pending
    * confirmation, a chosen destination, an acknowledgement on screen or a save in
@@ -1199,6 +1330,9 @@
       reproject={reprojectMatch}
       {adoptDiskVersion}
       adoptRecoveryDiskVersion={adoptDiskVersion}
+      reportReceiver={bindReceiver('matchEditor')}
+      reportRecovery={bindReceiver('recovery')}
+      standingConflictFor={(document) => browser.standingConflictFor(document)}
       close={() => (editingMatch = null)}
     />
   {:else if deletingMatch !== null}
@@ -1216,6 +1350,7 @@
       remove={(id, baseRevision, acknowledgement) =>
         browser.deleteMatch(id, baseRevision, acknowledgement)}
       {adoptDiskVersion}
+      standingConflictFor={(document) => browser.standingConflictFor(document)}
       close={() => (deletingMatch = null)}
     />
   {:else if movingMatch !== null}
@@ -1236,6 +1371,7 @@
         browser.moveMatch(id, after, baseRevision, acknowledgement)}
       reload={(document) => browser.rereadDocument(document)}
       {adoptDiskVersion}
+      standingConflictFor={(document) => browser.standingConflictFor(document)}
       close={() => (movingMatch = null)}
     />
   {:else if duplicatingMatch !== null}
@@ -1257,6 +1393,7 @@
         browser.duplicateMatch(id, baseRevision, acknowledgement)}
       reload={(document) => browser.rereadDocument(document)}
       {adoptDiskVersion}
+      standingConflictFor={(document) => browser.standingConflictFor(document)}
       close={() => (duplicatingMatch = null)}
     />
   {:else if creating}
@@ -1277,6 +1414,9 @@
         browser.createMatch(document, newMatch, position, baseRevision, acknowledgement)}
       {adoptDiskVersion}
       reportDestination={(document) => (creatorDestination = document)}
+      reportReceiver={bindReceiver('matchCreator')}
+      reportRecovery={bindReceiver('recovery')}
+      standingConflictFor={(document) => browser.standingConflictFor(document)}
       close={stopCreating}
     />
   {:else if restoring !== null}

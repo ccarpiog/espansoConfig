@@ -1,8 +1,12 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
+  import type { ConflictSource } from '../browser/conflictSource';
+  import type { BindObservationReceiver } from '../browser/surfaceReceivers';
   import { attemptOfReapply, reapplyReveal, reapplyToShow, type ReapplyAttempt } from '../browser/reapply';
   import type { CreationField } from '../browser/matchCreation';
   import {
     acknowledgeRecoveryFindings,
+    applyRecoveryObservation,
     askToReloadRecoveryDiskVersion,
     chooseRecoveryDestination,
     confirmRecoveryDiskReload,
@@ -11,6 +15,7 @@
     keepRecovering,
     reapplyRecoveryToDiskVersion,
     recoveryIsAnswerable,
+    recoveryTargetOf,
     recoveryView,
     redoRecoveryEdit,
     reloadRecoveryDiskVersion,
@@ -131,7 +136,9 @@
     availability,
     open,
     create,
-    adoptDiskVersion
+    adoptDiskVersion,
+    reportSurface,
+    standingConflictFor
   }: {
     /**
      * Whether recovery has anything to offer on the calling surface.
@@ -170,12 +177,63 @@
      * as an opaque value it passes to nothing.
      */
     adoptDiskVersion: AdoptTheDiskVersion<CreationBuffers>;
+    /**
+     * Reports this panel's receiver and, while a form is open, the file it would
+     * write — Phase 2d-6-6b, the 2d-6 record's §3 entries 1 and 3.
+     *
+     * **The recovery form is the eighth write surface**, registered by the host
+     * that mounts `DetailPane` rather than by the editor or the form this panel
+     * sits in: its destination is its own, so an editor over one file protects no
+     * recovery destination in another. The host hands this down through
+     * `MatchEditor` or `MatchCreator` untouched. Called once when the panel
+     * starts; the target is reported from an effect on every transition of the
+     * form, `null` while no form is open or once it has closed, and the binding is
+     * withdrawn when the panel is destroyed. **Required, and what that forces is
+     * only that a host supplies it** — nothing in TypeScript forces this panel to
+     * report the target the model holds; the mounted suites establish it.
+     */
+    reportSurface: BindObservationReceiver;
+    /**
+     * What origin the window holds as standing for one file **now** —
+     * `BrowserState.standingConflictFor`, asked about this form's destination by
+     * its reapply. Nothing in TypeScript forces a host to hand the window's answer.
+     */
+    standingConflictFor: (document: DocumentId) => ConflictSource | null;
   } = $props();
 
   // `$state.raw`, not `$state`: a form is an immutable value replaced whole on
   // every transition, and its draft holds deep-frozen snapshots a reactive proxy
   // has no business walking.
   let session = $state.raw<RecoverySession | null>(null);
+
+  /*
+   * **The receiver, reported when this panel starts and withdrawn when it is
+   * destroyed** — Phase 2d-6-6b. It applies `applyRecoveryObservation` to the form
+   * held now and to nothing while none is open; the host registers it only while
+   * the target below names a surface, so an empty panel is told nothing.
+   */
+  // svelte-ignore state_referenced_locally
+  const surface = reportSurface((delivery) => {
+    if (session !== null) {
+      session = applyRecoveryObservation(session, delivery);
+    }
+  });
+  onDestroy(() => {
+    surface.withdraw();
+  });
+
+  /*
+   * **The form's target, reported on every transition** — `recoveryTargetOf`'s
+   * answer while a form is open and not closed, and `null` otherwise. A closed
+   * form writes nothing more, so it is not a surface. Reported from an effect,
+   * which runs after the transition that moved it: between the two, the host
+   * still describes the previous target — the same flush gap
+   * `MatchCreator.svelte`'s destination report has, and inert for the same
+   * reason (nothing asks the window between a press and its flush).
+   */
+  $effect(() => {
+    surface.reportTarget(session === null || session.closed ? null : recoveryTargetOf(session));
+  });
 
   /** Why the last press opened nothing, or `null`. */
   let refusedToOpen = $state.raw<RecoveryUnavailable | null>(null);
@@ -419,7 +477,16 @@
     // **The outcome first, then the form still installed** (the 2d-6-6a review,
     // its third finding): a refused reapply leaves whatever a receiver installed
     // during it, and folding it into `held` would reinstall the capture.
-    const outcome = reapplyRecoveryToDiskVersion(held, adoptDiskVersion, null, () => session ?? held);
+    // **The standing-origin guard is the window's own answer** (Phase 2d-6-6b),
+    // asked about this form's destination; a form naming none is refused
+    // `destinationRequired` before the guard is ever asked.
+    const chosen = held.chosen;
+    const outcome = reapplyRecoveryToDiskVersion(
+      held,
+      adoptDiskVersion,
+      () => (chosen === null ? null : standingConflictFor(chosen)),
+      () => session ?? held
+    );
     const attempt = attemptOfReapply(session ?? held, outcome);
     reapplyAttempt = attempt;
     session = attempt.session;
@@ -465,7 +532,19 @@
         // window is what decides whether the adoption happened, and the form ends
         // only if it did — so a refusal leaves this panel open rather than closing
         // it over a window that never moved.
-        session = reloadRecoveryDiskVersion(confirmRecoveryDiskReload(held), adoptDiskVersion);
+        //
+        // The reader answers the confirmed form while the installed one is still
+        // the form it was derived from, and the installed form otherwise (Phase
+        // 2d-6-6b; `reloadRecoveryDiskVersion` in `recovery.ts`). A panel holding
+        // no form cannot be reached inside this synchronous handler — `abandon` is
+        // the only thing that empties it — so the `?? confirmed` arm answers the
+        // form this press started from rather than inventing one.
+        {
+          const confirmed = confirmRecoveryDiskReload(held);
+          session = reloadRecoveryDiskVersion(confirmed, adoptDiskVersion, () =>
+            session === held ? confirmed : (session ?? confirmed)
+          );
+        }
         return;
       case 'copyDraft':
         // Never offered here; see this function's own note.

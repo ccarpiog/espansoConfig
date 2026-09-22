@@ -19,9 +19,11 @@
  * `applyMoveObservation` in `./matchMove.ts` and the duplicator's
  * `applyDuplicationObservation` in `./matchDuplication.ts`, and since 2d-6-5 the
  * raw editor's `applyObservation` in `./rawEditor.ts` and restore's
- * `applyRestoreObservation` in `./restore.ts`. **No component registers any of
- * those eight receivers yet** (2d-6-6's and 2d-6-8's), so in production every
- * envelope still reaches the receivers a test registered, or nobody.
+ * `applyRestoreObservation` in `./restore.ts`. **Since Phase 2d-6-6b
+ * `DetailPane.svelte` registers three of those eight** — the editor's, the
+ * new-snippet form's and the recovery form's (`./surfaceReceivers.ts`); the
+ * operation panels' are 2d-6-7's and the raw editor's and restore's 2d-6-8's, so
+ * an envelope about a file only those have open still reaches nobody.
  *
  * 1. **The delivery envelope** ({@link ObservationDelivery}): the narrowed
  *    observation plus the verdict the window reached about it, sealed together so

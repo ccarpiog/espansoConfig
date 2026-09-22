@@ -990,8 +990,8 @@ export interface LoadFailure {
  * the verdict inside are this window's one decision, and every receiver
  * registered over the file gets the same object. What a receiver does with it is
  * the session transition's business (entry 11) — the match editor's is
- * `applyObservation` in `./matchEditor.ts` since Phase 2d-6-2, and no component
- * registers it yet; nothing in TypeScript makes a receiver act on the arm it is
+ * `applyObservation` in `./matchEditor.ts` since Phase 2d-6-2, registered through
+ * `DetailPane.svelte` since Phase 2d-6-6b; nothing in TypeScript makes a receiver act on the arm it is
  * given, or act on it in order against its own awaited write (entry 5 — see
  * {@link BrowserState.registerObservationReceiver}).
  *
@@ -1595,12 +1595,13 @@ export interface BrowserState {
    * settlement that later releases it (`beginWrite`'s lease) and the person's
    * {@link retryRetainedObservation} publish through the same private path, so the
    * verdict that ends the wait arrives where the wait was announced. **Who is
-   * registered is not this method's question**: in production nothing registers a
-   * receiver yet — the coordinator's `tellTheSurfaceAbout` in
-   * `./observationTransitions.ts` still calls a surface's `WriteSurfaceTransition`
-   * with the bare observation, and routing it through this member together with
-   * child-reported receivers is 2d-6-6's — so today every delivery reaches the
-   * receivers a test registered, or nobody.
+   * registered is not this method's question**: since Phase 2d-6-6b the
+   * coordinator's `tellTheSurfaceAbout` in `./observationTransitions.ts` calls the
+   * `WriteSurfaceTransition` `DetailPane.svelte` registered, and that transition
+   * calls this member for the editor, the new-snippet form and the recovery form,
+   * whose child-reported receivers the pane registers; for the other five kinds it
+   * is still a no-op (2d-6-7, 2d-6-8), so a delivery about a file only those have
+   * open reaches nobody.
    *
    * **It registers, and it installs nothing.** A verdict that names a new origin
    * goes through the same private registration the six save wrappers use, at the
@@ -1651,10 +1652,11 @@ export interface BrowserState {
    *
    * **What it is for, and who calls it today.** The 2d-6 record's §3 entry 1
    * routes a child's receiver up through a required callback prop and keeps the
-   * registry assembly in `DetailPane`; 2d-6-6 is the step that makes that call.
-   * **No production code registers a receiver in this phase**: the member exists
-   * so that the delivery path can be exercised and pinned by `workspace.test.ts`
-   * with fake receivers before any component depends on it (entry 42).
+   * registry assembly in `DetailPane`. **Since Phase 2d-6-6b `DetailPane.svelte`
+   * calls it**, through the roster in `./surfaceReceivers.ts`, for the editor, the
+   * new-snippet form and the recovery form — over the file each names, or over
+   * every creator-eligible file while a form names none; the operation panels'
+   * receivers are 2d-6-7's and the raw editor's and restore's 2d-6-8's.
    *
    * **Entry 5, stated where the code cannot force it.** A settlement is published
    * synchronously from the lease's `close()`, which runs before the wrapper's own
@@ -1663,8 +1665,8 @@ export interface BrowserState {
    * that such a session holds the delivery until it has applied its own result and
    * then consumes the latest valid one, or the continuation overwrites the
    * delivered conflict. **Nothing in TypeScript orders a continuation against a
-   * delivery**; that ordering is a mounted-test fact, and the mounted test is
-   * 2d-6-6's.
+   * delivery**; that ordering is a mounted-test fact, pinned for the editor by
+   * `DetailPane.test.ts` since Phase 2d-6-6b.
    *
    * **Not cleared by `open()`, for {@link registerWriteSurface}'s reason**: a
    * component owns its registration and removes it through the function this
@@ -3220,9 +3222,9 @@ export function createBrowserState(
   // two entries and each unregister removes exactly the one it was answered for.
   // Not `$state` — nothing renders it — and not cleared by `open()`, for the reason
   // `writeSurfaces` below gives: a component owns its registration and removes it
-  // through the function it was handed. **Empty in production today**: no
-  // component registers a receiver until 2d-6-6, so every delivery below reaches
-  // whoever a test registered, or nobody.
+  // through the function it was handed. **In production, since Phase 2d-6-6b**,
+  // `DetailPane.svelte` registers the editor's, the new-snippet form's and the
+  // recovery form's receivers here; the other five kinds register none yet.
   const observationReceivers = new Map<DocumentId, Set<ReceiverRegistration>>();
   // **The delivery queue** — Phase 2d-6-1b's review, finding 2. A publication made
   // from inside a delivery (a receiver that calls `observeExternalChange` or the
