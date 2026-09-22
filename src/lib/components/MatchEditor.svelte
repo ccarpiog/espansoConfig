@@ -42,7 +42,12 @@
     startMatchFieldRecovery,
     type CreateARecoveredSnippet
   } from '../browser/recovery';
-  import { isExternalConflict, outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
+  import {
+    isExternalConflict,
+    outcomeReveal,
+    type ConflictChoice,
+    type ConflictModel
+  } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
   import { copyReferenceText } from './clipboard';
@@ -430,8 +435,44 @@
   /** Whether leaving the editor is waiting on a confirmation. */
   let leaving = $state(false);
 
+  /**
+   * What became of one *Copy my text*, and exactly what it was about — Phase
+   * 2d-6-6c-2, the shape 2d-6-6c-1's review gave the creator.
+   *
+   * The conflict on screen when the copy was asked for, by identity, and the text
+   * that was handed to the clipboard. Both are needed: a later change to the file
+   * replaces the conflict with a new object over the same retained draft, and a
+   * save conflict and an external one can retain drafts that render alike.
+   */
+  interface CopyDisclosure {
+    /** The conflict whose retained draft was copied. */
+    readonly conflict: ConflictModel<MatchBuffers>;
+    /** The exact text handed to the clipboard. */
+    readonly text: string;
+    /** Whether the clipboard took it. */
+    readonly result: 'copied' | 'failed';
+  }
+
   /** What became of the last *Copy my text*, so the person is told either way. */
-  let copied = $state<'none' | 'copied' | 'failed'>('none');
+  let copied = $state.raw<CopyDisclosure | null>(null);
+
+  /**
+   * What the copy disclosure may say about the retained draft **on screen now**.
+   *
+   * A disclosure is shown only while the conflict it was made under is still the
+   * one on screen and the retained draft still renders to exactly the text that
+   * was copied. A conflict replaced by a later change to the file is a different
+   * snapshot, and nothing was copied of it. **What this compares is identity and
+   * text, and what it cannot know** is whether the clipboard still holds that
+   * text; the sentence says a copy was made, never that it is still there.
+   */
+  const copyShown = $derived(
+    copied !== null &&
+      copied.conflict === view.conflict &&
+      copied.text === tDraftCopy(view.retainedDraft)
+      ? copied.result
+      : 'none'
+  );
 
   /** The outcome panel's own element, so a reveal has something to point at. */
   let outcomePanel = $state<HTMLElement | null>(null);
@@ -617,11 +658,10 @@
     // this save has just answered differently, and leaving is refused for as long
     // as one is in flight anyway.
     leaving = false;
-    // The copy disclosure belongs to the outcome that was on screen. Only
-    // *Keep editing* can reach a new save today, and that clears it too; clearing
-    // it here as well makes that an invariant rather than an argument about
-    // reachability.
-    copied = 'none';
+    // The copy disclosure belongs to the conflict that was on screen, and
+    // `copyShown` already hides it once that conflict is gone; clearing it here
+    // as well drops a record nothing can draw again.
+    copied = null;
     const answer = await save(
       started.session.match,
       started.draft,
@@ -684,10 +724,18 @@
    * not promise a recovery this application cannot give.
    */
   async function copyTheDraft(): Promise<void> {
-    if (view.conflict === null) {
+    const conflict = view.conflict;
+    if (conflict === null) {
       return;
     }
-    copied = (await copyReferenceText(tDraftCopy(view.retainedDraft))) ? 'copied' : 'failed';
+    // **The snapshot is taken before the clipboard is asked**, and the answer is
+    // recorded against it: the clipboard answers asynchronously, and by then a
+    // delivery may have replaced the conflict. `copyShown` then shows it only
+    // while that snapshot is still the one on screen, so a late answer about an
+    // old snapshot is recorded and never drawn over a new one.
+    const text = tDraftCopy(view.retainedDraft);
+    const result = (await copyReferenceText(text)) ? 'copied' : 'failed';
+    copied = { conflict, text, result };
   } // End of function copyTheDraft()
 
   /**
@@ -744,7 +792,7 @@
     switch (choice) {
       case 'keepEditing':
         session = keepEditing(session);
-        copied = 'none';
+        copied = null;
         return;
       case 'keepMyDraft':
         keepMyDraft();
@@ -869,9 +917,9 @@
   {/if}
 
   <p class="kind">{t('browser.saveOutcome.copyIsReference')}</p>
-  {#if copied === 'copied'}
+  {#if copyShown === 'copied'}
     <p class="kind">{t('browser.saveOutcome.draftCopied')}</p>
-  {:else if copied === 'failed'}
+  {:else if copyShown === 'failed'}
     <p class="kind">{t('browser.saveOutcome.draftCopyFailed')}</p>
   {/if}
 

@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-22T23:07:41Z",
+ "updated": "2026-09-22T23:36:36Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -502,9 +502,9 @@
   {
    "id": "2d-6-6",
    "title": "Authored-surface delivery and complete registration",
-   "status": "in_progress",
+   "status": "done",
    "risk": "high",
-   "summary": "Cut into 6a and 6b (done) and 6c, itself cut into 6c-1 (done) and 6c-2 (the window reading, next)."
+   "summary": "Cut into 6a, 6b and 6c (6c-1, 6c-2); all done, the whole acceptance checked in 2d-6-6c-2-notes.md."
   },
   {
    "id": "2d-6-6a",
@@ -528,9 +528,9 @@
   {
    "id": "2d-6-6c",
    "title": "Authored panels' external rendering",
-   "status": "in_progress",
+   "status": "done",
    "risk": "high",
-   "summary": "Split into 6c-1 (panel rendering and bilingual mounted tests, done) and 6c-2 (the narrow window reading and 2d-6-6's full acceptance, next)."
+   "summary": "Split into 6c-1 (panel rendering and bilingual mounted tests) and 6c-2 (the window reading and 2d-6-6's full acceptance), both done."
   },
   {
    "id": "2d-6-6c-1",
@@ -545,9 +545,11 @@
   {
    "id": "2d-6-6c-2",
    "title": "Authored panels' window reading",
-   "status": "queued",
+   "status": "done",
    "risk": "high",
-   "summary": "Takes the narrow window reading of the three authored panels and checks 2d-6-6's whole acceptance in one place."
+   "summary": "The editor, creator and recovery panels read in a real window in English and Spanish, two carried editor fixes landed, and 2d-6-6 closes.",
+   "review": "docs/reviews/phase-2d-6-6c-2.md",
+   "narrative": "docs/decisions/2d-6-6c-2-notes.md"
   },
   {
    "id": "2d-6-7",

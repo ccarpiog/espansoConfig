@@ -2052,6 +2052,9 @@ export interface BrowserState {
    * are **dropped** rather than left on screen describing bytes that are gone, and
    * `adoption` comes back `failed` beside the committed outcome. The save
    * succeeded; the window is out of step. Those are two facts and both survive.
+   * Since Phase 2d-6-6c-2 the same holds for an **exception** thrown by the
+   * adoption or the re-read after a commit: it is caught and answered as a
+   * `failed` adoption beside the `saved` outcome, and the promise does not reject.
    *
    * **The base revision is the caller's and is forwarded unchanged**, which is the
    * last half of the 2c-3a-1 review's second finding and was closed at 2c-3a-2.
@@ -6134,26 +6137,64 @@ export function createBrowserState(
           const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
           if (outOfDate) {
             forgetFileText();
-            // **The adoption the consult's Q6 asks for**, performed here so that a
-            // caller cannot obtain this result without it. `moved` is the snippet's
-            // identity in the new revision, and the selection follows it — but only
-            // when the selection is still the snippet that was saved, which is the
-            // review's fourth finding: a person who clicked another snippet while the
-            // save was in flight must not be dragged back to this one.
-            const stale = await adoptTheDocumentOnDisk(id.document, id, answer.value.moved);
-            if (stale === null) {
-              adoption = { kind: 'done' };
-            } else {
-              // **The commit happened and this window could not read the file back.**
-              // Everything it holds for that file was minted from bytes that have been
-              // replaced, so it is dropped rather than left on screen: a stale
-              // projection is not a smaller problem than an unprojected file, it is
-              // the same problem told as a fact. The failure travels back beside the
-              // committed outcome, never in place of it (`PROGRESS.md` D2).
-              forgetTheReplacedDocument(id.document);
-              adoption = { kind: 'failed', failure: stale };
-            }
-            await readFileText();
+            // **Nothing thrown after the commit may turn it into an error** — Phase
+            // 2d-6-6c-2, the shape 2d-6-6c-1's review fixed in `createMatch`. The
+            // transaction has written and the barrier has been told so above; an
+            // exception out of the adoption or the re-read below used to reject
+            // this promise, and the editor then drew a committed write as a save
+            // that did not succeed (`PROGRESS.md` D2). The exception is caught here
+            // and travels back as the adoption's failure, beside the `saved`
+            // outcome, never in place of it.
+            try {
+              // **The adoption the consult's Q6 asks for**, performed here so that a
+              // caller cannot obtain this result without it. `moved` is the
+              // snippet's identity in the new revision, and the selection follows
+              // it — but only when the selection is still the snippet that was
+              // saved, which is the review's fourth finding: a person who clicked
+              // another snippet while the save was in flight must not be dragged
+              // back to this one.
+              const stale = await adoptTheDocumentOnDisk(id.document, id, answer.value.moved);
+              if (stale === null) {
+                adoption = { kind: 'done' };
+              } else {
+                // **The commit happened and this window could not read the file
+                // back.** Everything it holds for that file was minted from bytes
+                // that have been replaced, so it is dropped rather than left on
+                // screen: a stale projection is not a smaller problem than an
+                // unprojected file, it is the same problem told as a fact. The
+                // failure travels back beside the committed outcome, never in place
+                // of it (`PROGRESS.md` D2).
+                forgetTheReplacedDocument(id.document);
+                adoption = { kind: 'failed', failure: stale };
+              }
+              await readFileText();
+            } catch (raw: unknown) {
+              // Thrown before the adoption answered: nothing of the new bytes was
+              // installed, so the replaced projection is dropped, as for a read that
+              // failed. Thrown by the re-read after it: the projection is the new
+              // one and stays. Either way the window is out of step with the file,
+              // which is what a `failed` adoption beside a `saved` outcome says; a
+              // failure the adoption already answered is kept rather than replaced.
+              if (adoption.kind === 'notOwed') {
+                forgetTheReplacedDocument(id.document);
+              }
+              if (adoption.kind !== 'failed') {
+                // **The classification is guarded too** — Phase 2d-6-6c-2's review.
+                // `classifyFailure` reads `code` off the thrown value, and a getter
+                // that throws would escape this catch and reject the committed save
+                // after all. Its fallback classifies a fixed string and never looks
+                // at the thrown value again.
+                let failure: IpcFailure;
+                try {
+                  failure = classifyFailure(raw);
+                } catch {
+                  failure = classifyFailure(
+                    'the exception after a committed save could not be classified'
+                  );
+                }
+                adoption = { kind: 'failed', failure };
+              }
+            } // End of the post-commit adoption and re-read
           }
         } else if (answer.value.outcome === 'conflict') {
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note

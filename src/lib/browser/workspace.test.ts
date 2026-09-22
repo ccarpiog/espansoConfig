@@ -4312,6 +4312,95 @@ describe('saving one snippet’s fields', () => {
     expect(commands.documentText).toHaveBeenCalledTimes(2);
   }); // End of the "committed field save" case
 
+  it.each(['getDocument', 'documentText'] as const)(
+    'answers a committed field save as saved when the %s that follows it throws',
+    async (thrower) => {
+      // **Phase 2d-6-6c-1's notes, section 4 item 7**, the shape that review's
+      // first finding fixed in `createMatch`. The transaction committed and the
+      // barrier was told so; then a read this window makes afterwards threw.
+      // Rejecting here lets the editor draw a committed write as an unsuccessful
+      // save — a committed write reported afterwards as an error (D2).
+      const saved: CommandResult<SaveResult> = {
+        ok: true,
+        value: {
+          outcome: 'saved',
+          revision: 'rev-b',
+          committed: true,
+          notes: [],
+          backup_taken: false,
+          moved: movedDocument().matches[1]!.id
+        }
+      };
+      const commands = scriptedCommands({ saves: [saved] });
+      const state = createBrowserState(commands, () => undefined);
+      await state.open(null);
+      state.show({ kind: 'document', id: 2 });
+      await state.select(baseDocument().matches[0]!);
+      await state.showFileText(true);
+
+      vi.mocked(commands[thrower]).mockImplementation(async () => {
+        throw new Error('the read after the commit threw');
+      });
+      const answer = await state.saveMatch(
+        baseDocument().matches[0]!.id,
+        editedDraft(),
+        'rev-a',
+        NOTHING_ACKNOWLEDGED
+      );
+
+      expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'failed' } });
+      expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('saved');
+    }
+  ); // End of the "post-commit throw" case
+
+  it.each([
+    ['the adoption', 'getDocument'],
+    ['the re-read', 'documentText']
+  ] as const)(
+    'answers a committed field save as saved when %s throws a value whose classification throws',
+    async (_step, thrower) => {
+      // **Phase 2d-6-6c-2's review, the one blocker.** The catch that answers a
+      // post-commit exception classified it with `classifyFailure`, which reads
+      // `code` off the thrown value — so a `code` getter that throws escaped the
+      // catch, and the committed save was rejected after all (D2).
+      const saved: CommandResult<SaveResult> = {
+        ok: true,
+        value: {
+          outcome: 'saved',
+          revision: 'rev-b',
+          committed: true,
+          notes: [],
+          backup_taken: false,
+          moved: movedDocument().matches[1]!.id
+        }
+      };
+      const commands = scriptedCommands({ saves: [saved] });
+      const state = createBrowserState(commands, () => undefined);
+      await state.open(null);
+      state.show({ kind: 'document', id: 2 });
+      await state.select(baseDocument().matches[0]!);
+      await state.showFileText(true);
+
+      const hostile = Object.defineProperty({}, 'code', {
+        get: (): never => {
+          throw new Error('the code getter threw');
+        }
+      });
+      vi.mocked(commands[thrower]).mockImplementation(async () => {
+        throw hostile;
+      });
+      const answer = await state.saveMatch(
+        baseDocument().matches[0]!.id,
+        editedDraft(),
+        'rev-a',
+        NOTHING_ACKNOWLEDGED
+      );
+
+      expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'failed' } });
+      expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('saved');
+    }
+  ); // End of the "post-commit hostile throw" case
+
   it('does not resolve the saved identity in a projection of another parse', async () => {
     // The same defect as the create's, in the adoption `saveMatch` and `moveMatch`
     // share: `moved` names a snippet in the revision the transaction ended on, and

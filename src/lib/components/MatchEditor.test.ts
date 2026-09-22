@@ -60,7 +60,8 @@ import {
 import { conflictChoiceKey, type ConflictChoice } from '../browser/saveOutcome';
 import { sourceSegments, type InvisibleSegment } from '../browser/sourceText';
 import type { SurfaceBinding } from '../browser/surfaceReceivers';
-import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+import { arbitratedDelivery, type ObservationDelivery } from '../browser/observationDelivery';
+import type { MatchSaveAnswer, ObservationReceiver } from '../browser/workspace.svelte';
 import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
 import {
   describeEditorReapplyObstacle,
@@ -311,6 +312,11 @@ interface Mounted {
   readonly closed: () => number;
   /** Moves the injected clock forward, in milliseconds. */
   readonly advance: (by: number) => void;
+  /**
+   * Hands one envelope to the receiver the editor reported — Phase 2d-6-6c-2 —
+   * as the window's registration would, inside a flush.
+   */
+  readonly deliver: (delivery: ObservationDelivery) => void;
   /** Tears the component down. */
   readonly stop: () => void;
 }
@@ -464,6 +470,9 @@ function mountEditor(
   let closes = 0;
   let now = 0;
   const standing = new Map<DocumentId, ConflictSource>();
+  // The receiver the editor reports, kept so a case can deliver to it (Phase
+  // 2d-6-6c-2, the copy disclosure's cases).
+  let receiver: ObservationReceiver | null = null;
   const target = document.createElement('div');
   document.body.append(target);
   const component = mount(MatchEditor, {
@@ -533,7 +542,10 @@ function mountEditor(
         adoptions.push(conflict);
         return adoption;
       },
-      reportReceiver: inertBinding,
+      reportReceiver: (reported: ObservationReceiver): SurfaceBinding => {
+        receiver = reported;
+        return inertBinding();
+      },
       reportRecovery: inertBinding,
       standingConflictFor: (document: DocumentId): ConflictSource | null =>
         standing.get(document) ?? null,
@@ -551,6 +563,10 @@ function mountEditor(
     closed: () => closes,
     advance: (by: number) => {
       now += by;
+    },
+    deliver: (delivery: ObservationDelivery): void => {
+      receiver?.(delivery);
+      flushSync();
     },
     stop: () => {
       void unmount(component);
@@ -717,6 +733,31 @@ function recordTheSelectionCopied(): CopiedSelections {
   });
   return { selections };
 } // End of function recordTheSelectionCopied()
+
+/**
+ * A `raised` envelope about the editor's own file, sealed as the window seals one
+ * — Phase 2d-6-6c-2.
+ *
+ * @param sequence - The sequence it was admitted under.
+ * @param revision - The revision the file holds on disk after the change.
+ * @returns The envelope.
+ */
+function changeTo(sequence: number, revision: ContentRevision): ObservationDelivery {
+  return arbitratedDelivery(
+    null,
+    {
+      sequence,
+      document: FILE.id,
+      previousRevision: BASE,
+      diskRevision: revision,
+      diskText: DISK_TEXT,
+      disk: makeDocument({ id: FILE.id, relativePath: FILE.relative_path, revision }),
+      findings: [],
+      correspondences: null
+    },
+    false
+  );
+} // End of function changeTo()
 
 /**
  * Waits for the component's asynchronous save handler to finish.
@@ -1947,3 +1988,76 @@ describe('the small editor’s recovery', () => {
     editor.stop();
   });
 }); // End of the "small editor’s recovery" suite
+
+describe('the small editor’s copy disclosure belongs to the snapshot it copied', () => {
+  it('never shows a copy made under one conflict as a copy under the next', async () => {
+    // **Phase 2d-6-6c-1's notes, section 4 item 6.** The disclosure was one
+    // component-wide flag, reset only by *Keep editing* and by a new save. An
+    // editor's external conflict can be replaced by a later change while the
+    // editor stays open, and the flag then said the draft of the new conflict had
+    // been copied although nothing was copied under it.
+    const original = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    recordTheSelectionCopied();
+    try {
+      const editor = mountEditor();
+      type(editor.target, 'replace', 'my own body');
+      editor.deliver(changeTo(5, 'd'.repeat(64)));
+      control(editor.target, conflictChoiceKey('copyDraft', 'authoredText')).click();
+      await settle();
+      expect(says(editor.target, 'browser.saveOutcome.draftCopied')).toBe(true);
+
+      // A second change to the same file replaces the conflict on screen.
+      editor.deliver(changeTo(6, 'e'.repeat(64)));
+
+      expect(says(editor.target, 'browser.externalConflict.fileChangedWhileOpen')).toBe(true);
+      expect(says(editor.target, 'browser.saveOutcome.draftCopied')).toBe(false);
+      editor.stop();
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(document, 'execCommand');
+      } else {
+        Object.defineProperty(document, 'execCommand', original);
+      }
+    }
+  }); // End of the "copy bound to its conflict" case
+
+  it('ignores a clipboard completion that arrives for a conflict no longer shown', async () => {
+    // The same item's second half: the clipboard answers asynchronously, and an
+    // answer about the conflict that *was* on screen must not be installed over
+    // the conflict on screen when it lands.
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    let finish: (() => void) | null = null;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (): Promise<void> =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          })
+      }
+    });
+    try {
+      const editor = mountEditor();
+      type(editor.target, 'replace', 'my own body');
+      editor.deliver(changeTo(5, 'd'.repeat(64)));
+      control(editor.target, conflictChoiceKey('copyDraft', 'authoredText')).click();
+      flushSync();
+
+      editor.deliver(changeTo(6, 'e'.repeat(64)));
+      const late = finish as (() => void) | null;
+      late?.();
+      await settle();
+
+      expect(says(editor.target, 'browser.externalConflict.fileChangedWhileOpen')).toBe(true);
+      expect(says(editor.target, 'browser.saveOutcome.draftCopied')).toBe(false);
+      expect(says(editor.target, 'browser.saveOutcome.draftCopyFailed')).toBe(false);
+      editor.stop();
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(navigator, 'clipboard');
+      } else {
+        Object.defineProperty(navigator, 'clipboard', original);
+      }
+    }
+  }); // End of the "late clipboard completion" case
+}); // End of the "copy disclosure belongs to its snapshot" suite

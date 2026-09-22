@@ -5092,3 +5092,19 @@ changed beyond the instrument's `main.rs` hook, whose pair diff is still `5 inse
 narrative is archived verbatim in [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-6a's
 verification narrative"*.
 
+
+
+## Phase 2d-6-6c-1's verification narrative — archived verbatim 2026-09-23 at 2d-6-6c-2
+
+### Phase 2d-6-6c-1's verification: three frontend gates re-measured twice, the Rust cell re-measured once
+
+**`1323 / 449 / 2920 / 193`** at 2d-6-6c-1, from `1323 / 449 / 2899 / 193`. Measured by the orchestrator on the tree
+the worker reported and again after the review's fix round, each gate on its own, each exit read directly:
+`npm run check` **449 files, 0 errors, 0 warnings** (no new module); `npm test` **2920 passed, 65 files** (+21: +17
+for the deliverables — the 14 bilingual acceptance cases in `DetailPane.test.ts` plus the `MatchCreator`,
+`RecoveryPanel` and i18n cases, net of one 6b case rewritten — then +4 pinning the review's two blockers, each shown
+failing first); `npm run build` **193 modules** (no new module), server-only markers **absent**, client-only
+**present (2)**. `cargo test --workspace -- --test-threads=1` **1323 passed, 0 failed** on the first tree (the i18n
+JSON changed); the fix round touched no Rust and no dictionary. The instrument's pair diff is still `5
+insertions(+), 1 deletion(-)`. 2d-6-6b's narrative is archived verbatim in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-6b's verification narrative"*.

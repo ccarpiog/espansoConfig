@@ -15247,3 +15247,92 @@ the window ends without a delivery is unseen — 2d-6-9's; the Spanish of reword
 `ExternalConflictAction` has one arm; the `superseded` origin comparison); 1c's two, 1b's `classifyFailure` sentence,
 1a's stale "nine codes" sentence.
 
+
+
+## The 2d-6-6c-1 → 2d-6-6c-2 handoff — archived verbatim 2026-09-23 at 2d-6-6c-2
+
+### Phase 2d-6-6c-1 is complete and CLOSED. The next action is **Phase 2d-6-6c-2 — the narrow window reading of the three authored panels**, the second half of 2d-6-6c (the cut is recorded in `docs/decisions/2d-6-split-notes.md` §2, the 2d-6-6 entry). When 6c-2 closes, **2d-6-6's full acceptance (split record lines 131-141) is checked in one place** and 2d-6-6 closes with it.
+
+**The three documents that bind every 2d-6 step, in reading order**:
+[`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (the consult; it binds),
+[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (the record: §2 the split, §3 forty-three
+binding rulings, **§5 nine corrections that override `phase-2d-design.md` item 6 and `2d-5-split-notes.md`** — §5.3
+is why a component-changing step owes a window reading — §7 the map of the handed-on items) and
+[`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md).
+
+**What the closed steps landed — read each record's §1, never re-derive from the code**: 2d-6-1
+(`2d-6-1{a,b,c}-notes.md`) the delivery protocol on `BrowserState`; 2d-6-2 … 2d-6-5 (`2d-6-{2,3,4,5}-notes.md`) all
+eight session receivers as values; **2d-6-6a** the installed-session reader required everywhere; **2d-6-6b** the
+registration wiring (`surfaceReceivers.ts`, `DetailPane.svelte` registering the editor, creator and recovery
+receivers, recovery the eighth kind, the shell kept over an empty list); **2d-6-6c-1** (`2d-6-6c-1-notes.md` §1) the
+rendering on the three authored panels — origin, evidence, one comparison block per component with copy and the
+choices, the affected file and the way forward for a destination-less form — and the bilingual mounted tests of the
+six acceptance scenarios (§3 checks them one by one).
+
+**Executable cold — 2d-6-6c-2.** A **narrow window reading** of the three authored panels drawing an external
+conflict, English and Spanish: the editor over a file changed on disk, the destination-less creator, recovery over a
+file other than its host's. Start from [`docs/decisions/2d-5-7b-window-reading.md`](docs/decisions/2d-5-7b-window-reading.md)
+§3-§4 (the `fetch` recorder in `src/probe.ts`, the harness at `/private/tmp/espansoconfig-harness-2d-5-7b/`); **one
+plan per launch into a fresh bundle path; the language set through the picker** (`CLAUDE.md` §6, *Window readings*).
+What jsdom could not establish is 6c-1 notes §4 item 2: panel placement, scrolling, and that the drawn sentences are
+the ones the mounted suites read. Record it as `docs/decisions/2d-6-6c-2-window-reading.md` plus the phase notes,
+then check **2d-6-6's whole acceptance** in one place. **Carried from 6c-1** (notes §4): (6) `MatchEditor.svelte`
+keeps the component-wide `copied` flag the review's finding 2 replaced in the creator — same defect shape, owed
+before 2d-6 closes; (7) `BrowserState.saveMatch` has the post-commit shape finding 1 fixed in `createMatch`, read
+but not tested, and the delete/move/duplicate/raw save wrappers are unaudited for it — pin and fix before 2d-6-7
+draws those surfaces; (1), (3) repeated "No save was initiated…" clauses — 2d-6-11's wording review; (4) five
+surfaces still draw nothing (2d-6-7/-8); (5) `recovery.ts`'s stale "Nothing draws this yet". 6c-2 decides
+deliberately whether it takes (6) and (7) as code or leaves them to 2d-6-7; a window reading that changes code owes
+the gates. 6c-2 is **high** risk.
+
+**Owed by later steps, from 6b's fix round** (`2d-6-6b-notes.md` §7): (1) raw's `loadDiskVersion` and restore's
+`reloadTheDiskVersion` (2d-6-5) read after the post-adoption `current()`; fix with `settledAnswer` /
+`confirmationOf` **before 2d-6-8 registers their receivers**; (2) the three operation reapplies
+(`matchDeletion.ts`, `matchMove.ts`, `matchDuplication.ts`) unaudited for reads after their pre-adoption look —
+**before 2d-6-7 registers their receivers**; (3) the doors and settling transitions of all eight sessions not
+re-audited for reads after the last `current()`.
+
+**Orchestrator's rulings standing from 1b's close**: (1) the `ReconciliationWorkspace` interface may be widened as
+entries require; (2) the acknowledgement operand stays `ConflictSource` (2d-6-9 draws the exit); (3) the
+`projectionReplaced` refusal at an outlived arrival generation stands (2d-6-9's). **The declared hold gap** (6b §2
+ruling 3) was decided at 6c-1 (notes §2 item 5): no hold for the three authored kinds, which cannot reach the state;
+2d-6-7/-8 register the other five, and any remaining hold is 2d-6-9's.
+
+**Older open items**: the full list as of 2d-6-6b is archived verbatim in
+[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The 2d-6-6b → 2d-6-6c handoff"*
+and *"The 2d-6-6a → 2d-6-6b handoff"*; the live map is the split record's §7.
+
+
+#### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
+
+`git status --short --untracked-files=all` shows **four uncommitted instrument paths** — `M
+src-tauri/src/main.rs` and `M src/main.ts` (two hook lines each; `git diff --stat` over the pair is `5
+insertions(+), 1 deletion(-)` and must stay that way), `?? src-tauri/src/probe.rs` and `?? src/probe.ts`.
+**Do not commit them, do not revert them, and do not treat them as unaccounted-for work.** They are the
+temporary window-reading instrument (`CLAUDE.md` §6, *Window readings*); 2d-8 deletes it. The driver names
+them in `AUTOCLAUDE_PREFLIGHT_DIRTY`. **Stage by path**: `PROGRESS.md`, `PROGRESS.json`, `docs/`,
+`src/lib/browser/`, `src/lib/i18n/`, `src/lib/ipc/`, and any `src-tauri/` or `src/lib/components/` file **by
+name** — never `src-tauri/src/` as a directory. The 2d-6 steps that add a component or a `.ts` module move the
+Vite module count (one per module, two per styled component) and the `ipc-detail` row count (one per file
+under the scanned roots) — re-derive per file, never from the total, and remember the instrument's known
+contribution (`Verification baseline`). **A worker must never run `git stash`**: 1a's worker did so by accident
+inside a compound command and reversed it at once (`2d-6-1a-notes.md` §6); the instrument survived, but a stash
+that is not popped loses the instrument silently. Say so in every worker brief. **2d-6-6c-1 drew the three authored panels and touched no `src-tauri/` file; 2d-6-6c-2 owes the window reading**: the window-reading plan of
+`docs/decisions/2d-5-7b-window-reading.md` §3-§4 is the reading's starting point, one plan per launch into a
+fresh bundle path, the language set through the picker.
+
+#### Open items — the live map is the record's §7
+
+`docs/decisions/2d-6-split-notes.md` §7 states, per item, whether the consult **took it into 2d-6** (obligations
+(1)-(3), open items 5, 6, 8, 9), **deferred it** (1 — the `file:line` drift checker; 7 — the `"permissions": []`
+comment in `main.rs`, 2d-8's; 10 — the `dispose()`-on-close path) or **left it untouched** (0, 2, 3, 4, 11).
+Item 11 was discharged by 1c (`reconciliationWatchState()`, `reconciliationRegistration()`); obligations (2)
+and (3) of the 2d-5 hand-off by 1b in the code's own doc comments.
+
+#### The rest of the 2d consult, so a step is not invented
+
+**2d-6** (its eleven steps; 2d-6-1 closed as three sub-phases, 2d-6-2 … 2d-6-5 closed, 2d-6-6 next),
+**2d-7** (the reviewed instrument and the bilingual WKWebView reading — start from the `fetch` recorder already
+in `src/probe.ts`, not from the consult's description), **2d-8** (instrument removal and harness-free closure;
+corrects the `main.rs` comment and deletes `/private/tmp/espansoconfig-harness-2d-5-7b/`).
+---
