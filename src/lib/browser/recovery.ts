@@ -1108,7 +1108,9 @@ export interface RecoverySession {
    * `MatchEditorSession.heldDeliveries`'s rule, unchanged: appended by
    * {@link applyRecoveryObservation} while the phase is `saving`, replayed first to
    * last by {@link applyRecoveryCreate} and {@link recoveryCreateCouldNotBeSent}
-   * after their own answer. **What the list forces** is that no envelope delivered
+   * after their own answer — and, through the required {@link ReadTheInstalledForm},
+   * whatever the receiver appended to the installed form while they were doing so
+   * (Phase 2d-6-6a). **What the list forces** is that no envelope delivered
    * during the create is dropped and that first-to-last is the order; **what it
    * does not force** is that arrival order was decision order — the window's own
    * contract.
@@ -1853,11 +1855,28 @@ export interface StartedRecoveryCreate {
  * arrive by a route {@link transferOfField} already refuses. It is checked because
  * `NewMatch` carries **no brand**, so a caller that builds one by hand type-checks.
  *
+ * **Every caller-controlled read comes first, and the installed form is read
+ * once, last** (Phase 2d-6-6a — 2d-6-4's pattern (a), in 2d-6-5's `beginSave`
+ * shape in `./rawEditor.ts`): {@link canCreateRecovery} is asked, the chosen file
+ * read, the submission taken, the wire values derived and checked and the
+ * waiting form spread, and only then is the installed form read through
+ * `current`, once. A form that is no longer the one installed — a receiver run
+ * from a getter behind any of those reads replaced it — starts nothing, and
+ * nothing caller-controlled runs between that read and the answer. What no type
+ * forces is that the reader is honest ({@link ReadTheInstalledForm}), nor
+ * anything about a caller that redefines a property of the very form it handed
+ * in: a receiver replaces a form and never mutates one.
+ *
  * @param session - The form to submit.
+ * @param current - Reads the form the caller holds now — `() => session` over the
+ *   caller's state. Required.
  * @returns The waiting form and everything the command takes, or `null` when
- *   {@link recoveryRefusal} names a reason.
+ *   {@link recoveryRefusal} names a reason or the form is no longer installed.
  */
-export function beginRecoveryCreate(session: RecoverySession): StartedRecoveryCreate | null {
+export function beginRecoveryCreate(
+  session: RecoverySession,
+  current: ReadTheInstalledForm
+): StartedRecoveryCreate | null {
   if (!canCreateRecovery(session)) {
     return null;
   }
@@ -1870,7 +1889,7 @@ export function beginRecoveryCreate(session: RecoverySession): StartedRecoveryCr
   if (Object.values(newMatch).some((value) => typeof value === 'string' && value.includes('\r'))) {
     return null;
   }
-  return {
+  const started: StartedRecoveryCreate = {
     session: {
       ...session,
       phase: 'saving',
@@ -1883,6 +1902,8 @@ export function beginRecoveryCreate(session: RecoverySession): StartedRecoveryCr
     newMatch,
     position: RECOVERY_POSITION
   };
+  // **The installed form, read once, after the last caller-controlled read.**
+  return current() === session ? started : null;
 } // End of function beginRecoveryCreate()
 
 /**
@@ -1905,17 +1926,25 @@ export function beginRecoveryCreate(session: RecoverySession): StartedRecoveryCr
  * invite a retry of a write that already happened, and a committed write is never
  * afterwards reported as an error.
  *
+ * **Every delivery held during the create is replayed on top, and then every one
+ * the receiver appended to the installed form during this transition's own
+ * replay** (Phase 2d-6-6a — 2d-6-4's pattern (b); `applyDeletion` in
+ * `./matchDeletion.ts` says why a replay runs caller code): see
+ * {@link consumingHeldDeliveries}.
+ *
  * @param session - The form waiting for an answer.
  * @param result - How the save ended, exactly as the transaction reported it.
  * @param adoption - What became of the adoption, from `BrowserState.createMatch`.
  *   Required and not defaulted: a default would be this function inventing a
  *   `notOwed` for a caller that simply did not look.
+ * @param current - Reads the form the caller holds now. Required.
  * @returns The form showing what the create ended as.
  */
 export function applyRecoveryCreate(
   session: RecoverySession,
   result: SaveResult,
-  adoption: InvalidationStatus
+  adoption: InvalidationStatus,
+  current: ReadTheInstalledForm
 ): RecoverySession {
   const submission = session.submitted;
   // **Closed first, and not for the reason the submission check happens to give.**
@@ -1943,69 +1972,107 @@ export function applyRecoveryCreate(
     // conflict and retires it (the 2d-6 record's §3 entry 7) — a path
     // `beginRecoveryCreate` never reaches while one stands, kept for a direct call.
     const refused = result.outcome === 'refused';
-    return consumingHeldDeliveries({
+    return consumingHeldDeliveries(
+      {
+        ...session,
+        phase: 'editing',
+        group: null,
+        outcome,
+        extraMessages,
+        reload: NOT_RELOADING,
+        sendFailure: null,
+        windowWasReconciled,
+        externalConflict: refused ? session.externalConflict : null,
+        uncertaintyUnresolved: refused ? session.uncertaintyUnresolved : false
+      },
+      current
+    );
+  }
+  return consumingHeldDeliveries(
+    {
       ...session,
+      // A commit replaced the bytes every destination revision here was derived
+      // from, so the form stops accepting changes and the source conflict is
+      // answered. A `committed: false` answers nothing — and whether the window
+      // moved under it is the separate question above.
+      committed: result.committed,
+      windowWasReconciled,
+      created: result.moved,
+      draft: savedDraft(session.draft, submission, result.revision),
       phase: 'editing',
       group: null,
       outcome,
       extraMessages,
       reload: NOT_RELOADING,
       sendFailure: null,
-      windowWasReconciled,
-      externalConflict: refused ? session.externalConflict : null,
-      uncertaintyUnresolved: refused ? session.uncertaintyUnresolved : false
-    });
-  }
-  return consumingHeldDeliveries({
-    ...session,
-    // A commit replaced the bytes every destination revision here was derived
-    // from, so the form stops accepting changes and the source conflict is
-    // answered. A `committed: false` answers nothing — and whether the window
-    // moved under it is the separate question above.
-    committed: result.committed,
-    windowWasReconciled,
-    created: result.moved,
-    draft: savedDraft(session.draft, submission, result.revision),
-    phase: 'editing',
-    group: null,
-    outcome,
-    extraMessages,
-    reload: NOT_RELOADING,
-    sendFailure: null,
-    // The create ended on the file, so the disk side an earlier observation
-    // showed is no longer the comparison to draw (entry 7).
-    externalConflict: null,
-    uncertaintyUnresolved: false
-  });
+      // The create ended on the file, so the disk side an earlier observation
+      // showed is no longer the comparison to draw (entry 7).
+      externalConflict: null,
+      uncertaintyUnresolved: false
+    },
+    current
+  );
 } // End of function applyRecoveryCreate()
 
 /**
- * Replays every delivery a form held during its create, in the order it arrived,
- * once the create's own answer is on it — the 2d-6 record's §3 entry 5.
+ * Whether one held list is the other with more appended: the same envelopes, by
+ * identity, in the same positions — `extendsTheReplayed` in `./matchDeletion.ts`,
+ * for this form.
  *
- * `consumingHeldDeliveries` in `./matchEditor.ts`, for this form: the list is
- * emptied before the first replay, each envelope goes through
- * {@link applyRecoveryObservation} exactly as it would have on arrival, and each is
- * applied to the form the one before it left. **What this forces** is that no
- * envelope delivered during the create is dropped and that first-to-last is the
- * order; **what it cannot force** is that the window delivered them in the order
- * it decided them.
+ * @param arrived - The installed form's list.
+ * @param replayed - The list already replayed.
+ * @returns `true` when `arrived` begins with every entry of `replayed`.
+ */
+function extendsTheReplayed(
+  arrived: readonly ObservationDelivery[],
+  replayed: readonly ObservationDelivery[]
+): boolean {
+  return replayed.every((delivery, at) => arrived[at] === delivery);
+} // End of function extendsTheReplayed()
+
+/**
+ * Replays every delivery a form held during its create, in the order it arrived,
+ * once the create's own answer is on it — the 2d-6 record's §3 entry 5 — and then
+ * every delivery the receiver appended to the installed form while that was
+ * happening (Phase 2d-6-6a, 2d-6-4's pattern (b)).
+ *
+ * `consumingHeldDeliveries` in `./matchDeletion.ts`, for this form, which says
+ * why a replay runs caller code and what the extra round forces and cannot: the
+ * list is emptied before the first replay, each envelope goes through
+ * {@link applyRecoveryObservation} exactly as it would have on arrival, and each
+ * is applied to the form the one before it left; after each round the installed
+ * form is read once and the envelopes it holds beyond the ones replayed are
+ * replayed too, in arrival order, until a read finds none. **What this forces**
+ * is that no envelope delivered during the create or during this settlement is
+ * dropped when the reader answers the installed form, and that first-to-last is
+ * the order; **what it cannot force** is that the window delivered them in the
+ * order it decided them, that the reader is honest, or that the rounds end for a
+ * getter that manufactures a fresh reading on every read.
  *
  * @param settled - The form with its create's answer applied and its phase back
  *   to `editing`.
+ * @param current - Reads the form the caller holds now.
  * @returns The form with every held delivery applied, or the same form when none
  *   was held.
  */
-function consumingHeldDeliveries(settled: RecoverySession): RecoverySession {
-  const held = settled.heldDeliveries;
-  if (held.length === 0) {
-    return settled;
-  }
-  let replayed: RecoverySession = { ...settled, heldDeliveries: [] };
-  for (const delivery of held) {
-    replayed = applyRecoveryObservation(replayed, delivery);
-  } // End of the loop over the deliveries held during the create
-  return replayed;
+function consumingHeldDeliveries(
+  settled: RecoverySession,
+  current: ReadTheInstalledForm
+): RecoverySession {
+  let queue = settled.heldDeliveries;
+  let replayed: RecoverySession = queue.length === 0 ? settled : { ...settled, heldDeliveries: [] };
+  let seen = 0;
+  for (;;) {
+    for (let at = seen; at < queue.length; at += 1) {
+      replayed = applyRecoveryObservation(replayed, queue[at]!);
+    } // End of the loop over the deliveries not yet replayed
+    seen = queue.length;
+    const arrived = current().heldDeliveries;
+    if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
+      return replayed;
+    }
+    queue = arrived;
+  } // End of the loop over the rounds of replay
 } // End of function consumingHeldDeliveries()
 
 /**
@@ -2041,13 +2108,16 @@ function consumingHeldDeliveries(settled: RecoverySession): RecoverySession {
  * @param session - The form waiting for an answer.
  * @param mayHaveWritten - Whether the file may already hold the new snippet.
  * @param reason - Why the command rejected, or `null` when nothing was sent.
+ * @param current - Reads the form the caller holds now, for the replay's rounds
+ *   ({@link applyRecoveryCreate}'s reason). Required.
  * @returns The form, back to drafting, with the right notice raised, or the same
  *   form when it is closed.
  */
 export function recoveryCreateCouldNotBeSent(
   session: RecoverySession,
   mayHaveWritten: boolean,
-  reason: IpcFailure | null
+  reason: IpcFailure | null,
+  current: ReadTheInstalledForm
 ): RecoverySession {
   if (session.closed) {
     return session;
@@ -2055,13 +2125,16 @@ export function recoveryCreateCouldNotBeSent(
   // The create is over, so a delivery held while it was out is applied now — the
   // settlement of an uncertain write arbitrates the held reading under that
   // uncertainty, and its `raisedWithoutReload` is what this applies (entry 5).
-  return consumingHeldDeliveries({
-    ...session,
-    phase: 'editing',
-    group: null,
-    sendFailure: sendFailureOf(mayHaveWritten, reason),
-    windowWasReconciled: session.windowWasReconciled || mayHaveWritten
-  });
+  return consumingHeldDeliveries(
+    {
+      ...session,
+      phase: 'editing',
+      group: null,
+      sendFailure: sendFailureOf(mayHaveWritten, reason),
+      windowWasReconciled: session.windowWasReconciled || mayHaveWritten
+    },
+    current
+  );
 } // End of function recoveryCreateCouldNotBeSent()
 
 /**
@@ -2247,16 +2320,23 @@ export type InstallTheWaitingForm = (waiting: RecoverySession) => void;
  * would discard every delivery. So the composition asks for the current form
  * through this, once, after the await and before anything is settled.
  *
- * **What it forces and what it does not, in the same sentence.** With one
- * supplied, {@link sendRecoveryCreate} settles every answer — answered, refused,
- * not attempted, and a `create` that threw — against the form it reads, and the
- * held deliveries on that form are replayed by the settling transition. It cannot
- * force a caller to supply one: the parameter is optional so that
- * `RecoveryPanel.svelte`, which this phase may not touch and which registers no
- * receiver today, keeps compiling — and a caller that registers a receiver and
- * passes no reader loses every delivery held during the flight, which is exactly
- * the defect this closes. 2d-6-6, which registers the receiver, must pass
- * `() => session` beside its installer, and may make the parameter required.
+ * **Every door and settling transition of this form takes it since Phase
+ * 2d-6-6a**, required: {@link beginRecoveryCreate} starts nothing for a form no
+ * longer installed, {@link reapplyRecoveryToDiskVersion} rechecks the installed
+ * form immediately before adopting, and {@link applyRecoveryCreate} /
+ * {@link recoveryCreateCouldNotBeSent} replay what the receiver appended to it
+ * during their own replay — the three patterns 2d-6-4 set for the operation
+ * sessions.
+ *
+ * **What it forces and what it does not, in the same sentence.** Through it,
+ * {@link sendRecoveryCreate} settles every answer — answered, refused, not
+ * attempted, and a `create` that threw — against the form it reads, and the held
+ * deliveries on that form are replayed by the settling transition; no call
+ * compiles without one, and `RecoveryPanel.svelte` passes one beside its
+ * installer. What no type can force is that the closure reads the installed form
+ * rather than a capture: a reader that answers the form handed in whatever is
+ * installed loses every delivery held during the flight, which is exactly the
+ * defect this closes.
  *
  * @returns The form the caller holds now — the one `install` was handed, as the
  *   caller's receiver has since updated it.
@@ -2278,22 +2358,22 @@ export type ReadTheInstalledForm = () => RecoverySession;
  * Nothing here can install anything itself — this module holds no screen — which
  * is why the moment is offered rather than performed.
  *
- * **The answer is settled against the form the caller holds when it arrives, not
- * the one this function captured before the await** — Phase 2d-6-3, the review of
- * this phase (its first finding). The window delivers a write's settlement from
- * inside its wrapper, before this function's `await` resumes; a receiver over the
- * file applies it to the installed form, where {@link applyRecoveryObservation}
- * holds it; and the form this function captured knows nothing of it. So when a
- * {@link ReadTheInstalledForm} is supplied, the current form is read once after
- * the await and every answer is settled against it, so the deliveries it holds
- * are replayed by {@link applyRecoveryCreate} or
- * {@link recoveryCreateCouldNotBeSent} in arrival order (the 2d-6 record's §3
- * entry 5). **A `create` that throws is settled too**: as a failed send whose
- * outcome is unknown, which is what the window's own barrier records for a
- * wrapper that threw, handed to `install` — since this function cannot return it
- * — and then re-thrown, so the caller still learns. What no type here forces is
- * that a reader is supplied at all; {@link ReadTheInstalledForm} says what that
- * costs and who owes it.
+ * **The answer is settled against the form the caller holds when it arrives, not the
+ * one this function captured before the await** — Phase 2d-6-3, the review of this
+ * phase (its first finding). The window delivers a write's settlement from inside its
+ * wrapper, before this function's `await` resumes; a receiver over the file applies
+ * it to the installed form, where {@link applyRecoveryObservation} holds it; and the
+ * form this function captured knows nothing of it. So when a the await the current
+ * form is read once through the required {@link ReadTheInstalledForm} and every
+ * answer is settled against it, so the deliveries it holds are replayed by {@link
+ * applyRecoveryCreate} or {@link recoveryCreateCouldNotBeSent} in arrival order (the
+ * 2d-6 record's §3 entry 5). **A `create` that throws is settled too**: as a failed
+ * send whose outcome is unknown, which is what the window's own barrier records for a
+ * wrapper that threw, handed to `install` — since this function cannot return it —
+ * and then re-thrown, so the caller still learns. The same reader is what {@link
+ * beginRecoveryCreate} checks before anything is installed. What no type here forces
+ * is that the reader is honest; {@link ReadTheInstalledForm} says what a dishonest
+ * one costs.
  *
  * **Nothing in this module touches the selection, the projections or the conflict
  * the form was opened from — and the function it awaits does.** That distinction
@@ -2314,33 +2394,39 @@ export type ReadTheInstalledForm = () => RecoverySession;
  * @param install - What to do with the waiting form. Called exactly when `create`
  *   is, immediately before it, and never for a form that cannot be submitted; and
  *   once more, with the settled form, only when `create` threw.
- * @param current - Reads the form the caller holds now. `null`, the default,
- *   settles against the form this function captured before the await — honest
- *   only for a caller that registers no receiver, which is every caller today.
- * @returns The form after the attempt, which is the same form when there was
- *   nothing to send.
+ * @param current - Reads the form the caller holds now —
+ *   `() => session` over the caller's state. Required.
+ * @returns The form after the attempt; when there was nothing to send, the form
+ *   the reader answers — the same form handed in unless a receiver displaced it
+ *   during the door's reads, in which case the installed one.
  */
 export async function sendRecoveryCreate(
   session: RecoverySession,
   create: CreateARecoveredSnippet,
   install: InstallTheWaitingForm,
-  current: ReadTheInstalledForm | null = null
+  current: ReadTheInstalledForm
 ): Promise<RecoverySession> {
-  const started = beginRecoveryCreate(session);
+  const started = beginRecoveryCreate(session, current);
   if (started === null) {
-    return session;
+    // **The installed form, never the argument** (the 2d-6-6a review, its second
+    // finding). The door refuses a form a receiver displaced during its reads, and
+    // a caller installs what this answers: answering the form handed in would
+    // overwrite what the receiver installed. For a refusal that displaced nothing
+    // an honest reader answers the form handed in, so nothing else changes.
+    return current();
   }
   // **Before the await, and that ordering is the whole point of the argument.**
   // A caller that installs this has a form gated on `saving` for the flight; a
   // caller handed it only on resolution has one for none of it.
   install(started.session);
   /**
-   * The form to settle against: the caller's current one when it can be read,
-   * and otherwise the one handed to `install`.
+   * The form to settle against: the caller's current one, read through the
+   * reader — the one handed to `install`, as the caller's receiver has since
+   * updated it.
    *
    * @returns The form as it is now.
    */
-  const settling = (): RecoverySession => (current === null ? started.session : current());
+  const settling = (): RecoverySession => current();
   let answer: RecoveryCreateAnswer;
   try {
     answer = await create(
@@ -2359,16 +2445,16 @@ export async function sendRecoveryCreate(
     // wrapper that threw as uncertain — so the form is settled as a failed send
     // that may have written, on the form the caller holds, and handed to the
     // installer because this function cannot return it. The caller still learns.
-    install(recoveryCreateCouldNotBeSent(settling(), true, classifyFailure(raw)));
+    install(recoveryCreateCouldNotBeSent(settling(), true, classifyFailure(raw), current));
     throw raw;
   }
   const form = settling();
   if (answer.kind === 'answered') {
-    return applyRecoveryCreate(form, answer.result, answer.adoption);
+    return applyRecoveryCreate(form, answer.result, answer.adoption, current);
   }
   return answer.kind === 'notAttempted'
-    ? recoveryCreateCouldNotBeSent(form, false, null)
-    : recoveryCreateCouldNotBeSent(form, answer.mayHaveWritten, answer.failure);
+    ? recoveryCreateCouldNotBeSent(form, false, null, current)
+    : recoveryCreateCouldNotBeSent(form, answer.mayHaveWritten, answer.failure, current);
 } // End of function sendRecoveryCreate()
 
 /**
@@ -2766,10 +2852,11 @@ export type RecoveryReapply = ReapplyOutcome<RecoverySession, RecoveryReapplyObs
  * The guard {@link reapplyRecoveryToDiskVersion} uses when its caller hands none
  * in — `unaskedGuard` in `./matchEditor.ts`, for this form.
  *
- * It answers the shown conflict's own origin, so the supersession question the
- * entry asks last is answered *yes, it stands* without the window being asked. It
- * exists so that the one component caller, which 2d-6-3 may not touch, keeps its
- * save-origin reapply exactly as it was; what it costs is stated on the caller.
+ * It answers the shown conflict's own origin, so the supersession question the entry
+ * asks last is answered *yes, it stands* without the window being asked. It exists so
+ * that the one component caller, which passes `null` until 2d-6-6b hands the live
+ * closure down, keeps its save-origin reapply exactly as it was; what it costs is
+ * stated on the caller.
  *
  * @param conflict - The conflict shown, or `null`.
  * @returns A guard that never asks the window.
@@ -2828,33 +2915,63 @@ function unaskedGuard(conflict: ConflictModel<CreationBuffers> | null): Standing
  * anchor to find in it, and a refused table refuses nothing this form asked for;
  * superseded evidence refuses whatever the arm, because it is about the conflict
  * and not its table. **Three refusals come before any evidence is read**, in this
- * order: an unacknowledged write uncertainty (entry 22), a reading the window
- * holds undecided (entry 8), and a form that names no file (entry 21 — the
- * unknown-target reapply is a refusal, not a choice). The view withholds the
- * control through the same facts; these are the rules for a call made past it.
- * The adoption it spends is the **destination** conflict's own, never the
- * origin's (entry 25).
+ * order, whenever a conflict is shown: an unacknowledged write uncertainty (entry
+ * 22), a reading the window holds undecided (entry 8), and a form that names no
+ * file (entry 21 — the unknown-target reapply is a refusal, not a choice). Since
+ * Phase 2d-6-6a they are asked **before** `enterReapply`, which reads the
+ * observation's table even though this form consults none of it (2d-6-4's
+ * finding 4 — a blocked form reads no evidence); before that landing the entry
+ * came first and the sentence claimed an order the code did not have. The view
+ * withholds the control through the same facts; these are the rules for a call
+ * made past it. The adoption it spends is the **destination** conflict's own,
+ * never the origin's (entry 25).
  *
- * **The standing-origin guard is a parameter, and it is optional for one stated
- * reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s: `RecoveryPanel.svelte`
- * calls this with two arguments and 2d-6-3 touches no component. When no guard
- * is handed in the supersession question is not asked here; what still refuses a
- * superseded origin on that path is `adoptDiskVersion`'s fourth check, at the
- * door, answered `adoptionRefused` without the typed sentence. An omitted guard
- * costs a sentence and some work, never a wrong installation.
+ * **The two blocks and the conflict's identity are asked again of the installed
+ * form, once, immediately before the adoption** (Phase 2d-6-6a — 2d-6-4's
+ * pattern (c)): every read between the entry and the door — the disk projection
+ * the destination list is rebuilt from, the rebuilt form's own refusal rule over
+ * it — is a read of caller data, and a getter there can tell the window of a
+ * reading, whose receiver records a wait, an uncertainty or a new conflict on the
+ * installed form. So the adoption is refused `observationRetained` or
+ * `writeOutcomeUnknown` when the installed form now carries either, and
+ * `supersededEvidence` when the conflict it shows is no longer the one being
+ * reapplied; otherwise the rebuilt form carries the **installed** form's waits
+ * forward. Nothing caller-controlled runs between that read and the adoption.
+ * **The installed form is read once more after the adoption** (the 2d-6-6a
+ * review, its first finding — 2d-6-5's reload shape): `adoptDiskVersion` copies
+ * the observation's projection, and a getter there can tell the window of a
+ * reading the receiver records while the door is still inside `adopt`; a form now
+ * showing another conflict is not rebuilt over (`supersededEvidence`, and the
+ * caller keeps the installed form), and the waits the rebuilt form carries are
+ * the ones read then. What no type forces is that the reader is honest
+ * ({@link ReadTheInstalledForm}).
+ *
+ * **The standing-origin guard is a parameter, and `null` is accepted for one
+ * stated reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s:
+ * `RecoveryPanel.svelte` does not yet hand the live
+ * `BrowserState.standingConflictFor` closure down, and passes `null`; the
+ * parameter is nullable rather than defaulted since Phase 2d-6-6a, so that the
+ * required reader can follow it. When no guard is handed in the supersession
+ * question is not asked by the entry; what still refuses a superseded origin on
+ * that path is `adoptDiskVersion`'s fourth check, at the door, answered
+ * `adoptionRefused` without the typed sentence. An omitted guard costs a
+ * sentence and some work, never a wrong installation.
  *
  * @param session - The form showing a conflict of its own.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never
  *   at all on a refusal.
  * @param standing - Asks what origin stands for the file **now**;
- *   `() => browser.standingConflictFor(document)` is the honest closure. `null`,
- *   the default, asks nothing — see above for what that costs.
+ *   `() => browser.standingConflictFor(document)` is the honest closure. `null`
+ *   asks nothing — see above for what that costs.
+ * @param current - Reads the form the caller holds now, for the recheck before
+ *   the adoption — `() => session` over the caller's state. Required.
  * @returns What became of the attempt.
  */
 export function reapplyRecoveryToDiskVersion(
   session: RecoverySession,
   adopt: AdoptTheDiskVersion<CreationBuffers>,
-  standing: StandingOriginGuard | null = null
+  standing: StandingOriginGuard | null,
+  current: ReadTheInstalledForm
 ): RecoveryReapply {
   // **A closed form attempts nothing**, before its conflict is read and long before
   // an adoption could be reached. `notAttempted` is the arm for it: its sentence is
@@ -2865,18 +2982,22 @@ export function reapplyRecoveryToDiskVersion(
     return { kind: 'notAttempted' };
   }
   const conflict = recoveryConflictOf(session);
+  if (conflict !== null) {
+    // **Before the entry, which reads the evidence.** A blocked form reads none
+    // of it.
+    if (session.uncertaintyUnresolved) {
+      return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+    }
+    if (awaitedFor(session) !== null) {
+      return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+    }
+    if (session.chosen === null) {
+      return { kind: 'manualResolution', obstacle: { kind: 'destinationRequired' } };
+    }
+  }
   const entry = enterReapply(RECOVERY_CONFLICT_CAPABILITIES, conflict, standing ?? unaskedGuard(conflict));
   if (entry.kind !== 'ready') {
     return entry;
-  }
-  if (session.uncertaintyUnresolved) {
-    return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
-  }
-  if (awaitedFor(session) !== null) {
-    return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
-  }
-  if (session.chosen === null) {
-    return { kind: 'manualResolution', obstacle: { kind: 'destinationRequired' } };
   }
   const evidence = entry.evidence;
   if (evidence.kind === 'superseded') {
@@ -2917,14 +3038,40 @@ export function reapplyRecoveryToDiskVersion(
   if (refusal !== null) {
     return { kind: 'manualResolution', obstacle: { kind: 'recoveryRefused', reason: refusal } };
   }
+  // **The installed form, read once, after the last caller-controlled read and
+  // immediately before the spend.** Nothing caller-controlled runs between this
+  // read and the door.
+  const installed = current();
+  if (installed.uncertaintyUnresolved) {
+    return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+  }
+  if (awaitedFor(installed) !== null) {
+    return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+  }
+  if (recoveryConflictOf(installed)?.source !== entry.conflict.source) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
   if (adoptForReapply(entry.conflict, adopt) === 'refused') {
     return { kind: 'adoptionRefused' };
   }
+  // **Read again after the adoption**, which read caller data of its own (the
+  // 2d-6-6a review, its first finding): another conflict is not rebuilt over, and
+  // a wait recorded during the adoption is carried.
+  const settled = current();
+  if (recoveryConflictOf(settled)?.source !== entry.conflict.source) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  const waits = settled.awaitingReconciliation;
   // **Recorded on the way out rather than in the rebuild**, because it is a fact
   // about the adoption that has just been spent and not about the rebase: a
   // refusal above returns without it, and a success cannot leave
-  // `sourceConflictState` answering `retained`.
-  return { kind: 'reapplied', session: { ...rebuilt, windowWasReconciled: true } };
+  // `sourceConflictState` answering `retained`. The waits are the installed
+  // form's, read with the recheck, so a wait about another file recorded during
+  // the reads survives the rebuild.
+  return {
+    kind: 'reapplied',
+    session: { ...rebuilt, awaitingReconciliation: waits, windowWasReconciled: true }
+  };
 } // End of function reapplyRecoveryToDiskVersion()
 
 /**

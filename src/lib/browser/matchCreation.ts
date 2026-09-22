@@ -1469,6 +1469,31 @@ export interface StartedCreation {
 }
 
 /**
+ * Reads the form a caller currently holds — the one its registered receiver has
+ * been updating — for a door or a settling transition to check against.
+ *
+ * **The reader 2d-6-4 set on the three operation sessions, for this form**
+ * (Phase 2d-6-6a; `ReadTheInstalledSession` in `./matchDeletion.ts` states the
+ * class, and `ReadTheInstalledSession` in `./matchEditor.ts` is its twin):
+ * {@link beginCreate} reads it once after its last caller-controlled read and
+ * starts nothing for a form no longer installed; {@link reapplyToDiskVersion}
+ * rechecks the installed form's blocks and conflict once, immediately before
+ * adopting; {@link applyCreate} / {@link createCouldNotBeSent} replay whatever
+ * the receiver appended to it during their own replay, round after round.
+ *
+ * **What it forces and what it does not, in the same sentence.** It is required,
+ * so no call compiles without one, and `MatchCreator.svelte` passes one at every
+ * call; what no type can force is that the closure reads the installed form
+ * rather than a capture. `() => session` over the component's `$state.raw` is the
+ * honest one, and for a door handed a form derived from the installed one in the
+ * same synchronous block, the closure that answers the derived form while the
+ * installed one is still the form it was derived from.
+ *
+ * @returns The form the caller holds now.
+ */
+export type ReadTheInstalledSession = () => MatchCreationSession;
+
+/**
  * Starts a create of the form as it stands.
  *
  * The wire values are built from **the submission's own candidate** rather than
@@ -1483,11 +1508,26 @@ export interface StartedCreation {
  * exactly the caller this gate is for, since no control in this window can
  * produce the character at all.
  *
+ * **Every caller-controlled read comes first, and the installed form is read
+ * once, last** (Phase 2d-6-6a — 2d-6-5's `beginSave` shape in `./rawEditor.ts`):
+ * {@link canCreate} is asked, the destination read, the submission taken, the
+ * wire values derived and checked, and the waiting form spread; only then is the
+ * installed form read through `current`, once. A form that is no longer the one
+ * installed starts nothing, and nothing caller-controlled runs between that read
+ * and the answer. What no type forces is that the reader is honest
+ * ({@link ReadTheInstalledSession}), nor anything about a caller that redefines a
+ * property of the very form it handed in: a receiver replaces a form and never
+ * mutates one.
+ *
  * @param session - The form to submit.
+ * @param current - Reads the form the caller holds now. Required.
  * @returns The waiting form and everything the command takes, or `null` when
- *   {@link creationRefusal} names a reason.
+ *   {@link creationRefusal} names a reason or the form is no longer installed.
  */
-export function beginCreate(session: MatchCreationSession): StartedCreation | null {
+export function beginCreate(
+  session: MatchCreationSession,
+  current: ReadTheInstalledSession
+): StartedCreation | null {
   if (!canCreate(session)) {
     return null;
   }
@@ -1500,7 +1540,7 @@ export function beginCreate(session: MatchCreationSession): StartedCreation | nu
   if (newMatch.trigger.includes('\r') || newMatch.replace.includes('\r')) {
     return null;
   }
-  return {
+  const started: StartedCreation = {
     session: {
       ...session,
       phase: 'saving',
@@ -1513,6 +1553,8 @@ export function beginCreate(session: MatchCreationSession): StartedCreation | nu
     newMatch,
     position: wirePosition(session.placement)
   };
+  // **The installed form, read once, after the last caller-controlled read.**
+  return current() === session ? started : null;
 } // End of function beginCreate()
 
 /**
@@ -1543,19 +1585,24 @@ export function beginCreate(session: MatchCreationSession): StartedCreation | nu
  * reachable from {@link beginCreate} while an external conflict stands, so this
  * keeps the invariant for a caller that drove the model directly. Then, whatever
  * the answer, every delivery {@link applyObservation} held while the create was in
- * flight is replayed on top, in arrival order (entry 5).
+ * flight is replayed on top, in arrival order (entry 5) — and, through the
+ * reader, every delivery the receiver appended to the installed form during this
+ * transition's own replay (Phase 2d-6-6a, 2d-6-4's pattern (b);
+ * {@link consumingHeldDeliveries}).
  *
  * @param session - The form waiting for an answer.
  * @param result - How the save ended, exactly as the transaction reported it.
  * @param adoption - What became of the adoption, from `BrowserState.createMatch`.
  *   Required and not defaulted: a default would be this function inventing a
  *   `notOwed` for a caller that simply did not look.
+ * @param current - Reads the form the caller holds now. Required.
  * @returns The form showing what the create ended as.
  */
 export function applyCreate(
   session: MatchCreationSession,
   result: SaveResult,
-  adoption: InvalidationStatus
+  adoption: InvalidationStatus,
+  current: ReadTheInstalledSession
 ): MatchCreationSession {
   const submission = session.submitted;
   if (submission === null) {
@@ -1566,39 +1613,45 @@ export function applyCreate(
   const extraMessages = failed === null ? [] : [failed];
   if (result.outcome !== 'saved') {
     const refused = result.outcome === 'refused';
-    return consumingHeldDeliveries({
+    return consumingHeldDeliveries(
+      {
+        ...session,
+        phase: 'editing',
+        group: null,
+        outcome,
+        extraMessages,
+        // **A new outcome resets the reload**, so a confirmation collected for an
+        // earlier conflict cannot be spent while this one is on screen.
+        reload: NOT_RELOADING,
+        sendFailure: null,
+        externalConflict: refused ? session.externalConflict : null,
+        uncertaintyUnresolved: refused ? session.uncertaintyUnresolved : false
+      },
+      current
+    );
+  }
+  return consumingHeldDeliveries(
+    {
       ...session,
+      // A commit replaced the bytes every destination here was derived from, so the
+      // form stops accepting changes until it is seeded again. A `committed: false`
+      // replaced nothing and spends nothing.
+      committed: result.committed,
+      created: result.moved,
+      draft: savedDraft(session.draft, submission, result.revision),
       phase: 'editing',
       group: null,
       outcome,
       extraMessages,
-      // **A new outcome resets the reload**, so a confirmation collected for an
-      // earlier conflict cannot be spent while this one is on screen.
       reload: NOT_RELOADING,
       sendFailure: null,
-      externalConflict: refused ? session.externalConflict : null,
-      uncertaintyUnresolved: refused ? session.uncertaintyUnresolved : false
-    });
-  }
-  return consumingHeldDeliveries({
-    ...session,
-    // A commit replaced the bytes every destination here was derived from, so the
-    // form stops accepting changes until it is seeded again. A `committed: false`
-    // replaced nothing and spends nothing.
-    committed: result.committed,
-    created: result.moved,
-    draft: savedDraft(session.draft, submission, result.revision),
-    phase: 'editing',
-    group: null,
-    outcome,
-    extraMessages,
-    reload: NOT_RELOADING,
-    sendFailure: null,
-    // The create ended on the file, so the disk side an earlier observation
-    // showed is no longer the comparison to draw (entry 7).
-    externalConflict: null,
-    uncertaintyUnresolved: false
-  });
+      // The create ended on the file, so the disk side an earlier observation
+      // showed is no longer the comparison to draw (entry 7).
+      externalConflict: null,
+      uncertaintyUnresolved: false
+    },
+    current
+  );
 } // End of function applyCreate()
 
 /**
@@ -1608,27 +1661,59 @@ export function applyCreate(
  * `consumingHeldDeliveries` in `./matchEditor.ts`, for this form: the list is
  * emptied before the first replay so a replay cannot see itself in it, each
  * envelope goes through {@link applyObservation} exactly as it would have on
- * arrival, and each is applied to the form the one before it left. **What this
- * forces** is that no envelope delivered during the create is dropped and that
- * first-to-last is the order; **what it cannot force** is that the window
- * delivered them in the order it decided them.
+ * arrival, and each is applied to the form the one before it left — then, after
+ * each round, the installed form is read through `current`, once, and the
+ * envelopes it holds beyond the ones replayed are replayed too, in arrival order,
+ * until a read finds none (Phase 2d-6-6a; `consumingHeldDeliveries` in
+ * `./matchDeletion.ts` says why a replay runs caller code). **What this forces**
+ * is that no envelope delivered during the create or during this settlement is
+ * dropped when the reader answers the installed form, and that first-to-last is
+ * the order; **what it cannot force** is that the window delivered them in the
+ * order it decided them, that the reader is honest, that the installed list is
+ * an extension of the one replayed — one that is not is left alone — or that the
+ * rounds end for a getter that manufactures a fresh reading on every read.
  *
  * @param settled - The form with its create's answer applied and its phase back
  *   to `editing`.
+ * @param current - Reads the form the caller holds now.
  * @returns The form with every held delivery applied, or the same form when none
  *   was held.
  */
-function consumingHeldDeliveries(settled: MatchCreationSession): MatchCreationSession {
-  const held = settled.heldDeliveries;
-  if (held.length === 0) {
-    return settled;
-  }
-  let replayed: MatchCreationSession = { ...settled, heldDeliveries: [] };
-  for (const delivery of held) {
-    replayed = applyObservation(replayed, delivery);
-  } // End of the loop over the deliveries held during the create
-  return replayed;
+function consumingHeldDeliveries(
+  settled: MatchCreationSession,
+  current: ReadTheInstalledSession
+): MatchCreationSession {
+  let queue = settled.heldDeliveries;
+  let replayed: MatchCreationSession = queue.length === 0 ? settled : { ...settled, heldDeliveries: [] };
+  let seen = 0;
+  for (;;) {
+    for (let at = seen; at < queue.length; at += 1) {
+      replayed = applyObservation(replayed, queue[at]!);
+    } // End of the loop over the deliveries not yet replayed
+    seen = queue.length;
+    const arrived = current().heldDeliveries;
+    if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
+      return replayed;
+    }
+    queue = arrived;
+  } // End of the loop over the rounds of replay
 } // End of function consumingHeldDeliveries()
+
+/**
+ * Whether one held list is the other with more appended: the same envelopes, by
+ * identity, in the same positions — `extendsTheReplayed` in `./matchDeletion.ts`,
+ * for this form.
+ *
+ * @param arrived - The installed form's list.
+ * @param replayed - The list already replayed.
+ * @returns `true` when `arrived` begins with every entry of `replayed`.
+ */
+function extendsTheReplayed(
+  arrived: readonly ObservationDelivery[],
+  replayed: readonly ObservationDelivery[]
+): boolean {
+  return replayed.every((delivery, at) => arrived[at] === delivery);
+} // End of function extendsTheReplayed()
 
 /**
  * Records that the create produced no outcome.
@@ -1642,22 +1727,28 @@ function consumingHeldDeliveries(settled: MatchCreationSession): MatchCreationSe
  * @param mayHaveWritten - Whether the file may already hold the new snippet.
  * @param reason - Why the command rejected, or `null` when nothing was sent and
  *   the boundary therefore has no rejection to hand on.
+ * @param current - Reads the form the caller holds now, for the replay's rounds
+ *   ({@link applyCreate}'s reason). Required.
  * @returns The form, back to drafting, with the right notice raised.
  */
 export function createCouldNotBeSent(
   session: MatchCreationSession,
   mayHaveWritten: boolean,
-  reason: IpcFailure | null
+  reason: IpcFailure | null,
+  current: ReadTheInstalledSession
 ): MatchCreationSession {
   // The create is over, so a delivery held while it was out is applied now — the
   // settlement of an uncertain write arbitrates the held reading under that
   // uncertainty, and its `raisedWithoutReload` is what this applies (entry 5).
-  return consumingHeldDeliveries({
-    ...session,
-    phase: 'editing',
-    group: null,
-    sendFailure: sendFailureOf(mayHaveWritten, reason)
-  });
+  return consumingHeldDeliveries(
+    {
+      ...session,
+      phase: 'editing',
+      group: null,
+      sendFailure: sendFailureOf(mayHaveWritten, reason)
+    },
+    current
+  );
 } // End of function createCouldNotBeSent()
 
 /**
@@ -2316,10 +2407,11 @@ function anchorOfEvidence(
  * The guard {@link reapplyToDiskVersion} uses when its caller hands none in.
  *
  * `unaskedGuard` in `./matchEditor.ts`, for this form: it answers the shown
- * conflict's own origin, so the supersession question the entry asks last is
- * answered *yes, it stands* without the window being asked. It exists so that the
- * one component caller, which 2d-6-3 may not touch, keeps its save-origin reapply
- * exactly as it was; what it costs is stated on the caller.
+ * conflict's own origin, so the supersession question the entry asks last is answered
+ * *yes, it stands* without the window being asked. It exists so that the one
+ * component caller, which passes `null` until 2d-6-6b hands the live closure down,
+ * keeps its save-origin reapply exactly as it was; what it costs is stated on the
+ * caller.
  *
  * @param conflict - The conflict shown, or `null`.
  * @returns A guard that never asks the window.
@@ -2367,19 +2459,47 @@ function unaskedGuard(conflict: ConflictModel<CreationBuffers> | null): Standing
  * **Both origins since Phase 2d-6-3, through one entry** (entries 19, 20 and 22):
  * `enterReapply` in `./reapply.ts` answers `reapplyEvidenceFor`'s four arms and
  * {@link rebuiltPlacement} switches over them. **Three refusals come before any
- * evidence is read**, in this order: an unacknowledged write uncertainty (entry
- * 22 — a reapply ends in an adoption, which the uncertainty withholds); a reading
- * the window holds undecided (entry 8 — a form rebuilt over the adopted snapshot
- * would carry no record of the wait, and the blocked send would go through it);
- * and a form that names no file (entry 21 — the unknown-target reapply is a
- * refusal, not a choice: re-pointing the draft at the observed file would choose
- * that file for the person). The view withholds the control through the same
- * facts; these are the rules for a call made past it.
+ * evidence is read**, in this order, whenever a conflict is shown: an
+ * unacknowledged write uncertainty (entry 22 — a reapply ends in an adoption,
+ * which the uncertainty withholds); a reading the window holds undecided (entry
+ * 8 — a form rebuilt over the adopted snapshot would carry no record of the wait,
+ * and the blocked send would go through it); and a form that names no file
+ * (entry 21 — the unknown-target reapply is a refusal, not a choice: re-pointing
+ * the draft at the observed file would choose that file for the person). Since
+ * Phase 2d-6-6a they are asked **before** `enterReapply`, which reads the
+ * observation's table (2d-6-4's finding 4); before that landing the entry came
+ * first and this sentence claimed an order the code did not have. The view
+ * withholds the control through the same facts; these are the rules for a call
+ * made past it.
  *
- * **The standing-origin guard is a parameter, and it is optional for one stated
- * reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s: `MatchCreator.svelte`
- * calls this with two arguments and 2d-6-3 touches no component. When no guard is
- * handed in the supersession question is not asked here; what still refuses a
+ * **The two blocks and the conflict's identity are asked again of the installed
+ * form, once, immediately before the adoption** (Phase 2d-6-6a — 2d-6-4's
+ * pattern (c)): every read between the entry and the door — the anchor's row and
+ * its `exact` tier, the disk projection the destination is rebuilt from, the
+ * rebuilt form's own refusal rule over it — is a read of caller data, and a
+ * getter there can tell the window of a reading whose receiver records a wait,
+ * an uncertainty or a new conflict on the installed form. So the adoption is
+ * refused `observationRetained` or `writeOutcomeUnknown` when the installed form
+ * now carries either, and `supersededEvidence` when the conflict it shows is no
+ * longer the one being reapplied; otherwise the rebuilt form carries the
+ * **installed** form's waits forward, so a wait about another file recorded
+ * during the reads survives the rebuild. Nothing caller-controlled runs between
+ * that read and the adoption. **The installed form is read once more after the
+ * adoption** (the 2d-6-6a review, its first finding — 2d-6-5's reload shape):
+ * `adoptDiskVersion` copies the observation's projection, and a getter there can
+ * tell the window of a reading the receiver records while the door is still
+ * inside `adopt`; a form now showing another conflict is not rebuilt over
+ * (`supersededEvidence`, and the caller keeps the installed form), and the waits
+ * the rebuilt form carries are the ones read then; what no type forces is that the reader is honest
+ * ({@link ReadTheInstalledSession}).
+ *
+ * **The standing-origin guard is a parameter, and `null` is accepted for one
+ * stated reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s:
+ * `MatchCreator.svelte` does not yet hand the live
+ * `BrowserState.standingConflictFor` closure down, and passes `null`; the
+ * parameter is nullable rather than defaulted since Phase 2d-6-6a, so that the
+ * required reader can follow it. When no guard is handed in the supersession
+ * question is not asked by the entry; what still refuses a
  * superseded origin on that path is `adoptDiskVersion`'s fourth check, at the
  * door, answered `adoptionRefused` without the typed sentence. An omitted guard
  * costs a sentence and some work, never a wrong installation.
@@ -2394,28 +2514,41 @@ function unaskedGuard(conflict: ConflictModel<CreationBuffers> | null): Standing
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
  *   all on a refusal.
  * @param standing - Asks what origin stands for the file **now**;
- *   `() => browser.standingConflictFor(document)` is the honest closure. `null`,
- *   the default, asks nothing — see above for what that costs.
+ *   `() => browser.standingConflictFor(document)` is the honest closure. `null`
+ *   asks nothing — see above for what that costs.
+ * @param current - Reads the form the caller holds now, for the recheck before
+ *   the adoption. Required.
  * @returns What became of the attempt.
  */
 export function reapplyToDiskVersion(
   session: MatchCreationSession,
   adopt: AdoptTheDiskVersion<CreationBuffers>,
-  standing: StandingOriginGuard | null = null
+  standing: StandingOriginGuard | null,
+  current: ReadTheInstalledSession
 ): MatchCreationReapply {
   const conflict = conflictOf(session);
+  const held = chosenDestination(session);
+  if (conflict !== null) {
+    // **Before the entry, which reads the evidence.** A blocked form reads none
+    // of it.
+    if (session.uncertaintyUnresolved) {
+      return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+    }
+    if (awaitedFor(session) !== null) {
+      return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+    }
+    if (held === null) {
+      return { kind: 'manualResolution', obstacle: { kind: 'destinationRequired' } };
+    }
+  }
   const entry = enterReapply(CONFLICT_CAPABILITIES, conflict, standing ?? unaskedGuard(conflict));
   if (entry.kind !== 'ready') {
     return entry;
   }
-  if (session.uncertaintyUnresolved) {
-    return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
-  }
-  if (awaitedFor(session) !== null) {
-    return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
-  }
-  const held = chosenDestination(session);
   if (held === null) {
+    // Unreachable once a conflict is shown — refused above — and the entry
+    // answers before this for a form showing none; kept so the narrowing below is
+    // the type's rather than an argument about reachability.
     return { kind: 'manualResolution', obstacle: { kind: 'destinationRequired' } };
   }
   const evidence = entry.evidence;
@@ -2462,10 +2595,33 @@ export function reapplyToDiskVersion(
   if (refusal !== null) {
     return { kind: 'manualResolution', obstacle: { kind: 'creationRefused', reason: refusal } };
   }
+  // **The installed form, read once, after the last caller-controlled read and
+  // immediately before the spend.** Nothing caller-controlled runs between this
+  // read and the door.
+  const installed = current();
+  if (installed.uncertaintyUnresolved) {
+    return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
+  }
+  if (awaitedFor(installed) !== null) {
+    return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+  }
+  if (conflictOf(installed)?.source !== entry.conflict.source) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
   if (adoptForReapply(entry.conflict, adopt) === 'refused') {
     return { kind: 'adoptionRefused' };
   }
-  return { kind: 'reapplied', session: rebuilt };
+  // **Read again after the adoption**, which read caller data of its own (the
+  // 2d-6-6a review, its first finding): another conflict is not rebuilt over, and
+  // a wait recorded during the adoption is carried.
+  const settled = current();
+  if (conflictOf(settled)?.source !== entry.conflict.source) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  return {
+    kind: 'reapplied',
+    session: { ...rebuilt, awaitingReconciliation: settled.awaitingReconciliation }
+  };
 } // End of function reapplyToDiskVersion()
 
 /**

@@ -109,9 +109,8 @@
  * through a {@link ReadTheInstalledSession} (2d-6-4's review, its three
  * blockers): {@link beginSave} spends only against the session it was handed
  * while that is still installed; {@link applySave} and {@link saveCouldNotBeSent}
- * replay what the receiver appended during their own replay. The reader is
- * optional while `RawEditor.svelte` passes none, and its doc says what that
- * costs.
+ * replay what the receiver appended during their own replay. The reader is required
+ * since Phase 2d-6-6a, and its doc says what no type can force about it.
  *
  * **No component registers this receiver yet.** 2d-6-8 wires
  * `BrowserState.registerObservationReceiver` to it through `DetailPane` and
@@ -343,10 +342,10 @@ export interface RawEditorSession {
    * installed session while they were doing so. **What the list forces** is that
    * no envelope delivered during the save is dropped and that first-to-last is
    * the order; **what it does not force** is that arrival order was decision
-   * order — the window's own contract — nor that a caller passes the reader:
-   * `RawEditor.svelte` settles its live `session` after its own `await` and
-   * passes none today, and nothing in TypeScript stops a caller handing a
-   * capture and no reader.
+   * order — the window's own contract — nor that the required reader is honest:
+   * `RawEditor.svelte` settles its live `session` after its own `await` and passes
+   * `() => session` beside it, and nothing in TypeScript stops a caller handing a
+   * capture and a reader that answers the capture.
    */
   readonly heldDeliveries: readonly ObservationDelivery[];
 }
@@ -826,22 +825,19 @@ export function canSave(session: RawEditorSession): boolean {
  * after its adoption — and refuse, or answer the installed session, when what
  * is installed is not what they were handed.
  *
- * **What it forces and what it does not, in the same sentence.** With one
- * supplied, {@link beginSave} spends only against the session it was handed while
+ * **What it forces and what it does not, in the same sentence.** Through it, {@link
+ * beginSave} spends only against the session it was handed while
  * that session is still the one installed, {@link loadDiskVersion} reseeds over
  * the installed session and answers it untouched when the adoption replaced the
  * conflict, and {@link applySave} /
  * {@link saveCouldNotBeSent} settle every delivery the receiver appended to the
- * installed session during the save and during their own replay. It cannot force
- * a caller to supply one: **the parameter is optional so that `RawEditor.svelte`,
- * which this phase may not touch and which registers no receiver today, keeps
- * compiling** — and a caller that registers a receiver and passes no reader gets
- * the displaced check and the lost delivery this closes. **2d-6-6, which makes
- * the reader required across the sessions, or 2d-6-8, which registers this
- * receiver — whichever comes first — must pass `() => session` at every one of
- * these calls, and either may make the parameter required.** Nor can it force
- * that the closure reads the installed session rather than a capture;
- * `() => session` over the component's `$state.raw` is the honest one.
+ * installed session during the save and during their own replay. **The parameter is
+ * required since Phase 2d-6-6a**, so no call compiles without one, and
+ * `RawEditor.svelte` passes `() => session` at every one of these calls. What no type
+ * can force is that the closure reads the installed session rather than a capture;
+ * `() => session` over the component's `$state.raw` is the honest one, and a reader
+ * answering the session handed in whatever is installed gets the displaced check and
+ * the lost delivery this closes.
  *
  * @returns The session the caller holds now.
  */
@@ -894,22 +890,21 @@ export interface StartedSave {
  * carried when {@link canSave} was asked. An external conflict, a held reading
  * and the uncertainty the conflict carries each answer `null` here, exactly as
  * they disable the control. What that forces is refusal for the session
- * installed at the moment of the spend; it cannot force a caller to pass a
- * reader at all ({@link ReadTheInstalledSession} says what a missing one costs),
+ * installed at the moment of the spend; it cannot force the reader a caller passes to
+ * be honest ({@link ReadTheInstalledSession}),
  * nor stop a caller redefining a property of the very session it handed in —
  * that caller's own session is what it defeats.
  *
  * @param session - The session to save.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   checks the block on the session handed in — honest only for a caller that
- *   registers no receiver, which is `RawEditor.svelte` today.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The waiting session and the submission, or `null` when there is
  *   nothing to save, the session may not submit, or the candidate is one this
  *   editor could not have produced.
  */
 export function beginSave(
   session: RawEditorSession,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): StartedSave | null {
   // **Every caller-controlled read of this door, taken here, before the
   // installed session is read.** The draft is the session's own, but `readonly`
@@ -927,7 +922,7 @@ export function beginSave(
   // receiver run from a getter above has replaced it; a session that is no
   // longer the one installed spends nothing. Nothing caller-controlled runs
   // between this read and the return.
-  const installed = current === null ? session : current();
+  const installed = current();
   if (installed !== session || refused || !eligible) {
     return null;
   }
@@ -992,23 +987,22 @@ export function acknowledgeFindings(session: RawEditorSession): RawEditorSession
  * keeps the invariant for a caller that drove the model directly. Then, whatever
  * the answer — a seal already opened included, because the save is over either
  * way — every delivery {@link applyObservation} held while the save was in flight
- * is replayed on top, in arrival order (entry 5), **and, with a reader supplied,
- * every delivery the receiver appended to the installed session during this
+ * is replayed on top, in arrival order (entry 5), **and, through the reader, every
+ * delivery the receiver appended to the installed session during this
  * transition's own reads and replay** (2d-6-4's review, its second finding).
- * Without a reader the transition settles what it was handed and such a delivery
- * is lost when the caller installs the result; {@link ReadTheInstalledSession}
- * says who owes the reader.
+ * A reader answering a capture rather than the installed session loses such a
+ * delivery when the caller installs the result ({@link ReadTheInstalledSession}).
  *
  * @param session - The session waiting for an answer, as the caller holds it.
  * @param sealed - What `BrowserState.saveRawDocument` answered.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   replays only what the session handed in holds.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session showing what the save ended as.
  */
 export function applySave(
   session: RawEditorSession,
   sealed: SealedWholeDocumentSave,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): RawEditorSession {
   const submission = session.submitted;
   if (submission === null) {
@@ -1086,36 +1080,36 @@ function extendsTheReplayed(
  * that was happening (2d-6-4's review, its second finding).
  *
  * `consumingHeldDeliveries` in `./matchDeletion.ts`, for this session, rounds
- * included: the list is emptied before the first replay so a replay cannot see
- * itself in it, each envelope goes through {@link applyObservation} exactly as it
- * would have on arrival, and each is applied to the session the one before it
- * left. **Replaying an envelope reads its observation, and a read runs caller
- * code**: a getter there can tell the window of a reading, and the window
- * delivers it at once to the installed session — which is still `saving`, so
- * the receiver appends it there, to a list this transition was handed a copy of.
- * So after each round the installed session is read through `current`, once,
- * and the envelopes it holds beyond the ones replayed are replayed too, in the
- * order they arrived, until a read finds none. **What this forces** is that no
- * envelope delivered during the save, or during this settlement, is dropped when
- * a reader is supplied, and that first-to-last is the order; **what it cannot
- * force** is that the window delivered them in the order it decided them, that a
- * reader is supplied at all, or that the installed session is the one handed in
- * with more appended — a list that is not an extension of the one replayed is
- * left alone, since the transition cannot say what it is. Nor can it force the
- * rounds to end: a getter that tells the window of a fresh reading on every read
- * does not come to rest here, exactly as it does not at the window's own drain
- * (`registerObservationReceiver`'s doc), and one that re-tells a reading already
- * decided does, because the window hands each decision out once.
+ * included: the list is emptied before the first replay so a replay cannot see itself
+ * in it, each envelope goes through {@link applyObservation} exactly as it would have
+ * on arrival, and each is applied to the session the one before it left. **Replaying
+ * an envelope reads its observation, and a read runs caller code**: a getter there
+ * can tell the window of a reading, and the window delivers it at once to the
+ * installed session — which is still `saving`, so the receiver appends it there, to a
+ * list this transition was handed a copy of. So after each round the installed
+ * session is read through `current`, once, and the envelopes it holds beyond the ones
+ * replayed are replayed too, in the order they arrived, until a read finds none.
+ * **What this forces** is that no envelope delivered during the save, or during this
+ * settlement, is dropped when the reader answers the installed session, and that
+ * first-to-last is the order; **what it cannot force** is that the window delivered
+ * them in the order it decided them, that the reader is honest, or that the installed
+ * session is the one handed in with more appended — a list that is not an extension
+ * of the one replayed is left alone, since the transition cannot say what it is. Nor
+ * can it force the rounds to end: a getter that tells the window of a fresh reading
+ * on every read does not come to rest here, exactly as it does not at the window's
+ * own drain (`registerObservationReceiver`'s doc), and one that re-tells a reading
+ * already decided does, because the window hands each decision out once.
  *
  * @param settled - The session with its save's answer applied and its phase back
  *   to `editing`.
- * @param current - Reads the session the caller holds now, or `null`.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session with every held delivery applied, or the same session
  *   when none was held.
  */
 function consumingHeldDeliveries(
   settled: RawEditorSession,
-  current: ReadTheInstalledSession | null
+  current: ReadTheInstalledSession
 ): RawEditorSession {
   let queue = settled.heldDeliveries;
   let replayed: RawEditorSession = queue.length === 0 ? settled : { ...settled, heldDeliveries: [] };
@@ -1125,9 +1119,6 @@ function consumingHeldDeliveries(
       replayed = applyObservation(replayed, queue[at]!);
     } // End of the loop over the deliveries not yet replayed
     seen = queue.length;
-    if (current === null) {
-      return replayed;
-    }
     const arrived = current().heldDeliveries;
     if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
       return replayed;
@@ -1159,20 +1150,20 @@ function consumingHeldDeliveries(
  * The save is over, so a delivery held while it was out is applied now: the
  * settlement of an uncertain write arbitrates the held reading under that
  * uncertainty, and its `raisedWithoutReload` is what this applies (the 2d-6
- * record's §3 entry 5), and with a reader every delivery appended to the
+ * record's §3 entry 5), and through the reader every delivery appended to the
  * installed session during the replay is applied too, for {@link applySave}'s
  * reason.
  *
  * @param session - The session waiting for an answer, as the caller holds it.
  * @param mayHaveWritten - Whether the file may already hold the submitted text.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   replays only what the session handed in holds.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session, back to editing, with the right notice raised.
  */
 export function saveCouldNotBeSent(
   session: RawEditorSession,
   mayHaveWritten: boolean,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): RawEditorSession {
   return consumingHeldDeliveries(
     {
@@ -1331,32 +1322,31 @@ export function confirmReload(session: RawEditorSession): RawEditorSession {
  * the caller cannot obtain the reseeded draft without this function having called
  * it and been told the window holds the disk version.
  *
- * **The installed session is read twice: once after the last read of this
- * function's own and immediately before the adoption, and once more after it**
- * (this phase's review, its third finding; 2d-6-4's pattern (c)). The adoption
- * is the window's, and `BrowserState.adoptDiskVersion` copies the observation's
- * projection before it decides — a read of caller data, and a getter there can
- * tell the window of a later reading, which the window decides and hands to the
- * registered receiver while this function is still inside `adopt`. So: a session
- * displaced before the adoption is not reloaded and the installed session is
- * answered, the window never asked — a caller that installs the answer keeps
- * what its receiver installed. After the adoption the installed session is read
- * again; when it now shows **another conflict** (by source identity) the person
- * must decide about that one, whether the window installed this snapshot or
- * refused it as outlived, so the installed session is answered untouched and
- * nothing is reseeded over it; when it shows the same conflict with more
- * recorded — a wait, most of all — the reseed and the refused step are built
- * over **it**, so what the receiver recorded during the adoption survives. What
- * that cannot force is that a caller passes a reader ({@link ReadTheInstalledSession}
- * says what a missing one costs): without one the transition reseeds what it was
- * handed, and a delivery the receiver made during the adoption is lost when the
- * caller installs the answer.
+ * **The installed session is read twice: once after the last read of this function's
+ * own and immediately before the adoption, and once more after it** (this phase's
+ * review, its third finding; 2d-6-4's pattern (c)). The adoption is the window's, and
+ * `BrowserState.adoptDiskVersion` copies the observation's projection before it
+ * decides — a read of caller data, and a getter there can tell the window of a later
+ * reading, which the window decides and hands to the registered receiver while this
+ * function is still inside `adopt`. So: a session displaced before the adoption is
+ * not reloaded and the installed session is answered, the window never asked — a
+ * caller that installs the answer keeps what its receiver installed. After the
+ * adoption the installed session is read again; when it now shows **another
+ * conflict** (by source identity) the person must decide about that one, whether the
+ * window installed this snapshot or refused it as outlived, so the installed session
+ * is answered untouched and nothing is reseeded over it; when it shows the same
+ * conflict with more recorded — a wait, most of all — the reseed and the refused step
+ * are built over **it**, so what the receiver recorded during the adoption survives.
+ * What that cannot force is that the required reader is honest ({@link
+ * ReadTheInstalledSession}): one answering a capture reseeds what it was handed, and
+ * a delivery the receiver made during the adoption is lost when the caller installs
+ * the answer.
  *
  * @param session - The session holding a confirmation.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and only
  *   when this reload really happens.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   builds over the session handed in.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns A clean session over the disk version, the session at the refused
  *   step, the same session, or the installed session when the one handed in is
  *   no longer it.
@@ -1364,7 +1354,7 @@ export function confirmReload(session: RawEditorSession): RawEditorSession {
 export function loadDiskVersion(
   session: RawEditorSession,
   adopt: AdoptTheDiskVersion<RoundTripText>,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): RawEditorSession {
   // **Every read of this function's own, taken first.** The step, the
   // conflict, its disk text, its draft and its revision are all read here.
@@ -1378,7 +1368,7 @@ export function loadDiskVersion(
   // **The installed session, read once, after those reads and immediately
   // before the adoption.** A session no longer installed is not reloaded, and
   // what is installed is answered so the caller keeps it.
-  const installed = current === null ? session : current();
+  const installed = current();
   if (installed !== session) {
     return installed;
   }
@@ -1390,7 +1380,7 @@ export function loadDiskVersion(
     return session;
   }
   // **Read once more, after the adoption**, which ran the window's own reads.
-  const settled = current === null ? session : current();
+  const settled = current();
   if (settled !== session && conflictOf(settled)?.source !== conflict.source) {
     // A replacing verdict landed during the adoption: the conflict the receiver
     // installed is the one to decide about now, and nothing is reseeded over it.

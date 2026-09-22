@@ -30,6 +30,7 @@ import type { IpcFailure } from '../ipc/errors';
 import type {
   ContentRevision,
   CorrespondenceEntry,
+  CorrespondenceTable,
   DraftError,
   EditError,
   Finding,
@@ -112,6 +113,15 @@ import {
   type ConflictChoice,
   type ConflictModel
 } from './saveOutcome';
+
+/*
+ * **`((onHand) => door(onHand, …, () => onHand))(value)`** is a door, a settling
+ * transition or a reapply called with a reader answering the very session it is
+ * handed — the installed session of a caller that registers no receiver. Phase
+ * 2d-6-6a made the reader required; this is how a case that is not about
+ * displacement says so without evaluating `value` twice. The cases that are about
+ * displacement pass a holder's reader instead.
+ */
 
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -213,11 +223,11 @@ const REFUSAL: SaveResult = {
  * @returns The session showing the refusal, with its submission recorded.
  */
 function refused(): MatchEditorSession {
-  const started = beginSave(editField(session(), 'replace', 'c'));
+  const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'));
   if (started === null) {
     throw new Error('an edited draft is saveable');
   }
-  return applySave(started.session, REFUSAL, NOT_OWED);
+  return applySave(started.session, REFUSAL, NOT_OWED, () => started.session);
 } // End of function refused()
 
 /**
@@ -653,7 +663,7 @@ describe('what the controls may change, and what they may not', () => {
   });
 
   it('refuses everything while a save is in flight', () => {
-    const started = beginSave(editField(session(), 'replace', 'c'));
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'));
     expect(started).not.toBeNull();
     const flight = started!.session;
     expect(isEditable(flight)).toBe(false);
@@ -817,14 +827,14 @@ describe('history, coalesced per field on an injected clock', () => {
 describe('the save, and what its answer moves', () => {
   it('is offered only for a draft that differs from what the file holds', () => {
     expect(canSave(session())).toBe(false);
-    expect(beginSave(session())).toBeNull();
+    expect(((onHand) => beginSave(onHand, () => onHand))(session())).toBeNull();
     const edited = editField(session(), 'replace', 'c');
     expect(canSave(edited)).toBe(true);
-    expect(beginSave(edited)).not.toBeNull();
+    expect(beginSave(edited, () => edited)).not.toBeNull();
   });
 
   it('sends the draft derived from the candidate it recorded', () => {
-    const started = beginSave(editField(session(), 'replace', 'c'));
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'));
     expect(started?.draft.replace).toEqual({ Set: 'c' });
     expect(started?.draft.label).toBe('Unchanged');
     expect(started?.submission.candidate.replace).toEqual({ text: 'c', removed: false });
@@ -833,8 +843,8 @@ describe('the save, and what its answer moves', () => {
   });
 
   it('adopts the identity a commit answers with', () => {
-    const started = beginSave(editField(session(), 'replace', 'c'))!;
-    const done = applySave(started.session, saved(), ADOPTED);
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'))!;
+    const done = applySave(started.session, saved(), ADOPTED, () => started.session);
     expect(done.match).toEqual(MOVED);
     expect(done.identityStale).toBe(false);
     expect(baseRevisionOf(done)).toBe(AFTER);
@@ -843,8 +853,8 @@ describe('the save, and what its answer moves', () => {
   });
 
   it('stops offering to save when a commit answered no identity', () => {
-    const started = beginSave(editField(session(), 'replace', 'c'))!;
-    const done = applySave(started.session, saved(true, null), ADOPTED);
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'))!;
+    const done = applySave(started.session, saved(true, null), ADOPTED, () => started.session);
     expect(done.identityStale).toBe(true);
     expect(isEditable(done)).toBe(false);
     expect(canSave(done)).toBe(false);
@@ -856,8 +866,8 @@ describe('the save, and what its answer moves', () => {
     // **The draft-versus-projection mistake this phase is named after.** Insert a
     // label, save it, then clear it: without the rebase the absent-and-blank rule
     // would answer `'Unchanged'` and the label would stay in the file for ever.
-    const started = beginSave(editField(session(), 'label', 'a name'))!;
-    const done = applySave(started.session, saved(), ADOPTED);
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'label', 'a name'))!;
+    const done = applySave(started.session, saved(), ADOPTED, () => started.session);
     expect(done.baseline.label).toMatchObject({ present: true, value: 'a name' });
     // Asked of the rebased baseline directly rather than through `editField`,
     // because a commit now stops the session accepting changes until a fresh
@@ -876,8 +886,8 @@ describe('the save, and what its answer moves', () => {
     // right about presence and values and say nothing about the new scalars'
     // spelling, spans or decodability, so every eligibility verdict this session
     // holds is about bytes that no longer exist.
-    const started = beginSave(editField(session(), 'replace', 'c'))!;
-    const done = applySave(started.session, saved(), ADOPTED);
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'))!;
+    const done = applySave(started.session, saved(), ADOPTED, () => started.session);
     expect(matchEditorView(done).needsReprojection).toBe(true);
     expect(isEditable(done)).toBe(false);
     expect(editField(done, 'replace', 'd')).toBe(done);
@@ -897,9 +907,9 @@ describe('the save, and what its answer moves', () => {
   }); // End of the "re-projection is owed" case
 
   it('moves a removed field’s baseline to absent, and says nothing about it afterwards', () => {
-    const started = beginSave(removeField(session(), 'replace'))!;
+    const started = ((onHand) => beginSave(onHand, () => onHand))(removeField(session(), 'replace'))!;
     expect(started.draft.replace).toBe('Remove');
-    const done = applySave(started.session, saved(), ADOPTED);
+    const done = applySave(started.session, saved(), ADOPTED, () => started.session);
     expect(done.baseline.replace).toMatchObject({ present: false, value: '' });
     // The buffer still says "removed", and the file no longer has the key, so the
     // draft claims nothing and is not dirty.
@@ -908,8 +918,8 @@ describe('the save, and what its answer moves', () => {
   });
 
   it('treats a `committed: false` as the success it is', () => {
-    const started = beginSave(editField(session(), 'replace', 'c'))!;
-    const done = applySave(started.session, saved(false, null), NOT_OWED);
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'))!;
+    const done = applySave(started.session, saved(false, null), NOT_OWED, () => started.session);
     expect(done.identityStale).toBe(false);
     expect(baseRevisionOf(done)).toBe(AFTER);
     expect(matchEditorView(done).messages).toEqual([{ kind: 'nothingToWrite' }]);
@@ -927,7 +937,7 @@ describe('the save, and what its answer moves', () => {
 
   it('records consent for the exact candidate, and withdraws it when the draft moves', () => {
     const consented = acknowledgeFindings(refused());
-    const again = beginSave(consented);
+    const again = beginSave(consented, () => consented);
     expect(again?.submission.acknowledgement).toEqual({ accepted: [SUSPICION] });
 
     // One more keystroke and the findings are about something nobody is looking
@@ -936,7 +946,7 @@ describe('the save, and what its answer moves', () => {
     expect(outcomeIsStale(moved)).toBe(true);
     expect(matchEditorView(moved).refusalChoices).toEqual(['keepEditing']);
     expect(matchEditorView(moved).findingsAreStale).toBe(true);
-    expect(beginSave(moved)?.submission.acknowledgement).toEqual({ accepted: [] });
+    expect(beginSave(moved, () => moved)?.submission.acknowledgement).toEqual({ accepted: [] });
   }); // End of the "records consent" case
 
   it('records no consent when there is no refusal on screen', () => {
@@ -945,12 +955,12 @@ describe('the save, and what its answer moves', () => {
   });
 
   it('reports a send that never left as neither an outcome nor a written file', () => {
-    const started = beginSave(editField(session(), 'replace', 'c'))!;
-    const notSent = saveCouldNotBeSent(started.session, false, null);
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'))!;
+    const notSent = saveCouldNotBeSent(started.session, false, null, () => started.session);
     expect(notSent.sendFailure).toEqual({ kind: 'notSent', reason: null });
     expect(notSent.outcome).toBeNull();
     expect(notSent.draft.value.replace.text).toBe('c');
-    expect(saveCouldNotBeSent(started.session, true, null).sendFailure).toEqual({
+    expect(saveCouldNotBeSent(started.session, true, null, () => started.session).sendFailure).toEqual({
       kind: 'mayHaveWritten',
       reason: null
     });
@@ -962,7 +972,7 @@ describe('the save, and what its answer moves', () => {
     // rejection is `draftRefused`, and its `DraftError` is what says *which field
     // cannot be written and why*. Before this, all thirty-two of those sentences
     // reached the developer console and no screen at all.
-    const started = beginSave(editField(session(), 'replace', 'c'))!;
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'))!;
     const unmodelled: DraftError = {
       FieldHasAnUnmodelledShape: { field: 'label', found: 'Sequence' }
     };
@@ -970,7 +980,7 @@ describe('the save, and what its answer moves', () => {
       kind: 'command',
       error: { code: 'draftRefused', error: unmodelled }
     };
-    const answered = saveCouldNotBeSent(started.session, false, refusedDraft);
+    const answered = saveCouldNotBeSent(started.session, false, refusedDraft, () => started.session);
     expect(matchEditorView(answered).failureLines).toEqual([
       { kind: 'failure', failure: refusedDraft },
       { kind: 'draft', error: unmodelled }
@@ -981,7 +991,7 @@ describe('the save, and what its answer moves', () => {
     // The other chain, and the deepest one a field save can produce: a
     // `saveFailed` carrying a `SaveError` whose `Patch` arm carries an
     // `EditError`. Thirty-six more sentences that had never been drawn.
-    const started = beginSave(editField(session(), 'replace', 'c'))!;
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'))!;
     const patch: EditError = { EmptyTarget: { edit: 0, node: 7, at: { start: 12, end: 12 } } };
     const failedSave: IpcFailure = {
       kind: 'command',
@@ -991,7 +1001,7 @@ describe('the save, and what its answer moves', () => {
         may_have_written: false
       }
     };
-    const answered = saveCouldNotBeSent(started.session, false, failedSave);
+    const answered = saveCouldNotBeSent(started.session, false, failedSave, () => started.session);
     expect(matchEditorView(answered).failureLines).toEqual([
       { kind: 'failure', failure: failedSave },
       { kind: 'save', error: { Patch: patch } },
@@ -1000,17 +1010,17 @@ describe('the save, and what its answer moves', () => {
   }); // End of the "failed patch" case
 
   it('says only what it has to say about a rejection that carries no chain', () => {
-    const started = beginSave(editField(session(), 'replace', 'c'))!;
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'))!;
     const stale: IpcFailure = {
       kind: 'command',
       error: { code: 'identityStaleRevision', expected: AFTER, found: BASE }
     };
-    expect(matchEditorView(saveCouldNotBeSent(started.session, false, stale)).failureLines).toEqual(
+    expect(matchEditorView(saveCouldNotBeSent(started.session, false, stale, () => started.session)).failureLines).toEqual(
       [{ kind: 'failure', failure: stale }]
     );
     const unexpected: IpcFailure = { kind: 'unexpected' };
     expect(
-      matchEditorView(saveCouldNotBeSent(started.session, true, unexpected)).failureLines
+      matchEditorView(saveCouldNotBeSent(started.session, true, unexpected, () => started.session)).failureLines
     ).toEqual([{ kind: 'failure', failure: unexpected }]);
   }); // End of the "no chain" case
 
@@ -1024,7 +1034,7 @@ describe('the save, and what its answer moves', () => {
 
   it('does nothing with an answer to a save that was never started', () => {
     const editor = session();
-    expect(applySave(editor, saved(), ADOPTED)).toBe(editor);
+    expect(applySave(editor, saved(), ADOPTED, () => editor)).toBe(editor);
   });
 
   it('refuses at the last gate to write a value carrying a carriage return', () => {
@@ -1041,7 +1051,7 @@ describe('the save, and what its answer moves', () => {
     const driven: MatchEditorSession = { ...editor, draft: smuggled };
     expect(isDirty(driven.draft)).toBe(true);
     expect(canSave(driven)).toBe(true);
-    expect(beginSave(driven)).toBeNull();
+    expect(beginSave(driven, () => driven)).toBeNull();
   }); // End of the "last gate" case
 
   it('still saves a snippet that merely holds a carriage return it is not writing', () => {
@@ -1050,7 +1060,7 @@ describe('the save, and what its answer moves', () => {
     // intent is `'Unchanged'`, so the gate — which looks at what would be written —
     // must not refuse the whole save because of it.
     const editor = editField(session(withScalar('replace', scalar('a\rb'))), 'label', 'renamed');
-    const started = beginSave(editor);
+    const started = beginSave(editor, () => editor);
     expect(started?.draft.label).toEqual({ Set: 'renamed' });
     expect(started?.draft.replace).toBe('Unchanged');
   });
@@ -1061,8 +1071,8 @@ describe('the save, and what its answer moves', () => {
     // saved arm and never in place of it (`PROGRESS.md` D2). The session stops
     // offering to save, because there is no projection left to resolve an identity
     // against.
-    const started = beginSave(editField(session(), 'replace', 'c'))!;
-    const done = applySave(started.session, saved(), NOT_ADOPTED);
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'))!;
+    const done = applySave(started.session, saved(), NOT_ADOPTED, () => started.session);
     const view = matchEditorView(done);
     expect(view.outcome?.kind).toBe('saved');
     expect(view.messages).toEqual([{ kind: 'fileWritten' }, { kind: 'windowOutOfStep' }]);
@@ -1080,7 +1090,7 @@ describe('the conflict, which is terminal in this sub-phase', () => {
    * @returns The session showing the conflict.
    */
   function conflicted(): MatchEditorSession {
-    const started = beginSave(editField(session(), 'replace', 'c'));
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'));
     if (started === null) {
       throw new Error('an edited draft is saveable');
     }
@@ -1093,7 +1103,7 @@ describe('the conflict, which is terminal in this sub-phase', () => {
       disk_text: 'matches:\n  - trigger: x\n    replace: theirs\n',
       disk: makeDocument({ revision: AFTER })
     };
-    return applySave(started.session, conflict, NOT_OWED);
+    return applySave(started.session, conflict, NOT_OWED, () => started.session);
   } // End of function conflicted()
 
   it('keeps the draft and stops accepting changes', () => {
@@ -1168,7 +1178,7 @@ describe('the conflict, which is terminal in this sub-phase', () => {
   it('says a drafted removal would take the key out, and keeps its text', () => {
     // A removed field keeps its text in its buffer, so a copy that dropped either
     // the text or the status would not preserve what was drafted (consult Q4).
-    const started = beginSave(removeField(session(projection({ label: 'Signature' })), 'label'));
+    const started = ((onHand) => beginSave(onHand, () => onHand))(removeField(session(projection({ label: 'Signature' })), 'label'));
     if (started === null) {
       throw new Error('a drafted removal is saveable');
     }
@@ -1183,7 +1193,7 @@ describe('the conflict, which is terminal in this sub-phase', () => {
         disk_text: 'matches:\n  - trigger: x\n',
         disk: makeDocument({ revision: AFTER })
       },
-      NOT_OWED
+      NOT_OWED, () => started.session
     );
     const label = matchEditorView(stuck).retainedDraft.find((one) => one.label === 'label');
     expect(label?.status).toBe('removing');
@@ -1261,7 +1271,7 @@ describe('the confirmed reload', () => {
    * @returns The session showing the conflict.
    */
   function conflicted(): MatchEditorSession {
-    const started = beginSave(editField(session(), 'replace', 'c'));
+    const started = ((onHand) => beginSave(onHand, () => onHand))(editField(session(), 'replace', 'c'));
     if (started === null) {
       throw new Error('an edited draft is saveable');
     }
@@ -1274,7 +1284,7 @@ describe('the confirmed reload', () => {
       disk_text: 'matches:\n  - trigger: x\n    replace: theirs\n',
       disk: makeDocument({ revision: AFTER })
     };
-    return applySave(started.session, answer, NOT_OWED);
+    return applySave(started.session, answer, NOT_OWED, () => started.session);
   } // End of function conflicted()
 
   /**
@@ -1417,7 +1427,7 @@ describe('reapplying the retained draft', () => {
     diskMatches: readonly MatchView[],
     base: MatchView = projection()
   ): MatchEditorSession {
-    const started = beginSave(edit(session(base)));
+    const started = ((onHand) => beginSave(onHand, () => onHand))(edit(session(base)));
     if (started === null) {
       throw new Error('this case needs a saveable draft');
     }
@@ -1425,7 +1435,7 @@ describe('reapplying the retained draft', () => {
     return applySave(
       started.session,
       makeConflict({ disk, subject, expected: BASE, found: AFTER }),
-      NOT_OWED
+      NOT_OWED, () => started.session
     );
   } // End of function conflictedOver()
 
@@ -1652,7 +1662,7 @@ describe('reapplying the retained draft', () => {
         [target]
       );
       const recorder = adoptingReapply();
-      const answer = reapplyToDiskVersion(stuck, recorder.adopt);
+      const answer = reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind !== 'reapplied') {
         throw new Error('this case is about the rebuilt session');
@@ -1686,7 +1696,7 @@ describe('reapplying the retained draft', () => {
         { Identified: { target } },
         [target]
       );
-      const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt);
+      const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt, null, () => stuck);
       if (answer.kind !== 'reapplied') {
         throw new Error('this case is about the rebuilt session');
       }
@@ -1706,7 +1716,7 @@ describe('reapplying the retained draft', () => {
         [target]
       );
       const recorder = adoptingReapply();
-      const answer = reapplyToDiskVersion(stuck, recorder.adopt);
+      const answer = reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck);
       expect(answer.kind).toBe('alreadySatisfied');
       if (answer.kind !== 'alreadySatisfied') {
         throw new Error('this case is about the satisfied arm');
@@ -1727,7 +1737,7 @@ describe('reapplying the retained draft', () => {
         [target]
       );
       const recorder = adoptingReapply();
-      const answer = reapplyToDiskVersion(stuck, recorder.adopt);
+      const answer = reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck);
       expect(answer).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'fieldCollisions', fields: ['replace'] }
@@ -1744,7 +1754,7 @@ describe('reapplying the retained draft', () => {
         [diskMatch({ node: 9 })]
       );
       const recorder = adoptingReapply();
-      expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+      expect(reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'correspondence', reason: 'AmbiguousTrigger' }
       });
@@ -1759,7 +1769,7 @@ describe('reapplying the retained draft', () => {
           [diskMatch({ node: 9 })]
         );
         const recorder = adoptingReapply();
-        expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+        expect(reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck)).toEqual({
           kind: 'manualResolution',
           obstacle: { kind: 'evidenceNotATarget' }
         });
@@ -1775,7 +1785,7 @@ describe('reapplying the retained draft', () => {
         [target]
       );
       const recorder = adoptingReapply();
-      expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+      expect(reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'targetNotEditable' }
       });
@@ -1790,7 +1800,7 @@ describe('reapplying the retained draft', () => {
         [target]
       );
       const recorder = adoptingReapply('refused');
-      expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(recorder.adoptions).toHaveLength(1);
     });
 
@@ -1801,14 +1811,14 @@ describe('reapplying the retained draft', () => {
         { Identified: { target } },
         [target]
       );
-      expect(reapplyToDiskVersion(stuck, adoptingReapply('alreadyThere').adopt).kind).toBe(
+      expect(reapplyToDiskVersion(stuck, adoptingReapply('alreadyThere').adopt, null, () => stuck).kind).toBe(
         'reapplied'
       );
     });
 
     it('is not attempted when no conflict is showing', () => {
       const recorder = adoptingReapply();
-      expect(reapplyToDiskVersion(session(), recorder.adopt)).toEqual({ kind: 'notAttempted' });
+      expect(((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, null, () => onHand))(session())).toEqual({ kind: 'notAttempted' });
       expect(recorder.adoptions).toEqual([]);
     });
 
@@ -1822,11 +1832,11 @@ describe('reapplying the retained draft', () => {
         { Identified: { target } },
         [target]
       );
-      const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt);
+      const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt, null, () => stuck);
       if (answer.kind !== 'reapplied') {
         throw new Error('this case starts from a rebuilt session');
       }
-      const started = beginSave(answer.session);
+      const started = beginSave(answer.session, () => answer.session);
       if (started === null) {
         throw new Error('the rebuilt session is saveable');
       }
@@ -1836,7 +1846,7 @@ describe('reapplying the retained draft', () => {
       const again = applySave(
         started.session,
         makeConflict({ disk: third, expected: AFTER, found: 'c'.repeat(64) }),
-        NOT_OWED
+        NOT_OWED, () => started.session
       );
       expect(again.outcome?.kind).toBe('conflict');
       expect(conflictOf(again)?.diskRevision).toBe('c'.repeat(64));
@@ -1937,14 +1947,14 @@ describe('the external session — Phase 2d-6-2', () => {
    * @returns The session showing the save conflict.
    */
   function saveConflicted(): MatchEditorSession {
-    const started = beginSave(edited());
+    const started = ((onHand) => beginSave(onHand, () => onHand))(edited());
     if (started === null) {
       throw new Error('an edited draft is saveable');
     }
     return applySave(
       started.session,
       makeConflict({ disk: makeDocument({ revision: AFTER }), expected: BASE, found: AFTER, diskText: THEIRS }),
-      NOT_OWED
+      NOT_OWED, () => started.session
     );
   } // End of function saveConflicted()
 
@@ -2035,12 +2045,12 @@ describe('the external session — Phase 2d-6-2', () => {
       // reaching `beginSave` sends nothing.
       const next = applyObservation(edited(), raised(observation()));
       expect(isDirty(next.draft)).toBe(true);
-      expect(beginSave(next)).toBeNull();
+      expect(beginSave(next, () => next)).toBeNull();
       // And the refusal path: consent recorded on a refusal cannot be spent either,
       // and the view withholds the offer that would reach this.
       const blockedRefusal = applyObservation(refused(), raised(observation()));
       expect(blockedRefusal.outcome?.kind).toBe('refused');
-      expect(beginSave(acknowledgeFindings(blockedRefusal))).toBeNull();
+      expect(((onHand) => beginSave(onHand, () => onHand))(acknowledgeFindings(blockedRefusal))).toBeNull();
       const view = matchEditorView(blockedRefusal);
       expect(view.refusalChoices).toEqual(['keepEditing']);
       expect(view.findingsAreStale).toBe(false);
@@ -2098,11 +2108,11 @@ describe('the external session — Phase 2d-6-2', () => {
       // **History is not a conflict.** A `saved` outcome stays, with the
       // re-projection it owes; a `refused` outcome stays, with the submission its
       // consent path needs; neither is what `conflictOf` answers.
-      const started = beginSave(edited());
+      const started = ((onHand) => beginSave(onHand, () => onHand))(edited());
       if (started === null) {
         throw new Error('an edited draft is saveable');
       }
-      const committed = applySave(started.session, saved(), ADOPTED);
+      const committed = applySave(started.session, saved(), ADOPTED, () => started.session);
       const overSaved = applyObservation(committed, raised(observation()));
       expect(overSaved.outcome?.kind).toBe('saved');
       expect(overSaved.needsReprojection).toBe(true);
@@ -2125,20 +2135,20 @@ describe('the external session — Phase 2d-6-2', () => {
       const conflicted = applySave(
         blocked,
         makeConflict({ disk: makeDocument({ revision: AFTER }), expected: BASE, found: AFTER }),
-        NOT_OWED
+        NOT_OWED, () => blocked
       );
       expect(conflicted.externalConflict).toBeNull();
       expect(conflicted.outcome?.kind).toBe('conflict');
       expect(conflictOf(conflicted)?.source.kind).toBe('save');
       // A refusal wrote nothing and says nothing about the file: the external
       // conflict stands over it.
-      const refusedAgain = applySave(blocked, REFUSAL, NOT_OWED);
+      const refusedAgain = applySave(blocked, REFUSAL, NOT_OWED, () => blocked);
       expect(refusedAgain.externalConflict).toBe(blocked.externalConflict);
       expect(refusedAgain.outcome?.kind).toBe('refused');
     }); // End of the "reverse collision" case
 
     it('holds every delivery during its own save and replays them after the answer (entry 5)', () => {
-      const started = beginSave(edited());
+      const started = ((onHand) => beginSave(onHand, () => onHand))(edited());
       if (started === null) {
         throw new Error('an edited draft is saveable');
       }
@@ -2153,7 +2163,7 @@ describe('the external session — Phase 2d-6-2', () => {
       const heldTwice = applyObservation(heldOnce, raised(seen));
       expect(heldTwice.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised']);
       // The save's answer lands first, the held decision second, in one transition.
-      const settled = applySave(heldTwice, saved(), ADOPTED);
+      const settled = applySave(heldTwice, saved(), ADOPTED, () => heldTwice);
       expect(settled.heldDeliveries).toEqual([]);
       expect(settled.outcome?.kind).toBe('saved');
       expect(externalOf(settled).source).toBe(externalConflictSource(seen));
@@ -2166,7 +2176,7 @@ describe('the external session — Phase 2d-6-2', () => {
       const saveConflict = applySave(
         heldCoalesced,
         makeConflict({ disk: makeDocument({ revision: AFTER }), expected: BASE, found: AFTER }),
-        NOT_OWED
+        NOT_OWED, () => heldCoalesced
       );
       expect(saveConflict.heldDeliveries).toEqual([]);
       expect(saveConflict.externalConflict).toBeNull();
@@ -2174,7 +2184,7 @@ describe('the external session — Phase 2d-6-2', () => {
       // And a save that produced no outcome consumes the hold too — the uncertain
       // settlement's `raisedWithoutReload` is what this path applies.
       const heldUncertain = applyObservation(started.session, decided(null, seen, true, 'raisedWithoutReload'));
-      const failed = saveCouldNotBeSent(heldUncertain, true, null);
+      const failed = saveCouldNotBeSent(heldUncertain, true, null, () => heldUncertain);
       expect(failed.heldDeliveries).toEqual([]);
       expect(failed.sendFailure?.kind).toBe('mayHaveWritten');
       expect(failed.uncertaintyUnresolved).toBe(true);
@@ -2188,7 +2198,7 @@ describe('the external session — Phase 2d-6-2', () => {
       // bytes and every receiver is told `coalesced`. A hold that kept only the
       // latest envelope replayed `coalesced` over a session with no conflict to
       // coalesce into, and the file's change was never shown.
-      const started = beginSave(edited());
+      const started = ((onHand) => beginSave(onHand, () => onHand))(edited());
       if (started === null) {
         throw new Error('an edited draft is saveable');
       }
@@ -2200,7 +2210,7 @@ describe('the external session — Phase 2d-6-2', () => {
         decided(standing, later, false, 'coalesced')
       );
       expect(held.externalConflict).toBeNull();
-      const settled = applySave(held, REFUSAL, NOT_OWED);
+      const settled = applySave(held, REFUSAL, NOT_OWED, () => held);
       // The conflict `raised(A)` announced stands; the wait `retained(A)` recorded
       // ended with it; the `coalesced` found the conflict it was about.
       expect(settled.externalConflict?.source).toBe(standing);
@@ -2237,7 +2247,7 @@ describe('the external session — Phase 2d-6-2', () => {
       expect(waiting.externalConflict).toBeNull();
       expect(conflictOf(waiting)).toBeNull();
       expect(canSave(waiting)).toBe(false);
-      expect(beginSave(waiting)).toBeNull();
+      expect(beginSave(waiting, () => waiting)).toBeNull();
       // The controls stay live: this is a restriction on sending, not on drafting.
       expect(isEditable(waiting)).toBe(true);
       const typed = editField(waiting, 'replace', 'cd');
@@ -2299,7 +2309,7 @@ describe('the external session — Phase 2d-6-2', () => {
       });
       // And the reapply refuses before any evidence is read, adopting nothing.
       const recorder = adopting();
-      expect(reapplyToDiskVersion(withheld, recorder.adopt, () => externalOf(withheld).source)).toEqual({
+      expect(reapplyToDiskVersion(withheld, recorder.adopt, () => externalOf(withheld).source, () => withheld)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'writeOutcomeUnknown' }
       });
@@ -2401,7 +2411,7 @@ describe('the external session — Phase 2d-6-2', () => {
       expect(conflictOf(kept)).toBe(blocked.externalConflict);
       expect(isEditable(kept)).toBe(false);
       expect(canSave(kept)).toBe(false);
-      expect(beginSave(kept)).toBeNull();
+      expect(beginSave(kept, () => kept)).toBeNull();
       // The uncertainty and the wait survive it too.
       const withheld = applyObservation(edited(), decided(null, observation(), true, 'raisedWithoutReload'));
       expect(keepEditing(withheld).uncertaintyUnresolved).toBe(true);
@@ -2480,7 +2490,7 @@ describe('the external session — Phase 2d-6-2', () => {
       const identified = target();
       const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: identified } })], [identified]));
       const recorder = adopting();
-      const answer = reapplyToDiskVersion(stuck, recorder.adopt, stands);
+      const answer = reapplyToDiskVersion(stuck, recorder.adopt, stands, () => stuck);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind !== 'reapplied') {
         throw new Error('this case is about the rebuilt session');
@@ -2502,12 +2512,12 @@ describe('the external session — Phase 2d-6-2', () => {
         observed([row(SUBJECT, { Refused: { reason: 'AmbiguousTrigger' } })], [target()])
       );
       const recorder = adopting();
-      expect(reapplyToDiskVersion(refusedTier.stuck, recorder.adopt, refusedTier.stands)).toEqual({
+      expect(reapplyToDiskVersion(refusedTier.stuck, recorder.adopt, refusedTier.stands, () => refusedTier.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'correspondence', reason: 'AmbiguousTrigger' }
       });
       const emptyTier = raisedOver(observed([row(SUBJECT, { Unsupported: {} })], [target()]));
-      expect(reapplyToDiskVersion(emptyTier.stuck, recorder.adopt, emptyTier.stands)).toEqual({
+      expect(reapplyToDiskVersion(emptyTier.stuck, recorder.adopt, emptyTier.stands, () => emptyTier.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'evidenceNotATarget' }
       });
@@ -2522,14 +2532,14 @@ describe('the external session — Phase 2d-6-2', () => {
         observed([row({ document: 1, revision: 'z'.repeat(64), node: 1 }, { Identified: { target: target() } })], [target()])
       );
       const recorder = adopting();
-      expect(reapplyToDiskVersion(nodeOnly.stuck, recorder.adopt, nodeOnly.stands)).toEqual({
+      expect(reapplyToDiskVersion(nodeOnly.stuck, recorder.adopt, nodeOnly.stands, () => nodeOnly.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
       const byPosition = raisedOver(
         observed([row({ document: 1, revision: BASE, node: 2 }, { Identified: { target: target() } })], [target()])
       );
-      expect(reapplyToDiskVersion(byPosition.stuck, recorder.adopt, byPosition.stands)).toEqual({
+      expect(reapplyToDiskVersion(byPosition.stuck, recorder.adopt, byPosition.stands, () => byPosition.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
@@ -2542,7 +2552,7 @@ describe('the external session — Phase 2d-6-2', () => {
           [target(), target({ node: 12 })]
         )
       );
-      expect(reapplyToDiskVersion(twice.stuck, recorder.adopt, twice.stands)).toEqual({
+      expect(reapplyToDiskVersion(twice.stuck, recorder.adopt, twice.stands, () => twice.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'severalRowsForBase' }
       });
@@ -2554,19 +2564,19 @@ describe('the external session — Phase 2d-6-2', () => {
       const otherBase = raisedOver(
         observed([row(SUBJECT, { Identified: { target: target() } })], [target()], { base: 'z'.repeat(64) })
       );
-      expect(reapplyToDiskVersion(otherBase.stuck, recorder.adopt, otherBase.stands)).toEqual({
+      expect(reapplyToDiskVersion(otherBase.stuck, recorder.adopt, otherBase.stands, () => otherBase.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'baseRevisionMoved' }
       });
       const otherDisk = raisedOver(
         observed([row(SUBJECT, { Identified: { target: target() } })], [target()], { disk: 'z'.repeat(64) })
       );
-      expect(reapplyToDiskVersion(otherDisk.stuck, recorder.adopt, otherDisk.stands)).toEqual({
+      expect(reapplyToDiskVersion(otherDisk.stuck, recorder.adopt, otherDisk.stands, () => otherDisk.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'diskRevisionMoved' }
       });
       const tableless = raisedOver(observation());
-      expect(reapplyToDiskVersion(tableless.stuck, recorder.adopt, tableless.stands)).toEqual({
+      expect(reapplyToDiskVersion(tableless.stuck, recorder.adopt, tableless.stands, () => tableless.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noCorrespondence' }
       });
@@ -2578,16 +2588,16 @@ describe('the external session — Phase 2d-6-2', () => {
       const { stuck } = raisedOver(observed([row(SUBJECT, { Identified: { target: identified } })], [identified]));
       const recorder = adopting();
       const elsewhere = externalConflictSource(observation({ sequence: 9 }));
-      expect(reapplyToDiskVersion(stuck, recorder.adopt, () => elsewhere)).toEqual({
+      expect(reapplyToDiskVersion(stuck, recorder.adopt, () => elsewhere, () => stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
-      expect(reapplyToDiskVersion(stuck, recorder.adopt, () => null)).toEqual({
+      expect(reapplyToDiskVersion(stuck, recorder.adopt, () => null, () => stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
       // The save origin enters through the same entry and meets the same guard.
-      expect(reapplyToDiskVersion(saveConflicted(), recorder.adopt, () => elsewhere)).toEqual({
+      expect(((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, () => elsewhere, () => onHand))(saveConflicted())).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
@@ -2597,16 +2607,16 @@ describe('the external session — Phase 2d-6-2', () => {
     it('answers every adoption outcome for the external origin as it does for the save origin', () => {
       const identified = target();
       const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: identified } })], [identified]));
-      expect(reapplyToDiskVersion(stuck, adopting('installed').adopt, stands).kind).toBe('reapplied');
-      expect(reapplyToDiskVersion(stuck, adopting('alreadyThere').adopt, stands).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, adopting('installed').adopt, stands, () => stuck).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, adopting('alreadyThere').adopt, stands, () => stuck).kind).toBe('reapplied');
       const refusedWindow = adopting('refused');
-      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt, stands)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt, stands, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(refusedWindow.adoptions).toHaveLength(1);
       // Already satisfied on disk, with the disk adopted all the same.
       const satisfying = target({ replace: 'mine' });
       const already = raisedOver(observed([row(SUBJECT, { Identified: { target: satisfying } })], [satisfying]));
       const recorder = adopting();
-      const answer = reapplyToDiskVersion(already.stuck, recorder.adopt, already.stands);
+      const answer = reapplyToDiskVersion(already.stuck, recorder.adopt, already.stands, () => already.stuck);
       expect(answer.kind).toBe('alreadySatisfied');
       expect(recorder.adoptions).toHaveLength(1);
     }); // End of the "three adoption outcomes" case
@@ -2624,7 +2634,7 @@ describe('the external session — Phase 2d-6-2', () => {
       expect(held.awaitingReconciliation).toBe(heldReading);
       expect(canSave(held)).toBe(false);
       const recorder = adopting();
-      expect(reapplyToDiskVersion(held, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(held, recorder.adopt, stands, () => held)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'observationRetained' }
       });
@@ -2636,7 +2646,7 @@ describe('the external session — Phase 2d-6-2', () => {
       expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
       // Once the held reading is decided, the reapply goes through as before.
       const lifted = applyObservation(held, writtenHereDelivery(heldReading));
-      const answer = reapplyToDiskVersion(lifted, adopting().adopt, stands);
+      const answer = reapplyToDiskVersion(lifted, adopting().adopt, stands, () => lifted);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind !== 'reapplied') {
         throw new Error('this case ends on the rebuilt session');
@@ -2652,11 +2662,11 @@ describe('the external session — Phase 2d-6-2', () => {
       const identified = target();
       const { stuck } = raisedOver(observed([row(SUBJECT, { Identified: { target: identified } })], [identified]));
       const refusedWindow = adopting('refused');
-      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt, null, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(refusedWindow.adoptions).toEqual([externalOf(stuck)]);
       // And a window that installs lets the rebuild through, as the component's
       // save-origin call always has.
-      expect(reapplyToDiskVersion(stuck, adopting().adopt).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, adopting().adopt, null, () => stuck).kind).toBe('reapplied');
     });
 
     it('names a sentence in both languages for every obstacle the external origin can raise', () => {
@@ -2688,5 +2698,143 @@ describe('the external session — Phase 2d-6-2', () => {
         'browser.externalConflict.observationRetained'
       );
     }); // End of the "a sentence per obstacle" case
+
+    it('reads no evidence for a session that is already blocked (2d-6-4’s pattern, Phase 2d-6-6a)', () => {
+      // The two blocks come before the entry, which reads the observation's
+      // table; a table whose spine counts its reads is the pin.
+      let reads = 0;
+      const seen: ExternalConflictObservation = {
+        ...observation(),
+        get correspondences(): CorrespondenceTable {
+          reads += 1;
+          return { base_revision: BASE, disk_revision: AFTER, entries: [] };
+        }
+      };
+      const { stuck, stands } = raisedOver(seen);
+      const recorder = adopting();
+      const held = applyObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
+      expect(reapplyToDiskVersion(held, recorder.adopt, stands, () => held)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      const withheld = applyObservation(edited(), decided(null, seen, true, 'raisedWithoutReload'));
+      expect(reapplyToDiskVersion(withheld, recorder.adopt, stands, () => withheld)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'writeOutcomeUnknown' }
+      });
+      expect(reads).toBe(0);
+      // And an unblocked session reads it exactly once.
+      expect(reapplyToDiskVersion(stuck, recorder.adopt, stands, () => stuck)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
+      });
+      expect(reads).toBe(1);
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "no evidence read while blocked" case
+
+    it('rechecks the installed session immediately before adopting, and refuses what a read delivered during the reapply (Phase 2d-6-6a)', () => {
+      // A getter behind the row's `editor` tier runs after the two blocks were
+      // asked and before the adoption; a window's receiver, run from it, records
+      // a wait, a supersession or an uncertainty on the installed session. The
+      // reapply must ask the installed session again, once, immediately before it
+      // adopts — and adopt nothing when it changed.
+      const identified = target();
+      const heldReading = observation({ sequence: 6, diskRevision: 'd'.repeat(64), disk: makeDocument({ revision: 'd'.repeat(64) }) });
+      const recorder = adopting();
+      /**
+       * A session raised over a table whose subject row delivers to the holder
+       * when its editor tier is read.
+       *
+       * @param deliver - What the read delivers, or `null` for nothing.
+       * @returns The reader and the guard.
+       */
+      function trapped(deliver: ((source: ConflictSource) => ObservationDelivery) | null): {
+        readonly current: () => MatchEditorSession;
+        readonly stands: StandingOriginGuard;
+      } {
+        let held: MatchEditorSession | null = null;
+        const trappedRow: CorrespondenceEntry = {
+          base: SUBJECT,
+          exact: { Unsupported: {} },
+          get editor(): ReapplyResolution {
+            if (held !== null && deliver !== null) {
+              held = applyObservation(held, deliver(externalOf(held).source));
+            }
+            return { Identified: { target: identified } };
+          }
+        };
+        const raisedSession = raisedOver(observed([trappedRow], [identified])).stuck;
+        held = raisedSession;
+        const source = externalOf(raisedSession).source;
+        return { current: () => held ?? raisedSession, stands: () => source };
+      } // End of function trapped()
+      const waited = trapped(() => retainedDelivery(heldReading));
+      expect(reapplyToDiskVersion(waited.current(), recorder.adopt, waited.stands, waited.current)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      expect(waited.current().awaitingReconciliation).toBe(heldReading);
+      const superseded = trapped((source) => decided(source, heldReading, false, 'supersedes'));
+      expect(reapplyToDiskVersion(superseded.current(), recorder.adopt, superseded.stands, superseded.current)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'supersededEvidence' }
+      });
+      const uncertain = trapped((source) => decided(source, heldReading, true, 'raisedWithoutReload'));
+      expect(reapplyToDiskVersion(uncertain.current(), recorder.adopt, uncertain.stands, uncertain.current)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'writeOutcomeUnknown' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+      // A read that delivers nothing adopts as before.
+      const quiet = trapped(null);
+      expect(reapplyToDiskVersion(quiet.current(), recorder.adopt, quiet.stands, quiet.current).kind).toBe('reapplied');
+      expect(recorder.adoptions).toHaveLength(1);
+      // And a reader answering another session than the one handed in adopts
+      // nothing: the conflict it shows is not the one being reapplied.
+      const displaced = trapped(null);
+      const other = applyObservation(edited(), raised(observation({ sequence: 7 })));
+      expect(reapplyToDiskVersion(displaced.current(), recorder.adopt, displaced.stands, () => other)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'supersededEvidence' }
+      });
+      expect(recorder.adoptions).toHaveLength(1);
+    }); // End of the "recheck before adoption" case
+
+    it('keeps the installed session when a refused reapply is folded by a panel’s handler (2d-6-6a review, finding 3)', () => {
+      // **The handler's order, reproduced over the real transitions.** A panel
+      // folds the outcome into the session to hold through `attemptOfReapply`;
+      // an evidence getter that delivers a wait makes the recheck refuse
+      // `observationRetained`, and the session the handler then installs must be
+      // the one the receiver installed, not one read before the reapply ran.
+      // No component registers a receiver yet (2d-6-6b), so this is the rule
+      // `MatchEditor.svelte`'s `keepMyDraft` and its five twins follow, pinned
+      // where it can be driven.
+      const identified = target();
+      const heldReading = observation({ sequence: 6, diskRevision: 'd'.repeat(64), disk: makeDocument({ revision: 'd'.repeat(64) }) });
+      let session: MatchEditorSession | null = null;
+      const trappedRow: CorrespondenceEntry = {
+        base: SUBJECT,
+        exact: { Unsupported: {} },
+        get editor(): ReapplyResolution {
+          if (session !== null) {
+            session = applyObservation(session, retainedDelivery(heldReading));
+          }
+          return { Identified: { target: identified } };
+        }
+      };
+      const raisedSession = raisedOver(observed([trappedRow], [identified])).stuck;
+      session = raisedSession;
+      const recorder = adopting();
+      const current = (): MatchEditorSession => session ?? raisedSession;
+      // The handler: the outcome first, then the session still installed. (The
+      // first landing passed `attemptOfReapply` a session read before the reapply
+      // ran, and folded a refusal into that capture.)
+      const outcome = reapplyToDiskVersion(current(), recorder.adopt, null, current);
+      const attempt = attemptOfReapply(current(), outcome);
+      expect(outcome).toEqual({ kind: 'manualResolution', obstacle: { kind: 'observationRetained' } });
+      expect(attempt.session).toBe(current());
+      expect(attempt.session.awaitingReconciliation).toBe(heldReading);
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "handler keeps the installed session" case
   }); // End of the "reapply over the external origin" suite
 }); // End of the "external session" suite

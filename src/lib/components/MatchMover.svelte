@@ -465,7 +465,7 @@
     if (acknowledge) {
       session = acknowledgeMoveFindings(session);
     }
-    const started = beginMove(session, identityInProjection(current.views, session.match));
+    const started = beginMove(session, identityInProjection(current.views, session.match), () => session);
     if (started === null) {
       // The model refuses, and it has already said why: `current.view.cannotMove`
       // is computed from the same read this call just made, so the sentence beside
@@ -490,13 +490,13 @@
     // was written and there is no reason to show. `failed` is a command that ran
     // and rejected, and it always carries why.
     if (answer.kind === 'answered') {
-      session = applyMove(session, answer.result, answer.adoption);
+      session = applyMove(session, answer.result, answer.adoption, () => session);
       return;
     }
     session =
       answer.kind === 'notAttempted'
-        ? moveCouldNotBeSent(session, false, null)
-        : moveCouldNotBeSent(session, answer.mayHaveWritten, answer.failure);
+        ? moveCouldNotBeSent(session, false, null, () => session)
+        : moveCouldNotBeSent(session, answer.mayHaveWritten, answer.failure, () => session);
   } // End of function runMove()
 
   /**
@@ -569,7 +569,12 @@
    * mounted suite alone.
    */
   function keepMyDraft(): void {
-    const attempt = attemptOfReapply(session, reapplyToDiskVersion(session, unsavedDraftFor(), adoptDiskVersion));
+    // **The outcome first, then the session still installed** (the 2d-6-6a
+    // review, its third finding): a refused reapply leaves whatever a receiver
+    // installed during it, and folding it into a session read beforehand would
+    // reinstall the capture.
+    const outcome = reapplyToDiskVersion(session, unsavedDraftFor(), adoptDiskVersion, null, () => session);
+    const attempt = attemptOfReapply(session, outcome);
     reapplyAttempt = attempt;
     session = attempt.session;
   } // End of function keepMyDraft()

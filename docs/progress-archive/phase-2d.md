@@ -5035,3 +5035,24 @@ re-measured**: no path under `src-tauri/` or `crates/` changed beyond the instru
 pair diff is still `5 insertions(+), 1 deletion(-)`; the instrument's contribution is unchanged (Rust 0,
 svelte-check +1, vitest +1, Vite +1). 2d-6-3's narrative, formerly here, is archived verbatim in
 [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-3's verification narrative"*.
+
+### Phase 2d-6-5's verification narrative — archived 2026-09-22 at Phase 2d-6-6a
+
+Moved verbatim from `PROGRESS.md` when 2d-6-6a closed.
+
+### Phase 2d-6-5's verification: three frontend gates re-measured twice, the Rust cell held
+
+**`1323 / 447 / 2817 / 192`** at 2d-6-5, from `1323 / 447 / 2754 / 192`. Measured by the orchestrator on the
+tree the worker reported (`2807`) and again on the final tree after the review's fix round (`2817`), each gate
+on its own, each exit read directly (never through a pipe): `npm run check` **447 files, 0 errors, 0 warnings**
+(unchanged — no new file); `npm test` **2817 passed, 64 files** (+63 from 2754, re-derived per file:
+`rawEditor.test.ts` 46 → 63 → 66, `restore.test.ts` 221 → 250 → 253, `workspace.test.ts` 310 → 317 → 321,
+`restoreCodes.test.ts` 18 → 18 with its list widened 12 → 14 keys — +53 for the deliverables, then +10 pinning
+the review's four findings, four of the ten through the real door; the changed files' sums `648` and `640`
+confirmed by separate runs; `scripts/lint/ipc-detail.test.ts` 141 → 141, no new `.ts` file); `npm run build`
+**192 modules** (unchanged), the server-only bundle markers **absent** (`rg -c` prints nothing) and the
+client-only **present (2)**. **The Rust cell is held at 1323 and was not re-measured**: no path under
+`src-tauri/` or `crates/` changed beyond the instrument's `main.rs` hook, whose pair diff is still `5
+insertions(+), 1 deletion(-)`; the instrument's contribution is unchanged (Rust 0, svelte-check +1, vitest +1,
+Vite +1). 2d-6-4's narrative, formerly here, is archived verbatim in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-4's verification narrative"*.

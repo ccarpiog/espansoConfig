@@ -15045,3 +15045,41 @@ and (3) of the 2d-5 hand-off by 1b in the code's own doc comments.
 **2d-7** (the reviewed instrument and the bilingual WKWebView reading — start from the `fetch` recorder already
 in `src/probe.ts`, not from the consult's description), **2d-8** (instrument removal and harness-free closure;
 corrects the `main.rs` comment and deletes `/private/tmp/espansoconfig-harness-2d-5-7b/`).
+
+## The 2d-6-5 → 2d-6-6 handoff — superseded 2026-09-22 at Phase 2d-6-6a
+
+Moved verbatim from `PROGRESS.md` *Next action* when 2d-6-6a closed; the rest of that section stayed live.
+
+### Phase 2d-6-5 is complete and CLOSED, and with it the four model-only session steps (2d-6-2 … 2d-6-5). The next action is **Phase 2d-6-6 — authored-surface delivery and complete registration**, the first component-changing step of 2d-6.
+
+**Executable cold — 2d-6-6**, the record's §2 entry quoted in full: *"**Delivers** receiver reporting and
+delivery for editor, creator and recovery; recovery as the eighth centrally assembled kind; delivery to every
+affected session; the shell kept mounted while a retained surface exists over an empty list; origin, evidence,
+comparison, copy and recovery rendering on the three authored panels. **The first live component path for
+`observeExternalChange` and `supersedeConflict`.** **Acceptance:** bilingual mounted tests through the real
+registry and coordinator boundary — a pristine editor conflicts; an unknown-target creator blocks every eligible
+target; recovery over B protects B while its host stays over A; host and recovery over one file get one
+decision; a reopened editor cannot receive an old instance's delivery; a settlement lands in order — plus a
+narrow window reading. **Components:** `DetailPane.svelte`, `AppShell.svelte`, `MatchEditor.svelte`,
+`MatchCreator.svelte`, `RecoveryPanel.svelte`. **Bound by** entries 1-5, 10, 23, 25, 31, 34-36, 38. **Depends
+on** 2d-6-1, 2d-6-2, 2d-6-3."* **This step is large — five components, the registration wiring, bilingual mounted
+tests and a window reading — and the next orchestrator should decide at selection whether to cut it** (a
+natural seam: the model-side obligations below and the `DetailPane` / `AppShell` wiring first, the three
+panels' rendering second), recording the cut in the split record's §2 as 2d-6-1's was.
+
+**What 2d-6-6 owes the closed steps, all deliberately left to it and named in their records**: (1) **the
+`current` reader becomes required** — every door and settling transition of all eight sessions, and every
+caller passes `() => session` (2d-6-4 §1.6, 2d-6-5 §4 item 4; `BrowserState.restoreDocument` passes none today
+and may need a parameter); (2) **the three operation doors have the same defect class 2d-6-5's review found in
+`beginSave`** — `confirmDelete` / `beginMove` / `beginDuplicate` still call `submissionOf` and spread **after**
+their reader (2d-6-5 §4 item 11, noticed in the fix round and not fixed there by `CLAUDE.md` §7) — take it with
+pinning cases, as 2d-6-5 §7 finding 1 did; (3) **the editor's, the creator's and the recovery form's reapplies
+still enter `enterReapply` before their blocks and recheck nothing before adopting** (2d-6-4 §4 item 4) — take
+them with counting-getter cases; (4) `MatchCreator.svelte` gates the destination control on `editable`; 2d-6-6
+reads `canChooseDestination` (2d-6-3); it does not settle a thrown `create`; `OpenWriteSurface` cannot yet
+carry a `recovery` kind — 2d-6-6 makes recovery the eighth assembled kind; (5) the first component registers
+a listener → `src-tauri/capabilities/default.json` needs both `core:event:allow-listen` and
+`core:event:allow-unlisten` and `dispatch_check.rs` re-run (*Key paths*) — **that is a `src-tauri/` change,
+staged by file name, never as a directory**; (6) the raw editor's module header still says nothing renders it
+(2d-6-5 §4 item 10) — 2d-6-8's, not this step's. **Only the three authored panels are drawn here**; the operation
+panels are 2d-6-7's, raw and restore 2d-6-8's.

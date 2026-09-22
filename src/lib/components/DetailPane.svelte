@@ -1332,8 +1332,8 @@
       listBatches={() => browser.listBackupBatches()}
       listEntries={(batch) => browser.listBackupEntries(batch)}
       readEntry={(entry, document) => browser.readBackupText(entry, document)}
-      restore={(started, surfaces, invalidate) =>
-        browser.restoreDocument(started, surfaces, invalidate)}
+      restore={(started, surfaces, invalidate, current) =>
+        browser.restoreDocument(started, surfaces, invalidate, current)}
       invalidate={invalidateEverySurface}
       {adoptDiskVersion}
       close={() => (restoring = null)}

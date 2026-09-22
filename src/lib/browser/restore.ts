@@ -306,8 +306,9 @@
  * {@link sendRestore} spend nothing against a session that is no longer the one
  * installed; {@link applyRestore}, {@link restoreConfirmationWithdrawn} and
  * {@link restoreCouldNotBeSent} replay what the receiver appended during their
- * own replay. The reader is optional while `RestorePane.svelte` and
- * `BrowserState.restoreDocument` pass none, and its doc says what that costs.
+ * own replay. The reader is required since Phase 2d-6-6a — `RestorePane.svelte`
+ * passes one at every call and hands it to `BrowserState.restoreDocument`, which
+ * passes it on — and its doc says what no type can force about it.
  *
  * **No component registers this receiver yet.** 2d-6-8 wires
  * `BrowserState.registerObservationReceiver` to it through `DetailPane` and
@@ -1610,9 +1611,10 @@ export interface RestoreSession {
    * it. **What the list forces** is that no envelope delivered during the
    * replacement is dropped and that first-to-last is the order; **what it does
    * not force** is that arrival order was decision order — the window's own
-   * contract — nor that a caller passes the reader: `BrowserState.restoreDocument`
-   * settles the confirmation's own session and passes none today, and nothing
-   * in TypeScript stops a caller handing a capture and no reader.
+   * contract — nor that the required reader is honest: `BrowserState.restoreDocument`
+   * settles the confirmation's own session and passes the reader its caller handed
+   * it, and nothing in TypeScript stops a caller handing a capture and a reader that
+   * answers the capture.
    */
   readonly heldDeliveries: readonly ObservationDelivery[];
 }
@@ -2383,15 +2385,14 @@ export function canPrepareRestore(
  * mutates one, so a session still installed carries what it carried when the
  * block was asked. What that cannot force is a caller that redefines a property
  * of the session it handed in between the two — that caller's own session is
- * what it defeats — nor that a caller passes a reader at all
- * ({@link ReadTheInstalledSession} says what a missing one costs).
+ * what it defeats — nor that the reader a caller passes is honest ({@link
+ * ReadTheInstalledSession}).
  *
  * @param session - The session.
  * @param context - What this window observes about the destination and about its
  *   own open surfaces.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   asks on the session handed in — honest only for a caller that registers no
- *   receiver, which is `RestorePane.svelte` today.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session with the question pending, or the same session when it may
  *   not be asked or one is already authorized, or the installed session when the
  *   one handed in is no longer it.
@@ -2399,7 +2400,7 @@ export function canPrepareRestore(
 export function prepareRestore(
   session: RestoreSession,
   context: RestoreContext,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): RestoreSession {
   // **Asked of the map rather than of `session.pending`**, because the map is the
   // authority: a session presenting a question that no longer authorizes anything is
@@ -2424,7 +2425,7 @@ export function prepareRestore(
   // before any answer.** A receiver run from a getter behind any read above has
   // replaced it; what is installed is answered, refusal or not, so the caller
   // keeps what its receiver installed.
-  const installed = current === null ? session : current();
+  const installed = current();
   if (installed !== session) {
     return installed;
   }
@@ -2643,8 +2644,8 @@ interface RestorePermit {
  * spend — the reload once more after its adoption — and refuse, or answer the
  * installed session, when what is installed is not what they were handed.
  *
- * **What it forces and what it does not, in the same sentence.** With one
- * supplied, {@link prepareRestore} registers no question over a displaced
+ * **What it forces and what it does not, in the same sentence.** Through it, {@link
+ * prepareRestore} registers no question over a displaced
  * session and answers the installed one from every refusal, {@link confirmRestore}
  * spends the question only while the session it
  * was handed is still the one installed, {@link sendRestore} consumes the permit
@@ -2653,17 +2654,13 @@ interface RestorePermit {
  * conflict, and {@link applyRestore},
  * {@link restoreConfirmationWithdrawn} and {@link restoreCouldNotBeSent} settle
  * every delivery the receiver appended to the installed session during the
- * flight and during their own replay. It cannot force a caller to supply one:
- * **the parameter is optional so that `RestorePane.svelte` and
- * `BrowserState.restoreDocument`, which this phase may not touch and which
- * register no receiver today, keep compiling** — and a caller that registers a
- * receiver and passes no reader gets the displaced check and the lost delivery
- * this closes. **2d-6-6, which makes the reader required across the sessions, or
- * 2d-6-8, which registers this receiver — whichever comes first — must pass
- * `() => session` at every one of these calls, and either may make the parameter
- * required.** Nor can it
- * force that the closure reads the installed session rather than a capture;
- * `() => session` over the component's `$state.raw` is the honest one.
+ * flight and during their own replay. **The parameter is required since Phase
+ * 2d-6-6a**, so no call compiles without one: `RestorePane.svelte` passes a reader at
+ * every one of these calls and hands one to `BrowserState.restoreDocument`, which
+ * gained the parameter for it. What no type can force is that the closure reads the
+ * installed session rather than a capture; `() => session` over the component's
+ * `$state.raw` is the honest one, and a reader answering the session handed in
+ * whatever is installed gets the displaced check and the lost delivery this closes.
  *
  * @returns The session the caller holds now.
  */
@@ -2790,21 +2787,20 @@ const PERMITS = new WeakMap<StartedRestore, RestorePermit>();
  * map no longer holding it. A receiver replaces a session and never mutates one,
  * so a session still installed carries what it carried when the block was
  * asked; what that cannot force is a caller that redefines a property of the
- * session it handed in between the two, nor that a caller passes a reader at all
- * ({@link ReadTheInstalledSession} says what a missing one costs).
+ * session it handed in between the two, nor that the reader a caller passes is honest
+ * ({@link ReadTheInstalledSession}).
  *
  * @param session - The session holding the person's answer.
  * @param context - What this window observes about the destination and about its
  *   own open surfaces.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   checks the block on the session handed in — honest only for a caller that
- *   registers no receiver, which is `RestorePane.svelte` today.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The waiting session, keyed to its permit, or `null`.
  */
 export function confirmRestore(
   session: RestoreSession,
   context: RestoreContext,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): StartedRestore | null {
   // Looked up **first**, and by the session itself: a bare reference operation that
   // reads no property, so every comparison below is against this module's own frozen
@@ -2861,7 +2857,7 @@ export function confirmRestore(
   // **The installed session, read once, after the last caller-controlled read
   // and immediately before the spend.** A receiver run from a getter above has
   // replaced it; a session that is no longer the one installed spends nothing.
-  const installed = current === null ? session : current();
+  const installed = current();
   if (installed !== session) {
     return null;
   }
@@ -3094,11 +3090,11 @@ function permitHolds(
  * from a getter behind one of them replaces the installed session with one that
  * holds a delivery this session has not applied; a permit whose session is no
  * longer the one installed no longer describes the session, and is consumed
- * unspent exactly as one that failed the predicate is. What that cannot force
- * is that a caller passes a reader ({@link ReadTheInstalledSession}) —
- * `BrowserState.restoreDocument` passes none today and hands this the
- * confirmation's own session, so a delivery held on the installed one during
- * this call is what {@link restoreConfirmationWithdrawn}'s reader replays.
+ * unspent exactly as one that failed the predicate is. What that cannot force is that
+ * the required reader is honest ({@link ReadTheInstalledSession});
+ * `BrowserState.restoreDocument` hands this the confirmation's own session and the
+ * reader its caller passed, so a delivery held on the installed one during this call
+ * is what {@link restoreConfirmationWithdrawn}'s reader replays.
  *
  * @param started - What {@link confirmRestore} produced, or `null`.
  * @param session - The session as it stands now, which is the one the confirmation
@@ -3107,8 +3103,8 @@ function permitHolds(
  *   own open surfaces, read **now** rather than when the question was answered.
  * @param send - `BrowserState.saveRawDocument`. Called at most once, and never at
  *   all without an unspent permit that still holds.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   checks the permit against the session handed in alone.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns What became of the attempt: nothing held, a permit consumed by a
  *   mismatch, or the sender's own answer.
  */
@@ -3117,7 +3113,7 @@ export async function sendRestore(
   session: RestoreSession,
   context: RestoreContext,
   send: SendRestore,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): Promise<RestoreSend> {
   if (started === null) {
     return { kind: 'notAttempted' };
@@ -3128,7 +3124,7 @@ export async function sendRestore(
   }
   const holds = permitHolds(permit, session, context);
   // **The installed session, read once, after the last caller-controlled read.**
-  const installed = current === null ? session : current();
+  const installed = current();
   if (!holds || installed !== session) {
     // **Consumed rather than left for a retry**, and consumed by a *checked*
     // deletion for the same reason the authorizing one is: a call that finds the
@@ -3234,27 +3230,26 @@ export type InvalidateEverySurface = (invalidation: RawSaveInvalidation) => void
  * directly. Then, whatever the answer — a seal already opened included, because
  * the replacement is over either way — every delivery
  * {@link applyRestoreObservation} held while it was in flight is replayed on
- * top, in arrival order (entry 5), **and, with a reader supplied, every delivery
+ * top, in arrival order (entry 5), **and, through the reader, every delivery
  * the receiver appended to the installed session during this transition's own
- * reads and replay** (2d-6-4's review, its second finding). Without a reader the
- * transition settles what it was handed and such a delivery is lost when the
- * caller installs the result; {@link ReadTheInstalledSession} says who owes the
- * reader.
+ * reads and replay** (2d-6-4's review, its second finding). A reader answering a
+ * capture rather than the installed session loses such a delivery when the caller
+ * installs the result ({@link ReadTheInstalledSession}).
  *
  * @param session - The session waiting for an answer, as the caller holds it.
  * @param sealed - What `BrowserState.saveRawDocument` answered.
  * @param invalidate - What the coordinator does about every write surface over the
  *   replaced file. Required, with no default: a default would be this module
  *   deciding for a caller that has surfaces it never told anyone about.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   replays only what the session handed in holds.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session showing what the restore ended as.
  */
 export function applyRestore(
   session: RestoreSession,
   sealed: SealedWholeDocumentSave,
   invalidate: InvalidateEverySurface,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): RestoreSession {
   // **Revoked first, on every path, and before any property of the argument is
   // read.** On the ordinary path `confirmRestore` already spent the question, so this
@@ -3360,40 +3355,40 @@ function extendsTheReplayed(
  * session while that was happening (2d-6-4's review, its second finding).
  *
  * `consumingHeldDeliveries` in `./matchDeletion.ts`, for this session, rounds
- * included, with one thing that is this module's own: emptying the list is a
- * fresh session, so the question the settled session carries — there is one on
- * no ordinary path, because the confirmation spent it, and {@link carryTheQuestion}
- * is what makes the rule true of every path — is carried to it. Each envelope
- * then goes through {@link applyRestoreObservation} exactly as it would have on
- * arrival, which carries or withdraws the question itself, and each is applied
- * to the session the one before it left. **Replaying an envelope reads its
- * observation, and a read runs caller code**: a getter there can tell the window
- * of a reading, and the window delivers it at once to the installed session —
- * which is still `saving`, so the receiver appends it there, to a list this
- * transition was handed a copy of. So after each round the installed session is
- * read through `current`, once, and the envelopes it holds beyond the ones
- * replayed are replayed too, in the order they arrived, until a read finds none.
- * **What this forces** is that no envelope delivered during the replacement, or
- * during this settlement, is dropped when a reader is supplied, and that
- * first-to-last is the order; **what it cannot force** is that the window
- * delivered them in the order it decided them, that a reader is supplied at
- * all, or that the installed session is the one handed in with more appended —
- * a list that is not an extension of the one replayed is left alone, since the
- * transition cannot say what it is. Nor can it force the rounds to end: a getter
- * that tells the window of a fresh reading on every read does not come to rest
- * here, exactly as it does not at the window's own drain
- * (`registerObservationReceiver`'s doc), and one that re-tells a reading already
- * decided does, because the window hands each decision out once.
+ * included, with one thing that is this module's own: emptying the list is a fresh
+ * session, so the question the settled session carries — there is one on no ordinary
+ * path, because the confirmation spent it, and {@link carryTheQuestion} is what makes
+ * the rule true of every path — is carried to it. Each envelope then goes through
+ * {@link applyRestoreObservation} exactly as it would have on arrival, which carries
+ * or withdraws the question itself, and each is applied to the session the one before
+ * it left. **Replaying an envelope reads its observation, and a read runs caller
+ * code**: a getter there can tell the window of a reading, and the window delivers it
+ * at once to the installed session — which is still `saving`, so the receiver appends
+ * it there, to a list this transition was handed a copy of. So after each round the
+ * installed session is read through `current`, once, and the envelopes it holds
+ * beyond the ones replayed are replayed too, in the order they arrived, until a read
+ * finds none. **What this forces** is that no envelope delivered during the
+ * replacement, or during this settlement, is dropped when the reader answers the
+ * installed session, and that first-to-last is the order; **what it cannot force** is
+ * that the window delivered them in the order it decided them, that the reader is
+ * honest, or that the installed session is the one handed in with more appended — a
+ * list that is not an extension of the one replayed is left alone, since the
+ * transition cannot say what it is. Nor can it force the rounds to end: a getter that
+ * tells the window of a fresh reading on every read does not come to rest here,
+ * exactly as it does not at the window's own drain (`registerObservationReceiver`'s
+ * doc), and one that re-tells a reading already decided does, because the window
+ * hands each decision out once.
  *
  * @param settled - The session with its replacement's answer applied and its
  *   phase back to `editing`.
- * @param current - Reads the session the caller holds now, or `null`.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session with every held delivery applied, or the same session
  *   when none was held.
  */
 function consumingHeldDeliveries(
   settled: RestoreSession,
-  current: ReadTheInstalledSession | null
+  current: ReadTheInstalledSession
 ): RestoreSession {
   let queue = settled.heldDeliveries;
   let replayed: RestoreSession =
@@ -3404,9 +3399,6 @@ function consumingHeldDeliveries(
       replayed = applyRestoreObservation(replayed, queue[at]!);
     } // End of the loop over the deliveries not yet replayed
     seen = queue.length;
-    if (current === null) {
-      return replayed;
-    }
     const arrived = current().heldDeliveries;
     if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
       return replayed;
@@ -3447,18 +3439,18 @@ function consumingHeldDeliveries(
  *
  * The send is over, so a delivery held while the session was `saving` is applied
  * now (Phase 2d-6-5, the 2d-6 record's §3 entry 5) — the very delivery that may
- * have made {@link permitHolds} refuse — and with a reader every delivery
+ * have made {@link permitHolds} refuse — and through the reader every delivery
  * appended to the installed session during the replay is applied too, for
  * {@link applyRestore}'s reason.
  *
  * @param session - The session the consumed confirmation was minted with.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   replays only what the session handed in holds.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session back to its resting state, with the candidate retained.
  */
 export function restoreConfirmationWithdrawn(
   session: RestoreSession,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): RestoreSession {
   // Revoked before anything is built, so this transition's name is true of the
   // authorization and not only of what a screen draws.
@@ -3489,20 +3481,20 @@ export function restoreConfirmationWithdrawn(
  * The send is over, so a delivery held while it was out is applied now: the
  * settlement of an uncertain write arbitrates the held reading under that
  * uncertainty, and its `raisedWithoutReload` is what this applies (Phase 2d-6-5,
- * the 2d-6 record's §3 entry 5), and with a reader every delivery appended to
+ * the 2d-6 record's §3 entry 5), and through the reader every delivery appended to
  * the installed session during the replay is applied too, for
  * {@link applyRestore}'s reason.
  *
  * @param session - The session waiting for an answer, as the caller holds it.
  * @param mayHaveWritten - Whether the file may already hold the candidate.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   replays only what the session handed in holds.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session, back to its resting state, with the right notice raised.
  */
 export function restoreCouldNotBeSent(
   session: RestoreSession,
   mayHaveWritten: boolean,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): RestoreSession {
   // Carried rather than revoked, and carried rather than left behind: nothing a
   // confirmation binds moved, and on the ordinary path there is nothing to carry
@@ -3719,34 +3711,33 @@ export function confirmDiskReload(session: RestoreSession): RestoreSession {
  * **What no type here forces**: that `adopt`'s body does anything, and that the
  * window really holds the revision it reported.
  *
- * **The installed session is read twice: once after this function's own reads
- * and immediately before the adoption, and once more after it** (this phase's
- * review, its third finding; 2d-6-4's pattern (c)). The adoption is the window's,
- * and `BrowserState.adoptDiskVersion` copies the observation's projection before
- * it decides — a read of caller data, and a getter there can tell the window of
- * a later reading, which the window decides and hands to the registered receiver
- * while this function is still inside `adopt`. So: a session displaced before
- * the adoption is not re-pointed and the installed session is answered, the
- * window never asked and that session's own confirmation state untouched — a
- * caller that installs the answer keeps what its receiver installed, and
- * through this module's own transitions no question can be pending on a
- * session showing a conflict, so nothing reachable is answered presenting a
- * question it does not authorize. After the adoption the installed session is read again; when it now
- * shows **another conflict** (by source identity) the person must decide about
- * that one, whether the window installed this snapshot or refused it as
- * outlived, so the installed session is answered untouched and nothing is
- * re-pointed over it; when it shows the same conflict with more recorded — a
- * wait, most of all — the retarget and the refused step are built over **it**,
- * revoked as this function revokes its argument, so what the receiver recorded
- * during the adoption survives. What that cannot force is that a caller passes
- * a reader ({@link ReadTheInstalledSession} says what a missing one costs):
- * without one the transition re-points what it was handed, and a delivery the
- * receiver made during the adoption is lost when the caller installs the answer.
+ * **The installed session is read twice: once after this function's own reads and
+ * immediately before the adoption, and once more after it** (this phase's review, its
+ * third finding; 2d-6-4's pattern (c)). The adoption is the window's, and
+ * `BrowserState.adoptDiskVersion` copies the observation's projection before it
+ * decides — a read of caller data, and a getter there can tell the window of a later
+ * reading, which the window decides and hands to the registered receiver while this
+ * function is still inside `adopt`. So: a session displaced before the adoption is
+ * not re-pointed and the installed session is answered, the window never asked and
+ * that session's own confirmation state untouched — a caller that installs the answer
+ * keeps what its receiver installed, and through this module's own transitions no
+ * question can be pending on a session showing a conflict, so nothing reachable is
+ * answered presenting a question it does not authorize. After the adoption the
+ * installed session is read again; when it now shows **another conflict** (by source
+ * identity) the person must decide about that one, whether the window installed this
+ * snapshot or refused it as outlived, so the installed session is answered untouched
+ * and nothing is re-pointed over it; when it shows the same conflict with more
+ * recorded — a wait, most of all — the retarget and the refused step are built over
+ * **it**, revoked as this function revokes its argument, so what the receiver
+ * recorded during the adoption survives. What that cannot force is that the required
+ * reader is honest ({@link ReadTheInstalledSession}): one answering a capture
+ * re-points what it was handed, and a delivery the receiver made during the adoption
+ * is lost when the caller installs the answer.
  *
  * @param session - The session holding a confirmation.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   builds over the session handed in.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session re-pointed at the disk revision, the session at the terminal
  *   refused step, the same session with nothing pending, or the installed session
  *   when the one handed in is no longer it.
@@ -3754,7 +3745,7 @@ export function confirmDiskReload(session: RestoreSession): RestoreSession {
 export function reloadTheDiskVersion(
   session: RestoreSession,
   adopt: AdoptTheDiskVersion<string>,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): RestoreSession {
   revokeConfirmation(session);
   // **Every read of this function's own, taken first.**
@@ -3763,7 +3754,7 @@ export function reloadTheDiskVersion(
   // **The installed session, read once, after those reads and immediately
   // before the adoption.** A session no longer installed is not re-pointed, and
   // what is installed is answered so the caller keeps it.
-  const installed = current === null ? session : current();
+  const installed = current();
   if (installed !== session) {
     return installed;
   }
@@ -3772,7 +3763,7 @@ export function reloadTheDiskVersion(
     return withNothingPending(session);
   }
   // **Read once more, after the adoption**, which ran the window's own reads.
-  const settled = current === null ? session : current();
+  const settled = current();
   if (settled !== session) {
     if (conflictOf(settled)?.source !== conflict.source) {
       // A replacing verdict landed during the adoption: the conflict the

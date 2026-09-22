@@ -172,8 +172,8 @@
  * {@link reapplyToDiskVersion} rechecks the installed session's blocks and
  * conflict immediately before adopting; {@link applyDuplication} and
  * {@link duplicationCouldNotBeSent} replay what the receiver appended during their own
- * replay. The reader is optional while no component passes one, and its doc says
- * what that costs.
+ * replay. The reader is required at every one of them since Phase 2d-6-6a, and its
+ * doc says what no type can force about it.
  *
  * **The door and every settling transition can read the installed session**
  * through a {@link ReadTheInstalledSession} (this phase's review): a
@@ -184,8 +184,8 @@
  * {@link reapplyToDiskVersion} rechecks the installed session's blocks and
  * conflict immediately before adopting; {@link applyDuplication} and
  * {@link duplicationCouldNotBeSent} replay what the receiver appended during their own
- * replay. The reader is optional while no component passes one, and its doc says
- * what that costs.
+ * replay. The reader is required at every one of them since Phase 2d-6-6a, and its
+ * doc says what no type can force about it.
  *
  * **No component registers this receiver yet.** 2d-6-6 wires
  * `BrowserState.registerObservationReceiver` to it through `DetailPane`; until
@@ -619,10 +619,10 @@ export interface MatchDuplicationSession {
    * doing so. **What the list forces** is that no envelope delivered during the
    * duplicate is dropped and that first-to-last is the order; **what it does not
    * force** is that arrival order was decision order — the window's own contract
-   * — nor that a caller passes the reader: this module has no send composition,
-   * so the caller hands the settling transition the session it holds and the
-   * reader that answers it, as 2d-6-6's `MatchDuplicator.svelte` must, and
-   * nothing in TypeScript stops a caller handing it a capture and no reader.
+   * — nor that the required reader is honest: this module has no send composition, so
+   * the caller hands the settling transition the session it holds and the reader that
+   * answers it, as `MatchDuplicator.svelte` does, and nothing in TypeScript stops a
+   * caller handing it a capture and a reader that answers the capture.
    */
   readonly heldDeliveries: readonly ObservationDelivery[];
   /**
@@ -1016,13 +1016,12 @@ export function canDuplicate(
  * while that is still the one installed; {@link reapplyToDiskVersion} rechecks it
  * once immediately before adopting; {@link applyDuplication} and
  * {@link duplicationCouldNotBeSent} replay whatever the receiver appended to it
- * during their own replay. **What it cannot force**: that a caller supplies one —
- * the parameter is optional so that `MatchDuplicator.svelte`, which this phase
- * may not touch and which registers no receiver today, keeps compiling, and a
- * caller that registers a receiver and passes no reader gets the displaced check
- * and the lost delivery this closes; 2d-6-6 must pass `() => session` at every
- * door and may make the parameter required. Nor that the closure reads the
- * installed session rather than a capture.
+ * during their own replay. **The parameter is required since Phase 2d-6-6a**, so no
+ * call compiles without one, and `MatchDuplicator.svelte` passes `() => session` at
+ * every door and settling transition. **What it cannot force** is that the closure
+ * reads the installed session rather than a capture: a reader answering the session
+ * handed in whatever is installed gets the displaced check and the lost delivery this
+ * closes.
  *
  * @returns The session the caller holds now.
  */
@@ -1069,49 +1068,51 @@ export interface StartedDuplication {
  * `identityInProjection` in `./matchDeletion.ts` is the one producer a caller
  * uses instead.
  *
- * **The submission block is asked after the last caller-controlled read, and
- * against the installed session** (Phase 2d-6-4, the 2d-6 record's §3 entry 8
- * and R37; this phase's review, its first finding): `projected` is read and
- * compared first; then the installed session is read through `current`, once;
- * and only a session that is still the one handed in and passes `refusalGiven` —
+ * **Every caller-controlled read comes first, and the installed session is read
+ * once, last** (Phase 2d-6-4, the 2d-6 record's §3 entry 8 and R37; Phase
+ * 2d-6-6a, `confirmDelete`'s shape in `./matchDeletion.ts`): the submission is
+ * taken, `projected` is read and compared with its candidate, `refusalGiven` —
  * which answers `externalConflict` and `observationRetained` beside the ordinary
- * arms — spends, so a receiver run from a getter behind `projected` is seen by
- * the block rather than overwritten by the spend. A call made past a disabled
- * control answers `null` here, exactly as the view withholds it. What no type
- * forces is that a caller passes a reader ({@link ReadTheInstalledSession}).
+ * arms — is asked and the waiting session spread; only then is the installed
+ * session read through `current`, once, and only a session that is still the
+ * one installed spends. A receiver run from a getter behind `projected`, behind
+ * the draft's value or behind any own property the spread reads is therefore
+ * seen by the identity check rather than overwritten by the spend. A call made
+ * past a disabled control answers `null` here, exactly as the view withholds
+ * it. What no type forces is that the reader a caller passes is honest
+ * ({@link ReadTheInstalledSession}), nor anything about a caller that redefines
+ * a property of the very session it handed in: a receiver replaces a session
+ * and never mutates one.
  *
  * @param session - The session to send from.
  * @param projected - The identity the projection this window holds **now**
  *   gives the snippet, or `null` when it holds no such snippet any more.
  *   Required, and nullable rather than defaulted: a default would be this
  *   function inventing agreement for a caller that did not look.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   checks the block on the session handed in — honest only for a caller that
- *   registers no receiver, which is every caller today.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The waiting session and what the command takes, or `null`.
  */
 export function beginDuplicate(
   session: MatchDuplicationSession,
   projected: MatchId | null,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): StartedDuplication | null {
+  // The submission is taken first, so the candidate compared with `projected` is
+  // the one that is sent rather than a second read of the draft's value.
+  const submission = submissionOf(session.draft);
   const live =
     projected !== null &&
     sameIdentity(projected, session.match) &&
-    sameIdentity(projected, session.draft.value);
-  // **The installed session, read once, after the last caller-controlled read.**
-  // A receiver run from a getter above has replaced it; a session that is no
-  // longer the one installed spends nothing.
-  const installed = current === null ? session : current();
+    sameIdentity(projected, submission.candidate);
   // **A closed session sends nothing.** A confirmed reload adopted the disk
   // projection and ended this panel, so its identities describe a parse the window
   // has crossed away from. No refusal *code* is added for it, and that is
   // deliberate: a code is a sentence on a screen, and a closed panel is not on one.
-  if (installed !== session || session.closed || refusalGiven(session, live) !== null) {
+  if (session.closed || refusalGiven(session, live) !== null) {
     return null;
   }
-  const submission = submissionOf(session.draft);
-  return {
+  const started: StartedDuplication = {
     session: {
       ...session,
       phase: 'saving',
@@ -1121,6 +1122,12 @@ export function beginDuplicate(
     submission,
     match: session.match
   };
+  // **The installed session, read once, after the last caller-controlled read**
+  // — the submission and the spread included (Phase 2d-6-6a). A receiver run
+  // from a getter above has replaced it; a session that is no longer the one
+  // installed spends nothing, and nothing caller-controlled runs between this
+  // read and the answer.
+  return current() === session ? started : null;
 } // End of function beginDuplicate()
 
 /**
@@ -1165,12 +1172,12 @@ export function beginDuplicate(
  * invariant for a caller that drove the model directly. Then, whatever the
  * answer, every delivery {@link applyDuplicationObservation} held while the
  * duplicate was in flight is replayed on top, in arrival order (entry 5) — **and,
- * with a reader supplied, every delivery the receiver appended to the installed
+ * through the reader, every delivery the receiver appended to the installed
  * session during this transition's own reads and replay** (this phase's review,
- * its second finding; `applyDeletion` in `./matchDeletion.ts` says why a replay
- * runs caller code and what a missing reader costs). This module composes no
- * send, so `MatchDuplicator.svelte` settles its live `session` after its own
- * `await` and, from 2d-6-6, hands the reader beside it.
+ * its second finding; `applyDeletion` in `./matchDeletion.ts` says why a replay runs
+ * caller code and what a dishonest reader costs). This module composes no send, so
+ * `MatchDuplicator.svelte` settles its live `session` after its own `await` and hands
+ * the reader beside it.
  *
  * @param session - The session waiting for an answer, as the caller holds it.
  * @param result - How the save ended, exactly as the transaction reported it.
@@ -1179,15 +1186,15 @@ export function beginDuplicate(
  *   be this function inventing a `notOwed` for a caller that simply did not
  *   look — and since a `notOwed` is what keeps the session usable, that
  *   invention would be the defect rather than a shortcut.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   replays only what the session handed in holds.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session showing what the duplicate ended as.
  */
 export function applyDuplication(
   session: MatchDuplicationSession,
   result: SaveResult,
   adoption: InvalidationStatus,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): MatchDuplicationSession {
   const submission = session.submitted;
   if (submission === null) {
@@ -1285,13 +1292,14 @@ function extendsTheReplayed(
  *
  * @param settled - The session with its duplicate's answer applied and its
  *   phase back to `editing`.
- * @param current - Reads the session the caller holds now, or `null`.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session with every held delivery applied, or the same session
  *   when none was held.
  */
 function consumingHeldDeliveries(
   settled: MatchDuplicationSession,
-  current: ReadTheInstalledSession | null
+  current: ReadTheInstalledSession
 ): MatchDuplicationSession {
   let queue = settled.heldDeliveries;
   let replayed: MatchDuplicationSession = queue.length === 0 ? settled : { ...settled, heldDeliveries: [] };
@@ -1301,9 +1309,6 @@ function consumingHeldDeliveries(
       replayed = applyDuplicationObservation(replayed, queue[at]!);
     } // End of the loop over the deliveries not yet replayed
     seen = queue.length;
-    if (current === null) {
-      return replayed;
-    }
     const arrived = current().heldDeliveries;
     if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
       return replayed;
@@ -1335,15 +1340,15 @@ function consumingHeldDeliveries(
  * The duplicate is over, so a delivery held while it was out is applied now: the
  * settlement of an uncertain write arbitrates the held reading under that
  * uncertainty, and its `raisedWithoutReload` is what this applies (entry 5), and
- * with a reader every delivery appended to the installed session during the
+ * through the reader every delivery appended to the installed session during the
  * replay is applied too, for {@link applyDuplication}'s reason.
  *
  * @param session - The session waiting for an answer, as the caller holds it.
  * @param mayHaveWritten - Whether the file may already hold the clone.
  * @param reason - Why the command rejected, or `null` when nothing was sent
  *   and the boundary therefore has no rejection to hand on.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   replays only what the session handed in holds.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session, back to its resting state, with the right notice
  *   raised.
  */
@@ -1351,7 +1356,7 @@ export function duplicationCouldNotBeSent(
   session: MatchDuplicationSession,
   mayHaveWritten: boolean,
   reason: IpcFailure | null,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): MatchDuplicationSession {
   return consumingHeldDeliveries(
     {
@@ -1833,10 +1838,11 @@ export function duplicationReapplyObstacleKey(
  * The guard {@link reapplyToDiskVersion} uses when its caller hands none in.
  *
  * `unaskedGuard` in `./matchEditor.ts`, for this session: it answers the shown
- * conflict's own origin, so the supersession question the entry asks last is
- * answered *yes, it stands* without the window being asked. It exists so that the
- * one component caller, which 2d-6-4 may not touch, keeps its save-origin reapply
- * exactly as it was; what it costs is stated on the caller.
+ * conflict's own origin, so the supersession question the entry asks last is answered
+ * *yes, it stands* without the window being asked. It exists so that the one
+ * component caller, which passes `null` until 2d-6-6b hands the live closure down,
+ * keeps its save-origin reapply exactly as it was; what it costs is stated on the
+ * caller.
  *
  * @param conflict - The conflict shown, or `null`.
  * @returns A guard that never asks the window.
@@ -1948,18 +1954,18 @@ function subjectOfEvidence(
  * carries either, `supersededEvidence` when the conflict it shows is no longer
  * the one being reapplied; otherwise the rebuilt session carries the
  * **installed** session's waits forward, for `rebuiltOver`'s reason in
- * `./matchEditor.ts`. Without a reader the recheck is asked of the session handed
- * in ({@link ReadTheInstalledSession} says who owes the reader).
+ * `./matchEditor.ts`. The reader is required (Phase 2d-6-6a); one answering a capture
+ * asks the recheck of that capture ({@link ReadTheInstalledSession}).
  *
- * **The standing-origin guard is a parameter, and it is optional for one stated
- * reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s:
- * `MatchDuplicator.svelte` calls this with three arguments and 2d-6-4 touches no
- * component. When no guard is handed in the supersession question is not asked
- * here; what still refuses a superseded origin on that path is
- * `adoptDiskVersion`'s fourth check, at the door, answered `adoptionRefused`
- * without the typed sentence. An omitted guard costs a sentence and some work,
- * never a wrong installation. 2d-6-6, which hands the live closure down, may make
- * the parameter required.
+ * **The standing-origin guard is a parameter, and `null` is accepted for one stated
+ * reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s: `MatchDuplicator.svelte`
+ * does not yet hand the live `BrowserState.standingConflictFor` closure down, and
+ * passes `null`; the parameter is nullable rather than defaulted since Phase 2d-6-6a,
+ * so that the required reader can follow it. When no guard is handed in the
+ * supersession question is not asked here; what still refuses a superseded origin on
+ * that path is `adoptDiskVersion`'s fourth check, at the door, answered
+ * `adoptionRefused` without the typed sentence. An omitted guard costs a sentence and
+ * some work, never a wrong installation.
  *
  * @param session - The session showing the conflict.
  * @param unsavedDraftInDocument - Whether this window has a match editor open over
@@ -1969,18 +1975,18 @@ function subjectOfEvidence(
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
  *   all on a refusal.
  * @param standing - Asks what origin stands for the file **now**;
- *   `() => browser.standingConflictFor(document)` is the honest closure. `null`,
- *   the default, asks nothing — see above for what that costs.
- * @param current - Reads the session the caller holds now, for the recheck
- *   before the adoption. `null`, the default, rechecks the session handed in.
+ *   `() => browser.standingConflictFor(document)` is the honest closure. `null`
+ *   asks nothing — see above for what that costs.
+ * @param current - Reads the session the caller holds now, for the recheck before the
+ *   adoption — `() => session` over the caller's state. Required.
  * @returns What became of the attempt.
  */
 export function reapplyToDiskVersion(
   session: MatchDuplicationSession,
   unsavedDraftInDocument: boolean,
   adopt: AdoptTheDiskVersion<MatchId>,
-  standing: StandingOriginGuard | null = null,
-  current: ReadTheInstalledSession | null = null
+  standing: StandingOriginGuard | null,
+  current: ReadTheInstalledSession
 ): MatchDuplicationReapply {
   const conflict = conflictOf(session);
   if (conflict !== null) {
@@ -2020,7 +2026,7 @@ export function reapplyToDiskVersion(
   // **The installed session, read once, after the last caller-controlled read
   // and immediately before the spend.** Nothing caller-controlled runs between
   // this read and the door.
-  const installed = current === null ? session : current();
+  const installed = current();
   if (installed.uncertaintyUnresolved) {
     return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
   }

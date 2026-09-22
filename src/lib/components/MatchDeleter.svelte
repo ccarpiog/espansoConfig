@@ -299,7 +299,7 @@
    * closes and what no type can.
    */
   async function runDelete(): Promise<void> {
-    const started = confirmDelete(session, identityInProjection(projections(), session.match));
+    const started = confirmDelete(session, identityInProjection(projections(), session.match), () => session);
     if (started === null) {
       confirmationRefused = true;
       return;
@@ -319,13 +319,13 @@
     // is this window refusing before a command ran; `failed` is a command that ran
     // and rejected, and it always carries why.
     if (answer.kind === 'answered') {
-      session = applyDeletion(session, answer.result, answer.adoption);
+      session = applyDeletion(session, answer.result, answer.adoption, () => session);
       return;
     }
     session =
       answer.kind === 'notAttempted'
-        ? deletionCouldNotBeSent(session, false, null)
-        : deletionCouldNotBeSent(session, answer.mayHaveWritten, answer.failure);
+        ? deletionCouldNotBeSent(session, false, null, () => session)
+        : deletionCouldNotBeSent(session, answer.mayHaveWritten, answer.failure, () => session);
   } // End of function runDelete()
 
   /**
@@ -363,7 +363,12 @@
    * question, and nothing in it may.
    */
   function keepMyDraft(): void {
-    const attempt = attemptOfReapply(session, reapplyToDiskVersion(session, adoptDiskVersion));
+    // **The outcome first, then the session still installed** (the 2d-6-6a
+    // review, its third finding): a refused reapply leaves whatever a receiver
+    // installed during it, and folding it into a session read beforehand would
+    // reinstall the capture.
+    const outcome = reapplyToDiskVersion(session, adoptDiskVersion, null, () => session);
+    const attempt = attemptOfReapply(session, outcome);
     reapplyAttempt = attempt;
     session = attempt.session;
     confirmationRefused = false;

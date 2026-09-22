@@ -2559,7 +2559,7 @@ describe('moving a snippet', () => {
     const opened = choosePlacement(startMatchMove(before, before.matches[1]!, null), {
       kind: 'top'
     });
-    const started = beginMove(opened, before.matches[1]!.id);
+    const started = beginMove(opened, before.matches[1]!.id, () => opened);
     expect(started).not.toBeNull();
 
     const answer = await state.moveMatch(
@@ -2575,7 +2575,7 @@ describe('moving a snippet', () => {
     expect(answer.result.outcome).toBe('conflict');
     expect(answer.adoption).toEqual({ kind: 'notOwed' });
 
-    const done = applyMove(started!.session, answer.result, answer.adoption);
+    const done = applyMove(started!.session, answer.result, answer.adoption, () => started!.session);
     expect(done.invalidated).toBe(false);
     // The panel refuses while the conflict is on screen, and hands the session
     // back once it is dismissed — against the projection this window still holds,
@@ -2584,7 +2584,7 @@ describe('moving a snippet', () => {
     const dismissed = dismissMoveOutcome(done);
     expect(canChoose(dismissed)).toBe(true);
     expect(matchMoveView(dismissed, [before]).spent).toBe(false);
-    expect(beginMove(dismissed, before.matches[1]!.id)).not.toBeNull();
+    expect(beginMove(dismissed, before.matches[1]!.id, () => dismissed)).not.toBeNull();
     // What has *not* changed is the file, so a retry carrying the frozen base is
     // **refused** rather than allowed to overwrite the other writer's bytes. This
     // case sends no second command and therefore says nothing about *which*
@@ -5815,7 +5815,7 @@ describe('recovering a draft no reapply could resolve', () => {
     // there is no second writer and no new command anywhere on this path.
     const create: CreateARecoveredSnippet = state.createMatch;
     documents.set(2, { ok: true, value: grown });
-    const after = await sendRecoveryCreate(recoveryOver(state), create, INSTALLS_NOTHING);
+    const after = await sendTracking(recoveryOver(state), create, INSTALLS_NOTHING);
 
     const call = vi.mocked(commands.createMatch).mock.calls[0]!;
     expect(call[0]).toBe(2);
@@ -5854,7 +5854,7 @@ describe('recovering a draft no reapply could resolve', () => {
     const state = createBrowserState(commands, () => undefined);
     await state.open(null);
 
-    const pending = sendRecoveryCreate(recoveryOver(state), state.createMatch, INSTALLS_NOTHING);
+    const pending = sendTracking(recoveryOver(state), state.createMatch, INSTALLS_NOTHING);
     // The person picks something else while the recovered snippet is being
     // written. The guard is the wrapper's own and holds at the write; recovery
     // neither observes the selection nor writes to it.
@@ -5921,12 +5921,12 @@ describe('recovering a draft no reapply could resolve', () => {
     // body and the form refuses until a person supplies one.
     const blank = recoveryOver(state, baseDocument().matches[0]!);
     expect(recoveryRefusal(blank)).toBe('replaceEmpty');
-    expect(await sendRecoveryCreate(blank, state.createMatch, INSTALLS_NOTHING)).toBe(blank);
+    expect(await sendTracking(blank, state.createMatch, INSTALLS_NOTHING)).toBe(blank);
     expect(commands.createMatch).not.toHaveBeenCalled();
 
     // **And the same mock is reached the moment the refusal is gone**, which is
     // what stops the assertion above from being one that cannot fail.
-    await sendRecoveryCreate(
+    await sendTracking(
       editRecoveryField(blank, 'replace', 'a body'),
       state.createMatch,
       INSTALLS_NOTHING
@@ -5960,7 +5960,7 @@ describe('recovering a draft no reapply could resolve', () => {
     // The re-read finds a third revision, which is neither what the window held
     // nor what the conflict carried.
     documents.set(2, { ok: true, value: thinnedDocument() });
-    const after = await sendRecoveryCreate(
+    const after = await sendTracking(
       recoveryOver(state, undefined, conflict),
       state.createMatch,
       INSTALLS_NOTHING
@@ -5996,7 +5996,7 @@ describe('recovering a draft no reapply could resolve', () => {
     const conflict = await conflictFromASave(state);
     const reads = vi.mocked(commands.getDocument).mock.calls.length;
 
-    const after = await sendRecoveryCreate(
+    const after = await sendTracking(
       recoveryOver(state, undefined, conflict),
       state.createMatch,
       INSTALLS_NOTHING
@@ -6047,7 +6047,7 @@ describe('recovering a draft no reapply could resolve', () => {
     const conflict = await conflictFromASave(state);
 
     documents.set(2, { ok: true, value: thinnedDocument() });
-    const after = await sendRecoveryCreate(
+    const after = await sendTracking(
       recoveryOver(state, undefined, conflict),
       state.createMatch,
       INSTALLS_NOTHING
@@ -7792,7 +7792,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
    */
   async function conflictedDeletion(state: BrowserState): Promise<MatchDeletionSession> {
     const answered = await deletionUntilItConflicts(state);
-    return applyDeletion(answered.session, answered.result, answered.adoption);
+    return applyDeletion(answered.session, answered.result, answered.adoption, () => answered.session);
   } // End of function conflictedDeletion()
 
   /**
@@ -7816,7 +7816,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       throw new Error('this case needs the file projected');
     }
     const opened = startMatchDeletion(held, held.matches[0]!);
-    const started = confirmDelete(requestDelete(opened), held.matches[0]!.id);
+    const started = ((onHand) => confirmDelete(onHand, held.matches[0]!.id, () => onHand))(requestDelete(opened));
     if (started === null) {
       throw new Error('a confirmed deletion is what this case sends');
     }
@@ -7840,7 +7840,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
 
     const answer = reapplyToDiskVersion(stuck, (conflict, confirmation) =>
-      state.adoptDiskVersion(conflict, confirmation)
+      state.adoptDiskVersion(conflict, confirmation), null, () => stuck
     );
     expect(answer.kind).toBe('reapplied');
     expect(state.scopedDocument?.revision).toBe('rev-c');
@@ -7859,7 +7859,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
 
     expect(
       reapplyToDiskVersion(stuck, (conflict, confirmation) =>
-        state.adoptDiskVersion(conflict, confirmation)
+        state.adoptDiskVersion(conflict, confirmation), null, () => stuck
       ).kind
     ).toBe('manualResolution');
     // The window is exactly where it was, and the boundary was not touched again.
@@ -7889,7 +7889,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
 
     expect(
       reapplyToDiskVersion(stuck, (conflict, confirmation) =>
-        state.adoptDiskVersion(conflict, confirmation)
+        state.adoptDiskVersion(conflict, confirmation), null, () => stuck
       )
     ).toEqual({ kind: 'adoptionRefused' });
     expect(state.scopedDocument?.revision).toBe('rev-d');
@@ -7907,8 +7907,8 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     const adopt = (conflict: ConflictModel<MatchId>, confirmation: ReloadConfirmation) =>
       state.adoptDiskVersion(conflict, confirmation);
 
-    expect(reapplyToDiskVersion(stuck, adopt).kind).toBe('reapplied');
-    expect(reapplyToDiskVersion(stuck, adopt)).toEqual({ kind: 'adoptionRefused' });
+    expect(reapplyToDiskVersion(stuck, adopt, null, () => stuck).kind).toBe('reapplied');
+    expect(reapplyToDiskVersion(stuck, adopt, null, () => stuck)).toEqual({ kind: 'adoptionRefused' });
     expect(state.scopedDocument?.revision).toBe('rev-c');
   }); // End of the "one conflict, one token" case
 
@@ -7924,13 +7924,13 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     const commands = scriptedCommands({ deletes: [deletionConflict()] });
     const state = await withTheSecondSnippetSelected(commands);
     const answered = await deletionUntilItConflicts(state);
-    const first = applyDeletion(answered.session, answered.result, answered.adoption);
-    const second = applyDeletion(answered.session, answered.result, answered.adoption);
+    const first = applyDeletion(answered.session, answered.result, answered.adoption, () => answered.session);
+    const second = applyDeletion(answered.session, answered.result, answered.adoption, () => answered.session);
     const adopt = (conflict: ConflictModel<MatchId>, confirmation: ReloadConfirmation) =>
       state.adoptDiskVersion(conflict, confirmation);
 
-    expect(reapplyToDiskVersion(first, adopt).kind).toBe('reapplied');
-    expect(reapplyToDiskVersion(second, adopt)).toEqual({ kind: 'adoptionRefused' });
+    expect(reapplyToDiskVersion(first, adopt, null, () => first).kind).toBe('reapplied');
+    expect(reapplyToDiskVersion(second, adopt, null, () => second)).toEqual({ kind: 'adoptionRefused' });
     expect(state.scopedDocument?.revision).toBe('rev-c');
     expect(commands.deleteMatch).toHaveBeenCalledTimes(1);
   }); // End of the "two descriptions, one conflict" case
@@ -7945,11 +7945,11 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     const state = await withTheSecondSnippetSelected(commands);
     const adopt = (conflict: ConflictModel<MatchId>, confirmation: ReloadConfirmation) =>
       state.adoptDiskVersion(conflict, confirmation);
-    expect(reapplyToDiskVersion(await conflictedDeletion(state), adopt).kind).toBe('reapplied');
+    expect(((onHand) => reapplyToDiskVersion(onHand, adopt, null, () => onHand))(await conflictedDeletion(state)).kind).toBe('reapplied');
     expect(state.scopedDocument?.revision).toBe('rev-c');
 
     const again = await conflictedDeletion(state);
-    expect(reapplyToDiskVersion(again, adopt).kind).toBe('reapplied');
+    expect(reapplyToDiskVersion(again, adopt, null, () => again).kind).toBe('reapplied');
     expect(state.scopedDocument?.revision).toBe('rev-c');
     expect(commands.deleteMatch).toHaveBeenCalledTimes(2);
   }); // End of the "already there" case
@@ -10089,7 +10089,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(session.externalConflict?.source).toBe(state.standingConflictFor(2));
       expect(session.draft.value.replace.text).toBe('mine');
       expect(canSave(session)).toBe(false);
-      expect(beginSave(session)).toBeNull();
+      expect(beginSave(session, () => session)).toBeNull();
       expect(matchEditorView(session).externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
       // Nothing moved: no read, no reload, no coordinator transition, no command.
       expect(state.scopedDocument?.revision).toBe('rev-a');
@@ -10172,7 +10172,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(stuck.externalConflict).not.toBeNull();
 
       const answer = reapplyEditorToDiskVersion(stuck, state.adoptDiskVersion, () =>
-        state.standingConflictFor(2)
+        state.standingConflictFor(2), () => stuck
       );
       expect(answer.kind).toBe('reapplied');
       if (answer.kind !== 'reapplied') {
@@ -10201,13 +10201,102 @@ describe('what a conflict does to this window, and what only a confirmed reload 
         disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
       });
       expect(
-        reapplyEditorToDiskVersion(listening.current(), later.adoptDiskVersion, () =>
-          later.standingConflictFor(2)
-        )
+        ((onHand) => reapplyEditorToDiskVersion(onHand, later.adoptDiskVersion, () =>
+          later.standingConflictFor(2), () => onHand
+        ))(listening.current())
       ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } });
       expect(later.scopedDocument?.revision).toBe('rev-a');
       expect(invoked).not.toHaveBeenCalled();
     }); // End of the "reapply through the live guard" case
+
+    /**
+     * A later reading of `match/base.yml`, and a disk projection whose `id`, once
+     * armed, starts another surface's held raw save and tells the window of that
+     * reading — which the barrier retains — while the adoption reads it.
+     *
+     * @param state - The window, built over `heldRawSave`'s commands.
+     * @param plain - The projection the observation carries.
+     * @returns The trapped projection, the later reading, the arming switch and
+     *   the send to await once released.
+     */
+    function retainingDuringAdoption(
+      state: BrowserState,
+      plain: DocumentView
+    ): {
+      readonly disk: DocumentView;
+      readonly later: ExternalConflictObservation;
+      readonly arm: () => void;
+      readonly sending: () => Promise<unknown> | null;
+    } {
+      let armed = false;
+      let sending: Promise<unknown> | null = null;
+      const later: ExternalConflictObservation = {
+        ...externalObservation(),
+        sequence: 6,
+        diskRevision: 'rev-d',
+        disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+      };
+      const disk: DocumentView = {
+        ...plain,
+        get id(): DocumentId {
+          if (armed) {
+            armed = false;
+            sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+            expect(state.observeExternalChange(later).verdict.kind).toBe('retained');
+          }
+          return plain.id;
+        }
+      };
+      return {
+        disk,
+        later,
+        arm: () => {
+          armed = true;
+        },
+        sending: () => sending
+      };
+    } // End of function retainingDuringAdoption()
+
+    it('carries a wait the window recorded during the reapply’s own adoption into the rebuilt session (2d-6-6a review, finding 1)', async () => {
+      // **The reviewer's interleaving, through the real `adoptDiskVersion`.** The
+      // reapply's recheck runs before the door; the door then reads the
+      // observation's projection, a getter there starts another surface's write
+      // and tells the window of a later reading, which the barrier retains and the
+      // registered receiver records as a wait on the installed session. The
+      // rebuilt session must carry that wait, so its ordinary *Save* stays refused.
+      const held = heldRawSave({ ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } }, null);
+      const state = await withTheSecondSnippetSelected(held.commands);
+      const editor = editorOver(state);
+      const trap = retainingDuringAdoption(
+        state,
+        makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-c', matches: [diskTwin()] })
+      );
+      expect(
+        state.observeExternalChange(observedWithTable({ Identified: { target: diskTwin() } }, trap.disk)).verdict.kind
+      ).toBe('raised');
+      const stuck = editor.current();
+      const answer = reapplyEditorToDiskVersion(
+        stuck,
+        (conflict, confirmation) => {
+          trap.arm();
+          return state.adoptDiskVersion(conflict, confirmation);
+        },
+        () => state.standingConflictFor(2),
+        editor.current
+      );
+      expect(trap.sending()).not.toBeNull();
+      expect(editor.current().awaitingReconciliation).toBe(trap.later);
+      expect(state.scopedDocument?.revision).toBe('rev-c');
+      expect(answer.kind).toBe('reapplied');
+      if (answer.kind === 'reapplied') {
+        expect(answer.session.awaitingReconciliation).toBe(trap.later);
+        expect(canSave(answer.session)).toBe(false);
+      }
+      held.release();
+      await trap.sending();
+      expect(invoked).not.toHaveBeenCalled();
+      editor.off();
+    }); // End of the "wait recorded during the editor reapply's adoption" case
 
     it('is told retained through the barrier and then the settlement’s verdict, blocking the save in between', async () => {
       // A raw save of the same file — another surface's write — is in flight, so
@@ -10226,7 +10315,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(waiting.awaitingReconciliation).toBe(seen);
       expect(waiting.externalConflict).toBeNull();
       expect(canSave(waiting)).toBe(false);
-      expect(beginSave(waiting)).toBeNull();
+      expect(beginSave(waiting, () => waiting)).toBeNull();
       expect(matchEditorView(waiting).externalNotices).toEqual([{ kind: 'observationRetained' }]);
       // The window's guard says the same thing the session's notice does.
       expect(await state.requestFileReread(2)).toEqual({
@@ -10288,7 +10377,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       // The reapply refuses before it could obtain an adoption, and the window is
       // where it was.
       expect(
-        reapplyEditorToDiskVersion(withheld, state.adoptDiskVersion, () => state.standingConflictFor(2))
+        reapplyEditorToDiskVersion(withheld, state.adoptDiskVersion, () => state.standingConflictFor(2), () => withheld)
       ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } });
       expect(askToReloadDiskVersion(withheld)).toBe(withheld);
       expect(state.scopedDocument?.revision).toBe('rev-a');
@@ -10348,7 +10437,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(canSave(blocked)).toBe(false);
 
       const answer = reapplyEditorToDiskVersion(blocked, state.adoptDiskVersion, () =>
-        state.standingConflictFor(2)
+        state.standingConflictFor(2), () => blocked
       );
       expect(answer).toEqual({
         kind: 'manualResolution',
@@ -10386,7 +10475,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       };
       const state = await withTheSecondSnippetSelected(commands);
       const editor = editorOver(state);
-      const started = beginSave(editor.current());
+      const started = ((onHand) => beginSave(onHand, () => onHand))(editor.current());
       if (started === null) {
         throw new Error('the edited draft is saveable');
       }
@@ -10424,7 +10513,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       // Everything the window decided reached the editor before this line, held.
       const holding = editor.current();
       expect(holding.externalConflict).toBeNull();
-      editor.set(applyEditorSave(holding, answer.result, answer.adoption));
+      editor.set(applyEditorSave(holding, answer.result, answer.adoption, () => holding));
 
       const settled = editor.current();
       expect(settled.outcome?.kind).toBe('refused');
@@ -10609,7 +10698,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       const told = creator.current();
       expect(told.externalConflict?.source).toBe(state.standingConflictFor(2));
       expect(creationRefusal(told)).toBe('externalConflict');
-      expect(beginCreate(told)).toBeNull();
+      expect(beginCreate(told, () => told)).toBeNull();
       expect(creationTargetOf(told)).toEqual({ kind: 'document', document: 2 });
       expect(state.scopedDocument?.revision).toBe('rev-a');
       // The two-step reload adopts through the door and closes the form.
@@ -10660,7 +10749,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(matchCreationView(told).conflictChoices).toEqual(['keepEditing', 'copyDraft']);
       // The reapply refuses before the door, and the reload is refused before it.
       expect(
-        reapplyCreatorToDiskVersion(told, state.adoptDiskVersion, () => state.standingConflictFor(2))
+        reapplyCreatorToDiskVersion(told, state.adoptDiskVersion, () => state.standingConflictFor(2), () => told)
       ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'destinationRequired' } });
       expect(askCreatorToReloadDiskVersion(told)).toBe(told);
       expect(state.scopedDocument?.revision).toBe('rev-a');
@@ -10679,7 +10768,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(affected.externalConflict?.source).toBe(state.standingConflictFor(2));
       expect(creationRefusal(affected)).toBe('externalConflict');
       const answer = reapplyCreatorToDiskVersion(affected, state.adoptDiskVersion, () =>
-        state.standingConflictFor(2)
+        state.standingConflictFor(2), () => affected
       );
       expect(answer.kind).toBe('reapplied');
       if (answer.kind === 'reapplied') {
@@ -10750,9 +10839,9 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(recovery.current().origin.conflict).not.toBe(state.standingConflictFor(2));
       // The recovery form's reapply through the live guard and the real door:
       // targetless and at the end, so the reading's table is never consulted.
-      const answer = reapplyRecoveryToDiskVersion(recovery.current(), state.adoptDiskVersion, () =>
-        state.standingConflictFor(2)
-      );
+      const answer = ((onHand) => reapplyRecoveryToDiskVersion(onHand, state.adoptDiskVersion, () =>
+        state.standingConflictFor(2), () => onHand
+      ))(recovery.current());
       expect(answer.kind).toBe('reapplied');
       if (answer.kind === 'reapplied') {
         expect(recoveryBaseRevisionOf(answer.session)).toBe('rev-c');
@@ -10765,6 +10854,166 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       recovery.off();
       host.off();
     }); // End of the "same-file host and recovery" case
+
+    /**
+     * A later reading of `match/base.yml`, and a disk projection whose `id`, once
+     * armed, starts another surface's held raw save and tells the window of that
+     * reading — which the barrier retains — while the adoption reads it.
+     *
+     * @param state - The window, built over `heldRawSave`'s commands.
+     * @param plain - The projection the observation carries.
+     * @returns The trapped projection, the later reading, the arming switch and
+     *   the send to await once released.
+     */
+    function retainingDuringAdoption(
+      state: BrowserState,
+      plain: DocumentView
+    ): {
+      readonly disk: DocumentView;
+      readonly later: ExternalConflictObservation;
+      readonly arm: () => void;
+      readonly sending: () => Promise<unknown> | null;
+    } {
+      let armed = false;
+      let sending: Promise<unknown> | null = null;
+      const later: ExternalConflictObservation = {
+        ...externalObservation(),
+        sequence: 6,
+        diskRevision: 'rev-d',
+        disk: makeDocument({ id: 2, relativePath: 'match/base.yml', revision: 'rev-d' })
+      };
+      const disk: DocumentView = {
+        ...plain,
+        get id(): DocumentId {
+          if (armed) {
+            armed = false;
+            sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+            expect(state.observeExternalChange(later).verdict.kind).toBe('retained');
+          }
+          return plain.id;
+        }
+      };
+      return {
+        disk,
+        later,
+        arm: () => {
+          armed = true;
+        },
+        sending: () => sending
+      };
+    } // End of function retainingDuringAdoption()
+
+    /** A raw save that never produced an outcome, for the held write the traps start. */
+    const NO_OUTCOME = { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } } as const;
+
+    it('carries a wait the window recorded during the reapply’s own adoption into the rebuilt creator (2d-6-6a review, finding 1)', async () => {
+      // The editor's case, on the creator: the door's read of the projection lets
+      // the window retain a later reading, and the rebuilt form must carry the
+      // wait the receiver recorded, so its send stays refused.
+      const failure = NO_OUTCOME;
+      const heldForCreator = heldRawSave(failure, null);
+      const state = await withTheSecondSnippetSelected(heldForCreator.commands);
+      const creator = creatorOver(state, 2, [2]);
+      const creatorTrap = retainingDuringAdoption(state, replacedDocument());
+      expect(state.observeExternalChange({ ...externalObservation(), disk: creatorTrap.disk }).verdict.kind).toBe('raised');
+      const created = reapplyCreatorToDiskVersion(
+        creator.current(),
+        (conflict, confirmation) => {
+          creatorTrap.arm();
+          return state.adoptDiskVersion(conflict, confirmation);
+        },
+        () => state.standingConflictFor(2),
+        creator.current
+      );
+      expect(creatorTrap.sending()).not.toBeNull();
+      expect(creator.current().awaitingReconciliation.get(2)).toBe(creatorTrap.later);
+      expect(created.kind).toBe('reapplied');
+      if (created.kind === 'reapplied') {
+        expect(created.session.awaitingReconciliation.get(2)).toBe(creatorTrap.later);
+        expect(canCreate(created.session)).toBe(false);
+      }
+      heldForCreator.release();
+      await creatorTrap.sending();
+      expect(invoked).not.toHaveBeenCalled();
+      creator.off();
+    }); // End of the "wait recorded during the creator reapply's adoption" case
+
+    it('carries a wait the window recorded during the reapply’s own adoption into the rebuilt recovery form (2d-6-6a review, finding 1)', async () => {
+      // The same interleaving on the recovery form over its own destination.
+      const heldForRecovery = heldRawSave(NO_OUTCOME, null);
+      const window = await withTheSecondSnippetSelected(heldForRecovery.commands);
+      const recovery = recoveryFormOver(window, null, [2]);
+      expect(recovery.current().chosen).toBe(2);
+      const recoveryTrap = retainingDuringAdoption(window, replacedDocument());
+      expect(window.observeExternalChange({ ...externalObservation(), disk: recoveryTrap.disk }).verdict.kind).toBe('raised');
+      const recovered = reapplyRecoveryToDiskVersion(
+        recovery.current(),
+        (conflict, confirmation) => {
+          recoveryTrap.arm();
+          return window.adoptDiskVersion(conflict, confirmation);
+        },
+        () => window.standingConflictFor(2),
+        recovery.current
+      );
+      expect(recoveryTrap.sending()).not.toBeNull();
+      expect(recovery.current().awaitingReconciliation.get(2)).toBe(recoveryTrap.later);
+      expect(recovered.kind).toBe('reapplied');
+      if (recovered.kind === 'reapplied') {
+        expect(recovered.session.awaitingReconciliation.get(2)).toBe(recoveryTrap.later);
+        expect(recoveryRefusal(recovered.session)).toBe('observationRetained');
+      }
+      heldForRecovery.release();
+      await recoveryTrap.sending();
+      expect(invoked).not.toHaveBeenCalled();
+      recovery.off();
+    }); // End of the "wait recorded during the recovery reapply's adoption" case
+
+    it('answers the installed recovery form when a read of the door let the window displace it (2d-6-6a review, finding 2)', async () => {
+      // The reviewer's interleaving through the real window: a getter behind the
+      // draft's value tells the window of a reading, the registered receiver
+      // installs the conflict, the door refuses — and the composition, installed
+      // by its caller exactly as `RecoveryPanel.svelte` does, must hand back that
+      // installed form rather than the capture.
+      const commands = scriptedCommands();
+      const state = await withTheSecondSnippetSelected(commands);
+      const opened = recoveryFormOver(state, null, [2]);
+      const plain = opened.current();
+      opened.off();
+      expect(plain.chosen).toBe(2);
+      let armed = true;
+      const seen = externalObservation();
+      const trapped: RecoverySession = {
+        ...plain,
+        draft: {
+          ...plain.draft,
+          get value(): RecoverySession['draft']['value'] {
+            if (armed) {
+              armed = false;
+              expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
+            }
+            return plain.draft.value;
+          }
+        }
+      };
+      let session: RecoverySession = trapped;
+      const off = state.registerObservationReceiver(2, (delivery) => {
+        session = applyRecoveryObservation(session, delivery);
+      });
+      session = await sendRecoveryCreate(
+        trapped,
+        state.createMatch,
+        (waiting) => {
+          session = waiting;
+        },
+        () => session
+      );
+      expect(armed).toBe(false);
+      expect(session).not.toBe(trapped);
+      expect(session.externalConflict?.source).toBe(state.standingConflictFor(2));
+      expect(commands.createMatch).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      off();
+    }); // End of the "displaced recovery door through the window" case
 
     it('tells the creator retained through the barrier, then the settlement’s verdict, and lifts a writtenHere', async () => {
       const held = heldRawSave(
@@ -10779,7 +11028,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       const waiting = creator.current();
       expect(waiting.awaitingReconciliation.get(2)).toBe(seen);
       expect(creationRefusal(waiting)).toBe('observationRetained');
-      expect(beginCreate(waiting)).toBeNull();
+      expect(beginCreate(waiting, () => waiting)).toBeNull();
       expect(matchCreationView(waiting).externalNotices).toEqual([{ kind: 'observationRetained' }]);
       expect(await state.requestFileReread(2)).toEqual({
         kind: 'refused',
@@ -10833,7 +11082,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(recoveryView(withheld).conflictChoices).toEqual(['keepEditing']);
       expect(recoveryView(withheld).externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
       expect(
-        reapplyRecoveryToDiskVersion(withheld, state.adoptDiskVersion, () => state.standingConflictFor(2))
+        reapplyRecoveryToDiskVersion(withheld, state.adoptDiskVersion, () => state.standingConflictFor(2), () => withheld)
       ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } });
       expect(state.scopedDocument?.revision).toBe('rev-a');
       const acknowledged = acknowledgeRecoverySnapshot(withheld, (source) => {
@@ -10900,7 +11149,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(settled.externalConflict?.source).toBe(state.standingConflictFor(2));
       expect(settled.heldDeliveries).toEqual([]);
       expect(recoveryRefusal(settled)).toBe('externalConflict');
-      expect(beginRecoveryCreate(settled)).toBeNull();
+      expect(beginRecoveryCreate(settled, () => settled)).toBeNull();
       expect(settled.origin.conflict).toBe(opened.current().origin.conflict);
       expect(invoked).not.toHaveBeenCalled();
       off();
@@ -11025,7 +11274,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(told.pending).toBeNull();
       expect(canRequestDelete(told)).toBe(false);
       expect(requestDelete(told)).toBe(told);
-      expect(confirmDelete(told, identityInProjection(state.views, told.match))).toBeNull();
+      expect(confirmDelete(told, identityInProjection(state.views, told.match), () => told)).toBeNull();
       expect(matchDeletionView(told).externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
       expect(state.scopedDocument?.revision).toBe('rev-a');
       expect(commands.deleteMatch).not.toHaveBeenCalled();
@@ -11054,10 +11303,10 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       };
       const state = await withTheSecondSnippetSelected(commands);
       const deleter = deleterOver(state);
-      const started = confirmDelete(
-        requestDelete(deleter.current()),
-        identityInProjection(state.views, deleter.current().match)
-      );
+      const started = ((onHand) => confirmDelete(
+        onHand,
+        identityInProjection(state.views, deleter.current().match), () => onHand
+      ))(requestDelete(deleter.current()));
       if (started === null) {
         throw new Error('a confirmed deletion is sendable');
       }
@@ -11095,7 +11344,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
         'raised',
         'coalesced'
       ]);
-      deleter.set(applyDeletion(holding, answer.result, answer.adoption));
+      deleter.set(applyDeletion(holding, answer.result, answer.adoption, () => holding));
       const settled = deleter.current();
       expect(settled.outcome?.kind).toBe('refused');
       expect(settled.externalConflict?.source).toBe(externalConflictSource(seen));
@@ -11141,11 +11390,11 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
       expect(session.externalConflict?.source).toBe(state.standingConflictFor(2));
       expect(moveSubmissionRefusal(session, state.views)).toBe('externalConflict');
-      expect(beginMove(session, identityInProjection(state.views, session.match))).toBeNull();
+      expect(beginMove(session, identityInProjection(state.views, session.match), () => session)).toBeNull();
       expect(matchMoveView(session, state.views).conflictOperation).toBe('moveAfterSnippet');
 
       const answer = reapplyMoveToDiskVersion(session, null, state.adoptDiskVersion, () =>
-        state.standingConflictFor(2)
+        state.standingConflictFor(2), () => session
       );
       expect(answer.kind).toBe('reapplied');
       if (answer.kind !== 'reapplied') {
@@ -11158,7 +11407,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(state.scopedDocument?.revision).toBe('rev-c');
       expect(state.scopedMatches.map((match) => match.id.node)).toEqual([40, 41, 42]);
       expect(canMove(answer.session, state.views)).toBe(true);
-      const started = beginMove(answer.session, identityInProjection(state.views, answer.session.match));
+      const started = beginMove(answer.session, identityInProjection(state.views, answer.session.match), () => answer.session);
       expect(started?.after).toEqual(disk.matches[1]!.id);
       expect(commands.moveMatch).not.toHaveBeenCalled();
       expect(invoked).not.toHaveBeenCalled();
@@ -11187,7 +11436,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(state.observeExternalChange(seen).verdict.kind).toBe('retained');
       expect(session.awaitingReconciliation.get(2)).toBe(seen);
       expect(duplicationSubmissionRefusal(session, state.views)).toBe('observationRetained');
-      expect(beginDuplicate(session, identityInProjection(state.views, session.match))).toBeNull();
+      expect(beginDuplicate(session, identityInProjection(state.views, session.match), () => session)).toBeNull();
       expect(matchDuplicationView(session, state.views).externalNotices).toEqual([{ kind: 'observationRetained' }]);
       expect(await state.requestFileReread(2)).toEqual({
         kind: 'refused',
@@ -11266,6 +11515,56 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       deleter.off();
     }); // End of the "confirmation displaced through the window" case
 
+    it('refuses a confirmation whose later draft read let the window displace the installed session (Phase 2d-6-6a)', async () => {
+      // **2d-6-5's `beginSave` class, at this door, through the real window.** A
+      // getter behind the draft's value that tells the window of a reading on the
+      // door's **last** read of it must be seen: the first landing read the value
+      // for the comparison, then the installed session, then the value again for
+      // the submission, so a delivery on that last read ran after the reader and
+      // the door spent against a session the registered receiver had replaced.
+      const commands = scriptedCommands();
+      const state = await withTheSecondSnippetSelected(commands);
+      const deleter = deleterOver(state);
+      const asked = requestDelete(deleter.current());
+      const seen = externalObservation();
+      /**
+       * The asked session with a draft whose value tells the window of `seen` on
+       * the given read, counting from one, installed through the holder.
+       *
+       * @param on - The read that delivers, or `null` for none.
+       * @returns The trapped session and its read count.
+       */
+      function trappedOn(on: number | null): { readonly trapped: MatchDeletionSession; readonly reads: () => number } {
+        let reads = 0;
+        const trapped: MatchDeletionSession = {
+          ...asked,
+          draft: {
+            ...asked.draft,
+            get value(): MatchId {
+              reads += 1;
+              if (reads === on) {
+                state.observeExternalChange(seen);
+              }
+              return asked.draft.value;
+            }
+          }
+        };
+        deleter.set(trapped);
+        return { trapped, reads: () => reads };
+      } // End of function trappedOn()
+      // How many times the door reads the value, measured rather than assumed.
+      const quiet = trappedOn(null);
+      expect(confirmDelete(quiet.trapped, identityInProjection(state.views, quiet.trapped.match), deleter.current)).not.toBeNull();
+      const total = quiet.reads();
+      expect(total).toBeGreaterThanOrEqual(1);
+      const last = trappedOn(total);
+      expect(confirmDelete(last.trapped, identityInProjection(state.views, last.trapped.match), deleter.current)).toBeNull();
+      expect(deleter.current().externalConflict?.source).toBe(state.standingConflictFor(2));
+      expect(commands.deleteMatch).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      deleter.off();
+    }); // End of the "later draft read displaced through the window" case
+
     it('replays a delivery the window made during the settlement replay, against the installed session (the review’s second blocker)', async () => {
       // **The reviewer's interleaving, through the real window.** The deletion is
       // out; the barrier tells the installed session `retained(A)`; the refusal
@@ -11280,10 +11579,10 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       };
       const state = await withTheSecondSnippetSelected(commands);
       const deleter = deleterOver(state);
-      const started = confirmDelete(
-        requestDelete(deleter.current()),
-        identityInProjection(state.views, deleter.current().match)
-      );
+      const started = ((onHand) => confirmDelete(
+        onHand,
+        identityInProjection(state.views, deleter.current().match), () => onHand
+      ))(requestDelete(deleter.current()));
       if (started === null) {
         throw new Error('a confirmed deletion is sendable');
       }
@@ -11472,7 +11771,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       readonly off: () => void;
     }> {
       const withCandidate = await walkToACandidate(state, openRestore(state));
-      let session = prepareRestore(withCandidate, windowFor(state, withCandidate));
+      let session = prepareRestore(withCandidate, windowFor(state, withCandidate), () => withCandidate);
       expect(session.pending).not.toBeNull();
       const off = state.registerObservationReceiver(2, (delivery) => {
         session = applyRestoreObservation(session, delivery);
@@ -11498,7 +11797,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       // Entry 8 through the window: neither door answers anything, the box is
       // frozen, and the copy is exactly the edited text.
       expect(canRawSave(told)).toBe(false);
-      expect(beginRawSave(told)).toBeNull();
+      expect(beginRawSave(told, () => told)).toBeNull();
       expect(beginRawSave(told, editor.current)).toBeNull();
       const view = rawEditorView(told);
       expect(view.editable).toBe(false);
@@ -11508,7 +11807,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(state.scopedDocument?.revision).toBe('rev-a');
       // The two-step reload adopts through the door and reseeds the box from the
       // observation's own text (entry 23's "reseed").
-      const reseeded = loadRawDiskVersion(confirmRawReload(askRawToReload(told)), state.adoptDiskVersion);
+      const reseeded = ((onHand) => loadRawDiskVersion(onHand, state.adoptDiskVersion, () => onHand))(confirmRawReload(askRawToReload(told)));
       expect(reseeded.draft.value).toBe(DISK_TEXT);
       expect(reseeded.draft.baseRevision).toBe('rev-c');
       expect(reseeded.externalConflict).toBeNull();
@@ -11537,7 +11836,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(view.canReload).toBe(false);
       const confirmed = confirmRawReload(askRawToReload(told));
       expect(confirmed.reload.kind).toBe('confirmed');
-      expect(loadRawDiskVersion(confirmed, state.adoptDiskVersion)).toBe(confirmed);
+      expect(loadRawDiskVersion(confirmed, state.adoptDiskVersion, () => confirmed)).toBe(confirmed);
       expect(confirmed.draft.value).toBe(`${OPENED}# edited\n`);
       expect(state.scopedDocument?.revision).toBe('rev-a');
       expect(state.standingConflictFor(2)).toBe(externalConflictSource(seen));
@@ -11555,10 +11854,10 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       const seen = externalObservation();
       expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
       expect(first.current().externalConflict?.source).toBe(second.current().externalConflict?.source);
-      const installed = loadRawDiskVersion(confirmRawReload(askRawToReload(first.current())), state.adoptDiskVersion);
+      const installed = ((onHand) => loadRawDiskVersion(onHand, state.adoptDiskVersion, () => onHand))(confirmRawReload(askRawToReload(first.current())));
       expect(installed.draft.value).toBe(DISK_TEXT);
       expect(state.scopedDocument?.revision).toBe('rev-c');
-      const alreadyThere = loadRawDiskVersion(confirmRawReload(askRawToReload(second.current())), state.adoptDiskVersion);
+      const alreadyThere = ((onHand) => loadRawDiskVersion(onHand, state.adoptDiskVersion, () => onHand))(confirmRawReload(askRawToReload(second.current())));
       expect(alreadyThere.draft.value).toBe(DISK_TEXT);
       expect(alreadyThere.externalConflict).toBeNull();
       first.off();
@@ -11582,7 +11881,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(window.observeExternalChange(b).verdict.kind).toBe('supersedes');
       expect(editor.current().reload.kind).toBe('idle');
       expect(editor.current().externalConflict?.source).toBe(window.standingConflictFor(2));
-      const refused = loadRawDiskVersion(confirmedA, window.adoptDiskVersion);
+      const refused = loadRawDiskVersion(confirmedA, window.adoptDiskVersion, () => confirmedA);
       expect(refused.reload).toEqual({ kind: 'refused' });
       expect(refused.draft).toBe(confirmedA.draft);
       expect(rawEditorView(refused).reloadUnavailable).toBe(true);
@@ -11654,14 +11953,14 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       // Entry 12 through the window: the question is withdrawn — the retained
       // session confirms nothing either — and the candidate is kept.
       expect(told.pending).toBeNull();
-      expect(confirmRestore(asked, windowFor(state, asked))).toBeNull();
+      expect(confirmRestore(asked, windowFor(state, asked), () => asked)).toBeNull();
       expect(candidateText(told.preview!)).toBe(CANDIDATE);
       expect(told.baseRevision).toBe('rev-a');
       // Entry 8, all three doors.
       expect(restoreRefusal(told, windowFor(state, told))).toEqual({ kind: 'externalConflict' });
       expect(prepareRestore(told, windowFor(state, told), restore.current)).toBe(told);
       const byHand: RestoreSession = { ...told, pending: asked.pending };
-      expect(confirmRestore(byHand, windowFor(state, told))).toBeNull();
+      expect(confirmRestore(byHand, windowFor(state, told), () => byHand)).toBeNull();
       const view = restoreView(told, windowFor(state, told));
       expect(view.canPrepare).toBe(false);
       expect(view.externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
@@ -11669,10 +11968,10 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(revisionInProjection(state.views, 2)).toBe('rev-a');
       // The two-step reload adopts through the door and re-points the kept
       // candidate at the observation's disk revision (entry 23's "retarget").
-      const reloaded = reloadRestoreDiskVersion(
-        confirmRestoreDiskReload(askRestoreToReloadDiskVersion(told)),
-        state.adoptDiskVersion
-      );
+      const reloaded = ((onHand) => reloadRestoreDiskVersion(
+        onHand,
+        state.adoptDiskVersion, () => onHand
+      ))(confirmRestoreDiskReload(askRestoreToReloadDiskVersion(told)));
       expect(reloaded.baseRevision).toBe('rev-c');
       expect(reloaded.preview!.draft.baseRevision).toBe('rev-c');
       expect(candidateText(reloaded.preview!)).toBe(CANDIDATE);
@@ -11697,16 +11996,16 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       const second = await restoreOver(state);
       const seen = externalObservation();
       expect(state.observeExternalChange(seen).verdict.kind).toBe('raised');
-      const installed = reloadRestoreDiskVersion(
-        confirmRestoreDiskReload(askRestoreToReloadDiskVersion(first.current())),
-        state.adoptDiskVersion
-      );
+      const installed = ((onHand) => reloadRestoreDiskVersion(
+        onHand,
+        state.adoptDiskVersion, () => onHand
+      ))(confirmRestoreDiskReload(askRestoreToReloadDiskVersion(first.current())));
       expect(installed.baseRevision).toBe('rev-c');
       expect(revisionInProjection(state.views, 2)).toBe('rev-c');
-      const alreadyThere = reloadRestoreDiskVersion(
-        confirmRestoreDiskReload(askRestoreToReloadDiskVersion(second.current())),
-        state.adoptDiskVersion
-      );
+      const alreadyThere = ((onHand) => reloadRestoreDiskVersion(
+        onHand,
+        state.adoptDiskVersion, () => onHand
+      ))(confirmRestoreDiskReload(askRestoreToReloadDiskVersion(second.current())));
       expect(alreadyThere.baseRevision).toBe('rev-c');
       expect(candidateText(alreadyThere.preview!)).toBe(CANDIDATE);
       first.off();
@@ -11727,7 +12026,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       };
       expect(window.observeExternalChange(b).verdict.kind).toBe('supersedes');
       expect(restore.current().reload.kind).toBe('idle');
-      const refused = reloadRestoreDiskVersion(confirmedA, window.adoptDiskVersion);
+      const refused = reloadRestoreDiskVersion(confirmedA, window.adoptDiskVersion, () => confirmedA);
       expect(refused.reload).toEqual({ kind: 'refused' });
       expect(refused.baseRevision).toBe('rev-a');
       expect(restoreView(refused, windowFor(window, refused)).reloadUnavailable).toBe(true);
@@ -11757,7 +12056,7 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       expect(restoreRefusal(waiting, windowFor(state, waiting))).toEqual({ kind: 'observationRetained' });
       expect(prepareRestore(waiting, windowFor(state, waiting), restore.current)).toBe(waiting);
       expect(confirmRestore(waiting, windowFor(state, waiting), restore.current)).toBeNull();
-      expect(confirmRestore(asked, windowFor(state, asked))).toBeNull();
+      expect(confirmRestore(asked, windowFor(state, asked), () => asked)).toBeNull();
       expect(restoreView(waiting, windowFor(state, waiting)).externalNotices).toEqual([{ kind: 'observationRetained' }]);
       // The final permit: a confirmation minted in a window with no wait, sent
       // beside the installed session, is consumed unspent and the sender is
@@ -11765,13 +12064,13 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       const quiet = createBrowserState(scriptedCommands(), () => undefined, scriptedBackups());
       await quiet.open(null);
       const other = await restoreOver(quiet);
-      const started = confirmRestore(other.current(), windowFor(quiet, other.current()));
+      const started = ((onHand) => confirmRestore(onHand, windowFor(quiet, other.current()), () => onHand))(other.current());
       if (started === null) {
         throw new Error('a pending restore confirms');
       }
       const carrying: RestoreSession = { ...started.session, awaitingReconciliation: waiting.awaitingReconciliation };
       const sent = await sendRestore(started, carrying, windowFor(quiet, carrying), (document, base, text, ack) =>
-        quiet.saveRawDocument(document, base, text, ack)
+        quiet.saveRawDocument(document, base, text, ack), () => carrying
       );
       expect(sent).toEqual({ kind: 'withdrawn' });
       other.off();
@@ -12282,8 +12581,76 @@ async function readyToConfirm(
   const state = createBrowserState(commands, () => undefined, backups);
   await state.open(null);
   const withCandidate = await walkToACandidate(state, openRestore(state));
-  return { state, session: prepareRestore(withCandidate, windowFor(state, withCandidate)) };
+  return { state, session: prepareRestore(withCandidate, windowFor(state, withCandidate), () => withCandidate) };
 } // End of function readyToConfirm()
+
+/**
+ * The session a confirmation was minted over — what a pane holds between its
+ * `confirmRestore` and the answer, when it registers no receiver.
+ *
+ * `BrowserState.restoreDocument` takes a required reader since Phase 2d-6-6a; a
+ * case that is not about displacement hands it this one, which answers what the
+ * no-reader form checked and settled against before.
+ *
+ * @param started - What the confirmation produced.
+ * @returns The confirmation's own session.
+ */
+function ownSessionOf(started: StartedRestore | null): RestoreSession {
+  if (started === null) {
+    throw new Error('a send with no permit reads no session');
+  }
+  return started.session;
+} // End of function ownSessionOf()
+
+/**
+ * The reader for a send that holds no permit, which `BrowserState.restoreDocument`
+ * answers before reading anything.
+ *
+ * @returns Nothing: it fails the case that reaches it.
+ */
+function neverRead(): RestoreSession {
+  throw new Error('a send with no permit reads no session');
+} // End of function neverRead()
+/**
+ * `sendRecoveryCreate` with the reader a panel passes: the form it was handed
+ * until `install` is called, and the form `install` was last handed from then on.
+ *
+ * Phase 2d-6-6a made the reader required. A case that is not about displacement
+ * still has to say what the caller holds, and what `RecoveryPanel.svelte` holds
+ * is exactly this — the form it sent from, then the waiting form it installed —
+ * so a case written before the reader existed keeps the behaviour it pinned: the
+ * door checks the form handed in, and the answer is settled against the waiting
+ * form. `install` is still called with every form it was called with before.
+ *
+ * @param session - The form to submit.
+ * @param create - The boundary.
+ * @param install - What the case does with the waiting form.
+ * @returns What `sendRecoveryCreate` answers.
+ */
+function sendTracking(
+  session: RecoverySession,
+  create: CreateARecoveredSnippet,
+  install: InstallTheWaitingForm
+): Promise<RecoverySession> {
+  let held = session;
+  return sendRecoveryCreate(
+    session,
+    create,
+    (waiting) => {
+      held = waiting;
+      install(waiting);
+    },
+    () => held
+  );
+} // End of function sendTracking()
+/*
+ * **`((onHand) => door(onHand, …, () => onHand))(value)`** is a door, a settling
+ * transition or a reapply called with a reader answering the very session it is
+ * handed — the installed session of a caller that registers no receiver. Phase
+ * 2d-6-6a made the reader required; this is how a case that is not about
+ * displacement says so without evaluating `value` twice. The cases that are about
+ * displacement pass a holder's reader instead.
+ */
 
 /**
  * Sends a confirmed restore and requires an answer about the session.
@@ -12306,7 +12673,7 @@ async function restoreThrough(
   invalidate: InvalidateEverySurface = () => undefined,
   surfaces: readonly OpenWriteSurface[] = []
 ): Promise<RestoreSession> {
-  const answered = await state.restoreDocument(started, surfaces, invalidate);
+  const answered = await state.restoreDocument(started, surfaces, invalidate, () => ownSessionOf(started));
   if (answered === null) {
     throw new Error('this send was expected to answer about the session');
   }
@@ -12479,7 +12846,7 @@ describe('an answer that lands while a restore is being written', () => {
       scriptedCommands({ raws: [RAW_REFUSED] }),
       backups
     );
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     expect(started).not.toBeNull();
     if (started === null) {
       return;
@@ -12507,7 +12874,7 @@ describe('an answer that lands while a restore is being written', () => {
       scriptedCommands({ raws: [RAW_REFUSED] }),
       backups
     );
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     if (started === null) {
       throw new Error('this confirmation was expected to be produced');
     }
@@ -12542,7 +12909,7 @@ describe('sending a confirmed restore', () => {
 
     const answered = await state.restoreDocument(null, [], (invalidation) => {
       invalidations.push(invalidation);
-    });
+    }, () => neverRead());
 
     expect(answered).toBeNull();
     expect(session.phase).toBe('editing');
@@ -12568,7 +12935,7 @@ describe('sending a confirmed restore', () => {
       reload: { ok: true, value: replacedDocument() }
     });
     const { state, session } = await readyToConfirm(commands, scriptedBackups());
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     if (started === null) {
       throw new Error('this confirmation was expected to be produced');
     }
@@ -12619,7 +12986,7 @@ describe('sending a confirmed restore', () => {
       reload: { ok: true, value: replacedDocument() }
     });
     const { state, session } = await readyToConfirm(commands, scriptedBackups());
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     if (started === null) {
       throw new Error('this confirmation was expected to be produced');
     }
@@ -12628,7 +12995,7 @@ describe('sending a confirmed restore', () => {
     const withdrawn = await restoreThrough(state, started);
     expect(withdrawn.phase).toBe('editing');
 
-    const again = await state.restoreDocument(started, [], () => undefined);
+    const again = await state.restoreDocument(started, [], () => undefined, () => ownSessionOf(started));
 
     expect(again).toBeNull();
     expect(commands.saveRawDocument).not.toHaveBeenCalled();
@@ -12652,7 +13019,7 @@ describe('sending a confirmed restore', () => {
     ]);
     const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED, RAW_COMMITTED] });
     const { state, session } = await readyToConfirm(commands, scriptedBackups());
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     if (started === null) {
       throw new Error('this confirmation was expected to be produced');
     }
@@ -12667,13 +13034,13 @@ describe('sending a confirmed restore', () => {
       get(target, property, receiver): unknown {
         if (!entered && property === Symbol.iterator) {
           entered = true;
-          inner.push(state.restoreDocument(started, [], () => undefined));
+          inner.push(state.restoreDocument(started, [], () => undefined, () => ownSessionOf(started)));
         }
         return Reflect.get(target, property, receiver);
       } // End of function get()
     });
 
-    const answered = await state.restoreDocument(started, surfaces, () => undefined);
+    const answered = await state.restoreDocument(started, surfaces, () => undefined, () => ownSessionOf(started));
     const reentrant = await Promise.all(inner);
 
     // The trap really fired, so this is the re-entrant case and not one that never
@@ -12697,14 +13064,14 @@ describe('sending a confirmed restore', () => {
     ]);
     const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED, RAW_COMMITTED] });
     const { state, session } = await readyToConfirm(commands, scriptedBackups());
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     if (started === null) {
       throw new Error('this confirmation was expected to be produced');
     }
     documents.set(RESTORE_TARGET, { ok: true, value: replacedDocument() });
 
     await restoreThrough(state, started);
-    const twice = await state.restoreDocument(started, [], () => undefined);
+    const twice = await state.restoreDocument(started, [], () => undefined, () => ownSessionOf(started));
 
     // The second call held no permit, so it says nothing about the session: the one
     // the first call answered with is the one the caller is holding, and handing
@@ -12721,7 +13088,7 @@ describe('sending a confirmed restore', () => {
     ]);
     const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED] });
     const { state, session } = await readyToConfirm(commands, scriptedBackups());
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     if (started === null) {
       throw new Error('this confirmation was expected to be produced');
     }
@@ -12757,7 +13124,7 @@ describe('sending a confirmed restore', () => {
     // carry a replacement out.
     const commands = scriptedCommands({ raws: [RAW_UNCHANGED] });
     const { state, session } = await readyToConfirm(commands, scriptedBackups());
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     if (started === null) {
       throw new Error('this confirmation was expected to be produced');
     }
@@ -12777,7 +13144,7 @@ describe('sending a confirmed restore', () => {
     const conflict = makeConflict({ expected: OPEN_REVISION, disk: replacedDocument() });
     const commands = scriptedCommands({ raws: [{ ok: true, value: conflict }] });
     const { state, session } = await readyToConfirm(commands, scriptedBackups());
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     if (started === null) {
       throw new Error('this confirmation was expected to be produced');
     }
@@ -12808,7 +13175,7 @@ describe('sending a confirmed restore', () => {
     ]);
     const commands = scriptedCommands({ documents, raws: [refused, RAW_COMMITTED] });
     const { state, session } = await readyToConfirm(commands, scriptedBackups());
-    const first = confirmRestore(session, windowFor(state, session));
+    const first = confirmRestore(session, windowFor(state, session), () => session);
     if (first === null) {
       throw new Error('this confirmation was expected to be produced');
     }
@@ -12820,8 +13187,8 @@ describe('sending a confirmed restore', () => {
     // showing, never assembled by a caller — and it withdraws the question, so the
     // person is asked again before anything is sent.
     const consented = acknowledgeRestoreFindings(answered);
-    const asked = prepareRestore(consented, windowFor(state, consented));
-    const second = confirmRestore(asked, windowFor(state, asked));
+    const asked = prepareRestore(consented, windowFor(state, consented), () => consented);
+    const second = confirmRestore(asked, windowFor(state, asked), () => asked);
     if (second === null) {
       throw new Error('this second confirmation was expected to be produced');
     }
@@ -12858,7 +13225,7 @@ describe('sending a confirmed restore', () => {
     };
     const commands = scriptedCommands({ raws: [{ ok: false, failure }] });
     const { state, session } = await readyToConfirm(commands, scriptedBackups());
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     if (started === null) {
       throw new Error('this confirmation was expected to be produced');
     }
@@ -12888,7 +13255,7 @@ describe('sending a confirmed restore', () => {
     ]);
     const commands = scriptedCommands({ documents, raws: [RAW_COMMITTED] });
     const { state, session } = await readyToConfirm(commands, scriptedBackups());
-    const started = confirmRestore(session, windowFor(state, session));
+    const started = confirmRestore(session, windowFor(state, session), () => session);
     if (started === null) {
       throw new Error('this confirmation was expected to be produced');
     }

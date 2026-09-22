@@ -140,6 +140,34 @@ order — plus a narrow window reading. **Components:** `DetailPane.svelte`, `Ap
 `MatchEditor.svelte`, `MatchCreator.svelte`, `RecoveryPanel.svelte`. **Bound by** entries 1-5, 10,
 23, 25, 31, 34-36, 38. **Depends on** 2d-6-1, 2d-6-2, 2d-6-3.
 
+#### The orchestrator's cut of 2d-6-6, taken 2026-09-22
+
+Five components, the registration wiring, bilingual mounted tests, a window reading and three
+model-side obligations the closed steps handed on (`PROGRESS.md`, *What 2d-6-6 owes the closed
+steps*, items (1)-(3)) are too much for one coherent phase, so 2d-6-6 runs as three sub-phases in
+dependency order, each owing the gate set and its own review. **The union is 2d-6-6 exactly**,
+plus the three hand-on obligations; the acceptance above is checked in full when 2d-6-6c closes.
+
+- **2d-6-6a — the model-side obligations, before any wiring.** The `current` reader
+  (`ReadTheInstalledSession` / `ReadTheInstalledForm`) made **required** on every door and settling
+  transition of all eight sessions, and every caller passing one — `BrowserState.restoreDocument`
+  gaining the parameter; the three operation doors (`confirmDelete`, `beginMove`,
+  `beginDuplicate`) reading every caller-controlled value before their one reader call (2d-6-5
+  §4 item 11, in 2d-6-5 §7 finding 1's shape); the editor's, the creator's and the recovery
+  form's reapplies asking both blocks before `enterReapply` and the installed session once
+  immediately before adoption (2d-6-4 §4 item 4, pattern (c) and finding 4). Each pinned by a
+  case shown failing first. **Components only touched mechanically at call sites.** Record:
+  [`2d-6-6a-notes.md`](2d-6-6a-notes.md).
+- **2d-6-6b — registration and delivery wiring.** `DetailPane.svelte` / `AppShell.svelte`
+  registration and delivery for the editor, the creator and recovery; recovery as the eighth
+  centrally assembled `OpenWriteSurface` kind; the shell kept mounted while a retained surface
+  exists over an empty list; `src-tauri/capabilities/default.json` gaining
+  `core:event:allow-listen` and `core:event:allow-unlisten` (staged by file name); mounted
+  delivery tests through the real registry and coordinator boundary.
+- **2d-6-6c — the three authored panels' rendering.** Origin, evidence, comparison, copy and
+  recovery rendering on `MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte`;
+  the bilingual mounted tests of the acceptance above; the narrow window reading.
+
 ### 2d-6-7 — operation-surface rendering
 
 **Delivers** the delete, move and duplicate receivers with origin, comparison, reapply or manual

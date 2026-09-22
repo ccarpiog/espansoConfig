@@ -369,9 +369,21 @@
     // A leaving confirmation raised before the send is about a question this send
     // has just answered differently, and leaving is refused while one is in flight.
     leaving = false;
-    session = await sendRecoveryCreate(consented, create, (waiting) => {
-      session = waiting;
-    });
+    // **The reader answers the consented form while the installed one is still the
+    // form it was derived from**, and the installed form otherwise — the waiting
+    // form once `install` put it there, as the receiver has since updated it
+    // (`ReadTheInstalledForm` in `recovery.ts`). A panel holding no form cannot
+    // be reached between the install and the settlement, because `abandon`
+    // refuses while a send is in flight; the `?? consented` arm answers the form
+    // this send started from rather than inventing one.
+    session = await sendRecoveryCreate(
+      consented,
+      create,
+      (waiting) => {
+        session = waiting;
+      },
+      () => (session === held ? consented : (session ?? consented))
+    );
   } // End of function runCreate()
 
   /**
@@ -398,13 +410,17 @@
    * `attemptOfReapply` is what decides which arms replace the session.
    */
   function keepMyDraft(): void {
-    if (session === null) {
+    const held = session;
+    if (held === null) {
       return;
     }
-    const attempt = attemptOfReapply(
-      session,
-      reapplyRecoveryToDiskVersion(session, adoptDiskVersion)
-    );
+    // The reader answers the form this panel holds; `abandon` is the only thing
+    // that empties it, and nothing runs it inside this synchronous handler.
+    // **The outcome first, then the form still installed** (the 2d-6-6a review,
+    // its third finding): a refused reapply leaves whatever a receiver installed
+    // during it, and folding it into `held` would reinstall the capture.
+    const outcome = reapplyRecoveryToDiskVersion(held, adoptDiskVersion, null, () => session ?? held);
+    const attempt = attemptOfReapply(session ?? held, outcome);
     reapplyAttempt = attempt;
     session = attempt.session;
   } // End of function keepMyDraft()

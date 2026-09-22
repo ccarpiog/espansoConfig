@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-21T20:23:44Z",
+ "updated": "2026-09-22T21:48:54Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -502,8 +502,29 @@
   {
    "id": "2d-6-6",
    "title": "Authored-surface delivery and complete registration",
+   "status": "in_progress",
+   "risk": "high",
+   "summary": "Cut into 6a (model-side obligations, done), 6b (registration and delivery wiring, next) and 6c (the three authored panels)."
+  },
+  {
+   "id": "2d-6-6a",
+   "title": "Model-side obligations before the wiring",
+   "status": "done",
+   "risk": "high",
+   "summary": "The installed-session reader is required on all eight sessions, the operation doors read it last, and authored reapplies recheck around adoption.",
+   "review": "docs/reviews/phase-2d-6-6a.md"
+  },
+  {
+   "id": "2d-6-6b",
+   "title": "Registration and delivery wiring",
    "status": "queued",
-   "summary": "Wires child-reported receivers through DetailPane with exhaustive registration of all eight kinds, and keeps retained sessions mounted when the last document goes."
+   "summary": "Registers receivers from DetailPane and AppShell, makes recovery the eighth kind, keeps the shell mounted over retained surfaces."
+  },
+  {
+   "id": "2d-6-6c",
+   "title": "Authored panels' external rendering",
+   "status": "queued",
+   "summary": "Draws origin, evidence, comparison, copy and recovery on the editor, creator and recovery panels, with a window reading."
   },
   {
    "id": "2d-6-7",

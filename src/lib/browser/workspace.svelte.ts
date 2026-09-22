@@ -140,6 +140,7 @@ import {
   type InvalidateEverySurface,
   type OpenWriteSurface,
   type OpenWriteSurfaceKind,
+  type ReadTheInstalledSession as ReadTheInstalledRestore,
   type RestoreContext,
   type RestoreSession,
   type StartedRestore,
@@ -2485,6 +2486,18 @@ export interface BrowserState {
    * `() => {}` satisfies the type, so what the signature forces is that a caller
    * cannot take a restore's answer without supplying one.
    *
+   * **The reader is the caller's too, and required since Phase 2d-6-6a** — the
+   * one `current` every door and settling transition of `./restore.ts` takes. The
+   * confirmation's own session is what the permit is checked against; the reader
+   * is what says whether that session is still the one the caller holds, so a
+   * receiver that replaced it during the permit's reads refuses the send
+   * (`sendRestore`), and every delivery it appended to the installed session
+   * while the replacement was in flight is replayed by the settling transition
+   * this method ends in. This state holds no session and cannot read one, which is
+   * why the reader is a parameter rather than something this method builds; what
+   * no type forces is that the closure a caller passes reads what it installs
+   * rather than a capture.
+   *
    * **What no type forces, in the same sentence as what one does.** Nothing stops a
    * component calling {@link BrowserState.saveRawDocument} with any text it likes
    * and skipping this method, which is the hole every writing command has had
@@ -2499,6 +2512,8 @@ export interface BrowserState {
    * @param surfaces - Every write surface this window has open, in any order.
    * @param invalidate - What the caller does about every write surface over the
    *   replaced file. Required, with no default.
+   * @param current - Reads the restore session the caller holds now —
+   *   `() => session` over the pane's state. Required.
    * @returns The session showing what the restore ended as — including a
    *   consumed confirmation that sent nothing — or `null` when this call held no
    *   permit at all and therefore has nothing to say about any session.
@@ -2506,7 +2521,8 @@ export interface BrowserState {
   restoreDocument(
     started: StartedRestore | null,
     surfaces: readonly OpenWriteSurface[],
-    invalidate: InvalidateEverySurface
+    invalidate: InvalidateEverySurface,
+    current: ReadTheInstalledRestore
   ): Promise<RestoreSession | null>;
 
   /**
@@ -6630,7 +6646,8 @@ export function createBrowserState(
     async restoreDocument(
       started: StartedRestore | null,
       surfaces: readonly OpenWriteSurface[],
-      invalidate: InvalidateEverySurface
+      invalidate: InvalidateEverySurface,
+      current: ReadTheInstalledRestore
     ): Promise<RestoreSession | null> {
       if (started === null) {
         // A confirmation that never happened, or one that was refused. There is no
@@ -6668,7 +6685,8 @@ export function createBrowserState(
         session,
         context,
         (document, baseRevision, text, acknowledgement) =>
-          state.saveRawDocument(document, baseRevision, text, acknowledgement)
+          state.saveRawDocument(document, baseRevision, text, acknowledgement),
+        current
       );
       if (sent.kind === 'notAttempted') {
         // This call held no permit: another call — an earlier one, or a re-entrant
@@ -6687,18 +6705,18 @@ export function createBrowserState(
         // editing transition while it is there — so what comes back keeps the
         // candidate and its consent and is askable again, with `restoreRefusal`
         // saying what is in the way.
-        return restoreConfirmationWithdrawn(session);
+        return restoreConfirmationWithdrawn(session, current);
       }
       if (sent.answer.kind === 'failed') {
         // A command ran and produced no outcome. Whether the file changed is a
         // second question and `mayHaveWritten` is the only honest answer to it.
-        return restoreCouldNotBeSent(session, sent.answer.mayHaveWritten);
+        return restoreCouldNotBeSent(session, sent.answer.mayHaveWritten, current);
       }
       // The answer is sealed, and `applyRestore` is the only way to open it: the
       // caller's whole-document invalidation is discharged on the way, and a body
       // that throws comes back as a line beside the committed outcome rather than
       // in place of it.
-      return applyRestore(session, sent.answer.sealed, invalidate);
+      return applyRestore(session, sent.answer.sealed, invalidate, current);
     }, // End of function restoreDocument()
 
     start(): void {

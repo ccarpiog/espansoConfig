@@ -93,6 +93,15 @@ import { attemptOfReapply, reapplyToShow, type StandingOriginGuard } from './rea
 import { isExternalConflict, isSaveConflict, type DiskAdoptionOutcome } from './saveOutcome';
 import type { ConflictChoice, ConflictModel, ExternalConflictModel } from './saveOutcome';
 
+/*
+ * **`((onHand) => door(onHand, …, () => onHand))(value)`** is a door, a settling
+ * transition or a reapply called with a reader answering the very session it is
+ * handed — the installed session of a caller that registers no receiver. Phase
+ * 2d-6-6a made the reader required; this is how a case that is not about
+ * displacement says so without evaluating `value` twice. The cases that are about
+ * displacement pass a holder's reader instead.
+ */
+
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
 
@@ -397,7 +406,7 @@ describe('whether one snippet may be duplicated at all', () => {
 describe('starting a duplicate', () => {
   it('produces the identity and the frozen base revision the command takes', () => {
     const opened = session(0);
-    const started = beginDuplicate(opened, live(0));
+    const started = beginDuplicate(opened, live(0), () => opened);
     expect(started).not.toBeNull();
     expect(started!.match).toEqual(live(0));
     expect(started!.submission.baseRevision).toBe(BASE);
@@ -411,8 +420,8 @@ describe('starting a duplicate', () => {
     // that can notice a reprojection: the re-read file gives node 10 a new
     // revision, so all three fields no longer agree.
     const opened = session(0);
-    expect(beginDuplicate(opened, identityInProjection([reread()], opened.match))).toBeNull();
-    expect(beginDuplicate(opened, null)).toBeNull();
+    expect(beginDuplicate(opened, identityInProjection([reread()], opened.match), () => opened)).toBeNull();
+    expect(beginDuplicate(opened, null, () => opened)).toBeNull();
     // And the same rule, read from the view side: the refusal is `outOfDate`.
     expect(duplicationSubmissionRefusal(opened, [reread()])).toBe('outOfDate');
     expect(canDuplicate(opened, [reread()])).toBe(false);
@@ -421,7 +430,7 @@ describe('starting a duplicate', () => {
   it('produces nothing for a snippet that may not be duplicated', () => {
     const packaged = file({ kind: 'Package', readOnly: true });
     const opened = startMatchDuplication(packaged, packaged.matches[0]!, false);
-    expect(beginDuplicate(opened, live(0, packaged))).toBeNull();
+    expect(beginDuplicate(opened, live(0, packaged), () => opened)).toBeNull();
     expect(duplicationSubmissionRefusal(opened, [packaged])).toBe('notDuplicable');
   });
 
@@ -445,19 +454,19 @@ describe('what comes back', () => {
    * @returns The waiting session.
    */
   function inFlight(): MatchDuplicationSession {
-    return beginDuplicate(session(0), live(0))!.session;
+    return ((onHand) => beginDuplicate(onHand, live(0), () => onHand))(session(0))!.session;
   } // End of function inFlight()
 
   it('spends the session on a commit and keeps the identity the save answered', () => {
     const clone: MatchId = { document: 2, revision: AFTER, node: 31 };
-    const done = applyDuplication(inFlight(), saved(true, clone), ADOPTED);
+    const done = ((onHand) => applyDuplication(onHand, saved(true, clone), ADOPTED, () => onHand))(inFlight());
     const view = matchDuplicationView(done, HELD);
     expect(view.duplicated).toBe(true);
     expect(view.spent).toBe(true);
     expect(view.landed).toEqual(clone);
     expect(view.duplicating).toBe(false);
     expect(view.messages.map((message) => message.kind)).toEqual(['fileWritten']);
-    expect(beginDuplicate(done, live(0))).toBeNull();
+    expect(beginDuplicate(done, live(0), () => done)).toBeNull();
   });
 
   it('holds the committed arm even when the clone could not be identified', () => {
@@ -468,7 +477,7 @@ describe('what comes back', () => {
     // with no second writer at all). The session is spent exactly as it is for
     // an identified clone; only `landed` differs, and a screen has to be able
     // to draw that case.
-    const done = applyDuplication(inFlight(), saved(true, null), ADOPTED);
+    const done = ((onHand) => applyDuplication(onHand, saved(true, null), ADOPTED, () => onHand))(inFlight());
     expect(done.duplicated).toBe(true);
     expect(done.landed).toBeNull();
     expect(matchDuplicationView(done, HELD).spent).toBe(true);
@@ -479,13 +488,13 @@ describe('what comes back', () => {
     // document — and the arm is honest rather than hopeful (consult Q6: a
     // `committed: false` with no adoption owed spends nothing, even if
     // insertion makes that arm practically unreachable).
-    const done = applyDuplication(inFlight(), saved(false, null, BASE), NOT_OWED);
+    const done = ((onHand) => applyDuplication(onHand, saved(false, null, BASE), NOT_OWED, () => onHand))(inFlight());
     expect(done.duplicated).toBe(false);
     expect(done.invalidated).toBe(false);
     const view = matchDuplicationView(done, HELD);
     expect(view.spent).toBe(false);
     expect(view.canDuplicate).toBe(true);
-    expect(beginDuplicate(done, live(0))).not.toBeNull();
+    expect(beginDuplicate(done, live(0), () => done)).not.toBeNull();
   });
 
   it('spends the session when a `committed: false` owed an adoption anyway', () => {
@@ -494,14 +503,14 @@ describe('what comes back', () => {
     // projecting re-reads the file — and every identity here was minted from
     // the parse that re-read replaced. The session must stop offering the
     // duplicate **without** claiming one committed.
-    const done = applyDuplication(inFlight(), saved(false, null, AFTER), ADOPTED);
+    const done = ((onHand) => applyDuplication(onHand, saved(false, null, AFTER), ADOPTED, () => onHand))(inFlight());
     expect(done.duplicated).toBe(false);
     expect(done.invalidated).toBe(true);
     const view = matchDuplicationView(done, [reread()]);
     expect(view.duplicated).toBe(false);
     expect(view.spent).toBe(true);
     expect(view.cannotDuplicate).toBe('outOfDate');
-    expect(beginDuplicate(done, identityInProjection([reread()], done.match))).toBeNull();
+    expect(beginDuplicate(done, identityInProjection([reread()], done.match), () => done)).toBeNull();
   });
 
   it('does not spend the session on a conflict, whose adoption is always `notOwed`', () => {
@@ -510,7 +519,7 @@ describe('what comes back', () => {
     // carries on `disk` — replacing every identity this session held — while
     // reporting `adoption: notOwed`, so the arm had to be the evidence. It
     // installs nothing now, exactly as `applyMove` no longer derives it.
-    const conflicted = applyDuplication(inFlight(), CONFLICT, NOT_OWED);
+    const conflicted = ((onHand) => applyDuplication(onHand, CONFLICT, NOT_OWED, () => onHand))(inFlight());
     expect(conflicted.duplicated).toBe(false);
     expect(conflicted.invalidated).toBe(false);
     expect(conflictOf(conflicted)).not.toBeNull();
@@ -534,12 +543,12 @@ describe('what comes back', () => {
     expect(conflictOf(dismissed)).toBeNull();
     expect(duplicationSubmissionRefusal(dismissed, HELD)).toBeNull();
     expect(matchDuplicationView(dismissed, HELD).spent).toBe(false);
-    expect(beginDuplicate(dismissed, live(0))).not.toBeNull();
+    expect(beginDuplicate(dismissed, live(0), () => dismissed)).not.toBeNull();
     // A window that really has adopted the disk side is the live check's question,
     // and it still answers it.
     expect(duplicationSubmissionRefusal(dismissed, [CONFLICT.disk])).toBe('outOfDate');
     expect(
-      beginDuplicate(dismissed, identityInProjection([CONFLICT.disk], dismissed.match))
+      beginDuplicate(dismissed, identityInProjection([CONFLICT.disk], dismissed.match), () => dismissed)
     ).toBeNull();
   });
 
@@ -549,15 +558,15 @@ describe('what comes back', () => {
     // gives — what this pins is the shape of the rule, so that moving the
     // `adoption.kind !== 'notOwed'` check inside the saved branch cannot drop
     // the guarantee silently.
-    const refused = applyDuplication(inFlight(), REFUSED, ADOPTED);
+    const refused = ((onHand) => applyDuplication(onHand, REFUSED, ADOPTED, () => onHand))(inFlight());
     expect(refused.duplicated).toBe(false);
     expect(refused.invalidated).toBe(true);
     expect(matchDuplicationView(refused, HELD).spent).toBe(true);
-    expect(applyDuplication(inFlight(), REFUSED, NOT_ADOPTED).invalidated).toBe(true);
+    expect(((onHand) => applyDuplication(onHand, REFUSED, NOT_ADOPTED, () => onHand))(inFlight()).invalidated).toBe(true);
   });
 
   it('puts the out-of-step line beside a commit whose adoption failed', () => {
-    const done = applyDuplication(inFlight(), saved(), NOT_ADOPTED);
+    const done = ((onHand) => applyDuplication(onHand, saved(), NOT_ADOPTED, () => onHand))(inFlight());
     // Beside the saved arm, never in place of it: the clone really is in the
     // file, and telling the person the duplicate failed would invite a retry
     // of a write that already happened (`PROGRESS.md` D2).
@@ -574,7 +583,7 @@ describe('what comes back', () => {
     // exceptional one**: a byte-exact copy keeps its source's trigger
     // definition, and the transaction says so on the first attempt with a
     // finding bound to the candidate by its revision operand.
-    const refused = applyDuplication(inFlight(), REFUSED, NOT_OWED);
+    const refused = ((onHand) => applyDuplication(onHand, REFUSED, NOT_OWED, () => onHand))(inFlight());
     const view = matchDuplicationView(refused, HELD);
     expect(view.outcome?.kind).toBe('refused');
     expect(view.refusalChoices).toEqual(['saveAnyway', 'keepEditing']);
@@ -582,14 +591,14 @@ describe('what comes back', () => {
     expect(view.spent).toBe(false);
 
     const consented = acknowledgeDuplicationFindings(refused);
-    const again = beginDuplicate(consented, live(0));
+    const again = beginDuplicate(consented, live(0), () => consented);
     expect(again).not.toBeNull();
     expect(again!.submission.acknowledgement).toEqual({ accepted: [TRIGGER_KEPT] });
     expect(again!.submission.baseRevision).toBe(BASE);
   });
 
   it('records a send that produced no outcome, in its two arms', () => {
-    const notSent = duplicationCouldNotBeSent(inFlight(), false, null);
+    const notSent = ((onHand) => duplicationCouldNotBeSent(onHand, false, null, () => onHand))(inFlight());
     expect(notSent.sendFailure).toEqual({ kind: 'notSent', reason: null });
     expect(notSent.duplicated).toBe(false);
     // A failure before the rename really did write nothing, so the session is
@@ -597,13 +606,13 @@ describe('what comes back', () => {
     expect(notSent.mayHaveWritten).toBe(false);
     expect(canDuplicate(notSent, HELD)).toBe(true);
     const failure: IpcFailure = { kind: 'command', error: { code: 'noWorkspaceOpen' } };
-    const maybe = duplicationCouldNotBeSent(inFlight(), true, failure);
+    const maybe = ((onHand) => duplicationCouldNotBeSent(onHand, true, failure, () => onHand))(inFlight());
     expect(maybe.sendFailure).toEqual({ kind: 'mayHaveWritten', reason: failure });
     expect(matchDuplicationView(maybe, HELD).failureLines).toEqual([{ kind: 'failure', failure }]);
   });
 
   it('spends the session when the send may already have written the file', () => {
-    const maybe = duplicationCouldNotBeSent(inFlight(), true, UNCERTAIN);
+    const maybe = ((onHand) => duplicationCouldNotBeSent(onHand, true, UNCERTAIN, () => onHand))(inFlight());
     expect(maybe.mayHaveWritten).toBe(true);
     // Nothing is offered beside it, and that is not an omission: `saveFailed`
     // is the only code the flag comes from and it is not one of the four a
@@ -615,7 +624,7 @@ describe('what comes back', () => {
     // disclaimed.
     expect(duplicationSubmissionRefusal(maybe, HELD)).toBe('mayHaveWritten');
     expect(duplicationSubmissionRefusal(maybe, [reread()])).toBe('mayHaveWritten');
-    expect(beginDuplicate(maybe, live(0))).toBeNull();
+    expect(beginDuplicate(maybe, live(0), () => maybe)).toBeNull();
     expect(matchDuplicationView(maybe, HELD).spent).toBe(true);
     // Putting the panel away does not hand the session back: the message is
     // cleared, the flag is not.
@@ -645,7 +654,7 @@ describe('what comes back', () => {
     for (const failure of failures) {
       expect(duplicationRecoveryChoices(failure)).toEqual(['reloadFile']);
       expect(
-        matchDuplicationView(duplicationCouldNotBeSent(inFlight(), false, failure), HELD).recovery
+        matchDuplicationView(((onHand) => duplicationCouldNotBeSent(onHand, false, failure, () => onHand))(inFlight()), HELD).recovery
       ).toEqual(['reloadFile']);
     } // End of the loop over the four codes a re-read is offered for
 
@@ -669,7 +678,7 @@ describe('what comes back', () => {
       kind: 'command',
       error: { code: 'identityStaleRevision', expected: AFTER, found: BASE }
     };
-    const refused = duplicationCouldNotBeSent(inFlight(), false, disputed);
+    const refused = ((onHand) => duplicationCouldNotBeSent(onHand, false, disputed, () => onHand))(inFlight());
     // Before the recovery is attempted the session is live and sendable:
     // nothing was written, so a retry is a legitimate thing to offer.
     expect(matchDuplicationView(refused, HELD).recovery).toEqual(['reloadFile']);
@@ -684,20 +693,20 @@ describe('what comes back', () => {
     expect(spent.mayHaveWritten).toBe(false);
     expect(duplicationSubmissionRefusal(spent, HELD)).toBe('outOfDate');
     expect(matchDuplicationView(spent, HELD).spent).toBe(true);
-    expect(beginDuplicate(spent, identityInProjection(HELD, spent.match))).toBeNull();
+    expect(beginDuplicate(spent, identityInProjection(HELD, spent.match), () => spent)).toBeNull();
     expect(dismissDuplicationOutcome(spent).invalidated).toBe(true);
   }); // End of the "failed recovery re-read" case
 
   it('ignores an answer nothing was waiting for', () => {
     const clean = session(0);
-    expect(applyDuplication(clean, saved(), ADOPTED)).toBe(clean);
+    expect(applyDuplication(clean, saved(), ADOPTED, () => clean)).toBe(clean);
   });
 
   it('never takes a commit or an invalidation back', () => {
     // Both flags are or-ed into rather than assigned, so "cleared by nothing"
     // is what the code does and not only what the reachable transitions allow.
-    const committed = applyDuplication(inFlight(), saved(), ADOPTED);
-    const again = applyDuplication(committed, saved(false, null, BASE), NOT_OWED);
+    const committed = ((onHand) => applyDuplication(onHand, saved(), ADOPTED, () => onHand))(inFlight());
+    const again = applyDuplication(committed, saved(false, null, BASE), NOT_OWED, () => committed);
     expect(again.duplicated).toBe(true);
     expect(again.invalidated).toBe(true);
   });
@@ -710,7 +719,7 @@ describe('the refusal precedence — the arm that claims less wins', () => {
    * @returns The waiting session.
    */
   function inFlight(): MatchDuplicationSession {
-    return beginDuplicate(session(0), live(0))!.session;
+    return ((onHand) => beginDuplicate(onHand, live(0), () => onHand))(session(0))!.session;
   } // End of function inFlight()
 
   it('answers the uncertain send ahead of the commit, in both orders', () => {
@@ -718,18 +727,18 @@ describe('the refusal precedence — the arm that claims less wins', () => {
     // of the order, and the reason the order is a rule: a definite *this
     // snippet has been copied* beside a send failure disclaiming exactly that
     // is the arrangement the precedence forbids.
-    const committed = applyDuplication(inFlight(), saved(), ADOPTED);
+    const committed = ((onHand) => applyDuplication(onHand, saved(), ADOPTED, () => onHand))(inFlight());
     expect(duplicationSubmissionRefusal(committed, HELD)).toBe('alreadyDuplicated');
-    const afterwards = duplicationCouldNotBeSent(committed, true, UNCERTAIN);
+    const afterwards = duplicationCouldNotBeSent(committed, true, UNCERTAIN, () => committed);
     expect(afterwards.duplicated).toBe(true);
     expect(afterwards.mayHaveWritten).toBe(true);
     expect(duplicationSubmissionRefusal(afterwards, HELD)).toBe('mayHaveWritten');
     // The other order, because which answer arrives first is the caller's.
-    const beforehand = applyDuplication(
-      duplicationCouldNotBeSent(inFlight(), true, UNCERTAIN),
+    const beforehand = ((onHand) => applyDuplication(
+      onHand,
       saved(),
-      ADOPTED
-    );
+      ADOPTED, () => onHand
+    ))(((onHand) => duplicationCouldNotBeSent(onHand, true, UNCERTAIN, () => onHand))(inFlight()));
     expect(beforehand.duplicated).toBe(true);
     expect(beforehand.mayHaveWritten).toBe(true);
     expect(duplicationSubmissionRefusal(beforehand, HELD)).toBe('mayHaveWritten');
@@ -742,7 +751,7 @@ describe('the refusal precedence — the arm that claims less wins', () => {
     // no brand, and what this pins is the order of the checks, not a reachable
     // history.
     const both: MatchDuplicationSession = {
-      ...applyDuplication(inFlight(), saved(), ADOPTED),
+      ...((onHand) => applyDuplication(onHand, saved(), ADOPTED, () => onHand))(inFlight()),
       phase: 'saving'
     };
     expect(duplicationSubmissionRefusal(both, HELD)).toBe('alreadyDuplicated');
@@ -752,7 +761,7 @@ describe('the refusal precedence — the arm that claims less wins', () => {
     // `saveInFlight` and `conflict` — adjacent in the order. A conflict answer
     // always ends the flight, so the pair is constructed for the same stated
     // reason as above.
-    const conflicted = applyDuplication(inFlight(), CONFLICT, NOT_OWED);
+    const conflicted = ((onHand) => applyDuplication(onHand, CONFLICT, NOT_OWED, () => onHand))(inFlight());
     const both: MatchDuplicationSession = { ...conflicted, phase: 'saving' };
     expect(duplicationSubmissionRefusal(both, [CONFLICT.disk])).toBe('saveInFlight');
   });
@@ -762,7 +771,7 @@ describe('the refusal precedence — the arm that claims less wins', () => {
     // does not set `invalidated`, so the pair is constructed by handing the live
     // check a projection the window really did move to: while the panel is up the
     // person is told about the conflict, not about staleness.
-    const conflicted = applyDuplication(inFlight(), CONFLICT, NOT_OWED);
+    const conflicted = ((onHand) => applyDuplication(onHand, CONFLICT, NOT_OWED, () => onHand))(inFlight());
     expect(conflicted.invalidated).toBe(false);
     expect(duplicationSubmissionRefusal(conflicted, [CONFLICT.disk])).toBe('conflict');
     expect(
@@ -872,10 +881,10 @@ describe('the view a screen draws', () => {
     const note: PresentationNote = {
       ScalarRestyled: { edit: 0, from: 'Plain', to: 'SingleQuoted', reason: null }
     };
-    const started = beginDuplicate(session(0), live(0));
-    const done = applyDuplication(started!.session, saved(true, null, AFTER, [note]), ADOPTED);
+    const started = ((onHand) => beginDuplicate(onHand, live(0), () => onHand))(session(0));
+    const done = applyDuplication(started!.session, saved(true, null, AFTER, [note]), ADOPTED, () => started!.session);
     expect(matchDuplicationView(done, HELD).notes).toEqual([note]);
-    const quiet = applyDuplication(started!.session, saved(), ADOPTED);
+    const quiet = applyDuplication(started!.session, saved(), ADOPTED, () => started!.session);
     expect(matchDuplicationView(quiet, HELD).notes).toEqual([]);
   });
 
@@ -934,11 +943,11 @@ describe('the confirmed reload, offered since 2c-4a-3b', () => {
    * @returns The session showing the conflict.
    */
   function conflicted(): MatchDuplicationSession {
-    const started = beginDuplicate(session(0), live(0));
+    const started = ((onHand) => beginDuplicate(onHand, live(0), () => onHand))(session(0));
     if (started === null) {
       throw new Error('a live session is sendable');
     }
-    return applyDuplication(started.session, CONFLICT, NOT_OWED);
+    return applyDuplication(started.session, CONFLICT, NOT_OWED, () => started.session);
   } // End of function conflicted()
 
   /**
@@ -1080,14 +1089,14 @@ describe('reapplying the retained duplication', () => {
     subject: ReapplyResolution,
     disk: DocumentView = reread()
   ): MatchDuplicationSession {
-    const started = beginDuplicate(session(0), live(0));
+    const started = ((onHand) => beginDuplicate(onHand, live(0), () => onHand))(session(0));
     if (started === null) {
       throw new Error('a fresh session is duplicable');
     }
     return applyDuplication(
       started.session,
       makeConflict({ disk, subject, expected: BASE, found: AFTER }),
-      NOT_OWED
+      NOT_OWED, () => started.session
     );
   } // End of function conflictedOver()
 
@@ -1120,7 +1129,7 @@ describe('reapplying the retained duplication', () => {
     const target = disk.matches[0]!;
     const stuck = conflictedOver({ Identified: { target } }, disk);
     const recorder = adoptingReapply();
-    const answer = reapplyToDiskVersion(stuck, false, recorder.adopt);
+    const answer = reapplyToDiskVersion(stuck, false, recorder.adopt, null, () => stuck);
     expect(answer.kind).toBe('reapplied');
     if (answer.kind !== 'reapplied') {
       throw new Error('this case is about the rebuilt session');
@@ -1130,18 +1139,18 @@ describe('reapplying the retained duplication', () => {
     expect(answer.session.draft.consent).toBeNull();
     expect(answer.session.duplicated).toBe(false);
     expect(answer.session.invalidated).toBe(false);
-    expect(beginDuplicate(answer.session, live(0, disk))).not.toBeNull();
+    expect(beginDuplicate(answer.session, live(0, disk), () => answer.session)).not.toBeNull();
     expect(recorder.adoptions).toEqual([conflictOf(stuck)]);
   });
 
   it('refuses a correspondence the core would not establish, and adopts nothing', () => {
     const recorder = adoptingReapply();
     expect(
-      reapplyToDiskVersion(
-        conflictedOver({ Refused: { reason: 'AmbiguousExact' } }),
+      ((onHand) => reapplyToDiskVersion(
+        onHand,
         false,
-        recorder.adopt
-      )
+        recorder.adopt, null, () => onHand
+      ))(conflictedOver({ Refused: { reason: 'AmbiguousExact' } }))
     ).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'correspondence', reason: 'AmbiguousExact' }
@@ -1152,7 +1161,7 @@ describe('reapplying the retained duplication', () => {
   it('refuses evidence that names no snippet, and adopts nothing', () => {
     const recorder = adoptingReapply();
     expect(
-      reapplyToDiskVersion(conflictedOver({ Targetless: {} }), false, recorder.adopt)
+      ((onHand) => reapplyToDiskVersion(onHand, false, recorder.adopt, null, () => onHand))(conflictedOver({ Targetless: {} }))
     ).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'evidenceNotATarget' }
@@ -1167,11 +1176,11 @@ describe('reapplying the retained duplication', () => {
     const disk = reread();
     const recorder = adoptingReapply();
     expect(
-      reapplyToDiskVersion(
-        conflictedOver({ Identified: { target: disk.matches[0]! } }, disk),
+      ((onHand) => reapplyToDiskVersion(
+        onHand,
         true,
-        recorder.adopt
-      )
+        recorder.adopt, null, () => onHand
+      ))(conflictedOver({ Identified: { target: disk.matches[0]! } }, disk))
     ).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'notDuplicable', reason: 'unsavedDraftInDocument' }
@@ -1183,11 +1192,11 @@ describe('reapplying the retained duplication', () => {
     const disk = reread({ readOnly: true });
     const recorder = adoptingReapply();
     expect(
-      reapplyToDiskVersion(
-        conflictedOver({ Identified: { target: disk.matches[0]! } }, disk),
+      ((onHand) => reapplyToDiskVersion(
+        onHand,
         false,
-        recorder.adopt
-      )
+        recorder.adopt, null, () => onHand
+      ))(conflictedOver({ Identified: { target: disk.matches[0]! } }, disk))
     ).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'notDuplicable', reason: 'readOnly' }
@@ -1199,18 +1208,18 @@ describe('reapplying the retained duplication', () => {
     const disk = reread();
     const recorder = adoptingReapply('refused');
     expect(
-      reapplyToDiskVersion(
-        conflictedOver({ Identified: { target: disk.matches[0]! } }, disk),
+      ((onHand) => reapplyToDiskVersion(
+        onHand,
         false,
-        recorder.adopt
-      )
+        recorder.adopt, null, () => onHand
+      ))(conflictedOver({ Identified: { target: disk.matches[0]! } }, disk))
     ).toEqual({ kind: 'adoptionRefused' });
     expect(recorder.adoptions).toHaveLength(1);
   });
 
   it('is not attempted when no conflict is showing', () => {
     const recorder = adoptingReapply();
-    expect(reapplyToDiskVersion(session(0), false, recorder.adopt)).toEqual({
+    expect(((onHand) => reapplyToDiskVersion(onHand, false, recorder.adopt, null, () => onHand))(session(0))).toEqual({
       kind: 'notAttempted'
     });
     expect(recorder.adoptions).toEqual([]);
@@ -1362,7 +1371,7 @@ describe('the external session — Phase 2d-6-4', () => {
    * @returns The waiting session.
    */
   function inFlight(): MatchDuplicationSession {
-    const started = beginDuplicate(session(), live());
+    const started = ((onHand) => beginDuplicate(onHand, live(), () => onHand))(session());
     if (started === null) {
       throw new Error('a fresh session is sendable');
     }
@@ -1375,7 +1384,7 @@ describe('the external session — Phase 2d-6-4', () => {
    * @returns The session showing the save conflict.
    */
   function saveConflicted(): MatchDuplicationSession {
-    return applyDuplication(inFlight(), CONFLICT, NOT_OWED);
+    return ((onHand) => applyDuplication(onHand, CONFLICT, NOT_OWED, () => onHand))(inFlight());
   } // End of function saveConflicted()
 
   /**
@@ -1385,7 +1394,7 @@ describe('the external session — Phase 2d-6-4', () => {
    * @returns The session showing the refusal.
    */
   function refusedOnce(): MatchDuplicationSession {
-    return applyDuplication(inFlight(), REFUSED, NOT_OWED);
+    return ((onHand) => applyDuplication(onHand, REFUSED, NOT_OWED, () => onHand))(inFlight());
   } // End of function refusedOnce()
 
   describe('the seven arms over a session opened over one file (entries 6, 8, 11, 12)', () => {
@@ -1405,7 +1414,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(duplicationSubmissionRefusal(next, HELD)).toBe('externalConflict');
       expect(duplicationSubmissionRefusalKey('externalConflict')).toBe('browser.externalConflict.fileChangedWhileOpen');
       expect(canDuplicate(next, HELD)).toBe(false);
-      expect(beginDuplicate(next, live())).toBeNull();
+      expect(beginDuplicate(next, live(), () => next)).toBeNull();
       // Nothing is spent: the identities are still the ones the window projects.
       expect(next.invalidated).toBe(false);
       expect(next.duplicated).toBe(false);
@@ -1433,7 +1442,7 @@ describe('the external session — Phase 2d-6-4', () => {
       // rule the view asks, and the view withholds the offer.
       const blocked = applyDuplicationObservation(refusedOnce(), raised(observation()));
       expect(blocked.outcome?.kind).toBe('refused');
-      expect(beginDuplicate(acknowledgeDuplicationFindings(blocked), live())).toBeNull();
+      expect(((onHand) => beginDuplicate(onHand, live(), () => onHand))(acknowledgeDuplicationFindings(blocked))).toBeNull();
       const view = matchDuplicationView(blocked, HELD);
       expect(view.refusalChoices).toEqual(['keepEditing']);
       expect(view.findingsAreStale).toBe(false);
@@ -1445,7 +1454,7 @@ describe('the external session — Phase 2d-6-4', () => {
       // changed; a stale session says the file changed before it says it is stale.
       const seen = observation();
       const uncertain = applyDuplicationObservation(
-        duplicationCouldNotBeSent(inFlight(), true, UNCERTAIN),
+        ((onHand) => duplicationCouldNotBeSent(onHand, true, UNCERTAIN, () => onHand))(inFlight()),
         raised(seen)
       );
       expect(duplicationSubmissionRefusal(uncertain, HELD)).toBe('mayHaveWritten');
@@ -1491,7 +1500,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(conflictOf(waiting)).toBeNull();
       expect(duplicationSubmissionRefusal(waiting, HELD)).toBe('observationRetained');
       expect(duplicationSubmissionRefusalKey('observationRetained')).toBe('browser.externalConflict.observationRetained');
-      expect(beginDuplicate(waiting, live())).toBeNull();
+      expect(beginDuplicate(waiting, live(), () => waiting)).toBeNull();
       const view = matchDuplicationView(waiting, HELD);
       expect(view.canDuplicate).toBe(false);
       expect(view.cannotDuplicate).toBe('observationRetained');
@@ -1534,21 +1543,21 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(held.externalConflict).toBeNull();
       expect(held.awaitingReconciliation.size).toBe(0);
       expect(held.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised', 'coalesced']);
-      const settled = applyDuplication(held, REFUSED, NOT_OWED);
+      const settled = applyDuplication(held, REFUSED, NOT_OWED, () => held);
       expect(settled.heldDeliveries).toEqual([]);
       expect(settled.outcome?.kind).toBe('refused');
       expect(externalOf(settled).source).toBe(standing);
       expect(settled.awaitingReconciliation.size).toBe(0);
       expect(duplicationSubmissionRefusal(settled, HELD)).toBe('externalConflict');
       // The answer lands first and the replay has the last word, on a commit too.
-      const committed = applyDuplication(held, saved(), ADOPTED);
+      const committed = applyDuplication(held, saved(), ADOPTED, () => held);
       expect(committed.outcome?.kind).toBe('saved');
       expect(committed.duplicated).toBe(true);
       expect(externalOf(committed).source).toBe(standing);
       expect(duplicationSubmissionRefusal(committed, HELD)).toBe('alreadyDuplicated');
       // A duplicate that produced no outcome consumes the hold too.
       const heldUncertain = applyDuplicationObservation(started, decided(null, seen, true, 'raisedWithoutReload'));
-      const failed = duplicationCouldNotBeSent(heldUncertain, true, UNCERTAIN);
+      const failed = duplicationCouldNotBeSent(heldUncertain, true, UNCERTAIN, () => heldUncertain);
       expect(failed.heldDeliveries).toEqual([]);
       expect(failed.mayHaveWritten).toBe(true);
       expect(failed.uncertaintyUnresolved).toBe(true);
@@ -1584,7 +1593,7 @@ describe('the external session — Phase 2d-6-4', () => {
     }); // End of the "supersedes a save conflict" case
 
     it('keeps a committed success and a refusal as history, and lets a duplicate that conflicts retire the external one', () => {
-      const committed = applyDuplication(inFlight(), saved(), ADOPTED);
+      const committed = ((onHand) => applyDuplication(onHand, saved(), ADOPTED, () => onHand))(inFlight());
       const overSaved = applyDuplicationObservation(committed, raised(observation()));
       expect(overSaved.outcome?.kind).toBe('saved');
       expect(overSaved.duplicated).toBe(true);
@@ -1592,10 +1601,10 @@ describe('the external session — Phase 2d-6-4', () => {
       // The weaker claim still wins beside the conflict: the session is spent.
       expect(duplicationSubmissionRefusal(overSaved, HELD)).toBe('alreadyDuplicated');
       const blocked = applyDuplicationObservation(refusedOnce(), raised(observation()));
-      const conflicted = applyDuplication(blocked, CONFLICT, NOT_OWED);
+      const conflicted = applyDuplication(blocked, CONFLICT, NOT_OWED, () => blocked);
       expect(conflicted.externalConflict).toBeNull();
       expect(conflictOf(conflicted)?.source.kind).toBe('save');
-      const refusedAgain = applyDuplication(blocked, REFUSED, NOT_OWED);
+      const refusedAgain = applyDuplication(blocked, REFUSED, NOT_OWED, () => blocked);
       expect(refusedAgain.externalConflict).toBe(blocked.externalConflict);
     });
 
@@ -1607,7 +1616,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(kept.outcome).toBeNull();
       expect(kept.reload).toBe(NOT_RELOADING);
       expect(kept.externalConflict).toBe(blocked.externalConflict);
-      expect(beginDuplicate(kept, live())).toBeNull();
+      expect(beginDuplicate(kept, live(), () => kept)).toBeNull();
       const withheld = applyDuplicationObservation(session(), decided(null, observation(), true, 'raisedWithoutReload'));
       expect(dismissDuplicationOutcome(withheld).uncertaintyUnresolved).toBe(true);
       const waiting = applyDuplicationObservation(session(), retainedDelivery(seen));
@@ -1640,7 +1649,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(view.externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
       expect(askToReloadDiskVersion(withheld)).toBe(withheld);
       const recorder = adopting();
-      expect(reapplyToDiskVersion(withheld, false, recorder.adopt, () => externalOf(withheld).source)).toEqual({
+      expect(reapplyToDiskVersion(withheld, false, recorder.adopt, () => externalOf(withheld).source, () => withheld)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'writeOutcomeUnknown' }
       });
@@ -1738,7 +1747,7 @@ describe('the external session — Phase 2d-6-4', () => {
     it('rebuilds the duplicate from the row the subject’s full identity finds, reading its exact tier and never the editor tier', () => {
       const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
       const recorder = adopting();
-      const answer = reapplyToDiskVersion(stuck, false, recorder.adopt, stands);
+      const answer = reapplyToDiskVersion(stuck, false, recorder.adopt, stands, () => stuck);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind !== 'reapplied') {
         throw new Error('this case is about the rebuilt session');
@@ -1749,21 +1758,21 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(answer.session.externalConflict).toBeNull();
       expect(answer.session.awaitingReconciliation.size).toBe(0);
       expect(canDuplicate(answer.session, [diskFile()])).toBe(true);
-      expect(beginDuplicate(answer.session, live(0, diskFile()))?.match).toEqual(TWIN.id);
-      expect(beginDuplicate(answer.session, live())).toBeNull();
+      expect(beginDuplicate(answer.session, live(0, diskFile()), () => answer.session)?.match).toEqual(TWIN.id);
+      expect(beginDuplicate(answer.session, live(), () => answer.session)).toBeNull();
       expect(recorder.adoptions).toEqual([externalOf(stuck)]);
     }); // End of the "rebuilt from the row" case
 
     it('refuses the subject: a refused tier, an empty tier, a stale full identity, another file, the position, and several rows', () => {
       const recorder = adopting();
       const refusedTier = raisedOver(observed([row(SUBJECT, { Refused: { reason: 'AmbiguousExact' } })]));
-      expect(reapplyToDiskVersion(refusedTier.stuck, false, recorder.adopt, refusedTier.stands)).toEqual({
+      expect(reapplyToDiskVersion(refusedTier.stuck, false, recorder.adopt, refusedTier.stands, () => refusedTier.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'correspondence', reason: 'AmbiguousExact' }
       });
       for (const empty of [{ Unsupported: {} }, { Targetless: {} }] as const) {
         const emptyTier = raisedOver(observed([row(SUBJECT, empty)]));
-        expect(reapplyToDiskVersion(emptyTier.stuck, false, recorder.adopt, emptyTier.stands)).toEqual({
+        expect(reapplyToDiskVersion(emptyTier.stuck, false, recorder.adopt, emptyTier.stands, () => emptyTier.stuck)).toEqual({
           kind: 'manualResolution',
           obstacle: { kind: 'evidenceNotATarget' }
         });
@@ -1771,14 +1780,14 @@ describe('the external session — Phase 2d-6-4', () => {
       const staleRevision = raisedOver(
         observed([row({ document: 2, revision: AFTER, node: 10 }, { Identified: { target: TWIN } })])
       );
-      expect(reapplyToDiskVersion(staleRevision.stuck, false, recorder.adopt, staleRevision.stands)).toEqual({
+      expect(reapplyToDiskVersion(staleRevision.stuck, false, recorder.adopt, staleRevision.stands, () => staleRevision.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
       const otherFile = raisedOver(
         observed([row({ document: 3, revision: BASE, node: 10 }, { Identified: { target: TWIN } })])
       );
-      expect(reapplyToDiskVersion(otherFile.stuck, false, recorder.adopt, otherFile.stands)).toEqual({
+      expect(reapplyToDiskVersion(otherFile.stuck, false, recorder.adopt, otherFile.stands, () => otherFile.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
@@ -1788,14 +1797,14 @@ describe('the external session — Phase 2d-6-4', () => {
           row({ document: 2, revision: BASE, node: 11 }, { Identified: { target: TWIN } })
         ])
       );
-      expect(reapplyToDiskVersion(byPosition.stuck, false, recorder.adopt, byPosition.stands)).toEqual({
+      expect(reapplyToDiskVersion(byPosition.stuck, false, recorder.adopt, byPosition.stands, () => byPosition.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
       const twice = raisedOver(
         observed([row(SUBJECT, { Identified: { target: TWIN } }), row(SUBJECT, { Identified: { target: TWIN } })])
       );
-      expect(reapplyToDiskVersion(twice.stuck, false, recorder.adopt, twice.stands)).toEqual({
+      expect(reapplyToDiskVersion(twice.stuck, false, recorder.adopt, twice.stands, () => twice.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'severalRowsForBase' }
       });
@@ -1805,17 +1814,17 @@ describe('the external session — Phase 2d-6-4', () => {
     it('refuses a table about other revisions, and an observation with none', () => {
       const recorder = adopting();
       const otherBase = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })], { base: 'z'.repeat(64) }));
-      expect(reapplyToDiskVersion(otherBase.stuck, false, recorder.adopt, otherBase.stands)).toEqual({
+      expect(reapplyToDiskVersion(otherBase.stuck, false, recorder.adopt, otherBase.stands, () => otherBase.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'baseRevisionMoved' }
       });
       const otherDisk = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })], { disk: 'z'.repeat(64) }));
-      expect(reapplyToDiskVersion(otherDisk.stuck, false, recorder.adopt, otherDisk.stands)).toEqual({
+      expect(reapplyToDiskVersion(otherDisk.stuck, false, recorder.adopt, otherDisk.stands, () => otherDisk.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'diskRevisionMoved' }
       });
       const tableless = raisedOver(observation());
-      expect(reapplyToDiskVersion(tableless.stuck, false, recorder.adopt, tableless.stands)).toEqual({
+      expect(reapplyToDiskVersion(tableless.stuck, false, recorder.adopt, tableless.stands, () => tableless.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noCorrespondence' }
       });
@@ -1826,15 +1835,15 @@ describe('the external session — Phase 2d-6-4', () => {
       const recorder = adopting();
       const elsewhere = externalConflictSource(observation({ sequence: 9 }));
       const found = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
-      expect(reapplyToDiskVersion(found.stuck, false, recorder.adopt, () => elsewhere)).toEqual({
+      expect(reapplyToDiskVersion(found.stuck, false, recorder.adopt, () => elsewhere, () => found.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
-      expect(reapplyToDiskVersion(found.stuck, false, recorder.adopt, () => null)).toEqual({
+      expect(reapplyToDiskVersion(found.stuck, false, recorder.adopt, () => null, () => found.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
-      expect(reapplyToDiskVersion(saveConflicted(), false, recorder.adopt, () => elsewhere)).toEqual({
+      expect(((onHand) => reapplyToDiskVersion(onHand, false, recorder.adopt, () => elsewhere, () => onHand))(saveConflicted())).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
@@ -1843,14 +1852,14 @@ describe('the external session — Phase 2d-6-4', () => {
 
     it('answers every adoption outcome for the external origin, and rechecks eligibility over the disk parse', () => {
       const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
-      expect(reapplyToDiskVersion(stuck, false, adopting('installed').adopt, stands).kind).toBe('reapplied');
-      expect(reapplyToDiskVersion(stuck, false, adopting('alreadyThere').adopt, stands).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, false, adopting('installed').adopt, stands, () => stuck).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, false, adopting('alreadyThere').adopt, stands, () => stuck).kind).toBe('reapplied');
       const refusedWindow = adopting('refused');
-      expect(reapplyToDiskVersion(stuck, false, refusedWindow.adopt, stands)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, false, refusedWindow.adopt, stands, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(refusedWindow.adoptions).toHaveLength(1);
       // The open-editor rule is asked again, about this window now.
       const recorder = adopting();
-      expect(reapplyToDiskVersion(stuck, true, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(stuck, true, recorder.adopt, stands, () => stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'notDuplicable', reason: 'unsavedDraftInDocument' }
       });
@@ -1864,7 +1873,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(held.awaitingReconciliation.get(2)).toBe(heldReading);
       expect(duplicationSubmissionRefusal(held, HELD)).toBe('externalConflict');
       const recorder = adopting();
-      expect(reapplyToDiskVersion(held, false, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(held, false, recorder.adopt, stands, () => held)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'observationRetained' }
       });
@@ -1874,7 +1883,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(view.reapplyOffered).toBe(false);
       expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
       const lifted = applyDuplicationObservation(held, writtenHereDelivery(heldReading));
-      const answer = reapplyToDiskVersion(lifted, false, adopting().adopt, stands);
+      const answer = reapplyToDiskVersion(lifted, false, adopting().adopt, stands, () => lifted);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind === 'reapplied') {
         expect(answer.session.awaitingReconciliation.size).toBe(0);
@@ -1882,7 +1891,7 @@ describe('the external session — Phase 2d-6-4', () => {
       }
       const elsewhere = otherObservation();
       const carrying: MatchDuplicationSession = { ...stuck, awaitingReconciliation: new Map([[3, elsewhere]]) };
-      const rebuilt = reapplyToDiskVersion(carrying, false, adopting().adopt, stands);
+      const rebuilt = reapplyToDiskVersion(carrying, false, adopting().adopt, stands, () => carrying);
       expect(rebuilt.kind).toBe('reapplied');
       if (rebuilt.kind === 'reapplied') {
         expect(rebuilt.session.awaitingReconciliation.get(3)).toBe(elsewhere);
@@ -1892,9 +1901,9 @@ describe('the external session — Phase 2d-6-4', () => {
     it('asks nothing of the window when no guard is handed in, and leaves the door to decide', () => {
       const { stuck } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
       const refusedWindow = adopting('refused');
-      expect(reapplyToDiskVersion(stuck, false, refusedWindow.adopt)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, false, refusedWindow.adopt, null, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(refusedWindow.adoptions).toEqual([externalOf(stuck)]);
-      expect(reapplyToDiskVersion(stuck, false, adopting().adopt).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, false, adopting().adopt, null, () => stuck).kind).toBe('reapplied');
     });
 
     it('names a sentence in both languages for every obstacle the external origin can raise', () => {
@@ -1971,6 +1980,73 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(beginDuplicate(waiting.current(), live(), waiting.current)).toBeNull();
     }); // End of the "displaced during the projection read" case
 
+    it('refuses a duplicate when a later read of this door displaced the installed session (2d-6-5’s class, Phase 2d-6-6a)', () => {
+      // **The installed session is read once, and it must be read last.** The
+      // door reads the draft's value for the comparison and again for the
+      // submission, and spreads the session; a getter quiet on the first read
+      // and delivering on a later one, or on the spread, runs after a reader
+      // asked too early.
+      const seen = observation();
+      /**
+       * A holder installing a session whose draft value delivers `raised` to it
+       * on the given read, counting from one, and counts the reads.
+       *
+       * @param on - The read that delivers, or `null` to deliver never.
+       * @returns The reader, the trapped session and the count.
+       */
+      function deliveringOnRead(on: number | null): {
+        readonly current: () => MatchDuplicationSession;
+        readonly trapped: MatchDuplicationSession;
+        readonly reads: () => number;
+      } {
+        const handedIn = session();
+        let reads = 0;
+        let held: MatchDuplicationSession = handedIn;
+        const trapped: MatchDuplicationSession = {
+          ...handedIn,
+          draft: {
+            ...handedIn.draft,
+            get value(): MatchId {
+              reads += 1;
+              if (reads === on) {
+                held = applyDuplicationObservation(held, raised(seen));
+              }
+              return handedIn.draft.value;
+            }
+          }
+        };
+        held = trapped;
+        return { current: () => held, trapped, reads: () => reads };
+      } // End of function deliveringOnRead()
+      const quiet = deliveringOnRead(null);
+      expect(beginDuplicate(quiet.trapped, live(), quiet.current)).not.toBeNull();
+      const total = quiet.reads();
+      expect(total).toBeGreaterThanOrEqual(1);
+      for (let on = 1; on <= total; on += 1) {
+        const displaced = deliveringOnRead(on);
+        expect(beginDuplicate(displaced.trapped, live(), displaced.current)).toBeNull();
+        expect(externalOf(displaced.current()).source).toBe(externalConflictSource(seen));
+      } // End of the loop over the reads of the draft's value
+      // The spread that builds the waiting session reads every own property.
+      // Armed once: the receiver's own spread reads it again.
+      const beforeSpread = session();
+      let armed = true;
+      let spreadHeld: MatchDuplicationSession = beforeSpread;
+      const trappedSpread: MatchDuplicationSession = {
+        ...beforeSpread,
+        get extraMessages(): MatchDuplicationSession['extraMessages'] {
+          if (armed) {
+            armed = false;
+            spreadHeld = applyDuplicationObservation(spreadHeld, raised(seen));
+          }
+          return [];
+        }
+      };
+      spreadHeld = trappedSpread;
+      expect(beginDuplicate(trappedSpread, live(), () => spreadHeld)).toBeNull();
+      expect(externalOf(spreadHeld).source).toBe(externalConflictSource(seen));
+    }); // End of the "displaced during a later read" case
+
     it('settles against the installed session and replays a delivery that arrived during its own replay', () => {
       // **The review's second blocker**, on the two settling transitions.
       const later = observation({ sequence: 6, diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
@@ -2009,9 +2085,10 @@ describe('the external session — Phase 2d-6-4', () => {
       const failed = duplicationCouldNotBeSent(unanswered.current(), false, null, unanswered.current);
       expect(failed.heldDeliveries).toEqual([]);
       expect(externalOf(failed).source).toBe(externalConflictSource(later));
-      // Without a reader the transition settles what it was handed, and says so.
+      // A reader answering the capture it was handed settles only that capture —
+      // the documented cost of a reader that does not read what the caller installs.
       const alone = trapped();
-      expect(externalOf(applyDuplication(alone.current(), REFUSED, NOT_OWED)).source).not.toBe(externalConflictSource(later));
+      expect(externalOf(((onHand) => applyDuplication(onHand, REFUSED, NOT_OWED, () => onHand))(alone.current())).source).not.toBe(externalConflictSource(later));
     }); // End of the "delivery during the replay" case
 
     it('rechecks the installed session immediately before adopting, and refuses a wait or a supersession that arrived during the evidence reads', () => {
@@ -2079,17 +2156,17 @@ describe('the external session — Phase 2d-6-4', () => {
       const stands: StandingOriginGuard = () => externalOf(stuck).source;
       const recorder = adopting();
       const held = applyDuplicationObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
-      expect(reapplyToDiskVersion(held, false, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(held, false, recorder.adopt, stands, () => held)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'observationRetained' }
       });
       const withheld = applyDuplicationObservation(session(), decided(null, seen, true, 'raisedWithoutReload'));
-      expect(reapplyToDiskVersion(withheld, false, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(withheld, false, recorder.adopt, stands, () => withheld)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'writeOutcomeUnknown' }
       });
       expect(reads).toBe(0);
-      expect(reapplyToDiskVersion(stuck, false, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(stuck, false, recorder.adopt, stands, () => stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });

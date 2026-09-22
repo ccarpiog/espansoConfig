@@ -491,8 +491,13 @@
    * @param acknowledge - Whether this is the *Save anyway* control.
    */
   async function runSave(acknowledge: boolean): Promise<void> {
-    const consented = acknowledge ? acknowledgeFindings(session) : session;
-    const started = beginSave(consented);
+    const held = session;
+    const consented = acknowledge ? acknowledgeFindings(held) : held;
+    // **The reader answers the consented session while the installed one is still
+    // the session it was derived from**, and the installed session otherwise, so a
+    // receiver that replaced it during the door's reads refuses the save
+    // (`ReadTheInstalledSession` in `matchEditor.ts`).
+    const started = beginSave(consented, () => (session === held ? consented : session));
     if (started === null) {
       return;
     }
@@ -522,13 +527,13 @@
     // was written and there is no reason to show. `failed` is a command that ran
     // and rejected, and it always carries why.
     if (answer.kind === 'answered') {
-      session = applySave(session, answer.result, answer.adoption);
+      session = applySave(session, answer.result, answer.adoption, () => session);
       return;
     }
     session =
       answer.kind === 'notAttempted'
-        ? saveCouldNotBeSent(session, false, null)
-        : saveCouldNotBeSent(session, answer.mayHaveWritten, answer.failure);
+        ? saveCouldNotBeSent(session, false, null, () => session)
+        : saveCouldNotBeSent(session, answer.mayHaveWritten, answer.failure, () => session);
   } // End of function runSave()
 
   /**
@@ -585,7 +590,12 @@
    * mounted suite alone.
    */
   function keepMyDraft(): void {
-    const attempt = attemptOfReapply(session, reapplyToDiskVersion(session, adoptDiskVersion));
+    // **The outcome first, then the session still installed** (the 2d-6-6a
+    // review, its third finding): a refused reapply leaves whatever a receiver
+    // installed during it, and folding it into a session read beforehand would
+    // reinstall the capture.
+    const outcome = reapplyToDiskVersion(session, adoptDiskVersion, null, () => session);
+    const attempt = attemptOfReapply(session, outcome);
     reapplyAttempt = attempt;
     session = attempt.session;
   } // End of function keepMyDraft()

@@ -107,6 +107,15 @@ import { attemptOfReapply, reapplyToShow, type StandingOriginGuard } from './rea
 import { isExternalConflict, isSaveConflict, type DiskAdoptionOutcome } from './saveOutcome';
 import type { ConflictChoice, ConflictModel, ExternalConflictModel } from './saveOutcome';
 
+/*
+ * **`((onHand) => door(onHand, …, () => onHand))(value)`** is a door, a settling
+ * transition or a reapply called with a reader answering the very session it is
+ * handed — the installed session of a caller that registers no receiver. Phase
+ * 2d-6-6a made the reader required; this is how a case that is not about
+ * displacement says so without evaluating `value` twice. The cases that are about
+ * displacement pass a holder's reader instead.
+ */
+
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
 
@@ -563,14 +572,14 @@ describe('the destinations a session offers', () => {
     expect(movePlacementOptionsOf(chosen, held).map((one) => one.key)).toEqual(['top', 'end']);
     expect(matchMoveView(chosen, held).canMove).toBe(false);
     expect(matchMoveView(chosen, held).cannotMove).toBe('outOfDate');
-    expect(beginMove(chosen, identityInProjection(held, chosen.match))).toBeNull();
+    expect(beginMove(chosen, identityInProjection(held, chosen.match), () => chosen)).toBeNull();
     // **Every placement and not only the `after` ones.** The snippet being moved
     // shares its document and its revision with its anchors, so it stops resolving
     // when they do: "choose another destination" would be false advice.
     for (const placement of [{ kind: 'top' as const }, { kind: 'end' as const }]) {
       const other = choosePlacement(session(0), placement);
       expect(moveSubmissionRefusal(other, held)).toBe('outOfDate');
-      expect(beginMove(other, identityInProjection(held, other.match))).toBeNull();
+      expect(beginMove(other, identityInProjection(held, other.match), () => other)).toBeNull();
     } // End of the loop over the two placements that name no anchor
     // And the same session over the projections it was opened on is unaffected.
     expect(matchMoveView(chosen, HELD).canMove).toBe(true);
@@ -663,12 +672,12 @@ describe('choosing a destination, and what `end` really is', () => {
     const forged = { ...held, draft: { ...held.draft, value: { kind: 'after' as const, anchor: { document: 2, revision: AFTER, node: 11 } } } };
     expect(lowerPlacement(forged, placementOf(forged))).toBeNull();
     expect(moveSubmissionRefusal(forged, HELD)).toBe('outOfDate');
-    expect(beginMove(forged, live(0))).toBeNull();
+    expect(beginMove(forged, live(0), () => forged)).toBeNull();
   });
 
   it('withdraws what was said about the last attempt when the destination moves', () => {
-    const started = beginMove(choosePlacement(session(0), { kind: 'end' }), live(0));
-    const refused = applyMove(started!.session, REFUSED, NOT_OWED);
+    const started = ((onHand) => beginMove(onHand, live(0), () => onHand))(choosePlacement(session(0), { kind: 'end' }));
+    const refused = applyMove(started!.session, REFUSED, NOT_OWED, () => started!.session);
     expect(matchMoveView(refused, HELD).outcome?.kind).toBe('refused');
     const rechosen = choosePlacement(refused, { kind: 'after', anchor: live(1) });
     // A refusal is about **one** destination, so a panel describing a destination
@@ -678,15 +687,15 @@ describe('choosing a destination, and what `end` really is', () => {
   });
 
   it('accepts nothing while a move is in flight, in a conflict, or after a commit', () => {
-    const started = beginMove(choosePlacement(session(0), { kind: 'end' }), live(0));
+    const started = ((onHand) => beginMove(onHand, live(0), () => onHand))(choosePlacement(session(0), { kind: 'end' }));
     expect(canChoose(started!.session)).toBe(false);
     expect(choosePlacement(started!.session, { kind: 'top' })).toBe(started!.session);
 
-    const conflicted = applyMove(started!.session, CONFLICT, NOT_OWED);
+    const conflicted = applyMove(started!.session, CONFLICT, NOT_OWED, () => started!.session);
     expect(canChoose(conflicted)).toBe(false);
     expect(moveSubmissionRefusal(conflicted, HELD)).toBe('conflict');
 
-    const committed = applyMove(started!.session, saved(), ADOPTED);
+    const committed = applyMove(started!.session, saved(), ADOPTED, () => started!.session);
     expect(canChoose(committed)).toBe(false);
     expect(moveSubmissionRefusal(committed, HELD)).toBe('alreadyMoved');
     // And dismissing the panel does not give it back.
@@ -696,7 +705,7 @@ describe('choosing a destination, and what `end` really is', () => {
 
 describe('starting a move', () => {
   it('produces the identities the command takes, with the end already lowered', () => {
-    const started = beginMove(choosePlacement(session(0), { kind: 'end' }), live(0));
+    const started = ((onHand) => beginMove(onHand, live(0), () => onHand))(choosePlacement(session(0), { kind: 'end' }));
     expect(started!.match).toEqual(live(0));
     expect(started!.after).toEqual(live(2));
     expect(started!.session.phase).toBe('saving');
@@ -704,14 +713,14 @@ describe('starting a move', () => {
   });
 
   it('sends a `null` anchor for the top of the list', () => {
-    const started = beginMove(choosePlacement(session(2), { kind: 'top' }), live(2));
+    const started = ((onHand) => beginMove(onHand, live(2), () => onHand))(choosePlacement(session(2), { kind: 'top' }));
     expect(started!.after).toBeNull();
   });
 
   it('freezes the base revision the session was opened at', () => {
     const held = choosePlacement(session(0), { kind: 'end' });
     expect(baseRevisionOf(held)).toBe(BASE);
-    expect(beginMove(held, live(0))!.submission.baseRevision).toBe(BASE);
+    expect(beginMove(held, live(0), () => held)!.submission.baseRevision).toBe(BASE);
   });
 
   it('refuses when the live projection no longer gives that snippet this identity', () => {
@@ -719,11 +728,11 @@ describe('starting a move', () => {
     // was minted at `startMatchMove` and goes on agreeing with itself however
     // stale it all is, which is `confirmDelete`'s fourth-value rule for a move.
     const held = choosePlacement(session(0), { kind: 'end' });
-    expect(beginMove(held, live(0))).not.toBeNull();
-    expect(beginMove(held, null)).toBeNull();
+    expect(beginMove(held, live(0), () => held)).not.toBeNull();
+    expect(beginMove(held, null, () => held)).toBeNull();
     // The node is deliberately kept and only the revision moved: a fixture that
     // renumbered the nodes would pass by finding nothing, which is a weaker claim.
-    expect(beginMove(held, live(0, reread()))).toBeNull();
+    expect(beginMove(held, live(0, reread()), () => held)).toBeNull();
     // And what a screen would have drawn about that session says the same thing,
     // which is the half that used to be missing: the view is derived from the same
     // live projections, so it cannot enable a control this refuses.
@@ -731,15 +740,15 @@ describe('starting a move', () => {
   });
 
   it('produces nothing when the destination does not move the snippet', () => {
-    expect(beginMove(session(0), live(0))).toBeNull();
-    expect(beginMove(choosePlacement(session(2), { kind: 'end' }), live(2))).toBeNull();
+    expect(((onHand) => beginMove(onHand, live(0), () => onHand))(session(0))).toBeNull();
+    expect(((onHand) => beginMove(onHand, live(2), () => onHand))(choosePlacement(session(2), { kind: 'end' }))).toBeNull();
   });
 
   it('produces nothing for a snippet that may not be moved', () => {
     const packaged = file({ kind: 'Package', readOnly: true });
     const held = session(0, packaged);
     expect(moveSubmissionRefusal(held, [packaged])).toBe('notMovable');
-    expect(beginMove(held, live(0, packaged))).toBeNull();
+    expect(beginMove(held, live(0, packaged), () => held)).toBeNull();
   });
 
   it('answers the stale session above the frozen ineligibility', () => {
@@ -767,7 +776,7 @@ describe('starting a move', () => {
     expect(matchMoveView(held, [again]).notMovableToShow).toBeNull();
     expect(held.eligibility).toEqual({ kind: 'refused', reason: 'readOnly' });
     // Nothing is sendable either way; `beginMove` refuses both without saying why.
-    expect(beginMove(held, live(0, again))).toBeNull();
+    expect(beginMove(held, live(0, again), () => held)).toBeNull();
   });
 }); // End of the "starting" suite
 
@@ -778,12 +787,12 @@ describe('what comes back', () => {
    * @returns The waiting session.
    */
   function inFlight() {
-    return beginMove(choosePlacement(session(0), { kind: 'end' }), live(0))!.session;
+    return ((onHand) => beginMove(onHand, live(0), () => onHand))(choosePlacement(session(0), { kind: 'end' }))!.session;
   } // End of function inFlight()
 
   it('spends the session on a commit and keeps the identity the save answered', () => {
     const landed: MatchId = { document: 2, revision: AFTER, node: 31 };
-    const done = applyMove(inFlight(), saved(true, landed), ADOPTED);
+    const done = ((onHand) => applyMove(onHand, saved(true, landed), ADOPTED, () => onHand))(inFlight());
     const view = matchMoveView(done, HELD);
     expect(view.moved).toBe(true);
     expect(view.spent).toBe(true);
@@ -797,7 +806,7 @@ describe('what comes back', () => {
     // that is a documented success: the transaction ended on the revision this
     // window is projecting, so `BrowserState.moveMatch` re-read nothing and no
     // identity went stale. **Both halves matter** — see the case below.
-    const done = applyMove(inFlight(), saved(false, null, BASE), NOT_OWED);
+    const done = ((onHand) => applyMove(onHand, saved(false, null, BASE), NOT_OWED, () => onHand))(inFlight());
     expect(done.moved).toBe(false);
     expect(done.invalidated).toBe(false);
     const view = matchMoveView(done, HELD);
@@ -806,7 +815,7 @@ describe('what comes back', () => {
     // And the session really is still usable: the snippet is still at the top, so
     // moving it to the end is still a move that can be sent.
     expect(view.canMove).toBe(true);
-    expect(beginMove(done, live(0))).not.toBeNull();
+    expect(beginMove(done, live(0), () => done)).not.toBeNull();
   });
 
   it('spends the session when a `committed: false` owed an adoption anyway', () => {
@@ -816,7 +825,7 @@ describe('what comes back', () => {
     // ended on a revision this window was not projecting re-reads the file — and
     // every identity here was minted from the parse that re-read replaced. The
     // session must stop offering the move **without** claiming the move committed.
-    const done = applyMove(inFlight(), saved(false, null, AFTER), ADOPTED);
+    const done = ((onHand) => applyMove(onHand, saved(false, null, AFTER), ADOPTED, () => onHand))(inFlight());
     expect(done.moved).toBe(false);
     expect(done.invalidated).toBe(true);
     const view = matchMoveView(done, [reread()]);
@@ -827,7 +836,7 @@ describe('what comes back', () => {
     // The old code left `moved: false` and rebased only the draft, so the model
     // said the session was usable while `beginMove` answered `null` against the
     // live identity. The two now agree.
-    expect(beginMove(done, identityInProjection([reread()], done.match))).toBeNull();
+    expect(beginMove(done, identityInProjection([reread()], done.match), () => done)).toBeNull();
     // Nothing was written, and the outcome panel still says so.
     expect(view.messages.map((message) => message.kind)).toEqual(['nothingToWrite']);
     // Choosing another destination does not give the session back either: its
@@ -844,7 +853,7 @@ describe('what comes back', () => {
     // now: a save that wrote no byte must not re-order the list or move the
     // selection before the person has chosen. So these identities are still the
     // ones the window is projecting, and invalidation follows actual adoption.
-    const conflicted = applyMove(inFlight(), CONFLICT, NOT_OWED);
+    const conflicted = ((onHand) => applyMove(onHand, CONFLICT, NOT_OWED, () => onHand))(inFlight());
     expect(conflicted.moved).toBe(false);
     expect(conflicted.invalidated).toBe(false);
     // The panel refuses while the conflict is showing, and hands the session back
@@ -869,17 +878,17 @@ describe('what comes back', () => {
     // leave every reachable adoption case green while dropping the guarantee that
     // an adoption owed at all invalidates whatever arm carried it. It is kept
     // beside the conflict case rather than replaced by it.
-    const refused = applyMove(inFlight(), REFUSED, ADOPTED);
+    const refused = ((onHand) => applyMove(onHand, REFUSED, ADOPTED, () => onHand))(inFlight());
     expect(refused.moved).toBe(false);
     expect(refused.invalidated).toBe(true);
     expect(matchMoveView(refused, HELD).spent).toBe(true);
     expect(canChoose(refused)).toBe(false);
     // And the same for a failed adoption, which is the other arm of "owed at all".
-    expect(applyMove(inFlight(), REFUSED, NOT_ADOPTED).invalidated).toBe(true);
+    expect(((onHand) => applyMove(onHand, REFUSED, NOT_ADOPTED, () => onHand))(inFlight()).invalidated).toBe(true);
   }); // End of the structural non-saved-arm adoption case
 
   it('puts the out-of-step line beside a commit whose adoption failed', () => {
-    const done = applyMove(inFlight(), saved(), NOT_ADOPTED);
+    const done = ((onHand) => applyMove(onHand, saved(), NOT_ADOPTED, () => onHand))(inFlight());
     // Beside the saved arm, never in place of it: the snippet really did move.
     expect(matchMoveView(done, HELD).messages.map((message) => message.kind)).toEqual([
       'fileWritten',
@@ -891,28 +900,28 @@ describe('what comes back', () => {
   });
 
   it('carries a refusal’s findings and the consent that answers them', () => {
-    const refused = applyMove(inFlight(), REFUSED, NOT_OWED);
+    const refused = ((onHand) => applyMove(onHand, REFUSED, NOT_OWED, () => onHand))(inFlight());
     const view = matchMoveView(refused, HELD);
     expect(view.outcome?.kind).toBe('refused');
     expect(view.refusalChoices).toEqual(['saveAnyway', 'keepEditing']);
     expect(view.moved).toBe(false);
 
     const consented = acknowledgeMoveFindings(refused);
-    const again = beginMove(consented, live(0));
+    const again = beginMove(consented, live(0), () => consented);
     expect(again!.submission.acknowledgement).toEqual({ accepted: [SUSPICION] });
   });
 
   it('withdraws the consent when the destination changes under a refusal', () => {
     // Consent is content-addressed to the candidate, and the candidate here **is**
     // the destination — so a second destination cannot spend the first's consent.
-    const refused = applyMove(inFlight(), REFUSED, NOT_OWED);
+    const refused = ((onHand) => applyMove(onHand, REFUSED, NOT_OWED, () => onHand))(inFlight());
     const consented = acknowledgeMoveFindings(refused);
     const rechosen = choosePlacement(consented, { kind: 'after', anchor: live(1) });
-    expect(beginMove(rechosen, live(0))!.submission.acknowledgement).toEqual({ accepted: [] });
+    expect(beginMove(rechosen, live(0), () => rechosen)!.submission.acknowledgement).toEqual({ accepted: [] });
   });
 
   it('offers one way out of a conflict, and stops offering the move while it shows', () => {
-    const conflicted = applyMove(inFlight(), CONFLICT, NOT_OWED);
+    const conflicted = ((onHand) => applyMove(onHand, CONFLICT, NOT_OWED, () => onHand))(inFlight());
     expect(conflictOf(conflicted)).not.toBeNull();
     expect(canMove(conflicted, HELD)).toBe(false);
     // Two, since 2c-4a-3b flipped `offersReload`: the non-destructive way out and
@@ -937,16 +946,16 @@ describe('what comes back', () => {
     // `dismissMoveOutcome`'s note for why it is `identityStaleRevision`.
     expect(canMove(dismissed, HELD)).toBe(true);
     expect(moveSubmissionRefusal(dismissed, HELD)).toBeNull();
-    expect(beginMove(dismissed, live(0))).not.toBeNull();
+    expect(beginMove(dismissed, live(0), () => dismissed)).not.toBeNull();
     // A window that really has moved on is the live check's question, and it still
     // answers it: the session says nothing about a projection nobody told it about.
     expect(canMove(dismissed, [CONFLICT.disk])).toBe(false);
     expect(moveSubmissionRefusal(dismissed, [CONFLICT.disk])).toBe('outOfDate');
-    expect(beginMove(dismissed, identityInProjection([CONFLICT.disk], dismissed.match))).toBeNull();
+    expect(beginMove(dismissed, identityInProjection([CONFLICT.disk], dismissed.match), () => dismissed)).toBeNull();
   });
 
   it('records a send that produced no outcome, in its two arms', () => {
-    const notSent = moveCouldNotBeSent(inFlight(), false, null);
+    const notSent = ((onHand) => moveCouldNotBeSent(onHand, false, null, () => onHand))(inFlight());
     expect(notSent.sendFailure).toEqual({ kind: 'notSent', reason: null });
     expect(notSent.moved).toBe(false);
     // A failure before the rename really did write nothing, so the session is not
@@ -955,7 +964,7 @@ describe('what comes back', () => {
     expect(canChoose(notSent)).toBe(true);
     expect(canMove(notSent, HELD)).toBe(true);
     const failure: IpcFailure = { kind: 'command', error: { code: 'noWorkspaceOpen' } };
-    const maybe = moveCouldNotBeSent(inFlight(), true, failure);
+    const maybe = ((onHand) => moveCouldNotBeSent(onHand, true, failure, () => onHand))(inFlight());
     expect(maybe.sendFailure).toEqual({ kind: 'mayHaveWritten', reason: failure });
     expect(matchMoveView(maybe, HELD).failureLines).toEqual([{ kind: 'failure', failure }]);
   });
@@ -967,7 +976,7 @@ describe('what comes back', () => {
     // What the wrapper does next is a re-read that may itself fail, and the two
     // outcomes are the two projections below — the session must be spent under
     // both, and for the same stated reason.
-    const maybe = moveCouldNotBeSent(inFlight(), true, UNCERTAIN);
+    const maybe = ((onHand) => moveCouldNotBeSent(onHand, true, UNCERTAIN, () => onHand))(inFlight());
     expect(maybe.mayHaveWritten).toBe(true);
     // Nothing is offered beside it, and that is not an omission: `saveFailed` is
     // the only code the flag comes from and it is not one of the four a re-read is
@@ -980,7 +989,7 @@ describe('what comes back', () => {
     expect(choosePlacement(maybe, { kind: 'top' })).toBe(maybe);
     expect(canMove(maybe, HELD)).toBe(false);
     expect(moveSubmissionRefusal(maybe, HELD)).toBe('mayHaveWritten');
-    expect(beginMove(maybe, live(0))).toBeNull();
+    expect(beginMove(maybe, live(0), () => maybe)).toBeNull();
     expect(matchMoveView(maybe, HELD).spent).toBe(true);
     // **The re-read succeeded**, so the window now holds a different parse. The
     // reason is still `mayHaveWritten` and never `outOfDate`, whose sentence says
@@ -988,7 +997,7 @@ describe('what comes back', () => {
     expect(moveSubmissionRefusal(maybe, [reread()])).toBe('mayHaveWritten');
     expect(matchMoveView(maybe, [reread()]).cannotMove).toBe('mayHaveWritten');
     expect(matchMoveView(maybe, [reread()]).spent).toBe(true);
-    expect(beginMove(maybe, identityInProjection([reread()], maybe.match))).toBeNull();
+    expect(beginMove(maybe, identityInProjection([reread()], maybe.match), () => maybe)).toBeNull();
     // And putting the panel away does not hand the session back: the message is
     // cleared, the flag is not.
     const dismissed = dismissMoveOutcome(maybe);
@@ -1008,9 +1017,9 @@ describe('what comes back', () => {
     // half off the screen while the flag stayed set. The round before this one had
     // the two checks the other way round, which is why the rule — not the
     // arrangement — is written down in `refusalGiven`.
-    const committed = applyMove(inFlight(), saved(), ADOPTED);
+    const committed = ((onHand) => applyMove(onHand, saved(), ADOPTED, () => onHand))(inFlight());
     expect(moveSubmissionRefusal(committed, HELD)).toBe('alreadyMoved');
-    const afterwards = moveCouldNotBeSent(committed, true, UNCERTAIN);
+    const afterwards = moveCouldNotBeSent(committed, true, UNCERTAIN, () => committed);
     expect(afterwards.moved).toBe(true);
     expect(afterwards.mayHaveWritten).toBe(true);
     expect(moveSubmissionRefusal(afterwards, HELD)).toBe('mayHaveWritten');
@@ -1020,7 +1029,7 @@ describe('what comes back', () => {
     // **The other order, because which answer arrives first is the caller's.** A
     // session already spent by an uncertain send that then takes a committed answer
     // holds both flags too, and says the same thing about them.
-    const beforehand = applyMove(moveCouldNotBeSent(inFlight(), true, UNCERTAIN), saved(), ADOPTED);
+    const beforehand = ((onHand) => applyMove(onHand, saved(), ADOPTED, () => onHand))(((onHand) => moveCouldNotBeSent(onHand, true, UNCERTAIN, () => onHand))(inFlight()));
     expect(beforehand.moved).toBe(true);
     expect(beforehand.mayHaveWritten).toBe(true);
     expect(moveSubmissionRefusal(beforehand, HELD)).toBe('mayHaveWritten');
@@ -1029,12 +1038,12 @@ describe('what comes back', () => {
     // measured by the live projections, since 2c-4a-2 a dismissed conflict spends
     // nothing — reads `outOfDate` on its own, which says *nothing has been
     // written*. An uncertain send after it must not be reported with that sentence.
-    const dismissed = dismissMoveOutcome(applyMove(inFlight(), CONFLICT, NOT_OWED));
+    const dismissed = dismissMoveOutcome(((onHand) => applyMove(onHand, CONFLICT, NOT_OWED, () => onHand))(inFlight()));
     expect(moveSubmissionRefusal(dismissed, [CONFLICT.disk])).toBe('outOfDate');
-    const uncertain = moveCouldNotBeSent(dismissed, true, UNCERTAIN);
+    const uncertain = moveCouldNotBeSent(dismissed, true, UNCERTAIN, () => dismissed);
     expect(uncertain.moved).toBe(false);
     expect(moveSubmissionRefusal(uncertain, [CONFLICT.disk])).toBe('mayHaveWritten');
-    expect(beginMove(uncertain, identityInProjection([CONFLICT.disk], uncertain.match))).toBeNull();
+    expect(beginMove(uncertain, identityInProjection([CONFLICT.disk], uncertain.match), () => uncertain)).toBeNull();
   }); // End of the refusal-precedence case
 
   it('offers a re-read for the four failures that say this window disagrees with the file', () => {
@@ -1055,7 +1064,7 @@ describe('what comes back', () => {
     expect(failures.map((one) => (one.kind === 'command' ? one.error.code : null))).toEqual(codes);
     for (const failure of failures) {
       expect(moveRecoveryChoices(failure)).toEqual(['reloadFile']);
-      expect(matchMoveView(moveCouldNotBeSent(inFlight(), false, failure), HELD).recovery).toEqual([
+      expect(matchMoveView(((onHand) => moveCouldNotBeSent(onHand, false, failure, () => onHand))(inFlight()), HELD).recovery).toEqual([
         'reloadFile'
       ]);
     } // End of the loop over the four codes a re-read is offered for
@@ -1082,7 +1091,7 @@ describe('what comes back', () => {
       kind: 'command',
       error: { code: 'identityStaleRevision', expected: AFTER, found: BASE }
     };
-    const refused = moveCouldNotBeSent(inFlight(), false, disputed);
+    const refused = ((onHand) => moveCouldNotBeSent(onHand, false, disputed, () => onHand))(inFlight());
     // Before the recovery is attempted the session is live and sendable: nothing
     // was written, so a retry is a legitimate thing to offer.
     expect(matchMoveView(refused, HELD).recovery).toEqual(['reloadFile']);
@@ -1099,7 +1108,7 @@ describe('what comes back', () => {
     expect(canChoose(spent)).toBe(false);
     expect(moveSubmissionRefusal(spent, HELD)).toBe('outOfDate');
     expect(matchMoveView(spent, HELD).spent).toBe(true);
-    expect(beginMove(spent, identityInProjection(HELD, spent.match))).toBeNull();
+    expect(beginMove(spent, identityInProjection(HELD, spent.match), () => spent)).toBeNull();
     // Putting the send failure away does not hand the session back, which is the
     // rule every other spending flag already follows.
     expect(dismissMoveOutcome(spent).invalidated).toBe(true);
@@ -1108,7 +1117,7 @@ describe('what comes back', () => {
 
   it('ignores an answer nothing was waiting for', () => {
     const clean = session(0);
-    expect(applyMove(clean, saved(), ADOPTED)).toBe(clean);
+    expect(applyMove(clean, saved(), ADOPTED, () => clean)).toBe(clean);
   });
 
   it('never takes a commit or an invalidation back', () => {
@@ -1117,8 +1126,8 @@ describe('what comes back', () => {
     // second answer handed to a session that has already committed — which this
     // module offers no way to produce, and which a hand-written caller can — does
     // not turn a written file back into an unwritten one.
-    const committed = applyMove(inFlight(), saved(), ADOPTED);
-    const again = applyMove(committed, saved(false, null, BASE), NOT_OWED);
+    const committed = ((onHand) => applyMove(onHand, saved(), ADOPTED, () => onHand))(inFlight());
+    const again = applyMove(committed, saved(false, null, BASE), NOT_OWED, () => committed);
     expect(again.moved).toBe(true);
     expect(again.invalidated).toBe(true);
   });
@@ -1182,12 +1191,12 @@ describe('the view a screen draws', () => {
     const note: PresentationNote = {
       ScalarRestyled: { edit: 0, from: 'Plain', to: 'SingleQuoted', reason: null }
     };
-    const started = beginMove(choosePlacement(session(0), { kind: 'end' }), live(0));
-    const done = applyMove(started!.session, saved(true, null, AFTER, [note]), ADOPTED);
+    const started = ((onHand) => beginMove(onHand, live(0), () => onHand))(choosePlacement(session(0), { kind: 'end' }));
+    const done = applyMove(started!.session, saved(true, null, AFTER, [note]), ADOPTED, () => started!.session);
     expect(matchMoveView(done, HELD).notes).toEqual([note]);
     expect(matchMoveView(done, HELD).notes[0]).toBe(note);
     // And an answer that carried none still shows none.
-    const quiet = applyMove(started!.session, saved(), ADOPTED);
+    const quiet = applyMove(started!.session, saved(), ADOPTED, () => started!.session);
     expect(matchMoveView(quiet, HELD).notes).toEqual([]);
   });
 
@@ -1249,11 +1258,11 @@ describe('the confirmed reload, offered since 2c-4a-3b', () => {
    * @returns The session showing the conflict.
    */
   function conflicted(): MatchMoveSession {
-    const started = beginMove(choosePlacement(session(0), { kind: 'end' }), live(0));
+    const started = ((onHand) => beginMove(onHand, live(0), () => onHand))(choosePlacement(session(0), { kind: 'end' }));
     if (started === null) {
       throw new Error('a chosen destination is sendable');
     }
-    return applyMove(started.session, CONFLICT, NOT_OWED);
+    return applyMove(started.session, CONFLICT, NOT_OWED, () => started.session);
   } // End of function conflicted()
 
   /**
@@ -1381,11 +1390,11 @@ describe('the confirmed reload, offered since 2c-4a-3b', () => {
       [{ kind: 'end' as const }, 'positionalDestination'],
       [{ kind: 'after' as const, anchor: live(2) }, 'anchoredDestination']
     ] as const) {
-      const started = beginMove(choosePlacement(session(1), placement), live(1));
+      const started = ((onHand) => beginMove(onHand, live(1), () => onHand))(choosePlacement(session(1), placement));
       if (started === null) {
         throw new Error(`this case needs ${warning} to be sendable`);
       }
-      const asked = askToReloadDiskVersion(applyMove(started.session, CONFLICT, NOT_OWED));
+      const asked = askToReloadDiskVersion(applyMove(started.session, CONFLICT, NOT_OWED, () => started.session));
       expect(matchMoveView(asked, HELD).reloadWarning, warning).toBe(warning);
     } // End of the loop over the three placement arms
   }); // End of the "warning per arm" case
@@ -1402,11 +1411,11 @@ describe('the confirmed reload, offered since 2c-4a-3b', () => {
       [{ kind: 'end' as const }, 'moveToEnd'],
       [{ kind: 'after' as const, anchor: live(2) }, 'moveAfterSnippet']
     ] as const) {
-      const started = beginMove(choosePlacement(session(1), placement), live(1));
+      const started = ((onHand) => beginMove(onHand, live(1), () => onHand))(choosePlacement(session(1), placement));
       if (started === null) {
         throw new Error(`this case needs ${summary} to be sendable`);
       }
-      const conflict = applyMove(started.session, CONFLICT, NOT_OWED);
+      const conflict = applyMove(started.session, CONFLICT, NOT_OWED, () => started.session);
       expect(matchMoveView(conflict, HELD).conflictOperation, summary).toBe(summary);
     } // End of the loop over the three placement arms
   }); // End of the "placement summary" case
@@ -1418,14 +1427,14 @@ describe('the confirmed reload, offered since 2c-4a-3b', () => {
     // arriving *while the conflict is still displayed* took the mark away and left
     // the sentence pointing at nothing. The two arms are decided from the same
     // option list the panel draws, so they cannot disagree with it.
-    const started = beginMove(
-      choosePlacement(session(1), { kind: 'after', anchor: live(2) }),
-      live(1)
-    );
+    const started = ((onHand) => beginMove(
+      onHand,
+      live(1), () => onHand
+    ))(choosePlacement(session(1), { kind: 'after', anchor: live(2) }));
     if (started === null) {
       throw new Error('an anchored destination is sendable');
     }
-    const conflict = applyMove(started.session, CONFLICT, NOT_OWED);
+    const conflict = applyMove(started.session, CONFLICT, NOT_OWED, () => started.session);
     // While the window still holds the parse the anchor was minted from, the
     // option is offered and marked, and the sentence may point at it.
     const held = matchMoveView(conflict, HELD);
@@ -1520,14 +1529,14 @@ describe('reapplying the retained move', () => {
     anchor: ReapplyPlacement = { NotAnchored: {} }
   ): MatchMoveSession {
     const chosen = choosePlacement(session(position), placement);
-    const started = beginMove(chosen, live(position));
+    const started = beginMove(chosen, live(position), () => chosen);
     if (started === null) {
       throw new Error('this case needs a move that really moves');
     }
     return applyMove(
       started.session,
       makeConflict({ disk, subject, placement: anchor, expected: BASE, found: AFTER }),
-      NOT_OWED
+      NOT_OWED, () => started.session
     );
   } // End of function conflictedOver()
 
@@ -1559,7 +1568,7 @@ describe('reapplying the retained move', () => {
     const target = snippet(disk, ':date');
     const stuck = conflictedOver(1, { kind: 'top' }, { Identified: { target } }, disk);
     const recorder = adoptingReapply();
-    const answer = reapplyToDiskVersion(stuck, null, recorder.adopt);
+    const answer = reapplyToDiskVersion(stuck, null, recorder.adopt, null, () => stuck);
     expect(answer.kind).toBe('reapplied');
     if (answer.kind !== 'reapplied') {
       throw new Error('this case is about the rebuilt session');
@@ -1573,7 +1582,7 @@ describe('reapplying the retained move', () => {
     // nothing else, and the wire's `after` is the lowering of *top*.
     const started = beginMove(
       answer.session,
-      identityInProjection([disk], answer.session.match)
+      identityInProjection([disk], answer.session.match), () => answer.session
     );
     expect(started).not.toBeNull();
     expect(started?.match).toEqual(target.id);
@@ -1587,13 +1596,13 @@ describe('reapplying the retained move', () => {
     const disk = reordered();
     const target = snippet(disk, ':sig');
     const stuck = conflictedOver(0, { kind: 'end' }, { Identified: { target } }, disk);
-    const answer = reapplyToDiskVersion(stuck, null, adoptingReapply().adopt);
+    const answer = reapplyToDiskVersion(stuck, null, adoptingReapply().adopt, null, () => stuck);
     if (answer.kind !== 'reapplied') {
       throw new Error('this case is about the rebuilt session');
     }
     expect(placementOf(answer.session)).toEqual({ kind: 'end' });
     expect(
-      beginMove(answer.session, identityInProjection([disk], answer.session.match))?.after
+      beginMove(answer.session, identityInProjection([disk], answer.session.match), () => answer.session)?.after
     ).toEqual(snippet(disk, ':date').id);
   });
 
@@ -1607,7 +1616,7 @@ describe('reapplying the retained move', () => {
     const stuck = conflictedOver(0, { kind: 'end' }, { Identified: { target } }, disk, {
       Refused: { reason: 'NoExactCorrespondence' }
     });
-    expect(reapplyToDiskVersion(stuck, null, adoptingReapply().adopt).kind).toBe('reapplied');
+    expect(reapplyToDiskVersion(stuck, null, adoptingReapply().adopt, null, () => stuck).kind).toBe('reapplied');
   });
 
   it('rebuilds an after from the identified anchor, never from the old one', () => {
@@ -1621,7 +1630,7 @@ describe('reapplying the retained move', () => {
       disk,
       { Identified: { target: anchor } }
     );
-    const answer = reapplyToDiskVersion(stuck, null, adoptingReapply().adopt);
+    const answer = reapplyToDiskVersion(stuck, null, adoptingReapply().adopt, null, () => stuck);
     if (answer.kind !== 'reapplied') {
       throw new Error('this case is about the rebuilt session');
     }
@@ -1629,7 +1638,7 @@ describe('reapplying the retained move', () => {
     // belonged to a parse that is gone.
     expect(placementOf(answer.session)).toEqual({ kind: 'after', anchor: anchor.id });
     expect(
-      beginMove(answer.session, identityInProjection([disk], answer.session.match))?.after
+      beginMove(answer.session, identityInProjection([disk], answer.session.match), () => answer.session)?.after
     ).toEqual(anchor.id);
   });
 
@@ -1648,7 +1657,7 @@ describe('reapplying the retained move', () => {
       { Identified: { target: anchor } }
     );
     const recorder = adoptingReapply();
-    const answer = reapplyToDiskVersion(stuck, null, recorder.adopt);
+    const answer = reapplyToDiskVersion(stuck, null, recorder.adopt, null, () => stuck);
     expect(answer.kind).toBe('alreadySatisfied');
     if (answer.kind !== 'alreadySatisfied') {
       throw new Error('this case is about the satisfied arm');
@@ -1656,7 +1665,7 @@ describe('reapplying the retained move', () => {
     expect(recorder.adoptions).toHaveLength(1);
     expect(moveSubmissionRefusal(answer.session, [disk])).toBe('alreadyThere');
     expect(
-      beginMove(answer.session, identityInProjection([disk], answer.session.match))
+      beginMove(answer.session, identityInProjection([disk], answer.session.match), () => answer.session)
     ).toBeNull();
   });
 
@@ -1670,7 +1679,7 @@ describe('reapplying the retained move', () => {
       disk,
       { Refused: { reason: 'AmbiguousExact' } }
     );
-    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'anchorCorrespondence', reason: 'AmbiguousExact' }
     });
@@ -1686,7 +1695,7 @@ describe('reapplying the retained move', () => {
       { Identified: { target: snippet(disk, ':sig') } },
       disk
     );
-    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'evidenceNotAnAnchor' }
     });
@@ -1707,7 +1716,7 @@ describe('reapplying the retained move', () => {
       disk,
       { Identified: { target } }
     );
-    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'anchorNotInSequence' }
     });
@@ -1735,7 +1744,7 @@ describe('reapplying the retained move', () => {
     });
     const recorder = adoptingReapply();
     const stuck = conflictedOver(0, { kind: 'end' }, { Identified: { target: elsewhere } }, disk);
-    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'notTheSameSequence' }
     });
@@ -1750,7 +1759,7 @@ describe('reapplying the retained move', () => {
       { Refused: { reason: 'TargetMissingOrTriggerChanged' } },
       reordered()
     );
-    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'correspondence', reason: 'TargetMissingOrTriggerChanged' }
     });
@@ -1760,7 +1769,7 @@ describe('reapplying the retained move', () => {
   it('refuses evidence that names no snippet, and adopts nothing', () => {
     const recorder = adoptingReapply();
     const stuck = conflictedOver(0, { kind: 'end' }, { Targetless: {} }, reordered());
-    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'evidenceNotATarget' }
     });
@@ -1776,7 +1785,7 @@ describe('reapplying the retained move', () => {
       { Identified: { target: snippet(disk, ':sig') } },
       disk
     );
-    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'moveRefused', reason: 'notMovable' }
     });
@@ -1792,13 +1801,13 @@ describe('reapplying the retained move', () => {
       { Identified: { target: snippet(disk, ':sig') } },
       disk
     );
-    expect(reapplyToDiskVersion(stuck, null, recorder.adopt)).toEqual({ kind: 'adoptionRefused' });
+    expect(reapplyToDiskVersion(stuck, null, recorder.adopt, null, () => stuck)).toEqual({ kind: 'adoptionRefused' });
     expect(recorder.adoptions).toHaveLength(1);
   });
 
   it('is not attempted when no conflict is showing', () => {
     const recorder = adoptingReapply();
-    expect(reapplyToDiskVersion(session(0), null, recorder.adopt)).toEqual({
+    expect(((onHand) => reapplyToDiskVersion(onHand, null, recorder.adopt, null, () => onHand))(session(0))).toEqual({
       kind: 'notAttempted'
     });
     expect(recorder.adoptions).toEqual([]);
@@ -1979,7 +1988,7 @@ describe('the external session — Phase 2d-6-4', () => {
    * @returns The waiting session.
    */
   function inFlight(): MatchMoveSession {
-    const started = beginMove(chosen(), live());
+    const started = ((onHand) => beginMove(onHand, live(), () => onHand))(chosen());
     if (started === null) {
       throw new Error('a chosen destination is sendable');
     }
@@ -1992,7 +2001,7 @@ describe('the external session — Phase 2d-6-4', () => {
    * @returns The session showing the save conflict.
    */
   function saveConflicted(): MatchMoveSession {
-    return applyMove(inFlight(), CONFLICT, NOT_OWED);
+    return ((onHand) => applyMove(onHand, CONFLICT, NOT_OWED, () => onHand))(inFlight());
   } // End of function saveConflicted()
 
   /**
@@ -2001,7 +2010,7 @@ describe('the external session — Phase 2d-6-4', () => {
    * @returns The session showing the refusal.
    */
   function refusedOnce(): MatchMoveSession {
-    return applyMove(inFlight(), REFUSED, NOT_OWED);
+    return ((onHand) => applyMove(onHand, REFUSED, NOT_OWED, () => onHand))(inFlight());
   } // End of function refusedOnce()
 
   describe('the seven arms over a session opened over one file (entries 6, 8, 11, 12)', () => {
@@ -2023,7 +2032,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(placementOf(next)).toEqual({ kind: 'end' });
       expect(moveSubmissionRefusal(next, HELD)).toBe('externalConflict');
       expect(moveSubmissionRefusalKey('externalConflict')).toBe('browser.externalConflict.fileChangedWhileOpen');
-      expect(beginMove(next, live())).toBeNull();
+      expect(beginMove(next, live(), () => next)).toBeNull();
       expect(next.invalidated).toBe(false);
       const view = matchMoveView(next, HELD);
       expect(view.canMove).toBe(false);
@@ -2049,7 +2058,7 @@ describe('the external session — Phase 2d-6-4', () => {
     it('answers null from beginMove called directly under an external conflict, refusal path included', () => {
       const blocked = applyMoveObservation(refusedOnce(), raised(observation()));
       expect(blocked.outcome?.kind).toBe('refused');
-      expect(beginMove(acknowledgeMoveFindings(blocked), live())).toBeNull();
+      expect(((onHand) => beginMove(onHand, live(), () => onHand))(acknowledgeMoveFindings(blocked))).toBeNull();
       const view = matchMoveView(blocked, HELD);
       expect(view.refusalChoices).toEqual(['keepEditing']);
       expect(view.findingsAreStale).toBe(false);
@@ -2057,7 +2066,7 @@ describe('the external session — Phase 2d-6-4', () => {
 
     it('ranks the external conflict where the save conflict sits, and the uncertain send above it', () => {
       const seen = observation();
-      const uncertain = applyMoveObservation(moveCouldNotBeSent(inFlight(), true, UNCERTAIN), raised(seen));
+      const uncertain = applyMoveObservation(((onHand) => moveCouldNotBeSent(onHand, true, UNCERTAIN, () => onHand))(inFlight()), raised(seen));
       expect(moveSubmissionRefusal(uncertain, HELD)).toBe('mayHaveWritten');
       const stale = applyMoveObservation(chosen(), raised(seen));
       expect(moveSubmissionRefusal(stale, [reread()])).toBe('externalConflict');
@@ -2101,13 +2110,13 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(conflictOf(waiting)).toBeNull();
       expect(moveSubmissionRefusal(waiting, HELD)).toBe('observationRetained');
       expect(moveSubmissionRefusalKey('observationRetained')).toBe('browser.externalConflict.observationRetained');
-      expect(beginMove(waiting, live())).toBeNull();
+      expect(beginMove(waiting, live(), () => waiting)).toBeNull();
       // The destination controls stay live, and a choice carries the wait.
       expect(canChoose(waiting)).toBe(true);
       const rechosen = choosePlacement(waiting, { kind: 'top' });
       expect(placementOf(rechosen)).toEqual({ kind: 'top' });
       expect(rechosen.awaitingReconciliation.get(2)).toBe(seen);
-      expect(beginMove(rechosen, live())).toBeNull();
+      expect(beginMove(rechosen, live(), () => rechosen)).toBeNull();
       const view = matchMoveView(waiting, HELD);
       expect(view.canMove).toBe(false);
       expect(view.cannotMove).toBe('observationRetained');
@@ -2148,19 +2157,19 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(held.externalConflict).toBeNull();
       expect(held.awaitingReconciliation.size).toBe(0);
       expect(held.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised', 'coalesced']);
-      const settled = applyMove(held, REFUSED, NOT_OWED);
+      const settled = applyMove(held, REFUSED, NOT_OWED, () => held);
       expect(settled.heldDeliveries).toEqual([]);
       expect(settled.outcome?.kind).toBe('refused');
       expect(externalOf(settled).source).toBe(standing);
       expect(settled.awaitingReconciliation.size).toBe(0);
       expect(moveSubmissionRefusal(settled, HELD)).toBe('externalConflict');
-      const committed = applyMove(held, saved(), ADOPTED);
+      const committed = applyMove(held, saved(), ADOPTED, () => held);
       expect(committed.outcome?.kind).toBe('saved');
       expect(committed.moved).toBe(true);
       expect(externalOf(committed).source).toBe(standing);
       expect(moveSubmissionRefusal(committed, HELD)).toBe('alreadyMoved');
       const heldUncertain = applyMoveObservation(started, decided(null, seen, true, 'raisedWithoutReload'));
-      const failed = moveCouldNotBeSent(heldUncertain, true, UNCERTAIN);
+      const failed = moveCouldNotBeSent(heldUncertain, true, UNCERTAIN, () => heldUncertain);
       expect(failed.heldDeliveries).toEqual([]);
       expect(failed.mayHaveWritten).toBe(true);
       expect(failed.uncertaintyUnresolved).toBe(true);
@@ -2197,17 +2206,17 @@ describe('the external session — Phase 2d-6-4', () => {
     }); // End of the "supersedes a save conflict" case
 
     it('keeps a committed success and a refusal as history, and lets a move that conflicts retire the external one', () => {
-      const committed = applyMove(inFlight(), saved(), ADOPTED);
+      const committed = ((onHand) => applyMove(onHand, saved(), ADOPTED, () => onHand))(inFlight());
       const overSaved = applyMoveObservation(committed, raised(observation()));
       expect(overSaved.outcome?.kind).toBe('saved');
       expect(overSaved.moved).toBe(true);
       expect(conflictOf(overSaved)).toBe(overSaved.externalConflict);
       expect(moveSubmissionRefusal(overSaved, HELD)).toBe('alreadyMoved');
       const blocked = applyMoveObservation(refusedOnce(), raised(observation()));
-      const conflicted = applyMove(blocked, CONFLICT, NOT_OWED);
+      const conflicted = applyMove(blocked, CONFLICT, NOT_OWED, () => blocked);
       expect(conflicted.externalConflict).toBeNull();
       expect(conflictOf(conflicted)?.source.kind).toBe('save');
-      const refusedAgain = applyMove(blocked, REFUSED, NOT_OWED);
+      const refusedAgain = applyMove(blocked, REFUSED, NOT_OWED, () => blocked);
       expect(refusedAgain.externalConflict).toBe(blocked.externalConflict);
     });
 
@@ -2220,7 +2229,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(kept.reload).toBe(NOT_RELOADING);
       expect(kept.externalConflict).toBe(blocked.externalConflict);
       expect(canChoose(kept)).toBe(false);
-      expect(beginMove(kept, live())).toBeNull();
+      expect(beginMove(kept, live(), () => kept)).toBeNull();
       const withheld = applyMoveObservation(chosen(), decided(null, observation(), true, 'raisedWithoutReload'));
       expect(dismissMoveOutcome(withheld).uncertaintyUnresolved).toBe(true);
       const waiting = applyMoveObservation(chosen(), retainedDelivery(seen));
@@ -2253,7 +2262,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(view.externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
       expect(askToReloadDiskVersion(withheld)).toBe(withheld);
       const recorder = adopting();
-      expect(reapplyToDiskVersion(withheld, null, recorder.adopt, () => externalOf(withheld).source)).toEqual({
+      expect(reapplyToDiskVersion(withheld, null, recorder.adopt, () => externalOf(withheld).source, () => withheld)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'writeOutcomeUnknown' }
       });
@@ -2381,7 +2390,7 @@ describe('the external session — Phase 2d-6-4', () => {
     it('rebuilds an after from the subject’s and the anchor’s rows of one table, reading their exact tiers and never the index', () => {
       const { stuck, stands } = raisedOver(bothFound());
       const recorder = adopting();
-      const answer = reapplyToDiskVersion(stuck, null, recorder.adopt, stands);
+      const answer = reapplyToDiskVersion(stuck, null, recorder.adopt, stands, () => stuck);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind !== 'reapplied') {
         throw new Error('this case is about the rebuilt session');
@@ -2396,10 +2405,10 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(answer.session.awaitingReconciliation.size).toBe(0);
       expect(canMove(answer.session, [diskFile()])).toBe(true);
       // R25: what goes out is one move and nothing else, against the live identity.
-      const started = beginMove(answer.session, live(1, diskFile()));
+      const started = beginMove(answer.session, live(1, diskFile()), () => answer.session);
       expect(started?.match).toEqual(TWIN.id);
       expect(started?.after).toEqual(ANCHOR_TWIN.id);
-      expect(beginMove(answer.session, live())).toBeNull();
+      expect(beginMove(answer.session, live(), () => answer.session)).toBeNull();
       expect(recorder.adoptions).toEqual([externalOf(stuck)]);
     }); // End of the "after rebuilt from both rows" case
 
@@ -2408,11 +2417,11 @@ describe('the external session — Phase 2d-6-4', () => {
       // `end`: the subject's row alone suffices, and the end is lowered against
       // the new sequence — after `:date`, which is now last.
       const atEnd = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]), { kind: 'end' });
-      const moved = reapplyToDiskVersion(atEnd.stuck, null, recorder.adopt, atEnd.stands);
+      const moved = reapplyToDiskVersion(atEnd.stuck, null, recorder.adopt, atEnd.stands, () => atEnd.stuck);
       expect(moved.kind).toBe('reapplied');
       if (moved.kind === 'reapplied') {
         expect(placementOf(moved.session)).toEqual({ kind: 'end' });
-        expect(beginMove(moved.session, live(1, diskFile()))?.after).toEqual(ANCHOR_TWIN.id);
+        expect(beginMove(moved.session, live(1, diskFile()), () => moved.session)?.after).toEqual(ANCHOR_TWIN.id);
       }
       // `top`, for the second snippet, over a disk that already writes it
       // first: nothing to send, and nothing written.
@@ -2428,12 +2437,12 @@ describe('the external session — Phase 2d-6-4', () => {
         { kind: 'top' },
         1
       );
-      const satisfied = reapplyToDiskVersion(atTop.stuck, null, recorder.adopt, atTop.stands);
+      const satisfied = reapplyToDiskVersion(atTop.stuck, null, recorder.adopt, atTop.stands, () => atTop.stuck);
       expect(satisfied.kind).toBe('alreadySatisfied');
       if (satisfied.kind === 'alreadySatisfied') {
         expect(satisfied.session.match).toEqual(snippet(first, ':date').id);
         expect(moveSubmissionRefusal(satisfied.session, [first])).toBe('alreadyThere');
-        expect(beginMove(satisfied.session, live(0, first))).toBeNull();
+        expect(beginMove(satisfied.session, live(0, first), () => satisfied.session)).toBeNull();
       }
       // A table whose anchor row would refuse changes nothing for a placement
       // that names no snippet.
@@ -2444,7 +2453,7 @@ describe('the external session — Phase 2d-6-4', () => {
         ]),
         { kind: 'end' }
       );
-      expect(reapplyToDiskVersion(refusingAnchor.stuck, null, recorder.adopt, refusingAnchor.stands).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(refusingAnchor.stuck, null, recorder.adopt, refusingAnchor.stands, () => refusingAnchor.stuck).kind).toBe('reapplied');
       expect(recorder.adoptions).toHaveLength(3);
     }); // End of the "semantic placements" case
 
@@ -2453,13 +2462,13 @@ describe('the external session — Phase 2d-6-4', () => {
       const refusedTier = raisedOver(
         observed([row(SUBJECT, { Refused: { reason: 'AmbiguousExact' } }), row(ANCHOR, { Identified: { target: ANCHOR_TWIN } })])
       );
-      expect(reapplyToDiskVersion(refusedTier.stuck, null, recorder.adopt, refusedTier.stands)).toEqual({
+      expect(reapplyToDiskVersion(refusedTier.stuck, null, recorder.adopt, refusedTier.stands, () => refusedTier.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'correspondence', reason: 'AmbiguousExact' }
       });
       for (const empty of [{ Unsupported: {} }, { Targetless: {} }] as const) {
         const emptyTier = raisedOver(observed([row(SUBJECT, empty), row(ANCHOR, { Identified: { target: ANCHOR_TWIN } })]));
-        expect(reapplyToDiskVersion(emptyTier.stuck, null, recorder.adopt, emptyTier.stands)).toEqual({
+        expect(reapplyToDiskVersion(emptyTier.stuck, null, recorder.adopt, emptyTier.stands, () => emptyTier.stuck)).toEqual({
           kind: 'manualResolution',
           obstacle: { kind: 'evidenceNotATarget' }
         });
@@ -2470,7 +2479,7 @@ describe('the external session — Phase 2d-6-4', () => {
           row(ANCHOR, { Identified: { target: ANCHOR_TWIN } })
         ])
       );
-      expect(reapplyToDiskVersion(staleRevision.stuck, null, recorder.adopt, staleRevision.stands)).toEqual({
+      expect(reapplyToDiskVersion(staleRevision.stuck, null, recorder.adopt, staleRevision.stands, () => staleRevision.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
@@ -2480,7 +2489,7 @@ describe('the external session — Phase 2d-6-4', () => {
           row(ANCHOR, { Identified: { target: ANCHOR_TWIN } })
         ])
       );
-      expect(reapplyToDiskVersion(byPosition.stuck, null, recorder.adopt, byPosition.stands)).toEqual({
+      expect(reapplyToDiskVersion(byPosition.stuck, null, recorder.adopt, byPosition.stands, () => byPosition.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
@@ -2491,7 +2500,7 @@ describe('the external session — Phase 2d-6-4', () => {
           row(ANCHOR, { Identified: { target: ANCHOR_TWIN } })
         ])
       );
-      expect(reapplyToDiskVersion(twice.stuck, null, recorder.adopt, twice.stands)).toEqual({
+      expect(reapplyToDiskVersion(twice.stuck, null, recorder.adopt, twice.stands, () => twice.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'severalRowsForBase' }
       });
@@ -2502,26 +2511,26 @@ describe('the external session — Phase 2d-6-4', () => {
       const recorder = adopting();
       const subjectRow = row(SUBJECT, { Identified: { target: TWIN } });
       const refusedTier = raisedOver(observed([subjectRow, row(ANCHOR, { Refused: { reason: 'NoExactCorrespondence' } })]));
-      expect(reapplyToDiskVersion(refusedTier.stuck, null, recorder.adopt, refusedTier.stands)).toEqual({
+      expect(reapplyToDiskVersion(refusedTier.stuck, null, recorder.adopt, refusedTier.stands, () => refusedTier.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'anchorCorrespondence', reason: 'NoExactCorrespondence' }
       });
       for (const empty of [{ Unsupported: {} }, { Targetless: {} }] as const) {
         const emptyTier = raisedOver(observed([subjectRow, row(ANCHOR, empty)]));
-        expect(reapplyToDiskVersion(emptyTier.stuck, null, recorder.adopt, emptyTier.stands)).toEqual({
+        expect(reapplyToDiskVersion(emptyTier.stuck, null, recorder.adopt, emptyTier.stands, () => emptyTier.stuck)).toEqual({
           kind: 'manualResolution',
           obstacle: { kind: 'evidenceNotAnAnchor' }
         });
       } // End of the loop over the two empty arms
       const missing = raisedOver(observed([subjectRow]));
-      expect(reapplyToDiskVersion(missing.stuck, null, recorder.adopt, missing.stands)).toEqual({
+      expect(reapplyToDiskVersion(missing.stuck, null, recorder.adopt, missing.stands, () => missing.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
       const twice = raisedOver(
         observed([subjectRow, row(ANCHOR, { Identified: { target: ANCHOR_TWIN } }), row(ANCHOR, { Identified: { target: ANCHOR_TWIN } })])
       );
-      expect(reapplyToDiskVersion(twice.stuck, null, recorder.adopt, twice.stands)).toEqual({
+      expect(reapplyToDiskVersion(twice.stuck, null, recorder.adopt, twice.stands, () => twice.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'severalRowsForBase' }
       });
@@ -2529,12 +2538,12 @@ describe('the external session — Phase 2d-6-4', () => {
       // the moved snippet itself — the self-anchor exclusion.
       const stranger = makeMatch({ node: 99, document: 2, revision: AFTER, trigger: ':gone' });
       const notHeld = raisedOver(observed([subjectRow, row(ANCHOR, { Identified: { target: stranger } })]));
-      expect(reapplyToDiskVersion(notHeld.stuck, null, recorder.adopt, notHeld.stands)).toEqual({
+      expect(reapplyToDiskVersion(notHeld.stuck, null, recorder.adopt, notHeld.stands, () => notHeld.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'anchorNotInSequence' }
       });
       const itself = raisedOver(observed([subjectRow, row(ANCHOR, { Identified: { target: TWIN } })]));
-      expect(reapplyToDiskVersion(itself.stuck, null, recorder.adopt, itself.stands)).toEqual({
+      expect(reapplyToDiskVersion(itself.stuck, null, recorder.adopt, itself.stands, () => itself.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'anchorNotInSequence' }
       });
@@ -2556,7 +2565,7 @@ describe('the external session — Phase 2d-6-4', () => {
         ]
       });
       const subjectMoved = raisedOver(bothFound(elsewhere));
-      expect(reapplyToDiskVersion(subjectMoved.stuck, null, recorder.adopt, subjectMoved.stands)).toEqual({
+      expect(reapplyToDiskVersion(subjectMoved.stuck, null, recorder.adopt, subjectMoved.stands, () => subjectMoved.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'notTheSameSequence' }
       });
@@ -2568,7 +2577,7 @@ describe('the external session — Phase 2d-6-4', () => {
         ]
       });
       const anchorMoved = raisedOver(bothFound(anchorElsewhere));
-      expect(reapplyToDiskVersion(anchorMoved.stuck, null, recorder.adopt, anchorMoved.stands)).toEqual({
+      expect(reapplyToDiskVersion(anchorMoved.stuck, null, recorder.adopt, anchorMoved.stands, () => anchorMoved.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'anchorNotInSequence' }
       });
@@ -2576,12 +2585,12 @@ describe('the external session — Phase 2d-6-4', () => {
       // sequence — two snippets now, the anchor's twin not among them — which
       // already writes the subject last: nothing to send, and nothing written.
       const atEnd = raisedOver(bothFound(anchorElsewhere), { kind: 'end' });
-      const answer = reapplyToDiskVersion(atEnd.stuck, null, adopting().adopt, atEnd.stands);
+      const answer = reapplyToDiskVersion(atEnd.stuck, null, adopting().adopt, atEnd.stands, () => atEnd.stuck);
       expect(answer.kind).toBe('alreadySatisfied');
       if (answer.kind === 'alreadySatisfied') {
         expect(answer.session.members.map((one) => one.node)).toEqual([32, 30]);
         expect(answer.session.anchors.map((one) => one.node)).toEqual([32]);
-        expect(beginMove(answer.session, live(1, anchorElsewhere))).toBeNull();
+        expect(beginMove(answer.session, live(1, anchorElsewhere), () => answer.session)).toBeNull();
       }
       expect(recorder.adoptions).toEqual([]);
     }); // End of the "same-sequence rule over the disk version" case
@@ -2590,17 +2599,17 @@ describe('the external session — Phase 2d-6-4', () => {
       const recorder = adopting();
       for (const placement of [AFTER_ANCHOR, { kind: 'end' }] as const) {
         const otherBase = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })], { base: 'z'.repeat(64) }), placement);
-        expect(reapplyToDiskVersion(otherBase.stuck, null, recorder.adopt, otherBase.stands)).toEqual({
+        expect(reapplyToDiskVersion(otherBase.stuck, null, recorder.adopt, otherBase.stands, () => otherBase.stuck)).toEqual({
           kind: 'manualResolution',
           obstacle: { kind: 'externalEvidence', reason: 'baseRevisionMoved' }
         });
         const otherDisk = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })], { disk: 'z'.repeat(64) }), placement);
-        expect(reapplyToDiskVersion(otherDisk.stuck, null, recorder.adopt, otherDisk.stands)).toEqual({
+        expect(reapplyToDiskVersion(otherDisk.stuck, null, recorder.adopt, otherDisk.stands, () => otherDisk.stuck)).toEqual({
           kind: 'manualResolution',
           obstacle: { kind: 'externalEvidence', reason: 'diskRevisionMoved' }
         });
         const tableless = raisedOver(observation(), placement);
-        expect(reapplyToDiskVersion(tableless.stuck, null, recorder.adopt, tableless.stands)).toEqual({
+        expect(reapplyToDiskVersion(tableless.stuck, null, recorder.adopt, tableless.stands, () => tableless.stuck)).toEqual({
           kind: 'manualResolution',
           obstacle: { kind: 'externalEvidence', reason: 'noCorrespondence' }
         });
@@ -2612,16 +2621,16 @@ describe('the external session — Phase 2d-6-4', () => {
       const recorder = adopting();
       const elsewhere = externalConflictSource(observation({ sequence: 9 }));
       const anchored = raisedOver(bothFound());
-      expect(reapplyToDiskVersion(anchored.stuck, null, recorder.adopt, () => elsewhere)).toEqual({
+      expect(reapplyToDiskVersion(anchored.stuck, null, recorder.adopt, () => elsewhere, () => anchored.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
       const atEnd = raisedOver(observation(), { kind: 'end' });
-      expect(reapplyToDiskVersion(atEnd.stuck, null, recorder.adopt, () => null)).toEqual({
+      expect(reapplyToDiskVersion(atEnd.stuck, null, recorder.adopt, () => null, () => atEnd.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
-      expect(reapplyToDiskVersion(saveConflicted(), null, recorder.adopt, () => elsewhere)).toEqual({
+      expect(((onHand) => reapplyToDiskVersion(onHand, null, recorder.adopt, () => elsewhere, () => onHand))(saveConflicted())).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
@@ -2630,14 +2639,14 @@ describe('the external session — Phase 2d-6-4', () => {
 
     it('answers every adoption outcome for the external origin, and asks the ordinary rule again over the disk parse', () => {
       const { stuck, stands } = raisedOver(bothFound());
-      expect(reapplyToDiskVersion(stuck, null, adopting('installed').adopt, stands).kind).toBe('reapplied');
-      expect(reapplyToDiskVersion(stuck, null, adopting('alreadyThere').adopt, stands).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, null, adopting('installed').adopt, stands, () => stuck).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, null, adopting('alreadyThere').adopt, stands, () => stuck).kind).toBe('reapplied');
       const refusedWindow = adopting('refused');
-      expect(reapplyToDiskVersion(stuck, null, refusedWindow.adopt, stands)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, null, refusedWindow.adopt, stands, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(refusedWindow.adoptions).toHaveLength(1);
       // The unsaved-draft rule is asked again, by the disk parse's identity.
       const recorder = adopting();
-      expect(reapplyToDiskVersion(stuck, TWIN.id, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(stuck, TWIN.id, recorder.adopt, stands, () => stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'moveRefused', reason: 'notMovable' }
       });
@@ -2651,7 +2660,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(held.awaitingReconciliation.get(2)).toBe(heldReading);
       expect(moveSubmissionRefusal(held, HELD)).toBe('externalConflict');
       const recorder = adopting();
-      expect(reapplyToDiskVersion(held, null, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(held, null, recorder.adopt, stands, () => held)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'observationRetained' }
       });
@@ -2661,7 +2670,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(view.reapplyOffered).toBe(false);
       expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
       const lifted = applyMoveObservation(held, writtenHereDelivery(heldReading));
-      const answer = reapplyToDiskVersion(lifted, null, adopting().adopt, stands);
+      const answer = reapplyToDiskVersion(lifted, null, adopting().adopt, stands, () => lifted);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind === 'reapplied') {
         expect(answer.session.awaitingReconciliation.size).toBe(0);
@@ -2669,7 +2678,7 @@ describe('the external session — Phase 2d-6-4', () => {
       }
       const elsewhere = otherObservation();
       const carrying: MatchMoveSession = { ...stuck, awaitingReconciliation: new Map([[3, elsewhere]]) };
-      const rebuilt = reapplyToDiskVersion(carrying, null, adopting().adopt, stands);
+      const rebuilt = reapplyToDiskVersion(carrying, null, adopting().adopt, stands, () => carrying);
       expect(rebuilt.kind).toBe('reapplied');
       if (rebuilt.kind === 'reapplied') {
         expect(rebuilt.session.awaitingReconciliation.get(3)).toBe(elsewhere);
@@ -2679,9 +2688,9 @@ describe('the external session — Phase 2d-6-4', () => {
     it('asks nothing of the window when no guard is handed in, and leaves the door to decide', () => {
       const { stuck } = raisedOver(bothFound());
       const refusedWindow = adopting('refused');
-      expect(reapplyToDiskVersion(stuck, null, refusedWindow.adopt)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, null, refusedWindow.adopt, null, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(refusedWindow.adoptions).toEqual([externalOf(stuck)]);
-      expect(reapplyToDiskVersion(stuck, null, adopting().adopt).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, null, adopting().adopt, null, () => stuck).kind).toBe('reapplied');
     });
 
     it('names a sentence in both languages for every obstacle the external origin can raise', () => {
@@ -2764,6 +2773,72 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(beginMove(waiting.current(), live(), waiting.current)).toBeNull();
     }); // End of the "displaced during the projection read" case
 
+    it('refuses a move when a later read of this door displaced the installed session (2d-6-5’s class, Phase 2d-6-6a)', () => {
+      // **The installed session is read once, and it must be read last.** The
+      // door reads the draft's value for the submission and the lowering, and
+      // spreads the session; a getter quiet on the first read and delivering on
+      // a later one, or on the spread, runs after a reader asked too early.
+      const seen = observation();
+      /**
+       * A holder installing a session whose draft value delivers `raised` to it
+       * on the given read, counting from one, and counts the reads.
+       *
+       * @param on - The read that delivers, or `null` to deliver never.
+       * @returns The reader, the trapped session and the count.
+       */
+      function deliveringOnRead(on: number | null): {
+        readonly current: () => MatchMoveSession;
+        readonly trapped: MatchMoveSession;
+        readonly reads: () => number;
+      } {
+        const handedIn = chosen();
+        let reads = 0;
+        let held: MatchMoveSession = handedIn;
+        const trapped: MatchMoveSession = {
+          ...handedIn,
+          draft: {
+            ...handedIn.draft,
+            get value(): MovePlacement {
+              reads += 1;
+              if (reads === on) {
+                held = applyMoveObservation(held, raised(seen));
+              }
+              return handedIn.draft.value;
+            }
+          }
+        };
+        held = trapped;
+        return { current: () => held, trapped, reads: () => reads };
+      } // End of function deliveringOnRead()
+      const quiet = deliveringOnRead(null);
+      expect(beginMove(quiet.trapped, live(), quiet.current)).not.toBeNull();
+      const total = quiet.reads();
+      expect(total).toBeGreaterThanOrEqual(1);
+      for (let on = 1; on <= total; on += 1) {
+        const displaced = deliveringOnRead(on);
+        expect(beginMove(displaced.trapped, live(), displaced.current)).toBeNull();
+        expect(externalOf(displaced.current()).source).toBe(externalConflictSource(seen));
+      } // End of the loop over the reads of the draft's value
+      // The spread that builds the waiting session reads every own property.
+      // Armed once: the receiver's own spread reads it again.
+      const beforeSpread = chosen();
+      let armed = true;
+      let spreadHeld: MatchMoveSession = beforeSpread;
+      const trappedSpread: MatchMoveSession = {
+        ...beforeSpread,
+        get extraMessages(): MatchMoveSession['extraMessages'] {
+          if (armed) {
+            armed = false;
+            spreadHeld = applyMoveObservation(spreadHeld, raised(seen));
+          }
+          return [];
+        }
+      };
+      spreadHeld = trappedSpread;
+      expect(beginMove(trappedSpread, live(), () => spreadHeld)).toBeNull();
+      expect(externalOf(spreadHeld).source).toBe(externalConflictSource(seen));
+    }); // End of the "displaced during a later read" case
+
     it('settles against the installed session and replays a delivery that arrived during its own replay', () => {
       // **The review's second blocker**, on the two settling transitions.
       const later = observation({ sequence: 6, diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
@@ -2803,7 +2878,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(failed.heldDeliveries).toEqual([]);
       expect(externalOf(failed).source).toBe(externalConflictSource(later));
       const alone = trapped();
-      expect(externalOf(applyMove(alone.current(), REFUSED, NOT_OWED)).source).not.toBe(externalConflictSource(later));
+      expect(externalOf(((onHand) => applyMove(onHand, REFUSED, NOT_OWED, () => onHand))(alone.current())).source).not.toBe(externalConflictSource(later));
     }); // End of the "delivery during the replay" case
 
     it('rechecks the installed session immediately before adopting, and refuses a wait or a supersession that arrived during the subject’s or the anchor’s read', () => {
@@ -2888,17 +2963,17 @@ describe('the external session — Phase 2d-6-4', () => {
       const stands: StandingOriginGuard = () => externalOf(stuck).source;
       const recorder = adopting();
       const held = applyMoveObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
-      expect(reapplyToDiskVersion(held, null, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(held, null, recorder.adopt, stands, () => held)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'observationRetained' }
       });
       const withheld = applyMoveObservation(chosen(AFTER_ANCHOR), decided(null, seen, true, 'raisedWithoutReload'));
-      expect(reapplyToDiskVersion(withheld, null, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(withheld, null, recorder.adopt, stands, () => withheld)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'writeOutcomeUnknown' }
       });
       expect(reads).toBe(0);
-      expect(reapplyToDiskVersion(stuck, null, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(stuck, null, recorder.adopt, stands, () => stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });

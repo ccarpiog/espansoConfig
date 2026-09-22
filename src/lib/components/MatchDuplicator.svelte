@@ -393,7 +393,7 @@
     if (acknowledge) {
       session = acknowledgeDuplicationFindings(session);
     }
-    const started = beginDuplicate(session, identityInProjection(current.views, session.match));
+    const started = beginDuplicate(session, identityInProjection(current.views, session.match), () => session);
     if (started === null) {
       // The model refuses, and it has already said why:
       // `current.view.cannotDuplicate` is computed from the same read this call
@@ -419,13 +419,13 @@
     // was written and there is no reason to show. `failed` is a command that ran
     // and rejected, and it always carries why.
     if (answer.kind === 'answered') {
-      session = applyDuplication(session, answer.result, answer.adoption);
+      session = applyDuplication(session, answer.result, answer.adoption, () => session);
       return;
     }
     session =
       answer.kind === 'notAttempted'
-        ? duplicationCouldNotBeSent(session, false, null)
-        : duplicationCouldNotBeSent(session, answer.mayHaveWritten, answer.failure);
+        ? duplicationCouldNotBeSent(session, false, null, () => session)
+        : duplicationCouldNotBeSent(session, answer.mayHaveWritten, answer.failure, () => session);
   } // End of function runDuplicate()
 
   /**
@@ -497,7 +497,12 @@
    * mounted suite alone.
    */
   function keepMyDraft(): void {
-    const attempt = attemptOfReapply(session, reapplyToDiskVersion(session, unsavedDraftInDocument(), adoptDiskVersion));
+    // **The outcome first, then the session still installed** (the 2d-6-6a
+    // review, its third finding): a refused reapply leaves whatever a receiver
+    // installed during it, and folding it into a session read beforehand would
+    // reinstall the capture.
+    const outcome = reapplyToDiskVersion(session, unsavedDraftInDocument(), adoptDiskVersion, null, () => session);
+    const attempt = attemptOfReapply(session, outcome);
     reapplyAttempt = attempt;
     session = attempt.session;
   } // End of function keepMyDraft()

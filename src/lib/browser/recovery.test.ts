@@ -197,6 +197,48 @@ const CLOCK = (): number => 0;
 const INSTALLS_NOTHING: InstallTheWaitingForm = () => {};
 
 /**
+ * `sendRecoveryCreate` with the reader a panel passes: the form it was handed
+ * until `install` is called, and the form `install` was last handed from then on.
+ *
+ * Phase 2d-6-6a made the reader required. A case that is not about displacement
+ * still has to say what the caller holds, and what `RecoveryPanel.svelte` holds
+ * is exactly this — the form it sent from, then the waiting form it installed —
+ * so a case written before the reader existed keeps the behaviour it pinned: the
+ * door checks the form handed in, and the answer is settled against the waiting
+ * form. `install` is still called with every form it was called with before.
+ *
+ * @param session - The form to submit.
+ * @param create - The boundary.
+ * @param install - What the case does with the waiting form.
+ * @returns What `sendRecoveryCreate` answers.
+ */
+function sendTracking(
+  session: RecoverySession,
+  create: CreateARecoveredSnippet,
+  install: InstallTheWaitingForm
+): Promise<RecoverySession> {
+  let held = session;
+  return sendRecoveryCreate(
+    session,
+    create,
+    (waiting) => {
+      held = waiting;
+      install(waiting);
+    },
+    () => held
+  );
+} // End of function sendTracking()
+
+/*
+ * **`((onHand) => door(onHand, …, () => onHand))(value)`** is a door, a settling
+ * transition or a reapply called with a reader answering the very session it is
+ * handed — the installed session of a caller that registers no receiver. Phase
+ * 2d-6-6a made the reader required; this is how a case that is not about
+ * displacement says so without evaluating `value` twice. The cases that are about
+ * displacement pass a holder's reader instead.
+ */
+
+/**
  * An installation that fails the case that reaches it.
  *
  * For the probes where *nothing goes in flight at all* is the property under test.
@@ -925,7 +967,7 @@ describe('where a recovered snippet may go', () => {
   });
 
   it('withdraws consent and the panel when the destination moves', async () => {
-    const refusedFirst = await sendRecoveryCreate(
+    const refusedFirst = await sendTracking(
       openedOverEditor(),
       recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
       INSTALLS_NOTHING
@@ -940,7 +982,7 @@ describe('where a recovered snippet may go', () => {
     const { create, calls } = recordingCreate([
       { kind: 'answered', result: COMMITTED, adoption: ADOPTED }
     ]);
-    await sendRecoveryCreate(moved, create, INSTALLS_NOTHING);
+    await sendTracking(moved, create, INSTALLS_NOTHING);
     expect(calls[0]![3]).toBe(OTHER);
     expect(calls[0]![4]).toEqual({ accepted: [] });
   }); // End of the "consent does not cross a destination" case
@@ -949,7 +991,7 @@ describe('where a recovered snippet may go', () => {
 describe('where in the file a recovered snippet goes', () => {
   it('is the end, and there is no other value and no chooser', async () => {
     expect(RECOVERY_POSITION).toEqual({ End: {} });
-    const started = beginRecoveryCreate(openedOverEditor());
+    const started = ((onHand) => beginRecoveryCreate(onHand, () => onHand))(openedOverEditor());
     expect(started?.position).toBe(RECOVERY_POSITION);
     // No anchor, no ordinal, no front: the whole of what is sent is checked, not
     // just the arm's name.
@@ -957,7 +999,7 @@ describe('where in the file a recovered snippet goes', () => {
     const { create, calls } = recordingCreate([
       { kind: 'answered', result: COMMITTED, adoption: ADOPTED }
     ]);
-    await sendRecoveryCreate(openedOverEditor(), create, INSTALLS_NOTHING);
+    await sendTracking(openedOverEditor(), create, INSTALLS_NOTHING);
     expect(calls[0]![2]).toEqual({ End: {} });
     expect(recoveryView(openedOverEditor()).position).toEqual({ End: {} });
   });
@@ -981,7 +1023,7 @@ describe('sending the recovery create', () => {
       expect(args[3]).toBe(recoveryBaseRevisionOf(installed[0]!));
       return { kind: 'answered', result: COMMITTED, adoption: ADOPTED };
     };
-    const after = await sendRecoveryCreate(openedOverEditor(), create, (waiting) => {
+    const after = await sendTracking(openedOverEditor(), create, (waiting) => {
       order.push('install');
       installed.push(waiting);
     });
@@ -1002,7 +1044,7 @@ describe('sending the recovery create', () => {
     const installed: RecoverySession[] = [];
     const blank = editRecoveryField(openedOverCreator({ trigger: '', replace: 'A body' }), 'trigger', '');
     const { create, calls } = recordingCreate([]);
-    expect(await sendRecoveryCreate(blank, create, (waiting) => installed.push(waiting))).toBe(blank);
+    expect(await sendTracking(blank, create, (waiting) => installed.push(waiting))).toBe(blank);
     expect(installed).toEqual([]);
     expect(calls).toEqual([]);
   });
@@ -1012,7 +1054,7 @@ describe('sending the recovery create', () => {
       { kind: 'answered', result: COMMITTED, adoption: ADOPTED }
     ]);
     const session = openedOverEditor(snippet({ label: 'A name' }));
-    const after = await sendRecoveryCreate(session, create, INSTALLS_NOTHING);
+    const after = await sendTracking(session, create, INSTALLS_NOTHING);
     expect(calls).toHaveLength(1);
     expect(calls[0]![0]).toBe(2);
     expect(calls[0]![1]).toEqual({
@@ -1030,19 +1072,19 @@ describe('sending the recovery create', () => {
       { kind: 'answered', result: REFUSED, adoption: NOT_OWED },
       { kind: 'answered', result: COMMITTED, adoption: ADOPTED }
     ]);
-    const refused = await sendRecoveryCreate(openedOverEditor(), create, INSTALLS_NOTHING);
+    const refused = await sendTracking(openedOverEditor(), create, INSTALLS_NOTHING);
     expect(refused.outcome?.kind).toBe('refused');
     expect(recoveryView(refused).refusalChoices).toEqual(['saveAnyway', 'keepEditing']);
     expect(refused.committed).toBe(false);
     expect(sourceConflictState(refused)).toBe('retained');
     const consented = acknowledgeRecoveryFindings(refused);
-    const committed = await sendRecoveryCreate(consented, create, INSTALLS_NOTHING);
+    const committed = await sendTracking(consented, create, INSTALLS_NOTHING);
     expect(calls[1]![4]).toEqual({ accepted: [REPEATS_TRIGGER] });
     expect(committed.committed).toBe(true);
   }); // End of the "acknowledgement round trip" case
 
   it('withdraws the offer to save anyway once the findings are about another draft', async () => {
-    const refused = await sendRecoveryCreate(
+    const refused = await sendTracking(
       openedOverEditor(),
       recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
       INSTALLS_NOTHING
@@ -1054,7 +1096,7 @@ describe('sending the recovery create', () => {
 
   it('keeps its own conflict, and the source conflict, when the file moved again', async () => {
     const session = openedOverEditor();
-    const conflicted = await sendRecoveryCreate(
+    const conflicted = await sendTracking(
       session,
       recordingCreate([
         {
@@ -1087,7 +1129,7 @@ describe('sending the recovery create', () => {
       }
     ]);
     const session = openedOverEditor();
-    const after = await sendRecoveryCreate(session, create, INSTALLS_NOTHING);
+    const after = await sendTracking(session, create, INSTALLS_NOTHING);
     expect(after.sendFailure?.kind).toBe('mayHaveWritten');
     expect(after.outcome).toBeNull();
     expect(after.committed).toBe(false);
@@ -1105,7 +1147,7 @@ describe('sending the recovery create', () => {
   }); // End of the "uncertain send" case
 
   it('leaves the source conflict alone for a failure that wrote nothing', async () => {
-    const after = await sendRecoveryCreate(
+    const after = await sendTracking(
       openedOverEditor(),
       recordingCreate([
         {
@@ -1121,7 +1163,7 @@ describe('sending the recovery create', () => {
   });
 
   it('says nothing was written for a state that refused before any command ran', async () => {
-    const after = await sendRecoveryCreate(
+    const after = await sendTracking(
       openedOverEditor(),
       recordingCreate([{ kind: 'notAttempted' }]).create,
       INSTALLS_NOTHING
@@ -1132,15 +1174,15 @@ describe('sending the recovery create', () => {
   it('raises the two failure arms from outside the composition too', () => {
     // The transition is public because a caller that composes `beginRecoveryCreate`
     // itself still has to be able to say what became of its own send.
-    const started = beginRecoveryCreate(openedOverEditor())!;
-    expect(recoveryCreateCouldNotBeSent(started.session, false, null).sendFailure).toEqual({
+    const started = ((onHand) => beginRecoveryCreate(onHand, () => onHand))(openedOverEditor())!;
+    expect(recoveryCreateCouldNotBeSent(started.session, false, null, () => started.session).sendFailure).toEqual({
       kind: 'notSent',
       reason: null
     });
     const uncertain = recoveryCreateCouldNotBeSent(started.session, true, {
       kind: 'command',
       error: { code: 'noWorkspaceOpen' }
-    });
+    }, () => started.session);
     expect(uncertain.sendFailure?.kind).toBe('mayHaveWritten');
     // Back to drafting either way, so nothing the person typed is stranded behind
     // a phase that never ends.
@@ -1148,7 +1190,7 @@ describe('sending the recovery create', () => {
   });
 
   it('reports a committed create whose adoption failed as a save, never as an error', async () => {
-    const after = await sendRecoveryCreate(
+    const after = await sendTracking(
       openedOverEditor(),
       recordingCreate([{ kind: 'answered', result: COMMITTED, adoption: NOT_ADOPTED }]).create,
       INSTALLS_NOTHING
@@ -1162,23 +1204,23 @@ describe('sending the recovery create', () => {
   }); // End of the "failed adoption after a known commit" case
 
   it('spends the form on a commit and lets nothing dismiss its way past that', async () => {
-    const after = await sendRecoveryCreate(
+    const after = await sendTracking(
       openedOverEditor(),
       recordingCreate([{ kind: 'answered', result: COMMITTED, adoption: ADOPTED }]).create,
       INSTALLS_NOTHING
     );
     expect(recoveryRefusal(after)).toBe('alreadyCreated');
     expect(recoveryRefusal(keepRecovering(after))).toBe('alreadyCreated');
-    expect(beginRecoveryCreate(after)).toBeNull();
+    expect(beginRecoveryCreate(after, () => after)).toBeNull();
     expect(isRecoveryEditable(after)).toBe(false);
     const { create, calls } = recordingCreate([]);
-    expect(await sendRecoveryCreate(after, create, INSTALLS_NOTHING)).toBe(after);
+    expect(await sendTracking(after, create, INSTALLS_NOTHING)).toBe(after);
     expect(calls).toEqual([]);
   });
 
   it('retains the source conflict for a saved arm that committed nothing and moved nothing', async () => {
     const wroteNothing: SaveResult = { ...COMMITTED, committed: false, moved: null };
-    const after = await sendRecoveryCreate(
+    const after = await sendTracking(
       openedOverEditor(),
       recordingCreate([{ kind: 'answered', result: wroteNothing, adoption: NOT_OWED }]).create,
       INSTALLS_NOTHING
@@ -1194,7 +1236,7 @@ describe('sending the recovery create', () => {
     // of date and adopts — and the adoption status is what says so.
     const wroteNothing: SaveResult = { ...COMMITTED, committed: false, moved: null };
     for (const adoption of [ADOPTED, NOT_ADOPTED]) {
-      const after = await sendRecoveryCreate(
+      const after = await sendTracking(
         openedOverEditor(),
         recordingCreate([{ kind: 'answered', result: wroteNothing, adoption }]).create,
         INSTALLS_NOTHING
@@ -1206,7 +1248,7 @@ describe('sending the recovery create', () => {
   }); // End of the "saved, committed: false, reconciled" case
 
   it('keeps saying the window may have moved once a re-read was ordered, through every later transition', async () => {
-    const moved = await sendRecoveryCreate(
+    const moved = await sendTracking(
       openedOverEditor(),
       recordingCreate([
         {
@@ -1223,7 +1265,7 @@ describe('sending the recovery create', () => {
     expect(sourceConflictState(keepRecovering(moved))).toBe('windowMoved');
     expect(sourceConflictState(editRecoveryField(moved, 'trigger', ':again'))).toBe('windowMoved');
     expect(sourceConflictState(chooseRecoveryDestination(moved, 3))).toBe('windowMoved');
-    const refusedLater = await sendRecoveryCreate(
+    const refusedLater = await sendTracking(
       moved,
       recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
       INSTALLS_NOTHING
@@ -1233,7 +1275,7 @@ describe('sending the recovery create', () => {
 
   it('ignores an answer for a form that sent nothing', () => {
     const session = openedOverEditor();
-    expect(applyRecoveryCreate(session, COMMITTED, ADOPTED)).toBe(session);
+    expect(applyRecoveryCreate(session, COMMITTED, ADOPTED, () => session)).toBe(session);
   });
 }); // End of the "sending" suite
 
@@ -1303,13 +1345,13 @@ const CLOSED_FORM_PROBES: Readonly<Record<string, ClosedFormProbe>> = {
     answersItself: true
   },
   applyRecoveryCreate: {
-    answers: (closed) => applyRecoveryCreate(closed, COMMITTED, ADOPTED),
+    answers: (closed) => applyRecoveryCreate(closed, COMMITTED, ADOPTED, () => closed),
     answersItself: true
   },
   recoveryCreateCouldNotBeSent: {
     // **The door round 4 found missing** from the hand-written list this table
     // replaced.
-    answers: (closed) => recoveryCreateCouldNotBeSent(closed, true, null),
+    answers: (closed) => recoveryCreateCouldNotBeSent(closed, true, null, () => closed),
     answersItself: true
   },
   sendRecoveryCreate: {
@@ -1317,16 +1359,16 @@ const CLOSED_FORM_PROBES: Readonly<Record<string, ClosedFormProbe>> = {
     // neither the boundary nor the moment a form goes in flight, and a probe that
     // silently accepted an installation would let a terminal form be drawn as
     // saving with nothing ever coming back to clear it.
-    answers: (closed) => sendRecoveryCreate(closed, recordingCreate([]).create, REFUSES_TO_INSTALL),
+    answers: (closed) => sendTracking(closed, recordingCreate([]).create, REFUSES_TO_INSTALL),
     answersItself: true
   },
   reapplyRecoveryToDiskVersion: {
-    answers: (closed, adopt) => reapplyRecoveryToDiskVersion(closed, adopt),
+    answers: (closed, adopt) => reapplyRecoveryToDiskVersion(closed, adopt, null, () => closed),
     answersItself: false,
     otherwise: { kind: 'notAttempted' }
   },
   beginRecoveryCreate: {
-    answers: (closed) => beginRecoveryCreate(closed),
+    answers: (closed) => beginRecoveryCreate(closed, () => closed),
     answersItself: false,
     otherwise: null
   },
@@ -1420,7 +1462,7 @@ describe('the two ways out of a conflict of this form’s own', () => {
     disk: DocumentView = diskFile({ revision: AFTER }),
     targetless = true
   ): Promise<RecoverySession> {
-    return sendRecoveryCreate(
+    return sendTracking(
       openedOverEditor(),
       recordingCreate([
         {
@@ -1464,7 +1506,7 @@ describe('the two ways out of a conflict of this form’s own', () => {
     const conflicted = await conflictedForm();
     expect(recoveryBaseRevisionOf(conflicted)).toBe(DISK);
     const { adopt, adoptions } = adopting();
-    const attempt = reapplyRecoveryToDiskVersion(conflicted, adopt);
+    const attempt = reapplyRecoveryToDiskVersion(conflicted, adopt, null, () => conflicted);
     expect(attempt.kind).toBe('reapplied');
     if (attempt.kind !== 'reapplied') {
       return;
@@ -1485,19 +1527,19 @@ describe('the two ways out of a conflict of this form’s own', () => {
     const { create, calls } = recordingCreate([
       { kind: 'answered', result: COMMITTED, adoption: ADOPTED }
     ]);
-    await sendRecoveryCreate(attempt.session, create, INSTALLS_NOTHING);
+    await sendTracking(attempt.session, create, INSTALLS_NOTHING);
     expect(calls[0]![3]).toBe(AFTER);
   }); // End of the "stale base broken" case
 
   it('withdraws consent when it rebases, because findings do not cross a revision', async () => {
-    const refused = await sendRecoveryCreate(
+    const refused = await sendTracking(
       openedOverEditor(),
       recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
       INSTALLS_NOTHING
     );
     const consented = acknowledgeRecoveryFindings(refused);
     expect(consented.draft.consent).not.toBeNull();
-    const conflicted = await sendRecoveryCreate(
+    const conflicted = await sendTracking(
       keepRecovering(consented),
       recordingCreate([
         {
@@ -1512,15 +1554,15 @@ describe('the two ways out of a conflict of this form’s own', () => {
       ]).create,
       INSTALLS_NOTHING
     );
-    const attempt = reapplyRecoveryToDiskVersion(conflicted, adopting().adopt);
+    const attempt = reapplyRecoveryToDiskVersion(conflicted, adopting().adopt, null, () => conflicted);
     expect(attempt.kind === 'reapplied' ? attempt.session.draft.consent : 'no session').toBeNull();
   });
 
   it('refuses to rebase onto evidence a creation’s conflict never answers', async () => {
-    const attempt = reapplyRecoveryToDiskVersion(
-      await conflictedForm(diskFile({ revision: AFTER }), false),
-      adopting().adopt
-    );
+    const attempt = ((onHand) => reapplyRecoveryToDiskVersion(
+      onHand,
+      adopting().adopt, null, () => onHand
+    ))(await conflictedForm(diskFile({ revision: AFTER }), false));
     expect(attempt).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'evidenceNotATarget' }
@@ -1528,10 +1570,10 @@ describe('the two ways out of a conflict of this form’s own', () => {
   });
 
   it('refuses to rebase onto a file that may no longer be written into', async () => {
-    const attempt = reapplyRecoveryToDiskVersion(
-      await conflictedForm(diskFile({ revision: AFTER, topLevelKeys: ['global_vars'] })),
-      adopting().adopt
-    );
+    const attempt = ((onHand) => reapplyRecoveryToDiskVersion(
+      onHand,
+      adopting().adopt, null, () => onHand
+    ))(await conflictedForm(diskFile({ revision: AFTER, topLevelKeys: ['global_vars'] })));
     // The destination is dropped rather than left holding a revision the command
     // would refuse, and the ordinary rule is what names the refusal.
     expect(attempt).toEqual({
@@ -1542,7 +1584,7 @@ describe('the two ways out of a conflict of this form’s own', () => {
 
   it('leaves the form exactly as it was when the window refuses the adoption', async () => {
     const conflicted = await conflictedForm();
-    const attempt = reapplyRecoveryToDiskVersion(conflicted, adopting('refused').adopt);
+    const attempt = reapplyRecoveryToDiskVersion(conflicted, adopting('refused').adopt, null, () => conflicted);
     expect(attempt).toEqual({ kind: 'adoptionRefused' });
     expect(recoveryBaseRevisionOf(conflicted)).toBe(DISK);
     expect(recoveryConflictOf(conflicted)).not.toBeNull();
@@ -1552,7 +1594,7 @@ describe('the two ways out of a conflict of this form’s own', () => {
   });
 
   it('records the spend for a rebase whose adoption found the window already there', async () => {
-    const attempt = reapplyRecoveryToDiskVersion(await conflictedForm(), adopting('alreadyThere').adopt);
+    const attempt = ((onHand) => reapplyRecoveryToDiskVersion(onHand, adopting('alreadyThere').adopt, null, () => onHand))(await conflictedForm());
     expect(attempt.kind).toBe('reapplied');
     if (attempt.kind !== 'reapplied') {
       return;
@@ -1561,7 +1603,7 @@ describe('the two ways out of a conflict of this form’s own', () => {
   });
 
   it('answers `notAttempted` when there is no conflict of its own to rebase', () => {
-    const attempt = reapplyRecoveryToDiskVersion(openedOverEditor(), adopting().adopt);
+    const attempt = ((onHand) => reapplyRecoveryToDiskVersion(onHand, adopting().adopt, null, () => onHand))(openedOverEditor());
     expect(attempt).toEqual({ kind: 'notAttempted' });
   });
 
@@ -1591,7 +1633,7 @@ describe('the two ways out of a conflict of this form’s own', () => {
     expect(recoveryConflictOf(closed)).toBeNull();
     expect(recoveryRefusal(closed)).toBe('formClosed');
     expect(isRecoveryEditable(closed)).toBe(false);
-    expect(beginRecoveryCreate(closed)).toBeNull();
+    expect(beginRecoveryCreate(closed, () => closed)).toBeNull();
     // The conflict recovery was opened from is another conflict on another
     // surface, and this transition neither answers nor spends it — **and that is
     // not the same as leaving the window it was registered against alone**, which
@@ -1676,7 +1718,7 @@ describe('the two ways out of a conflict of this form’s own', () => {
 
     const conflicted = await conflictedForm();
     const asked = askToReloadRecoveryDiskVersion(conflicted);
-    const refused = await sendRecoveryCreate(
+    const refused = await sendTracking(
       openedOverEditor(),
       recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
       INSTALLS_NOTHING
@@ -1740,10 +1782,10 @@ describe('what the form refuses to send', () => {
     const noBody = openedOverCreator({ trigger: ':new', replace: '' });
     expect(recoveryRefusal(noBody)).toBe('replaceEmpty');
     const { create, calls } = recordingCreate([]);
-    expect(await sendRecoveryCreate(noBody, create, INSTALLS_NOTHING)).toBe(noBody);
+    expect(await sendTracking(noBody, create, INSTALLS_NOTHING)).toBe(noBody);
     expect(calls).toEqual([]);
     expect(canCreateRecovery(noBody)).toBe(false);
-    expect(beginRecoveryCreate(noBody)).toBeNull();
+    expect(beginRecoveryCreate(noBody, () => noBody)).toBeNull();
   });
 
   it('opens a field the transfer could not carry blank, and requires a value', () => {
@@ -1759,7 +1801,7 @@ describe('what the form refuses to send', () => {
     });
     const typed = editRecoveryField(session, 'trigger', ':chosen');
     expect(recoveryRefusal(typed)).toBeNull();
-    expect(beginRecoveryCreate(typed)?.newMatch.trigger).toBe(':chosen');
+    expect(beginRecoveryCreate(typed, () => typed)?.newMatch.trigger).toBe(':chosen');
   }); // End of the "blank rather than invented" case
 
   it('refuses a carriage return at the control and again at the wire', () => {
@@ -1772,13 +1814,13 @@ describe('what the form refuses to send', () => {
       draft: { ...session.draft, value: { trigger: ':sig', replace: 'a\rb' } }
     };
     expect(recoveryRefusal(forced)).toBe('carriageReturn');
-    expect(beginRecoveryCreate(forced)).toBeNull();
+    expect(beginRecoveryCreate(forced, () => forced)).toBeNull();
   });
 
   it('refuses while a create is in flight', () => {
-    const started = beginRecoveryCreate(openedOverEditor());
+    const started = ((onHand) => beginRecoveryCreate(onHand, () => onHand))(openedOverEditor());
     expect(recoveryRefusal(started!.session)).toBe('saveInFlight');
-    expect(beginRecoveryCreate(started!.session)).toBeNull();
+    expect(beginRecoveryCreate(started!.session, () => started!.session)).toBeNull();
   });
 
   it('refuses a destination that is not one of its own', () => {
@@ -1836,7 +1878,7 @@ describe('what a screen would draw', () => {
     // by the confirmed reload, both above.
     const session = openedOverEditor();
     expect(recoveryView(session).sourceConflict).toBe('retained');
-    const committed = await sendRecoveryCreate(
+    const committed = await sendTracking(
       session,
       recordingCreate([{ kind: 'answered', result: COMMITTED, adoption: ADOPTED }]).create,
       INSTALLS_NOTHING
@@ -1847,7 +1889,7 @@ describe('what a screen would draw', () => {
   });
 
   it('offers the two ways out for a conflict of its own, and draws the disk text', async () => {
-    const conflicted = await sendRecoveryCreate(
+    const conflicted = await sendTracking(
       openedOverEditor(),
       recordingCreate([
         {
@@ -1906,10 +1948,10 @@ describe('what recovery never does', () => {
     // `beginRecoveryCreate` makes this fail rather than pass vacuously.
     const create = vi.fn<CreateARecoveredSnippet>(async () => ({ kind: 'notAttempted' }));
     const blank = openedOverCreator({ trigger: ':new', replace: '' });
-    expect(await sendRecoveryCreate(blank, create, INSTALLS_NOTHING)).toBe(blank);
+    expect(await sendTracking(blank, create, INSTALLS_NOTHING)).toBe(blank);
     expect(create).not.toHaveBeenCalled();
     // And it is called exactly once for a form that may be.
-    await sendRecoveryCreate(openedOverCreator(), create, INSTALLS_NOTHING);
+    await sendTracking(openedOverCreator(), create, INSTALLS_NOTHING);
     expect(create).toHaveBeenCalledTimes(1);
   });
 
@@ -2120,7 +2162,7 @@ describe('the external session — Phase 2d-6-3', () => {
    * @returns The form showing its own save conflict.
    */
   async function saveConflicted(form: RecoverySession = openedOverEditor()): Promise<RecoverySession> {
-    return sendRecoveryCreate(
+    return sendTracking(
       form,
       recordingCreate([
         {
@@ -2157,7 +2199,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(isRecoveryEditable(told)).toBe(false);
       expect(recoveryRefusal(told)).toBe('externalConflict');
       expect(recoveryRefusalKey('externalConflict')).toBe('browser.externalConflict.fileChangedWhileOpen');
-      expect(beginRecoveryCreate(told)).toBeNull();
+      expect(beginRecoveryCreate(told, () => told)).toBeNull();
       expect(told.draft.value).toEqual({ trigger: ':sig', replace: 'Regards' });
       const view = recoveryView(told);
       expect(view.conflict).toBe(conflict);
@@ -2236,7 +2278,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(told.draft.value).toEqual({ trigger: ':sig', replace: 'Regards' });
       expect(told.origin.conflict).toBe(form.origin.conflict);
       expect(recoveryRefusal(told)).toBe('noDestination');
-      expect(beginRecoveryCreate(told)).toBeNull();
+      expect(beginRecoveryCreate(told, () => told)).toBeNull();
       expect(isRecoveryEditable(told)).toBe(false);
       expect(canChooseRecoveryDestination(told)).toBe(true);
       const view = recoveryView(told);
@@ -2246,7 +2288,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing']);
       expect(askToReloadRecoveryDiskVersion(told)).toBe(told);
       const recorder = adopting();
-      expect(reapplyRecoveryToDiskVersion(told, recorder.adopt, () => conflict.source)).toEqual({
+      expect(reapplyRecoveryToDiskVersion(told, recorder.adopt, () => conflict.source, () => told)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'destinationRequired' }
       });
@@ -2310,7 +2352,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(waiting.externalConflict).toBeNull();
       expect(recoveryRefusal(waiting)).toBe('observationRetained');
       expect(recoveryRefusalKey('observationRetained')).toBe('browser.externalConflict.observationRetained');
-      expect(beginRecoveryCreate(waiting)).toBeNull();
+      expect(beginRecoveryCreate(waiting, () => waiting)).toBeNull();
       expect(isRecoveryEditable(waiting)).toBe(true);
       const typed = editRecoveryField(waiting, 'replace', 'Kind regards');
       expect(typed.draft.value.replace).toBe('Kind regards');
@@ -2339,21 +2381,21 @@ describe('the external session — Phase 2d-6-3', () => {
     it('keeps a wait across a change of destination, so returning to the file restores its block (the review’s second blocker)', () => {
       const seen = observation();
       const waiting = applyRecoveryObservation(openedOverEditor(), retainedDelivery(seen));
-      expect(beginRecoveryCreate(waiting)).toBeNull();
+      expect(beginRecoveryCreate(waiting, () => waiting)).toBeNull();
       const away = chooseRecoveryDestination(waiting, 3);
       expect(away.chosen).toBe(3);
       expect(recoveryRefusal(away)).toBeNull();
       const back = chooseRecoveryDestination(away, 2);
       expect(back.chosen).toBe(2);
       expect(recoveryRefusal(back)).toBe('observationRetained');
-      expect(beginRecoveryCreate(back)).toBeNull();
+      expect(beginRecoveryCreate(back, () => back)).toBeNull();
       const lifted = applyRecoveryObservation(back, writtenHereDelivery(seen));
       expect(recoveryRefusal(lifted)).toBeNull();
-      expect(beginRecoveryCreate(lifted)).not.toBeNull();
+      expect(beginRecoveryCreate(lifted, () => lifted)).not.toBeNull();
     }); // End of the "wait kept across a change of destination" case
 
     it('holds every delivery during its own create and replays them in arrival order', () => {
-      const started = beginRecoveryCreate(openedOverEditor());
+      const started = ((onHand) => beginRecoveryCreate(onHand, () => onHand))(openedOverEditor());
       if (started === null) {
         throw new Error('an opened form is submittable');
       }
@@ -2366,7 +2408,7 @@ describe('the external session — Phase 2d-6-3', () => {
       );
       expect(held.externalConflict).toBeNull();
       expect(held.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised', 'coalesced']);
-      const settled = applyRecoveryCreate(held, REFUSED, NOT_OWED);
+      const settled = applyRecoveryCreate(held, REFUSED, NOT_OWED, () => held);
       expect(settled.heldDeliveries).toEqual([]);
       expect(settled.outcome?.kind).toBe('refused');
       expect(externalOf(settled).source).toBe(standing);
@@ -2375,7 +2417,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(settled.origin.conflict).toBe(held.origin.conflict);
       // A create that produced no outcome consumes the hold too.
       const heldUncertain = applyRecoveryObservation(started.session, decided(null, seen, true, 'raisedWithoutReload'));
-      const failed = recoveryCreateCouldNotBeSent(heldUncertain, true, null);
+      const failed = recoveryCreateCouldNotBeSent(heldUncertain, true, null, () => heldUncertain);
       expect(failed.heldDeliveries).toEqual([]);
       expect(failed.uncertaintyUnresolved).toBe(true);
       expect(sourceConflictState(failed)).toBe('windowMoved');
@@ -2400,26 +2442,30 @@ describe('the external session — Phase 2d-6-3', () => {
         expect(current.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised']);
         return { kind: 'answered', result: REFUSED, adoption: NOT_OWED };
       };
+      // The reader answers the form handed in until the installer runs — the door
+      // checks it before anything is installed (Phase 2d-6-6a) — and the form the
+      // installer put where a receiver updates it from then on.
+      const opened = openedOverEditor();
+      let reads = 0;
       const settled = await sendRecoveryCreate(
-        openedOverEditor(),
+        opened,
         create,
         (waiting) => {
           installs += 1;
           current = waiting;
         },
         () => {
-          if (current === null) {
-            throw new Error('the reader is asked after the installer');
-          }
-          return current;
+          reads += 1;
+          return current ?? opened;
         }
       );
+      expect(reads).toBeGreaterThanOrEqual(2);
       expect(installs).toBe(1);
       expect(settled.outcome?.kind).toBe('refused');
       expect(externalOf(settled).source).toBe(standing);
       expect(settled.heldDeliveries).toEqual([]);
       expect(settled.awaitingReconciliation.size).toBe(0);
-      expect(beginRecoveryCreate(settled)).toBeNull();
+      expect(beginRecoveryCreate(settled, () => settled)).toBeNull();
       // Every other answer is settled against the current form too.
       for (const answer of [
         { kind: 'notAttempted' } as const,
@@ -2430,8 +2476,9 @@ describe('the external session — Phase 2d-6-3', () => {
         } as const
       ]) {
         current = null;
+        const handedIn = openedOverEditor();
         const other = await sendRecoveryCreate(
-          openedOverEditor(),
+          handedIn,
           async () => {
             if (current !== null) {
               current = applyRecoveryObservation(current, raised(seen));
@@ -2441,15 +2488,17 @@ describe('the external session — Phase 2d-6-3', () => {
           (waiting) => {
             current = waiting;
           },
-          () => current ?? openedOverEditor()
+          () => current ?? handedIn
         );
         expect(externalOf(other).source).toBe(standing);
         expect(other.phase).toBe('editing');
       } // End of the loop over the two answers that are not outcomes
-      // Without a reader the composition can only settle the form it captured —
-      // the documented cost for a caller that registers no receiver.
+      // A reader answering the waiting form as it was installed, rather than as the
+      // receiver has since updated it, is a capture: the composition can only
+      // settle that — the documented cost of a reader that does not read what the
+      // caller installs.
       current = null;
-      const unread = await sendRecoveryCreate(openedOverEditor(), create, (waiting) => {
+      const unread = await sendTracking(openedOverEditor(), create, (waiting) => {
         current = waiting;
       });
       expect(unread.externalConflict).toBeNull();
@@ -2457,9 +2506,10 @@ describe('the external session — Phase 2d-6-3', () => {
       // written, handed to the installer, and re-thrown.
       current = null;
       const installed: RecoverySession[] = [];
+      const throwing = openedOverEditor();
       await expect(
         sendRecoveryCreate(
-          openedOverEditor(),
+          throwing,
           async () => {
             if (current !== null) {
               current = applyRecoveryObservation(current, raised(seen));
@@ -2470,7 +2520,7 @@ describe('the external session — Phase 2d-6-3', () => {
             installed.push(waiting);
             current = waiting;
           },
-          () => current ?? openedOverEditor()
+          () => current ?? throwing
         )
       ).rejects.toThrow('the boundary threw');
       expect(installed).toHaveLength(2);
@@ -2480,6 +2530,46 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(sourceConflictState(thrown)).toBe('windowMoved');
       expect(externalOf(thrown).source).toBe(standing);
     }); // End of the "send settled against the current form" case
+
+    it('answers the installed form, never the capture, when a read of the door displaced it (2d-6-6a review, finding 2)', async () => {
+      // **Through the caller's own shape.** `RecoveryPanel.svelte` installs what
+      // the composition answers: `session = await sendRecoveryCreate(…)`. A getter
+      // behind the draft's value runs a receiver that replaces the installed form
+      // with one showing a conflict; the door refuses, and the answer must be that
+      // installed form — answering the form handed in would have the panel
+      // overwrite what its receiver installed.
+      const seen = observation();
+      let session: RecoverySession = openedOverEditor();
+      const plain = session;
+      let armed = true;
+      const trapped: RecoverySession = {
+        ...plain,
+        draft: {
+          ...plain.draft,
+          get value(): RecoverySession['draft']['value'] {
+            if (armed) {
+              armed = false;
+              session = applyRecoveryObservation(session, raised(seen));
+            }
+            return plain.draft.value;
+          }
+        }
+      };
+      session = trapped;
+      const recorder = recordingCreate([]);
+      session = await sendRecoveryCreate(
+        trapped,
+        recorder.create,
+        (waiting) => {
+          session = waiting;
+        },
+        () => session
+      );
+      expect(armed).toBe(false);
+      expect(session).not.toBe(trapped);
+      expect(externalOf(session).source).toBe(externalConflictSource(seen));
+      expect(recorder.calls).toEqual([]);
+    }); // End of the "displaced door answers the installed form" case
 
     it('retires a save conflict of its own when an observation supersedes it, resetting the reload', async () => {
       const stuck = await saveConflicted();
@@ -2506,11 +2596,11 @@ describe('the external session — Phase 2d-6-3', () => {
       const conflicted = applyRecoveryCreate(
         blocked,
         makeConflict({ disk: diskFile({ revision: AFTER }), expected: DISK, subject: { Targetless: {} } }),
-        NOT_OWED
+        NOT_OWED, () => blocked
       );
       expect(conflicted.externalConflict).toBeNull();
       expect(recoveryConflictOf(conflicted)?.source.kind).toBe('save');
-      expect(applyRecoveryCreate(blocked, REFUSED, NOT_OWED).externalConflict).toBe(blocked.externalConflict);
+      expect(applyRecoveryCreate(blocked, REFUSED, NOT_OWED, () => blocked).externalConflict).toBe(blocked.externalConflict);
     }); // End of the "supersedes a save conflict" case
 
     it('lets keepRecovering cancel the warning and the panel, and nothing external', async () => {
@@ -2520,7 +2610,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(kept.outcome).toBeNull();
       expect(kept.reload).toBe(NOT_RELOADING);
       expect(kept.externalConflict).toBe(blocked.externalConflict);
-      expect(beginRecoveryCreate(kept)).toBeNull();
+      expect(beginRecoveryCreate(kept, () => kept)).toBeNull();
       const withheld = applyRecoveryObservation(openedOverEditor(), decided(null, observation(), true, 'raisedWithoutReload'));
       expect(keepRecovering(withheld).uncertaintyUnresolved).toBe(true);
       const waiting = applyRecoveryObservation(openedOverEditor(), retainedDelivery(seen));
@@ -2551,7 +2641,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(view.externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
       expect(askToReloadRecoveryDiskVersion(withheld)).toBe(withheld);
       const recorder = adopting();
-      expect(reapplyRecoveryToDiskVersion(withheld, recorder.adopt, () => externalOf(withheld).source)).toEqual({
+      expect(reapplyRecoveryToDiskVersion(withheld, recorder.adopt, () => externalOf(withheld).source, () => withheld)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'writeOutcomeUnknown' }
       });
@@ -2609,7 +2699,7 @@ describe('the external session — Phase 2d-6-3', () => {
       for (const correspondences of tables) {
         const stuck = applyRecoveryObservation(openedOverEditor(), raised(observation({ correspondences })));
         const recorder = adopting();
-        const answer = reapplyRecoveryToDiskVersion(stuck, recorder.adopt, () => externalOf(stuck).source);
+        const answer = reapplyRecoveryToDiskVersion(stuck, recorder.adopt, () => externalOf(stuck).source, () => stuck);
         expect(answer.kind).toBe('reapplied');
         if (answer.kind !== 'reapplied') {
           throw new Error('this case is about the rebuilt form');
@@ -2628,32 +2718,32 @@ describe('the external session — Phase 2d-6-3', () => {
     it('refuses superseded evidence, a held reading, a form naming no file, and the window’s refusal', () => {
       const stuck = applyRecoveryObservation(openedOverEditor(), raised(observation()));
       const recorder = adopting();
-      expect(reapplyRecoveryToDiskVersion(stuck, recorder.adopt, () => null)).toEqual({
+      expect(reapplyRecoveryToDiskVersion(stuck, recorder.adopt, () => null, () => stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
       const heldReading = observation({ sequence: 6, diskRevision: 'd'.repeat(64), disk: diskFile({ revision: 'd'.repeat(64) }) });
       const held = applyRecoveryObservation(stuck, retainedDelivery(heldReading));
-      expect(reapplyRecoveryToDiskVersion(held, recorder.adopt, () => externalOf(stuck).source)).toEqual({
+      expect(reapplyRecoveryToDiskVersion(held, recorder.adopt, () => externalOf(stuck).source, () => held)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'observationRetained' }
       });
       expect(recoveryView(held).conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'reloadDiskVersion']);
       expect(recorder.adoptions).toEqual([]);
-      expect(reapplyRecoveryToDiskVersion(stuck, adopting('refused').adopt, () => externalOf(stuck).source)).toEqual({
+      expect(reapplyRecoveryToDiskVersion(stuck, adopting('refused').adopt, () => externalOf(stuck).source, () => stuck)).toEqual({
         kind: 'adoptionRefused'
       });
-      expect(reapplyRecoveryToDiskVersion(stuck, adopting('alreadyThere').adopt, () => externalOf(stuck).source).kind).toBe('reapplied');
+      expect(reapplyRecoveryToDiskVersion(stuck, adopting('alreadyThere').adopt, () => externalOf(stuck).source, () => stuck).kind).toBe('reapplied');
       // Without a guard the door decides, as the component's save-origin call has
       // always had it.
-      expect(reapplyRecoveryToDiskVersion(stuck, adopting('refused').adopt)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyRecoveryToDiskVersion(stuck, adopting('refused').adopt, null, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       // The ordinary checks run again over the disk parse: a file that lost its
       // list drops out of the destinations.
       const listless = applyRecoveryObservation(
         openedOverEditor(),
         raised(observation({ disk: diskFile({ revision: AFTER, topLevelKeys: ['global_vars'] }) }))
       );
-      expect(reapplyRecoveryToDiskVersion(listless, recorder.adopt, () => externalOf(listless).source)).toEqual({
+      expect(reapplyRecoveryToDiskVersion(listless, recorder.adopt, () => externalOf(listless).source, () => listless)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'recoveryRefused', reason: 'destinationUnavailable' }
       });
@@ -2681,6 +2771,97 @@ describe('the external session — Phase 2d-6-3', () => {
         } // End of the loop over the two locales
       } // End of the loop over the two refusals
     });
+
+    it('reads no evidence for a form that is already blocked (2d-6-4’s pattern, Phase 2d-6-6a)', () => {
+      // The blocks come before the entry, which reads the observation's table
+      // even though this form consults none of it; a table whose spine counts
+      // its reads is the pin.
+      let reads = 0;
+      const seen: ExternalConflictObservation = {
+        ...observation(),
+        get correspondences(): ExternalConflictObservation['correspondences'] {
+          reads += 1;
+          return null;
+        }
+      };
+      const stuck = applyRecoveryObservation(openedOverEditor(), raised(seen));
+      const stands = (): ConflictSource | null => externalOf(stuck).source;
+      const recorder = adopting();
+      const held = applyRecoveryObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
+      expect(reapplyRecoveryToDiskVersion(held, recorder.adopt, stands, () => held)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      const withheld = applyRecoveryObservation(openedOverEditor(), decided(null, seen, true, 'raisedWithoutReload'));
+      expect(reapplyRecoveryToDiskVersion(withheld, recorder.adopt, stands, () => withheld)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'writeOutcomeUnknown' }
+      });
+      expect(reads).toBe(0);
+      expect(recorder.adoptions).toEqual([]);
+      // And an unblocked form reads it on its way to the adoption.
+      expect(reapplyRecoveryToDiskVersion(stuck, recorder.adopt, stands, () => stuck).kind).toBe('reapplied');
+      expect(reads).toBeGreaterThan(0);
+    }); // End of the "no evidence read while blocked" case
+
+    it('rechecks the installed form immediately before adopting, and refuses what a read delivered during the reapply (Phase 2d-6-6a)', () => {
+      // A getter behind the disk projection's path — read while the destination
+      // list is rebuilt — runs after the blocks were asked and before the
+      // adoption; a window's receiver, run from it, records a wait, a
+      // supersession or an uncertainty on the installed form. The reapply must
+      // ask the installed form again, once, immediately before it adopts.
+      const heldReading = observation({ sequence: 6, diskRevision: 'f'.repeat(64), disk: diskFile({ revision: 'f'.repeat(64) }) });
+      const recorder = adopting();
+      /**
+       * A form raised over an observation whose disk projection delivers to the
+       * holder when its path is read, once armed.
+       *
+       * @param deliver - What the read delivers, or `null` for nothing.
+       * @returns The reader and the guard.
+       */
+      function trapped(deliver: ((source: ConflictSource) => ObservationDelivery) | null): {
+        readonly current: () => RecoverySession;
+        readonly stands: () => ConflictSource | null;
+      } {
+        let held: RecoverySession | null = null;
+        let armed = false;
+        const plain = diskFile({ revision: AFTER });
+        const disk: DocumentView = {
+          ...plain,
+          get relative_path(): string {
+            if (armed && held !== null && deliver !== null) {
+              armed = false;
+              held = applyRecoveryObservation(held, deliver(externalOf(held).source));
+            }
+            return plain.relative_path;
+          }
+        };
+        const raisedForm = applyRecoveryObservation(openedOverEditor(), raised(observation({ disk })));
+        held = raisedForm;
+        armed = true;
+        const source = externalOf(raisedForm).source;
+        return { current: () => held ?? raisedForm, stands: () => source };
+      } // End of function trapped()
+      const waited = trapped(() => retainedDelivery(heldReading));
+      expect(reapplyRecoveryToDiskVersion(waited.current(), recorder.adopt, waited.stands, waited.current)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      expect(waited.current().awaitingReconciliation.get(2)).toBe(heldReading);
+      const superseded = trapped((source) => decided(source, heldReading, false, 'supersedes'));
+      expect(
+        reapplyRecoveryToDiskVersion(superseded.current(), recorder.adopt, superseded.stands, superseded.current)
+      ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } });
+      const uncertain = trapped((source) => decided(source, heldReading, true, 'raisedWithoutReload'));
+      expect(
+        reapplyRecoveryToDiskVersion(uncertain.current(), recorder.adopt, uncertain.stands, uncertain.current)
+      ).toEqual({ kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } });
+      expect(recorder.adoptions).toEqual([]);
+      // A read that delivers nothing adopts as before.
+      const quiet = trapped(null);
+      expect(reapplyRecoveryToDiskVersion(quiet.current(), recorder.adopt, quiet.stands, quiet.current).kind).toBe('reapplied');
+      expect(recorder.adoptions).toHaveLength(1);
+    }); // End of the "recheck before adoption" case
   }); // End of the "reapply over the external origin" suite
 
   /**
@@ -2689,7 +2870,7 @@ describe('the external session — Phase 2d-6-3', () => {
    * @returns The form showing the refusal.
    */
   async function refusedForm(): Promise<RecoverySession> {
-    return sendRecoveryCreate(
+    return sendTracking(
       openedOverEditor(),
       recordingCreate([{ kind: 'answered', result: REFUSED, adoption: NOT_OWED }]).create,
       INSTALLS_NOTHING

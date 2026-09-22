@@ -27,6 +27,7 @@
     targetRevisionObserved,
     type InvalidateEverySurface,
     type OpenWriteSurface,
+    type ReadTheInstalledSession,
     type RestoreContext,
     type RestoreSession,
     type RestoreView,
@@ -275,13 +276,16 @@
      * @param surfaces - Every write surface this window has open.
      * @param invalidate - What this pane's host does about every write surface
      *   over the replaced file.
+     * @param current - Reads the session this pane holds now, which the send is
+     *   checked and settled against (`ReadTheInstalledSession` in `restore.ts`).
      * @returns The session to install, or `null` when this call held no permit and
      *   therefore has nothing to say about any session.
      */
     restore: (
       started: StartedRestore | null,
       surfaces: readonly OpenWriteSurface[],
-      invalidate: InvalidateEverySurface
+      invalidate: InvalidateEverySurface,
+      current: ReadTheInstalledSession
     ) => Promise<RestoreSession | null>;
     /**
      * What the host does about every write surface over the replaced file.
@@ -467,7 +471,7 @@
 
   /** Asks the person the destructive question. */
   function prepare(): void {
-    session = prepareRestore(session, current.context);
+    session = prepareRestore(session, current.context, () => session);
   } // End of function prepare()
 
   /** Takes the question back, leaving the candidate exactly where it is. */
@@ -507,12 +511,12 @@
    */
   async function runRestore(): Promise<void> {
     const now = current;
-    const started = confirmRestore(session, now.context);
+    const started = confirmRestore(session, now.context, () => session);
     if (started === null) {
       return;
     }
     session = started.session;
-    const answered = await restore(started, now.context.surfaces, invalidate);
+    const answered = await restore(started, now.context.surfaces, invalidate, () => session);
     if (answered !== null) {
       session = answered;
     }
@@ -539,7 +543,14 @@
    */
   function refusalAction(choice: RawSaveChoice): void {
     if (choice === 'saveAnyway') {
-      session = prepareRestore(acknowledgeRestoreFindings(session), current.context);
+      const held = session;
+      const acknowledged = acknowledgeRestoreFindings(held);
+      // The reader answers the acknowledged session while the installed one is
+      // still the session it was derived from, and the installed session otherwise
+      // (`ReadTheInstalledSession` in `restore.ts`).
+      session = prepareRestore(acknowledged, current.context, () =>
+        session === held ? acknowledged : session
+      );
       return;
     }
     session = dismissRestoreOutcome(session);
@@ -587,7 +598,13 @@
         // the two steps a person sees are the warning and this press. The window
         // decides whether the adoption happened, and `reloadTheDiskVersion`
         // re-points nothing when it answers `refused`.
-        session = reloadTheDiskVersion(confirmDiskReload(session), adoptDiskVersion);
+        {
+          const held = session;
+          const confirmed = confirmDiskReload(held);
+          session = reloadTheDiskVersion(confirmed, adoptDiskVersion, () =>
+            session === held ? confirmed : session
+          );
+        }
         return;
       case 'confirmReload':
         // Never offered here, and the distinction is the whole reason this member

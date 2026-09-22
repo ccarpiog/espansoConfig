@@ -129,6 +129,15 @@ import {
   type SaveOutcomeModel
 } from './saveOutcome';
 
+/*
+ * **`((onHand) => door(onHand, …, () => onHand))(value)`** is a door, a settling
+ * transition or a reapply called with a reader answering the very session it is
+ * handed — the installed session of a caller that registers no receiver. Phase
+ * 2d-6-6a made the reader required; this is how a case that is not about
+ * displacement says so without evaluating `value` twice. The cases that are about
+ * displacement pass a holder's reader instead.
+ */
+
 /** The file every case here restores into. */
 const TARGET = 7;
 
@@ -308,7 +317,7 @@ function withCandidate(): RestoreSession {
  * @returns The session.
  */
 function pending(): RestoreSession {
-  return prepareRestore(withCandidate(), at(BASE));
+  return ((onHand) => prepareRestore(onHand, at(BASE), () => onHand))(withCandidate());
 } // End of function pending()
 
 /**
@@ -373,7 +382,7 @@ function trapped(session: RestoreSession): {
       get: () => {
         if (!entered) {
           entered = true;
-          attempts.push(confirmRestore(session, at(BASE, [])));
+          attempts.push(confirmRestore(session, at(BASE, []), () => session));
         }
         return held[key];
       },
@@ -633,13 +642,13 @@ async function confirmAndSend(
   send: SendRestore,
   live: { session?: RestoreSession; context?: RestoreContext } = {}
 ): Promise<{ readonly started: StartedRestore | null; readonly sent: RestoreSend }> {
-  const started = confirmRestore(session, context);
-  const sent = await sendRestore(
+  const started = confirmRestore(session, context, () => session);
+  const sent = await ((onHand) => sendRestore(
     started,
-    live.session ?? started?.session ?? session,
+    onHand,
     live.context ?? context,
-    send
-  );
+    send, () => onHand
+  ))(live.session ?? started?.session ?? session);
   return { started, sent };
 } // End of function confirmAndSend()
 
@@ -664,7 +673,7 @@ async function roundTrip(
   if (started === null || sent.kind !== 'answered' || sent.answer.kind !== 'sealed') {
     throw new Error('this session was expected to confirm and send');
   }
-  return { session: applyRestore(started.session, sent.answer.sealed, NO_SURFACES), send };
+  return { session: applyRestore(started.session, sent.answer.sealed, NO_SURFACES, () => started.session), send };
 } // End of function roundTrip()
 
 /**
@@ -906,12 +915,12 @@ describe('the six write surfaces a restore refuses to run beside', () => {
         kind: 'writeSurfaceOpen',
         surface: kind
       });
-      expect(prepareRestore(session, at(BASE, surfaces)).pending, kind).toBeNull();
+      expect(prepareRestore(session, at(BASE, surfaces), () => session).pending, kind).toBeNull();
       // **And a surface that opened *after* the question was asked stops the
       // confirmation**, which is consult Q4's "the refusal is an affordance, not the
       // post-commit safety proof": the coordinator is rechecked immediately before a
       // submission is produced, not only when the question is put.
-      expect(confirmRestore(pending(), at(BASE, surfaces)), kind).toBeNull();
+      expect(((onHand) => confirmRestore(onHand, at(BASE, surfaces), () => onHand))(pending()), kind).toBeNull();
     } // End of the loop over the six competing surface kinds
   }); // End of the "refuses to prepare and to confirm" case
 
@@ -1000,7 +1009,7 @@ describe('a creator that has not named a file', () => {
     const open = at(BASE, [UNKNOWN_CREATOR]);
     expect(canPrepareRestore(withCandidate(), open)).toBe(true);
     expect(restoreRefusal(withCandidate(), open)).toBeNull();
-    expect(confirmRestore(pending(), open)).not.toBeNull();
+    expect(((onHand) => confirmRestore(onHand, open, () => onHand))(pending())).not.toBeNull();
 
     // And the same form, once it has reported the destination upward, refuses both.
     const named = at(BASE, [
@@ -1011,7 +1020,7 @@ describe('a creator that has not named a file', () => {
       kind: 'writeSurfaceOpen',
       surface: 'matchCreator'
     });
-    expect(confirmRestore(pending(), named)).toBeNull();
+    expect(((onHand) => confirmRestore(onHand, named, () => onHand))(pending())).toBeNull();
   }); // End of the "lets a restore be prepared" case
 
   it('is answered by both predicates for every arm the union has', () => {
@@ -1172,15 +1181,15 @@ describe('the confirmation and the five values it binds', () => {
     // `sendRestore` revalidates and spends, and the group below is what drives that.
     const session = withCandidate();
     // No pending request, so nothing is confirmed — whatever else is true.
-    expect(confirmRestore(session, at(BASE, []))).toBeNull();
-    expect(confirmRestore(prepareRestore(session, at(BASE)), at(BASE, []))).not.toBeNull();
+    expect(confirmRestore(session, at(BASE, []), () => session)).toBeNull();
+    expect(((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(prepareRestore(session, at(BASE), () => session))).not.toBeNull();
   });
 
   it('is consumed, so consent is for one attempt', () => {
-    const started = confirmRestore(pending(), at(BASE, []));
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending());
     expect(started).not.toBeNull();
     expect(started!.session.pending).toBeNull();
-    expect(confirmRestore(started!.session, at(BASE, []))).toBeNull();
+    expect(confirmRestore(started!.session, at(BASE, []), () => started!.session)).toBeNull();
   });
 
   it('is refused when the live projection gives the destination another revision', () => {
@@ -1188,8 +1197,8 @@ describe('the confirmation and the five values it binds', () => {
     // confirmation carries was minted by this module and therefore agrees with the
     // session however stale both are; `observed` is the only one that comes from
     // outside it.
-    expect(confirmRestore(pending(), at(ELSEWHERE, []))).toBeNull();
-    expect(confirmRestore(pending(), at(null, []))).toBeNull();
+    expect(((onHand) => confirmRestore(onHand, at(ELSEWHERE, []), () => onHand))(pending())).toBeNull();
+    expect(((onHand) => confirmRestore(onHand, at(null, []), () => onHand))(pending())).toBeNull();
     // **And it is refused through the same rule the control is withdrawn by**, so a
     // screen cannot offer an enabled control the confirmation would then refuse.
     // One code covers a window that re-read the file and one that holds no reading
@@ -1197,7 +1206,7 @@ describe('the confirmation and the five values it binds', () => {
     expect(restoreRefusal(pending(), at(ELSEWHERE))).toEqual({ kind: 'targetMoved' });
     expect(restoreRefusal(pending(), at(null))).toEqual({ kind: 'targetMoved' });
     expect(canPrepareRestore(withCandidate(), at(ELSEWHERE))).toBe(false);
-    expect(prepareRestore(withCandidate(), at(ELSEWHERE)).pending).toBeNull();
+    expect(((onHand) => prepareRestore(onHand, at(ELSEWHERE), () => onHand))(withCandidate()).pending).toBeNull();
   }); // End of the "live projection" case
 
   it('reads that revision off the projections the window holds', () => {
@@ -1213,7 +1222,7 @@ describe('the confirmation and the five values it binds', () => {
     // object would be refused for being a copy of an authorized session and would say
     // nothing at all about the recheck this case is named for.
     const moved = moveOnTheSession(pending(), 'target', 99);
-    expect(confirmRestore(moved, at(BASE, []))).toBeNull();
+    expect(confirmRestore(moved, at(BASE, []), () => moved)).toBeNull();
   }); // End of the "another destination" case
 
   it('is refused when the base revision moved under it', () => {
@@ -1223,7 +1232,7 @@ describe('the confirmation and the five values it binds', () => {
     // And moving it on the asked session is refused too, with the window moved along
     // with it so that only the permit's own base revision can be the reason.
     const carried = moveOnTheSession(pending(), 'baseRevision', ELSEWHERE);
-    expect(confirmRestore(carried, at(ELSEWHERE, []))).toBeNull();
+    expect(confirmRestore(carried, at(ELSEWHERE, []), () => carried)).toBeNull();
   }); // End of the "base revision moved" case
 
   it('is refused when the entry it names is not the retained one', () => {
@@ -1233,7 +1242,7 @@ describe('the confirmation and the five values it binds', () => {
     );
     expect(other.pending).toBeNull();
     const carried = moveOnTheSession(pending(), 'preview', other.preview);
-    expect(confirmRestore(carried, at(BASE, []))).toBeNull();
+    expect(confirmRestore(carried, at(BASE, []), () => carried)).toBeNull();
   }); // End of the "another entry" case
 
   it('is refused when the candidate hash moved under it', () => {
@@ -1242,7 +1251,7 @@ describe('the confirmation and the five values it binds', () => {
       ...restarted.preview!,
       revision: OTHER_CANDIDATE_REVISION
     });
-    expect(confirmRestore(rehashed, at(BASE, []))).toBeNull();
+    expect(confirmRestore(rehashed, at(BASE, []), () => rehashed)).toBeNull();
   }); // End of the "candidate hash" case
 
   it('is refused when the preview generation moved under it', () => {
@@ -1252,7 +1261,7 @@ describe('the confirmation and the five values it binds', () => {
     const again = candidateRead(pending(), textResponse());
     expect(again.previewGeneration).toBeGreaterThan(pending().previewGeneration);
     const carried = moveOnTheSession(pending(), 'previewGeneration', again.previewGeneration);
-    expect(confirmRestore(carried, at(BASE, []))).toBeNull();
+    expect(confirmRestore(carried, at(BASE, []), () => carried)).toBeNull();
   }); // End of the "preview generation" case
 
   it('is refused when the draft and the session disagree about the base revision', () => {
@@ -1270,14 +1279,14 @@ describe('the confirmation and the five values it binds', () => {
       draft: { ...base.preview!.draft, baseRevision: ELSEWHERE }
     });
 
-    const asked = prepareRestore(drifted, at(BASE));
+    const asked = prepareRestore(drifted, at(BASE), () => drifted);
 
     // No question at all: a snapshot describing two transactions is not a snapshot.
     expect(asked.pending).toBeNull();
     expect(asked).toBe(drifted);
-    expect(confirmRestore(asked, at(BASE, []))).toBeNull();
+    expect(confirmRestore(asked, at(BASE, []), () => asked)).toBeNull();
     // And the control: the same walk with the two agreeing does ask.
-    expect(prepareRestore(withCandidate(), at(BASE)).pending).not.toBeNull();
+    expect(((onHand) => prepareRestore(onHand, at(BASE), () => onHand))(withCandidate()).pending).not.toBeNull();
   }); // End of the "draft and session disagree" case
 
   it('is withdrawn by every change to what it binds', () => {
@@ -1301,7 +1310,7 @@ describe('the confirmation and the five values it binds', () => {
     expect(restoreRefusal(startRestore(target({ readOnly: true })), at(BASE))).toEqual({
       kind: 'readOnly'
     });
-    const inFlight = confirmRestore(pending(), at(BASE, []))!.session;
+    const inFlight = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!.session;
     expect(restoreRefusal(inFlight, at(BASE))).toEqual({ kind: 'inFlight' });
   }); // End of the "not offered" case
 }); // End of the "confirmation and the five values it binds" suite
@@ -1313,8 +1322,8 @@ describe('the permit a confirmation mints', () => {
    * @returns The outcome, for splicing onto a session that must not send.
    */
   function conflictOnScreen(): SaveOutcomeModel<string> {
-    const started = confirmRestore(pending(), at(BASE, []))!;
-    const answered = applyRestore(started.session, sealed(conflictResult()), NO_SURFACES);
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
+    const answered = applyRestore(started.session, sealed(conflictResult()), NO_SURFACES, () => started.session);
     if (answered.outcome === null) {
       throw new Error('a conflict was expected on this session');
     }
@@ -1428,15 +1437,15 @@ describe('the permit a confirmation mints', () => {
     'sends nothing when %s moved before the send',
     async (_name, one) => {
       const send = sender();
-      const started = confirmRestore(pending(), at(BASE, []));
+      const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending());
       expect(started).not.toBeNull();
       const live = one.live(started!);
-      const sent = await sendRestore(
+      const sent = await ((onHand) => sendRestore(
         started,
-        live.session ?? started!.session,
+        onHand,
         live.context ?? at(BASE, []),
-        send
-      );
+        send, () => onHand
+      ))(live.session ?? started!.session);
       // `withdrawn` rather than `notAttempted`: a permit was there, it no longer
       // described the world, and it has been consumed. The distinction is what tells
       // a caller that the session it was minted with has to be moved out of the
@@ -1454,11 +1463,11 @@ describe('the permit a confirmation mints', () => {
     // permit at all. What the person does instead is ask again, which is
     // `prepareRestore` and `confirmRestore` over the repaired session.
     const send = sender();
-    const started = confirmRestore(pending(), at(BASE, []))!;
-    const moved = await sendRestore(started, started.session, at(ELSEWHERE, []), send);
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
+    const moved = await sendRestore(started, started.session, at(ELSEWHERE, []), send, () => started.session);
     expect(moved).toEqual({ kind: 'withdrawn' });
 
-    const repaired = await sendRestore(started, started.session, at(BASE, []), send);
+    const repaired = await sendRestore(started, started.session, at(BASE, []), send, () => started.session);
 
     expect(repaired).toEqual({ kind: 'notAttempted' });
     expect(send).not.toHaveBeenCalled();
@@ -1470,11 +1479,11 @@ describe('the permit a confirmation mints', () => {
     // selection, candidate and base-revision transition answer its argument
     // unchanged while the phase is `saving`. So a send that reached no command has
     // to be able to give that session back to the person, and this is what does it.
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     expect(started.session.phase).toBe('saving');
     expect(started.session.inFlight).not.toBeNull();
 
-    const withdrawn = restoreConfirmationWithdrawn(started.session);
+    const withdrawn = restoreConfirmationWithdrawn(started.session, () => started.session);
 
     expect(withdrawn.phase).toBe('editing');
     expect(withdrawn.inFlight).toBeNull();
@@ -1491,7 +1500,7 @@ describe('the permit a confirmation mints', () => {
     // And it is askable again — which the frozen session was not, by construction.
     expect(restoreRefusal(started.session, at(BASE, []))).toEqual({ kind: 'inFlight' });
     expect(restoreRefusal(withdrawn, at(BASE, []))).toBeNull();
-    expect(prepareRestore(withdrawn, at(BASE, [])).pending).not.toBeNull();
+    expect(prepareRestore(withdrawn, at(BASE, []), () => withdrawn).pending).not.toBeNull();
   }); // End of the "consumed confirmation" case
 
   it('is spent by the send, so one permit writes at most once', async () => {
@@ -1500,10 +1509,10 @@ describe('the permit a confirmation mints', () => {
     // after the first send. This case pins that half only — the half that stops one
     // *question* minting a second permit is the group below.
     const send = sender();
-    const started = confirmRestore(pending(), at(BASE, []))!;
-    const first = await sendRestore(started, started.session, at(BASE, []), send);
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
+    const first = await sendRestore(started, started.session, at(BASE, []), send, () => started.session);
     expect(first.kind).toBe('answered');
-    const again = await sendRestore(started, started.session, at(BASE, []), send);
+    const again = await sendRestore(started, started.session, at(BASE, []), send, () => started.session);
     expect(again).toEqual({ kind: 'notAttempted' });
     expect(send).toHaveBeenCalledTimes(1);
   }); // End of the "spent by the send" case
@@ -1515,13 +1524,13 @@ describe('the permit a confirmation mints', () => {
     const reentrant: RestoreSend[] = [];
     const send = vi.fn<SendRestore>(async () => {
       reentrant.push(
-        await sendRestore(holder.started, holder.started!.session, at(BASE, []), send)
+        await sendRestore(holder.started, holder.started!.session, at(BASE, []), send, () => holder.started!.session)
       );
       return { kind: 'sealed', sealed: sealed(saved()) };
     });
-    holder.started = confirmRestore(pending(), at(BASE, []));
+    holder.started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending());
     expect(holder.started).not.toBeNull();
-    await sendRestore(holder.started, holder.started!.session, at(BASE, []), send);
+    await sendRestore(holder.started, holder.started!.session, at(BASE, []), send, () => holder.started!.session);
     expect(reentrant).toEqual([{ kind: 'notAttempted' }]);
     expect(send).toHaveBeenCalledTimes(1);
   }); // End of the "spent before the sender runs" case
@@ -1532,8 +1541,8 @@ describe('the permit a confirmation mints', () => {
     // binding. This session agrees with the permit about everything the send
     // rechecks; the assertion is that the four arguments come off the permit.
     const send = sender();
-    const started = confirmRestore(pending(), at(BASE, []))!;
-    await sendRestore(started, started.session, at(BASE, []), send);
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
+    await sendRestore(started, started.session, at(BASE, []), send, () => started.session);
     expect(send).toHaveBeenCalledWith(TARGET, BASE, CANDIDATE, { accepted: [] });
   }); // End of the "sends the bytes it retained" case
 
@@ -1550,12 +1559,12 @@ describe('the permit a confirmation mints', () => {
     // and neither is reachable from here.
     const send = sender();
     const session = pending();
-    const first = confirmRestore(session, at(BASE, []));
-    const second = confirmRestore(session, at(BASE, []));
+    const first = confirmRestore(session, at(BASE, []), () => session);
+    const second = confirmRestore(session, at(BASE, []), () => session);
     expect(first).not.toBeNull();
     expect(second).toBeNull();
-    await sendRestore(first, first!.session, at(BASE, []), send);
-    await sendRestore(second, session, at(BASE, []), send);
+    await sendRestore(first, first!.session, at(BASE, []), send, () => first!.session);
+    await sendRestore(second, session, at(BASE, []), send, () => session);
     expect(send).toHaveBeenCalledTimes(1);
   }); // End of the "one permit per question" case
 
@@ -1565,13 +1574,13 @@ describe('the permit a confirmation mints', () => {
     // module asked from a reproduction of it. A spread copies own properties and
     // `structuredClone` copies fields; a `WeakMap` entry is neither.
     const session = pending();
-    expect(confirmRestore({ ...session }, at(BASE, []))).toBeNull();
+    expect(((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))({ ...session })).toBeNull();
     expect(
-      confirmRestore({ ...session, pending: structuredClone(session.pending!) }, at(BASE, []))
+      ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))({ ...session, pending: structuredClone(session.pending!) })
     ).toBeNull();
     // The refusals spent nothing: the session the copies were made from still
     // answers, which is what makes this a case about the copies alone.
-    expect(confirmRestore(session, at(BASE, []))).not.toBeNull();
+    expect(confirmRestore(session, at(BASE, []), () => session)).not.toBeNull();
   }); // End of the "copy of the asked session" case
 
   it('does not spend the question when it refuses, so a repaired session confirms it', () => {
@@ -1583,14 +1592,14 @@ describe('the permit a confirmation mints', () => {
     const window = pending();
     const bound = pending();
     const generation = bound.previewGeneration;
-    expect(confirmRestore(window, at(ELSEWHERE, []))).toBeNull();
+    expect(confirmRestore(window, at(ELSEWHERE, []), () => window)).toBeNull();
     expect(
-      confirmRestore(moveOnTheSession(bound, 'previewGeneration', generation + 1), at(BASE, []))
+      ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(moveOnTheSession(bound, 'previewGeneration', generation + 1))
     ).toBeNull();
     // Put each reason back, and each session answers the question it still holds.
-    expect(confirmRestore(window, at(BASE, []))).not.toBeNull();
+    expect(confirmRestore(window, at(BASE, []), () => window)).not.toBeNull();
     expect(
-      confirmRestore(moveOnTheSession(bound, 'previewGeneration', generation), at(BASE, []))
+      ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(moveOnTheSession(bound, 'previewGeneration', generation))
     ).not.toBeNull();
   }); // End of the "refusal spends nothing" case
 
@@ -1629,7 +1638,7 @@ describe('the permit a confirmation mints', () => {
           reads[field] += 1;
           if (!entered) {
             entered = true;
-            reentrant.push(confirmRestore(session, at(BASE, [])));
+            reentrant.push(confirmRestore(session, at(BASE, []), () => session));
           }
           return held[field];
         },
@@ -1638,7 +1647,7 @@ describe('the permit a confirmation mints', () => {
       });
     } // End of the loop over the four fields a submission is derived from
 
-    const started = confirmRestore(session, at(BASE, []));
+    const started = confirmRestore(session, at(BASE, []), () => session);
 
     expect(started).not.toBeNull();
     // Not one read, so not one opening. Every one of these was a read the old
@@ -1647,7 +1656,7 @@ describe('the permit a confirmation mints', () => {
     expect(reentrant).toEqual([]);
     // And the permit is real: the bytes and the base revision the question was asked
     // about are what the sender is handed.
-    await sendRestore(started, started!.session, at(BASE, []), send);
+    await sendRestore(started, started!.session, at(BASE, []), send, () => started!.session);
     expect(send).toHaveBeenCalledWith(TARGET, BASE, CANDIDATE, { accepted: [] });
     // The send does read the live candidate — that is `permitHolds`'s byte
     // comparison — and the re-entrant confirmation it triggers finds the question
@@ -1679,13 +1688,13 @@ describe('the permit a confirmation mints', () => {
         }
       }
     };
-    const asked = prepareRestore(session, at(BASE));
+    const asked = prepareRestore(session, at(BASE), () => session);
     expect(asked.pending).not.toBeNull();
     // From here the draft answers a different base revision to every reader.
     drifting = true;
 
-    const started = confirmRestore(asked, at(BASE, []));
-    await sendRestore(started, started!.session, at(BASE, []), send);
+    const started = confirmRestore(asked, at(BASE, []), () => asked);
+    await sendRestore(started, started!.session, at(BASE, []), send, () => started!.session);
 
     expect(send).toHaveBeenCalledWith(TARGET, BASE, CANDIDATE, { accepted: [] });
   }); // End of the "base revision bound when asked" case
@@ -1713,11 +1722,11 @@ describe('the permit a confirmation mints', () => {
         }
       }
     };
-    const asked = prepareRestore(session, at(BASE));
+    const asked = prepareRestore(session, at(BASE), () => session);
     drifting = true;
 
-    const started = confirmRestore(asked, at(BASE, []));
-    const sent = await sendRestore(started, started!.session, at(BASE, []), send);
+    const started = confirmRestore(asked, at(BASE, []), () => asked);
+    const sent = await sendRestore(started, started!.session, at(BASE, []), send, () => started!.session);
 
     expect(sent).toEqual({ kind: 'withdrawn' });
     expect(send).not.toHaveBeenCalled();
@@ -1750,14 +1759,14 @@ describe('the permit a confirmation mints', () => {
       get: () => {
         if (!entered) {
           entered = true;
-          reentrant.push(confirmRestore(session, at(BASE, [])));
+          reentrant.push(confirmRestore(session, at(BASE, []), () => session));
         }
         return generation;
       },
       configurable: true,
       enumerable: true
     });
-    const outer = confirmRestore(session, at(BASE, []));
+    const outer = confirmRestore(session, at(BASE, []), () => session);
     // The getter ran, so this really is the pre-spend opening and not a case that
     // never re-entered at all.
     expect(entered).toBe(true);
@@ -1765,7 +1774,7 @@ describe('the permit a confirmation mints', () => {
     const minted = [outer, ...reentrant].filter((one) => one !== null);
     expect(minted).toHaveLength(1);
     for (const one of [outer, ...reentrant]) {
-      await sendRestore(one, one?.session ?? session, at(BASE, []), send);
+      await ((onHand) => sendRestore(one, onHand, at(BASE, []), send, () => onHand))(one?.session ?? session);
     }
     expect(send).toHaveBeenCalledTimes(1);
   }); // End of the "spent in one operation" case
@@ -1823,18 +1832,18 @@ describe('a withdrawn question authorizes nothing, whoever still holds it', () =
       {
         name: 'an answer landing',
         asked,
-        withdraw: (session) => applyRestore(session, sealed(saved()), NO_SURFACES)
+        withdraw: (session) => applyRestore(session, sealed(saved()), NO_SURFACES, () => session)
       },
       {
         name: 'a consumed confirmation being taken back',
         asked,
-        withdraw: (session) => restoreConfirmationWithdrawn(session)
+        withdraw: (session) => restoreConfirmationWithdrawn(session, () => session)
       },
       {
         name: 'the findings being acknowledged',
         asked: async (): Promise<RestoreSession> => {
           const { session } = await roundTrip(pending(), refusal());
-          return prepareRestore(session, at(BASE));
+          return prepareRestore(session, at(BASE), () => session);
         },
         withdraw: (session) => acknowledgeRestoreFindings(session)
       },
@@ -1847,7 +1856,7 @@ describe('a withdrawn question authorizes nothing, whoever still holds it', () =
         // attempted and the revocation is the only thing that happened.
         name: 'a reload of the disk version being spent',
         asked,
-        withdraw: (session) => reloadTheDiskVersion(session, adopting().adopt)
+        withdraw: (session) => reloadTheDiskVersion(session, adopting().adopt, () => session)
       }
     ];
   } // End of function withdrawals()
@@ -1862,18 +1871,18 @@ describe('a withdrawn question authorizes nothing, whoever still holds it', () =
       // exactly what a retained pre-transition reference is.
       one.withdraw(asked);
 
-      const started = confirmRestore(asked, at(BASE, []));
+      const started = confirmRestore(asked, at(BASE, []), () => asked);
 
       expect(started).toBeNull();
-      expect(await sendRestore(started, asked, at(BASE, []), send)).toEqual({
+      expect(await sendRestore(started, asked, at(BASE, []), send, () => asked)).toEqual({
         kind: 'notAttempted'
       });
       expect(send).not.toHaveBeenCalled();
       // **The control**: asking again over the same retained session mints a fresh
       // question, and that one confirms. So what is refused above is the withdrawal
       // and not the shape of the case.
-      const again = prepareRestore(cancelRestore(asked), at(BASE));
-      expect(confirmRestore(again, at(BASE, []))).not.toBeNull();
+      const again = ((onHand) => prepareRestore(onHand, at(BASE), () => onHand))(cancelRestore(asked));
+      expect(confirmRestore(again, at(BASE, []), () => again)).not.toBeNull();
     }
   );
 
@@ -1902,7 +1911,7 @@ describe('a withdrawn question authorizes nothing, whoever still holds it', () =
       // nothing, because the revocation had already happened.
       expect(attempts).toHaveLength(1);
       expect(attempts[0]).toBeNull();
-      expect(await sendRestore(attempts[0]!, session, at(BASE, []), send)).toEqual({
+      expect(await sendRestore(attempts[0]!, session, at(BASE, []), send, () => session)).toEqual({
         kind: 'notAttempted'
       });
       expect(send).not.toHaveBeenCalled();
@@ -1930,13 +1939,13 @@ describe('a withdrawn question authorizes nothing, whoever still holds it', () =
 
     const reloaded = reloadTheDiskVersion(confirmed, () => {
       moveOnTheSession(confirmed, 'outcome', null);
-      inside.push(confirmRestore(confirmed, at(BASE, [])));
+      inside.push(confirmRestore(confirmed, at(BASE, []), () => confirmed));
       return 'installed';
-    });
+    }, () => confirmed);
 
     expect(inside).toEqual([null]);
     expect(reloaded.pending).toBeNull();
-    expect(confirmRestore(confirmed, at(BASE, []))).toBeNull();
+    expect(confirmRestore(confirmed, at(BASE, []), () => confirmed)).toBeNull();
   }); // End of the "revokes before the adoption callback" case
 
   it('is refused by the same rule whether the question was answered or withdrawn', async () => {
@@ -1946,13 +1955,13 @@ describe('a withdrawn question authorizes nothing, whoever still holds it', () =
     // permit exists.
     const send = sender();
     const answered = pending();
-    expect(confirmRestore(answered, at(BASE, []))).not.toBeNull();
-    expect(confirmRestore(answered, at(BASE, []))).toBeNull();
+    expect(confirmRestore(answered, at(BASE, []), () => answered)).not.toBeNull();
+    expect(confirmRestore(answered, at(BASE, []), () => answered)).toBeNull();
 
     const cancelled = pending();
     cancelRestore(cancelled);
-    expect(confirmRestore(cancelled, at(BASE, []))).toBeNull();
-    expect(await sendRestore(null, cancelled, at(BASE, []), send)).toEqual({
+    expect(confirmRestore(cancelled, at(BASE, []), () => cancelled)).toBeNull();
+    expect(await sendRestore(null, cancelled, at(BASE, []), send, () => cancelled)).toEqual({
       kind: 'notAttempted'
     });
     expect(send).not.toHaveBeenCalled();
@@ -2027,7 +2036,7 @@ describe('a question being inspected is held, never absent', () => {
     const asked = pending();
     const successors: RestoreSession[] = [];
     const read = whenFirstRead(asked, 'phase', () => {
-      successors.push(prepareRestore(asked, at(BASE)));
+      successors.push(prepareRestore(asked, at(BASE), () => asked));
     });
 
     const idle = targetRevisionObserved(asked, BASE);
@@ -2059,7 +2068,7 @@ describe('a question being inspected is held, never absent', () => {
     expect(read()).toBe(true);
     expect(carried).toHaveLength(1);
     expect(carried[0]!.pending).toBeNull();
-    expect(confirmRestore(carried[0]!, at(BASE, []))).toBeNull();
+    expect(((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(carried[0]!)).toBeNull();
     expect(await replacementsFrom([asked, ...carried])).toBe(1);
   }); // End of the "carried away from inside targetRevisionObserved" case
 
@@ -2078,9 +2087,9 @@ describe('a question being inspected is held, never absent', () => {
     const idle = targetRevisionObserved(asked, BASE);
 
     expect(read()).toBe(true);
-    expect(confirmRestore(asked, at(BASE, []))).toBeNull();
+    expect(confirmRestore(asked, at(BASE, []), () => asked)).toBeNull();
     expect(idle.pending).toBeNull();
-    expect(confirmRestore(idle, at(BASE, []))).toBeNull();
+    expect(confirmRestore(idle, at(BASE, []), () => idle)).toBeNull();
   }); // End of the "not put back when a getter withdrew it" case
 
   it.each([
@@ -2115,7 +2124,7 @@ describe('a question being inspected is held, never absent', () => {
     const asked = pending();
     const successors: RestoreSession[] = [];
     const read = whenFirstRead(asked, 'entry', () => {
-      successors.push(prepareRestore(asked, at(BASE)));
+      successors.push(prepareRestore(asked, at(BASE), () => asked));
     });
 
     const same = candidateRead(asked, textResponse({ entry: entryOf('match/other.yml') }));
@@ -2136,9 +2145,9 @@ describe('a question being inspected is held, never absent', () => {
     const same = candidateRead(asked, textResponse({ entry: entryOf('match/other.yml') }));
 
     expect(read()).toBe(true);
-    expect(confirmRestore(asked, at(BASE, []))).toBeNull();
+    expect(confirmRestore(asked, at(BASE, []), () => asked)).toBeNull();
     expect(same.pending).toBeNull();
-    expect(confirmRestore(same, at(BASE, []))).toBeNull();
+    expect(confirmRestore(same, at(BASE, []), () => same)).toBeNull();
   }); // End of the "withdrew it during a candidate response" case
 
   it('cannot be confirmed while it is suspended, and is confirmable once it is not', async () => {
@@ -2150,7 +2159,7 @@ describe('a question being inspected is held, never absent', () => {
     const asked = pending();
     const inside: (StartedRestore | null)[] = [];
     const read = whenFirstRead(asked, 'entry', () => {
-      inside.push(confirmRestore(asked, at(BASE, [])));
+      inside.push(confirmRestore(asked, at(BASE, []), () => asked));
     });
 
     const same = candidateRead(asked, textResponse({ entry: entryOf('match/other.yml') }));
@@ -2194,10 +2203,10 @@ describe('a question being inspected is held, never absent', () => {
       // The biconditional, over everything a caller could still be holding: a session
       // presents a question exactly when it still authorizes one. The nested result is
       // what fails this against a build whose `undefined` branch skips the map.
-      expect(confirmRestore(one, at(one.baseRevision, [])) !== null).toBe(one.pending !== null);
+      expect(confirmRestore(one, at(one.baseRevision, []), () => one) !== null).toBe(one.pending !== null);
     }
     // And the withdrawal is what stands, on the asked session and on both answers.
-    expect(confirmRestore(asked, at(BASE, []))).toBeNull();
+    expect(confirmRestore(asked, at(BASE, []), () => asked)).toBeNull();
     expect(await replacementsFrom([asked, ...retained])).toBe(0);
   }); // End of the "withdrew it from inside a nested inspection" case
 }); // End of the "question being inspected is held" suite
@@ -2238,17 +2247,17 @@ describe('what a session presents and what it authorizes', () => {
       ['candidateRefused', (session) => candidateRefused(session, FAILURE)],
       ['targetRevisionObserved, moved', (session) => targetRevisionObserved(session, ELSEWHERE)],
       ['targetRevisionObserved, unmoved', (session) => targetRevisionObserved(session, BASE)],
-      ['prepareRestore over a live question', (session) => prepareRestore(session, at(BASE))],
+      ['prepareRestore over a live question', (session) => prepareRestore(session, at(BASE), () => session)],
       ['cancelRestore', (session) => cancelRestore(session)],
-      ['confirmRestore', (session) => confirmRestore(session, at(BASE, []))!.session],
-      ['applyRestore', (session) => applyRestore(session, sealed(saved()), NO_SURFACES)],
-      ['restoreConfirmationWithdrawn', (session) => restoreConfirmationWithdrawn(session)],
-      ['restoreCouldNotBeSent', (session) => restoreCouldNotBeSent(session, false)],
+      ['confirmRestore', (session) => confirmRestore(session, at(BASE, []), () => session)!.session],
+      ['applyRestore', (session) => applyRestore(session, sealed(saved()), NO_SURFACES, () => session)],
+      ['restoreConfirmationWithdrawn', (session) => restoreConfirmationWithdrawn(session, () => session)],
+      ['restoreCouldNotBeSent', (session) => restoreCouldNotBeSent(session, false, () => session)],
       ['acknowledgeRestoreFindings', (session) => acknowledgeRestoreFindings(session)],
       ['dismissRestoreOutcome', (session) => dismissRestoreOutcome(session)],
       ['askToReloadDiskVersion', (session) => askToReloadDiskVersion(session)],
       ['confirmDiskReload', (session) => confirmDiskReload(session)],
-      ['reloadTheDiskVersion', (session) => reloadTheDiskVersion(session, adopting().adopt)],
+      ['reloadTheDiskVersion', (session) => reloadTheDiskVersion(session, adopting().adopt, () => session)],
       // The receiver's arms (Phase 2d-6-5): the replacing ones withdraw, the
       // others carry. A `retained` about the destination carries too, and is
       // outside this table's scope because the block it records is a second
@@ -2318,7 +2327,7 @@ describe('what a session presents and what it authorizes', () => {
     // The biconditional, in one line: a session presents a question exactly when it
     // still authorizes one. A carry that was forgotten fails the left half; a
     // revocation that was forgotten fails the right.
-    expect(confirmRestore(next, at(next.baseRevision, [])) !== null).toBe(next.pending !== null);
+    expect(confirmRestore(next, at(next.baseRevision, []), () => next) !== null).toBe(next.pending !== null);
   });
 }); // End of the "presents and authorizes" suite
 
@@ -2339,7 +2348,7 @@ describe('no save is issued without a confirmation', () => {
     readonly observed: ContentRevision | null;
     readonly surfaces: readonly OpenWriteSurface[];
   }[] {
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     const rehashed: RestoreSession = {
       ...pending(),
       preview: { ...pending().preview!, revision: OTHER_CANDIDATE_REVISION }
@@ -2387,11 +2396,11 @@ describe('no save is issued without a confirmation', () => {
    * @returns The session.
    */
   function pendingOverAConflict(): RestoreSession {
-    const answered = applyRestore(
-      confirmRestore(pending(), at(BASE, []))!.session,
+    const answered = ((onHand) => applyRestore(
+      onHand,
       sealed(conflictResult()),
-      NO_SURFACES
-    );
+      NO_SURFACES, () => onHand
+    ))(((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!.session);
     return { ...answered, pending: pending().pending };
   } // End of function pendingOverAConflict()
 
@@ -2414,7 +2423,7 @@ describe('no save is issued without a confirmation', () => {
 
   it('calls nothing at all for a null confirmation', async () => {
     const send = sender();
-    expect(await sendRestore(null, pending(), at(BASE, []), send)).toEqual({
+    expect(await ((onHand) => sendRestore(null, onHand, at(BASE, []), send, () => onHand))(pending())).toEqual({
       kind: 'notAttempted'
     });
     expect(send).not.toHaveBeenCalled();
@@ -2463,13 +2472,13 @@ describe('nothing here changes until the file answers', () => {
    */
   function panelActions(): readonly (readonly [string, (session: RestoreSession) => RestoreSession])[] {
     return [
-      ['the question being asked', (session) => prepareRestore(session, at(BASE))],
+      ['the question being asked', (session) => prepareRestore(session, at(BASE), () => session)],
       ['the question being taken back', (session) => cancelRestore(session)],
       ['the findings being acknowledged', (session) => acknowledgeRestoreFindings(session)],
       ['the outcome being put away', (session) => dismissRestoreOutcome(session)],
       ['a reload being asked about', (session) => askToReloadDiskVersion(session)],
       ['a reload being confirmed', (session) => confirmDiskReload(session)],
-      ['a reload being spent', (session) => reloadTheDiskVersion(session, adopting().adopt)]
+      ['a reload being spent', (session) => reloadTheDiskVersion(session, adopting().adopt, () => session)]
     ];
   } // End of function panelActions()
 
@@ -2484,7 +2493,7 @@ describe('nothing here changes until the file answers', () => {
    */
   async function inFlightOverARefusal(): Promise<RestoreSession> {
     const { session } = await roundTrip(pending(), refusal());
-    const started = confirmRestore(prepareRestore(session, at(BASE)), at(BASE, []));
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(prepareRestore(session, at(BASE), () => session));
     if (started === null) {
       throw new Error('this session was expected to confirm a second attempt');
     }
@@ -2513,21 +2522,21 @@ describe('nothing here changes until the file answers', () => {
     // No transition can reach this state — that is what the group above holds — so
     // the swap is done by hand, which is exactly what a caller could do. The
     // conflict must describe the bytes that were sent.
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     const swapped: RestoreSession = {
       ...started.session,
       preview: previewOf({ text: OTHER_CANDIDATE, revision: OTHER_CANDIDATE_REVISION })
     };
-    const conflict = conflictOf(applyRestore(swapped, sealed(conflictResult()), NO_SURFACES));
+    const conflict = conflictOf(applyRestore(swapped, sealed(conflictResult()), NO_SURFACES, () => swapped));
     expect(conflict).not.toBeNull();
     expect(conflict!.draft.value).toBe(CANDIDATE);
   }); // End of the "not a preview swapped under it" case
 
   it('discharges a committed seal even when the preview has gone', () => {
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     const stripped: RestoreSession = { ...started.session, preview: null };
     const surfaces = coordinator([{ kind: 'matchEditor', target: { kind: 'document', document: TARGET } }]);
-    const answered = applyRestore(stripped, sealed(saved()), surfaces.close);
+    const answered = applyRestore(stripped, sealed(saved()), surfaces.close, () => stripped);
     expect(surfaces.closed).toEqual([{ document: TARGET, revision: AFTER }]);
     expect(answered.restored).toBe(true);
     expect(answered.baseRevision).toBe(AFTER);
@@ -2538,7 +2547,7 @@ describe('nothing here changes until the file answers', () => {
     // **Absence of presentation state must never strand a committed write.** There
     // is nothing to describe an outcome over here, so none is invented — but the
     // seal is opened, the coordinator runs, and the file's new revision is recorded.
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     const bare: RestoreSession = {
       ...started.session,
       preview: null,
@@ -2546,7 +2555,7 @@ describe('nothing here changes until the file answers', () => {
       inFlight: null
     };
     const surfaces = coordinator([{ kind: 'rawEditor', target: { kind: 'document', document: TARGET } }]);
-    const answered = applyRestore(bare, sealed(saved()), surfaces.close);
+    const answered = applyRestore(bare, sealed(saved()), surfaces.close, () => bare);
     expect(surfaces.closed).toEqual([{ document: TARGET, revision: AFTER }]);
     expect(surfaces.open).toEqual([]);
     expect(answered.restored).toBe(true);
@@ -2622,8 +2631,8 @@ describe('the answer', () => {
     // the synchronous whole-document invalidation this answer discharges. The
     // surface over another file stays open: the write did not touch it.
     const send = sender();
-    const started = confirmRestore(pending(), at(BASE, []))!;
-    const sent = await sendRestore(started, started.session, at(BASE, []), send);
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
+    const sent = await sendRestore(started, started.session, at(BASE, []), send, () => started.session);
     if (sent.kind !== 'answered' || sent.answer.kind !== 'sealed') {
       throw new Error('this send was expected to be sealed');
     }
@@ -2633,7 +2642,7 @@ describe('the answer', () => {
       { kind: 'matchCreator', target: { kind: 'document', document: TARGET } },
       { kind: 'rawEditor', target: { kind: 'document', document: 99 } }
     ]);
-    const answered = applyRestore(started.session, sent.answer.sealed, surfaces.close);
+    const answered = applyRestore(started.session, sent.answer.sealed, surfaces.close, () => started.session);
     expect(surfaces.closed).toEqual([{ document: TARGET, revision: AFTER }]);
     expect(surfaces.open).toEqual([{ kind: 'rawEditor', target: { kind: 'document', document: 99 } }]);
     expect(answered.restored).toBe(true);
@@ -2648,13 +2657,13 @@ describe('the answer', () => {
     // `creating = false` unconditionally, and its comment at `:529-535` says why: it
     // cannot learn which destination the form chose, so it closes the form over every
     // file, which over-broadly includes the file it names nothing about.
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     const surfaces = coordinator([
       { kind: 'matchCreator', target: { kind: 'unknown' } },
       { kind: 'matchCreator', target: { kind: 'document', document: 99 } },
       { kind: 'matchEditor', target: { kind: 'document', document: 99 } }
     ]);
-    const answered = applyRestore(started.session, sealed(saved()), surfaces.close);
+    const answered = applyRestore(started.session, sealed(saved()), surfaces.close, () => started.session);
     // Both creators go, whatever file they name; the editor over another file stays,
     // because the write did not touch it.
     expect(surfaces.open).toEqual([
@@ -2668,7 +2677,7 @@ describe('the answer', () => {
     // The pane deliberately does not close the restore (`DetailPane.svelte:525-527`):
     // it is where the outcome of this very write is drawn, and `RestoreSession`'s own
     // `restored` is what stops it offering to replace anything again.
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     const restoring: OpenWriteSurface = {
       kind: 'restore',
       target: { kind: 'document', document: TARGET }
@@ -2677,7 +2686,7 @@ describe('the answer', () => {
       restoring,
       { kind: 'rawEditor', target: { kind: 'document', document: TARGET } }
     ]);
-    const answered = applyRestore(started.session, sealed(saved()), surfaces.close);
+    const answered = applyRestore(started.session, sealed(saved()), surfaces.close, () => started.session);
     expect(surfaces.open).toEqual([restoring]);
     expect(answered.restored).toBe(true);
   }); // End of the "restore surface itself" case
@@ -2687,9 +2696,9 @@ describe('the answer', () => {
     ['a refusal', refusal()],
     ['a success that wrote nothing', saved(false)]
   ])('closes no surface for %s, because nothing went stale', (_name, result) => {
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     const surfaces = coordinator([{ kind: 'matchEditor', target: { kind: 'document', document: TARGET } }]);
-    applyRestore(started.session, sealed(result), surfaces.close);
+    applyRestore(started.session, sealed(result), surfaces.close, () => started.session);
     expect(surfaces.closed).toEqual([]);
     expect(surfaces.open).toHaveLength(1);
   });
@@ -2697,10 +2706,10 @@ describe('the answer', () => {
   it('keeps a committed replacement primary when the coordinator throws', async () => {
     // A failure **after** the commit never unwrites the file, and never turns into a
     // failed save (`PROGRESS.md` D2). It is one line beside the committed arm.
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     const answered = applyRestore(started.session, sealed(saved()), () => {
       throw new Error('a surface would not close');
-    });
+    }, () => started.session);
     expect(answered.outcome?.kind).toBe('saved');
     expect(answered.outcome?.messages).toEqual([{ kind: 'fileWritten' }, { kind: 'backupTaken' }]);
     expect(answered.restored).toBe(true);
@@ -2713,11 +2722,11 @@ describe('the answer', () => {
   it('adds one line for the two invalidations, because both mean the same thing', () => {
     // The seal's own callback and the issuer's are two acts at two moments; a person
     // reads one sentence for either.
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     const answered = applyRestore(
       started.session,
       sealWholeDocumentSave(TARGET, saved(), { kind: 'failed', failure: FAILURE }),
-      NO_SURFACES
+      NO_SURFACES, () => started.session
     );
     expect(answered.extraMessages).toHaveLength(1);
   }); // End of the "one line for two invalidations" case
@@ -2726,11 +2735,11 @@ describe('the answer', () => {
     // **Named for what it does.** The branch does not leave the session alone — it
     // moves the phase, which is the useful half — so what it claims is only that it
     // replaces no outcome and invents none, and that nothing is left in flight.
-    const started = confirmRestore(pending(), at(BASE, []))!;
+    const started = ((onHand) => confirmRestore(onHand, at(BASE, []), () => onHand))(pending())!;
     const once = sealed(saved());
     const twice = coordinator();
-    const first = applyRestore(started.session, once, twice.close);
-    const second = applyRestore(first, once, twice.close);
+    const first = applyRestore(started.session, once, twice.close, () => started.session);
+    const second = applyRestore(first, once, twice.close, () => first);
     expect(second.outcome).toBe(first.outcome);
     expect(second.phase).toBe('editing');
     expect(second.inFlight).toBeNull();
@@ -2759,7 +2768,7 @@ describe('the answer', () => {
     // **A refusal moves nothing**, so the session is still measured against `BASE`
     // and a confirmation offered any other observed revision is refused — the
     // acknowledgement does not weaken that gate.
-    const again = prepareRestore(consented, at(BASE));
+    const again = prepareRestore(consented, at(BASE), () => consented);
     const wrongRevision = sender();
     await confirmAndSend(again, at(AFTER, []), wrongRevision);
     expect(wrongRevision).not.toHaveBeenCalled();
@@ -2779,7 +2788,7 @@ describe('the answer', () => {
     const consented = acknowledgeRestoreFindings(session);
     expect(restoreView(consented, windowAgrees(consented)).refusalChoices).toEqual(['keepEditing']);
     const send = sender();
-    await confirmAndSend(prepareRestore(consented, at(BASE)), at(BASE, []), send);
+    await confirmAndSend(prepareRestore(consented, at(BASE), () => consented), at(BASE, []), send);
     expect(send).toHaveBeenCalledWith(TARGET, BASE, CANDIDATE, { accepted: [] });
   }); // End of the "no consent for a model error" case
 
@@ -2790,7 +2799,7 @@ describe('the answer', () => {
     if (started === null || sent.kind !== 'answered' || sent.answer.kind !== 'failed') {
       throw new Error('this send was expected to fail');
     }
-    const session = restoreCouldNotBeSent(started.session, sent.answer.mayHaveWritten);
+    const session = restoreCouldNotBeSent(started.session, sent.answer.mayHaveWritten, () => started.session);
     expect(session.sendFailure).toEqual({ kind: 'mayHaveWritten', reason: null });
     expect(session.phase).toBe('editing');
     expect(session.inFlight).toBeNull();
@@ -2802,7 +2811,7 @@ describe('the answer', () => {
   }); // End of the "uncertain send" case
 
   it('keeps a send that never left apart from one that may have written', () => {
-    expect(restoreCouldNotBeSent(pending(), false).sendFailure).toEqual({
+    expect(((onHand) => restoreCouldNotBeSent(onHand, false, () => onHand))(pending()).sendFailure).toEqual({
       kind: 'notSent',
       reason: null
     });
@@ -2885,7 +2894,7 @@ describe('the conflict', () => {
   it('re-points the candidate at the disk revision when the window installs it', async () => {
     const session = confirmDiskReload(askToReloadDiskVersion(await conflicted()));
     const { adopt, adoptions } = adopting('installed');
-    const reloaded = reloadTheDiskVersion(session, adopt);
+    const reloaded = reloadTheDiskVersion(session, adopt, () => session);
     expect(adoptions).toHaveLength(1);
     // The candidate stays; what moves is the revision it is measured against.
     expect(candidateText(reloaded.preview!)).toBe(CANDIDATE);
@@ -2896,7 +2905,7 @@ describe('the conflict', () => {
     expect(reloaded.reload).toEqual({ kind: 'idle' });
     // And a fresh confirmation is issued against the newly installed revision.
     const send = sender();
-    await confirmAndSend(prepareRestore(reloaded, at(ELSEWHERE)), at(ELSEWHERE, []), send);
+    await confirmAndSend(prepareRestore(reloaded, at(ELSEWHERE), () => reloaded), at(ELSEWHERE, []), send);
     expect(send).toHaveBeenCalledWith(TARGET, ELSEWHERE, CANDIDATE, { accepted: [] });
     // And the previous preview generation cannot be spent against the new base: the
     // adoption withdrew it.
@@ -2910,7 +2919,7 @@ describe('the conflict', () => {
     // adoption was given about a different reading of the world.
     const session = confirmDiskReload(askToReloadDiskVersion(await conflicted(BASE)));
     const carried: RestoreSession = { ...session, pending: pending().pending };
-    const reloaded = reloadTheDiskVersion(carried, adopting('installed').adopt);
+    const reloaded = reloadTheDiskVersion(carried, adopting('installed').adopt, () => carried);
     expect(reloaded.baseRevision).toBe(BASE);
     expect(reloaded.pending).toBeNull();
     expect(reloaded.previewGeneration).toBeGreaterThan(carried.previewGeneration);
@@ -2919,14 +2928,14 @@ describe('the conflict', () => {
 
   it('treats alreadyThere as a success, exactly as an install', async () => {
     const session = confirmDiskReload(askToReloadDiskVersion(await conflicted()));
-    const reloaded = reloadTheDiskVersion(session, adopting('alreadyThere').adopt);
+    const reloaded = reloadTheDiskVersion(session, adopting('alreadyThere').adopt, () => session);
     expect(reloaded.baseRevision).toBe(ELSEWHERE);
     expect(reloaded.outcome).toBeNull();
   });
 
   it('moves nothing when the window refuses, and stops offering the control', async () => {
     const session = confirmDiskReload(askToReloadDiskVersion(await conflicted()));
-    const reloaded = reloadTheDiskVersion(session, adopting('refused').adopt);
+    const reloaded = reloadTheDiskVersion(session, adopting('refused').adopt, () => session);
     expect(reloaded.baseRevision).toBe(BASE);
     expect(reloaded.outcome).toBe(session.outcome);
     expect(reloaded.reload).toEqual({ kind: 'refused' });
@@ -2937,15 +2946,15 @@ describe('the conflict', () => {
 
   it('asks the window nothing without a confirmation', async () => {
     const { adopt, adoptions } = adopting();
-    expect(reloadTheDiskVersion(await conflicted(), adopt).reload).toEqual({ kind: 'idle' });
+    expect(((onHand) => reloadTheDiskVersion(onHand, adopt, () => onHand))(await conflicted()).reload).toEqual({ kind: 'idle' });
     expect(adoptions).toEqual([]);
   });
 
   it('takes a second conflict after the first was adopted', async () => {
     const first = confirmDiskReload(askToReloadDiskVersion(await conflicted(ELSEWHERE)));
-    const reloaded = reloadTheDiskVersion(first, adopting('installed').adopt);
+    const reloaded = reloadTheDiskVersion(first, adopting('installed').adopt, () => first);
     const { session } = await roundTrip(
-      prepareRestore(reloaded, at(ELSEWHERE)),
+      prepareRestore(reloaded, at(ELSEWHERE), () => reloaded),
       conflictResult(AGAIN, ELSEWHERE)
     );
     const second = conflictOf(session);
@@ -2959,17 +2968,17 @@ describe('the conflict', () => {
     expect(session.restored).toBe(false);
     expect(candidateText(session.preview!)).toBe(CANDIDATE);
     // And the second conflict's own reload re-points onto the second disk revision.
-    const adopted = reloadTheDiskVersion(
-      confirmDiskReload(askToReloadDiskVersion(session)),
-      adopting('installed').adopt
-    );
+    const adopted = ((onHand) => reloadTheDiskVersion(
+      onHand,
+      adopting('installed').adopt, () => onHand
+    ))(confirmDiskReload(askToReloadDiskVersion(session)));
     expect(adopted.baseRevision).toBe(AGAIN);
   }); // End of the "second conflict" case
 
   it('is a refusal to prepare while it is on screen', async () => {
     const session = await conflicted();
     expect(restoreRefusal(session, windowAgrees(session))).toEqual({ kind: 'conflictShowing' });
-    expect(prepareRestore(session, at(BASE)).pending).toBeNull();
+    expect(prepareRestore(session, at(BASE), () => session).pending).toBeNull();
   });
 }); // End of the "conflict" suite
 
@@ -3236,15 +3245,15 @@ describe('the external session — Phase 2d-6-5', () => {
       // for nobody, the caller's retained session included — its consent gone
       // and the preview generation moved.
       expect(next.pending).toBeNull();
-      expect(confirmRestore(next, at(BASE))).toBeNull();
-      expect(confirmRestore(asked, at(BASE))).toBeNull();
+      expect(confirmRestore(next, at(BASE), () => next)).toBeNull();
+      expect(confirmRestore(asked, at(BASE), () => asked)).toBeNull();
       expect(next.previewGeneration).toBeGreaterThan(asked.previewGeneration);
       expect(next.preview!.draft.consent).toBeNull();
       // Entry 8, all three doors: preparation, confirmation and the final permit.
       expect(restoreRefusal(next, at(BASE))).toEqual({ kind: 'externalConflict' });
-      expect(prepareRestore(next, at(BASE))).toBe(next);
+      expect(prepareRestore(next, at(BASE), () => next)).toBe(next);
       const byHand: RestoreSession = { ...next, pending: asked.pending };
-      expect(confirmRestore(byHand, at(BASE))).toBeNull();
+      expect(confirmRestore(byHand, at(BASE), () => byHand)).toBeNull();
       const view = restoreView(next, at(BASE));
       expect(view.canPrepare).toBe(false);
       expect(view.confirming).toBe(false);
@@ -3268,7 +3277,7 @@ describe('the external session — Phase 2d-6-5', () => {
       // **Past a disabled button, at the last door.** A confirmation minted
       // before the conflict, handed to the send beside a session that now
       // carries one, is consumed unspent; the sender is never called.
-      const started = confirmRestore(pending(), at(BASE));
+      const started = ((onHand) => confirmRestore(onHand, at(BASE), () => onHand))(pending());
       if (started === null) {
         throw new Error('a pending restore confirms');
       }
@@ -3278,10 +3287,10 @@ describe('the external session — Phase 2d-6-5', () => {
         externalConflict: externalOf(applyRestoreObservation(withCandidate(), watched.raised(seen)))
       };
       const send = sender();
-      expect(await sendRestore(started, blocked, at(BASE), send)).toEqual({ kind: 'withdrawn' });
+      expect(await sendRestore(started, blocked, at(BASE), send, () => blocked)).toEqual({ kind: 'withdrawn' });
       expect(send).not.toHaveBeenCalled();
       // Consumed: the same confirmation sends nothing afterwards either.
-      expect(await sendRestore(started, started.session, at(BASE), send)).toEqual({ kind: 'notAttempted' });
+      expect(await sendRestore(started, started.session, at(BASE), send, () => started.session)).toEqual({ kind: 'notAttempted' });
       expect(send).not.toHaveBeenCalled();
     }); // End of the "final permit under an external conflict" case
 
@@ -3292,7 +3301,7 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(blocked.outcome?.kind).toBe('refused');
       const view = restoreView(blocked, at(BASE));
       expect(view.refusalChoices).toEqual(['keepEditing']);
-      expect(prepareRestore(acknowledgeRestoreFindings(blocked), at(BASE)).pending).toBeNull();
+      expect(((onHand) => prepareRestore(onHand, at(BASE), () => onHand))(acknowledgeRestoreFindings(blocked)).pending).toBeNull();
     });
 
     it('raises over a session with no candidate, over a placeholder draft, and says the file first', () => {
@@ -3309,7 +3318,7 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(restoreView(next, at(BASE)).preview).toBeNull();
       // The reload retargets the session with nothing to keep, and a candidate
       // read afterwards is measured against the adopted revision.
-      const reloaded = reloadTheDiskVersion(confirmDiskReload(askToReloadDiskVersion(next)), adopting().adopt);
+      const reloaded = ((onHand) => reloadTheDiskVersion(onHand, adopting().adopt, () => onHand))(confirmDiskReload(askToReloadDiskVersion(next)));
       expect(reloaded.baseRevision).toBe(ELSEWHERE);
       expect(reloaded.externalConflict).toBeNull();
       expect(restoreRefusal(reloaded, at(ELSEWHERE))).toEqual({ kind: 'noCandidate' });
@@ -3322,7 +3331,7 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(applyRestoreObservation(over, retainedDelivery(elsewhere))).toBe(over);
       expect(applyRestoreObservation(over, watched.decided(null, elsewhere, true, 'raisedWithoutReload'))).toBe(over);
       // The question survived every one of them, authorization included.
-      expect(confirmRestore(over, at(BASE))).not.toBeNull();
+      expect(confirmRestore(over, at(BASE), () => over)).not.toBeNull();
       const waiting: RestoreSession = {
         ...withCandidate(),
         awaitingReconciliation: new Map([[TARGET + 1, elsewhere]])
@@ -3347,7 +3356,7 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(told.restored).toBe(true);
       expect(externalOf(told).source).toBe(externalConflictSource(seen));
       expect(restoreRefusal(told, at(AFTER))).toEqual({ kind: 'alreadyRestored' });
-      expect(prepareRestore(told, at(AFTER))).toBe(told);
+      expect(prepareRestore(told, at(AFTER), () => told)).toBe(told);
       const waiting = applyRestoreObservation(session, retainedDelivery(seen));
       expect(waiting.awaitingReconciliation.get(TARGET)).toBe(seen);
       expect(waiting.restored).toBe(true);
@@ -3359,14 +3368,14 @@ describe('the external session — Phase 2d-6-5', () => {
       // the caller's retained session authorizes nothing afterwards either.
       const raisedOver = pending();
       expect(applyRestoreObservation(raisedOver, watched.raised(seen)).pending).toBeNull();
-      expect(confirmRestore(raisedOver, at(BASE))).toBeNull();
+      expect(confirmRestore(raisedOver, at(BASE), () => raisedOver)).toBeNull();
       const withheldOver = pending();
       expect(applyRestoreObservation(withheldOver, watched.decided(null, seen, true, 'raisedWithoutReload')).pending).toBeNull();
-      expect(confirmRestore(withheldOver, at(BASE))).toBeNull();
+      expect(confirmRestore(withheldOver, at(BASE), () => withheldOver)).toBeNull();
       const standing = externalConflictSource(watched.observation({ sequence: 1, diskRevision: AGAIN }));
       const supersededOver = pending();
       expect(applyRestoreObservation(supersededOver, watched.decided(standing, seen, false, 'supersedes')).pending).toBeNull();
-      expect(confirmRestore(supersededOver, at(BASE))).toBeNull();
+      expect(confirmRestore(supersededOver, at(BASE), () => supersededOver)).toBeNull();
       // A verdict that changes nothing about the file changes nothing about the
       // question either: the session is the object it was, authorization included.
       const asked = pending();
@@ -3376,18 +3385,18 @@ describe('the external session — Phase 2d-6-5', () => {
       const later = externalConflictSource(watched.observation({ sequence: 9 }));
       expect(applyRestoreObservation(asked, watched.decided(later, seen, false, 'notLater'))).toBe(asked);
       expect(restoreView(asked, at(BASE)).confirming).toBe(true);
-      expect(confirmRestore(asked, at(BASE))).not.toBeNull();
+      expect(confirmRestore(asked, at(BASE), () => asked)).not.toBeNull();
       // A wait carries the question to the successor and blocks the doors until
       // it lifts; the same question then confirms.
       const waiting = applyRestoreObservation(pending(), retainedDelivery(seen));
       expect(waiting.pending).not.toBeNull();
       expect(restoreView(waiting, at(BASE)).confirming).toBe(true);
-      expect(confirmRestore(waiting, at(BASE))).toBeNull();
+      expect(confirmRestore(waiting, at(BASE), () => waiting)).toBeNull();
       const lifted = applyRestoreObservation(waiting, writtenHereDelivery(seen));
       expect(lifted.pending).toBe(waiting.pending);
-      expect(confirmRestore(lifted, at(BASE))).not.toBeNull();
+      expect(confirmRestore(lifted, at(BASE), () => lifted)).not.toBeNull();
       // And the one it was carried from authorizes nothing any more.
-      expect(confirmRestore(waiting, at(BASE))).toBeNull();
+      expect(confirmRestore(waiting, at(BASE), () => waiting)).toBeNull();
     }); // End of the "question withdrawn or carried" case
   }); // End of the "seven arms" suite
 
@@ -3400,14 +3409,14 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(waiting.externalConflict).toBeNull();
       expect(conflictOf(waiting)).toBeNull();
       expect(restoreRefusal(waiting, at(BASE))).toEqual({ kind: 'observationRetained' });
-      expect(prepareRestore(waiting, at(BASE))).toBe(waiting);
+      expect(prepareRestore(waiting, at(BASE), () => waiting)).toBe(waiting);
       const byHand: RestoreSession = { ...waiting, pending: pending().pending };
-      expect(confirmRestore(byHand, at(BASE))).toBeNull();
+      expect(confirmRestore(byHand, at(BASE), () => byHand)).toBeNull();
       // The final permit, with a session that carries the wait beside a
       // confirmation minted before it.
-      const started = confirmRestore(pending(), at(BASE));
+      const started = ((onHand) => confirmRestore(onHand, at(BASE), () => onHand))(pending());
       const send = sender();
-      expect(await sendRestore(started, { ...started!.session, awaitingReconciliation: waiting.awaitingReconciliation }, at(BASE), send)).toEqual({ kind: 'withdrawn' });
+      expect(await ((onHand) => sendRestore(started, onHand, at(BASE), send, () => onHand))({ ...started!.session, awaitingReconciliation: waiting.awaitingReconciliation })).toEqual({ kind: 'withdrawn' });
       expect(send).not.toHaveBeenCalled();
       const view = restoreView(waiting, at(BASE));
       expect(view.canPrepare).toBe(false);
@@ -3437,7 +3446,7 @@ describe('the external session — Phase 2d-6-5', () => {
     }); // End of the "retained and writtenHere" case
 
     it('holds every delivery during its own replacement and replays them in arrival order (entry 5)', async () => {
-      const started = confirmRestore(pending(), at(BASE));
+      const started = ((onHand) => confirmRestore(onHand, at(BASE), () => onHand))(pending());
       if (started === null) {
         throw new Error('a pending restore confirms');
       }
@@ -3453,12 +3462,12 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(held.heldDeliveries.map((one) => one.verdict.kind)).toEqual(['retained', 'raised', 'coalesced']);
       // A held envelope blocks the final permit: the send is consumed unspent.
       const send = sender();
-      expect(await sendRestore(started, held, at(BASE), send)).toEqual({ kind: 'withdrawn' });
+      expect(await sendRestore(started, held, at(BASE), send, () => held)).toEqual({ kind: 'withdrawn' });
       expect(send).not.toHaveBeenCalled();
       // The withdrawal replays the held decisions: the conflict `raised` announced
       // stands, the wait `retained` recorded ended with it, and `coalesced` found
       // the conflict it was about.
-      const withdrawn = restoreConfirmationWithdrawn(held);
+      const withdrawn = restoreConfirmationWithdrawn(held, () => held);
       expect(withdrawn.phase).toBe('editing');
       expect(withdrawn.heldDeliveries).toEqual([]);
       expect(externalOf(withdrawn).source).toBe(standing);
@@ -3466,24 +3475,24 @@ describe('the external session — Phase 2d-6-5', () => {
       // The answer lands first and the replay has the last word, on a refusal, on
       // a commit — the session spent, the conflict beside the success — and on a
       // seal already opened.
-      const refused = applyRestore(held, sealed(refusal()), NO_SURFACES);
+      const refused = applyRestore(held, sealed(refusal()), NO_SURFACES, () => held);
       expect(refused.heldDeliveries).toEqual([]);
       expect(refused.outcome?.kind).toBe('refused');
       expect(externalOf(refused).source).toBe(standing);
       expect(restoreRefusal(refused, at(BASE))).toEqual({ kind: 'externalConflict' });
-      const committed = applyRestore(held, sealed(saved()), NO_SURFACES);
+      const committed = applyRestore(held, sealed(saved()), NO_SURFACES, () => held);
       expect(committed.outcome?.kind).toBe('saved');
       expect(committed.restored).toBe(true);
       expect(externalOf(committed).source).toBe(standing);
       const twice = sealed(saved());
-      applyRestore(held, twice, NO_SURFACES);
-      const again = applyRestore(held, twice, NO_SURFACES);
+      applyRestore(held, twice, NO_SURFACES, () => held);
+      const again = applyRestore(held, twice, NO_SURFACES, () => held);
       expect(again.phase).toBe('editing');
       expect(again.heldDeliveries).toEqual([]);
       expect(externalOf(again).source).toBe(standing);
       // A send that produced no outcome consumes the hold too.
       const heldUncertain = applyRestoreObservation(started.session, watched.decided(null, seen, true, 'raisedWithoutReload'));
-      const failed = restoreCouldNotBeSent(heldUncertain, true);
+      const failed = restoreCouldNotBeSent(heldUncertain, true, () => heldUncertain);
       expect(failed.heldDeliveries).toEqual([]);
       expect(failed.sendFailure?.kind).toBe('mayHaveWritten');
       expect(failed.uncertaintyUnresolved).toBe(true);
@@ -3515,7 +3524,7 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(next.reload).toBe(NOT_RELOADING);
       expect(restoreView(next, at(BASE)).awaitingReloadConfirmation).toBe(false);
       const recorder = adopting();
-      const unmoved = reloadTheDiskVersion(next, recorder.adopt);
+      const unmoved = reloadTheDiskVersion(next, recorder.adopt, () => next);
       expect(unmoved.baseRevision).toBe(BASE);
       expect(recorder.adoptions).toEqual([]);
     }); // End of the "supersedes a save conflict" case
@@ -3526,15 +3535,15 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(conflictOf(blocked)).toBe(blocked.externalConflict);
       // The reverse collision, kept for a direct call: a conflict answer retires
       // the external conflict, a refusal leaves it.
-      const sending = confirmRestore(pending(), at(BASE));
+      const sending = ((onHand) => confirmRestore(onHand, at(BASE), () => onHand))(pending());
       if (sending === null) {
         throw new Error('a pending restore confirms');
       }
       const carrying: RestoreSession = { ...sending.session, externalConflict: blocked.externalConflict };
-      const conflicted = applyRestore(carrying, sealed(conflictResult()), NO_SURFACES);
+      const conflicted = applyRestore(carrying, sealed(conflictResult()), NO_SURFACES, () => carrying);
       expect(conflicted.externalConflict).toBeNull();
       expect(conflictOf(conflicted)?.source.kind).toBe('save');
-      const refusedAgain = applyRestore(carrying, sealed(refusal()), NO_SURFACES);
+      const refusedAgain = applyRestore(carrying, sealed(refusal()), NO_SURFACES, () => carrying);
       expect(refusedAgain.externalConflict).toBe(blocked.externalConflict);
     }); // End of the "history and the reverse collision" case
 
@@ -3568,7 +3577,7 @@ describe('the external session — Phase 2d-6-5', () => {
       // A confirmation assembled by hand spends nothing and re-points nothing.
       const recorder = adopting();
       const byHand: RestoreSession = { ...withheld, reload: confirmDiskReload(askToReloadDiskVersion(withheld.externalConflict === null ? withheld : { ...withheld, uncertaintyUnresolved: false })).reload };
-      expect(reloadTheDiskVersion(byHand, recorder.adopt).baseRevision).toBe(BASE);
+      expect(reloadTheDiskVersion(byHand, recorder.adopt, () => byHand).baseRevision).toBe(BASE);
       expect(recorder.adoptions).toEqual([]);
       // Exit three: the acknowledgement, refused and then accepted.
       const asked: ExternalChangeConflictSource[] = [];
@@ -3613,7 +3622,7 @@ describe('the external session — Phase 2d-6-5', () => {
       const confirmed = confirmDiskReload(askToReloadDiskVersion(stuck));
       expect(restoreView(confirmed, at(BASE)).conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'confirmReloadKeeping']);
       const { adopt, adoptions } = adopting('installed');
-      const reloaded = reloadTheDiskVersion(confirmed, adopt);
+      const reloaded = reloadTheDiskVersion(confirmed, adopt, () => confirmed);
       expect(adoptions).toEqual([externalOf(stuck)]);
       // The candidate stays; what moves is the revision it is measured against.
       expect(candidateText(reloaded.preview!)).toBe(CANDIDATE);
@@ -3627,7 +3636,7 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(restoreRefusal(reloaded, at(ELSEWHERE))).toBeNull();
       // And a fresh confirmation sends the same bytes against the adopted revision.
       const send = sender();
-      await confirmAndSend(prepareRestore(reloaded, at(ELSEWHERE)), at(ELSEWHERE, []), send);
+      await confirmAndSend(prepareRestore(reloaded, at(ELSEWHERE), () => reloaded), at(ELSEWHERE, []), send);
       expect(send).toHaveBeenCalledWith(TARGET, ELSEWHERE, CANDIDATE, { accepted: [] });
       expect(reloaded.previewGeneration).toBeGreaterThan(confirmed.previewGeneration);
     }); // End of the "re-points the kept candidate" case
@@ -3641,10 +3650,10 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(blocked.outcome?.kind).toBe('refused');
       expect(submissionOf(blocked.preview!.draft).acknowledgement.accepted).toEqual([]);
       expect(candidateText(blocked.preview!)).toBe(CANDIDATE);
-      const reloaded = reloadTheDiskVersion(confirmDiskReload(askToReloadDiskVersion(blocked)), adopting().adopt);
+      const reloaded = ((onHand) => reloadTheDiskVersion(onHand, adopting().adopt, () => onHand))(confirmDiskReload(askToReloadDiskVersion(blocked)));
       expect(submissionOf(reloaded.preview!.draft).acknowledgement.accepted).toEqual([]);
       const send = sender();
-      await confirmAndSend(prepareRestore(reloaded, at(ELSEWHERE)), at(ELSEWHERE, []), send);
+      await confirmAndSend(prepareRestore(reloaded, at(ELSEWHERE), () => reloaded), at(ELSEWHERE, []), send);
       expect(send).toHaveBeenCalledWith(TARGET, ELSEWHERE, CANDIDATE, { accepted: [] });
     }); // End of the "consent withdrawn" case
 
@@ -3654,7 +3663,7 @@ describe('the external session — Phase 2d-6-5', () => {
       // `installed` and `alreadyThere` both re-point.
       for (const answer of ['installed', 'alreadyThere'] as const) {
         const recorder = adopting(answer);
-        const reloaded = reloadTheDiskVersion(confirmed, recorder.adopt);
+        const reloaded = reloadTheDiskVersion(confirmed, recorder.adopt, () => confirmed);
         expect(recorder.adoptions).toHaveLength(1);
         expect(reloaded.baseRevision).toBe(ELSEWHERE);
         expect(candidateText(reloaded.preview!)).toBe(CANDIDATE);
@@ -3664,7 +3673,7 @@ describe('the external session — Phase 2d-6-5', () => {
       // `refused` moves nothing and stops offering the control; the conflict
       // stands, and the dismissal resets the step for a fresh attempt.
       const recorder = adopting('refused');
-      const refused = reloadTheDiskVersion(confirmed, recorder.adopt);
+      const refused = reloadTheDiskVersion(confirmed, recorder.adopt, () => confirmed);
       expect(recorder.adoptions).toHaveLength(1);
       expect(refused.baseRevision).toBe(BASE);
       expect(refused.preview).toBe(confirmed.preview);
@@ -3678,7 +3687,7 @@ describe('the external session — Phase 2d-6-5', () => {
       // A wait about another observation survives the retarget: an adoption
       // decides nothing about it.
       const waitingToo = applyRestoreObservation(confirmed, retainedDelivery(watched.observation({ sequence: 8 })));
-      const reloadedWaiting = reloadTheDiskVersion(waitingToo, adopting().adopt);
+      const reloadedWaiting = reloadTheDiskVersion(waitingToo, adopting().adopt, () => waitingToo);
       expect(reloadedWaiting.baseRevision).toBe(ELSEWHERE);
       expect(reloadedWaiting.awaitingReconciliation.size).toBe(1);
       expect(restoreRefusal(reloadedWaiting, at(ELSEWHERE))).toEqual({ kind: 'observationRetained' });
@@ -3716,7 +3725,7 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(answered).toBe(holder.current());
       expect(answered.pending).toBeNull();
       expect(externalOf(answered).source).toBe(externalConflictSource(seen));
-      expect(confirmRestore(handedIn, at(BASE))).toBeNull();
+      expect(confirmRestore(handedIn, at(BASE), () => handedIn)).toBeNull();
       // The same for the confirmation: the question is not spent on the session
       // handed in, and the receiver's replacing verdict withdrew it anyway.
       const asking = installed(pending());
@@ -3888,12 +3897,13 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(reloadTheDiskVersion(trapped, untouched.adopt, early.current)).toBe(early.current());
       expect(untouched.adoptions).toEqual([]);
       expect(early.current().awaitingReconciliation.get(TARGET)).toBe(later);
-      // Without a reader the transition retargets what it was handed, and says so.
+      // A reader answering the capture it was handed retargets only that capture —
+      // the documented cost of a reader that does not read what the caller installs.
       const alone = confirmedToReload();
-      const lost = reloadTheDiskVersion(alone.current(), (conflict, confirmation) => {
+      const lost = ((onHand) => reloadTheDiskVersion(onHand, (conflict, confirmation) => {
         alone.receive(retainedDelivery(later));
         return adopting('installed').adopt(conflict, confirmation);
-      });
+      }, () => onHand))(alone.current());
       expect(lost.awaitingReconciliation.size).toBe(0);
     }); // End of the "retarget over the installed session" case
 
@@ -3930,7 +3940,7 @@ describe('the external session — Phase 2d-6-5', () => {
     }); // End of the "no candidate claimed" case
 
     it('consumes the permit unspent when a permit read displaced the installed session, and sends nothing', async () => {
-      const started = confirmRestore(pending(), at(BASE));
+      const started = ((onHand) => confirmRestore(onHand, at(BASE), () => onHand))(pending());
       if (started === null) {
         throw new Error('a pending restore confirms');
       }
@@ -3965,7 +3975,7 @@ describe('the external session — Phase 2d-6-5', () => {
       // installed session — still `saving`, so it is appended there — and a
       // settlement that returned only its own replay would let the caller
       // overwrite that append. The settled session must carry B.
-      const started = confirmRestore(pending(), at(BASE));
+      const started = ((onHand) => confirmRestore(onHand, at(BASE), () => onHand))(pending());
       if (started === null) {
         throw new Error('a pending restore confirms');
       }
@@ -4018,9 +4028,10 @@ describe('the external session — Phase 2d-6-5', () => {
       const withdrawn = restoreConfirmationWithdrawn(third.holder.current(), third.holder.current);
       expect(withdrawn.heldDeliveries).toEqual([]);
       expect(externalOf(withdrawn).source).toBe(externalConflictSource(later));
-      // Without a reader the transition settles what it was handed, and says so.
+      // A reader answering the capture it was handed settles only that capture —
+      // the documented cost of a reader that does not read what the caller installs.
       const alone = armed();
-      expect(externalOf(applyRestore(alone.holder.current(), sealed(refusal()), NO_SURFACES)).source).toBe(
+      expect(externalOf(((onHand) => applyRestore(onHand, sealed(refusal()), NO_SURFACES, () => onHand))(alone.holder.current())).source).toBe(
         externalConflictSource(alone.seen)
       );
     }); // End of the "delivery during the replay" case

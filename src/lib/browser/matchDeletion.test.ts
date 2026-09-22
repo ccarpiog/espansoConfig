@@ -85,6 +85,15 @@ import { attemptOfReapply, reapplyToShow, type StandingOriginGuard } from './rea
 import { isExternalConflict, isSaveConflict, type DiskAdoptionOutcome } from './saveOutcome';
 import type { ConflictChoice, ConflictModel, ExternalConflictModel } from './saveOutcome';
 
+/*
+ * **`((onHand) => door(onHand, …, () => onHand))(value)`** is a door, a settling
+ * transition or a reapply called with a reader answering the very session it is
+ * handed — the installed session of a caller that registers no receiver. Phase
+ * 2d-6-6a made the reader required; this is how a case that is not about
+ * displacement says so without evaluating `value` twice. The cases that are about
+ * displacement pass a holder's reader instead.
+ */
+
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
 
@@ -282,17 +291,17 @@ describe('the two phases a deletion goes through', () => {
     // round trip engages only for a finding-bearing candidate, so a clean deletion
     // collects no consent anywhere else.
     const clean = session();
-    expect(confirmDelete(clean, live())).toBeNull();
+    expect(confirmDelete(clean, live(), () => clean)).toBeNull();
     const asked = requestDelete(clean);
     expect(asked.pending).not.toBeNull();
-    expect(confirmDelete(asked, live())).not.toBeNull();
+    expect(confirmDelete(asked, live(), () => asked)).not.toBeNull();
   });
 
   it('takes the question back', () => {
     const asked = requestDelete(session());
     const cancelled = cancelDelete(asked);
     expect(cancelled.pending).toBeNull();
-    expect(confirmDelete(cancelled, live())).toBeNull();
+    expect(confirmDelete(cancelled, live(), () => cancelled)).toBeNull();
     // And cancelling nothing changes nothing.
     expect(cancelDelete(cancelled)).toBe(cancelled);
   });
@@ -304,12 +313,12 @@ describe('the two phases a deletion goes through', () => {
     const asked = requestDelete(session());
     const elsewhere: MatchId = { document: 2, revision: AFTER, node: 10 };
     const carried: MatchDeletionSession = { ...asked, match: elsewhere };
-    expect(confirmDelete(carried, elsewhere)).toBeNull();
+    expect(confirmDelete(carried, elsewhere, () => carried)).toBeNull();
     const otherNode: MatchDeletionSession = {
       ...asked,
       match: { document: 2, revision: BASE, node: 11 }
     };
-    expect(confirmDelete(otherNode, otherNode.match)).toBeNull();
+    expect(confirmDelete(otherNode, otherNode.match, () => otherNode)).toBeNull();
   });
 
   it('refuses a confirmation the window has reprojected the file under', () => {
@@ -320,10 +329,10 @@ describe('the two phases a deletion goes through', () => {
     // projection gives that snippet is the only value in the comparison that comes
     // from outside the session — so it is the only one that can say so.
     const asked = requestDelete(session());
-    expect(confirmDelete(asked, live())).not.toBeNull();
+    expect(confirmDelete(asked, live(), () => asked)).not.toBeNull();
 
     const afterReload = reprojected();
-    expect(confirmDelete(asked, live(afterReload))).toBeNull();
+    expect(confirmDelete(asked, live(afterReload), () => asked)).toBeNull();
     // The session really is untouched: every field it carries still names the
     // parse it was opened over, which is why nothing inside it could have noticed.
     expect(asked.match).toEqual(file().matches[0]!.id);
@@ -335,11 +344,11 @@ describe('the two phases a deletion goes through', () => {
     // Somebody else deleted it, or the file no longer parses: there is no current
     // identity to agree with, and a confirmation cannot be spent on nothing.
     const asked = requestDelete(session());
-    expect(confirmDelete(asked, null)).toBeNull();
+    expect(confirmDelete(asked, null, () => asked)).toBeNull();
   });
 
   it('spends the confirmation, so a second attempt is asked for again', () => {
-    const started = confirmDelete(requestDelete(session()), live());
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(session()));
     expect(started!.session.pending).toBeNull();
     expect(started!.match).toEqual(file().matches[0]!.id);
     expect(started!.session.phase).toBe('saving');
@@ -348,22 +357,22 @@ describe('the two phases a deletion goes through', () => {
   });
 
   it('asks nothing while a deletion is in flight, or after one has committed', () => {
-    const started = confirmDelete(requestDelete(session()), live());
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(session()));
     expect(canRequestDelete(started!.session)).toBe(false);
     expect(requestDelete(started!.session)).toBe(started!.session);
-    const done = applyDeletion(started!.session, saved(), ADOPTED);
+    const done = applyDeletion(started!.session, saved(), ADOPTED, () => started!.session);
     expect(done.deleted).toBe(true);
     expect(canRequestDelete(done)).toBe(false);
     // And dismissing the panel does not give it back.
     expect(canRequestDelete(dismissDeletionOutcome(done))).toBe(false);
-    expect(confirmDelete(requestDelete(done), live())).toBeNull();
+    expect(((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(done))).toBeNull();
   });
 }); // End of the "two phases" suite
 
 describe('what comes back', () => {
   it('spends the session on a commit and says the file was written', () => {
-    const started = confirmDelete(requestDelete(session()), live());
-    const done = applyDeletion(started!.session, saved(), ADOPTED);
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(session()));
+    const done = applyDeletion(started!.session, saved(), ADOPTED, () => started!.session);
     const view = matchDeletionView(done);
     expect(view.deleted).toBe(true);
     expect(view.deleting).toBe(false);
@@ -371,7 +380,7 @@ describe('what comes back', () => {
   });
 
   it('carries the doubled-separation note only a deletion produces', () => {
-    const started = confirmDelete(requestDelete(session()), live());
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(session()));
     const withNote: SaveResult = {
       outcome: 'saved',
       revision: AFTER,
@@ -380,15 +389,15 @@ describe('what comes back', () => {
       backup_taken: false,
       moved: null
     };
-    const view = matchDeletionView(applyDeletion(started!.session, withNote, ADOPTED));
+    const view = matchDeletionView(applyDeletion(started!.session, withNote, ADOPTED, () => started!.session));
     // Plan section 6.2 is *never silently normalise*, and the blank line a removed
     // snippet leaves behind is exactly such a change.
     expect(view.notes).toEqual([{ DoubledSequenceSeparation: { edit: 0 } }]);
   });
 
   it('puts the out-of-step line beside a commit whose adoption failed', () => {
-    const started = confirmDelete(requestDelete(session()), live());
-    const done = applyDeletion(started!.session, saved(), NOT_ADOPTED);
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(session()));
+    const done = applyDeletion(started!.session, saved(), NOT_ADOPTED, () => started!.session);
     // Beside the saved arm, never in place of it: the snippet really is gone.
     expect(matchDeletionView(done).messages.map((message) => message.kind)).toEqual([
       'fileWritten',
@@ -397,21 +406,21 @@ describe('what comes back', () => {
   });
 
   it('carries a refusal’s findings and the consent that answers them', () => {
-    const started = confirmDelete(requestDelete(session()), live());
-    const refused = applyDeletion(started!.session, REFUSED, NOT_OWED);
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(session()));
+    const refused = applyDeletion(started!.session, REFUSED, NOT_OWED, () => started!.session);
     const view = matchDeletionView(refused);
     expect(view.outcome?.kind).toBe('refused');
     expect(view.refusalChoices).toEqual(['saveAnyway', 'keepEditing']);
     expect(view.deleted).toBe(false);
 
     const consented = acknowledgeDeletionFindings(refused);
-    const again = confirmDelete(requestDelete(consented), live());
+    const again = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(consented));
     expect(again!.submission.acknowledgement).toEqual({ accepted: [SUSPICION] });
   });
 
   it('offers one way out of a conflict, and stops asking while it shows', () => {
-    const started = confirmDelete(requestDelete(session()), live());
-    const conflicted = applyDeletion(started!.session, CONFLICT, NOT_OWED);
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(session()));
+    const conflicted = applyDeletion(started!.session, CONFLICT, NOT_OWED, () => started!.session);
     expect(conflictOf(conflicted)).not.toBeNull();
     expect(canRequestDelete(conflicted)).toBe(false);
     // Two, since 2c-4a-3b flipped `offersReload`: the non-destructive way out and
@@ -429,19 +438,19 @@ describe('what comes back', () => {
   });
 
   it('records a send that produced no outcome, in its two arms', () => {
-    const started = confirmDelete(requestDelete(session()), live());
-    const notSent = deletionCouldNotBeSent(started!.session, false, null);
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(session()));
+    const notSent = deletionCouldNotBeSent(started!.session, false, null, () => started!.session);
     expect(notSent.sendFailure).toEqual({ kind: 'notSent', reason: null });
     expect(notSent.deleted).toBe(false);
     const failure = { kind: 'command' as const, error: { code: 'noWorkspaceOpen' as const } };
-    const maybe = deletionCouldNotBeSent(started!.session, true, failure);
+    const maybe = deletionCouldNotBeSent(started!.session, true, failure, () => started!.session);
     expect(maybe.sendFailure).toEqual({ kind: 'mayHaveWritten', reason: failure });
     expect(matchDeletionView(maybe).failureLines).toEqual([{ kind: 'failure', failure }]);
   });
 
   it('ignores an answer nothing was waiting for', () => {
     const clean = session();
-    expect(applyDeletion(clean, saved(), ADOPTED)).toBe(clean);
+    expect(applyDeletion(clean, saved(), ADOPTED, () => clean)).toBe(clean);
   });
 }); // End of the "what comes back" suite
 
@@ -511,7 +520,7 @@ describe('the identity a screen reads off the live projection', () => {
     });
     const fresh = identityInProjection([sameNodes], session().match);
     expect(fresh).toEqual({ document: 2, revision: AFTER, node: 10 });
-    expect(confirmDelete(requestDelete(session()), fresh)).toBeNull();
+    expect(((onHand) => confirmDelete(onHand, fresh, () => onHand))(requestDelete(session()))).toBeNull();
   });
 
   it('answers nothing for a file this window holds no projection of', () => {
@@ -544,11 +553,11 @@ describe('the confirmed reload, offered since 2c-4a-3b', () => {
    * @returns The session showing the conflict.
    */
   function conflicted(): MatchDeletionSession {
-    const started = confirmDelete(requestDelete(session()), live());
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(session()));
     if (started === null) {
       throw new Error('a confirmed deletion is sendable');
     }
-    return applyDeletion(started.session, CONFLICT, NOT_OWED);
+    return applyDeletion(started.session, CONFLICT, NOT_OWED, () => started.session);
   } // End of function conflicted()
 
   /**
@@ -692,14 +701,14 @@ describe('reapplying the retained deletion', () => {
     subject: ReapplyResolution,
     disk: DocumentView = reprojected()
   ): MatchDeletionSession {
-    const started = confirmDelete(requestDelete(session()), live());
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(session()));
     if (started === null) {
       throw new Error('a confirmed deletion is what this case sends');
     }
     return applyDeletion(
       started.session,
       makeConflict({ disk, subject, expected: BASE, found: AFTER }),
-      NOT_OWED
+      NOT_OWED, () => started.session
     );
   } // End of function conflictedOver()
 
@@ -732,7 +741,7 @@ describe('reapplying the retained deletion', () => {
     const target = disk.matches[0]!;
     const stuck = conflictedOver({ Identified: { target } }, disk);
     const recorder = adoptingReapply();
-    const answer = reapplyToDiskVersion(stuck, recorder.adopt);
+    const answer = reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck);
     expect(answer.kind).toBe('reapplied');
     if (answer.kind !== 'reapplied') {
       throw new Error('this case is about the rebuilt session');
@@ -747,7 +756,7 @@ describe('reapplying the retained deletion', () => {
     // where the identity came from** — `answer.session.match` and `live(disk)` are
     // both `disk.matches[0]!.id`, minted together — which is what the next
     // assertion is for.
-    const again = confirmDelete(requestDelete(answer.session), live(disk));
+    const again = ((onHand) => confirmDelete(onHand, live(disk), () => onHand))(requestDelete(answer.session));
     expect(again).not.toBeNull();
     expect(again?.match).toEqual(target.id);
     // **And it resolves against the live projection, not against itself.** A third
@@ -763,13 +772,13 @@ describe('reapplying the retained deletion', () => {
       ]
     });
     expect(live(third)).not.toEqual(answer.session.match);
-    expect(confirmDelete(requestDelete(answer.session), live(third))).toBeNull();
+    expect(((onHand) => confirmDelete(onHand, live(third), () => onHand))(requestDelete(answer.session))).toBeNull();
   });
 
   it('refuses a correspondence the core would not establish, and adopts nothing', () => {
     const recorder = adoptingReapply();
     expect(
-      reapplyToDiskVersion(conflictedOver({ Refused: { reason: 'NoExactCorrespondence' } }), recorder.adopt)
+      ((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, null, () => onHand))(conflictedOver({ Refused: { reason: 'NoExactCorrespondence' } }))
     ).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'correspondence', reason: 'NoExactCorrespondence' }
@@ -779,7 +788,7 @@ describe('reapplying the retained deletion', () => {
 
   it('refuses evidence that names no snippet, and adopts nothing', () => {
     const recorder = adoptingReapply();
-    expect(reapplyToDiskVersion(conflictedOver({ Unsupported: {} }), recorder.adopt)).toEqual({
+    expect(((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, null, () => onHand))(conflictedOver({ Unsupported: {} }))).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'evidenceNotATarget' }
     });
@@ -795,7 +804,7 @@ describe('reapplying the retained deletion', () => {
     });
     const recorder = adoptingReapply();
     expect(
-      reapplyToDiskVersion(conflictedOver({ Identified: { target: disk.matches[0]! } }, disk), recorder.adopt)
+      ((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, null, () => onHand))(conflictedOver({ Identified: { target: disk.matches[0]! } }, disk))
     ).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'notDeletable', reason: 'lastSnippet' }
@@ -807,14 +816,14 @@ describe('reapplying the retained deletion', () => {
     const disk = reprojected();
     const recorder = adoptingReapply('refused');
     expect(
-      reapplyToDiskVersion(conflictedOver({ Identified: { target: disk.matches[0]! } }, disk), recorder.adopt)
+      ((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, null, () => onHand))(conflictedOver({ Identified: { target: disk.matches[0]! } }, disk))
     ).toEqual({ kind: 'adoptionRefused' });
     expect(recorder.adoptions).toHaveLength(1);
   });
 
   it('is not attempted when no conflict is showing', () => {
     const recorder = adoptingReapply();
-    expect(reapplyToDiskVersion(session(), recorder.adopt)).toEqual({ kind: 'notAttempted' });
+    expect(((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, null, () => onHand))(session())).toEqual({ kind: 'notAttempted' });
     expect(recorder.adoptions).toEqual([]);
   });
 }); // End of the reapply suite
@@ -976,11 +985,11 @@ describe('the external session — Phase 2d-6-4', () => {
    * @returns The session showing the save conflict.
    */
   function saveConflicted(): MatchDeletionSession {
-    const started = confirmDelete(requested(), live());
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requested());
     if (started === null) {
       throw new Error('a confirmed deletion is sendable');
     }
-    return applyDeletion(started.session, CONFLICT, NOT_OWED);
+    return applyDeletion(started.session, CONFLICT, NOT_OWED, () => started.session);
   } // End of function saveConflicted()
 
   /**
@@ -989,11 +998,11 @@ describe('the external session — Phase 2d-6-4', () => {
    * @returns The session showing the refusal.
    */
   function refusedOnce(): MatchDeletionSession {
-    const started = confirmDelete(requested(), live());
+    const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requested());
     if (started === null) {
       throw new Error('a confirmed deletion is sendable');
     }
-    return applyDeletion(started.session, REFUSED, NOT_OWED);
+    return applyDeletion(started.session, REFUSED, NOT_OWED, () => started.session);
   } // End of function refusedOnce()
 
   describe('the seven arms over a session opened over one file (entries 6, 8, 11, 12)', () => {
@@ -1013,7 +1022,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(next.pending).toBeNull();
       expect(canRequestDelete(next)).toBe(false);
       expect(requestDelete(next)).toBe(next);
-      expect(confirmDelete(next, live())).toBeNull();
+      expect(confirmDelete(next, live(), () => next)).toBeNull();
       const view = matchDeletionView(next);
       expect(view.canDelete).toBe(false);
       expect(view.confirming).toBe(false);
@@ -1041,7 +1050,7 @@ describe('the external session — Phase 2d-6-4', () => {
       const consented = acknowledgeDeletionFindings(blocked);
       expect(requestDelete(consented)).toBe(consented);
       const byHand: MatchDeletionSession = { ...consented, pending: requested().pending };
-      expect(confirmDelete(byHand, live())).toBeNull();
+      expect(confirmDelete(byHand, live(), () => byHand)).toBeNull();
       const view = matchDeletionView(blocked);
       expect(view.refusalChoices).toEqual(['keepEditing']);
       expect(view.findingsAreStale).toBe(false);
@@ -1105,7 +1114,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(canRequestDelete(waiting)).toBe(false);
       expect(requestDelete(waiting)).toBe(waiting);
       const byHand: MatchDeletionSession = { ...waiting, pending: requested().pending };
-      expect(confirmDelete(byHand, live())).toBeNull();
+      expect(confirmDelete(byHand, live(), () => byHand)).toBeNull();
       const view = matchDeletionView(waiting);
       expect(view.canDelete).toBe(false);
       expect(view.conflict).toBeNull();
@@ -1136,7 +1145,7 @@ describe('the external session — Phase 2d-6-4', () => {
     }); // End of the "retained and writtenHere" case
 
     it('holds every delivery during its own deletion and replays them in arrival order (entry 5)', () => {
-      const started = confirmDelete(requested(), live());
+      const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requested());
       if (started === null) {
         throw new Error('a confirmed deletion is sendable');
       }
@@ -1153,7 +1162,7 @@ describe('the external session — Phase 2d-6-4', () => {
       // The deletion's answer lands first, the held decisions second, in one
       // transition: the conflict `raised` announced stands, the wait `retained`
       // recorded ended with it, and `coalesced` found the conflict it was about.
-      const settled = applyDeletion(held, REFUSED, NOT_OWED);
+      const settled = applyDeletion(held, REFUSED, NOT_OWED, () => held);
       expect(settled.heldDeliveries).toEqual([]);
       expect(settled.outcome?.kind).toBe('refused');
       expect(externalOf(settled).source).toBe(standing);
@@ -1161,7 +1170,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(canRequestDelete(settled)).toBe(false);
       // The answer lands first and the replay has the last word, on a commit too:
       // the session is spent and the conflict stands beside the success.
-      const committed = applyDeletion(held, saved(), ADOPTED);
+      const committed = applyDeletion(held, saved(), ADOPTED, () => held);
       expect(committed.outcome?.kind).toBe('saved');
       expect(committed.deleted).toBe(true);
       expect(externalOf(committed).source).toBe(standing);
@@ -1170,7 +1179,7 @@ describe('the external session — Phase 2d-6-4', () => {
         started.session,
         decided(null, seen, true, 'raisedWithoutReload')
       );
-      const failed = deletionCouldNotBeSent(heldUncertain, true, null);
+      const failed = deletionCouldNotBeSent(heldUncertain, true, null, () => heldUncertain);
       expect(failed.heldDeliveries).toEqual([]);
       expect(failed.sendFailure?.kind).toBe('mayHaveWritten');
       expect(failed.uncertaintyUnresolved).toBe(true);
@@ -1208,11 +1217,11 @@ describe('the external session — Phase 2d-6-4', () => {
     }); // End of the "supersedes a save conflict" case
 
     it('keeps a committed success and a refusal as history, and lets a deletion that conflicts retire the external one', () => {
-      const started = confirmDelete(requested(), live());
+      const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requested());
       if (started === null) {
         throw new Error('a confirmed deletion is sendable');
       }
-      const committed = applyDeletion(started.session, saved(), ADOPTED);
+      const committed = applyDeletion(started.session, saved(), ADOPTED, () => started.session);
       const overSaved = applyDeletionObservation(committed, raised(observation()));
       expect(overSaved.outcome?.kind).toBe('saved');
       expect(overSaved.deleted).toBe(true);
@@ -1220,10 +1229,10 @@ describe('the external session — Phase 2d-6-4', () => {
       // The reverse collision, kept for a direct call: a conflict answer retires
       // the external conflict, a refusal leaves it.
       const blocked = applyDeletionObservation(refusedOnce(), raised(observation()));
-      const conflicted = applyDeletion(blocked, CONFLICT, NOT_OWED);
+      const conflicted = applyDeletion(blocked, CONFLICT, NOT_OWED, () => blocked);
       expect(conflicted.externalConflict).toBeNull();
       expect(conflictOf(conflicted)?.source.kind).toBe('save');
-      const refusedAgain = applyDeletion(blocked, REFUSED, NOT_OWED);
+      const refusedAgain = applyDeletion(blocked, REFUSED, NOT_OWED, () => blocked);
       expect(refusedAgain.externalConflict).toBe(blocked.externalConflict);
     });
 
@@ -1271,7 +1280,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(view.externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
       expect(askToReloadDiskVersion(withheld)).toBe(withheld);
       const recorder = adopting();
-      expect(reapplyToDiskVersion(withheld, recorder.adopt, () => externalOf(withheld).source)).toEqual({
+      expect(reapplyToDiskVersion(withheld, recorder.adopt, () => externalOf(withheld).source, () => withheld)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'writeOutcomeUnknown' }
       });
@@ -1374,7 +1383,7 @@ describe('the external session — Phase 2d-6-4', () => {
     it('rebuilds the deletion from the row the subject’s full identity finds, reading its exact tier and never the editor tier', () => {
       const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
       const recorder = adopting();
-      const answer = reapplyToDiskVersion(stuck, recorder.adopt, stands);
+      const answer = reapplyToDiskVersion(stuck, recorder.adopt, stands, () => stuck);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind !== 'reapplied') {
         throw new Error('this case is about the rebuilt session');
@@ -1387,21 +1396,21 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(canRequestDelete(answer.session)).toBe(true);
       expect(recorder.adoptions).toEqual([externalOf(stuck)]);
       // The question is asked again, and answered against the live projection.
-      const again = confirmDelete(requestDelete(answer.session), live(diskFile()));
+      const again = ((onHand) => confirmDelete(onHand, live(diskFile()), () => onHand))(requestDelete(answer.session));
       expect(again?.match).toEqual(TWIN.id);
-      expect(confirmDelete(requestDelete(answer.session), live())).toBeNull();
+      expect(((onHand) => confirmDelete(onHand, live(), () => onHand))(requestDelete(answer.session))).toBeNull();
     }); // End of the "rebuilt from the row" case
 
     it('refuses the subject: a refused tier, an empty tier, a stale full identity, the node alone, the position, and several rows', () => {
       const recorder = adopting();
       const refusedTier = raisedOver(observed([row(SUBJECT, { Refused: { reason: 'NoExactCorrespondence' } })]));
-      expect(reapplyToDiskVersion(refusedTier.stuck, recorder.adopt, refusedTier.stands)).toEqual({
+      expect(reapplyToDiskVersion(refusedTier.stuck, recorder.adopt, refusedTier.stands, () => refusedTier.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'correspondence', reason: 'NoExactCorrespondence' }
       });
       for (const empty of [{ Unsupported: {} }, { Targetless: {} }] as const) {
         const emptyTier = raisedOver(observed([row(SUBJECT, empty)]));
-        expect(reapplyToDiskVersion(emptyTier.stuck, recorder.adopt, emptyTier.stands)).toEqual({
+        expect(reapplyToDiskVersion(emptyTier.stuck, recorder.adopt, emptyTier.stands, () => emptyTier.stuck)).toEqual({
           kind: 'manualResolution',
           obstacle: { kind: 'evidenceNotATarget' }
         });
@@ -1413,14 +1422,14 @@ describe('the external session — Phase 2d-6-4', () => {
       const staleRevision = raisedOver(
         observed([row({ document: 2, revision: LATER, node: 10 }, { Identified: { target: TWIN } })])
       );
-      expect(reapplyToDiskVersion(staleRevision.stuck, recorder.adopt, staleRevision.stands)).toEqual({
+      expect(reapplyToDiskVersion(staleRevision.stuck, recorder.adopt, staleRevision.stands, () => staleRevision.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
       const otherFile = raisedOver(
         observed([row({ document: 3, revision: BASE, node: 10 }, { Identified: { target: TWIN } })])
       );
-      expect(reapplyToDiskVersion(otherFile.stuck, recorder.adopt, otherFile.stands)).toEqual({
+      expect(reapplyToDiskVersion(otherFile.stuck, recorder.adopt, otherFile.stands, () => otherFile.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
@@ -1430,14 +1439,14 @@ describe('the external session — Phase 2d-6-4', () => {
           row({ document: 2, revision: BASE, node: 11 }, { Identified: { target: TWIN } })
         ])
       );
-      expect(reapplyToDiskVersion(byPosition.stuck, recorder.adopt, byPosition.stands)).toEqual({
+      expect(reapplyToDiskVersion(byPosition.stuck, recorder.adopt, byPosition.stands, () => byPosition.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
       const twice = raisedOver(
         observed([row(SUBJECT, { Identified: { target: TWIN } }), row(SUBJECT, { Identified: { target: TWIN } })])
       );
-      expect(reapplyToDiskVersion(twice.stuck, recorder.adopt, twice.stands)).toEqual({
+      expect(reapplyToDiskVersion(twice.stuck, recorder.adopt, twice.stands, () => twice.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'severalRowsForBase' }
       });
@@ -1447,17 +1456,17 @@ describe('the external session — Phase 2d-6-4', () => {
     it('refuses a table about other revisions, and an observation with none', () => {
       const recorder = adopting();
       const otherBase = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })], { base: 'z'.repeat(64) }));
-      expect(reapplyToDiskVersion(otherBase.stuck, recorder.adopt, otherBase.stands)).toEqual({
+      expect(reapplyToDiskVersion(otherBase.stuck, recorder.adopt, otherBase.stands, () => otherBase.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'baseRevisionMoved' }
       });
       const otherDisk = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })], { disk: 'z'.repeat(64) }));
-      expect(reapplyToDiskVersion(otherDisk.stuck, recorder.adopt, otherDisk.stands)).toEqual({
+      expect(reapplyToDiskVersion(otherDisk.stuck, recorder.adopt, otherDisk.stands, () => otherDisk.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'diskRevisionMoved' }
       });
       const tableless = raisedOver(observation());
-      expect(reapplyToDiskVersion(tableless.stuck, recorder.adopt, tableless.stands)).toEqual({
+      expect(reapplyToDiskVersion(tableless.stuck, recorder.adopt, tableless.stands, () => tableless.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noCorrespondence' }
       });
@@ -1468,15 +1477,15 @@ describe('the external session — Phase 2d-6-4', () => {
       const recorder = adopting();
       const elsewhere = externalConflictSource(observation({ sequence: 9 }));
       const found = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
-      expect(reapplyToDiskVersion(found.stuck, recorder.adopt, () => elsewhere)).toEqual({
+      expect(reapplyToDiskVersion(found.stuck, recorder.adopt, () => elsewhere, () => found.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
-      expect(reapplyToDiskVersion(found.stuck, recorder.adopt, () => null)).toEqual({
+      expect(reapplyToDiskVersion(found.stuck, recorder.adopt, () => null, () => found.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
-      expect(reapplyToDiskVersion(saveConflicted(), recorder.adopt, () => elsewhere)).toEqual({
+      expect(((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, () => elsewhere, () => onHand))(saveConflicted())).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
@@ -1485,16 +1494,16 @@ describe('the external session — Phase 2d-6-4', () => {
 
     it('answers every adoption outcome for the external origin, and rechecks eligibility over the disk parse', () => {
       const { stuck, stands } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
-      expect(reapplyToDiskVersion(stuck, adopting('installed').adopt, stands).kind).toBe('reapplied');
-      expect(reapplyToDiskVersion(stuck, adopting('alreadyThere').adopt, stands).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, adopting('installed').adopt, stands, () => stuck).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, adopting('alreadyThere').adopt, stands, () => stuck).kind).toBe('reapplied');
       const refusedWindow = adopting('refused');
-      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt, stands)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt, stands, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(refusedWindow.adoptions).toHaveLength(1);
       // The last snippet of the disk parse is refused there, adopting nothing.
       const alone = diskFile({ matches: [makeMatch({ node: 30, document: 2, revision: AFTER, trigger: ':sig' })] });
       const last = raisedOver(observed([row(SUBJECT, { Identified: { target: alone.matches[0]! } })], {}, alone));
       const recorder = adopting();
-      expect(reapplyToDiskVersion(last.stuck, recorder.adopt, last.stands)).toEqual({
+      expect(reapplyToDiskVersion(last.stuck, recorder.adopt, last.stands, () => last.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'notDeletable', reason: 'lastSnippet' }
       });
@@ -1508,7 +1517,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(held.awaitingReconciliation.get(2)).toBe(heldReading);
       expect(canRequestDelete(held)).toBe(false);
       const recorder = adopting();
-      expect(reapplyToDiskVersion(held, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(held, recorder.adopt, stands, () => held)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'observationRetained' }
       });
@@ -1518,7 +1527,7 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(view.reapplyOffered).toBe(false);
       expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
       const lifted = applyDeletionObservation(held, writtenHereDelivery(heldReading));
-      const answer = reapplyToDiskVersion(lifted, adopting().adopt, stands);
+      const answer = reapplyToDiskVersion(lifted, adopting().adopt, stands, () => lifted);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind === 'reapplied') {
         expect(answer.session.awaitingReconciliation.size).toBe(0);
@@ -1528,7 +1537,7 @@ describe('the external session — Phase 2d-6-4', () => {
       // holds about another file survives it.
       const elsewhere = otherObservation();
       const carrying: MatchDeletionSession = { ...stuck, awaitingReconciliation: new Map([[3, elsewhere]]) };
-      const rebuilt = reapplyToDiskVersion(carrying, adopting().adopt, stands);
+      const rebuilt = reapplyToDiskVersion(carrying, adopting().adopt, stands, () => carrying);
       expect(rebuilt.kind).toBe('reapplied');
       if (rebuilt.kind === 'reapplied') {
         expect(rebuilt.session.awaitingReconciliation.get(3)).toBe(elsewhere);
@@ -1539,9 +1548,9 @@ describe('the external session — Phase 2d-6-4', () => {
     it('asks nothing of the window when no guard is handed in, and leaves the door to decide', () => {
       const { stuck } = raisedOver(observed([row(SUBJECT, { Identified: { target: TWIN } })]));
       const refusedWindow = adopting('refused');
-      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt, null, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(refusedWindow.adoptions).toEqual([externalOf(stuck)]);
-      expect(reapplyToDiskVersion(stuck, adopting().adopt).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, adopting().adopt, null, () => stuck).kind).toBe('reapplied');
     });
 
     it('names a sentence in both languages for every obstacle the external origin can raise', () => {
@@ -1631,13 +1640,80 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(confirmDelete(byHand, live(), waiting.current)).toBeNull();
     }); // End of the "displaced during the projection read" case
 
+    it('refuses a confirmation when a later read of this door displaced the installed session (2d-6-5’s class, Phase 2d-6-6a)', () => {
+      // **The installed session is read once, and it must be read last.** The
+      // door reads the draft's value for the comparison and again for the
+      // submission, and spreads the session; a getter quiet on the first read
+      // and delivering on a later one, or on the spread, runs after a reader
+      // asked too early. Every read the door makes, counted, delivers in turn.
+      const seen = observation();
+      /**
+       * A holder whose installed session delivers `raised` on the given read of
+       * the draft's value, counting from one, and counts the reads.
+       *
+       * @param on - The read that delivers, or `null` to deliver never.
+       * @returns The holder, the trapped session it installs, and the count.
+       */
+      function deliveringOnRead(on: number | null): {
+        readonly holder: ReturnType<typeof installed>;
+        readonly trapped: MatchDeletionSession;
+        readonly reads: () => number;
+      } {
+        const holder = installed(requested());
+        const handedIn = holder.current();
+        let reads = 0;
+        const trapped: MatchDeletionSession = {
+          ...handedIn,
+          draft: {
+            ...handedIn.draft,
+            get value(): MatchId {
+              reads += 1;
+              if (reads === on) {
+                holder.receive(raised(seen));
+              }
+              return handedIn.draft.value;
+            }
+          }
+        };
+        holder.set(trapped);
+        return { holder, trapped, reads: () => reads };
+      } // End of function deliveringOnRead()
+      const quiet = deliveringOnRead(null);
+      expect(confirmDelete(quiet.trapped, live(), quiet.holder.current)).not.toBeNull();
+      const total = quiet.reads();
+      expect(total).toBeGreaterThanOrEqual(1);
+      for (let on = 1; on <= total; on += 1) {
+        const displaced = deliveringOnRead(on);
+        expect(confirmDelete(displaced.trapped, live(), displaced.holder.current)).toBeNull();
+        expect(externalOf(displaced.holder.current()).source).toBe(externalConflictSource(seen));
+      } // End of the loop over the reads of the draft's value
+      // The spread that builds the waiting session reads every own property.
+      // Armed once: the receiver's own spread reads it again.
+      const spreading = installed(requested());
+      const beforeSpread = spreading.current();
+      let armed = true;
+      const trappedSpread: MatchDeletionSession = {
+        ...beforeSpread,
+        get extraMessages(): MatchDeletionSession['extraMessages'] {
+          if (armed) {
+            armed = false;
+            spreading.receive(raised(seen));
+          }
+          return [];
+        }
+      };
+      spreading.set(trappedSpread);
+      expect(confirmDelete(trappedSpread, live(), spreading.current)).toBeNull();
+      expect(externalOf(spreading.current()).source).toBe(externalConflictSource(seen));
+    }); // End of the "displaced during a later read" case
+
     it('settles against the installed session and replays a delivery that arrived during its own replay', () => {
       // **The review's second blocker.** With `retained(A), raised(A)` held, a
       // getter behind A's `document` publishes B while A is being replayed; the
       // window delivers B to the installed session — still `saving`, so it is
       // appended there — and a settlement that returned only its own replay would
       // let the caller overwrite that append. The settled session must carry B.
-      const started = confirmDelete(requested(), live());
+      const started = ((onHand) => confirmDelete(onHand, live(), () => onHand))(requested());
       if (started === null) {
         throw new Error('a confirmed deletion is sendable');
       }
@@ -1682,7 +1758,8 @@ describe('the external session — Phase 2d-6-4', () => {
       const failed = deletionCouldNotBeSent(again.current(), false, null, again.current);
       expect(failed.heldDeliveries).toEqual([]);
       expect(externalOf(failed).source).toBe(externalConflictSource(later));
-      // Without a reader the transition settles what it was handed, and says so.
+      // A reader answering the capture it was handed settles only that capture —
+      // the documented cost of a reader that does not read what the caller installs.
       const alone = installed(started.session);
       const seenAlone: ExternalConflictObservation = {
         ...observation(),
@@ -1697,7 +1774,7 @@ describe('the external session — Phase 2d-6-4', () => {
       alone.receive(retainedDelivery(seenAlone));
       alone.receive(raised(seenAlone));
       armed = true;
-      expect(externalOf(applyDeletion(alone.current(), REFUSED, NOT_OWED)).source).toBe(externalConflictSource(seenAlone));
+      expect(externalOf(((onHand) => applyDeletion(onHand, REFUSED, NOT_OWED, () => onHand))(alone.current())).source).toBe(externalConflictSource(seenAlone));
     }); // End of the "delivery during the replay" case
 
     it('rechecks the installed session immediately before adopting, and refuses a wait or a supersession that arrived during the evidence reads', () => {
@@ -1778,18 +1855,18 @@ describe('the external session — Phase 2d-6-4', () => {
       const stands: StandingOriginGuard = () => externalOf(stuck).source;
       const recorder = adopting();
       const held = applyDeletionObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
-      expect(reapplyToDiskVersion(held, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(held, recorder.adopt, stands, () => held)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'observationRetained' }
       });
       const withheld = applyDeletionObservation(requested(), decided(null, seen, true, 'raisedWithoutReload'));
-      expect(reapplyToDiskVersion(withheld, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(withheld, recorder.adopt, stands, () => withheld)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'writeOutcomeUnknown' }
       });
       expect(reads).toBe(0);
       // And an unblocked session reads it exactly once.
-      expect(reapplyToDiskVersion(stuck, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(stuck, recorder.adopt, stands, () => stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });

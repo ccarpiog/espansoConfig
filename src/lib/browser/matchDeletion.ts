@@ -139,8 +139,8 @@
  * {@link reapplyToDiskVersion} rechecks the installed session's blocks and
  * conflict immediately before adopting; {@link applyDeletion} and
  * {@link deletionCouldNotBeSent} replay what the receiver appended during their
- * own replay. The reader is optional while no component passes one, and its doc
- * says what that costs.
+ * own replay. The reader is required at every one of them since Phase 2d-6-6a, and
+ * its doc says what no type can force about it.
  *
  * **No component registers this receiver yet.** 2d-6-6 wires
  * `BrowserState.registerObservationReceiver` to it through `DetailPane`; until
@@ -537,15 +537,15 @@ export interface MatchDeletionSession {
    * started it resumes, so {@link applyDeletionObservation} appends here while the
    * phase is `saving` and {@link applyDeletion} and {@link deletionCouldNotBeSent}
    * replay the whole list through it, first to last, after their own answer —
-   * and, given a {@link ReadTheInstalledSession}, whatever the receiver appended
-   * to the installed session while they were doing so. **What the list forces**
-   * is that no envelope delivered during the deletion is dropped and that
-   * first-to-last is the order; **what it does not force** is that arrival order
-   * was decision order — the window's own contract — nor that a caller passes
-   * the reader: this module has no send composition, so the caller hands the
-   * settling transition the session it holds and the reader that answers it, as
-   * 2d-6-6's `MatchDeleter.svelte` must, and nothing in TypeScript stops a caller
-   * handing it a capture and no reader.
+   * and, through the required {@link ReadTheInstalledSession}, whatever the
+   * receiver appended to the installed session while they were doing so. **What
+   * the list forces** is that no envelope delivered during the deletion is
+   * dropped and that first-to-last is the order; **what it does not force** is
+   * that arrival order was decision order — the window's own contract — nor that
+   * the reader is honest: this module has no send composition, so the caller
+   * hands the settling transition the session it holds and the reader that
+   * answers it, as `MatchDeleter.svelte` does, and nothing in TypeScript stops a
+   * caller handing it a capture and a reader that answers the capture.
    */
   readonly heldDeliveries: readonly ObservationDelivery[];
 }
@@ -764,20 +764,19 @@ export function cancelDelete(session: MatchDeletionSession): MatchDeletionSessio
  * refuses when what is installed is not what it was handed or now carries a
  * block.
  *
- * **What it forces and what it does not, in the same sentence.** With one
- * supplied, {@link confirmDelete} spends only against the session it was handed
+ * **What it forces and what it does not, in the same sentence.** Through it, {@link
+ * confirmDelete} spends only against the session it was handed
  * while that session is still the one installed, {@link reapplyToDiskVersion}
  * adopts only when the installed session's restrictions and conflict are what
  * they were, and {@link applyDeletion} / {@link deletionCouldNotBeSent} settle
  * every delivery the receiver appended to the installed session during the
- * flight and during their own replay. It cannot force a caller to supply one:
- * the parameter is optional so that `MatchDeleter.svelte`, which this phase may
- * not touch and which registers no receiver today, keeps compiling — and a
- * caller that registers a receiver and passes no reader gets the displaced
- * check and the lost delivery this closes. 2d-6-6, which registers the receiver,
- * must pass `() => session` at every door and may make the parameter required.
- * Nor can it force that the closure reads the installed session rather than a
- * capture; `() => session` over the component's `$state.raw` is the honest one.
+ * flight and during their own replay. **The parameter is required since Phase
+ * 2d-6-6a**, so no call compiles without one, and `MatchDeleter.svelte` passes
+ * `() => session` at every door and settling transition. What no type can force
+ * is that the closure reads the installed session rather than a capture:
+ * `() => session` over the component's `$state.raw` is the honest one, and a
+ * reader answering the session handed in whatever is installed gets the
+ * displaced check and the lost delivery this closes.
  *
  * @returns The session the caller holds now.
  */
@@ -830,69 +829,74 @@ export interface StartedDeletion {
  * same shape the acknowledgement round trip has everywhere else in this
  * application.
  *
- * **The submission block is asked last, after the last caller-controlled read,
- * and against the installed session** (Phase 2d-6-4, the 2d-6 record's §3 entry
- * 8 and R37; this phase's review, its first finding): the pending identity, the
- * session's own, the draft's candidate and `projected` are all read and compared
- * first; then the installed session is read through `current`, once; and only a
- * session that is still the one handed in and passes {@link canRequestDelete}
- * spends. A getter behind `projected` therefore runs before the block decides,
- * and a receiver it runs — which replaces the installed session with one carrying
- * an external conflict or a wait — is seen by the block rather than overwritten
- * by the spend. An external conflict, a held reading and the uncertainty the
- * conflict carries each answer `null` here, exactly as they disable the control.
- * What that forces is refusal for the inputs supplied and for the session
- * installed at the moment of the spend; it cannot force those inputs to be
- * current — one projection snapshot, one synchronous decision — nor that a
- * caller passes a reader at all ({@link ReadTheInstalledSession} says what a
- * missing one costs).
+ * **Every caller-controlled read comes first, and the installed session is read
+ * once, last** (Phase 2d-6-4, the 2d-6 record's §3 entry 8 and R37; Phase
+ * 2d-6-6a, 2d-6-5's `beginSave` shape): the pending identity, the session's own,
+ * the submission — whose candidate is the draft's value, read once and compared
+ * — and `projected` are all read and compared; {@link canRequestDelete} is asked;
+ * the waiting session is built by the spread, which reads every own property of
+ * the session; and only then is the installed session read through `current`,
+ * once. Only a session that is still the one installed spends, and nothing
+ * caller-controlled runs between that read and the answer. A getter behind
+ * `projected`, behind the draft's value or behind any own property the spread
+ * reads therefore runs before the reader, and a receiver it runs — which
+ * replaces the installed session with one carrying an external conflict or a
+ * wait — is seen by the identity check rather than overwritten by the spend. An
+ * external conflict, a held reading and the uncertainty the conflict carries each
+ * answer `null` here, exactly as they disable the control. What that forces is
+ * refusal for the inputs supplied and for the session installed at the moment of
+ * the spend; it cannot force those inputs to be current — one projection
+ * snapshot, one synchronous decision — nor that the reader a caller passes is
+ * honest ({@link ReadTheInstalledSession}), nor anything about a caller that
+ * redefines a property of the very session it handed in between the block and
+ * the reader: a receiver replaces a session and never mutates one, so the
+ * identity check is what carries the block across, and that caller's own
+ * session is what it defeats.
  *
  * @param session - The session holding the person's answer.
  * @param projected - The identity the projection this window holds **now** gives
  *   the snippet, or `null` when it holds no such snippet any more. Required, and
  *   nullable rather than defaulted: a default would be this function inventing
  *   agreement for a caller that did not look.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   checks the block on the session handed in — honest only for a caller that
- *   registers no receiver, which is every caller today.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The waiting session and what to send, or `null`.
  */
 export function confirmDelete(
   session: MatchDeletionSession,
   projected: MatchId | null,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): StartedDeletion | null {
-  // **The caller-controlled reads, taken once and first.** `projected` is the
-  // one argument from outside the session; it is compared before the block below
-  // is asked, so nothing caller-controlled runs between the block and the spend.
+  // **Every caller-controlled read, taken first.** The submission is taken
+  // before the comparison, so the candidate compared is the one that is sent
+  // rather than a second read of the draft's value.
   const pending = session.pending;
   const held = session.match;
-  const candidate = session.draft.value;
+  const submission = submissionOf(session.draft);
   if (pending === null || projected === null || !sameIdentity(pending.match, held)) {
     return null;
   }
-  if (!sameIdentity(projected, held) || !sameIdentity(projected, candidate)) {
+  if (!sameIdentity(projected, held) || !sameIdentity(projected, submission.candidate)) {
     return null;
   }
+  if (!canRequestDelete(session)) {
+    return null;
+  }
+  const waiting: MatchDeletionSession = {
+    ...session,
+    phase: 'saving',
+    pending: null,
+    submitted: submission,
+    sendFailure: null
+  };
   // **The installed session, read once, after the last caller-controlled read.**
   // A receiver run from a getter above has replaced it; a session that is no
-  // longer the one installed spends nothing.
-  const installed = current === null ? session : current();
-  if (installed !== session || !canRequestDelete(session)) {
+  // longer the one installed spends nothing, and nothing caller-controlled runs
+  // between this read and the answer.
+  if (current() !== session) {
     return null;
   }
-  const submission = submissionOf(session.draft);
-  return {
-    session: {
-      ...session,
-      phase: 'saving',
-      pending: null,
-      submitted: submission,
-      sendFailure: null
-    },
-    submission,
-    match: session.match
-  };
+  return { session: waiting, submission, match: held };
 } // End of function confirmDelete()
 
 /**
@@ -922,33 +926,32 @@ export function confirmDelete(
  * {@link confirmDelete} while an external conflict stands, so this keeps the
  * invariant for a caller that drove the model directly. Then, whatever the
  * answer, every delivery {@link applyDeletionObservation} held while the deletion
- * was in flight is replayed on top, in arrival order (entry 5) — **and, with a
- * reader supplied, every delivery the receiver appended to the installed session
+ * was in flight is replayed on top, in arrival order (entry 5) — **and, through the
+ * reader, every delivery the receiver appended to the installed session
  * during this transition's own reads and replay** (this phase's review, its
  * second finding): the replay reads the observations it replays, a read runs
  * caller code, and a window told of a reading from there delivers it to the
- * installed session, still `saving`, where the receiver appends it. Without a
- * reader the transition settles what it was handed and such a delivery is lost
- * when the caller installs the result; {@link ReadTheInstalledSession} says who
- * owes the reader. This module composes no send, so `MatchDeleter.svelte`
- * settles its live `session` after its own `await`; with a reader that session
- * may even be a capture, because the installed one's appended list is what is
- * replayed.
+ * installed session, still `saving`, where the receiver appends it; the reader
+ * is required (Phase 2d-6-6a), and one that answers a capture rather than the
+ * installed session loses such a delivery when the caller installs the result.
+ * This module composes no send, so `MatchDeleter.svelte` settles its live
+ * `session` after its own `await`; with an honest reader that session may even
+ * be a capture, because the installed one's appended list is what is replayed.
  *
  * @param session - The session waiting for an answer, as the caller holds it.
  * @param result - How the save ended, exactly as the transaction reported it.
  * @param adoption - What became of the adoption, from `BrowserState.deleteMatch`.
  *   Required and not defaulted: a default would be this function inventing a
  *   `notOwed` for a caller that simply did not look.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   replays only what the session handed in holds.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session showing what the deletion ended as.
  */
 export function applyDeletion(
   session: MatchDeletionSession,
   result: SaveResult,
   adoption: InvalidationStatus,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): MatchDeletionSession {
   const submission = session.submitted;
   if (submission === null) {
@@ -1031,9 +1034,9 @@ function extendsTheReplayed(
  * and the envelopes it holds beyond the ones replayed are replayed too, in the
  * order they arrived, until a read finds none. **What this forces** is that no
  * envelope delivered during the deletion, or during this settlement, is dropped
- * when a reader is supplied, and that first-to-last is the order; **what it
- * cannot force** is that the window delivered them in the order it decided them,
- * that a reader is supplied at all, or that the installed session is the one
+ * when the reader answers the installed session, and that first-to-last is the
+ * order; **what it cannot force** is that the window delivered them in the order
+ * it decided them, that the reader is honest, or that the installed session is the one
  * handed in with more appended — a list that is not an extension of the one
  * replayed is left alone, since the transition cannot say what it is. Nor can it
  * force the rounds to end: a getter that tells the window of a fresh reading on
@@ -1043,13 +1046,14 @@ function extendsTheReplayed(
  *
  * @param settled - The session with its deletion's answer applied and its phase
  *   back to `editing`.
- * @param current - Reads the session the caller holds now, or `null`.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session with every held delivery applied, or the same session
  *   when none was held.
  */
 function consumingHeldDeliveries(
   settled: MatchDeletionSession,
-  current: ReadTheInstalledSession | null
+  current: ReadTheInstalledSession
 ): MatchDeletionSession {
   let queue = settled.heldDeliveries;
   let replayed: MatchDeletionSession = queue.length === 0 ? settled : { ...settled, heldDeliveries: [] };
@@ -1059,9 +1063,6 @@ function consumingHeldDeliveries(
       replayed = applyDeletionObservation(replayed, queue[at]!);
     } // End of the loop over the deliveries not yet replayed
     seen = queue.length;
-    if (current === null) {
-      return replayed;
-    }
     const arrived = current().heldDeliveries;
     if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
       return replayed;
@@ -1081,22 +1082,22 @@ function consumingHeldDeliveries(
  * The deletion is over, so a delivery held while it was out is applied now: the
  * settlement of an uncertain write arbitrates the held reading under that
  * uncertainty, and its `raisedWithoutReload` is what this applies (entry 5), and
- * with a reader every delivery appended to the installed session during the
+ * through the reader every delivery appended to the installed session during the
  * replay is applied too, for {@link applyDeletion}'s reason.
  *
  * @param session - The session waiting for an answer, as the caller holds it.
  * @param mayHaveWritten - Whether the file may already have lost the snippet.
  * @param reason - Why the command rejected, or `null` when nothing was sent and
  *   the boundary therefore has no rejection to hand on.
- * @param current - Reads the session the caller holds now. `null`, the default,
- *   replays only what the session handed in holds.
+ * @param current - Reads the session the caller holds now —
+ *   `() => session` over the caller's state. Required.
  * @returns The session, back to its resting state, with the right notice raised.
  */
 export function deletionCouldNotBeSent(
   session: MatchDeletionSession,
   mayHaveWritten: boolean,
   reason: IpcFailure | null,
-  current: ReadTheInstalledSession | null = null
+  current: ReadTheInstalledSession
 ): MatchDeletionSession {
   return consumingHeldDeliveries(
     {
@@ -1567,10 +1568,11 @@ export function deletionReapplyObstacleKey(obstacle: DeletionReapplyObstacle): T
  * The guard {@link reapplyToDiskVersion} uses when its caller hands none in.
  *
  * `unaskedGuard` in `./matchEditor.ts`, for this session: it answers the shown
- * conflict's own origin, so the supersession question the entry asks last is
- * answered *yes, it stands* without the window being asked. It exists so that the
- * one component caller, which 2d-6-4 may not touch, keeps its save-origin reapply
- * exactly as it was; what it costs is stated on the caller.
+ * conflict's own origin, so the supersession question the entry asks last is answered
+ * *yes, it stands* without the window being asked. It exists so that the one
+ * component caller, which passes `null` until 2d-6-6b hands the live closure down,
+ * keeps its save-origin reapply exactly as it was; what it costs is stated on the
+ * caller.
  *
  * @param conflict - The conflict shown, or `null`.
  * @returns A guard that never asks the window.
@@ -1688,35 +1690,37 @@ function subjectOfEvidence(
  * session carries the **installed** session's waits forward, for `rebuiltOver`'s
  * reason in `./matchEditor.ts` — its own file's entry is absent, because the
  * recheck comes first, and the map is carried so a wait about another file
- * survives the rebuild. Without a reader the recheck is asked of the session
- * handed in, and a wait recorded on the installed one during the reads is lost
- * with the rebuilt session ({@link ReadTheInstalledSession} says who owes the
- * reader).
+ * survives the rebuild. The reader is required (Phase 2d-6-6a); one that
+ * answers a capture rather than the installed session asks the recheck of that
+ * capture, and a wait recorded on the installed one during the reads is lost
+ * with the rebuilt session ({@link ReadTheInstalledSession}).
  *
- * **The standing-origin guard is a parameter, and it is optional for one stated
- * reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s: `MatchDeleter.svelte`
- * calls this with two arguments and 2d-6-4 touches no component. When no guard is
- * handed in the supersession question is not asked here; what still refuses a
+ * **The standing-origin guard is a parameter, and `null` is accepted for one
+ * stated reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s:
+ * `MatchDeleter.svelte` does not yet hand the live
+ * `BrowserState.standingConflictFor` closure down, and passes `null`. It is
+ * nullable rather than defaulted since Phase 2d-6-6a, so that the required reader
+ * can follow it and a caller states that it asks nothing. When no guard is handed
+ * in the supersession question is not asked here; what still refuses a
  * superseded origin on that path is `adoptDiskVersion`'s fourth check, at the
  * door, answered `adoptionRefused` without the typed sentence. An omitted guard
- * costs a sentence and some work, never a wrong installation. 2d-6-6, which hands
- * the live closure down, may make the parameter required.
+ * costs a sentence and some work, never a wrong installation.
  *
  * @param session - The session showing the conflict.
  * @param adopt - `BrowserState.adoptDiskVersion`. Called at most once, and never at
  *   all on a refusal.
  * @param standing - Asks what origin stands for the file **now**;
- *   `() => browser.standingConflictFor(document)` is the honest closure. `null`,
- *   the default, asks nothing — see above for what that costs.
- * @param current - Reads the session the caller holds now, for the recheck
- *   before the adoption. `null`, the default, rechecks the session handed in.
+ *   `() => browser.standingConflictFor(document)` is the honest closure. `null`
+ *   asks nothing — see above for what that costs.
+ * @param current - Reads the session the caller holds now, for the recheck before the
+ *   adoption — `() => session` over the caller's state. Required.
  * @returns What became of the attempt.
  */
 export function reapplyToDiskVersion(
   session: MatchDeletionSession,
   adopt: AdoptTheDiskVersion<MatchId>,
-  standing: StandingOriginGuard | null = null,
-  current: ReadTheInstalledSession | null = null
+  standing: StandingOriginGuard | null,
+  current: ReadTheInstalledSession
 ): MatchDeletionReapply {
   const conflict = conflictOf(session);
   if (conflict !== null) {
@@ -1756,7 +1760,7 @@ export function reapplyToDiskVersion(
   // **The installed session, read once, after the last caller-controlled read
   // and immediately before the spend.** Nothing caller-controlled runs between
   // this read and the door.
-  const installed = current === null ? session : current();
+  const installed = current();
   if (installed.uncertaintyUnresolved) {
     return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
   }

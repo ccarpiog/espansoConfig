@@ -253,8 +253,13 @@
     if (session === null) {
       return;
     }
-    const consented = acknowledge ? acknowledgeFindings(session) : session;
-    const started = beginSave(consented);
+    const held = session;
+    const consented = acknowledge ? acknowledgeFindings(held) : held;
+    // **The reader answers the consented session while the installed one is still
+    // the session it was derived from**, and the installed session otherwise
+    // (`ReadTheInstalledSession` in `rawEditor.ts`). `session` is non-null for the
+    // whole handler: nothing here or in the model sets it back to `null`.
+    const started = beginSave(consented, () => (session === held || session === null ? consented : session));
     if (started === null) {
       return;
     }
@@ -272,8 +277,8 @@
     );
     session =
       answer.kind === 'sealed'
-        ? applySave(session, answer.sealed)
-        : saveCouldNotBeSent(session, answer.mayHaveWritten);
+        ? applySave(session, answer.sealed, () => session ?? started.session)
+        : saveCouldNotBeSent(session, answer.mayHaveWritten, () => session ?? started.session);
   } // End of function runSave()
 
   /**
@@ -292,7 +297,13 @@
     if (session === null) {
       return;
     }
-    session = loadDiskVersion(confirmReload(session), adoptDiskVersion);
+    const held = session;
+    const confirmed = confirmReload(held);
+    // The reader answers the confirmed session while the installed one is still
+    // the session it was derived from, and the installed session otherwise.
+    session = loadDiskVersion(confirmed, adoptDiskVersion, () =>
+      session === held || session === null ? confirmed : session
+    );
     copied = 'none';
   } // End of function loadTheDiskVersion()
 

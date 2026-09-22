@@ -109,6 +109,15 @@ import {
 import type { ConflictChoice, ConflictModel, ExternalConflictModel } from './saveOutcome';
 import { TYPING_GROUP_IDLE_MS } from './typing';
 
+/*
+ * **`((onHand) => door(onHand, …, () => onHand))(value)`** is a door, a settling
+ * transition or a reapply called with a reader answering the very session it is
+ * handed — the installed session of a caller that registers no receiver. Phase
+ * 2d-6-6a made the reader required; this is how a case that is not about
+ * displacement says so without evaluating `value` twice. The cases that are about
+ * displacement pass a holder's reader instead.
+ */
+
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
 
@@ -459,13 +468,13 @@ describe('where in the file the snippet goes', () => {
     // findings accepted for a refusal in file A were still bound after a retarget
     // to file B, and `beginCreate` sent them. Identical finding values would then
     // have authorised a transaction nobody was ever shown.
-    const started = beginCreate(ready());
-    const consented = acknowledgeCreationFindings(applyCreate(started!.session, REFUSED, NOT_OWED));
-    expect(beginCreate(consented)!.submission.acknowledgement).toEqual({ accepted: [SUSPICION] });
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const consented = acknowledgeCreationFindings(applyCreate(started!.session, REFUSED, NOT_OWED, () => started!.session));
+    expect(beginCreate(consented, () => consented)!.submission.acknowledgement).toEqual({ accepted: [SUSPICION] });
     expect(consented.draft.baseRevision).toBe(BASE);
 
     const retargeted = chooseDestination(consented, 3);
-    expect(beginCreate(retargeted)!.submission.acknowledgement).toEqual({ accepted: [] });
+    expect(beginCreate(retargeted, () => retargeted)!.submission.acknowledgement).toEqual({ accepted: [] });
     expect(retargeted.outcome).toBeNull();
     expect(retargeted.submitted).toBeNull();
     expect(matchCreationView(retargeted).refusalChoices).toEqual([]);
@@ -478,10 +487,10 @@ describe('where in the file the snippet goes', () => {
   it('withdraws consent and everything said when the position moves', () => {
     // *Front* and *After :sig* are two different transactions, so the same finding
     // is the same argument as for the destination.
-    const started = beginCreate(ready());
-    const consented = acknowledgeCreationFindings(applyCreate(started!.session, REFUSED, NOT_OWED));
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const consented = acknowledgeCreationFindings(applyCreate(started!.session, REFUSED, NOT_OWED, () => started!.session));
     const moved = choosePlacement(consented, { kind: 'front' });
-    expect(beginCreate(moved)!.submission.acknowledgement).toEqual({ accepted: [] });
+    expect(beginCreate(moved, () => moved)!.submission.acknowledgement).toEqual({ accepted: [] });
     expect(moved.outcome).toBeNull();
     expect(moved.submitted).toBeNull();
     // The file has not changed, so the base revision has not either.
@@ -491,8 +500,8 @@ describe('where in the file the snippet goes', () => {
   it('says nothing about a placement that is the one already held', () => {
     // A control that re-emits its own value must not clear a refusal panel nobody
     // dismissed, which is what the withdrawal above would otherwise do.
-    const started = beginCreate(ready());
-    const refused = applyCreate(started!.session, REFUSED, NOT_OWED);
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const refused = applyCreate(started!.session, REFUSED, NOT_OWED, () => started!.session);
     expect(choosePlacement(refused, { kind: 'end' })).toBe(refused);
     const anchor = snippetFile().matches[0]!.id;
     const after = choosePlacement(refused, { kind: 'after', anchor });
@@ -532,7 +541,7 @@ describe('what makes the form submittable', () => {
       'y'
     );
     expect(creationRefusal(filled)).toBe('destinationIneligible');
-    expect(beginCreate(filled)).toBeNull();
+    expect(beginCreate(filled, () => filled)).toBeNull();
   });
 
   it('refuses an empty trigger and an empty body, trigger first', () => {
@@ -552,24 +561,24 @@ describe('what makes the form submittable', () => {
       placement: { kind: 'after', anchor: stranger }
     };
     expect(creationRefusal(forced)).toBe('anchorUnavailable');
-    expect(beginCreate(forced)).toBeNull();
+    expect(beginCreate(forced, () => forced)).toBeNull();
   });
 
   it('refuses while a save is in flight, and while a conflict is showing', () => {
-    const started = beginCreate(ready());
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
     expect(creationRefusal(started!.session)).toBe('saveInFlight');
-    const conflicted = applyCreate(started!.session, CONFLICT, NOT_OWED);
+    const conflicted = applyCreate(started!.session, CONFLICT, NOT_OWED, () => started!.session);
     expect(creationRefusal(conflicted)).toBe('conflict');
     expect(isEditable(conflicted)).toBe(false);
   });
 
   it('refuses for good once a create has committed', () => {
-    const started = beginCreate(ready());
-    const done = applyCreate(started!.session, saved(), ADOPTED);
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const done = applyCreate(started!.session, saved(), ADOPTED, () => started!.session);
     expect(creationRefusal(done)).toBe('alreadyCreated');
     // And no transition here clears it: dismissing the panel does not.
     expect(creationRefusal(keepDrafting(done))).toBe('alreadyCreated');
-    expect(beginCreate(done)).toBeNull();
+    expect(beginCreate(done, () => done)).toBeNull();
   });
 
   it('has a sentence for every refusal, in both languages', () => {
@@ -612,13 +621,13 @@ describe('the carriage return', () => {
       draft: editDraft(session.draft, { trigger: ':new', replace: 'a\rb' })
     };
     expect(creationRefusal(forced)).toBe('carriageReturn');
-    expect(beginCreate(forced)).toBeNull();
+    expect(beginCreate(forced, () => forced)).toBeNull();
   });
 }); // End of the "carriage return" suite
 
 describe('starting a create', () => {
   it('builds the wire values from the submission’s own candidate', () => {
-    const started = beginCreate(ready());
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
     expect(started).not.toBeNull();
     expect(started!.document).toBe(2);
     expect(started!.newMatch).toEqual({ trigger: ':new', replace: 'a body' });
@@ -630,15 +639,15 @@ describe('starting a create', () => {
 
   it('sends the anchor a placement names', () => {
     const anchor = snippetFile().matches[0]!.id;
-    const started = beginCreate(choosePlacement(ready(), { kind: 'after', anchor }));
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(choosePlacement(ready(), { kind: 'after', anchor }));
     expect(started!.position).toEqual({ After: { anchor } });
   });
 }); // End of the "starting a create" suite
 
 describe('what comes back', () => {
   it('records the created snippet and spends the form on a commit', () => {
-    const started = beginCreate(ready());
-    const done = applyCreate(started!.session, saved(), ADOPTED);
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const done = applyCreate(started!.session, saved(), ADOPTED, () => started!.session);
     expect(done.committed).toBe(true);
     expect(done.created).toEqual(CREATED);
     const view = matchCreationView(done);
@@ -648,8 +657,8 @@ describe('what comes back', () => {
   });
 
   it('leaves the form alive when the save committed nothing', () => {
-    const started = beginCreate(ready());
-    const done = applyCreate(started!.session, saved(false, null), NOT_OWED);
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const done = applyCreate(started!.session, saved(false, null), NOT_OWED, () => started!.session);
     expect(done.committed).toBe(false);
     expect(done.created).toBeNull();
     // Nothing on disk moved, so nothing this form holds is stale.
@@ -657,42 +666,42 @@ describe('what comes back', () => {
   });
 
   it('accepts a commit that answered no identity, and says nothing false about it', () => {
-    const started = beginCreate(ready());
-    const done = applyCreate(started!.session, saved(true, null), ADOPTED);
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const done = applyCreate(started!.session, saved(true, null), ADOPTED, () => started!.session);
     expect(done.committed).toBe(true);
     expect(done.created).toBeNull();
   });
 
   it('puts the out-of-step line beside a commit whose adoption failed', () => {
-    const started = beginCreate(ready());
-    const done = applyCreate(started!.session, saved(), NOT_ADOPTED);
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const done = applyCreate(started!.session, saved(), NOT_ADOPTED, () => started!.session);
     const kinds = matchCreationView(done).messages.map((message) => message.kind);
     // Beside the saved arm, never in place of it: the bytes are on disk.
     expect(kinds).toEqual(['fileWritten', 'windowOutOfStep']);
   });
 
   it('carries a refusal’s findings and the consent that answers them', () => {
-    const started = beginCreate(ready());
-    const refused = applyCreate(started!.session, REFUSED, NOT_OWED);
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const refused = applyCreate(started!.session, REFUSED, NOT_OWED, () => started!.session);
     const view = matchCreationView(refused);
     expect(view.outcome?.kind).toBe('refused');
     expect(view.refusalChoices).toEqual(['saveAnyway', 'keepEditing']);
     expect(view.findingsAreStale).toBe(false);
 
     const consented = acknowledgeCreationFindings(refused);
-    const again = beginCreate(consented);
+    const again = beginCreate(consented, () => consented);
     expect(again!.submission.acknowledgement).toEqual({ accepted: [SUSPICION] });
   });
 
   it('withdraws the offer to save anyway once the draft has moved on', () => {
-    const started = beginCreate(ready());
-    const refused = acknowledgeCreationFindings(applyCreate(started!.session, REFUSED, NOT_OWED));
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const refused = acknowledgeCreationFindings(applyCreate(started!.session, REFUSED, NOT_OWED, () => started!.session));
     const typed = editCreationField(refused, 'replace', 'another body');
     const view = matchCreationView(typed);
     expect(view.findingsAreStale).toBe(true);
     expect(view.refusalChoices).toEqual(['keepEditing']);
     // Editing dropped the consent, so the next attempt is an ordinary first one.
-    expect(beginCreate(typed)!.submission.acknowledgement).toEqual({ accepted: [] });
+    expect(beginCreate(typed, () => typed)!.submission.acknowledgement).toEqual({ accepted: [] });
   });
 
   it('offers four ways out of a conflict, and only the reapply reapplies', () => {
@@ -700,8 +709,8 @@ describe('what comes back', () => {
     // non-destructive way out first, then the copy that makes the destruction
     // survivable, then the reapply, then the destructive one — which is
     // `conflictChoicesFor`'s ordering and not this module's.
-    const started = beginCreate(ready());
-    const conflicted = applyCreate(started!.session, CONFLICT, NOT_OWED);
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const conflicted = applyCreate(started!.session, CONFLICT, NOT_OWED, () => started!.session);
     const view = matchCreationView(conflicted);
     expect(view.conflictChoices).toEqual([
       'keepEditing',
@@ -729,8 +738,8 @@ describe('what comes back', () => {
     // and both `setting`: a create writes both keys, and there is no key here to
     // leave alone or to take out. The destination and the position are absent on
     // purpose — `Draft<CreationBuffers>` does not carry them (consult Q4).
-    const started = beginCreate(ready());
-    const conflicted = applyCreate(started!.session, CONFLICT, NOT_OWED);
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const conflicted = applyCreate(started!.session, CONFLICT, NOT_OWED, () => started!.session);
     expect(matchCreationView(conflicted).retainedDraft).toEqual([
       { label: 'trigger', text: ':new', status: 'setting' },
       { label: 'replace', text: 'a body', status: 'setting' }
@@ -740,14 +749,14 @@ describe('what comes back', () => {
   }); // End of the "retained draft" case
 
   it('records a send that produced no outcome, in its two arms', () => {
-    const started = beginCreate(ready());
-    const notSent = createCouldNotBeSent(started!.session, false, null);
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
+    const notSent = createCouldNotBeSent(started!.session, false, null, () => started!.session);
     expect(notSent.sendFailure).toEqual({ kind: 'notSent', reason: null });
     const failure = {
       kind: 'command' as const,
       error: { code: 'noWorkspaceOpen' as const }
     };
-    const maybe = createCouldNotBeSent(started!.session, true, failure);
+    const maybe = createCouldNotBeSent(started!.session, true, failure, () => started!.session);
     expect(maybe.sendFailure).toEqual({ kind: 'mayHaveWritten', reason: failure });
     expect(matchCreationView(maybe).failureLines).toEqual([{ kind: 'failure', failure }]);
     // The draft is untouched either way, so nothing typed is lost.
@@ -795,7 +804,7 @@ describe('the history the form keeps', () => {
   });
 
   it('accepts no change at all while a save is in flight', () => {
-    const started = beginCreate(ready());
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
     const waiting = started!.session;
     expect(editCreationField(waiting, 'trigger', ':other')).toBe(waiting);
     expect(chooseDestination(waiting, 3)).toBe(waiting);
@@ -823,7 +832,7 @@ describe('the view a screen draws', () => {
   });
 
   it('carries the presentation notes a saved arm disclosed', () => {
-    const started = beginCreate(ready());
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
     const withNote: SaveResult = {
       outcome: 'saved',
       revision: AFTER,
@@ -832,7 +841,7 @@ describe('the view a screen draws', () => {
       backup_taken: false,
       moved: CREATED
     };
-    const view = matchCreationView(applyCreate(started!.session, withNote, ADOPTED));
+    const view = matchCreationView(applyCreate(started!.session, withNote, ADOPTED, () => started!.session));
     expect(view.notes).toEqual([{ DoubledSequenceSeparation: { edit: 0 } }]);
   });
 }); // End of the "view" suite
@@ -902,7 +911,7 @@ describe('the base revision a screen sends', () => {
   });
 
   it('is what the submission carries, so the two cannot describe two parses', () => {
-    const started = beginCreate(ready());
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
     expect(started!.submission.baseRevision).toBe(baseRevisionOf(started!.session));
   });
 }); // End of the "base revision" suite
@@ -923,11 +932,11 @@ describe('the confirmed reload', () => {
    * @returns The session showing the conflict.
    */
   function conflicted(): MatchCreationSession {
-    const started = beginCreate(ready());
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
     if (started === null) {
       throw new Error('a ready form is sendable');
     }
-    return applyCreate(started.session, CONFLICT, NOT_OWED);
+    return applyCreate(started.session, CONFLICT, NOT_OWED, () => started.session);
   } // End of function conflicted()
 
   /**
@@ -1086,14 +1095,14 @@ describe('reapplying the retained form', () => {
     subject: ReapplyResolution = { Targetless: {} },
     anchor: ReapplyPlacement = { NotAnchored: {} }
   ): MatchCreationSession {
-    const started = beginCreate(session);
+    const started = beginCreate(session, () => session);
     if (started === null) {
       throw new Error('this case needs a form that can be submitted');
     }
     return applyCreate(
       started.session,
       makeConflict({ disk, subject, placement: anchor, expected: BASE, found: AFTER }),
-      NOT_OWED
+      NOT_OWED, () => started.session
     );
   } // End of function conflictedOver()
 
@@ -1123,7 +1132,7 @@ describe('reapplying the retained form', () => {
     const disk = diskFile();
     const stuck = conflictedOver(ready(), disk);
     const recorder = adoptingReapply();
-    const answer = reapplyToDiskVersion(stuck, recorder.adopt);
+    const answer = reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck);
     expect(answer.kind).toBe('reapplied');
     if (answer.kind !== 'reapplied') {
       throw new Error('this case is about the rebuilt form');
@@ -1141,27 +1150,27 @@ describe('reapplying the retained form', () => {
   it('withdraws consent collected before the conflict', () => {
     // Findings accepted against one revision's candidate say nothing about
     // another's, so the acknowledgement round trip starts again.
-    const refused = applyCreate(beginCreate(ready())!.session, REFUSED, NOT_OWED);
+    const refused = ((onHand) => applyCreate(onHand, REFUSED, NOT_OWED, () => onHand))(((onHand) => beginCreate(onHand, () => onHand))(ready())!.session);
     const consented = acknowledgeCreationFindings(refused);
-    expect(beginCreate(consented)!.submission.acknowledgement).toEqual({ accepted: [SUSPICION] });
+    expect(beginCreate(consented, () => consented)!.submission.acknowledgement).toEqual({ accepted: [SUSPICION] });
     const stuck = conflictedOver(consented, diskFile());
-    const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt);
+    const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt, null, () => stuck);
     if (answer.kind !== 'reapplied') {
       throw new Error('this case is about the rebuilt form');
     }
     expect(answer.session.draft.consent).toBeNull();
-    expect(beginCreate(answer.session)!.submission.acknowledgement).toEqual({ accepted: [] });
+    expect(beginCreate(answer.session, () => answer.session)!.submission.acknowledgement).toEqual({ accepted: [] });
   });
 
   it('keeps a front placement, which the command lowers against the new list', () => {
     const disk = diskFile();
     const stuck = conflictedOver(choosePlacement(ready(), { kind: 'front' }), disk);
-    const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt);
+    const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt, null, () => stuck);
     if (answer.kind !== 'reapplied') {
       throw new Error('this case is about the rebuilt form');
     }
     expect(answer.session.placement).toEqual({ kind: 'front' });
-    expect(beginCreate(answer.session)?.position).toEqual({ Front: {} });
+    expect(beginCreate(answer.session, () => answer.session)?.position).toEqual({ Front: {} });
   });
 
   it('ignores the evidence anchor entirely for a semantic placement', () => {
@@ -1171,7 +1180,7 @@ describe('reapplying the retained form', () => {
     const stuck = conflictedOver(choosePlacement(ready(), { kind: 'end' }), diskFile(), undefined, {
       Refused: { reason: 'NoExactCorrespondence' }
     });
-    expect(reapplyToDiskVersion(stuck, adoptingReapply().adopt).kind).toBe('reapplied');
+    expect(reapplyToDiskVersion(stuck, adoptingReapply().adopt, null, () => stuck).kind).toBe('reapplied');
   });
 
   it('rebuilds an after from the identified anchor, never from the old one', () => {
@@ -1182,12 +1191,12 @@ describe('reapplying the retained form', () => {
       anchor: snippetFile().matches[1]!.id
     });
     const stuck = conflictedOver(placed, disk, undefined, { Identified: { target: anchor } });
-    const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt);
+    const answer = reapplyToDiskVersion(stuck, adoptingReapply().adopt, null, () => stuck);
     if (answer.kind !== 'reapplied') {
       throw new Error('this case is about the rebuilt form');
     }
     expect(answer.session.placement).toEqual({ kind: 'after', anchor: anchor.id });
-    expect(beginCreate(answer.session)?.position).toEqual({ After: { anchor: anchor.id } });
+    expect(beginCreate(answer.session, () => answer.session)?.position).toEqual({ After: { anchor: anchor.id } });
   });
 
   it('refuses an anchor the core would not establish, and adopts nothing', () => {
@@ -1199,7 +1208,7 @@ describe('reapplying the retained form', () => {
     const stuck = conflictedOver(placed, diskFile(), undefined, {
       Refused: { reason: 'TargetMissingOrTriggerChanged' }
     });
-    expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'anchorCorrespondence', reason: 'TargetMissingOrTriggerChanged' }
     });
@@ -1212,7 +1221,7 @@ describe('reapplying the retained form', () => {
       anchor: snippetFile().matches[1]!.id
     });
     const recorder = adoptingReapply();
-    expect(reapplyToDiskVersion(conflictedOver(placed, diskFile()), recorder.adopt)).toEqual({
+    expect(((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, null, () => onHand))(conflictedOver(placed, diskFile()))).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'evidenceNotAnAnchor' }
     });
@@ -1229,7 +1238,7 @@ describe('reapplying the retained form', () => {
     const stuck = conflictedOver(placed, diskFile(), undefined, {
       Identified: { target: stranger }
     });
-    expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'anchorNotInDestination' }
     });
@@ -1240,7 +1249,7 @@ describe('reapplying the retained form', () => {
     const recorder = adoptingReapply();
     const disk = diskFile();
     const stuck = conflictedOver(ready(), disk, { Identified: { target: disk.matches[0]! } });
-    expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'evidenceNotATarget' }
     });
@@ -1250,7 +1259,7 @@ describe('reapplying the retained form', () => {
   it('runs the ordinary creation checks again over the new parse', () => {
     const recorder = adoptingReapply();
     const stuck = conflictedOver(ready(), diskFile({ readOnly: true }));
-    expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'creationRefused', reason: 'destinationIneligible' }
     });
@@ -1260,7 +1269,7 @@ describe('reapplying the retained form', () => {
   it('refuses a conflict about a file this form is not writing into', () => {
     const recorder = adoptingReapply();
     const stuck = conflictedOver(ready(), diskFile({ id: 3, relativePath: 'match/other.yml' }));
-    expect(reapplyToDiskVersion(stuck, recorder.adopt)).toEqual({
+    expect(reapplyToDiskVersion(stuck, recorder.adopt, null, () => stuck)).toEqual({
       kind: 'manualResolution',
       obstacle: { kind: 'notTheDestination' }
     });
@@ -1269,7 +1278,7 @@ describe('reapplying the retained form', () => {
 
   it('reports the window refusal and rebuilds nothing', () => {
     const recorder = adoptingReapply('refused');
-    expect(reapplyToDiskVersion(conflictedOver(ready(), diskFile()), recorder.adopt)).toEqual({
+    expect(((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, null, () => onHand))(conflictedOver(ready(), diskFile()))).toEqual({
       kind: 'adoptionRefused'
     });
     expect(recorder.adoptions).toHaveLength(1);
@@ -1277,7 +1286,7 @@ describe('reapplying the retained form', () => {
 
   it('is not attempted when no conflict is showing', () => {
     const recorder = adoptingReapply();
-    expect(reapplyToDiskVersion(ready(), recorder.adopt)).toEqual({ kind: 'notAttempted' });
+    expect(((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, null, () => onHand))(ready())).toEqual({ kind: 'notAttempted' });
     expect(recorder.adoptions).toEqual([]);
   });
 }); // End of the reapply suite
@@ -1432,11 +1441,11 @@ describe('the external session — Phase 2d-6-3', () => {
    * @returns The form showing the save conflict.
    */
   function saveConflicted(): MatchCreationSession {
-    const started = beginCreate(ready());
+    const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
     if (started === null) {
       throw new Error('a ready form is submittable');
     }
-    return applyCreate(started.session, CONFLICT, NOT_OWED);
+    return applyCreate(started.session, CONFLICT, NOT_OWED, () => started.session);
   } // End of function saveConflicted()
 
   /**
@@ -1470,7 +1479,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(creationRefusal(next)).toBe('externalConflict');
       expect(creationRefusalKey('externalConflict')).toBe('browser.externalConflict.fileChangedWhileOpen');
       expect(canCreate(next)).toBe(false);
-      expect(beginCreate(next)).toBeNull();
+      expect(beginCreate(next, () => next)).toBeNull();
       // The form stays over the file it chose; the target it reports is unchanged.
       expect(next.chosen).toBe(2);
       expect(creationTargetOf(next)).toEqual({ kind: 'document', document: 2 });
@@ -1495,10 +1504,10 @@ describe('the external session — Phase 2d-6-3', () => {
       // **Past a disabled button.** The refusal panel's *Save anyway* would reach
       // `beginCreate` with consent recorded; the model refuses at the same function
       // the view asks, and the view withholds the offer.
-      const refused = applyCreate(beginCreate(ready())!.session, REFUSED, NOT_OWED);
+      const refused = ((onHand) => applyCreate(onHand, REFUSED, NOT_OWED, () => onHand))(((onHand) => beginCreate(onHand, () => onHand))(ready())!.session);
       const blocked = applyObservation(refused, raised(observation()));
       expect(blocked.outcome?.kind).toBe('refused');
-      expect(beginCreate(acknowledgeCreationFindings(blocked))).toBeNull();
+      expect(((onHand) => beginCreate(onHand, () => onHand))(acknowledgeCreationFindings(blocked))).toBeNull();
       const view = matchCreationView(blocked);
       expect(view.refusalChoices).toEqual(['keepEditing']);
       expect(view.findingsAreStale).toBe(false);
@@ -1548,7 +1557,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(editCreationField(told, 'trigger', ':other')).toBe(told);
       // The refusal is the destination, because that is the resolution.
       expect(creationRefusal(told)).toBe('noDestination');
-      expect(beginCreate(told)).toBeNull();
+      expect(beginCreate(told, () => told)).toBeNull();
       const view = matchCreationView(told);
       expect(view.destinationRequired).toBe(true);
       expect(view.canChooseDestination).toBe(true);
@@ -1572,7 +1581,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(reloadTheDiskVersion(forced, recorder.adopt)).toBe(forced);
       // And the reapply refuses before any evidence is read, adopting nothing —
       // the unknown-target reapply is a refusal, not a choice.
-      expect(reapplyToDiskVersion(told, recorder.adopt, () => conflict.source)).toEqual({
+      expect(reapplyToDiskVersion(told, recorder.adopt, () => conflict.source, () => told)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'destinationRequired' }
       });
@@ -1677,7 +1686,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(conflictOf(waiting)).toBeNull();
       expect(creationRefusal(waiting)).toBe('observationRetained');
       expect(creationRefusalKey('observationRetained')).toBe('browser.externalConflict.observationRetained');
-      expect(beginCreate(waiting)).toBeNull();
+      expect(beginCreate(waiting, () => waiting)).toBeNull();
       expect(isEditable(waiting)).toBe(true);
       const typed = editCreationField(waiting, 'replace', 'a longer body');
       expect(typed.draft.value.replace).toBe('a longer body');
@@ -1714,7 +1723,7 @@ describe('the external session — Phase 2d-6-3', () => {
       // detour, or `beginCreate` proceeds past a block the window still holds.
       const seen = observation();
       const waiting = applyObservation(ready(), retainedDelivery(seen));
-      expect(beginCreate(waiting)).toBeNull();
+      expect(beginCreate(waiting, () => waiting)).toBeNull();
       const away = chooseDestination(waiting, 3);
       expect(away.chosen).toBe(3);
       // Over the other file the wait about the first blocks nothing.
@@ -1722,11 +1731,11 @@ describe('the external session — Phase 2d-6-3', () => {
       const back = chooseDestination(away, 2);
       expect(back.chosen).toBe(2);
       expect(creationRefusal(back)).toBe('observationRetained');
-      expect(beginCreate(back)).toBeNull();
+      expect(beginCreate(back, () => back)).toBeNull();
       // And the decision about that observation, arriving now, lifts it.
       const lifted = applyObservation(back, writtenHereDelivery(seen));
       expect(creationRefusal(lifted)).toBeNull();
-      expect(beginCreate(lifted)).not.toBeNull();
+      expect(beginCreate(lifted, () => lifted)).not.toBeNull();
     }); // End of the "wait kept across a change of destination" case
 
     it('keeps every wait through a change of destination, and blocks only for the file named', () => {
@@ -1751,7 +1760,7 @@ describe('the external session — Phase 2d-6-3', () => {
     });
 
     it('holds every delivery during its own create and replays them in arrival order (entry 5)', () => {
-      const started = beginCreate(ready());
+      const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
       if (started === null) {
         throw new Error('a ready form is submittable');
       }
@@ -1768,7 +1777,7 @@ describe('the external session — Phase 2d-6-3', () => {
       // The create's answer lands first, the held decisions second, in one
       // transition: the conflict `raised` announced stands, the wait `retained`
       // recorded ended with it, and `coalesced` found the conflict it was about.
-      const settled = applyCreate(held, REFUSED, NOT_OWED);
+      const settled = applyCreate(held, REFUSED, NOT_OWED, () => held);
       expect(settled.heldDeliveries).toEqual([]);
       expect(settled.outcome?.kind).toBe('refused');
       expect(externalOf(settled).source).toBe(standing);
@@ -1776,12 +1785,12 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(canCreate(settled)).toBe(false);
       // The answer lands first and the replay has the last word, on a commit too
       // (entry 5).
-      const committed = applyCreate(held, saved(), ADOPTED);
+      const committed = applyCreate(held, saved(), ADOPTED, () => held);
       expect(committed.outcome?.kind).toBe('saved');
       expect(externalOf(committed).source).toBe(standing);
       // A create that produced no outcome consumes the hold too.
       const heldUncertain = applyObservation(started.session, decided(null, seen, true, 'raisedWithoutReload'));
-      const failed = createCouldNotBeSent(heldUncertain, true, null);
+      const failed = createCouldNotBeSent(heldUncertain, true, null, () => heldUncertain);
       expect(failed.heldDeliveries).toEqual([]);
       expect(failed.sendFailure?.kind).toBe('mayHaveWritten');
       expect(failed.uncertaintyUnresolved).toBe(true);
@@ -1821,36 +1830,36 @@ describe('the external session — Phase 2d-6-3', () => {
     }); // End of the "supersedes a save conflict" case
 
     it('keeps a committed success and a refusal as history, and lets a create that conflicts retire the external one', () => {
-      const started = beginCreate(ready());
+      const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
       if (started === null) {
         throw new Error('a ready form is submittable');
       }
-      const committed = applyCreate(started.session, saved(), ADOPTED);
+      const committed = applyCreate(started.session, saved(), ADOPTED, () => started.session);
       const overSaved = applyObservation(committed, raised(observation()));
       expect(overSaved.outcome?.kind).toBe('saved');
       expect(overSaved.committed).toBe(true);
       expect(conflictOf(overSaved)).toBe(overSaved.externalConflict);
       // The reverse collision, kept for a direct call: a conflict answer retires
       // the external conflict, a refusal leaves it.
-      const refused = applyCreate(beginCreate(ready())!.session, REFUSED, NOT_OWED);
+      const refused = ((onHand) => applyCreate(onHand, REFUSED, NOT_OWED, () => onHand))(((onHand) => beginCreate(onHand, () => onHand))(ready())!.session);
       const blocked = applyObservation(refused, raised(observation()));
-      const conflicted = applyCreate(blocked, CONFLICT, NOT_OWED);
+      const conflicted = applyCreate(blocked, CONFLICT, NOT_OWED, () => blocked);
       expect(conflicted.externalConflict).toBeNull();
       expect(conflictOf(conflicted)?.source.kind).toBe('save');
-      const refusedAgain = applyCreate(blocked, REFUSED, NOT_OWED);
+      const refusedAgain = applyCreate(blocked, REFUSED, NOT_OWED, () => blocked);
       expect(refusedAgain.externalConflict).toBe(blocked.externalConflict);
     });
 
     it('lets keepDrafting cancel the warning and the panel, and nothing external (entry 9)', () => {
       const seen = observation();
-      const refused = applyCreate(beginCreate(ready())!.session, REFUSED, NOT_OWED);
+      const refused = ((onHand) => applyCreate(onHand, REFUSED, NOT_OWED, () => onHand))(((onHand) => beginCreate(onHand, () => onHand))(ready())!.session);
       const blocked = askToReloadDiskVersion(applyObservation(refused, raised(seen)));
       const kept = keepDrafting(blocked);
       expect(kept.outcome).toBeNull();
       expect(kept.reload).toBe(NOT_RELOADING);
       expect(kept.externalConflict).toBe(blocked.externalConflict);
       expect(isEditable(kept)).toBe(false);
-      expect(beginCreate(kept)).toBeNull();
+      expect(beginCreate(kept, () => kept)).toBeNull();
       const withheld = applyObservation(ready(), decided(null, observation(), true, 'raisedWithoutReload'));
       expect(keepDrafting(withheld).uncertaintyUnresolved).toBe(true);
       const waiting = applyObservation(ready(), retainedDelivery(seen));
@@ -1880,7 +1889,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(view.externalNotices).toEqual([{ kind: 'writeOutcomeUnknown' }]);
       expect(askToReloadDiskVersion(withheld)).toBe(withheld);
       const recorder = adopting();
-      expect(reapplyToDiskVersion(withheld, recorder.adopt, () => externalOf(withheld).source)).toEqual({
+      expect(reapplyToDiskVersion(withheld, recorder.adopt, () => externalOf(withheld).source, () => withheld)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'writeOutcomeUnknown' }
       });
@@ -1983,7 +1992,7 @@ describe('the external session — Phase 2d-6-3', () => {
     it('rebuilds an after from the row the anchor’s full identity finds, reading its exact tier', () => {
       const { stuck, stands } = raisedOver(observed([row(ANCHOR, { Identified: { target: TWIN } })]));
       const recorder = adopting();
-      const answer = reapplyToDiskVersion(stuck, recorder.adopt, stands);
+      const answer = reapplyToDiskVersion(stuck, recorder.adopt, stands, () => stuck);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind !== 'reapplied') {
         throw new Error('this case is about the rebuilt form');
@@ -1993,7 +2002,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(answer.session.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
       expect(answer.session.draft.consent).toBeNull();
       expect(canCreate(answer.session)).toBe(true);
-      expect(beginCreate(answer.session)?.position).toEqual({ After: { anchor: TWIN.id } });
+      expect(beginCreate(answer.session, () => answer.session)?.position).toEqual({ After: { anchor: TWIN.id } });
       expect(answer.session.externalConflict).toBeNull();
       expect(answer.session.awaitingReconciliation.size).toBe(0);
       expect(recorder.adoptions).toEqual([externalOf(stuck)]);
@@ -2006,11 +2015,11 @@ describe('the external session — Phase 2d-6-3', () => {
       const recorder = adopting();
       for (const placement of [{ kind: 'front' }, { kind: 'end' }] as const) {
         const naming = raisedOver(observed([row(ANCHOR, { Identified: { target: TWIN } })]), placement);
-        expect(reapplyToDiskVersion(naming.stuck, recorder.adopt, naming.stands).kind).toBe('reapplied');
+        expect(reapplyToDiskVersion(naming.stuck, recorder.adopt, naming.stands, () => naming.stuck).kind).toBe('reapplied');
         const moved = raisedOver(observed([], { base: 'z'.repeat(64) }), placement);
-        expect(reapplyToDiskVersion(moved.stuck, recorder.adopt, moved.stands).kind).toBe('reapplied');
+        expect(reapplyToDiskVersion(moved.stuck, recorder.adopt, moved.stands, () => moved.stuck).kind).toBe('reapplied');
         const tableless = raisedOver(observation(), placement);
-        const answer = reapplyToDiskVersion(tableless.stuck, recorder.adopt, tableless.stands);
+        const answer = reapplyToDiskVersion(tableless.stuck, recorder.adopt, tableless.stands, () => tableless.stuck);
         expect(answer.kind).toBe('reapplied');
         if (answer.kind === 'reapplied') {
           expect(answer.session.placement).toEqual(placement);
@@ -2023,13 +2032,13 @@ describe('the external session — Phase 2d-6-3', () => {
     it('refuses the anchor: a refused tier, an empty tier, a missing row, several rows, and a stranger', () => {
       const recorder = adopting();
       const refusedTier = raisedOver(observed([row(ANCHOR, { Refused: { reason: 'NoExactCorrespondence' } })]));
-      expect(reapplyToDiskVersion(refusedTier.stuck, recorder.adopt, refusedTier.stands)).toEqual({
+      expect(reapplyToDiskVersion(refusedTier.stuck, recorder.adopt, refusedTier.stands, () => refusedTier.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'anchorCorrespondence', reason: 'NoExactCorrespondence' }
       });
       for (const empty of [{ Unsupported: {} }, { Targetless: {} }] as const) {
         const emptyTier = raisedOver(observed([row(ANCHOR, empty)]));
-        expect(reapplyToDiskVersion(emptyTier.stuck, recorder.adopt, emptyTier.stands)).toEqual({
+        expect(reapplyToDiskVersion(emptyTier.stuck, recorder.adopt, emptyTier.stands, () => emptyTier.stuck)).toEqual({
           kind: 'manualResolution',
           obstacle: { kind: 'evidenceNotAnAnchor' }
         });
@@ -2038,7 +2047,7 @@ describe('the external session — Phase 2d-6-3', () => {
       const nodeOnly = raisedOver(
         observed([row({ document: 2, revision: 'z'.repeat(64), node: 11 }, { Identified: { target: TWIN } })])
       );
-      expect(reapplyToDiskVersion(nodeOnly.stuck, recorder.adopt, nodeOnly.stands)).toEqual({
+      expect(reapplyToDiskVersion(nodeOnly.stuck, recorder.adopt, nodeOnly.stands, () => nodeOnly.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
@@ -2048,20 +2057,20 @@ describe('the external session — Phase 2d-6-3', () => {
           row({ document: 2, revision: BASE, node: 99 }, { Identified: { target: TWIN } })
         ])
       );
-      expect(reapplyToDiskVersion(byPosition.stuck, recorder.adopt, byPosition.stands)).toEqual({
+      expect(reapplyToDiskVersion(byPosition.stuck, recorder.adopt, byPosition.stands, () => byPosition.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
       });
       const twice = raisedOver(
         observed([row(ANCHOR, { Identified: { target: TWIN } }), row(ANCHOR, { Identified: { target: TWIN } })])
       );
-      expect(reapplyToDiskVersion(twice.stuck, recorder.adopt, twice.stands)).toEqual({
+      expect(reapplyToDiskVersion(twice.stuck, recorder.adopt, twice.stands, () => twice.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'severalRowsForBase' }
       });
       const stranger = makeMatch({ node: 99, document: 2, revision: AFTER, trigger: ':gone' });
       const notHeld = raisedOver(observed([row(ANCHOR, { Identified: { target: stranger } })]));
-      expect(reapplyToDiskVersion(notHeld.stuck, recorder.adopt, notHeld.stands)).toEqual({
+      expect(reapplyToDiskVersion(notHeld.stuck, recorder.adopt, notHeld.stands, () => notHeld.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'anchorNotInDestination' }
       });
@@ -2071,17 +2080,17 @@ describe('the external session — Phase 2d-6-3', () => {
     it('refuses a table about other revisions, and an observation with none, for an anchored placement', () => {
       const recorder = adopting();
       const otherBase = raisedOver(observed([row(ANCHOR, { Identified: { target: TWIN } })], { base: 'z'.repeat(64) }));
-      expect(reapplyToDiskVersion(otherBase.stuck, recorder.adopt, otherBase.stands)).toEqual({
+      expect(reapplyToDiskVersion(otherBase.stuck, recorder.adopt, otherBase.stands, () => otherBase.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'baseRevisionMoved' }
       });
       const otherDisk = raisedOver(observed([row(ANCHOR, { Identified: { target: TWIN } })], { disk: 'z'.repeat(64) }));
-      expect(reapplyToDiskVersion(otherDisk.stuck, recorder.adopt, otherDisk.stands)).toEqual({
+      expect(reapplyToDiskVersion(otherDisk.stuck, recorder.adopt, otherDisk.stands, () => otherDisk.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'diskRevisionMoved' }
       });
       const tableless = raisedOver(observation());
-      expect(reapplyToDiskVersion(tableless.stuck, recorder.adopt, tableless.stands)).toEqual({
+      expect(reapplyToDiskVersion(tableless.stuck, recorder.adopt, tableless.stands, () => tableless.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'externalEvidence', reason: 'noCorrespondence' }
       });
@@ -2092,16 +2101,16 @@ describe('the external session — Phase 2d-6-3', () => {
       const recorder = adopting();
       const elsewhere = externalConflictSource(observation({ sequence: 9 }));
       const anchored = raisedOver(observed([row(ANCHOR, { Identified: { target: TWIN } })]));
-      expect(reapplyToDiskVersion(anchored.stuck, recorder.adopt, () => elsewhere)).toEqual({
+      expect(reapplyToDiskVersion(anchored.stuck, recorder.adopt, () => elsewhere, () => anchored.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
       const atEnd = raisedOver(observation(), { kind: 'end' });
-      expect(reapplyToDiskVersion(atEnd.stuck, recorder.adopt, () => null)).toEqual({
+      expect(reapplyToDiskVersion(atEnd.stuck, recorder.adopt, () => null, () => atEnd.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
-      expect(reapplyToDiskVersion(saveConflicted(), recorder.adopt, () => elsewhere)).toEqual({
+      expect(((onHand) => reapplyToDiskVersion(onHand, recorder.adopt, () => elsewhere, () => onHand))(saveConflicted())).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'supersededEvidence' }
       });
@@ -2111,15 +2120,15 @@ describe('the external session — Phase 2d-6-3', () => {
     it('answers every adoption outcome for the external origin, and the ordinary checks over the new parse', () => {
       const seen = observed([row(ANCHOR, { Identified: { target: TWIN } })]);
       const { stuck, stands } = raisedOver(seen);
-      expect(reapplyToDiskVersion(stuck, adopting('installed').adopt, stands).kind).toBe('reapplied');
-      expect(reapplyToDiskVersion(stuck, adopting('alreadyThere').adopt, stands).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, adopting('installed').adopt, stands, () => stuck).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, adopting('alreadyThere').adopt, stands, () => stuck).kind).toBe('reapplied');
       const refusedWindow = adopting('refused');
-      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt, stands)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt, stands, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(refusedWindow.adoptions).toHaveLength(1);
       // The creation checks run again over the disk parse, adopting nothing.
       const readOnly = raisedOver(observation({ disk: diskFile({ readOnly: true }) }), { kind: 'end' });
       const recorder = adopting();
-      expect(reapplyToDiskVersion(readOnly.stuck, recorder.adopt, readOnly.stands)).toEqual({
+      expect(reapplyToDiskVersion(readOnly.stuck, recorder.adopt, readOnly.stands, () => readOnly.stuck)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'creationRefused', reason: 'destinationIneligible' }
       });
@@ -2128,7 +2137,7 @@ describe('the external session — Phase 2d-6-3', () => {
         { ...ready(), externalConflict: null },
         raised(otherObservation({ document: 2, disk: makeDocument({ id: 3, relativePath: 'match/other.yml', revision: AFTER }) }))
       );
-      expect(reapplyToDiskVersion(elsewhere, recorder.adopt, () => externalOf(elsewhere).source)).toEqual({
+      expect(reapplyToDiskVersion(elsewhere, recorder.adopt, () => externalOf(elsewhere).source, () => elsewhere)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'notTheDestination' }
       });
@@ -2142,7 +2151,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(held.awaitingReconciliation.get(2)).toBe(heldReading);
       expect(canCreate(held)).toBe(false);
       const recorder = adopting();
-      expect(reapplyToDiskVersion(held, recorder.adopt, stands)).toEqual({
+      expect(reapplyToDiskVersion(held, recorder.adopt, stands, () => held)).toEqual({
         kind: 'manualResolution',
         obstacle: { kind: 'observationRetained' }
       });
@@ -2152,7 +2161,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(view.reapplyOffered).toBe(false);
       expect(view.externalNotices).toEqual([{ kind: 'observationRetained' }]);
       const lifted = applyObservation(held, writtenHereDelivery(heldReading));
-      const answer = reapplyToDiskVersion(lifted, adopting().adopt, stands);
+      const answer = reapplyToDiskVersion(lifted, adopting().adopt, stands, () => lifted);
       expect(answer.kind).toBe('reapplied');
       if (answer.kind === 'reapplied') {
         expect(answer.session.awaitingReconciliation.size).toBe(0);
@@ -2163,9 +2172,9 @@ describe('the external session — Phase 2d-6-3', () => {
     it('asks nothing of the window when no guard is handed in, and leaves the door to decide', () => {
       const { stuck } = raisedOver(observed([row(ANCHOR, { Identified: { target: TWIN } })]));
       const refusedWindow = adopting('refused');
-      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt)).toEqual({ kind: 'adoptionRefused' });
+      expect(reapplyToDiskVersion(stuck, refusedWindow.adopt, null, () => stuck)).toEqual({ kind: 'adoptionRefused' });
       expect(refusedWindow.adoptions).toEqual([externalOf(stuck)]);
-      expect(reapplyToDiskVersion(stuck, adopting().adopt).kind).toBe('reapplied');
+      expect(reapplyToDiskVersion(stuck, adopting().adopt, null, () => stuck).kind).toBe('reapplied');
     });
 
     it('names a sentence in both languages for every obstacle the external origin can raise', () => {
@@ -2192,5 +2201,99 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(creationReapplyObstacleKey({ kind: 'writeOutcomeUnknown' })).toBe('browser.externalConflict.writeOutcomeUnknown');
       expect(creationReapplyObstacleKey({ kind: 'observationRetained' })).toBe('browser.externalConflict.observationRetained');
     }); // End of the "a sentence per obstacle" case
+
+    it('reads no evidence for a form that is already blocked (2d-6-4’s pattern, Phase 2d-6-6a)', () => {
+      // The blocks come before the entry, which reads the observation's table; a
+      // table whose spine counts its reads is the pin.
+      let reads = 0;
+      const seen: ExternalConflictObservation = {
+        ...observation(),
+        get correspondences(): NonNullable<ExternalConflictObservation['correspondences']> {
+          reads += 1;
+          return { base_revision: BASE, disk_revision: AFTER, entries: [] };
+        }
+      };
+      const { stuck, stands } = raisedOver(seen);
+      const recorder = adopting();
+      const held = applyObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
+      expect(reapplyToDiskVersion(held, recorder.adopt, stands, () => held)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      const withheld = applyObservation(
+        choosePlacement(ready(), { kind: 'after', anchor: ANCHOR }),
+        decided(null, seen, true, 'raisedWithoutReload')
+      );
+      expect(reapplyToDiskVersion(withheld, recorder.adopt, stands, () => withheld)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'writeOutcomeUnknown' }
+      });
+      expect(reads).toBe(0);
+      // And an unblocked form reads it.
+      expect(reapplyToDiskVersion(stuck, recorder.adopt, stands, () => stuck)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'externalEvidence', reason: 'noRowForBase' }
+      });
+      expect(reads).toBeGreaterThan(0);
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "no evidence read while blocked" case
+
+    it('rechecks the installed form immediately before adopting, and refuses what a read delivered during the reapply (Phase 2d-6-6a)', () => {
+      // A getter behind the anchor row's `exact` tier runs after the blocks were
+      // asked and before the adoption; a window's receiver, run from it, records
+      // a wait, a supersession or an uncertainty on the installed form. The
+      // reapply must ask the installed form again, once, immediately before it
+      // adopts — and adopt nothing when it changed.
+      const heldReading = observation({ sequence: 6, diskRevision: 'd'.repeat(64), disk: diskFile({ revision: 'd'.repeat(64) }) });
+      const recorder = adopting();
+      /**
+       * A form raised over a table whose anchor row delivers to the holder when
+       * its exact tier is read.
+       *
+       * @param deliver - What the read delivers, or `null` for nothing.
+       * @returns The reader and the guard.
+       */
+      function trapped(deliver: ((source: ConflictSource) => ObservationDelivery) | null): {
+        readonly current: () => MatchCreationSession;
+        readonly stands: StandingOriginGuard;
+      } {
+        let held: MatchCreationSession | null = null;
+        const trappedRow: CorrespondenceEntry = {
+          base: ANCHOR,
+          get exact(): ReapplyResolution {
+            if (held !== null && deliver !== null) {
+              held = applyObservation(held, deliver(externalOf(held).source));
+            }
+            return { Identified: { target: TWIN } };
+          },
+          editor: { Unsupported: {} }
+        };
+        const raisedForm = raisedOver(observed([trappedRow])).stuck;
+        held = raisedForm;
+        const source = externalOf(raisedForm).source;
+        return { current: () => held ?? raisedForm, stands: () => source };
+      } // End of function trapped()
+      const waited = trapped(() => retainedDelivery(heldReading));
+      expect(reapplyToDiskVersion(waited.current(), recorder.adopt, waited.stands, waited.current)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'observationRetained' }
+      });
+      expect(waited.current().awaitingReconciliation.get(2)).toBe(heldReading);
+      const superseded = trapped((source) => decided(source, heldReading, false, 'supersedes'));
+      expect(reapplyToDiskVersion(superseded.current(), recorder.adopt, superseded.stands, superseded.current)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'supersededEvidence' }
+      });
+      const uncertain = trapped((source) => decided(source, heldReading, true, 'raisedWithoutReload'));
+      expect(reapplyToDiskVersion(uncertain.current(), recorder.adopt, uncertain.stands, uncertain.current)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'writeOutcomeUnknown' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+      // A read that delivers nothing adopts as before.
+      const quiet = trapped(null);
+      expect(reapplyToDiskVersion(quiet.current(), recorder.adopt, quiet.stands, quiet.current).kind).toBe('reapplied');
+      expect(recorder.adoptions).toHaveLength(1);
+    }); // End of the "recheck before adoption" case
   }); // End of the "reapply over the external origin" suite
 }); // End of the "external session" suite
