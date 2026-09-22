@@ -36,16 +36,20 @@ import {
 } from '../browser/restore';
 import { DICTIONARIES, translate, type TranslationKey } from './dictionaries';
 import en from './en.json';
+import type { ExpectNever, Missing } from './exhaustive';
 import { LOCALES } from './locale';
 import type { Locale } from './locale';
 
 /**
  * Every surface kind a restore refuses to run beside.
  *
- * Written out with a `satisfies` for the reason every enumerated union in this
- * repository is: a union has no run-time extent, so a new member of
- * `OpenWriteSurfaceKind` — which would join `CompetingWriteSurfaceKind` by
- * exclusion — is a compile error here rather than an arm nobody renders.
+ * Written out by hand, because a union has no run-time extent. **The `satisfies`
+ * forces one direction only**: every entry is a member, so a kind removed or
+ * renamed in `CompetingWriteSurfaceKind` is a compile error here. It does not
+ * force the other — a list missing a member satisfies it — so the alias below
+ * names that direction through `./exhaustive`: a new member of
+ * `OpenWriteSurfaceKind`, which joins `CompetingWriteSurfaceKind` by exclusion,
+ * is an `npm run check` failure naming it rather than an arm nobody renders.
  */
 const COMPETING = [
   'matchEditor',
@@ -56,6 +60,11 @@ const COMPETING = [
   'rawEditor',
   'recovery'
 ] as const satisfies readonly CompetingWriteSurfaceKind[];
+
+// `never` exactly when the table above names every competing kind. See `./exhaustive`.
+export type _CompetingKindsAreComplete = ExpectNever<
+  Missing<CompetingWriteSurfaceKind, typeof COMPETING>
+>;
 
 /**
  * Every refusal a restore can answer, one value each.

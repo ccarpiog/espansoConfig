@@ -2853,14 +2853,16 @@ export interface MatchCreationView {
    * Beside {@link MatchCreationView.messages} and never merged into it, for
    * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
    * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
-   * twice. Rendered through `tConflictMessage`. No component reads it yet.
+   * twice. Rendered through `tConflictMessage`; `MatchCreator.svelte` draws it in
+   * its external conflict panel since Phase 2d-6-6c-1.
    */
   readonly externalMessages: readonly ConflictMessage[];
   /**
    * The lines owed while an observation cannot be acted on — Phase 2d-6-3.
    *
    * `writeOutcomeUnknown` first, `observationRetained` second, from the form's
-   * own fields. No component reads it yet; 2d-6-6 and 2d-6-9 do.
+   * own fields. `MatchCreator.svelte` draws it beside the create control since
+   * Phase 2d-6-6c-1; the acknowledgement control is 2d-6-9's.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
   /**
@@ -2869,9 +2871,11 @@ export interface MatchCreationView {
    *
    * While `true` the conflict is shown, the boxes are frozen, the reload and the
    * reapply are withheld, and {@link MatchCreationView.canChooseDestination} is
-   * `true` although {@link MatchCreationView.editable} is not. A renderer says so
-   * with the `noDestination` refusal sentence, which
-   * {@link MatchCreationView.refusal} already answers. No component reads it yet.
+   * `true` although {@link MatchCreationView.editable} is not. The
+   * `noDestination` refusal sentence, which {@link MatchCreationView.refusal}
+   * already answers, says so beside the create control, and since Phase 2d-6-6c-1
+   * `MatchCreator.svelte` reads this field to draw the external panel's own line
+   * naming that one way forward.
    */
   readonly destinationRequired: boolean;
   /**

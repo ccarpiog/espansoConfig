@@ -384,15 +384,17 @@ export function decideAutomaticReload(inputs: AutomaticReloadGuardInputs): Autom
  * reviewing the snapshot cannot establish whether it completed — an unknown
  * outcome, never a failure and never a success.
  *
- * **Nothing draws these yet.** The match editor's view answers both since
- * 2d-6-2 (`MatchEditorView.externalNotices` in `./matchEditor.ts`), the
- * new-snippet form's and the recovery form's since 2d-6-3
- * (`MatchCreationView.externalNotices`, `RecoveryView.externalNotices`), the
- * deleter's, mover's and duplicator's since 2d-6-4
+ * **Three panels draw these since Phase 2d-6-6c-1.** Every view answers both:
+ * the match editor's since 2d-6-2 (`MatchEditorView.externalNotices` in
+ * `./matchEditor.ts`), the new-snippet form's and the recovery form's since
+ * 2d-6-3 (`MatchCreationView.externalNotices`, `RecoveryView.externalNotices`),
+ * the deleter's, mover's and duplicator's since 2d-6-4
  * (`MatchDeletionView.externalNotices`, `MatchMoveView.externalNotices`,
- * `MatchDuplicationView.externalNotices`), the raw editor's and restore's
- * since 2d-6-5 (`RawEditorView.externalNotices`, `RestoreView.externalNotices`),
- * and no component reads any of those fields; the acknowledgement that ends the second exists
+ * `MatchDuplicationView.externalNotices`), and the raw editor's and restore's
+ * since 2d-6-5 (`RawEditorView.externalNotices`, `RestoreView.externalNotices`).
+ * `MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte` draw the
+ * first three views' notices; the other five panels are 2d-6-7's and 2d-6-8's.
+ * The acknowledgement that ends the second exists
  * (`BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, since
  * 2d-6-1b) and no component calls it — 2d-6-9 draws the control. The codes exist
  * because a code with no string is worse than a code with no caller, and because

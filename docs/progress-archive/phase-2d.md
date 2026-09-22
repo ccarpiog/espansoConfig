@@ -5075,3 +5075,20 @@ and the client-only **present (2)**. **The Rust cell is held at 1323 and was not
 `src-tauri/` or `crates/` changed beyond the instrument's `main.rs` hook, whose pair diff is still `5
 insertions(+), 1 deletion(-)`. 2d-6-5's narrative, formerly here, is archived verbatim in
 [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-5's verification narrative"*.
+
+## Phase 2d-6-6b's verification narrative — archived verbatim 2026-09-23 at 2d-6-6c-1
+
+
+**`1323 / 449 / 2899 / 193`** at 2d-6-6b, from `1323 / 447 / 2833 / 192`. Measured by the orchestrator on the tree
+the worker reported (`449 / 2875 / 193`) and again on the final tree after the review's fix round, each gate on its
+own, each exit read directly: `npm run check` **449 files, 0 errors, 0 warnings** (+2: `surfaceReceivers.ts` and its
+test); `npm test` **2899 passed, 65 files** (+66 from 2833: +42 for the deliverables — `ipc-detail` +2, `matchCreation`
++4, `matchDeletion` +3, `matchDuplication` +3, `matchEditor` +4, `matchMove` +3, `recovery` +4, `restore` +2,
+`surfaceReceivers` +4 new, `AppShell` +1, `DetailPane` +10, `RestorePane` +2 — then +24 pinning the review's blocker,
+eighteen reload cases across the six model suites and six reapply cases across the three authored ones, each shown
+failing first); `npm run build` **193 modules** (+1, `surfaceReceivers.ts`), server-only markers **absent**, client-only
+**present (2)**. **The Rust cell is held at 1323 and was not re-measured**: no path under `src-tauri/` or `crates/`
+changed beyond the instrument's `main.rs` hook, whose pair diff is still `5 insertions(+), 1 deletion(-)`. 2d-6-6a's
+narrative is archived verbatim in [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-6a's
+verification narrative"*.
+

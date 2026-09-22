@@ -207,8 +207,9 @@
  * hands down, and the pane registers it through
  * `BrowserState.registerObservationReceiver` over the editor's file
  * (`./surfaceReceivers.ts`); `DetailPane.test.ts` shows the mounted ordering of a
- * delivery against this editor's own `await save(...)`. Drawing the external
- * conflict and its notices is 2d-6-6c's.
+ * delivery against this editor's own `await save(...)`. Since Phase 2d-6-6c-1
+ * `MatchEditor.svelte` draws the external conflict in a panel of its own and the
+ * notices beside the save control.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -3234,7 +3235,8 @@ export interface MatchEditorView {
    * accessor cannot take, so these go through `tConflictMessage`. A panel that
    * draws `view.conflict` outside the save-outcome branch (the 2d-6 record's §3
    * entry 10) draws these there, and a save conflict's lines stay where they
-   * were — so nothing is drawn twice. **No component draws this yet**; 2d-6-6 does.
+   * were — so nothing is drawn twice. `MatchEditor.svelte` draws these in its
+   * external conflict panel since Phase 2d-6-6c-1.
    */
   readonly externalMessages: readonly ConflictMessage[];
   /**
@@ -3246,7 +3248,8 @@ export interface MatchEditorView {
    * offered; `observationRetained` while the window holds a reading of this file
    * it has not decided about, which is why nothing can be sent. Codes, rendered
    * through `tExternalConflictNotice`, never sentences; the acknowledgement
-   * control that ends the first is 2d-6-9's. **No component draws these yet.**
+   * control that ends the first is 2d-6-9's. `MatchEditor.svelte` draws these
+   * beside its save control since Phase 2d-6-6c-1.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
   /** The presentation changes a saved arm disclosed, in report order. */

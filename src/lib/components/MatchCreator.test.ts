@@ -50,8 +50,9 @@ import {
   type DestinationRefusal
 } from '../browser/matchCreation';
 import { recoveryChoiceKey, sourceConflictStateKey } from '../browser/recovery';
+import { arbitratedDelivery, type ObservationDelivery } from '../browser/observationDelivery';
 import type { SurfaceBinding } from '../browser/surfaceReceivers';
-import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+import type { MatchSaveAnswer, ObservationReceiver } from '../browser/workspace.svelte';
 import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
 import { t, tDraftCopy } from '../i18n';
 import { locale } from '../stores/locale.svelte';
@@ -233,6 +234,11 @@ interface ScriptedAnswer {
   readonly mayHaveWritten?: boolean;
   /** Why the command rejected, for the `failed` arm. */
   readonly failure?: IpcFailure;
+  /**
+   * What the wrapper throws instead of answering at all — Phase 2d-6-6c-1. Read
+   * before every other field.
+   */
+  readonly throws?: Error;
 }
 
 /**
@@ -294,6 +300,11 @@ interface Mounted {
   readonly closed: () => number;
   /** Replaces what the projections reader answers, as a re-read would. */
   readonly reproject: (views: readonly DocumentView[]) => void;
+  /**
+   * Hands one envelope to the receiver the form reported — Phase 2d-6-6c-1 —
+   * as the window's registration would, inside a flush.
+   */
+  readonly deliver: (delivery: ObservationDelivery) => void;
   /** Tears the component down. */
   readonly stop: () => void;
 }
@@ -330,6 +341,9 @@ function mountCreator(
   const adoptions: ConflictModel<CreationBuffers>[] = [];
   const reports: (DocumentId | null)[] = [];
   const standing = new Map<DocumentId, ConflictSource>();
+  // The receiver the form reports, kept so a case can deliver to it (Phase
+  // 2d-6-6c-1); the window's own registration is `DetailPane.test.ts`'s.
+  let receiver: ObservationReceiver | null = null;
   let closes = 0;
   let views: readonly DocumentView[] = [
     profile(),
@@ -356,6 +370,9 @@ function mountCreator(
         calls.push({ document: into, newMatch, position, baseRevision, acknowledgement });
         const next = remaining.shift();
         noteStanding(standing, into, next);
+        if (next?.throws !== undefined) {
+          return Promise.reject(next.throws);
+        }
         if (next?.failure !== undefined) {
           return Promise.resolve({
             kind: 'failed',
@@ -390,7 +407,10 @@ function mountCreator(
       reportDestination: (into: DocumentId | null): void => {
         reports.push(into);
       },
-      reportReceiver: inertBinding,
+      reportReceiver: (reported: ObservationReceiver): SurfaceBinding => {
+        receiver = reported;
+        return inertBinding();
+      },
       reportRecovery: inertBinding,
       standingConflictFor: (document: DocumentId): ConflictSource | null =>
         standing.get(document) ?? null,
@@ -407,6 +427,10 @@ function mountCreator(
     closed: () => closes,
     reproject: (next: readonly DocumentView[]) => {
       views = next;
+    },
+    deliver: (delivery: ObservationDelivery): void => {
+      receiver?.(delivery);
+      flushSync();
     },
     stop: () => {
       void unmount(component);
@@ -611,6 +635,32 @@ function recordTheSelectionCopied(): CopiedSelections {
 } // End of function recordTheSelectionCopied()
 
 /**
+ * A `raised` envelope about one file, sealed as the window seals one — Phase
+ * 2d-6-6c-1.
+ *
+ * @param document - The file that changed.
+ * @param relativePath - Its display path.
+ * @param sequence - The sequence it was admitted under.
+ * @returns The envelope.
+ */
+function changeTo(document: DocumentId, relativePath: string, sequence: number): ObservationDelivery {
+  return arbitratedDelivery(
+    null,
+    {
+      sequence,
+      document,
+      previousRevision: BASE,
+      diskRevision: 'f'.repeat(64),
+      diskText: DISK_TEXT,
+      disk: makeDocument({ id: document, relativePath, revision: 'f'.repeat(64) }),
+      findings: [],
+      correspondences: null
+    },
+    false
+  );
+} // End of function changeTo()
+
+/**
  * Waits for the component's asynchronous handler to finish.
  *
  * A macrotask rather than a fixed number of microtask ticks: counting ticks is a
@@ -794,6 +844,106 @@ describe('the mounted new-snippet form', () => {
     expect(box(form.target, 'replace').value).toBe('a body');
     form.stop();
   }); // End of the "no match list" case
+
+  it('never shows a copy of one retained draft as the copy of another', async () => {
+    // **Phase 2d-6-6c-1's review, second finding.** The copy disclosure was one
+    // component-wide flag, so a draft copied under one conflict was still said to
+    // be copied under the next — after the person had named another file and
+    // edited the text. The disclosure belongs to the exact snapshot copied.
+    const original = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    recordTheSelectionCopied();
+    try {
+      const form = mountCreator();
+      type(form.target, 'trigger', ':new');
+      type(form.target, 'replace', 'a body');
+      form.deliver(changeTo(2, 'match/base.yml', 5));
+      control(form.target, conflictChoiceKey('copyDraft', 'authoredText')).click();
+      await settle();
+      expect(says(form.target, 'browser.saveOutcome.draftCopied')).toBe(true);
+
+      // Another file named: the conflict goes, the boxes come back, the text changes.
+      destination(form.target, 'match/other.yml').click();
+      flushSync();
+      type(form.target, 'replace', 'an edited body');
+      form.deliver(changeTo(3, 'match/other.yml', 6));
+
+      expect(says(form.target, 'browser.externalConflict.fileChangedWhileOpen')).toBe(true);
+      expect(says(form.target, 'browser.saveOutcome.draftCopied')).toBe(false);
+      form.stop();
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(document, 'execCommand');
+      } else {
+        Object.defineProperty(document, 'execCommand', original);
+      }
+    }
+  }); // End of the "copy bound to its snapshot" case
+
+  it('ignores a clipboard completion that arrives for a snapshot no longer shown', async () => {
+    // The same finding's second half: the clipboard answers asynchronously, and an
+    // answer about the draft that *was* retained must not be installed over the
+    // draft that is retained when it lands.
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    let finish: (() => void) | null = null;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (): Promise<void> =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          })
+      }
+    });
+    try {
+      const form = mountCreator();
+      type(form.target, 'trigger', ':new');
+      type(form.target, 'replace', 'a body');
+      form.deliver(changeTo(2, 'match/base.yml', 5));
+      control(form.target, conflictChoiceKey('copyDraft', 'authoredText')).click();
+      flushSync();
+
+      destination(form.target, 'match/other.yml').click();
+      flushSync();
+      type(form.target, 'replace', 'an edited body');
+      form.deliver(changeTo(3, 'match/other.yml', 6));
+      const late = finish as (() => void) | null;
+      late?.();
+      await settle();
+
+      expect(says(form.target, 'browser.externalConflict.fileChangedWhileOpen')).toBe(true);
+      expect(says(form.target, 'browser.saveOutcome.draftCopied')).toBe(false);
+      expect(says(form.target, 'browser.saveOutcome.draftCopyFailed')).toBe(false);
+      form.stop();
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(navigator, 'clipboard');
+      } else {
+        Object.defineProperty(navigator, 'clipboard', original);
+      }
+    }
+  }); // End of the "late clipboard completion" case
+
+  it('settles a create that throws instead of staying in flight forever', async () => {
+    // **2d-6-3's carried item, closed in Phase 2d-6-6c-1.** A wrapper that throws
+    // answers nothing, and the form used to stay `saving` for good: the create
+    // control refused with `saveInFlight`, *Stop adding this snippet* stayed
+    // disabled, and nothing said why. Nothing is known about the file, so the form
+    // settles as a send that may have written, keeps the draft, and gives the
+    // controls back.
+    const form = mountCreator([{ throws: new Error('the wrapper threw') }]);
+    fillIn(form);
+
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+
+    expect(form.calls).toHaveLength(1);
+    expect(says(form.target, 'browser.matchCreation.mayHaveWritten')).toBe(true);
+    expect(says(form.target, 'browser.matchCreation.saving')).toBe(false);
+    expect(says(form.target, 'browser.matchCreation.cannotCreate.saveInFlight')).toBe(false);
+    expect(control(form.target, 'browser.matchCreation.close').disabled).toBe(false);
+    expect(box(form.target, 'replace').value).toBe('a body');
+    form.stop();
+  }); // End of the "thrown create" case
 
   it('runs the acknowledgement round trip with consent bound to what is on screen', async () => {
     const form = mountCreator([{ result: REFUSED }, { result: COMMITTED }]);

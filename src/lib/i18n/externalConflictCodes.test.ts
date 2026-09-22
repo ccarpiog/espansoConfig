@@ -53,7 +53,7 @@ import {
   describeExternalConflictAction,
   describeExternalConflictNotice
 } from './codes';
-import { DICTIONARIES, type TranslationKey } from './dictionaries';
+import { DICTIONARIES, translate, type TranslationKey } from './dictionaries';
 import type { ExpectNever, Missing } from './exhaustive';
 import { tConflictMessage, tExternalConflictAction, tExternalConflictNotice } from './index';
 import { DEFAULT_LOCALE, LOCALES } from './locale';
@@ -297,6 +297,34 @@ describe('the reviewed wording, pinned literally', () => {
       'La evidencia con la que este panel comparaba ha quedado sustituida por otra lectura aceptada de este archivo, así que aquí no hay nada con lo que comparar lo que has conservado. Este intento de reaplicar no ha escrito nada.'
     );
   }); // End of the "supersession sentence" case
+
+  it('pins the three panel sentences Phase 2d-6-6c-1 added, in both languages', () => {
+    // **The observed revision is the only one named** (the 2d-6 record's §3 entry
+    // 10): no *expected*, no *found*, nothing called *afterwards*. The affected
+    // file is a display operand (entry 39). The destination-less form's line names
+    // the one way forward and withholds nothing it has not said is withheld
+    // (entry 21). The Spanish is the implementer's draft, pinned so a bilingual
+    // review's correction is a deliberate two-file edit (entry 40).
+    const revision = { revision: 'c'.repeat(64) };
+    expect(translate('en', 'browser.externalConflict.revisionObserved', revision)).toBe(
+      `The version read from disk when this change was observed is ${'c'.repeat(64)}.`
+    );
+    expect(translate('es', 'browser.externalConflict.revisionObserved', revision)).toBe(
+      `La versión leída del disco cuando se observó este cambio es ${'c'.repeat(64)}.`
+    );
+    expect(translate('en', 'browser.externalConflict.affectedFile', { path: 'match/c.yml' })).toBe(
+      'The file this change is about: match/c.yml'
+    );
+    expect(translate('es', 'browser.externalConflict.affectedFile', { path: 'match/c.yml' })).toBe(
+      'El archivo al que se refiere este cambio: match/c.yml'
+    );
+    expect(sentence('en', 'browser.externalConflict.destinationRequired')).toBe(
+      'This form does not name a file yet, so the only way forward from this change is choosing the file it goes in. Nothing has been chosen for you, and neither loading the version on disk nor keeping your draft is offered until a file is chosen.'
+    );
+    expect(sentence('es', 'browser.externalConflict.destinationRequired')).toBe(
+      'Este formulario todavía no indica ningún archivo, así que la única forma de seguir desde este cambio es elegir el archivo en el que va. No se ha elegido ninguno por ti, y ni cargar la versión del disco ni conservar tu borrador se ofrecen hasta que se elija un archivo.'
+    );
+  }); // End of the "three panel sentences" case
 }); // End of the "reviewed wording" suite
 
 describe('the semantic bounds of entry 40, as absences', () => {
@@ -312,6 +340,12 @@ describe('the semantic bounds of entry 40, as absences', () => {
     'browser.externalConflict.observationRetained',
     'browser.externalConflict.writeOutcomeUnknown',
     'browser.externalConflict.action.acknowledgeSnapshot',
+    // The three sentences Phase 2d-6-6c-1 added for the panels that draw an
+    // external conflict: the one observed revision, the affected file, and the
+    // destination-less form's one way forward.
+    'browser.externalConflict.revisionObserved',
+    'browser.externalConflict.affectedFile',
+    'browser.externalConflict.destinationRequired',
     'browser.conflictOrigin.changedWhileOpen',
     'browser.reapply.externalEvidence.noCorrespondence',
     'browser.reapply.externalEvidence.baseRevisionMoved',
@@ -482,7 +516,7 @@ describe('the semantic bounds of entry 40, as absences', () => {
     for (const key of namespace) {
       expect(BOUNDED_KEYS, key).toContain(key);
     } // End of the loop over every key of the namespace
-    expect(namespace).toHaveLength(4);
+    expect(namespace).toHaveLength(7);
   });
 
   it('never makes a claim the consult forbids, in either locale', () => {

@@ -30,7 +30,11 @@
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { CreationBuffers } from '../browser/matchCreation';
   import type { MatchBuffers } from '../browser/matchEditor';
-  import type { ConflictSource } from '../browser/conflictSource';
+  import {
+    conflictOriginMessage,
+    conflictRevisionsOf,
+    type ConflictSource
+  } from '../browser/conflictSource';
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
   import type { BindObservationReceiver } from '../browser/surfaceReceivers';
   import {
@@ -38,7 +42,7 @@
     startMatchFieldRecovery,
     type CreateARecoveredSnippet
   } from '../browser/recovery';
-  import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
+  import { isExternalConflict, outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
   import { copyReferenceText } from './clipboard';
@@ -47,12 +51,15 @@
   import {
     t,
     tConflictChoice,
+    tConflictMessage,
+    tConflictOriginMessage,
     tDetailField,
     tDraftCopy,
     tDraftError,
     tDraftFieldStatus,
     tEditError,
     tEditorReapplyObstacle,
+    tExternalConflictNotice,
     tFieldRefusal,
     tFindingCode,
     tHazard,
@@ -177,6 +184,23 @@
    * snippet after an external insertion or reorder. That is 2c-4b's confidence
    * work (consult Q5). The confirmed reload therefore closes this editor rather
    * than reseeding it, and the sentence at the confirmation step says so.
+   *
+   * **A conflict of either origin is drawn, and each panel says which origin it
+   * has** — Phase 2d-6-6c-1, the 2d-6 record's §3 entries 10 and 23. A save
+   * conflict stays inside the outcome panel, where the save that produced it is
+   * described; an external conflict has no outcome at all (the session keeps it
+   * in `externalConflict`, beside `outcome`), so it is drawn by a panel of its
+   * own **outside the save-outcome branch**. Both open with
+   * `tConflictOriginMessage`, and each names only the revisions its origin has:
+   * `conflictRevisionsOf` answers three for a refused save and one for an
+   * observation, so there is no *expected* or *found* to draw for the second.
+   * What the two share — the retained draft, the whole-file disk text, the
+   * reload warning, the copy and the choices — is one `comparison` snippet, so
+   * the two arms cannot drift apart; which arm is drawn is decided by
+   * `isExternalConflict`, the one tested guard, because the nested `source.kind`
+   * does not narrow the model. **What no type forces** is that this markup draws
+   * the origin line at all; `DetailPane.test.ts` reads it off the screen in both
+   * languages.
    */
 
   const {
@@ -427,11 +451,39 @@
    *
    * The decision is `./reveal.ts`'s and the two `bind:this` targets are this file's.
    */
-  const reveal = $derived(
-    outcomeReveal(view.outcome?.kind ?? null, view.awaitingReloadConfirmation)
+  /**
+   * The external conflict on screen, narrowed, or `null` — Phase 2d-6-6c-1.
+   *
+   * Through `isExternalConflict` rather than `view.conflict.source.kind`: the nested
+   * discriminant narrows the source and leaves the model the union (the 2d-6
+   * record's §3 entry 10), so this is the one place the panel below learns that it
+   * may read the external arm.
+   */
+  const external = $derived(
+    view.conflict !== null && isExternalConflict(view.conflict) ? view.conflict : null
   );
+  /** The external conflict panel's own element, the reveal's target when it shows. */
+  let externalPanel = $state<HTMLElement | null>(null);
+
+  // **An external conflict is revealed as a conflict panel is** (Phase 2d-6-6c-1):
+  // it has no outcome arm, so the cue is `conflict` while it shows and no outcome
+  // does. A `saved` or `refused` outcome kept as history beside it keeps its own
+  // cue, because that panel is the one whose appearance the person caused.
+  const reveal = $derived(
+    outcomeReveal(
+      view.outcome?.kind ?? (external !== null ? 'conflict' : null),
+      view.awaitingReloadConfirmation
+    )
+  );
+  /**
+   * Whether the outcome panel, rather than the external one, is the reveal's
+   * target. A boolean `$derived` rather than a read of `view` inside the effect:
+   * `view` is a new object on every transition, so the effect would re-run — and
+   * ask for a scroll again — on transitions that changed no cue.
+   */
+  const outcomeShown = $derived(view.outcome !== null);
   $effect(() => {
-    revealOutcome(reveal, outcomePanel, outcomeChoices);
+    revealOutcome(reveal, outcomeShown ? outcomePanel : externalPanel, outcomeChoices);
   });
 
   /** The reapply report's own block, so an answer to a press can be seen. */
@@ -764,6 +816,83 @@
   } // End of function discardAndClose()
 </script>
 
+<!-- **What a conflict of either origin shows beside its own lines** — Phase
+     2d-6-6c-1. One snippet for both panels rather than two copies, so the retained
+     draft, the disk side, the reload warning, the copy and the choices cannot drift
+     apart between the save arm and the external arm (the 2d-6 record's §3 entry
+     23). Only one conflict is active at a time (entry 7), so the one
+     `outcomeChoices` element it binds belongs to whichever panel is drawn. -->
+{#snippet comparison()}
+  <h3>{t('browser.saveOutcome.retainedDraft')}</h3>
+  <!-- The conflict's **own** retained buffers, walked by the model, and the
+       same list the copy is built from. Through `SourceText` rather than
+       into boxes: nothing here is editable while the panel is up, and a
+       projected value may hold a real carriage return that a text control
+       would silently draw as an ordinary line break. -->
+  {#each view.retainedDraft as field (field.label)}
+    <div class="shownValue">
+      <span class="marker">{tDetailField(field.label)}</span>
+      <span class="marker">{tDraftFieldStatus(field.status)}</span>
+      <SourceText text={field.text} />
+    </div>
+  {/each}
+
+  <h3>{t('browser.saveOutcome.diskVersion')}</h3>
+  <!-- The whole file as the command layer read it, paired with
+       `diskRevision`. **Not** "the same snippet in the disk version": there
+       is no trustworthy correspondence across revisions and inventing one is
+       2c-4b (consult Q5). Which arm is drawn is `conflictDiskText`'s
+       decision and not this markup's: *a file of zero characters is a fact
+       about the file rather than a failure to obtain it* was written into
+       three renderers until the 2c-4a-3a review's finding 5. -->
+  {#if view.diskText !== null && view.diskText.kind === 'text'}
+    <SourceText text={view.diskText.text} documentStart />
+  {:else}
+    <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
+  {/if}
+
+  <!-- The second step's warning. The shared line above is the whole
+       close/abandon guarantee and this one never restates it (2c-4a-3b
+       review, finding 3); it says only what this surface alone can say —
+       that no snippet in the new version will be guessed at, and what to do
+       about that afterwards. -->
+  {#if view.awaitingReloadConfirmation}
+    <p class="kind">{t('browser.matchEditor.reloadIdentifiesNoSnippet')}</p>
+  {/if}
+
+  <!-- A control that has just gone, with the reason in its place. The reload
+       is not offered again once the window has refused a spend, because the
+       refusal came back with no word about its cause. That withholds a
+       control; it claims nothing about how a later ask would be answered. -->
+  {#if view.reloadUnavailable}
+    <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
+  {/if}
+
+  <p class="kind">{t('browser.saveOutcome.copyIsReference')}</p>
+  {#if copied === 'copied'}
+    <p class="kind">{t('browser.saveOutcome.draftCopied')}</p>
+  {:else if copied === 'failed'}
+    <p class="kind">{t('browser.saveOutcome.draftCopyFailed')}</p>
+  {/if}
+
+  <!-- The line beside *Keep my draft*: what this app will **try**, what it
+       works from, when it writes nothing, and what a later save may still
+       do. Drawn when the model names that choice and never from this
+       surface's own declaration, so the sentence and the control cannot
+       disagree (consult Q6). -->
+  {#if view.reapplyOffered}
+    <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
+  {/if}
+
+  <p class="choices" bind:this={outcomeChoices}>
+    {#each view.conflictChoices as choice (choice)}
+      <button type="button" onclick={() => conflictAction(choice)}>
+        {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
+      </button>
+    {/each}
+  </p>
+{/snippet}
+
 <section class="matchEditor" aria-label={t('browser.matchEditor.label')}>
   <div class="head">
     {#if file !== null}
@@ -936,6 +1065,14 @@
     {/if}
   </p>
 
+  <!-- Why *Save* may be refusing when nothing else on screen says so: a reading of
+       this file the window is holding undecided, or a conflict raised while the
+       outcome of an earlier write is unknown. Codes from the model, in its order;
+       the control that acknowledges the second is 2d-6-9's. -->
+  {#each view.externalNotices as notice (notice.kind)}
+    <p class="kind">{tExternalConflictNotice(notice)}</p>
+  {/each}
+
   {#if view.sendFailure !== null}
     {@const failure = view.sendFailure}
     <div class="panel">
@@ -1003,6 +1140,26 @@
     {standingConflictFor}
   />
 
+  <!-- **The external conflict, outside the save-outcome branch** (the 2d-6 record's
+       §3 entry 10). The origin line first, then the model's own lines for this
+       origin — never `view.messages`, which are a save's — then the one revision
+       an observation has, then everything the save panel shows (entry 23). -->
+  {#if external !== null}
+    {@const revisions = conflictRevisionsOf(external.source)}
+    <div class="panel external" role="status" bind:this={externalPanel}>
+      <p>{tConflictOriginMessage(conflictOriginMessage(external.source))}</p>
+      {#each view.externalMessages as message, index (index)}
+        <p>{tConflictMessage(message)}</p>
+      {/each}
+      {#if revisions.kind === 'externalChange'}
+        <p class="kind">
+          {t('browser.externalConflict.revisionObserved', { revision: revisions.observed })}
+        </p>
+      {/if}
+      {@render comparison()}
+    </div>
+  {/if}
+
   {#if view.outcome !== null}
     {@const outcome = view.outcome}
     <div class="panel" role="status" bind:this={outcomePanel}>
@@ -1068,6 +1225,8 @@
         </p>
       {:else}
         {@const conflict = outcome}
+        <!-- Where this conflict came from: a save this editor attempted. -->
+        <p>{tConflictOriginMessage(conflictOriginMessage(conflict.source))}</p>
         <p class="kind">
           {t('browser.matchEditor.revisionExpected', { revision: conflict.expected })}
         </p>
@@ -1076,74 +1235,7 @@
           {t('browser.matchEditor.revisionDisk', { revision: conflict.diskRevision })}
         </p>
 
-        <h3>{t('browser.saveOutcome.retainedDraft')}</h3>
-        <!-- The conflict's **own** retained buffers, walked by the model, and the
-             same list the copy is built from. Through `SourceText` rather than
-             into boxes: nothing here is editable while the panel is up, and a
-             projected value may hold a real carriage return that a text control
-             would silently draw as an ordinary line break. -->
-        {#each view.retainedDraft as field (field.label)}
-          <div class="shownValue">
-            <span class="marker">{tDetailField(field.label)}</span>
-            <span class="marker">{tDraftFieldStatus(field.status)}</span>
-            <SourceText text={field.text} />
-          </div>
-        {/each}
-
-        <h3>{t('browser.saveOutcome.diskVersion')}</h3>
-        <!-- The whole file as the command layer read it, paired with
-             `diskRevision`. **Not** "the same snippet in the disk version": there
-             is no trustworthy correspondence across revisions and inventing one is
-             2c-4b (consult Q5). Which arm is drawn is `conflictDiskText`'s
-             decision and not this markup's: *a file of zero characters is a fact
-             about the file rather than a failure to obtain it* was written into
-             three renderers until the 2c-4a-3a review's finding 5. -->
-        {#if view.diskText !== null && view.diskText.kind === 'text'}
-          <SourceText text={view.diskText.text} documentStart />
-        {:else}
-          <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
-        {/if}
-
-        <!-- The second step's warning. The shared line above is the whole
-             close/abandon guarantee and this one never restates it (2c-4a-3b
-             review, finding 3); it says only what this surface alone can say —
-             that no snippet in the new version will be guessed at, and what to do
-             about that afterwards. -->
-        {#if view.awaitingReloadConfirmation}
-          <p class="kind">{t('browser.matchEditor.reloadIdentifiesNoSnippet')}</p>
-        {/if}
-
-        <!-- A control that has just gone, with the reason in its place. The reload
-             is not offered again once the window has refused a spend, because the
-             refusal came back with no word about its cause. That withholds a
-             control; it claims nothing about how a later ask would be answered. -->
-        {#if view.reloadUnavailable}
-          <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
-        {/if}
-
-        <p class="kind">{t('browser.saveOutcome.copyIsReference')}</p>
-        {#if copied === 'copied'}
-          <p class="kind">{t('browser.saveOutcome.draftCopied')}</p>
-        {:else if copied === 'failed'}
-          <p class="kind">{t('browser.saveOutcome.draftCopyFailed')}</p>
-        {/if}
-
-        <!-- The line beside *Keep my draft*: what this app will **try**, what it
-             works from, when it writes nothing, and what a later save may still
-             do. Drawn when the model names that choice and never from this
-             surface's own declaration, so the sentence and the control cannot
-             disagree (consult Q6). -->
-        {#if view.reapplyOffered}
-          <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
-        {/if}
-
-        <p class="choices" bind:this={outcomeChoices}>
-          {#each view.conflictChoices as choice (choice)}
-            <button type="button" onclick={() => conflictAction(choice)}>
-              {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
-            </button>
-          {/each}
-        </p>
+        {@render comparison()}
       {/if}
     </div>
   {/if}

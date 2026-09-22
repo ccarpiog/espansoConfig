@@ -89,9 +89,10 @@ import {
   type ConflictModel,
   type DiskAdoptionOutcome
 } from '../browser/saveOutcome';
+import { arbitratedDelivery, type ObservationDelivery } from '../browser/observationDelivery';
 import type { SurfaceBinding } from '../browser/surfaceReceivers';
-import type { MatchSaveAnswer } from '../browser/workspace.svelte';
-import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
+import type { MatchSaveAnswer, ObservationReceiver } from '../browser/workspace.svelte';
+import { DICTIONARIES, translate, type TranslationKey } from '../i18n/dictionaries';
 import { locale } from '../stores/locale.svelte';
 import type { IpcFailure } from '../ipc/errors';
 import type {
@@ -314,6 +315,11 @@ interface Mounted {
   readonly adoptions: ConflictModel<CreationBuffers>[];
   /** The conflict recovery was opened from, which the panel must never spend. */
   readonly source: ConflictModel<MatchBuffers>;
+  /**
+   * Hands one envelope to the receiver the panel reported — Phase 2d-6-6c-1 —
+   * exactly as the window's registration would, inside a flush.
+   */
+  readonly deliver: (delivery: ObservationDelivery) => void;
   /** Tears the component down. */
   readonly stop: () => void;
 }
@@ -385,6 +391,9 @@ function mountPanel(options: {
   const calls: RecordedCreate[] = [];
   const pending: ((answer: MatchSaveAnswer) => void)[] = [];
   const adoptions: ConflictModel<CreationBuffers>[] = [];
+  // The receiver the panel reports, kept so a case can deliver to it (Phase
+  // 2d-6-6c-1); the window's own registration is `DetailPane.test.ts`'s.
+  let receiver: ObservationReceiver | null = null;
   // **The stand-in for `BrowserState.standingConflictFor`** — Phase 2d-6-6b. The
   // window registers a create conflict's origin for its file when the command
   // answers `conflict`, and the form's reapply asks it at the end of its entry;
@@ -445,12 +454,13 @@ function mountPanel(options: {
         adoptions.push(conflict);
         return options.adoption ?? 'installed';
       }) as AdoptTheDiskVersion<CreationBuffers>,
-      // This suite mounts the panel alone, so nothing registers a receiver; the
-      // delivery path through a real window is `DetailPane.test.ts`'s.
-      reportSurface: (): SurfaceBinding => ({
-        reportTarget: () => undefined,
-        withdraw: () => undefined
-      }),
+      // This suite mounts the panel alone, so nothing registers the receiver with a
+      // window: it is kept for `deliver` below, and the delivery path through a real
+      // window is `DetailPane.test.ts`'s.
+      reportSurface: (reported: ObservationReceiver): SurfaceBinding => {
+        receiver = reported;
+        return { reportTarget: () => undefined, withdraw: () => undefined };
+      },
       standingConflictFor: (document: DocumentId): ConflictSource | null =>
         standing.get(document) ?? null
     }
@@ -461,6 +471,10 @@ function mountPanel(options: {
     pending,
     adoptions,
     source,
+    deliver: (delivery: ObservationDelivery): void => {
+      receiver?.(delivery);
+      flushSync();
+    },
     stop: () => {
       void unmount(component);
       target.remove();
@@ -764,6 +778,49 @@ describe('where the new snippet goes', () => {
     expect(panel.calls[0]!.document).toBe(3);
     // The chosen file's own revision, never the conflict's.
     expect(panel.calls[0]!.baseRevision).toBe(OTHER);
+    panel.stop();
+  });
+
+  it('keeps the destination choosable when a form naming none is told of a change', () => {
+    // **2d-6-6b's carried item, closed in Phase 2d-6-6c-1.** A destination-less form
+    // told of a change is not editable, and naming a file is its one way forward
+    // (the 2d-6 record's §3 entry 21). Gated on `editable`, every destination
+    // button was disabled and the form had no way forward on screen at all; gated
+    // on `canChooseDestination`, the file can be named, and the panel says so.
+    const panel = mountPanel({ disk: diskFile({ topLevelKeys: [] }) });
+    openForm(panel);
+    expect(says(panel.target, recoveryRefusalKey('noDestination'))).toBe(true);
+    panel.deliver(
+      arbitratedDelivery(
+        null,
+        {
+          sequence: 9,
+          document: 3,
+          previousRevision: OTHER,
+          diskRevision: AFTER,
+          diskText: 'matches: []\n',
+          disk: makeDocument({ id: 3, relativePath: 'match/other.yml', revision: AFTER }),
+          findings: [],
+          correspondences: null
+        },
+        false
+      )
+    );
+
+    expect(box(panel.target, 'trigger').readOnly).toBe(true);
+    expect(says(panel.target, 'browser.conflictOrigin.changedWhileOpen')).toBe(true);
+    expect(says(panel.target, 'browser.externalConflict.destinationRequired')).toBe(true);
+    expect(panel.target.textContent).toContain(
+      translate('en', 'browser.externalConflict.affectedFile', { path: 'match/other.yml' })
+    );
+    const other = destination(panel.target, 'match/other.yml');
+    expect(other?.disabled).toBe(false);
+    other?.click();
+    flushSync();
+    // Named: the one way forward was taken, so the line that asked for it goes.
+    expect(says(panel.target, 'browser.externalConflict.destinationRequired')).toBe(false);
+    expect(other?.getAttribute('aria-pressed')).toBe('true');
+    expect(panel.calls).toHaveLength(0);
     panel.stop();
   });
 

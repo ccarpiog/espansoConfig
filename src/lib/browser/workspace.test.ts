@@ -5638,6 +5638,47 @@ describe('creating a snippet', () => {
     expect(state.selected).toBeNull();
   }); // End of the "adoption failed" case
 
+  it.each(['getDocument', 'documentText'] as const)(
+    'answers a committed create as saved when the %s that follows it throws',
+    async (thrower) => {
+      // **Phase 2d-6-6c-1's review, first finding.** The transaction committed and
+      // the barrier was told so; then a read this window makes afterwards threw.
+      // Rejecting here let the form settle the create as a failed send that "may
+      // have written" — a committed write reported afterwards as an error (D2).
+      const created: CommandResult<SaveResult> = {
+        ok: true,
+        value: {
+          outcome: 'saved',
+          revision: 'rev-b',
+          committed: true,
+          notes: [],
+          backup_taken: false,
+          moved: { document: 2, revision: 'rev-b', node: 42 }
+        }
+      };
+      const commands = scriptedCommands({ creates: [created] });
+      const state = createBrowserState(commands, () => undefined);
+      await state.open(null);
+      state.show({ kind: 'document', id: 2 });
+      await state.select(baseDocument().matches[0]!);
+      await state.showFileText(true);
+
+      vi.mocked(commands[thrower]).mockImplementation(async () => {
+        throw new Error('the read after the commit threw');
+      });
+      const answer = await state.createMatch(
+        2,
+        NEW_MATCH,
+        AT_END,
+        OPEN_REVISION,
+        NOTHING_ACKNOWLEDGED
+      );
+
+      expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'failed' } });
+      expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('saved');
+    }
+  ); // End of the "post-commit throw" case
+
   it('carries the disk projection a conflict handed back, and installs nothing', async () => {
     const disk = grownDocument();
     const conflict: CommandResult<SaveResult> = {

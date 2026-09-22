@@ -15184,3 +15184,66 @@ sentences awaits ruling 40's bilingual review (**2d-6-11's**); `ExternalConflict
 reaches no developer channel. **From 1b**: `classifyFailure`'s "never throws" sentence in `src/lib/ipc/errors.ts`
 is false for a thrown value with a hostile `code` getter. **From 1a**: the stale "nine codes" sentence in
 `saveOutcome.ts` / `index.ts`.
+
+## The 2d-6-6b → 2d-6-6c handoff — archived verbatim 2026-09-23 at 2d-6-6c-1
+
+### Phase 2d-6-6b is complete and CLOSED. The next action is **Phase 2d-6-6c — the three authored panels' rendering**, the last of the three sub-phases 2d-6-6 was cut into (`docs/decisions/2d-6-split-notes.md` §2, the 2d-6-6 entry and *The orchestrator's cut*). When 6c closes, **2d-6-6's full acceptance (lines 131-141) is checked in one place**.
+
+**The three documents that bind every 2d-6 step, in reading order**:
+[`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (the consult; it binds),
+[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (the record: §2 the split, §3 forty-three
+binding rulings, **§5 nine corrections that override `phase-2d-design.md` item 6 and `2d-5-split-notes.md`**, §7 the
+map of the handed-on items) and [`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md).
+
+**What the closed steps landed — read each record's §1, never re-derive from the code**: 2d-6-1
+(`2d-6-1{a,b,c}-notes.md`) the delivery protocol on `BrowserState`; 2d-6-2 … 2d-6-5 (`2d-6-{2,3,4,5}-notes.md`) all
+eight session receivers as values, the submission blocks and the shared `reapply.ts` primitives; **2d-6-6a**
+(`2d-6-6a-notes.md`) the installed-session reader required everywhere; **2d-6-6b** (`2d-6-6b-notes.md`) the wiring:
+the six reloads (editor, creator, deleter, mover, duplicator, recovery) take a required reader, with
+`confirmationOf` / `settledAnswer` in `editorSave.ts` building every answer **before** the one last installed-session
+check (the review's blocker); the three authored reapplies read and prepare first and check the installed session last
+on both sides of adoption; `src/lib/browser/surfaceReceivers.ts` (`createReceiverRoster`) — the parent's binding record
+of receiver, instance and lease, a displaced instance's registration delivering to nothing; `DetailPane.svelte`
+registering the editor, creator and recovery receivers through `registerObservationReceiver`, a form with no chosen
+file registered over every eligible file, the surface transition routed through `observeExternalChange` (the first live
+path to `supersedeConflict`); **recovery the eighth `OpenWriteSurfaceKind`**; the shell kept mounted over an empty
+document list while a surface is open; the creator's destination control on `canChooseDestination`; the real standing
+origin passed by all six reapplying components (`standingConflictFor` prop); one new key
+`browser.restore.refused.recoveryOpen` EN/ES (the Spanish a worker's draft — ruling 40's review, 2d-6-11's).
+
+**Executable cold — 2d-6-6c.** Delivers origin, evidence, comparison, copy and recovery **rendering** on
+`MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte`; the **bilingual** mounted tests of 2d-6-6's
+acceptance asserting the drawn sentences (6b's mounted cases assert frozen boxes, disabled submission, registrations
+and envelopes, not sentences — `2d-6-6b-notes.md` §4 item 3); and the **narrow window reading** (start from
+`docs/decisions/2d-5-7b-window-reading.md` §3-§4; one plan per launch into a fresh bundle path; language set through
+the picker). **6c's carried items** (`2d-6-6b-notes.md` §4): (1) `RecoveryPanel.svelte` still gates its destination
+buttons on `form.editable` — must read `RecoveryView.canChooseDestination`, else a destination-less recovery form
+under an external conflict has no way forward; (2) `MatchCreator.svelte` does not settle a thrown `create`
+(2d-6-3); (4) an unknown recovery form is attributed to the creator-eligible set while its destinations come from
+`recoveryDestinationsOf`; (5) the one-slot limit of a destination-less form is now reachable (two eligible files
+changing show as the later one); (7) two stale comments (`MatchCreator.svelte`'s "`targetingSurfaceFor` has no
+production caller yet"; `restoreCodes.test.ts`'s `satisfies` array claim). **The declared gap (§2 ruling 3)**: the
+consult asks that an observation be *held* for a surface whose receiver has not been reported; `transitionOf(kind)` is
+a no-op instead, relying on children reporting synchronously in initialisation before the host's registration effect.
+The review did not uphold a loss; decide deliberately whether 6c or 2d-6-9 owns a hold. 6c is **high** risk and
+changes components; count any new module against the Vite figure. **The capability file needs nothing**:
+`src-tauri/capabilities/default.json` has granted `core:event:allow-listen` and `allow-unlisten` since 2d-5-7a.
+
+**Owed by later steps, from 6b's fix round** (`2d-6-6b-notes.md` §7): (1) raw's `loadDiskVersion` and restore's
+`reloadTheDiskVersion` (2d-6-5) have the blocker's shape — reads after the post-adoption `current()`; fix with
+`settledAnswer` / `confirmationOf` **before 2d-6-8 registers their receivers**; (2) the three operation reapplies
+(`matchDeletion.ts`, `matchMove.ts`, `matchDuplication.ts`) were not audited for reads after their one pre-adoption
+look — **before 2d-6-7 registers their receivers**; (3) the doors and settling transitions of all eight sessions
+(`beginSave`, `applySave`, `consumingHeldDeliveries` and twins) not re-audited for reads after the last `current()`.
+
+**Orchestrator's rulings standing from 1b's close**: (1) the `ReconciliationWorkspace` interface may be widened by
+2d-6-6 as its entries require; (2) the acknowledgement operand stays `ConflictSource` (2d-6-9 draws the exit); (3) the
+`projectionReplaced` refusal at an outlived arrival generation stands (2d-6-9's).
+
+**Older open items** (none a defect of the step that left them): the full list as of 2d-6-6a is archived verbatim in
+[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The 2d-6-6a → 2d-6-6b handoff"*;
+the live map is the split record's §7. Still live from it: 2d-6-5 §4 items 3, 5, 9, 10, 12, 13; 2d-6-2's (a hold
+the window ends without a delivery is unseen — 2d-6-9's; the Spanish of reworded sentences — 2d-6-11's;
+`ExternalConflictAction` has one arm; the `superseded` origin comparison); 1c's two, 1b's `classifyFailure` sentence,
+1a's stale "nine codes" sentence.
+

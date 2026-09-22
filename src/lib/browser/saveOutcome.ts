@@ -957,8 +957,9 @@ export interface SaveConflictModel<T> extends ConflictModelCommon<T> {
  * retained, over a placeholder draft of the empty string that its own field doc
  * names for what it is. **Since Phase 2d-6-6b `DetailPane.svelte` registers
  * three of those eight** — the editor's, the new-snippet form's and the recovery
- * form's; the other five are 2d-6-7's and 2d-6-8's, and the panels that draw the
- * result are 2d-6-6c's, 2d-6-7's and 2d-6-8's.
+ * form's; the other five are 2d-6-7's and 2d-6-8's. **Since Phase 2d-6-6c-1 the
+ * three registered surfaces' panels draw the result**, outside the save-outcome
+ * branch; the other five panels are 2d-6-7's and 2d-6-8's.
  *
  * @typeParam T - The drafted value.
  */

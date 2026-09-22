@@ -169,7 +169,13 @@ plus the three hand-on obligations; the acceptance above is checked in full when
   [`2d-6-6b-notes.md`](2d-6-6b-notes.md).
 - **2d-6-6c — the three authored panels' rendering.** Origin, evidence, comparison, copy and
   recovery rendering on `MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte`;
-  the bilingual mounted tests of the acceptance above; the narrow window reading.
+  the bilingual mounted tests of the acceptance above; the narrow window reading. **Cut again on
+  2026-09-22 into two halves**, because the window reading needs its own fresh bundle paths and
+  launch plans and is a coherent unit of its own: **2d-6-6c-1** — the rendering on the three
+  panels, 6b's carried items (`2d-6-6b-notes.md` §4 items 1, 2, 4, 5, 7), the declared-gap
+  decision (§2 ruling 3) and the bilingual mounted tests; **2d-6-6c-2** — the narrow window
+  reading and 2d-6-6's whole acceptance checked in one place. Records:
+  [`2d-6-6c-1-notes.md`](2d-6-6c-1-notes.md), `2d-6-6c-2-notes.md`.
 
 ### 2d-6-7 — operation-surface rendering
 

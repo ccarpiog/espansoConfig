@@ -29,14 +29,24 @@
   } from '../browser/matchCreation';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { CreationBuffers } from '../browser/matchCreation';
-  import type { ConflictSource } from '../browser/conflictSource';
+  import {
+    conflictOriginMessage,
+    conflictRevisionsOf,
+    type ConflictSource
+  } from '../browser/conflictSource';
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
   import { recoveryAvailability, startCreationFieldRecovery } from '../browser/recovery';
   import type { BindObservationReceiver } from '../browser/surfaceReceivers';
-  import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
+  import {
+    isExternalConflict,
+    outcomeReveal,
+    type ConflictChoice,
+    type ConflictModel
+  } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import type { Clock } from '../browser/typing';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
+  import { classifyFailure } from '../ipc/errors';
   import { copyReferenceText } from './clipboard';
   import RecoveryPanel from './RecoveryPanel.svelte';
   import { revealOutcome, revealReapplyReport } from './reveal';
@@ -44,6 +54,8 @@
   import {
     t,
     tConflictChoice,
+    tConflictMessage,
+    tConflictOriginMessage,
     tCreationReapplyObstacle,
     tCreationRefusal,
     tDestinationRefusal,
@@ -52,6 +64,7 @@
     tDraftError,
     tDraftFieldStatus,
     tEditError,
+    tExternalConflictNotice,
     tFindingCode,
     tIpcFailure,
     tPresentationNote,
@@ -160,6 +173,17 @@
    * carry them (consult Q4); they stay in the form above, which is where they have
    * always been. The confirmed reload closes this form, because a file on disk
    * holds no half-written snippet to load in its place.
+   *
+   * **A conflict of either origin is drawn, each saying which origin it has** —
+   * Phase 2d-6-6c-1, for `MatchEditor.svelte`'s reason and in its shape: a save
+   * conflict inside the outcome panel, an external one in a panel of its own
+   * outside the save-outcome branch, both opening with `tConflictOriginMessage`
+   * and sharing one `comparison` snippet. What this form adds is the file: it
+   * *chooses* one, so an external panel names the file the change is about
+   * (`conflict.disk`'s display path), and a form that has chosen none says that
+   * choosing one is its only way forward (`view.destinationRequired`, the 2d-6
+   * record's §3 entry 21) — which is also why the destination buttons are gated on
+   * `view.canChooseDestination` rather than on `view.editable`.
    */
 
   const {
@@ -343,8 +367,45 @@
   /** Whether leaving the form is waiting on a confirmation. */
   let leaving = $state(false);
 
+  /**
+   * What became of one *Copy my text*, and exactly what it was about.
+   *
+   * The conflict on screen when the copy was asked for, by identity, and the text
+   * that was handed to the clipboard. Both are needed: a conflict rebuilt over a
+   * re-pointed draft is a new object, and a draft can differ from the one copied
+   * under a conflict that happens to render alike.
+   */
+  interface CopyDisclosure {
+    /** The conflict whose retained draft was copied. */
+    readonly conflict: ConflictModel<CreationBuffers>;
+    /** The exact text handed to the clipboard. */
+    readonly text: string;
+    /** Whether the clipboard took it. */
+    readonly result: 'copied' | 'failed';
+  }
+
   /** What became of the last *Copy my text*, so the person is told either way. */
-  let copied = $state<'none' | 'copied' | 'failed'>('none');
+  let copied = $state.raw<CopyDisclosure | null>(null);
+
+  /**
+   * What the copy disclosure may say about the retained draft **on screen now** —
+   * Phase 2d-6-6c-1's review, second finding.
+   *
+   * A disclosure is shown only while the conflict it was made under is still the
+   * one on screen and the retained draft still renders to exactly the text that
+   * was copied. A new conflict, a re-pointed one, or a draft edited after a
+   * change of destination is a different snapshot, and nothing was copied of it.
+   * **What this compares is identity and text, and what it cannot know** is
+   * whether the clipboard still holds that text; the sentence says a copy was
+   * made, never that it is still there.
+   */
+  const copyShown = $derived(
+    copied !== null &&
+      copied.conflict === view.conflict &&
+      copied.text === tDraftCopy(view.retainedDraft)
+      ? copied.result
+      : 'none'
+  );
 
   /** The outcome panel's own element, so a reveal has something to point at. */
   let outcomePanel = $state<HTMLElement | null>(null);
@@ -359,11 +420,35 @@
    * sentence that justifies it** (y = 771 in English, y = 788 in Spanish), which is
    * why the second step has a target of its own. The decision is `./reveal.ts`'s.
    */
-  const reveal = $derived(
-    outcomeReveal(view.outcome?.kind ?? null, view.awaitingReloadConfirmation)
+  /**
+   * The external conflict on screen, narrowed, or `null` — Phase 2d-6-6c-1.
+   *
+   * Through `isExternalConflict`, for `MatchEditor.svelte`'s reason: the nested
+   * `source.kind` does not narrow the model.
+   */
+  const external = $derived(
+    view.conflict !== null && isExternalConflict(view.conflict) ? view.conflict : null
   );
+  /** The external conflict panel's own element, the reveal's target when it shows. */
+  let externalPanel = $state<HTMLElement | null>(null);
+
+  // An external conflict is revealed as a conflict panel is, and an outcome kept as
+  // history beside it keeps its own cue (`MatchEditor.svelte`, Phase 2d-6-6c-1).
+  const reveal = $derived(
+    outcomeReveal(
+      view.outcome?.kind ?? (external !== null ? 'conflict' : null),
+      view.awaitingReloadConfirmation
+    )
+  );
+  /**
+   * Whether the outcome panel, rather than the external one, is the reveal's
+   * target. A boolean `$derived` rather than a read of `view` inside the effect:
+   * `view` is a new object on every transition, so the effect would re-run — and
+   * ask for a scroll again — on transitions that changed no cue.
+   */
+  const outcomeShown = $derived(view.outcome !== null);
   $effect(() => {
-    revealOutcome(reveal, outcomePanel, outcomeChoices);
+    revealOutcome(reveal, outcomeShown ? outcomePanel : externalPanel, outcomeChoices);
   });
 
   /** The reapply report's own block, so an answer to a press can be seen. */
@@ -458,7 +543,9 @@
    *
    * **Neither is read on *every* open restore**: `restoreRefusal` returns one of six
    * earlier reasons before it, so an open restore with no candidate never reaches the
-   * call. It is `targetingSurfaceFor` that has no production caller yet. The pane's `busy` rule
+   * call. `targetingSurfaceFor` is read in production too, by the reconciliation
+   * coordinator deciding which surfaces a watcher observation is about; that read is
+   * the over-refusing direction named above. The pane's `busy` rule
    * is what keeps a restore from being open beside this form at all, and that is a
    * fact about `DetailPane.svelte` rather than a guarantee of this component's.
    */
@@ -573,17 +660,34 @@
     // *Keep editing* can reach a new create today, and that clears it too;
     // clearing it here as well makes that an invariant rather than an argument
     // about reachability.
-    copied = 'none';
-    const answer = await create(
-      started.document,
-      started.newMatch,
-      started.position,
-      // **The form's own base, never the window's current projection.** A form
-      // opened at one revision over a window that has since re-read the file
-      // conflicts rather than committing into a parse nobody saw.
-      baseRevisionOf(started.session),
-      acknowledgementOf(started.submission)
-    );
+    copied = null;
+    let answer: MatchSaveAnswer;
+    try {
+      answer = await create(
+        started.document,
+        started.newMatch,
+        started.position,
+        // **The form's own base, never the window's current projection.** A form
+        // opened at one revision over a window that has since re-read the file
+        // conflicts rather than committing into a parse nobody saw.
+        baseRevisionOf(started.session),
+        acknowledgementOf(started.submission)
+      );
+    } catch (raw: unknown) {
+      // **A `create` that throws is settled, never left `saving`** — 2d-6-3's
+      // carried item, closed in Phase 2d-6-6c-1. `BrowserState.createMatch` no
+      // longer throws after a commit: an exception out of its adoption or re-read
+      // comes back as a `failed` adoption beside the `saved` outcome, so a
+      // committed create is never drawn here as an error. What can still throw is
+      // the wrapper before any answer was established — the command itself, or a
+      // host that is not `BrowserState` — and then nothing is known about the file.
+      // The form is settled as a failed send that may have written, against the
+      // form installed now (a receiver may have replaced it during the flight), and
+      // the failure is drawn rather than re-thrown: the only caller is a click
+      // handler that discards the promise, so a re-throw would reach nobody.
+      session = createCouldNotBeSent(session, true, classifyFailure(raw), () => session);
+      return;
+    }
     // Three arms, and each says something different about the file. `notAttempted`
     // is this window refusing before a command ran — nothing was sent, so nothing
     // was written and there is no reason to show. `failed` is a command that ran
@@ -628,10 +732,19 @@
    * the draft either way.
    */
   async function copyTheDraft(): Promise<void> {
-    if (view.conflict === null) {
+    const conflict = view.conflict;
+    if (conflict === null) {
       return;
     }
-    copied = (await copyReferenceText(tDraftCopy(view.retainedDraft))) ? 'copied' : 'failed';
+    // **The snapshot is taken before the clipboard is asked**, and the answer is
+    // recorded against it: the clipboard answers asynchronously, and by then a
+    // delivery may have replaced the conflict or the person may have changed the
+    // draft. `copyShown` then shows it only while that snapshot is still the one
+    // on screen, so a late answer about an old snapshot is recorded and never
+    // drawn over a new one.
+    const text = tDraftCopy(view.retainedDraft);
+    const result = (await copyReferenceText(text)) ? 'copied' : 'failed';
+    copied = { conflict, text, result };
   } // End of function copyTheDraft()
 
   /**
@@ -690,7 +803,7 @@
     switch (choice) {
       case 'keepEditing':
         session = keepDrafting(session);
-        copied = 'none';
+        copied = null;
         return;
       case 'keepMyDraft':
         keepMyDraft();
@@ -758,6 +871,76 @@
     close();
   } // End of function discardAndClose()
 </script>
+
+<!-- **What a conflict of either origin shows beside its own lines** — Phase
+     2d-6-6c-1, `MatchEditor.svelte`'s snippet in this form's words. Only one
+     conflict is active at a time (the 2d-6 record's §3 entry 7), so the one
+     `outcomeChoices` element it binds belongs to whichever panel is drawn. -->
+{#snippet comparison()}
+  <h3>{t('browser.saveOutcome.retainedDraft')}</h3>
+  <!-- The conflict's own retained buffers, walked by the model, and the same
+       list the copy is built from. Through `SourceText` rather than into
+       boxes: the two controls above normalise a carriage return in opposite
+       ways, and this is a rendering of what is held rather than a place to
+       type. -->
+  {#each view.retainedDraft as field (field.label)}
+    <div class="shownValue">
+      <span class="marker">{tDetailField(field.label)}</span>
+      <span class="marker">{tDraftFieldStatus(field.status)}</span>
+      <SourceText text={field.text} />
+    </div>
+  {/each}
+
+  <h3>{t('browser.saveOutcome.diskVersion')}</h3>
+  <!-- The whole file as the command layer read it, paired with
+       `diskRevision`, and never a projection of "the same snippet" — which
+       does not exist for a snippet that was never written. Which arm is drawn
+       is `conflictDiskText`'s decision and not this markup's (2c-4a-3a
+       review, finding 5). -->
+  {#if view.diskText !== null && view.diskText.kind === 'text'}
+    <SourceText text={view.diskText.text} documentStart />
+  {:else}
+    <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
+  {/if}
+
+  <!-- The second step's warning. The shared line above is the whole
+       close/abandon guarantee and this one never restates it (2c-4a-3b
+       review, finding 3); it says only what this surface alone can say —
+       that a file on disk holds no half-written snippet, and what a form
+       opened afterwards starts from. -->
+  {#if view.awaitingReloadConfirmation}
+    <p class="kind">{t('browser.matchCreation.reloadSeedsNoForm')}</p>
+  {/if}
+
+  <!-- A control that has just gone, with the reason in its place. -->
+  {#if view.reloadUnavailable}
+    <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
+  {/if}
+
+  <p class="kind">{t('browser.saveOutcome.copyIsReference')}</p>
+  {#if copyShown === 'copied'}
+    <p class="kind">{t('browser.saveOutcome.draftCopied')}</p>
+  {:else if copyShown === 'failed'}
+    <p class="kind">{t('browser.saveOutcome.draftCopyFailed')}</p>
+  {/if}
+
+  <!-- The line beside *Keep my draft*: what this app will **try**, what it
+       works from, when it writes nothing, and what a later save may still
+       do. Drawn when the model names that choice and never from this
+       surface's own declaration, so the sentence and the control cannot
+       disagree (consult Q6). -->
+  {#if view.reapplyOffered}
+    <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
+  {/if}
+
+  <p class="choices" bind:this={outcomeChoices}>
+    {#each view.conflictChoices as choice (choice)}
+      <button type="button" onclick={() => conflictAction(choice)}>
+        {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
+      </button>
+    {/each}
+  </p>
+{/snippet}
 
 <section class="creator" aria-label={t('browser.matchCreation.label')}>
   <div class="head">
@@ -893,6 +1076,13 @@
       {/if}
     </p>
 
+    <!-- Why *Add this snippet* may be refusing beyond the refusal below: a reading
+         held undecided, or a conflict raised while an earlier write's outcome is
+         unknown (the control that acknowledges it is 2d-6-9's). -->
+    {#each view.externalNotices as notice (notice.kind)}
+      <p class="kind">{tExternalConflictNotice(notice)}</p>
+    {/each}
+
     <!-- **Every refusal has a code here**, unlike the small editor's, whose
          `beginSave` can only answer `null`. So a disabled control says why. -->
     {#if view.refusal !== null}
@@ -967,6 +1157,33 @@
     {standingConflictFor}
   />
 
+  <!-- **The external conflict, outside the save-outcome branch** (the 2d-6 record's
+       §3 entries 10, 21 and 23), in `MatchEditor.svelte`'s order, with the file the
+       change is about named — this form chooses its file, so the panel cannot
+       assume the person knows which one changed — and, for a form that has chosen
+       none, the one way forward. -->
+  {#if external !== null}
+    {@const revisions = conflictRevisionsOf(external.source)}
+    <div class="panel external" role="status" bind:this={externalPanel}>
+      <p>{tConflictOriginMessage(conflictOriginMessage(external.source))}</p>
+      {#each view.externalMessages as message, index (index)}
+        <p>{tConflictMessage(message)}</p>
+      {/each}
+      <p class="kind">
+        {t('browser.externalConflict.affectedFile', { path: external.disk.relative_path })}
+      </p>
+      {#if revisions.kind === 'externalChange'}
+        <p class="kind">
+          {t('browser.externalConflict.revisionObserved', { revision: revisions.observed })}
+        </p>
+      {/if}
+      {#if view.destinationRequired}
+        <p class="kind">{t('browser.externalConflict.destinationRequired')}</p>
+      {/if}
+      {@render comparison()}
+    </div>
+  {/if}
+
   {#if view.outcome !== null}
     {@const outcome = view.outcome}
     <div class="panel" role="status" bind:this={outcomePanel}>
@@ -1026,6 +1243,8 @@
         </p>
       {:else}
         {@const conflict = outcome}
+        <!-- Where this conflict came from: a create this form attempted. -->
+        <p>{tConflictOriginMessage(conflictOriginMessage(conflict.source))}</p>
         <p class="kind">
           {t('browser.matchCreation.revisionExpected', { revision: conflict.expected })}
         </p>
@@ -1034,69 +1253,7 @@
           {t('browser.matchCreation.revisionDisk', { revision: conflict.diskRevision })}
         </p>
 
-        <h3>{t('browser.saveOutcome.retainedDraft')}</h3>
-        <!-- The conflict's own retained buffers, walked by the model, and the same
-             list the copy is built from. Through `SourceText` rather than into
-             boxes: the two controls above normalise a carriage return in opposite
-             ways, and this is a rendering of what is held rather than a place to
-             type. -->
-        {#each view.retainedDraft as field (field.label)}
-          <div class="shownValue">
-            <span class="marker">{tDetailField(field.label)}</span>
-            <span class="marker">{tDraftFieldStatus(field.status)}</span>
-            <SourceText text={field.text} />
-          </div>
-        {/each}
-
-        <h3>{t('browser.saveOutcome.diskVersion')}</h3>
-        <!-- The whole file as the command layer read it, paired with
-             `diskRevision`, and never a projection of "the same snippet" — which
-             does not exist for a snippet that was never written. Which arm is drawn
-             is `conflictDiskText`'s decision and not this markup's (2c-4a-3a
-             review, finding 5). -->
-        {#if view.diskText !== null && view.diskText.kind === 'text'}
-          <SourceText text={view.diskText.text} documentStart />
-        {:else}
-          <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
-        {/if}
-
-        <!-- The second step's warning. The shared line above is the whole
-             close/abandon guarantee and this one never restates it (2c-4a-3b
-             review, finding 3); it says only what this surface alone can say —
-             that a file on disk holds no half-written snippet, and what a form
-             opened afterwards starts from. -->
-        {#if view.awaitingReloadConfirmation}
-          <p class="kind">{t('browser.matchCreation.reloadSeedsNoForm')}</p>
-        {/if}
-
-        <!-- A control that has just gone, with the reason in its place. -->
-        {#if view.reloadUnavailable}
-          <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
-        {/if}
-
-        <p class="kind">{t('browser.saveOutcome.copyIsReference')}</p>
-        {#if copied === 'copied'}
-          <p class="kind">{t('browser.saveOutcome.draftCopied')}</p>
-        {:else if copied === 'failed'}
-          <p class="kind">{t('browser.saveOutcome.draftCopyFailed')}</p>
-        {/if}
-
-        <!-- The line beside *Keep my draft*: what this app will **try**, what it
-             works from, when it writes nothing, and what a later save may still
-             do. Drawn when the model names that choice and never from this
-             surface's own declaration, so the sentence and the control cannot
-             disagree (consult Q6). -->
-        {#if view.reapplyOffered}
-          <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
-        {/if}
-
-        <p class="choices" bind:this={outcomeChoices}>
-          {#each view.conflictChoices as choice (choice)}
-            <button type="button" onclick={() => conflictAction(choice)}>
-              {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
-            </button>
-          {/each}
-        </p>
+        {@render comparison()}
       {/if}
     </div>
   {/if}

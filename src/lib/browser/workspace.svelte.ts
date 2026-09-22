@@ -6244,22 +6244,47 @@ export function createBrowserState(
           const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
           if (outOfDate) {
             forgetFileText();
-            const stale = await adoptTheCreatedSnippet(
-              document,
-              heldBefore,
-              answer.value.moved
-            );
-            if (stale === null) {
-              adoption = { kind: 'done' };
-            } else {
-              // The commit happened and this window could not read the file back, so
-              // everything it holds for that file was minted from bytes that have
-              // been replaced. It is dropped rather than left on screen, and the
-              // failure travels back beside the committed outcome (`PROGRESS.md` D2).
-              forgetTheReplacedDocument(document);
-              adoption = { kind: 'failed', failure: stale };
+            // **Nothing thrown after the commit may turn it into an error** — Phase
+            // 2d-6-6c-1's review, first finding. The transaction has written and the
+            // barrier has been told so above; an exception out of the adoption or the
+            // re-read below used to reject this promise, and the form then settled a
+            // committed create as a failed send that may have written (`PROGRESS.md`
+            // D2). The exception is caught here and travels back as the adoption's
+            // failure, beside the `saved` outcome, never in place of it. What the
+            // catch does not do is make the window's own state right: the file is
+            // dropped as it is for a read that failed, so nothing minted from the
+            // replaced bytes stays on screen.
+            try {
+              const stale = await adoptTheCreatedSnippet(
+                document,
+                heldBefore,
+                answer.value.moved
+              );
+              if (stale === null) {
+                adoption = { kind: 'done' };
+              } else {
+                // The commit happened and this window could not read the file back, so
+                // everything it holds for that file was minted from bytes that have
+                // been replaced. It is dropped rather than left on screen, and the
+                // failure travels back beside the committed outcome (`PROGRESS.md` D2).
+                forgetTheReplacedDocument(document);
+                adoption = { kind: 'failed', failure: stale };
+              }
+              await readFileText();
+            } catch (raw: unknown) {
+              // Thrown before the adoption answered: nothing of the new bytes was
+              // installed, so the replaced projection is dropped, as for a read that
+              // failed. Thrown by the re-read after it: the projection is the new one
+              // and stays. Either way the window is out of step with the file, which
+              // is what a `failed` adoption beside a `saved` outcome says; a failure
+              // the adoption already answered is kept rather than replaced.
+              if (adoption.kind === 'notOwed') {
+                forgetTheReplacedDocument(document);
+              }
+              if (adoption.kind !== 'failed') {
+                adoption = { kind: 'failed', failure: classifyFailure(raw) };
+              }
             }
-            await readFileText();
           }
         } else if (answer.value.outcome === 'conflict') {
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note

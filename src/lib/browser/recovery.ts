@@ -3344,14 +3344,16 @@ export interface RecoveryView {
    *
    * Beside {@link RecoveryView.messages} and never merged into it, so a panel
    * drawing `conflict` outside the save-outcome branch (the 2d-6 record's §3 entry
-   * 10) draws nothing twice. Rendered through `tConflictMessage`. No component
-   * reads it yet.
+   * 10) draws nothing twice. Rendered through `tConflictMessage`;
+   * `RecoveryPanel.svelte` draws it in its external conflict panel since Phase
+   * 2d-6-6c-1.
    */
   readonly externalMessages: readonly ConflictMessage[];
   /**
    * The lines owed while an observation cannot be acted on — Phase 2d-6-3.
-   * `writeOutcomeUnknown` first, `observationRetained` second. No component reads
-   * it yet; 2d-6-6 and 2d-6-9 do.
+   * `writeOutcomeUnknown` first, `observationRetained` second.
+   * `RecoveryPanel.svelte` draws it beside the create control since Phase
+   * 2d-6-6c-1; the acknowledgement control is 2d-6-9's.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
   /**
@@ -3359,13 +3361,15 @@ export interface RecoveryView {
    * forward is naming the file it writes into — Phase 2d-6-3, entry 21. While
    * `true` the reload and the reapply are withheld and
    * {@link RecoveryView.canChooseDestination} is `true` although
-   * {@link RecoveryView.editable} is not. No component reads it yet.
+   * {@link RecoveryView.editable} is not. `RecoveryPanel.svelte` reads it since
+   * Phase 2d-6-6c-1 to draw the line naming that one way forward.
    */
   readonly destinationRequired: boolean;
   /**
    * Whether the destination control does anything — Phase 2d-6-3:
    * {@link canChooseRecoveryDestination}, `editable` widened by exactly the state
-   * above. No component reads it yet.
+   * above. `RecoveryPanel.svelte` gates its destination buttons on it since Phase
+   * 2d-6-6c-1.
    */
   readonly canChooseDestination: boolean;
   /** The presentation changes a saved arm disclosed, in report order. */

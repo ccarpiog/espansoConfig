@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import type { ConflictSource } from '../browser/conflictSource';
+  import {
+    conflictOriginMessage,
+    conflictRevisionsOf,
+    type ConflictSource
+  } from '../browser/conflictSource';
   import type { BindObservationReceiver } from '../browser/surfaceReceivers';
   import { attemptOfReapply, reapplyReveal, reapplyToShow, type ReapplyAttempt } from '../browser/reapply';
   import type { CreationField } from '../browser/matchCreation';
@@ -29,20 +33,29 @@
     type RecoveryReapplyObstacle,
     type RecoverySession,
     type RecoveryStart,
+    type RecoveryView,
     type RecoveryUnavailable
   } from '../browser/recovery';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { CreationBuffers } from '../browser/matchCreation';
-  import { outcomeReveal, reapplyIsOffered, type ConflictChoice } from '../browser/saveOutcome';
+  import {
+    isExternalConflict,
+    outcomeReveal,
+    reapplyIsOffered,
+    type ConflictChoice
+  } from '../browser/saveOutcome';
   import type { RawSaveChoice } from '../browser/rawSave';
   import { revealOutcome, revealReapplyReport } from './reveal';
   import SourceText from './SourceText.svelte';
   import {
     t,
     tConflictChoice,
+    tConflictMessage,
+    tConflictOriginMessage,
     tDetailField,
     tDraftError,
     tEditError,
+    tExternalConflictNotice,
     tFindingCode,
     tIpcFailure,
     tPresentationNote,
@@ -130,6 +143,19 @@
    * **A committed create is never afterwards drawn as an error.** A failed
    * adoption is a line beside the saved arm through `view.messages`, exactly as it
    * is on the other six write surfaces.
+   *
+   * **This form's own conflict is drawn with its origin, and it is never the one
+   * the form was opened from** — Phase 2d-6-6c-1, the 2d-6 record's §3 entries 10,
+   * 23 and 25. `form.conflict` is the conflict over this form's own destination;
+   * the source conflict stays the host's, and the one sentence about it above is
+   * `tSourceConflictState`. A save conflict of the form's own is drawn inside the
+   * outcome panel and an external one in a panel of its own outside it, both
+   * opening with `tConflictOriginMessage` and sharing one `comparison` snippet —
+   * which has no retained-draft list and no copy, because the two values are in
+   * this form's own boxes and `RECOVERY_CONFLICT_CAPABILITIES` declares no copy.
+   * **The destination buttons are gated on `form.canChooseDestination`, not on
+   * `form.editable`** (2d-6-6b's carried item): a destination-less form told of a
+   * change is not editable, and naming a file is its one way forward (entry 21).
    */
 
   const {
@@ -293,11 +319,33 @@
    * Neither can be checked by any test in this repository: jsdom lays nothing out
    * and does not implement `scrollIntoView`. 2c-4c-5 is the reading.
    */
-  const reveal = $derived(
-    outcomeReveal(view?.outcome?.kind ?? null, view?.awaitingReloadConfirmation ?? false)
+  /**
+   * This form's own external conflict, narrowed, or `null` — Phase 2d-6-6c-1,
+   * through `isExternalConflict` for `MatchEditor.svelte`'s reason.
+   */
+  const external = $derived(
+    view !== null && view.conflict !== null && isExternalConflict(view.conflict)
+      ? view.conflict
+      : null
   );
+  /** The external conflict panel's own element, the reveal's target when it shows. */
+  let externalPanel = $state<HTMLElement | null>(null);
+
+  const reveal = $derived(
+    outcomeReveal(
+      view?.outcome?.kind ?? (external !== null ? 'conflict' : null),
+      view?.awaitingReloadConfirmation ?? false
+    )
+  );
+  /**
+   * Whether the outcome panel, rather than the external one, is the reveal's
+   * target. A boolean `$derived` rather than a read of `view` inside the effect:
+   * `view` is a new object on every transition, so the effect would re-run — and
+   * ask for a scroll again — on transitions that changed no cue.
+   */
+  const outcomeShown = $derived(view !== null && view.outcome !== null);
   $effect(() => {
-    revealOutcome(reveal, outcomePanel, outcomeChoices);
+    revealOutcome(reveal, outcomeShown ? outcomePanel : externalPanel, outcomeChoices);
   });
   $effect(() => {
     revealReapplyReport(reapplyReveal(reapplyReport?.kind ?? null), reapplyPanel);
@@ -595,6 +643,49 @@
   } // End of function abandon()
 </script>
 
+<!-- **What this form's own conflict of either origin shows beside its lines** —
+     Phase 2d-6-6c-1, `MatchEditor.svelte`'s snippet without the retained-draft list
+     and the copy this form does not declare. It takes the view as a parameter
+     because the view is `null` while no form is open. -->
+{#snippet comparison(form: RecoveryView)}
+  <h4>{t('browser.saveOutcome.diskVersion')}</h4>
+  <!-- The whole file as the command layer read it, paired with
+       `diskRevision`, and never a projection of "the same snippet". Which
+       arm is drawn is `conflictDiskText`'s decision and not this markup's. -->
+  {#if form.diskText !== null && form.diskText.kind === 'text'}
+    <SourceText text={form.diskText.text} documentStart />
+  {:else}
+    <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
+  {/if}
+
+  <!-- The second step's warning. The shared line above is the whole
+       close/abandon guarantee and this one never restates it; it says only
+       what this panel alone can say. -->
+  {#if form.awaitingReloadConfirmation}
+    <p class="kind">{t('browser.recovery.reloadEndsRecovery')}</p>
+  {/if}
+
+  <!-- A control that has just gone, with the reason in its place. -->
+  {#if form.reloadUnavailable}
+    <p class="kind">{tReloadUnavailable(RECOVERY_CONFLICT_CAPABILITIES.draftKind)}</p>
+  {/if}
+
+  <!-- The line beside *Keep my draft*, drawn when the model names that
+       choice and never from this panel's own declaration, so the sentence
+       and the control cannot disagree. -->
+  {#if reapplyIsOffered(form.conflictChoices)}
+    <p class="kind">{tReapplyReadiness(RECOVERY_CONFLICT_CAPABILITIES.draftKind)}</p>
+  {/if}
+
+  <p class="choices" bind:this={outcomeChoices}>
+    {#each form.conflictChoices as choice (choice)}
+      <button type="button" onclick={() => conflictAction(choice)}>
+        {tConflictChoice(choice, RECOVERY_CONFLICT_CAPABILITIES.draftKind)}
+      </button>
+    {/each}
+  </p>
+{/snippet}
+
 <section class="recovery" aria-label={t('browser.recovery.label')}>
   {#if view !== null}
     {@const form = view}
@@ -668,7 +759,7 @@
               type="button"
               class="choice"
               aria-pressed={form.chosen !== null && form.chosen.document === destination.document}
-              disabled={!form.editable}
+              disabled={!form.canChooseDestination}
               onclick={() => onDestination(destination.document)}
             >
               {destination.path}
@@ -737,6 +828,11 @@
       {#if form.refusal !== null}
         <p class="kind">{tRecoveryRefusal(form.refusal)}</p>
       {/if}
+      <!-- A reading held undecided, or a conflict raised while an earlier write's
+           outcome is unknown (the control that acknowledges it is 2d-6-9's). -->
+      {#each form.externalNotices as notice (notice.kind)}
+        <p class="kind">{tExternalConflictNotice(notice)}</p>
+      {/each}
     </div>
 
     {#if form.sendFailure !== null}
@@ -777,6 +873,32 @@
         {#if report.kind === 'manualResolution'}
           <p class="kind">{tRecoveryReapplyObstacle(report.obstacle)}</p>
         {/if}
+      </div>
+    {/if}
+
+    <!-- **This form's own external conflict, outside the save-outcome branch** (the
+         2d-6 record's §3 entries 10, 21, 23 and 25): the origin, the model's lines
+         for it, the file the change is about, the one observed revision, the
+         destination-less form's one way forward, and the comparison. -->
+    {#if external !== null}
+      {@const revisions = conflictRevisionsOf(external.source)}
+      <div class="panel external" role="status" bind:this={externalPanel}>
+        <p>{tConflictOriginMessage(conflictOriginMessage(external.source))}</p>
+        {#each form.externalMessages as message, index (index)}
+          <p>{tConflictMessage(message)}</p>
+        {/each}
+        <p class="kind">
+          {t('browser.externalConflict.affectedFile', { path: external.disk.relative_path })}
+        </p>
+        {#if revisions.kind === 'externalChange'}
+          <p class="kind">
+            {t('browser.externalConflict.revisionObserved', { revision: revisions.observed })}
+          </p>
+        {/if}
+        {#if form.destinationRequired}
+          <p class="kind">{t('browser.externalConflict.destinationRequired')}</p>
+        {/if}
+        {@render comparison(form)}
       </div>
     {/if}
 
@@ -833,6 +955,8 @@
           </p>
         {:else}
           {@const conflict = outcome}
+          <!-- Where this form's own conflict came from: a create it attempted. -->
+          <p>{tConflictOriginMessage(conflictOriginMessage(conflict.source))}</p>
           <p class="kind">
             {t('browser.recovery.revisionExpected', { revision: conflict.expected })}
           </p>
@@ -841,42 +965,7 @@
             {t('browser.recovery.revisionDisk', { revision: conflict.diskRevision })}
           </p>
 
-          <h4>{t('browser.saveOutcome.diskVersion')}</h4>
-          <!-- The whole file as the command layer read it, paired with
-               `diskRevision`, and never a projection of "the same snippet". Which
-               arm is drawn is `conflictDiskText`'s decision and not this markup's. -->
-          {#if form.diskText !== null && form.diskText.kind === 'text'}
-            <SourceText text={form.diskText.text} documentStart />
-          {:else}
-            <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
-          {/if}
-
-          <!-- The second step's warning. The shared line above is the whole
-               close/abandon guarantee and this one never restates it; it says only
-               what this panel alone can say. -->
-          {#if form.awaitingReloadConfirmation}
-            <p class="kind">{t('browser.recovery.reloadEndsRecovery')}</p>
-          {/if}
-
-          <!-- A control that has just gone, with the reason in its place. -->
-          {#if form.reloadUnavailable}
-            <p class="kind">{tReloadUnavailable(RECOVERY_CONFLICT_CAPABILITIES.draftKind)}</p>
-          {/if}
-
-          <!-- The line beside *Keep my draft*, drawn when the model names that
-               choice and never from this panel's own declaration, so the sentence
-               and the control cannot disagree. -->
-          {#if reapplyIsOffered(form.conflictChoices)}
-            <p class="kind">{tReapplyReadiness(RECOVERY_CONFLICT_CAPABILITIES.draftKind)}</p>
-          {/if}
-
-          <p class="choices" bind:this={outcomeChoices}>
-            {#each form.conflictChoices as choice (choice)}
-              <button type="button" onclick={() => conflictAction(choice)}>
-                {tConflictChoice(choice, RECOVERY_CONFLICT_CAPABILITIES.draftKind)}
-              </button>
-            {/each}
-          </p>
+          {@render comparison(form)}
         {/if}
       </div>
     {/if}

@@ -825,10 +825,11 @@ export function tSaveOutcomeMessage(message: SaveOutcomeMessage): string {
  * of `view.conflict` calls this one for both arms and never narrows the union in
  * markup.
  *
- * **No component calls it yet.** The 2d-6 record's §3 entry 10 renders
- * `view.conflict` outside the save-outcome branch in the component steps
- * (2d-6-6 onwards); this phase lands the accessor so the code has a string
- * before anything draws it. The eight components keep calling
+ * **Three components call it since Phase 2d-6-6c-1** — `MatchEditor.svelte`,
+ * `MatchCreator.svelte` and `RecoveryPanel.svelte`, over `view.externalMessages`
+ * in the external conflict panel each draws outside the save-outcome branch (the
+ * 2d-6 record's §3 entry 10). The other five surfaces' panels are 2d-6-7's and
+ * 2d-6-8's. Every component still draws a save outcome's lines through
  * {@link tSaveOutcomeMessage} over `view.messages`, whose type is unchanged.
  *
  * @param message - A line of either conflict arm.
@@ -843,12 +844,12 @@ export function tConflictMessage(message: ConflictMessage): string {
  * or a write's outcome is unknown, in the current language.
  *
  * The reactive wrapper over `describeExternalConflictNotice` in `./codes` (the
- * 2d-6 record's §3 entries 13 and 14). **No component calls it yet, and no
- * session produces the state it names yet**: the retained restriction is
- * 2d-6-2's session state, and the acknowledgement that ends the second state
- * exists — `BrowserState.acknowledgeWriteUncertainty` in
- * `../browser/workspace.svelte.ts`, since 2d-6-1b — with no component calling
- * it. A code with no string is worse than a code with no caller.
+ * 2d-6 record's §3 entries 13 and 14). **Three components call it since Phase
+ * 2d-6-6c-1** — `MatchEditor.svelte`, `MatchCreator.svelte` and
+ * `RecoveryPanel.svelte`, over their views' `externalNotices`, beside the control
+ * a notice explains. The acknowledgement that ends the second state exists —
+ * `BrowserState.acknowledgeWriteUncertainty` in `../browser/workspace.svelte.ts`,
+ * since 2d-6-1b — and no component calls it yet: 2d-6-9 draws that control.
  *
  * @param notice - Which state the surface is in.
  * @returns The translated sentence.
@@ -884,10 +885,10 @@ export function tExternalConflictAction(action: ExternalConflictAction): string 
  * names a file, a revision or a time — the watcher line says in as many words that
  * this application cannot say what changed the file or when.
  *
- * **Nothing draws this yet.** The two origins are 2d-5-1's vocabulary and 2d-6 is
- * where a panel shows one; the only caller today is
- * `../browser/conflictSource.test.ts`. An accessor with no component caller is
- * deliberate, because a code with no string is worse than a code with no caller.
+ * **Three components draw it since Phase 2d-6-6c-1** — `MatchEditor.svelte`,
+ * `MatchCreator.svelte` and `RecoveryPanel.svelte`, as the first line of a
+ * conflict panel of either origin, over `conflictOriginMessage(conflict.source)`.
+ * The other five surfaces' panels are 2d-6-7's and 2d-6-8's.
  *
  * @param message - Which origin line the model asked for.
  * @returns The translated sentence.
@@ -1485,12 +1486,12 @@ export function tReapplyReadiness(draftKind: ConflictDraftKind): string {
  * order. Three are about the table and two, since Phase 2d-6-2, about its rows —
  * no row for the snippet, or more than one (the 2d-6 record's §3 entry 20).
  *
- * **Nothing draws this yet.** The origin switch is Phase 2d-5-5a's vocabulary and
- * 2d-6 is where a panel shows one of its refusals; since Phase 2d-6-2 the match
- * editor's reapply reaches these through {@link describeEditorReapplyObstacle},
- * which no component draws for the external origin until 2d-6-6. An accessor with
- * no component caller is deliberate, because a code with no string is worse than
- * a code with no caller.
+ * **Drawn since Phase 2d-6-6c-1, through the reapply obstacles.** The match
+ * editor's, the new-snippet form's and the recovery form's reapplies reach these
+ * through their `describe*ReapplyObstacle` accessors, and the three panels draw
+ * the obstacle beside the reapply outcome after a *Keep my draft* over an external
+ * conflict; `DetailPane.test.ts` reads the `noCorrespondence` sentence off the
+ * editor's panel in both languages.
  *
  * @param locale - The dictionary to read from.
  * @param reason - Which negative claim about the table, or about its rows, this is.

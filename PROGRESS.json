@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-22T22:36:21Z",
+ "updated": "2026-09-22T23:07:41Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -421,7 +421,7 @@
    "id": "2d-6",
    "title": "Components, i18n and mounted evidence",
    "status": "in_progress",
-   "summary": "Eleven steps per its design consult; 2d-6-1 (three sub-phases) and 2d-6-2 through 2d-6-5 are done, 2d-6-6 is next."
+   "summary": "Eleven steps per its design consult; 2d-6-1 through 2d-6-5 are done, and 2d-6-6 is down to its window reading (6c-2)."
   },
   {
    "id": "2d-6-1",
@@ -504,7 +504,7 @@
    "title": "Authored-surface delivery and complete registration",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Cut into 6a (model-side obligations, done), 6b (registration and delivery wiring, done) and 6c (the three authored panels, next)."
+   "summary": "Cut into 6a and 6b (done) and 6c, itself cut into 6c-1 (done) and 6c-2 (the window reading, next)."
   },
   {
    "id": "2d-6-6a",
@@ -528,8 +528,25 @@
   {
    "id": "2d-6-6c",
    "title": "Authored panels' external rendering",
+   "status": "in_progress",
+   "risk": "high",
+   "summary": "Split into 6c-1 (panel rendering and bilingual mounted tests, done) and 6c-2 (the narrow window reading and 2d-6-6's full acceptance, next)."
+  },
+  {
+   "id": "2d-6-6c-1",
+   "title": "Authored panels' rendering and bilingual mounted tests",
+   "status": "done",
+   "risk": "high",
+   "summary": "The editor, creator and recovery panels draw an external conflict's origin, evidence, comparison and copy, pinned by bilingual mounted tests.",
+   "review": "docs/reviews/phase-2d-6-6c-1.md",
+   "narrative": "docs/decisions/2d-6-6c-1-notes.md"
+  },
+  {
+   "id": "2d-6-6c-2",
+   "title": "Authored panels' window reading",
    "status": "queued",
-   "summary": "Draws origin, evidence, comparison, copy and recovery on the editor, creator and recovery panels, with a window reading."
+   "risk": "high",
+   "summary": "Takes the narrow window reading of the three authored panels and checks 2d-6-6's whole acceptance in one place."
   },
   {
    "id": "2d-6-7",

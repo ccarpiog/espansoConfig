@@ -35,7 +35,8 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeDocument, makeMatch, makeSummary, matchListPath } from '../browser/fixtures';
-import { recoveryChoiceKey } from '../browser/recovery';
+import { recoveryChoiceKey, recoveryRefusalKey, sourceConflictStateKey } from '../browser/recovery';
+import { externalEvidenceRefusalKey, reapplyOutcomeKey } from '../browser/reapply';
 import { conflictChoiceKey } from '../browser/saveOutcome';
 import type { OpenWriteSurface, OpenWriteSurfaceKind } from '../browser/restore';
 import {
@@ -955,11 +956,13 @@ async function conflictedSave(): Promise<CommandResult<SaveResult>> {
  * scripted conflict — Phase 2d-6-6b.
  *
  * @param pane - A pane mounted with {@link conflictedSave} as its `save_match`.
+ * @param lang - The locale the pane is drawing in, whose labels the controls are
+ *   found by (Phase 2d-6-6c-1); English unless a case says otherwise.
  */
-async function editorInSaveConflict(pane: Mounted): Promise<void> {
+async function editorInSaveConflict(pane: Mounted, lang: Locale = 'en'): Promise<void> {
   await pane.state.select(snippetOf(pane.state, 1));
   flushSync();
-  control(pane.target, 'browser.matchEditor.open').click();
+  controlIn(pane.target, lang, 'browser.matchEditor.open').click();
   flushSync();
   const body = pane.target.querySelector('.matchEditor textarea');
   if (!(body instanceof HTMLTextAreaElement)) {
@@ -968,7 +971,7 @@ async function editorInSaveConflict(pane: Mounted): Promise<void> {
   body.value = 'mine';
   body.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
-  control(pane.target, 'browser.matchEditor.save').click();
+  controlIn(pane.target, lang, 'browser.matchEditor.save').click();
   await settle();
 } // End of function editorInSaveConflict()
 
@@ -976,13 +979,14 @@ async function editorInSaveConflict(pane: Mounted): Promise<void> {
  * Takes the editor's save conflict to recovery and opens the form — Phase 2d-6-6b.
  *
  * @param pane - A pane whose editor shows {@link conflictedSave}'s conflict.
+ * @param lang - The locale the pane is drawing in (Phase 2d-6-6c-1).
  */
-function openRecoveryForm(pane: Mounted): void {
-  control(pane.target, conflictChoiceKey('keepMyDraft', 'authoredText')).click();
+function openRecoveryForm(pane: Mounted, lang: Locale = 'en'): void {
+  controlIn(pane.target, lang, conflictChoiceKey('keepMyDraft', 'authoredText')).click();
   flushSync();
-  control(pane.target, recoveryChoiceKey('createFromSupportedFields')).click();
+  controlIn(pane.target, lang, recoveryChoiceKey('createFromSupportedFields')).click();
   flushSync();
-}
+} // End of function openRecoveryForm()
 
 /**
  * Every kind, and how to open it from the pane.
@@ -1795,8 +1799,8 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
   // `targetingSurfaceFor`, handed to the transition this pane registered, and
   // arbitrated once by `BrowserState.observeExternalChange`. What these cases
   // assert is what 6b wires — the session's state as its controls show it, a
-  // submission refused, one decision — and not the conflict panel's new
-  // rendering, which is 2d-6-6c's.
+  // submission refused, one decision — and not the sentences the conflict panels
+  // draw, which the Phase 2d-6-6c-1 suite at the end of this file reads.
 
   it.each(LOCALES)('a pristine editor conflicts, and refuses to submit (%s)', async (lang) => {
     expectedDrains = 3;
@@ -2079,10 +2083,429 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
     expect(armed).toBe(false);
     expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
     // The receiver's session stands: its external conflict retired the save
-    // outcome, so the save conflict's controls are gone, and the boxes stay frozen.
-    expect(pane.target.textContent).not.toContain(DICTIONARIES.en[keep]);
+    // outcome, so the save conflict's panel — read by its origin line — is gone
+    // and the external one is drawn in its place, and the boxes stay frozen. (The
+    // external panel offers *Keep my draft* too, so that label cannot tell them
+    // apart.)
+    expect(pane.target.textContent).not.toContain(
+      DICTIONARIES.en['browser.conflictOrigin.refusedSave']
+    );
+    expect(pane.target.textContent).toContain(
+      DICTIONARIES.en['browser.conflictOrigin.changedWhileOpen']
+    );
     expect(box(pane.target, '.matchEditor textarea').readOnly).toBe(true);
     expect(pane.commands.saveMatch).toHaveBeenCalledTimes(1);
     pane.stop();
   }); // End of the "reapply handler order" case
 }); // End of the "delivery host" suite
+
+/**
+ * The text one element of the pane draws, insisted upon — Phase 2d-6-6c-1.
+ *
+ * @param target - Where the pane was mounted.
+ * @param selector - The element's selector.
+ * @returns Its whole text.
+ */
+function drawn(target: HTMLElement, selector: string): string {
+  const found = target.querySelector(selector);
+  if (found === null) {
+    throw new Error(`this case needs ${selector} drawn`);
+  }
+  return found.textContent ?? '';
+} // End of function drawn()
+
+/**
+ * Whether one element of the pane is drawn at all.
+ *
+ * @param target - Where the pane was mounted.
+ * @param selector - The element's selector.
+ * @returns `true` when it is.
+ */
+function isDrawn(target: HTMLElement, selector: string): boolean {
+  return target.querySelector(selector) !== null;
+} // End of function isDrawn()
+
+/**
+ * The labels of the buttons one element of the pane draws — Phase 2d-6-6c-1.
+ *
+ * A control is asserted by its label rather than by the panel's text, because a
+ * sentence beside the controls may quote a label (the reload warning does).
+ *
+ * @param target - Where the pane was mounted.
+ * @param selector - The element's selector.
+ * @returns The trimmed labels, in document order.
+ */
+function labelsIn(target: HTMLElement, selector: string): readonly string[] {
+  return [...target.querySelectorAll(`${selector} button`)].map(
+    (one) => one.textContent?.trim() ?? ''
+  );
+} // End of function labelsIn()
+
+/** The editor's own external conflict panel, never the recovery form's inside it. */
+const EDITOR_EXTERNAL = '.matchEditor > .panel.external';
+
+/** The editor's own outcome panel: a direct child that is neither of the other two. */
+const EDITOR_OUTCOME = '.matchEditor > .panel[role="status"]:not(.reapply):not(.external)';
+
+/** The recovery form's own external conflict panel. */
+const RECOVERY_EXTERNAL = '.recovery .panel.external';
+
+/** The new-snippet form's external conflict panel. */
+const CREATOR_EXTERNAL = '.creator > .panel.external';
+
+/**
+ * Makes the selection route of the copy succeed, and says how to undo it.
+ *
+ * jsdom has no `navigator.clipboard`, so `copyReferenceText` in `./clipboard.ts`
+ * takes its selection route, which asks `document.execCommand('copy')`; jsdom has
+ * no such method either, and this installs one that answers `true` for `copy`.
+ *
+ * @returns Restores what was there before.
+ */
+function selectionCopySucceeds(): () => void {
+  const original = Object.getOwnPropertyDescriptor(document, 'execCommand');
+  Object.defineProperty(document, 'execCommand', {
+    configurable: true,
+    writable: true,
+    value: (command: string): boolean => command === 'copy'
+  });
+  return (): void => {
+    if (original === undefined) {
+      Reflect.deleteProperty(document, 'execCommand');
+    } else {
+      Object.defineProperty(document, 'execCommand', original);
+    }
+  };
+} // End of function selectionCopySucceeds()
+
+describe('the conflict panels’ drawn sentences, in English and Spanish — Phase 2d-6-6c-1', () => {
+  // **2d-6-6's acceptance, read off the screen.** The same six scenarios as the
+  // delivery suite above, each through the real registry and the real coordinator
+  // boundary — opened by the pane's controls in the case's own locale, a finite
+  // scripted drain queue counted exactly, a wake admitted by the coordinator — and
+  // each asserting the **sentences** the three authored panels draw, in both
+  // locales (the 2d-6 record's §3 entries 34 and 35). What a sentence is pinned
+  // to is its dictionary value in that locale: this protects that the panel draws
+  // the right code in the right place, never that a translation is good.
+
+  it.each(LOCALES)(
+    'a pristine editor draws the external origin, evidence, comparison, copy and recovery (%s)',
+    async (lang) => {
+      expectedDrains = 3;
+      const events = paneEvents();
+      const pane = await mountPane(
+        false,
+        { batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])] },
+        events.source
+      );
+      locale.setOverride(lang);
+      await pane.state.select(snippetOf(pane.state, 1));
+      flushSync();
+      controlIn(pane.target, lang, 'browser.matchEditor.open').click();
+      flushSync();
+      expect(isDrawn(pane.target, EDITOR_EXTERNAL)).toBe(false);
+
+      events.wake(5, 5);
+      await settleWake();
+
+      // **The origin, then the observation's own line, then its one revision** — and
+      // none of the save arm's: there was no save, so no *expected* and no *found*.
+      const panel = drawn(pane.target, EDITOR_EXTERNAL);
+      expect(panel).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+      expect(panel).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+      expect(panel).toContain(
+        translate(lang, 'browser.externalConflict.revisionObserved', { revision: 'c'.repeat(64) })
+      );
+      expect(panel).not.toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
+      expect(panel).not.toContain(
+        translate(lang, 'browser.matchEditor.revisionExpected', { revision: 'a'.repeat(64) })
+      );
+      expect(panel).not.toContain(translate(lang, 'browser.saveOutcome.changedElsewhere'));
+      // **The comparison the save panel has** (entry 23): the retained draft, the
+      // whole disk text, the copy disclosure and the choices.
+      expect(panel).toContain(translate(lang, 'browser.saveOutcome.retainedDraft'));
+      expect(panel).toContain(translate(lang, 'browser.saveOutcome.diskVersion'));
+      expect(panel).toContain('ondisk');
+      expect(panel).toContain(translate(lang, 'browser.saveOutcome.copyIsReference'));
+      expect(isDrawn(pane.target, EDITOR_OUTCOME)).toBe(false);
+
+      // **The copy**, through `copyReferenceText`, disclosed in this locale.
+      const restore = selectionCopySucceeds();
+      try {
+        controlIn(pane.target, lang, conflictChoiceKey('copyDraft', 'authoredText')).click();
+        await settle();
+      } finally {
+        restore();
+      }
+      expect(drawn(pane.target, EDITOR_EXTERNAL)).toContain(
+        translate(lang, 'browser.saveOutcome.draftCopied')
+      );
+
+      // **The evidence**: the observation carried no correspondence, so *Keep my
+      // draft* reaches manual resolution with the typed external-evidence sentence.
+      controlIn(pane.target, lang, conflictChoiceKey('keepMyDraft', 'authoredText')).click();
+      flushSync();
+      const report = drawn(pane.target, '.matchEditor > .panel.reapply');
+      expect(report).toContain(translate(lang, reapplyOutcomeKey('manualResolution')));
+      expect(report).toContain(translate(lang, externalEvidenceRefusalKey('noCorrespondence')));
+
+      // **The recovery path**, offered after that manual resolution and opened over
+      // the external conflict, which it names as untouched.
+      controlIn(pane.target, lang, recoveryChoiceKey('createFromSupportedFields')).click();
+      flushSync();
+      expect(drawn(pane.target, '.recovery')).toContain(
+        translate(lang, sourceConflictStateKey('retained'))
+      );
+      expect(pane.commands.saveMatch).not.toHaveBeenCalled();
+      expect(pane.commands.createMatch).not.toHaveBeenCalled();
+      pane.stop();
+    }
+  ); // End of the "pristine editor draws" case
+
+  it.each([
+    ['en', 1, 'match/a.yml'],
+    ['en', 3, 'match/c.yml'],
+    ['es', 1, 'match/a.yml'],
+    ['es', 3, 'match/c.yml']
+  ] as const)(
+    'an unknown-target creator names the affected file and its one way forward (%s, file %i)',
+    async (lang, affected, path) => {
+      expectedDrains = 3;
+      const events = paneEvents();
+      const pane = await mountPane(
+        false,
+        { ...THREE_FILES, batches: [batch(0), batch(0), batch(5, [changed(5, affected, path)])] },
+        events.source
+      );
+      locale.setOverride(lang);
+      flushSync();
+      controlIn(pane.target, lang, 'browser.matchCreation.open').click();
+      flushSync();
+
+      events.wake(5, 5);
+      await settleWake();
+
+      const panel = drawn(pane.target, CREATOR_EXTERNAL);
+      expect(panel).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+      expect(panel).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+      expect(panel).toContain(translate(lang, 'browser.externalConflict.affectedFile', { path }));
+      expect(panel).toContain(translate(lang, 'browser.externalConflict.destinationRequired'));
+      // **Every eligible target blocked**: the send refuses for want of a file, and
+      // neither way to the disk version is offered — only *Keep editing* and the copy.
+      expect(drawn(pane.target, '.creator .actions')).toContain(
+        translate(lang, 'browser.matchCreation.cannotCreate.noDestination')
+      );
+      expect(labelsIn(pane.target, CREATOR_EXTERNAL)).toEqual([
+        translate(lang, conflictChoiceKey('keepEditing', 'authoredText')),
+        translate(lang, conflictChoiceKey('copyDraft', 'authoredText'))
+      ]);
+
+      // Naming the affected file is the way forward: the line goes, the reload comes.
+      destinationIn(pane.target, '.creator', path).click();
+      flushSync();
+      const named = drawn(pane.target, CREATOR_EXTERNAL);
+      expect(named).not.toContain(translate(lang, 'browser.externalConflict.destinationRequired'));
+      expect(labelsIn(pane.target, CREATOR_EXTERNAL)).toContain(
+        translate(lang, conflictChoiceKey('reloadDiskVersion', 'authoredText'))
+      );
+      expect(drawn(pane.target, '.creator .actions')).not.toContain(
+        translate(lang, 'browser.matchCreation.cannotCreate.noDestination')
+      );
+      expect(controlIn(pane.target, lang, 'browser.matchCreation.create').disabled).toBe(true);
+      expect(pane.commands.createMatch).not.toHaveBeenCalled();
+      pane.stop();
+    }
+  ); // End of the "unknown-target creator draws" case
+
+  it.each(LOCALES)(
+    'recovery over B draws B’s external conflict while its host still draws its save conflict over A (%s)',
+    async (lang) => {
+      expectedDrains = 3;
+      const events = paneEvents();
+      const pane = await mountPane(
+        false,
+        {
+          ...THREE_FILES,
+          saveMatch: conflictedSave,
+          batches: [batch(0), batch(0), batch(5, [changed(5, 3, 'match/c.yml')])]
+        },
+        events.source
+      );
+      locale.setOverride(lang);
+      await editorInSaveConflict(pane, lang);
+      openRecoveryForm(pane, lang);
+      destinationIn(pane.target, '.recovery', 'match/c.yml').click();
+      flushSync();
+
+      events.wake(5, 5);
+      await settleWake();
+
+      const form = drawn(pane.target, RECOVERY_EXTERNAL);
+      expect(form).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+      expect(form).toContain(
+        translate(lang, 'browser.externalConflict.affectedFile', { path: 'match/c.yml' })
+      );
+      expect(form).toContain(
+        translate(lang, 'browser.externalConflict.revisionObserved', { revision: 'c'.repeat(64) })
+      );
+      expect(form).not.toContain(translate(lang, 'browser.externalConflict.destinationRequired'));
+      expect(drawn(pane.target, '.recovery .actions')).toContain(
+        translate(lang, recoveryRefusalKey('externalConflict'))
+      );
+      // **The host is where it was**: its own save conflict over `a`, with the save
+      // origin and the save's revisions, and no external panel of its own.
+      const host = drawn(pane.target, EDITOR_OUTCOME);
+      expect(host).toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
+      expect(host).toContain(
+        translate(lang, 'browser.matchEditor.revisionExpected', { revision: 'a'.repeat(64) })
+      );
+      expect(host).not.toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+      expect(isDrawn(pane.target, EDITOR_EXTERNAL)).toBe(false);
+      expect(pane.commands.createMatch).not.toHaveBeenCalled();
+      pane.stop();
+    }
+  ); // End of the "recovery over B draws" case
+
+  it.each(LOCALES)(
+    'a host and its recovery form over one file draw the one decision alike (%s)',
+    async (lang) => {
+      expectedDrains = 3;
+      const events = paneEvents();
+      const pane = await mountPane(
+        false,
+        {
+          saveMatch: conflictedSave,
+          batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml', 'd'.repeat(64))])]
+        },
+        events.source
+      );
+      locale.setOverride(lang);
+      await editorInSaveConflict(pane, lang);
+      openRecoveryForm(pane, lang);
+
+      events.wake(5, 5);
+      await settleWake();
+
+      // **`supersedes` on both**: the host's save conflict is replaced by the
+      // external one, and the form draws the same observation.
+      const observed = translate(lang, 'browser.externalConflict.revisionObserved', {
+        revision: 'd'.repeat(64)
+      });
+      const host = drawn(pane.target, EDITOR_EXTERNAL);
+      expect(host).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+      expect(host).toContain(observed);
+      expect(isDrawn(pane.target, EDITOR_OUTCOME)).toBe(false);
+      const form = drawn(pane.target, RECOVERY_EXTERNAL);
+      expect(form).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+      expect(form).toContain(observed);
+      expect(pane.commands.createMatch).not.toHaveBeenCalled();
+      pane.stop();
+    }
+  ); // End of the "one decision drawn alike" case
+
+  it.each(LOCALES)(
+    'a reopened editor draws nothing of what its previous instance was told (%s)',
+    async (lang) => {
+      expectedDrains = 4;
+      const events = paneEvents();
+      const pane = await mountPane(
+        false,
+        {
+          batches: [
+            batch(0),
+            batch(0),
+            batch(5, [changed(5, 1, 'match/a.yml')]),
+            batch(6, [changed(6, 1, 'match/a.yml', 'd'.repeat(64))])
+          ]
+        },
+        events.source
+      );
+      locale.setOverride(lang);
+      await pane.state.select(snippetOf(pane.state, 1));
+      flushSync();
+      controlIn(pane.target, lang, 'browser.matchEditor.open').click();
+      flushSync();
+      events.wake(5, 5);
+      await settleWake();
+      expect(drawn(pane.target, EDITOR_EXTERNAL)).toContain(
+        translate(lang, 'browser.externalConflict.revisionObserved', { revision: 'c'.repeat(64) })
+      );
+
+      controlIn(pane.target, lang, 'browser.matchEditor.close').click();
+      flushSync();
+      controlIn(pane.target, lang, 'browser.matchEditor.open').click();
+      flushSync();
+      expect(isDrawn(pane.target, EDITOR_EXTERNAL)).toBe(false);
+      expect(drawn(pane.target, '.matchEditor')).not.toContain(
+        translate(lang, 'browser.conflictOrigin.changedWhileOpen')
+      );
+
+      events.wake(5, 6);
+      await settleWake();
+      // Only the later reading, told to the reopened editor, is drawn.
+      const panel = drawn(pane.target, EDITOR_EXTERNAL);
+      expect(panel).toContain(
+        translate(lang, 'browser.externalConflict.revisionObserved', { revision: 'd'.repeat(64) })
+      );
+      expect(panel).not.toContain(
+        translate(lang, 'browser.externalConflict.revisionObserved', { revision: 'c'.repeat(64) })
+      );
+      pane.stop();
+    }
+  ); // End of the "reopened editor draws" case
+
+  it.each(LOCALES)(
+    'a settlement lands after the save it settles, and both are drawn (%s)',
+    async (lang) => {
+      expectedDrains = 3;
+      const events = paneEvents();
+      let answer: ((value: CommandResult<SaveResult>) => void) | null = null;
+      const pane = await mountPane(
+        false,
+        {
+          saveMatch: () =>
+            new Promise<CommandResult<SaveResult>>((resolve) => {
+              answer = resolve;
+            }),
+          batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])]
+        },
+        events.source
+      );
+      locale.setOverride(lang);
+      await pane.state.select(snippetOf(pane.state, 1));
+      flushSync();
+      controlIn(pane.target, lang, 'browser.matchEditor.open').click();
+      flushSync();
+      const body = box(pane.target, '.matchEditor textarea');
+      body.value = 'mine';
+      body.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      controlIn(pane.target, lang, 'browser.matchEditor.save').click();
+      await settle();
+
+      // Held while the save is in flight: nothing external is drawn yet, and the
+      // save says it cannot be stopped.
+      events.wake(5, 5);
+      await settleWake();
+      expect(isDrawn(pane.target, EDITOR_EXTERNAL)).toBe(false);
+      expect(drawn(pane.target, '.matchEditor')).toContain(
+        translate(lang, 'browser.matchEditor.savingCannotBeStopped')
+      );
+
+      const settleSave = answer as ((value: CommandResult<SaveResult>) => void) | null;
+      settleSave?.({ ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } });
+      await settleWake();
+
+      // **In the order it was decided**: the save's own ending — a send that
+      // produced no outcome — and then the external conflict the settlement raised,
+      // which the continuation did not overwrite.
+      const editor = drawn(pane.target, '.matchEditor');
+      expect(editor).toContain(translate(lang, 'browser.matchEditor.sendFailed'));
+      const panel = drawn(pane.target, EDITOR_EXTERNAL);
+      expect(panel).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+      expect(panel).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+      expect(controlIn(pane.target, lang, 'browser.matchEditor.save').disabled).toBe(true);
+      pane.stop();
+    }
+  ); // End of the "settlement drawn in order" case
+}); // End of the "drawn sentences" suite
