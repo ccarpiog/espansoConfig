@@ -1928,7 +1928,7 @@ describe('a withdrawn question authorizes nothing, whoever still holds it', () =
 
   it('revokes before the adoption callback runs, so a reload cannot confirm from inside one', async () => {
     // **The callback half of the same High**, and the one no getter can stand in for:
-    // `reloadTheDiskVersion` hands `adopt` to `spendTheConfirmedReload`, and `adopt`
+    // `reloadTheDiskVersion` calls `adopt` with the confirmation it snapshot, and `adopt`
     // is an arbitrary function a caller supplied. Until this round the question was
     // still authorized while it ran.
     //
@@ -3915,6 +3915,98 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(lost.awaitingReconciliation.size).toBe(0);
     }); // End of the "retarget over the installed session" case
 
+    it('reads the reload step only before the pre-adoption look, so a read of it cannot displace the session past that look (2d-6-6b §7 item 1)', () => {
+      // **The 2d-6-6b blocker's shape, in restore.** The step is caller data. The
+      // retarget took it once before its look at the installed session and handed
+      // it to `spendTheConfirmedReload`, which read `kind` and `confirmation` off
+      // it after that look — so a step quiet on its first read and delivering on
+      // the second ran past the last look, and the window was asked over a
+      // session no longer installed.
+      const holder = installed(confirmDiskReload(askToReloadDiskVersion(applyRestoreObservation(withCandidate(), watched.raised(watched.observation())))));
+      const before = holder.current();
+      const step = before.reload;
+      // `looked` turns true at the first read of the installed session, so the
+      // trap delivers only on a read of the step made after that look.
+      let looked = false;
+      let readsAfterTheLook = 0;
+      const tricked: RestoreSession = {
+        ...before,
+        reload: new Proxy(step, {
+          /**
+           * Installs a displacing session on any read after the look, then reads through.
+           *
+           * @param of - The step.
+           * @param key - The property.
+           * @param receiver - The receiver.
+           * @returns The property's value.
+           */
+          get(of, key, receiver): unknown {
+            if (looked) {
+              readsAfterTheLook += 1;
+              holder.receive(retainedDelivery(watched.observation({ sequence: 8 })));
+            }
+            return Reflect.get(of, key, receiver) as unknown;
+          }
+        })
+      };
+      holder.set(tricked);
+      const recorder = adopting('installed');
+      const reader = (): RestoreSession => {
+        looked = true;
+        return holder.current();
+      };
+      const answered = reloadTheDiskVersion(tricked, recorder.adopt, reader);
+      // Nothing reads the step after the look, so nothing can displace the
+      // session past it: the window is asked once, over the installed session.
+      expect(readsAfterTheLook).toBe(0);
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(answered.baseRevision).toBe(ELSEWHERE);
+    }); // End of the "read of the step after the look" case
+
+    it.each(['installed', 'refused'] as const)(
+      'answers what a read of the settled session installed, after a %s adoption (2d-6-6b §7 item 1)',
+      (answer) => {
+        // The settled session is read and spread to build the retarget or the
+        // refused step. Without a last look after that build, a getter or `Proxy`
+        // trap there installed a new session and the answer was still built over
+        // the old one.
+        const confirmed = confirmDiskReload(askToReloadDiskVersion(applyRestoreObservation(withCandidate(), watched.raised(watched.observation()))));
+        const displaced = applyRestoreObservation(confirmed, retainedDelivery(watched.observation({ sequence: 8 })));
+        let holder: RestoreSession = confirmed;
+        let armed = false;
+        const proxy = new Proxy(confirmed, {
+          /**
+           * Installs the displacing session on the first read after arming.
+           *
+           * @param of - The session.
+           * @param key - The property.
+           * @param receiver - The receiver.
+           * @returns The property's value.
+           */
+          get(of, key, receiver): unknown {
+            if (armed) {
+              armed = false;
+              holder = displaced;
+            }
+            return Reflect.get(of, key, receiver) as unknown;
+          }
+        });
+        holder = proxy;
+        const recorder = adopting(answer);
+        const answered = reloadTheDiskVersion(
+          proxy,
+          (conflict, confirmation) => {
+            armed = true;
+            return recorder.adopt(conflict, confirmation);
+          },
+          () => holder
+        );
+        expect(recorder.adoptions).toHaveLength(1);
+        expect(holder).toBe(displaced);
+        expect(answered).toBe(displaced);
+      }
+    ); // End of the "read of the settled session" cases
+
     it('claims no candidate for an external conflict raised over none (the review’s fourth finding)', () => {
       // **The placeholder draft is not a candidate, and the lines must not say
       // it is.** A session told of a change before any entry was read has no
@@ -4043,5 +4135,49 @@ describe('the external session — Phase 2d-6-5', () => {
         externalConflictSource(alone.seen)
       );
     }); // End of the "delivery during the replay" case
+
+    it('replays a delivery that a read of the installed session’s queue made, after the last look (the 2d-6-8a review’s should-fix)', () => {
+      // **The review of Phase 2d-6-8a, its should-fix.** The settlement reads
+      // `current().heldDeliveries` after its last look at the installed session,
+      // and that read runs caller code: a getter there can deliver an observation
+      // into the installed session — still `saving`, so the receiver appends it to
+      // a *new* installed session — while the read answers the old, shorter list.
+      // The settlement then returned its replay without the delivery, and the
+      // caller installing that answer dropped it.
+      const started = ((onHand) => confirmRestore(onHand, at(BASE), () => onHand))(pending());
+      if (started === null) {
+        throw new Error('a pending restore confirms');
+      }
+      const later = watched.observation({ sequence: 9 });
+      let looked = false;
+      let fired = false;
+      const holder = installed(started.session);
+      const proxy = new Proxy(started.session, {
+        /**
+         * Delivers `later` once, on the first read of the queue after the look.
+         *
+         * @param of - The session.
+         * @param key - The property.
+         * @param receiver - The receiver.
+         * @returns The property's value.
+         */
+        get(of, key, receiver): unknown {
+          if (looked && !fired && key === 'heldDeliveries') {
+            fired = true;
+            holder.receive(retainedDelivery(later));
+          }
+          return Reflect.get(of, key, receiver) as unknown;
+        }
+      });
+      holder.set(proxy);
+      const reader = (): RestoreSession => {
+        looked = true;
+        return holder.current();
+      };
+      const settled = restoreCouldNotBeSent(proxy, false, reader);
+      expect(fired).toBe(true);
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.awaitingReconciliation.get(TARGET)).toBe(later);
+    }); // End of the "delivery made by the queue read" case
   }); // End of the "against the installed session" suite
 }); // End of the "external session" suite

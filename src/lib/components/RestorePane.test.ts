@@ -105,6 +105,7 @@ import type {
   WorkspaceSummary
 } from '../ipc/types';
 import RestorePane from './RestorePane.svelte';
+import type { SurfaceBinding } from '../browser/surfaceReceivers';
 
 /**
  * The Tauri boundary, replaced for the whole file — on the same terms as
@@ -453,6 +454,18 @@ interface Opened {
 let drains = 0;
 
 /**
+ * A binding whose two methods do nothing — the `reportReceiver` answer for a
+ * mount that drives no delivery (Phase 2d-6-8a made the prop required; the
+ * deliveries themselves are driven through the real pane in
+ * `DetailPane.test.ts`).
+ *
+ * @returns The inert binding.
+ */
+function inertBinding(): SurfaceBinding {
+  return { reportTarget: () => undefined, withdraw: () => undefined };
+} // End of function inertBinding()
+
+/**
  * Mounts the pane over a real `BrowserState` and a scripted boundary.
  *
  * @param answers - What each successive replacement answers, in order.
@@ -573,6 +586,7 @@ async function mountRestore(
       listEntries: (batch: BackupBatchId) => state.listBackupEntries(batch),
       readEntry: (entry: BackupEntryId, into: DocumentId) => state.readBackupText(entry, into),
       restore: state.restoreDocument,
+      reportReceiver: (): SurfaceBinding => inertBinding(),
       invalidate: (invalidation: RawSaveInvalidation): void => {
         invalidations.push(invalidation);
       },

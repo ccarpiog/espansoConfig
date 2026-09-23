@@ -226,6 +226,40 @@ path while the editor conflicts; the restore candidate survives; CR disclosure; 
 reading. **Components:** `DetailPane.svelte`, `RawEditor.svelte`, `RestorePane.svelte`. **Bound by**
 entries 1, 10, 23, 32, 34-36, 38. **Depends on** 2d-6-5, 2d-6-6.
 
+#### The orchestrator's cut of 2d-6-8, taken 2026-09-23
+
+Three components, the registration wiring, two distinct reload effects, bilingual mounted tests, a
+window reading and the model-side obligations the closed steps handed on (`PROGRESS.md`, *Next
+action*: `2d-6-6b-notes.md` §7 item 1, `2d-6-5-notes.md` §4 item 4, and raw's post-commit wrapper
+from `2d-6-7a-notes.md` §4 item 5) are too much for one coherent phase, so 2d-6-8 runs as three
+sub-phases in dependency order, following 2d-6-7's precedent, each owing the gate set and its own
+review. **The union is 2d-6-8 exactly**, plus the hand-on obligations; the acceptance above is
+checked in full when 2d-6-8c closes.
+
+- **2d-6-8a — the owed model-side obligations, then registration and delivery wiring.** Raw's
+  `loadDiskVersion` (`rawEditor.ts`) and restore's `reloadTheDiskVersion` (`restore.ts`) given the
+  `confirmationOf` / `settledAnswer` shape 2d-6-6b's review gave the editor's reload; whether
+  `BrowserState.restoreDocument` still passes no reader re-derived; the `saveRawDocument` and
+  `restoreDocument` wrappers in `workspace.svelte.ts` audited for the post-commit shape fixed in
+  `saveMatch` (a committed write answered as an error when the adoption or the re-read throws).
+  Each defect pinned by a case shown failing first. Then the raw and restore receivers reported
+  by their components and registered from `DetailPane.svelte` through `surfaceReceivers.ts`,
+  `ReceivingSurfaceKind` extended to all eight kinds, with mounted delivery tests through the real
+  registry and coordinator boundary. **No new rendering.** Record:
+  [`2d-6-8a-notes.md`](2d-6-8a-notes.md).
+- **2d-6-8b — the two panels' rendering.** On `RawEditor.svelte` and `RestorePane.svelte`: the
+  origin, the comparison, the distinct reload effects — reseed (raw) and retarget (restore) — the
+  viewer refreshing through the guarded path while the editor conflicts, the restore candidate
+  surviving, the CR disclosure, and the bilingual mounted tests of the acceptance above. Record:
+  `2d-6-8b-notes.md`.
+- **2d-6-8c — the narrow window reading with one hard fixture (ruling 38), and 2d-6-8's whole
+  acceptance checked in one place**, starting from the harness and launch recipe of
+  [`2d-6-7c-window-reading.md`](2d-6-7c-window-reading.md). Record: `2d-6-8c-notes.md`.
+
+The open item *the eight sessions' doors and settling transitions not re-audited for reads after
+their last `current()`* (`2d-6-6b-notes.md` §7 item 3) is **not** part of this cut beyond the two
+reloads it names separately, for the reason the 2d-6-7 cut gives.
+
 ### 2d-6-9 — reconciliation status and explicit exits
 
 **Delivers** the drawn states — stale, unavailable, removed, path drift, not watched, failed

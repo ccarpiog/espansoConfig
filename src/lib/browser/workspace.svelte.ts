@@ -1599,10 +1599,9 @@ export interface BrowserState {
    * coordinator's `tellTheSurfaceAbout` in `./observationTransitions.ts` calls the
    * `WriteSurfaceTransition` `DetailPane.svelte` registered, and that transition
    * calls this member for the editor, the new-snippet form and the recovery form,
-   * and since Phase 2d-6-7a for the deleter, the mover and the duplicator, whose
-   * child-reported receivers the pane registers; for the other two kinds it is
-   * still a no-op (2d-6-8), so a delivery about a file only those have open
-   * reaches nobody.
+   * since Phase 2d-6-7a for the deleter, the mover and the duplicator, and since
+   * Phase 2d-6-8a for the raw editor and restore, whose child-reported receivers
+   * the pane registers.
    *
    * **It registers, and it installs nothing.** A verdict that names a new origin
    * goes through the same private registration the six save wrappers use, at the
@@ -1657,8 +1656,8 @@ export interface BrowserState {
    * calls it**, through the roster in `./surfaceReceivers.ts`, for the editor, the
    * new-snippet form and the recovery form — over the file each names, or over
    * every creator-eligible file while a form names none — and since Phase 2d-6-7a
-   * for the deleter, the mover and the duplicator, over the file each names; the
-   * raw editor's and restore's receivers are 2d-6-8's.
+   * for the deleter, the mover and the duplicator, and since Phase 2d-6-8a for the
+   * raw editor and restore, over the file each names.
    *
    * **Entry 5, stated where the code cannot force it.** A settlement is published
    * synchronously from the lease's `close()`, which runs before the wrapper's own
@@ -6532,9 +6531,31 @@ export function createBrowserState(
       // committed save this window could not re-project is a window out of step
       // with a file that really was rewritten — and until the 2c-1b review that
       // fact reached the developer console and no screen.
+      //
+      // **Nothing escapes this closure, since Phase 2d-6-8a.** The command awaits
+      // it and classifies whatever it throws, but with a bare `classifyFailure`,
+      // which a thrown value whose `code` getter throws makes throw in turn — so a
+      // committed save came back as a rejection (D2), the shape 2d-6-6c-2's review
+      // fixed in `saveMatch`. Caught here, the failure is classified by the guarded
+      // `classifiedAfterTheCommit`, reported as the command's own catch would have
+      // reported it, and kept on `reprojection`. `adoptTheReplacedDocument` forgets
+      // the file before its first await, so a throw from the re-read leaves the
+      // replaced projection dropped (from `getDocument`) or the new one installed
+      // (from `documentText`), as `adoptAfterTheCommit` does.
       let reprojection: IpcFailure | null = null;
       const invalidate: ReloadAfterRawSave = async (invalidation) => {
-        reprojection = await adoptTheReplacedDocument(invalidation.document);
+        try {
+          reprojection = await adoptTheReplacedDocument(invalidation.document);
+        } catch (raw: unknown) {
+          // **Recorded before it is reported, and the report contained** (Phase
+          // 2d-6-8a's review, its blocker): the reporter reads the failure again —
+          // `reportIpcFailure` reads `failure.error.code` — and a value the
+          // classifier accepted on one read can throw on the next. The report is
+          // diagnostic; the recorded failure is what the seal carries.
+          const failure = classifiedAfterTheCommit(raw);
+          reprojection = failure;
+          reportedQuietly(failure);
+        }
       };
       // **Ruling 27's barrier opens here and closes in the `finally` below.**
       // While it is open, a watcher observation of this file is held rather than
@@ -6565,7 +6586,17 @@ export function createBrowserState(
           write.expect(settlementOfFailure(written));
           report(answer.failure);
           if (written) {
-            await adoptTheReplacedDocument(document);
+            // **Caught since Phase 2d-6-8a.** An exception out of this re-read
+            // used to reject the wrapper, and the one fact a screen needs here —
+            // the file may already hold the candidate — never reached it. What it
+            // threw is reported, classified by the guarded helper; the answer is
+            // the same `mayHaveWritten` either way.
+            try {
+              await adoptTheReplacedDocument(document);
+            } catch (raw: unknown) {
+              // Contained for the same reason as the closure's report above.
+              reportedQuietly(classifiedAfterTheCommit(raw));
+            }
           }
           return { kind: 'failed', mayHaveWritten: written };
         }
@@ -7358,19 +7389,59 @@ export function createBrowserState(
         forgetTheReplacedDocument(document);
       }
       if (adoption.kind !== 'failed') {
-        let failure: IpcFailure;
-        try {
-          failure = classifyFailure(raw);
-        } catch {
-          failure = classifyFailure(
-            'the exception after a committed save could not be classified'
-          );
-        }
-        adoption = { kind: 'failed', failure };
+        adoption = { kind: 'failed', failure: classifiedAfterTheCommit(raw) };
       }
     } // End of the post-commit adoption and re-read
     return adoption;
   } // End of function adoptAfterTheCommit()
+
+  /**
+   * Classifies a value thrown after a write answered, **never throwing itself**.
+   *
+   * `classifyFailure` in `../ipc/errors` reads `code` off the value it is given,
+   * so a thrown value whose `code` getter throws escapes it (Phase 2d-6-6c-2's
+   * review). The fallback classifies a fixed string and never looks at the
+   * thrown value again. Shared since Phase 2d-6-8a by `adoptAfterTheCommit` and
+   * the two post-answer paths of `saveRawDocument`, rather than held as three
+   * copies of one rule.
+   *
+   * **What this forces**: the call returns an `IpcFailure` for any thrown value.
+   * **What it does not force**: that a caller uses it rather than calling
+   * `classifyFailure` bare inside its own catch.
+   *
+   * @param raw - Whatever was thrown.
+   * @returns The failure, classified, or the fixed-string fallback.
+   */
+  function classifiedAfterTheCommit(raw: unknown): IpcFailure {
+    try {
+      return classifyFailure(raw);
+    } catch {
+      return classifyFailure('the exception after a committed save could not be classified');
+    }
+  } // End of function classifiedAfterTheCommit()
+
+  /**
+   * Reports a failure met after a write answered, **never throwing** — Phase
+   * 2d-6-8a's review, its blocker.
+   *
+   * The reporter reads the failure again (the default, `reportIpcFailure` in
+   * `../ipc/errors`, reads `failure.error.code`), and a thrown value the guarded
+   * classifier accepted as a command error on one read of `code` can throw on the
+   * next. A report is diagnostic, so an exception out of it is dropped rather
+   * than allowed to turn a written file's answer into an error. **What this
+   * forces**: the call returns for any failure and any reporter. **What it does
+   * not force**: that the report was delivered — a reporter that threw reported
+   * nothing, and nothing says so.
+   *
+   * @param failure - The failure, already classified.
+   */
+  function reportedQuietly(failure: IpcFailure): void {
+    try {
+      report(failure);
+    } catch {
+      // Deliberately empty: see the doc above.
+    }
+  } // End of function reportedQuietly()
 
   /**
    * Forgets a replaced document and reads it again.

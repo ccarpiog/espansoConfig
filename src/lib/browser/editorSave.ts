@@ -426,7 +426,8 @@ export function spendTheConfirmedReload<T>(
  * **A snapshot for a function that reads the installed session afterwards.** A
  * step is caller data, so a reload that asked `step.kind` after its last look at
  * the installed session would run a getter or a `Proxy` trap past that look.
- * The six authored and operation reloads take this before their pre-adoption
+ * The six authored and operation reloads, and since Phase 2d-6-8a raw's and
+ * restore's, take this before their pre-adoption
  * check and spend what it answered. What it cannot force is that a caller takes
  * it first; that ordering is each reload's, pinned in its own suite.
  *

@@ -5146,3 +5146,9 @@ round (one new dictionary key): `npm run check` 449 / 0 / 0, **`npm test` 3057 p
 `npm run build` 193 modules, markers the same, and `cargo test` re-run for the dictionary contract, 1323 passed, 0
 failed. No Rust source changed. The instrument pair diff is still `5 insertions(+), 1 deletion(-)`.
 
+
+## Phase 2d-6-7c's verification narrative — archived 2026-09-23 at 2d-6-8a
+
+### (archived) Phase 2d-6-7c's verification
+
+**`1323 / 449 / 3057 / 193`** at 2d-6-7c, unchanged from 2d-6-7b: no tracked source changed. Worker, each gate alone with output in a file: `npm run check` 449 files, 0 errors, 0 warnings; `npm test` 3057 passed; `npm run build` 193 modules, server-only markers absent, client-only present (2); `cargo test --workspace -- --test-threads=1` 1323 passed, 0 failed; clippy `-D warnings` and `cargo fmt --check` exit 0. Orchestrator re-ran `npm test`: exit 0, 3057 passed (65 files). The fix round re-ran check/test/build with the same counts (`probe.rs` unchanged that round). The instrument pair diff is still `5 insertions(+), 1 deletion(-)`.

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import {
     acknowledgeFindings,
     acknowledgementOf,
@@ -17,8 +18,10 @@
     textToCopy,
     undoEdit,
     applySave,
+    applyObservation,
     type RoundTripText
   } from '../browser/rawEditor';
+  import type { BindObservationReceiver } from '../browser/surfaceReceivers';
   import type { RawSaveAnswer } from '../browser/workspace.svelte';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { RawSaveChoice } from '../browser/rawSave';
@@ -141,6 +144,7 @@
     text,
     adoptDiskVersion,
     save,
+    reportReceiver,
     close
   }: {
     /** The file being edited. Its path is what tells the person which one it is. */
@@ -179,6 +183,21 @@
       text: string,
       acknowledgement: Acknowledgement
     ) => Promise<RawSaveAnswer>;
+    /**
+     * Reports this editor's observation receiver to the host — Phase 2d-6-8a,
+     * the 2d-6 record's §3 entry 1, the pattern `MatchEditor.svelte` has followed
+     * since 2d-6-6b.
+     *
+     * **Required**, so a host cannot mount this editor without a way to be told
+     * what the window decided about its file. It is called once, when this
+     * component starts, and the binding it answers is withdrawn when it is
+     * destroyed; what the receiver does is `applyObservation` in
+     * `../browser/rawEditor.ts`, installed over whatever this editor holds.
+     * **What the required prop forces is that a host supplies one; nothing in
+     * TypeScript forces this component to call it or to withdraw** — the mounted
+     * suites are what establish both.
+     */
+    reportReceiver: BindObservationReceiver;
     /** Leaves the editor. */
     close: () => void;
   } = $props();
@@ -194,6 +213,36 @@
   // are read once, here, and the session owns the text from then on.
   // svelte-ignore state_referenced_locally
   let session = $state.raw(startRawEditor(file.id, baseRevision, text));
+
+  /*
+   * **The receiver, reported when this editor starts and withdrawn when it is
+   * destroyed** — Phase 2d-6-8a, `MatchEditor.svelte`'s pattern. A synchronous
+   * call in the component's own initialisation rather than an effect: the host
+   * registers this editor as a write surface from an effect of its own, which
+   * runs after this, so a surface the coordinator can see always has its
+   * receiver. The receiver installs `applyObservation`'s answer over the session
+   * held **now**, so a delivery that arrives while this editor's own write is in
+   * flight is held inside the session and consumed by `applySave` or
+   * `saveCouldNotBeSent` (entry 5). The binding is instance-bound: a later
+   * editor's report displaces this one, and this one's withdrawal then reaches
+   * nothing.
+   *
+   * **A text holding a carriage return opens no session** (`startRawEditor`
+   * answers `null`, `CLAUDE.md` §6), and then a delivery installs nothing: there
+   * is no draft for the change to conflict with and no save door to refuse. The
+   * pane still registers the surface, so the coordinator's own effect — the file
+   * marked stale — is what remains. What a delivery installs on a live session
+   * is not drawn deliberately until Phase 2d-6-8b.
+   */
+  // svelte-ignore state_referenced_locally
+  const receiving = reportReceiver((delivery) => {
+    if (session !== null) {
+      session = applyObservation(session, delivery);
+    }
+  });
+  onDestroy(() => {
+    receiving.withdraw();
+  });
   const view = $derived(session === null ? null : rawEditorView(session));
 
   /**

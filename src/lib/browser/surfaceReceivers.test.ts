@@ -20,7 +20,7 @@ import { retainedDelivery } from './observationDelivery';
 import type { ExternalConflictObservation } from './conflictSource';
 import { makeDocument } from './fixtures';
 import type { OpenWriteSurface, WriteSurfaceTarget } from './restore';
-import { createReceiverRoster, type ReceivingSurfaceKind } from './surfaceReceivers';
+import { createReceiverRoster, type ReceivingSurfaceKind, type SurfaceBinding } from './surfaceReceivers';
 import type { ObservationDelivery } from './observationDelivery';
 import type { ObservationReceiver } from './workspace.svelte';
 
@@ -168,7 +168,7 @@ describe('the receiver roster', () => {
     expect(recorded.targets).toHaveLength(2);
   });
 
-  it('never binds a kind this step does not receive, and disposes everything', () => {
+  it('registers nothing for a receiving kind no component has bound, and disposes everything', () => {
     const recorded = recordingHost();
     const roster = createReceiverRoster(recorded.host);
     roster.bind('matchEditor', () => undefined);
@@ -177,6 +177,8 @@ describe('the receiver roster', () => {
       [over('matchEditor', 1), over('recovery', 2), { kind: 'rawEditor', target: { kind: 'document', document: 3 } }],
       []
     );
+    // `rawEditor` receives since Phase 2d-6-8a, but nothing reported a receiver
+    // for it here, so its surface is registered over nothing.
     expect(recorded.live()).toEqual([1, 2]);
     expect(roster.receives('rawEditor')).toBe(false);
     roster.dispose();
@@ -184,7 +186,7 @@ describe('the receiver roster', () => {
     expect(roster.receives('matchEditor')).toBe(false);
   });
 
-  it('receives the three operation panels since Phase 2d-6-7a, each over its own file, and still not raw or restore', () => {
+  it('receives the three operation panels since Phase 2d-6-7a, each over its own file, and nothing for an unbound restore', () => {
     const recorded = recordingHost();
     const roster = createReceiverRoster(recorded.host);
     const operations = ['matchDeleter', 'matchMover', 'matchDuplicator'] as const;
@@ -214,5 +216,39 @@ describe('the receiver roster', () => {
     } // End of the loop over the three operation kinds
     expect(roster.receives('restore')).toBe(false);
     expect(roster.receives('rawEditor')).toBe(false);
+  });
+
+  it('receives the raw editor and restore since Phase 2d-6-8a, each over its own file', () => {
+    const recorded = recordingHost();
+    const roster = createReceiverRoster(recorded.host);
+    const told = new Map<ReceivingSurfaceKind, ObservationDelivery[]>();
+    const bindings = new Map<ReceivingSurfaceKind, SurfaceBinding>();
+    for (const kind of ['rawEditor', 'restore'] as const) {
+      const mine: ObservationDelivery[] = [];
+      told.set(kind, mine);
+      bindings.set(kind, roster.bind(kind, (delivery) => mine.push(delivery)));
+    } // End of the loop over the two kinds
+    roster.reconcile(
+      [
+        { kind: 'rawEditor', target: { kind: 'document', document: 1 } },
+        { kind: 'restore', target: { kind: 'document', document: 2 } }
+      ],
+      []
+    );
+    expect(recorded.live()).toEqual([1, 2]);
+    const first = envelope(1);
+    recorded.deliver(1, first);
+    const second = envelope(2);
+    recorded.deliver(2, second);
+    expect(told.get('rawEditor')).toEqual([first]);
+    expect(told.get('restore')).toEqual([second]);
+    expect(roster.receives('rawEditor')).toBe(true);
+    expect(roster.receives('restore')).toBe(true);
+    // Each withdrawal returns its own registration and nothing else.
+    bindings.get('rawEditor')!.withdraw();
+    expect(recorded.live()).toEqual([2]);
+    expect(roster.receives('rawEditor')).toBe(false);
+    bindings.get('restore')!.withdraw();
+    expect(recorded.live()).toEqual([]);
   });
 }); // End of the "receiver roster" suite

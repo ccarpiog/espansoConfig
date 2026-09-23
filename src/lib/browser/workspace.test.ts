@@ -5962,6 +5962,179 @@ describe('a committed operation whose follow-up read throws — Phase 2d-6-7a', 
   ); // End of the "hostile moved getter" cases
 }); // End of the "committed operation whose follow-up read throws" suite
 
+describe('a raw save whose follow-up read throws — Phase 2d-6-8a', () => {
+  /** The two reads the raw wrapper makes after the command answered. */
+  type Thrower = 'getDocument' | 'documentText';
+  /** What the read throws: an `Error`, or a value whose `code` getter throws. */
+  type Thrown = 'an error' | 'a value whose classification throws';
+
+  /**
+   * A thrown value `classifyFailure` cannot classify: its `code` getter throws.
+   *
+   * @returns A fresh hostile value.
+   */
+  function hostileValue(): object {
+    return Object.defineProperty({}, 'code', {
+      get: (): never => {
+        throw new Error('the code getter threw');
+      }
+    });
+  } // End of function hostileValue()
+
+  /**
+   * Builds a state over a scripted raw save and arms one follow-up read to throw.
+   *
+   * @param raw - What the raw save command answers.
+   * @param thrower - The command that throws once the save has answered.
+   * @param thrown - What it throws.
+   * @returns The state and its commands.
+   */
+  async function armed(
+    raw: CommandResult<SaveResult>,
+    thrower: Thrower,
+    thrown: Thrown
+  ): Promise<{ state: BrowserState; commands: BrowserCommands }> {
+    const commands = scriptedCommands({ raws: [raw] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+    const hostile = hostileValue();
+    vi.mocked(commands[thrower]).mockImplementation(async () => {
+      if (thrown === 'an error') {
+        throw new Error('the read after the raw save threw');
+      }
+      throw hostile;
+    });
+    return { state, commands };
+  } // End of function armed()
+
+  it.each([
+    ['getDocument', 'an error'],
+    ['documentText', 'an error'],
+    ['getDocument', 'a value whose classification throws'],
+    ['documentText', 'a value whose classification throws']
+  ] as const)(
+    'answers a committed raw save as sealed when its %s throws %s',
+    async (thrower, thrown) => {
+      // **The audit 2d-6-8a owed (`2d-6-7a-notes.md` §4 item 5).** The bytes are
+      // on disk. The reload the command awaits is this state's own closure, and the
+      // command classifies whatever it throws — with a `classifyFailure` a hostile
+      // `code` getter makes throw, so the committed write came back as a rejection
+      // (D2), the shape 2d-6-6c-2's review fixed in `saveMatch`.
+      const { state } = await armed(RAW_COMMITTED, thrower, thrown);
+
+      const answer = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+      expect(answer.kind).toBe('sealed');
+      expect(issuerInvalidationOf(answer)?.kind).toBe('failed');
+      expect(state.writeInFlight(2)).toBe(false);
+    }
+  ); // End of the "committed raw save, follow-up throw" cases
+
+  it.each([
+    ['getDocument', 'an error'],
+    ['documentText', 'an error'],
+    ['getDocument', 'a value whose classification throws'],
+    ['documentText', 'a value whose classification throws']
+  ] as const)(
+    'answers a raw save that may have written as failed when its re-read %s throws %s',
+    async (thrower, thrown) => {
+      // The other post-answer path: a failure that may have renamed the candidate
+      // into place. The re-read this wrapper then owes is awaited with no catch, so
+      // an exception out of it rejected the wrapper and the one fact a screen needs
+      // — *the file may already hold your text* — never reached it.
+      const failure: IpcFailure = {
+        kind: 'command',
+        error: {
+          code: 'saveFailed',
+          error: { Write: { Io: { step: 'SyncDirectory', path: '/tmp/espanso/match/base.yml', kind: 'Interrupted', raw_os_error: 4 } } },
+          may_have_written: true
+        }
+      };
+      const { state } = await armed({ ok: false, failure }, thrower, thrown);
+
+      const answer = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+
+      expect(answer).toEqual({ kind: 'failed', mayHaveWritten: true });
+      expect(state.writeInFlight(2)).toBe(false);
+    }
+  ); // End of the "may have written, re-read throws" cases
+
+  /**
+   * A thrown value `isCommandError` accepts on its one read of `code`, and whose
+   * every later read of `code` throws a value no classifier can read — the
+   * review of Phase 2d-6-8a, its blocker.
+   *
+   * @returns A fresh flaky value.
+   */
+  function flakyCommandError(): object {
+    let reads = 0;
+    return Object.defineProperty({}, 'code', {
+      enumerable: true,
+      get: (): string => {
+        reads += 1;
+        if (reads === 1) {
+          return 'noWorkspaceOpen';
+        }
+        // What the second read throws is itself unclassifiable, so nothing
+        // downstream that classifies it — the command's own catch included — can
+        // turn it back into an answer.
+        throw hostileValue();
+      }
+    });
+  } // End of function flakyCommandError()
+
+  it.each([
+    ['committed', 'getDocument'],
+    ['committed', 'documentText'],
+    ['may have written', 'getDocument'],
+    ['may have written', 'documentText']
+  ] as const)(
+    'answers a %s raw save as such when its %s throws a value the default reporter cannot read (the review’s blocker)',
+    async (path, thrower) => {
+      // **The review of Phase 2d-6-8a, its blocker.** The guarded classifier reads
+      // `code` once and accepts the value as a command error; the default
+      // reporter, `reportIpcFailure`, then reads `failure.error.code` again, and
+      // that second read throws — from inside the very catch meant to keep a
+      // written file's answer from becoming an error.
+      const failure: IpcFailure = {
+        kind: 'command',
+        error: {
+          code: 'saveFailed',
+          error: { Write: { Io: { step: 'SyncDirectory', path: '/tmp/espanso/match/base.yml', kind: 'Interrupted', raw_os_error: 4 } } },
+          may_have_written: true
+        }
+      };
+      const raw: CommandResult<SaveResult> = path === 'committed' ? RAW_COMMITTED : { ok: false, failure };
+      const commands = scriptedCommands({ raws: [raw] });
+      // The default reporter, on purpose: the third argument's default is what
+      // production runs.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const state = createBrowserState(commands);
+      await state.open(null);
+      state.show({ kind: 'document', id: 2 });
+      await state.select(baseDocument().matches[0]!);
+      await state.showFileText(true);
+      vi.mocked(commands[thrower]).mockImplementation(async () => {
+        throw flakyCommandError();
+      });
+
+      const answer = await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      warn.mockRestore();
+
+      if (path === 'committed') {
+        expect(answer.kind).toBe('sealed');
+        expect(issuerInvalidationOf(answer)?.kind).toBe('failed');
+      } else {
+        expect(answer).toEqual({ kind: 'failed', mayHaveWritten: true });
+      }
+      expect(state.writeInFlight(2)).toBe(false);
+    }
+  ); // End of the "default reporter cannot read the failure" cases
+}); // End of the "raw save whose follow-up read throws" suite
+
 describe('recovering a draft no reapply could resolve', () => {
   /**
    * An installation that puts the waiting form nowhere.

@@ -955,10 +955,10 @@ export interface SaveConflictModel<T> extends ConflictModelCommon<T> {
  * whole text its box holds — and restore's `applyRestoreObservation` in
  * `./restore.ts`, over its retained candidate's draft or, with no candidate
  * retained, over a placeholder draft of the empty string that its own field doc
- * names for what it is. **`DetailPane.svelte` registers six of those eight** —
- * the editor's, the new-snippet form's and the recovery form's since Phase
- * 2d-6-6b, the three operation panels' since 2d-6-7a; the other two are
- * 2d-6-8's. **The six registered surfaces' panels draw the result**, outside the
+ * names for what it is. **`DetailPane.svelte` registers all eight** — the
+ * editor's, the new-snippet form's and the recovery form's since Phase 2d-6-6b,
+ * the three operation panels' since 2d-6-7a, the raw editor's and restore's
+ * since 2d-6-8a. **Six of those surfaces' panels draw the result**, outside the
  * save-outcome branch — the three authored panels since Phase 2d-6-6c-1, the
  * three operation panels since 2d-6-7b; the raw editor's and restore's are
  * 2d-6-8's.

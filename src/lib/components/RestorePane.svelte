@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { RawDocumentText } from '../browser/rawDocument';
   import type { RawSaveChoice } from '../browser/rawSave';
   import {
     acknowledgeRestoreFindings,
+    applyRestoreObservation,
     askToReloadDiskVersion,
     batchesLoaded,
     candidateRead,
@@ -34,6 +36,7 @@
     type StartedRestore
   } from '../browser/restore';
   import { candidateMeasurements, distinctReasons } from '../browser/restoreFacts';
+  import type { BindObservationReceiver } from '../browser/surfaceReceivers';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import RecoveryWithoutCreation from './RecoveryWithoutCreation.svelte';
   import { revealOutcome } from './reveal';
@@ -185,6 +188,7 @@
     restore,
     invalidate,
     adoptDiskVersion,
+    reportReceiver,
     close
   }: {
     /**
@@ -311,6 +315,21 @@
      * success the transition finishes on.
      */
     adoptDiskVersion: AdoptTheDiskVersion<string>;
+    /**
+     * Reports this pane's observation receiver to the host — Phase 2d-6-8a, the
+     * 2d-6 record's §3 entry 1, the pattern `MatchEditor.svelte` has followed
+     * since 2d-6-6b.
+     *
+     * **Required**, so a host cannot mount this pane without a way to be told
+     * what the window decided about its destination. It is called once, when
+     * this component starts, and the binding it answers is withdrawn when it is
+     * destroyed; what the receiver does is `applyRestoreObservation` in
+     * `../browser/restore.ts`, installed over whatever this pane holds. **What
+     * the required prop forces is that a host supplies one; nothing in TypeScript
+     * forces this component to call it or to withdraw** — the mounted suites are
+     * what establish both.
+     */
+    reportReceiver: BindObservationReceiver;
     /** Leaves the restore pane. */
     close: () => void;
   } = $props();
@@ -323,6 +342,35 @@
   // event the `targetMoved` refusal must notice rather than absorb.
   // svelte-ignore state_referenced_locally
   let session = $state.raw(startRestore(projection));
+
+  /*
+   * **The receiver, reported when this pane starts and withdrawn when it is
+   * destroyed** — Phase 2d-6-8a, `MatchEditor.svelte`'s pattern. A synchronous
+   * call in the component's own initialisation rather than an effect: the host
+   * registers this pane as a write surface from an effect of its own, which runs
+   * after this, so a surface the coordinator can see always has its receiver.
+   * The receiver installs `applyRestoreObservation`'s answer over the session
+   * held **now**, so a delivery that arrives while this pane's own write is in
+   * flight is held inside the session and consumed by the settlement
+   * `restoreDocument` answers (entry 5). The binding is instance-bound: a later
+   * pane's report displaces this one, and this one's withdrawal then reaches
+   * nothing. What a delivery installs is not drawn deliberately until Phase
+   * 2d-6-8b.
+   *
+   * **A delivery cannot arrive from inside the `targetRevisionObserved` effect
+   * below** (2d-6-5 §4 item 9): the window delivers from its reconciliation
+   * drain, and nothing that effect reads — the session, a plain frozen value,
+   * and the window's projections — calls into the drain. No type forces that;
+   * were one to arrive there, `applyRestoreObservation` answers a session
+   * presenting no question, the safe direction its own doc states.
+   */
+  // svelte-ignore state_referenced_locally
+  const receiving = reportReceiver((delivery) => {
+    session = applyRestoreObservation(session, delivery);
+  });
+  onDestroy(() => {
+    receiving.withdraw();
+  });
 
   /**
    * Everything derived from **one** read of the window.

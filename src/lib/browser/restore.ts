@@ -310,9 +310,9 @@
  * passes one at every call and hands it to `BrowserState.restoreDocument`, which
  * passes it on — and its doc says what no type can force about it.
  *
- * **No component registers this receiver yet.** 2d-6-8 wires
- * `BrowserState.registerObservationReceiver` to it through `DetailPane` and
- * draws the result; until then every case that drives it is a model test.
+ * **`RestorePane.svelte` reports this receiver since Phase 2d-6-8a**, and
+ * `DetailPane.svelte` registers it through `./surfaceReceivers.ts` over the
+ * destination. The result is not drawn deliberately yet — that is 2d-6-8b's.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -353,7 +353,8 @@ import {
   reloadWasRefused,
   sendFailureLines,
   sendFailureOf,
-  spendTheConfirmedReload,
+  confirmationOf,
+  settledAnswer,
   submissionIsStale,
   NOT_RELOADING,
   RELOAD_REFUSED,
@@ -1610,7 +1611,8 @@ export interface RestoreSession {
    * window decided is never told and stays blocked until closed — nor that a
    * wait it was *not* told of, because no receiver was registered when the
    * window held the reading, is recorded at all; both are facts about
-   * registration, which is 2d-6-8's. What it cannot see is a reading the barrier
+   * registration (wired since Phase 2d-6-8a, `DetailPane.svelte`), not about this
+   * session. What it cannot see is a reading the barrier
    * coalesced away without announcing it.
    */
   readonly awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>;
@@ -3386,9 +3388,10 @@ function extendsTheReplayed(
  * code**: a getter there can tell the window of a reading, and the window delivers it
  * at once to the installed session — which is still `saving`, so the receiver appends
  * it there, to a list this transition was handed a copy of. So after each round the
- * installed session is read through `current`, once, and the envelopes it holds
- * beyond the ones replayed are replayed too, in the order they arrived, until a read
- * finds none. **What this forces** is that no envelope delivered during the
+ * installed session is read through `current`, its queue inspected, and `current`
+ * asked again — a session displaced by that inspection is inspected afresh (since
+ * Phase 2d-6-8a's review) — and the envelopes it holds beyond the ones replayed are
+ * replayed too, in the order they arrived, until an undisplaced read finds none. **What this forces** is that no envelope delivered during the
  * replacement, or during this settlement, is dropped when the reader answers the
  * installed session, and that first-to-last is the order; **what it cannot force** is
  * that the window delivered them in the order it decided them, that the reader is
@@ -3420,8 +3423,20 @@ function consumingHeldDeliveries(
       replayed = applyRestoreObservation(replayed, queue[at]!);
     } // End of the loop over the deliveries not yet replayed
     seen = queue.length;
-    const arrived = current().heldDeliveries;
-    if (arrived.length <= seen || !extendsTheReplayed(arrived, queue)) {
+    // **The installed session captured, its queue inspected, and its identity
+    // checked again after every read** (Phase 2d-6-8a's review, its should-fix).
+    // Reading `heldDeliveries` and the envelopes in it runs caller code, and a
+    // getter there can deliver into the installed session — which the receiver
+    // answers by installing a new one — while the read answers the old list. A
+    // session displaced during the inspection is inspected again from the top,
+    // with nothing replayed twice because `seen` has not moved.
+    const installed = current();
+    const arrived = installed.heldDeliveries;
+    const extended = arrived.length > seen && extendsTheReplayed(arrived, queue);
+    if (current() !== installed) {
+      continue;
+    }
+    if (!extended) {
       return replayed;
     }
     queue = arrived;
@@ -3769,9 +3784,13 @@ export function reloadTheDiskVersion(
   current: ReadTheInstalledSession
 ): RestoreSession {
   revokeConfirmation(session);
-  // **Every read of this function's own, taken first.**
+  // **Every read of this function's own, taken first** — the confirmation
+  // snapshot through `confirmationOf`, once, so nothing reads the step again
+  // after the look below (Phase 2d-6-8a, `2d-6-6b-notes.md` §7 item 1:
+  // `spendTheConfirmedReload` used to read it after that look).
   const step = session.reload;
   const conflict = reloadableConflictOf(session);
+  const confirmation = conflict === null ? null : confirmationOf(step);
   // **The installed session, read once, after those reads and immediately
   // before the adoption.** A session no longer installed is not re-pointed, and
   // what is installed is answered so the caller keeps it.
@@ -3779,10 +3798,12 @@ export function reloadTheDiskVersion(
   if (installed !== session) {
     return installed;
   }
-  const spend = spendTheConfirmedReload(conflict, step, adopt);
-  if (spend === 'notAttempted' || conflict === null) {
-    return withNothingPending(session);
+  if (conflict === null || confirmation === null) {
+    // `withNothingPending` reads the session, so its answer goes through the
+    // same last look as every other built answer here.
+    return settledAnswer(session, withNothingPending(session), current);
   }
+  const spend = adopt(conflict, confirmation) === 'refused' ? 'refused' : 'satisfied';
   // **Read once more, after the adoption**, which ran the window's own reads.
   const settled = current();
   if (settled !== session) {
@@ -3790,7 +3811,7 @@ export function reloadTheDiskVersion(
       // A replacing verdict landed during the adoption: the conflict the
       // receiver installed is the one to decide about now, and nothing is
       // re-pointed over it.
-      return settled;
+      return settledAnswer(settled, settled, current);
     }
     // The same conflict with more recorded; built over, and revoked as the
     // argument was, so the answer presents what it authorizes.
@@ -3803,7 +3824,7 @@ export function reloadTheDiskVersion(
     // offered and the panel says so. That is a decision about what to draw and
     // **not** a claim that a later ask would be refused too — a refusal spends
     // nothing.
-    return { ...settled, reload: RELOAD_REFUSED, pending: null };
+    return settledAnswer(settled, { ...settled, reload: RELOAD_REFUSED, pending: null }, current);
   }
   // **`measuredAgainst` rather than `targetRevisionObserved`**, and the difference
   // is load-bearing: that transition answers *unchanged* when the revision it is
@@ -3828,7 +3849,11 @@ export function reloadTheDiskVersion(
     },
     conflict.diskRevision
   );
-  return { ...moved, reload: NOT_RELOADING };
+  // **Built first, then the final installed-session read** (Phase 2d-6-8a, the
+  // shape 2d-6-6b's review gave the editor's reload): the spread, the revocation
+  // and `measuredAgainst` all read the settled session, and nothing
+  // caller-controlled may run after the look `settledAnswer` takes.
+  return settledAnswer(settled, { ...moved, reload: NOT_RELOADING }, current);
 } // End of function reloadTheDiskVersion()
 
 /**
@@ -3838,7 +3863,7 @@ export function reloadTheDiskVersion(
  * **The session's receiver, as a value**, in the shape `applyObservation` in
  * `./matchEditor.ts` established: a component registers a function through
  * `BrowserState.registerObservationReceiver` that calls this with the envelope and
- * installs what comes back (the wiring is 2d-6-8's), and the decision is here so a
+ * installs what comes back (`RestorePane.svelte` since Phase 2d-6-8a), and the decision is here so a
  * suite can drive every arm without a window. It never re-arbitrates and reads
  * none of the window's tables.
  *

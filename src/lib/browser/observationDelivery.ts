@@ -20,11 +20,10 @@
  * `applyDuplicationObservation` in `./matchDuplication.ts`, and since 2d-6-5 the
  * raw editor's `applyObservation` in `./rawEditor.ts` and restore's
  * `applyRestoreObservation` in `./restore.ts`. **`DetailPane.svelte` registers
- * six of those eight** (`./surfaceReceivers.ts`) — the editor's, the new-snippet
- * form's and the recovery form's since Phase 2d-6-6b, and the deleter's, the
- * mover's and the duplicator's since 2d-6-7a; the raw editor's and restore's are
- * 2d-6-8's, so an envelope about a file only those have open still reaches
- * nobody.
+ * all eight** (`./surfaceReceivers.ts`) — the editor's, the new-snippet form's
+ * and the recovery form's since Phase 2d-6-6b, the deleter's, the mover's and
+ * the duplicator's since 2d-6-7a, and the raw editor's and restore's since
+ * 2d-6-8a.
  *
  * 1. **The delivery envelope** ({@link ObservationDelivery}): the narrowed
  *    observation plus the verdict the window reached about it, sealed together so

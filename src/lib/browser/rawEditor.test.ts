@@ -1692,6 +1692,97 @@ describe('the external session — Phase 2d-6-5', () => {
       expect(lost.awaitingReconciliation.size).toBe(0);
     }); // End of the "reseed over the installed session" case
 
+    it('reads the reload step only before the pre-adoption look, so a read of it cannot displace the session past that look (2d-6-6b §7 item 1)', () => {
+      // **The 2d-6-6b blocker's shape, in raw.** The step is caller data. The
+      // reseed read it twice before its look at the installed session, then
+      // handed it to `spendTheConfirmedReload`, which read it again after that
+      // look — so a step quiet on its first two reads and delivering on the
+      // third ran past the last look, and the window was asked over a session
+      // no longer installed.
+      const holder = installed(confirmReload(askToReload(applyObservation(edited(), raised(observation())))));
+      const before = holder.current();
+      const step = before.reload;
+      // `looked` turns true at the first read of the installed session, so the
+      // trap delivers only on a read of the step made after that look.
+      let looked = false;
+      let readsAfterTheLook = 0;
+      const tricked: RawEditorSession = {
+        ...before,
+        reload: new Proxy(step, {
+          /**
+           * Installs a displacing session on any read after the look, then reads through.
+           *
+           * @param of - The step.
+           * @param key - The property.
+           * @param receiver - The receiver.
+           * @returns The property's value.
+           */
+          get(of, key, receiver): unknown {
+            if (looked) {
+              readsAfterTheLook += 1;
+              holder.receive(retainedDelivery(observation({ sequence: 8 })));
+            }
+            return Reflect.get(of, key, receiver) as unknown;
+          }
+        })
+      };
+      holder.set(tricked);
+      const recorder = adopting('installed');
+      const reader = (): RawEditorSession => {
+        looked = true;
+        return holder.current();
+      };
+      const answered = loadDiskVersion(tricked, recorder.adopt, reader);
+      // Nothing reads the step after the look, so nothing can displace the
+      // session past it: the window is asked once, over the installed session.
+      expect(readsAfterTheLook).toBe(0);
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(answered.draft.value).toBe(THEIRS);
+    }); // End of the "read of the step after the look" case
+
+    it.each(['installed', 'refused'] as const)(
+      'answers what a read of the settled session installed, after a %s adoption (2d-6-6b §7 item 1)',
+      (answer) => {
+        // The settled session is read and spread to build the answer. Without a
+        // last look after that build, a getter or `Proxy` trap there installed a
+        // new session and the reseed was still answered over the old one.
+        const confirmed = confirmReload(askToReload(applyObservation(edited(), raised(observation()))));
+        const displaced = applyObservation(confirmed, retainedDelivery(observation({ sequence: 8 })));
+        let holder: RawEditorSession = confirmed;
+        let armed = false;
+        const proxy = new Proxy(confirmed, {
+          /**
+           * Installs the displacing session on the first read after arming.
+           *
+           * @param of - The session.
+           * @param key - The property.
+           * @param receiver - The receiver.
+           * @returns The property's value.
+           */
+          get(of, key, receiver): unknown {
+            if (armed) {
+              armed = false;
+              holder = displaced;
+            }
+            return Reflect.get(of, key, receiver) as unknown;
+          }
+        });
+        holder = proxy;
+        const recorder = adopting(answer);
+        const answered = loadDiskVersion(
+          proxy,
+          (conflict, confirmation) => {
+            armed = true;
+            return recorder.adopt(conflict, confirmation);
+          },
+          () => holder
+        );
+        expect(recorder.adoptions).toHaveLength(1);
+        expect(holder).toBe(displaced);
+        expect(answered).toBe(displaced);
+      }
+    ); // End of the "read of the settled session" cases
+
     it('settles against the installed session and replays a delivery that arrived during its own replay', () => {
       // With `retained(A), raised(A)` held, a getter behind A's `document`
       // publishes B while A is being replayed; the window delivers B to the
@@ -1749,5 +1840,49 @@ describe('the external session — Phase 2d-6-5', () => {
         externalConflictSource(alone.seen)
       );
     }); // End of the "delivery during the replay" case
+
+    it('replays a delivery that a read of the installed session’s queue made, after the last look (the 2d-6-8a review’s should-fix)', () => {
+      // **The review of Phase 2d-6-8a, its should-fix.** The settlement reads
+      // `current().heldDeliveries` after its last look at the installed session,
+      // and that read runs caller code: a getter there can deliver an observation
+      // into the installed session — still `saving`, so the receiver appends it to
+      // a *new* installed session — while the read answers the old, shorter list.
+      // The settlement then returned its replay without the delivery, and the
+      // caller installing that answer dropped it.
+      const started = ((onHand) => beginSave(onHand, () => onHand))(edited());
+      if (started === null) {
+        throw new Error('an edited session is sendable');
+      }
+      const later = observation({ sequence: 9 });
+      let looked = false;
+      let fired = false;
+      const holder = installed(started.session);
+      const proxy = new Proxy(started.session, {
+        /**
+         * Delivers `later` once, on the first read of the queue after the look.
+         *
+         * @param of - The session.
+         * @param key - The property.
+         * @param receiver - The receiver.
+         * @returns The property's value.
+         */
+        get(of, key, receiver): unknown {
+          if (looked && !fired && key === 'heldDeliveries') {
+            fired = true;
+            holder.receive(retainedDelivery(later));
+          }
+          return Reflect.get(of, key, receiver) as unknown;
+        }
+      });
+      holder.set(proxy);
+      const reader = (): RawEditorSession => {
+        looked = true;
+        return holder.current();
+      };
+      const settled = saveCouldNotBeSent(proxy, false, reader);
+      expect(fired).toBe(true);
+      expect(settled.heldDeliveries).toEqual([]);
+      expect(settled.awaitingReconciliation.get(DOCUMENT)).toBe(later);
+    }); // End of the "delivery made by the queue read" case
   }); // End of the "against the installed session" suite
 }); // End of the "external session" suite

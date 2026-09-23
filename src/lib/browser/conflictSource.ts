@@ -518,8 +518,9 @@ export function standingConflictOf(source: ConflictSource): StandingConflict {
  * the raw editor's `applyObservation` in `./rawEditor.ts` and restore's
  * `applyRestoreObservation` in `./restore.ts` (Phase 2d-6-5). All eight exist as
  * values; `DetailPane.svelte` registers the editor's, the new-snippet form's and
- * the recovery form's since Phase 2d-6-6b and the three operation panels' since
- * 2d-6-7a (`./surfaceReceivers.ts`), and the other two are 2d-6-8's.
+ * the recovery form's since Phase 2d-6-6b, the three operation panels' since
+ * 2d-6-7a and the raw editor's and restore's since 2d-6-8a
+ * (`./surfaceReceivers.ts`).
  */
 export type ObservationVerdict =
   | {

@@ -66,6 +66,7 @@ import type {
   SaveResult
 } from '../ipc/types';
 import RawEditor from './RawEditor.svelte';
+import type { SurfaceBinding } from '../browser/surfaceReceivers';
 
 /** The revision the text was read at. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -195,6 +196,18 @@ interface ScriptedAnswer {
 }
 
 /**
+ * A binding whose two methods do nothing — the `reportReceiver` answer for a
+ * mount that drives no delivery (Phase 2d-6-8a made the prop required; the
+ * deliveries themselves are driven through the real pane in
+ * `DetailPane.test.ts`).
+ *
+ * @returns The inert binding.
+ */
+function inertBinding(): SurfaceBinding {
+  return { reportTarget: () => undefined, withdraw: () => undefined };
+} // End of function inertBinding()
+
+/**
  * Mounts the editor over a scripted boundary.
  *
  * @param answers - What each successive save answers, in order. A save with no
@@ -222,6 +235,7 @@ function mountEditor(
     props: {
       file: FILE,
       baseRevision: BASE,
+      reportReceiver: (): SurfaceBinding => inertBinding(),
       text: loaded,
       adoptDiskVersion: (conflict: ConflictModel<RoundTripText>): DiskAdoptionOutcome => {
         adoptions.push(conflict);

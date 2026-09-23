@@ -272,6 +272,11 @@ interface PaneScript {
   readonly saveMatch?: () => Promise<CommandResult<SaveResult>>;
   /** What `delete_match` answers, called once per deletion (Phase 2d-6-7a). */
   readonly deleteMatch?: () => Promise<CommandResult<SaveResult>>;
+  /**
+   * What `save_raw_document` answers, called once per raw save (Phase 2d-6-8a).
+   * When given, it replaces the stocked commit below and runs no reload.
+   */
+  readonly saveRawDocument?: () => Promise<RawSaveOutcome>;
   /** The batches the drain answers, in order; past the end it refuses. */
   readonly batches?: CommandResult<ReconciliationBatch>[];
 }
@@ -346,6 +351,9 @@ function scriptedCommands(
         acknowledgement: Acknowledgement,
         reload: ReloadAfterRawSave
       ): Promise<RawSaveOutcome> => {
+        if (script.saveRawDocument !== undefined) {
+          return script.saveRawDocument();
+        }
         if (saves === null) {
           return refusal;
         }
@@ -2376,6 +2384,209 @@ describe('the pane as a delivery host for the operation panels — Phase 2d-6-7a
     pane.stop();
   }); // End of the "deletion settlement lands in order" case
 }); // End of the "delivery host for the operation panels" suite
+
+describe('the pane as a delivery host for the raw editor and restore — Phase 2d-6-8a', () => {
+  // **Through the real registry and the real coordinator boundary**, as the two
+  // suites above: each case opens its surface through the pane's own control,
+  // starts the lifecycle over a finite drain queue counted exactly, and wakes the
+  // window, so the observation is admitted by the real coordinator, routed to the
+  // pane's transition, arbitrated once by `observeExternalChange`, and delivered
+  // through the roster's registration. What these cases assert is what 2d-6-8a
+  // wires — the registration, the envelope, the send withdrawn. What the two
+  // panels draw about the conflict is 2d-6-8b's, so no sentence is read here.
+
+  /** The two surfaces this suite drives. */
+  type LastKind = 'rawEditor' | 'restore';
+
+  /** How one of the two is brought to a state where it may send. */
+  interface LastWalk {
+    /**
+     * Opens the surface through the pane's control and arms its send: the raw
+     * editor's box edited, restore's candidate read.
+     *
+     * @param pane - The mounted pane.
+     */
+    readonly arm: (pane: Mounted) => Promise<void>;
+    /**
+     * Whether its send is offered.
+     *
+     * @param target - Where the pane was mounted.
+     * @returns `true` while the control is enabled.
+     */
+    readonly mayStillSend: (target: HTMLElement) => boolean;
+    /**
+     * Closes it through its own controls: the raw editor's edited draft asks
+     * first, and is discarded.
+     *
+     * @param target - Where the pane was mounted.
+     */
+    readonly leave: (target: HTMLElement) => void;
+  }
+
+  /**
+   * Edits the raw editor's box, as a person typing would.
+   *
+   * @param target - Where the pane was mounted.
+   */
+  function typeIntoRaw(target: HTMLElement): void {
+    const body = box(target, 'textarea');
+    body.value = `${body.value}# edited\n`;
+    body.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  } // End of function typeIntoRaw()
+
+  const LAST: Record<LastKind, LastWalk> = {
+    rawEditor: {
+      arm: async (pane) => {
+        await WALKS.rawEditor.open(pane);
+        flushSync();
+        typeIntoRaw(pane.target);
+      },
+      mayStillSend: (target) => !control(target, 'browser.rawEditor.save').disabled,
+      leave: (target) => {
+        control(target, 'browser.rawEditor.close').click();
+        flushSync();
+        control(target, 'browser.rawEditor.discard').click();
+      }
+    },
+    restore: {
+      arm: async (pane) => {
+        await WALKS.restore.open(pane);
+        flushSync();
+        control(pane.target, 'browser.restore.listBatches').click();
+        await settle();
+        control(pane.target, 'browser.restore.batchNamed', { name: BATCH.name }).click();
+        await settle();
+        entryControl(pane.target, 'match/a.yml').click();
+        await settle();
+      },
+      mayStillSend: (target) => !control(target, 'browser.restore.prepare').disabled,
+      leave: (target) => {
+        control(target, 'browser.restore.close').click();
+      }
+    }
+  };
+
+  it.each(['rawEditor', 'restore'] as const)(
+    'an open %s is delivered its file’s change, and its send is withdrawn',
+    async (kind) => {
+      expectedDrains = 3;
+      const events = paneEvents();
+      const pane = await mountPane(
+        true,
+        { batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])] },
+        events.source
+      );
+      const log = watchDeliveries(pane.state);
+      await LAST[kind].arm(pane);
+      expect(registered(pane.state)).toEqual([WALKS[kind].expected]);
+      expect(log.live()).toEqual([1]);
+      expect(LAST[kind].mayStillSend(pane.target)).toBe(true);
+
+      events.wake(5, 5);
+      await settleWake();
+
+      // **One decision, to the one registration over the file**, and the origin
+      // the window now holds is the external change.
+      expect(log.delivered.map((one) => [one.document, one.delivery.verdict.kind])).toEqual([
+        [1, 'raised']
+      ]);
+      expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+      // **The send is withdrawn** — the session the receiver installed refuses it.
+      expect(LAST[kind].mayStillSend(pane.target)).toBe(false);
+      // Protected rather than reloaded under the surface, and nothing was sent.
+      expect(pane.state.externalDocumentStatus(1)).toEqual({ kind: 'stale' });
+      expect(pane.commands.reloadDocument).not.toHaveBeenCalled();
+      expect(pane.commands.saveRawDocument).not.toHaveBeenCalled();
+      pane.stop();
+    }
+  ); // End of the "raw or restore delivered" case
+
+  it.each(['rawEditor', 'restore'] as const)(
+    'never hands a reopened %s what its previous instance was told',
+    async (kind) => {
+      expectedDrains = 4;
+      const events = paneEvents();
+      const pane = await mountPane(
+        true,
+        {
+          batches: [
+            batch(0),
+            batch(0),
+            batch(5, [changed(5, 1, 'match/a.yml')]),
+            batch(6, [changed(6, 1, 'match/a.yml', 'd'.repeat(64))])
+          ]
+        },
+        events.source
+      );
+      const log = watchDeliveries(pane.state);
+      await LAST[kind].arm(pane);
+      events.wake(5, 5);
+      await settleWake();
+      expect(LAST[kind].mayStillSend(pane.target)).toBe(false);
+
+      LAST[kind].leave(pane.target);
+      flushSync();
+      expect(log.live()).toEqual([]);
+      expect(registered(pane.state)).toEqual([]);
+      await LAST[kind].arm(pane);
+      // **A fresh session**: the old instance's delivery did not follow it.
+      expect(LAST[kind].mayStillSend(pane.target)).toBe(true);
+      expect(log.live()).toEqual([1]);
+
+      events.wake(5, 6);
+      await settleWake();
+      // The first registration was told once and never again; only the second —
+      // the reopened surface's — was told of the later reading.
+      expect(log.delivered.map((one) => one.registration)).toEqual([0, 1]);
+      expect(LAST[kind].mayStillSend(pane.target)).toBe(false);
+      expect(pane.commands.saveRawDocument).not.toHaveBeenCalled();
+      pane.stop();
+    }
+  ); // End of the "reopened raw or restore" case
+
+  it('lands a settlement after the raw save it settles, in the order it was decided', async () => {
+    expectedDrains = 3;
+    const events = paneEvents();
+    let answer: ((value: RawSaveOutcome) => void) | null = null;
+    const pane = await mountPane(
+      false,
+      {
+        saveRawDocument: () =>
+          new Promise<RawSaveOutcome>((resolve) => {
+            answer = resolve;
+          }),
+        batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])]
+      },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    await LAST.rawEditor.arm(pane);
+    control(pane.target, 'browser.rawEditor.save').click();
+    await settle();
+    expect(pane.commands.saveRawDocument).toHaveBeenCalledTimes(1);
+
+    // **Arrives while the save is in flight**: the barrier holds it (ruling 27),
+    // and the receiver records the wait inside the session.
+    events.wake(5, 5);
+    await settleWake();
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['retained']);
+
+    // The command refuses: nothing was written, so the settlement arbitrates the
+    // held reading and publishes it — before the save's own continuation.
+    const settleSave = answer as ((value: RawSaveOutcome) => void) | null;
+    settleSave?.({ ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } });
+    await settleWake();
+
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['retained', 'raised']);
+    // **Entry 5**: the continuation did not overwrite what the settlement
+    // delivered — the editor ends holding the external conflict, and sends nothing.
+    expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+    expect(LAST.rawEditor.mayStillSend(pane.target)).toBe(false);
+    expect(pane.commands.saveRawDocument).toHaveBeenCalledTimes(1);
+    pane.stop();
+  }); // End of the "raw save settlement lands in order" case
+}); // End of the "delivery host for the raw editor and restore" suite
 
 describe('the operation panels’ drawn sentences through the pane, in English and Spanish — Phase 2d-6-7b', () => {
   // **Read off the screen through the real registry and coordinator boundary**,

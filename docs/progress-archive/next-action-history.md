@@ -15474,3 +15474,19 @@ harness-free closure; corrects the `main.rs` comment and deletes the harness und
 ---
 
 
+
+## The 2d-6-7c → 2d-6-8 handoff — archived 2026-09-23 at 2d-6-8a
+
+### Phase 2d-6-7c is complete and CLOSED, and 2d-6-7 with it. The next action is **Phase 2d-6-8: raw and restore rendering** — the external origin, the offers and the blocked state drawn on the raw and restore surfaces, with bilingual mounted evidence.
+
+**The three documents that bind every 2d-6 step, in reading order**:
+[`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (the consult; it binds),
+[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (§2 the split — **the `### 2d-6-8` entry (line ~221) is this step's scope and acceptance**; §3 the binding rulings, ruling 38 included — a component-changing step owes a narrow window reading **with one hard fixture**; §7 the map of handed-on items) and [`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md).
+
+**Executable cold: 2d-6-8.** Decide at selection whether it needs a cut like 2d-6-6 and 2d-6-7 (model obligations / rendering and mounted tests / window reading); record the cut in the split record's §2. **First, before any receiver is registered**: 6b §7 item 1 — raw's `loadDiskVersion` (`rawEditor.ts`) and restore's `reloadTheDiskVersion` (`restore.ts`) read after the post-adoption `current()`; fix failing-first. Read [`2d-6-5-notes.md`](docs/decisions/2d-6-5-notes.md) §1.2-§1.7 and §4 (item 4: `BrowserState.restoreDocument` passes no reader) and 7a's pattern ([`2d-6-7a-notes.md`](docs/decisions/2d-6-7a-notes.md) §1: receivers registered from `DetailPane.svelte`, `ReceivingSurfaceKind` now six kinds; 2d-6-8 adds the last two). Copy the rendering pattern of [`2d-6-7b-notes.md`](docs/decisions/2d-6-7b-notes.md). The raw editor refuses any `\r` (`CLAUDE.md` §6). Risk **high**.
+
+**Open items carried from 7c** ([`2d-6-7c-notes.md`](docs/decisions/2d-6-7c-notes.md) §4): the operation panels' choice row below the fold (same later decision as 6c-2 §5 item 5); no window reading yet of `supersededConflict`, `noCorrespondence` or the `writeOutcomeUnknown` withholding; the deleter's post-`reapplied` two-press wording (2d-6-11); the disk-text panel cannot show a CRLF convention (`SourceText`'s one-break rule — a later deliberate decision); the 7b §4 items (ES "Dejarlo como está" collision and the repeated refusal sentence → 2d-6-11; the editor/creator/recovery reveal shape; `adoptForReapply` has no production caller). From 6c-2 §5: repeated "No save was initiated…" clauses (2d-6-11); the creator's reload warning with no reload offered; a real copy under a real gesture (2d-7); `recovery.ts`'s stale "Nothing draws this yet". From 6b §7 item 3: the eight sessions' doors not re-audited for reads after the last `current()`. **2d-8 deletes `/private/tmp/espansoconfig-harness-2d-6-6c-2/`** (now with `launch-7c.sh`, `tools/verbatim-7c.cjs`, the `hard*` fixtures) and the instrument's commands `probe_other_writer`, `probe_fourth_writer`, `probe_snapshot`, `probe_snapshot_state`.
+
+**Orchestrator's rulings standing from 1b's close**: (1) the `ReconciliationWorkspace` interface may be widened as entries require; (2) the acknowledgement operand stays `ConflictSource` (2d-6-9 draws the exit); (3) the `projectionReplaced` refusal at an outlived arrival generation stands (2d-6-9's). The declared hold gap: no hold for the three authored kinds; 2d-6-8 registers the last two receivers, and any remaining hold is 2d-6-9's.
+
+**Older open items**: archived verbatim in [`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The 2d-6-7b → 2d-6-7c handoff"* and the handoffs before it; the live map is the split record's §7.

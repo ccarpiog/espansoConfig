@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T01:13:17Z",
+ "updated": "2026-09-23T01:44:19Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -421,7 +421,7 @@
    "id": "2d-6",
    "title": "Components, i18n and mounted evidence",
    "status": "in_progress",
-   "summary": "Eleven steps per its design consult; 2d-6-1 through 2d-6-7 are done, and 2d-6-8 (raw and restore rendering) is next."
+   "summary": "Eleven steps per its design consult; 2d-6-1 through 2d-6-7 are done and 2d-6-8 is in progress (8a done, 8b next)."
   },
   {
    "id": "2d-6-1",
@@ -592,8 +592,31 @@
   {
    "id": "2d-6-8",
    "title": "Raw and restore rendering",
+   "status": "in_progress",
+   "summary": "Cut into 8a (owed model fixes and receiver registration), 8b (the two panels rendering) and 8c (window reading); 8a is done, 8b next."
+  },
+  {
+   "id": "2d-6-8a",
+   "title": "Raw and restore: owed model fixes and receiver registration",
+   "status": "done",
+   "risk": "high",
+   "summary": "Fixed reads after adoption in the raw and restore reloads and the raw save wrapper, and registered the last two receivers; no new rendering.",
+   "review": "docs/reviews/phase-2d-6-8a.md",
+   "narrative": "docs/decisions/2d-6-8a-notes.md"
+  },
+  {
+   "id": "2d-6-8b",
+   "title": "Raw and restore panels rendering",
    "status": "queued",
-   "summary": "Draws the external origin, the offers and the blocked state on the raw and restore surfaces, with bilingual mounted evidence."
+   "risk": "high",
+   "summary": "Draws origin, comparison and the reseed or retarget reload on the raw editor and restore pane, with bilingual mounted tests."
+  },
+  {
+   "id": "2d-6-8c",
+   "title": "Raw and restore window reading",
+   "status": "queued",
+   "risk": "high",
+   "summary": "Reads the raw and restore surfaces in a real window over a hard fixture, EN and ES, and checks 2d-6-8 whole."
   },
   {
    "id": "2d-6-9",
@@ -630,7 +653,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 through 2d-6-7 done, 2d-6-8 next); 2d-7 and 2d-8 follow."
+   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 through 2d-6-7 and 2d-6-8a done, 2d-6-8b next); 2d-7 and 2d-8 follow."
   },
   {
    "id": "3",
