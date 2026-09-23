@@ -955,9 +955,10 @@ export interface SaveConflictModel<T> extends ConflictModelCommon<T> {
  * whole text its box holds — and restore's `applyRestoreObservation` in
  * `./restore.ts`, over its retained candidate's draft or, with no candidate
  * retained, over a placeholder draft of the empty string that its own field doc
- * names for what it is. **Since Phase 2d-6-6b `DetailPane.svelte` registers
- * three of those eight** — the editor's, the new-snippet form's and the recovery
- * form's; the other five are 2d-6-7's and 2d-6-8's. **Since Phase 2d-6-6c-1 the
+ * names for what it is. **`DetailPane.svelte` registers six of those eight** —
+ * the editor's, the new-snippet form's and the recovery form's since Phase
+ * 2d-6-6b, the three operation panels' since 2d-6-7a; the other two are
+ * 2d-6-8's. **Since Phase 2d-6-6c-1 the
  * three registered surfaces' panels draw the result**, outside the save-outcome
  * branch; the other five panels are 2d-6-7's and 2d-6-8's.
  *
@@ -1819,9 +1820,11 @@ const REAPPLY_AUTHORIZATIONS = new WeakMap<ConflictSource, ReloadConfirmation>()
  * that installs nothing but is reported as one, because
  * `BrowserState.adoptDiskVersion` settles that question before it reaches the
  * projection-generation check. What holds today is an implementation fact and not a
- * type: every reapply transition that adopts anything — the five match surfaces —
- * takes its token from this function, through `adoptForReapply` in `./reapply.ts`,
- * and the raw editor's and restore's take no adoption function at all.
+ * type: every reapply transition that adopts anything — the editor's, the
+ * creator's, the recovery form's and the three operations' — takes its token
+ * from this function directly (since Phase 2d-6-7a none goes
+ * through `adoptForReapply` in `./reapply.ts`), and the raw editor's and
+ * restore's take no adoption function at all.
  *
  * @typeParam T - The drafted value.
  * @param conflict - The conflict state a reapply is being attempted from.

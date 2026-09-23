@@ -2711,6 +2711,124 @@ describe('the external session — Phase 2d-6-4', () => {
         } // End of the loop over the two locales
       } // End of the loop over the external obstacles
     }); // End of the "a sentence per obstacle" case
+
+    /**
+     * A Proxy over one session whose first property read after it is armed runs
+     * a body once — Phase 2d-6-7a, the reapply's reads after its looks
+     * (`2d-6-6b-notes.md` §7 item 2).
+     *
+     * @param over - The session to stand in for.
+     * @param body - What that read does before answering.
+     * @returns The proxy, and the call that arms it.
+     */
+    function trappedForReapply(over: MatchMoveSession, body: () => void): { readonly proxy: MatchMoveSession; arm(): void } {
+      let armed = false;
+      const proxy = new Proxy(over, {
+        /**
+         * Runs the body on the first read after arming, then reads through.
+         *
+         * @param of - The session.
+         * @param key - The property.
+         * @param receiver - The receiver.
+         * @returns The property's value.
+         */
+        get(of, key, receiver): unknown {
+          if (armed) {
+            armed = false;
+            body();
+          }
+          return Reflect.get(of, key, receiver) as unknown;
+        }
+      });
+      return {
+        proxy,
+        arm: () => {
+          armed = true;
+        }
+      };
+    } // End of function trappedForReapply()
+
+    it('refuses, and asks the window nothing, when a read of the installed session displaced it before the adoption (Phase 2d-6-7a)', () => {
+      const { stuck, stands } = raisedOver(bothFound());
+      const displaced = applyMoveObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
+      let holder: MatchMoveSession = stuck;
+      const trap = trappedForReapply(stuck, () => {
+        holder = displaced;
+      });
+      holder = trap.proxy;
+      const recorder = adopting('installed');
+      const answer = reapplyToDiskVersion(trap.proxy, null, recorder.adopt, stands, () => {
+        const now = holder;
+        trap.arm();
+        return now;
+      });
+      expect(holder).toBe(displaced);
+      expect(answer.kind).toBe('manualResolution');
+      expect(recorder.adoptions).toEqual([]);
+    }); // End of the "displaced before the reapply's adoption" case
+
+    it('rebuilds nothing when a read of the settled session displaced it after the adoption (Phase 2d-6-7a)', () => {
+      const { stuck, stands } = raisedOver(bothFound());
+      const displaced = applyMoveObservation(stuck, retainedDelivery(observation({ sequence: 6 })));
+      let holder: MatchMoveSession = stuck;
+      const trap = trappedForReapply(stuck, () => {
+        holder = displaced;
+      });
+      holder = trap.proxy;
+      const recorder = adopting('installed');
+      const answer = reapplyToDiskVersion(
+        trap.proxy,
+        null, (conflict, confirmation) => {
+          trap.arm();
+          return recorder.adopt(conflict, confirmation);
+        },
+        stands,
+        () => holder
+      );
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(holder).toBe(displaced);
+      expect(answer).toEqual({ kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } });
+    }); // End of the "displaced after the reapply's adoption" case
+
+    it('answers supersededEvidence and rebuilds nothing when another conflict landed during the adoption (Phase 2d-6-7a)', () => {
+      const { stuck, stands } = raisedOver(bothFound());
+      let holder: MatchMoveSession = stuck;
+      const newer = observation({ sequence: 6, diskRevision: 'c'.repeat(64), disk: diskFile({ revision: 'c'.repeat(64) }) });
+      const recorder = adopting('installed');
+      const answer = reapplyToDiskVersion(
+        stuck,
+        null, (conflict, confirmation) => {
+          holder = applyMoveObservation(holder, decided(externalOf(holder).source, newer, false, 'supersedes'));
+          return recorder.adopt(conflict, confirmation);
+        },
+        stands,
+        () => holder
+      );
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(answer).toEqual({ kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } });
+      expect(externalOf(holder).source).toBe(externalConflictSource(newer));
+    }); // End of the "another conflict during the reapply's adoption" case
+
+    it('hands the rebuilt session a wait recorded during the adoption (Phase 2d-6-7a)', () => {
+      const { stuck, stands } = raisedOver(bothFound());
+      let holder: MatchMoveSession = stuck;
+      const later = observation({ sequence: 6 });
+      const recorder = adopting('installed');
+      const answer = reapplyToDiskVersion(
+        stuck,
+        null, (conflict, confirmation) => {
+          holder = applyMoveObservation(holder, retainedDelivery(later));
+          return recorder.adopt(conflict, confirmation);
+        },
+        stands,
+        () => holder
+      );
+      expect(recorder.adoptions).toHaveLength(1);
+      expect(answer.kind).toBe('reapplied');
+      if (answer.kind === 'reapplied') {
+        expect(answer.session.awaitingReconciliation.get(2)).toBe(later);
+      }
+    }); // End of the "wait recorded during the reapply's adoption" case
   }); // End of the "reapply over the external origin" suite
 
   describe('the door, the settlement and the reapply against the installed session (the review’s three blockers)', () => {

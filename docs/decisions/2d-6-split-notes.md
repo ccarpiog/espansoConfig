@@ -185,6 +185,39 @@ control, direct submission refusal, supersession withdrawing the warning, a narr
 **Components:** `DetailPane.svelte`, `MatchDeleter.svelte`, `MatchMover.svelte`,
 `MatchDuplicator.svelte`. **Bound by** entries 1, 10, 23, 34-36, 38. **Depends on** 2d-6-4, 2d-6-6.
 
+#### The orchestrator's cut of 2d-6-7, taken 2026-09-23
+
+Four components, the registration wiring, bilingual mounted tests of every offered control, a
+window reading and two model-side obligations the closed steps handed on (`PROGRESS.md`, *Next
+action*, items 1-2: `2d-6-6c-2-notes.md` §5 items 2 and 7, `2d-6-6b-notes.md` §7 item 2) are too
+much for one coherent phase, so 2d-6-7 runs as three sub-phases in dependency order, following
+2d-6-6's precedent, each owing the gate set and its own review. **The union is 2d-6-7 exactly**,
+plus the two hand-on obligations; the acceptance above is checked in full when 2d-6-7c closes.
+
+- **2d-6-7a — the owed model-side obligations, then registration and delivery wiring.** The
+  `deleteMatch`, `moveMatch` and `duplicateMatch` wrappers in `workspace.svelte.ts` audited for
+  the post-commit shape fixed in `saveMatch` (a committed write answered as an error when the
+  adoption or the re-read throws), with the guarded classification of the thrown value, and
+  `createMatch` given that guard; the three operation reapplies (`matchDeletion.ts`,
+  `matchMove.ts`, `matchDuplication.ts`) audited for reads after their pre-adoption look. Each
+  defect pinned by a case shown failing first. Then the delete, move and duplicate receivers
+  reported by their components and registered from `DetailPane.svelte` through
+  `surfaceReceivers.ts`, with mounted delivery tests through the real registry and coordinator
+  boundary. **No new rendering.** Raw's wrapper stays 2d-6-8's. Record:
+  [`2d-6-7a-notes.md`](2d-6-7a-notes.md).
+- **2d-6-7b — the three operation panels' rendering.** Origin, comparison, reapply or manual
+  resolution and reload rendering on `MatchDeleter.svelte`, `MatchMover.svelte` and
+  `MatchDuplicator.svelte`; the bilingual mounted tests of the acceptance above — every offered
+  control, direct submission refusal, supersession withdrawing the warning. Record:
+  `2d-6-7b-notes.md`.
+- **2d-6-7c — the narrow window reading, and 2d-6-7's whole acceptance checked in one place**,
+  starting from the harness and launch recipe of
+  [`2d-6-6c-2-window-reading.md`](2d-6-6c-2-window-reading.md) §2-§3. Record: `2d-6-7c-notes.md`.
+
+The open item *the eight sessions' doors and settling transitions not re-audited for reads after
+their last `current()`* (`2d-6-6b-notes.md` §7 item 3) is **not** part of this cut: it spans all
+eight sessions, not the three this step wires, and stays where `PROGRESS.md` carries it.
+
 ### 2d-6-8 — raw and restore rendering
 
 **Delivers** both receivers and the two external panels with their distinct reload effects (reseed,

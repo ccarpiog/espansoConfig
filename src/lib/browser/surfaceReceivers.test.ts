@@ -1,5 +1,5 @@
 /**
- * The parent's binding record — Phase 2d-6-6b.
+ * The parent's binding record — Phase 2d-6-6b, widened to the operation panels at 2d-6-7a.
  *
  * **Model tests over a recording host**, so each case can read exactly which
  * registrations the roster made and returned. What they establish is identity
@@ -182,5 +182,37 @@ describe('the receiver roster', () => {
     roster.dispose();
     expect(recorded.live()).toEqual([]);
     expect(roster.receives('matchEditor')).toBe(false);
+  });
+
+  it('receives the three operation panels since Phase 2d-6-7a, each over its own file, and still not raw or restore', () => {
+    const recorded = recordingHost();
+    const roster = createReceiverRoster(recorded.host);
+    const operations = ['matchDeleter', 'matchMover', 'matchDuplicator'] as const;
+    const told = new Map<ReceivingSurfaceKind, ObservationDelivery[]>();
+    for (const kind of operations) {
+      const mine: ObservationDelivery[] = [];
+      told.set(kind, mine);
+      roster.bind(kind, (delivery) => mine.push(delivery));
+    } // End of the loop over the three operation kinds
+    roster.reconcile(
+      [
+        { kind: 'matchDeleter', target: { kind: 'document', document: 1 } },
+        { kind: 'matchMover', target: { kind: 'document', document: 2 } },
+        { kind: 'matchDuplicator', target: { kind: 'document', document: 3 } },
+        { kind: 'restore', target: { kind: 'document', document: 4 } }
+      ],
+      []
+    );
+    expect(recorded.live()).toEqual([1, 2, 3]);
+    const second = envelope(2);
+    recorded.deliver(2, second);
+    expect(told.get('matchDeleter')).toEqual([]);
+    expect(told.get('matchMover')).toEqual([second]);
+    expect(told.get('matchDuplicator')).toEqual([]);
+    for (const kind of operations) {
+      expect(roster.receives(kind)).toBe(true);
+    } // End of the loop over the three operation kinds
+    expect(roster.receives('restore')).toBe(false);
+    expect(roster.receives('rawEditor')).toBe(false);
   });
 }); // End of the "receiver roster" suite

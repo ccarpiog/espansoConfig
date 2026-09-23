@@ -44,9 +44,10 @@
  * reports its chosen destination through {@link
  * UnregisterWriteSurface.replaceTarget}, and the transition it registers hands the
  * observation to `BrowserState.observeExternalChange` — one arbitration, delivered
- * to every receiver over the file — for the editor, the new-snippet form and the
- * recovery form while a receiver of that kind is reported, and is a **no-op** for
- * the other five kinds, whose receivers are 2d-6-7's and 2d-6-8's.
+ * to every receiver over the file — for the editor, the new-snippet form, the
+ * recovery form and (since Phase 2d-6-7a) the three operation panels while a
+ * receiver of that kind is reported, and is a **no-op** for the other two kinds,
+ * whose receivers are 2d-6-8's.
  *
  * **This module deliberately contains no exhaustive assembly**, and that has not
  * changed: an exhaustiveness check that lives anywhere but the composition file
@@ -104,8 +105,9 @@ import type {
  * external-conflict transition and install no projection"*
  * (`docs/reviews/phase-2d-5-design.md:149-152`). **Since Phase 2d-6-6b the one
  * registered in production arbitrates** through `BrowserState.observeExternalChange`
- * for the three kinds whose receivers are reported — the editor, the new-snippet
- * form and the recovery form — and is still a no-op for the other five.
+ * for the six kinds whose receivers are reported — the editor, the new-snippet
+ * form and the recovery form, and since Phase 2d-6-7a the deleter, the mover and
+ * the duplicator — and is still a no-op for the other two.
  *
  * **Only a `Changed`/`Addressable`/`Projected` observation can be delivered
  * through it**, because that is what its parameter is. A removal and an unreadable

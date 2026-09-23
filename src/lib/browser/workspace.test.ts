@@ -233,6 +233,7 @@ import {
   type BackupCommands,
   type BrowserCommands,
   type BrowserState,
+  type MatchSaveAnswer,
   type RawSaveAnswer,
   type RetainedRetryOutcome,
   type UncertaintyAcknowledgement
@@ -5799,6 +5800,168 @@ describe('creating a snippet', () => {
   }); // End of the "conflicted create" case
 }); // End of the "creating a snippet" suite
 
+describe('a committed operation whose follow-up read throws — Phase 2d-6-7a', () => {
+  /** The four writing wrappers this suite drives after a commit. */
+  type Operation = 'moveMatch' | 'deleteMatch' | 'duplicateMatch' | 'createMatch';
+  /** The two reads a wrapper makes after its commit. */
+  type Thrower = 'getDocument' | 'documentText';
+  /** What the read throws: an `Error`, or a value whose `code` getter throws. */
+  type Thrown = 'an error' | 'a value whose classification throws';
+
+  /**
+   * Sends one operation through the real `BrowserState` against a scripted
+   * commit, after arming one of the two follow-up reads to throw.
+   *
+   * @param operation - The wrapper to drive.
+   * @param thrower - The command that throws after the commit.
+   * @param thrown - What it throws.
+   * @returns The wrapper's answer, and the state it was sent through.
+   */
+  async function commitThenThrow(
+    operation: Operation,
+    thrower: Thrower,
+    thrown: Thrown
+  ): Promise<{ answer: MatchSaveAnswer; state: BrowserState }> {
+    const committed: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: operation === 'deleteMatch' ? null : { document: 2, revision: 'rev-b', node: 31 }
+      }
+    };
+    const commands = scriptedCommands({
+      moves: [committed],
+      deletes: [committed],
+      duplicates: [committed],
+      creates: [committed]
+    });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    await state.showFileText(true);
+
+    const hostile = Object.defineProperty({}, 'code', {
+      get: (): never => {
+        throw new Error('the code getter threw');
+      }
+    });
+    vi.mocked(commands[thrower]).mockImplementation(async () => {
+      if (thrown === 'an error') {
+        throw new Error('the read after the commit threw');
+      }
+      throw hostile;
+    });
+    const source = baseDocument().matches[0]!.id;
+    let answer: MatchSaveAnswer;
+    switch (operation) {
+      case 'moveMatch':
+        answer = await state.moveMatch(source, null, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+        break;
+      case 'deleteMatch':
+        answer = await state.deleteMatch(source, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+        break;
+      case 'duplicateMatch':
+        answer = await state.duplicateMatch(source, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+        break;
+      case 'createMatch':
+        answer = await state.createMatch(2, NEW_MATCH, AT_END, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+        break;
+    }
+    return { answer, state };
+  } // End of function commitThenThrow()
+
+  it.each([
+    ['moveMatch', 'getDocument', 'an error'],
+    ['moveMatch', 'documentText', 'an error'],
+    ['moveMatch', 'getDocument', 'a value whose classification throws'],
+    ['moveMatch', 'documentText', 'a value whose classification throws'],
+    ['deleteMatch', 'getDocument', 'an error'],
+    ['deleteMatch', 'documentText', 'an error'],
+    ['deleteMatch', 'getDocument', 'a value whose classification throws'],
+    ['deleteMatch', 'documentText', 'a value whose classification throws'],
+    ['duplicateMatch', 'getDocument', 'an error'],
+    ['duplicateMatch', 'documentText', 'an error'],
+    ['duplicateMatch', 'getDocument', 'a value whose classification throws'],
+    ['duplicateMatch', 'documentText', 'a value whose classification throws'],
+    ['createMatch', 'getDocument', 'a value whose classification throws'],
+    ['createMatch', 'documentText', 'a value whose classification throws']
+  ] as const)(
+    'answers a committed %s as saved when its %s throws %s',
+    async (operation, thrower, thrown) => {
+      // **`2d-6-6c-2-notes.md` §5 items 2 and 7.** The transaction committed and
+      // the barrier was told so; then a read this window makes afterwards threw.
+      // A wrapper that lets that exception out — or that classifies it with a
+      // `classifyFailure` a hostile `code` getter can make throw — rejects its
+      // promise, and the panel draws a committed write as an error (D2).
+      const { answer, state } = await commitThenThrow(operation, thrower, thrown);
+
+      expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'failed' } });
+      expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('saved');
+      // The barrier closed on the settlement the commit established.
+      expect(state.writeInFlight(2)).toBe(false);
+    }
+  ); // End of the "post-commit throw" cases
+
+  it.each(['saveMatch', 'createMatch', 'moveMatch', 'duplicateMatch'] as const)(
+    'answers a committed %s as saved when the result’s moved getter throws (the review’s should-fix)',
+    async (operation) => {
+      // **Phase 2d-6-7a's review.** The shared helper's catch covers only what
+      // runs inside its thunk; a wrapper that read `answer.value.moved` (or the
+      // attribution's `committed`) before calling it let that getter's exception
+      // reject a committed write (D2).
+      const value = {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false
+      } as const;
+      const hostile = Object.defineProperty({ ...value }, 'moved', {
+        enumerable: true,
+        get: (): never => {
+          throw new Error('the moved getter threw');
+        }
+      }) as unknown as SaveResult;
+      const committed: CommandResult<SaveResult> = { ok: true, value: hostile };
+      const commands = scriptedCommands({
+        saves: [committed],
+        creates: [committed],
+        moves: [committed],
+        duplicates: [committed]
+      });
+      const state = createBrowserState(commands, () => undefined);
+      await state.open(null);
+      state.show({ kind: 'document', id: 2 });
+      await state.select(baseDocument().matches[0]!);
+      const source = baseDocument().matches[0]!.id;
+      let answer: MatchSaveAnswer;
+      switch (operation) {
+        case 'saveMatch':
+          answer = await state.saveMatch(source, editedDraft(), OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+          break;
+        case 'createMatch':
+          answer = await state.createMatch(2, NEW_MATCH, AT_END, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+          break;
+        case 'moveMatch':
+          answer = await state.moveMatch(source, null, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+          break;
+        case 'duplicateMatch':
+          answer = await state.duplicateMatch(source, OPEN_REVISION, NOTHING_ACKNOWLEDGED);
+          break;
+      }
+      expect(answer.kind).toBe('answered');
+      expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('saved');
+      expect(answer.kind === 'answered' ? answer.adoption.kind : null).toBe('failed');
+      expect(state.writeInFlight(2)).toBe(false);
+    }
+  ); // End of the "hostile moved getter" cases
+}); // End of the "committed operation whose follow-up read throws" suite
+
 describe('recovering a draft no reapply could resolve', () => {
   /**
    * An installation that puts the waiting form nowhere.
@@ -7657,9 +7820,18 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     state = await withTheSecondSnippetSelected(commands);
     armed = true;
 
-    await expect(
-      state.moveMatch(baseDocument().matches[0]!.id, null, 'rev-a', NOTHING_ACKNOWLEDGED)
-    ).rejects.toThrow('the re-read threw');
+    // **Answered, not rejected, since Phase 2d-6-7a**: a committed write is never
+    // afterwards reported as an error (D2), so the exception travels back as a
+    // `failed` adoption beside the `saved` outcome. Until then this case asserted
+    // the rejection — the defect `2d-6-6c-2-notes.md` §5 item 2 named.
+    const answer = await state.moveMatch(
+      baseDocument().matches[0]!.id,
+      null,
+      'rev-a',
+      NOTHING_ACKNOWLEDGED
+    );
+    expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'failed' } });
+    expect(answer.kind === 'answered' ? answer.result.outcome : null).toBe('saved');
 
     expect(state.writeInFlight(2)).toBe(false);
     expect(state.retainedObservationFor(2)).toBeNull();

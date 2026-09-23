@@ -88,6 +88,7 @@ import type {
   WorkspaceSummary
 } from '../ipc/types';
 import MatchMover from './MatchMover.svelte';
+import type { SurfaceBinding } from '../browser/surfaceReceivers';
 
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -115,6 +116,18 @@ const NOT_ADOPTED: InvalidationStatus = {
   kind: 'failed',
   failure: { kind: 'command', error: { code: 'unknownDocument', document: 2 } }
 };
+
+/**
+ * A binding whose two methods do nothing — the `reportReceiver` answer for a
+ * mount that drives no delivery (Phase 2d-6-7a made the prop required; the
+ * deliveries themselves are driven through the real pane in
+ * `DetailPane.test.ts`).
+ *
+ * @returns The inert binding.
+ */
+function inertBinding(): SurfaceBinding {
+  return { reportTarget: () => undefined, withdraw: () => undefined };
+} // End of function inertBinding()
 
 /**
  * One snippet of the file's own `matches:` list.
@@ -408,6 +421,7 @@ function mountMover(answers: readonly ScriptedAnswer[] = [], opened: Opened = {}
       },
       standingConflictFor: (document: DocumentId): ConflictSource | null =>
         standing.get(document) ?? null,
+      reportReceiver: inertBinding,
       close: (): void => {
         closes += 1;
       }
@@ -1247,6 +1261,7 @@ describe('a move panel over the real workspace state', () => {
         adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
         standingConflictFor: (document: DocumentId): ConflictSource | null =>
           state.standingConflictFor(document),
+        reportReceiver: inertBinding,
         close: (): void => undefined
       }
     });
@@ -1346,6 +1361,7 @@ describe('a move panel over the real workspace state', () => {
         adoptDiskVersion: (): DiskAdoptionOutcome => 'installed',
         standingConflictFor: (document: DocumentId): ConflictSource | null =>
           state.standingConflictFor(document),
+        reportReceiver: inertBinding,
         close: (): void => undefined
       }
     });

@@ -579,7 +579,8 @@ export interface ReconciliationWorkspace {
    * `void`, so nothing here learns whether a conflict was raised. Since Phase
    * 2d-6-6b the transition `DetailPane.svelte` registers hands the observation to
    * `BrowserState.observeExternalChange` for the editor, the new-snippet form and
-   * the recovery form, and is still a no-op for the other five kinds.
+   * the recovery form, and since Phase 2d-6-7a for the three operation panels; it
+   * is still a no-op for the other two kinds (the raw editor and restore).
    *
    * @param kind - Which kind of surface.
    * @returns Its transition, or `null` when no surface of that kind is live.

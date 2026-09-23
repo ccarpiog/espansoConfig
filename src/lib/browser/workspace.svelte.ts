@@ -1599,9 +1599,10 @@ export interface BrowserState {
    * coordinator's `tellTheSurfaceAbout` in `./observationTransitions.ts` calls the
    * `WriteSurfaceTransition` `DetailPane.svelte` registered, and that transition
    * calls this member for the editor, the new-snippet form and the recovery form,
-   * whose child-reported receivers the pane registers; for the other five kinds it
-   * is still a no-op (2d-6-7, 2d-6-8), so a delivery about a file only those have
-   * open reaches nobody.
+   * and since Phase 2d-6-7a for the deleter, the mover and the duplicator, whose
+   * child-reported receivers the pane registers; for the other two kinds it is
+   * still a no-op (2d-6-8), so a delivery about a file only those have open
+   * reaches nobody.
    *
    * **It registers, and it installs nothing.** A verdict that names a new origin
    * goes through the same private registration the six save wrappers use, at the
@@ -1655,8 +1656,9 @@ export interface BrowserState {
    * registry assembly in `DetailPane`. **Since Phase 2d-6-6b `DetailPane.svelte`
    * calls it**, through the roster in `./surfaceReceivers.ts`, for the editor, the
    * new-snippet form and the recovery form — over the file each names, or over
-   * every creator-eligible file while a form names none; the operation panels'
-   * receivers are 2d-6-7's and the raw editor's and restore's 2d-6-8's.
+   * every creator-eligible file while a form names none — and since Phase 2d-6-7a
+   * for the deleter, the mover and the duplicator, over the file each names; the
+   * raw editor's and restore's receivers are 2d-6-8's.
    *
    * **Entry 5, stated where the code cannot force it.** A settlement is published
    * synchronously from the lease's `close()`, which runs before the wrapper's own
@@ -2053,8 +2055,11 @@ export interface BrowserState {
    * `adoption` comes back `failed` beside the committed outcome. The save
    * succeeded; the window is out of step. Those are two facts and both survive.
    * Since Phase 2d-6-6c-2 the same holds for an **exception** thrown by the
-   * adoption or the re-read after a commit: it is caught and answered as a
-   * `failed` adoption beside the `saved` outcome, and the promise does not reject.
+   * adoption or the re-read after a commit, and for one whose classification
+   * throws: it is caught and answered as a `failed` adoption beside the `saved`
+   * outcome, and the promise does not reject. Since Phase 2d-6-7a that is one
+   * policy, `adoptAfterTheCommit`, shared by this method, `createMatch`,
+   * `moveMatch`, `deleteMatch` and `duplicateMatch`.
    *
    * **The base revision is the caller's and is forwarded unchanged**, which is the
    * last half of the 2c-3a-1 review's second finding and was closed at 2c-3a-2.
@@ -2264,7 +2269,9 @@ export interface BrowserState {
    * rather than left on screen describing bytes that are gone, and `adoption`
    * comes back `failed` beside the committed outcome. The duplicate succeeded;
    * the window is out of step. Those are two facts and both survive
-   * (`PROGRESS.md` D2).
+   * (`PROGRESS.md` D2). Since Phase 2d-6-7a the same holds for an exception
+   * thrown by the adoption or the re-read, as it does for
+   * {@link BrowserState.saveMatch}: the promise does not reject after a commit.
    *
    * **The base revision is the caller's and is forwarded unchanged**, exactly
    * as it is for the other writing wrappers: `baseRevisionOf` in
@@ -3227,7 +3234,8 @@ export function createBrowserState(
   // `writeSurfaces` below gives: a component owns its registration and removes it
   // through the function it was handed. **In production, since Phase 2d-6-6b**,
   // `DetailPane.svelte` registers the editor's, the new-snippet form's and the
-  // recovery form's receivers here; the other five kinds register none yet.
+  // recovery form's receivers here, and since Phase 2d-6-7a the deleter's, the
+  // mover's and the duplicator's; the raw editor and restore register none yet.
   const observationReceivers = new Map<DocumentId, Set<ReceiverRegistration>>();
   // **The delivery queue** — Phase 2d-6-1b's review, finding 2. A publication made
   // from inside a delivery (a receiver that calls `observeExternalChange` or the
@@ -6012,25 +6020,22 @@ export function createBrowserState(
             // `mayHaveWritten` path above keeps the default for the same reason:
             // an uncertain write cannot claim the reorder, and the sentence that
             // claims less wins.
-            const stale = await adoptTheDocumentOnDisk(
-              match.document,
-              match,
-              answer.value.moved,
-              answer.value.committed ? 'requestedMove' : 'externalChange'
+            //
+            // **Nothing thrown after the commit may turn it into an error** — Phase
+            // 2d-6-7a; `adoptAfterTheCommit` is the one post-commit policy, and a
+            // failure travels back beside the committed outcome, never in place of
+            // it (`PROGRESS.md` D2).
+            // Every read of the result that feeds the adoption runs inside the thunk, so
+            // the helper's catch covers a getter that throws (Phase 2d-6-7a's review).
+            const result = answer.value;
+            adoption = await adoptAfterTheCommit(match.document, () =>
+              adoptTheDocumentOnDisk(
+                match.document,
+                match,
+                result.moved,
+                result.committed ? 'requestedMove' : 'externalChange'
+              )
             );
-            if (stale === null) {
-              adoption = { kind: 'done' };
-            } else {
-              // **The commit happened and this window could not read the file back.**
-              // Everything it holds for that file was minted from bytes that have
-              // been replaced, so it is dropped rather than left on screen: a stale
-              // projection is not a smaller problem than an unprojected file, it is
-              // the same problem told as a fact. The failure travels back beside the
-              // committed outcome, never in place of it (`PROGRESS.md` D2).
-              forgetTheReplacedDocument(match.document);
-              adoption = { kind: 'failed', failure: stale };
-            }
-            await readFileText();
           }
         } else if (answer.value.outcome === 'conflict') {
           // **A conflict installs nothing here, and that is 2c-4a-2's central
@@ -6138,63 +6143,24 @@ export function createBrowserState(
           if (outOfDate) {
             forgetFileText();
             // **Nothing thrown after the commit may turn it into an error** — Phase
-            // 2d-6-6c-2, the shape 2d-6-6c-1's review fixed in `createMatch`. The
-            // transaction has written and the barrier has been told so above; an
-            // exception out of the adoption or the re-read below used to reject
-            // this promise, and the editor then drew a committed write as a save
-            // that did not succeed (`PROGRESS.md` D2). The exception is caught here
-            // and travels back as the adoption's failure, beside the `saved`
-            // outcome, never in place of it.
-            try {
-              // **The adoption the consult's Q6 asks for**, performed here so that a
-              // caller cannot obtain this result without it. `moved` is the
-              // snippet's identity in the new revision, and the selection follows
-              // it — but only when the selection is still the snippet that was
-              // saved, which is the review's fourth finding: a person who clicked
-              // another snippet while the save was in flight must not be dragged
-              // back to this one.
-              const stale = await adoptTheDocumentOnDisk(id.document, id, answer.value.moved);
-              if (stale === null) {
-                adoption = { kind: 'done' };
-              } else {
-                // **The commit happened and this window could not read the file
-                // back.** Everything it holds for that file was minted from bytes
-                // that have been replaced, so it is dropped rather than left on
-                // screen: a stale projection is not a smaller problem than an
-                // unprojected file, it is the same problem told as a fact. The
-                // failure travels back beside the committed outcome, never in place
-                // of it (`PROGRESS.md` D2).
-                forgetTheReplacedDocument(id.document);
-                adoption = { kind: 'failed', failure: stale };
-              }
-              await readFileText();
-            } catch (raw: unknown) {
-              // Thrown before the adoption answered: nothing of the new bytes was
-              // installed, so the replaced projection is dropped, as for a read that
-              // failed. Thrown by the re-read after it: the projection is the new
-              // one and stays. Either way the window is out of step with the file,
-              // which is what a `failed` adoption beside a `saved` outcome says; a
-              // failure the adoption already answered is kept rather than replaced.
-              if (adoption.kind === 'notOwed') {
-                forgetTheReplacedDocument(id.document);
-              }
-              if (adoption.kind !== 'failed') {
-                // **The classification is guarded too** — Phase 2d-6-6c-2's review.
-                // `classifyFailure` reads `code` off the thrown value, and a getter
-                // that throws would escape this catch and reject the committed save
-                // after all. Its fallback classifies a fixed string and never looks
-                // at the thrown value again.
-                let failure: IpcFailure;
-                try {
-                  failure = classifyFailure(raw);
-                } catch {
-                  failure = classifyFailure(
-                    'the exception after a committed save could not be classified'
-                  );
-                }
-                adoption = { kind: 'failed', failure };
-              }
-            } // End of the post-commit adoption and re-read
+            // 2d-6-6c-2, the shape 2d-6-6c-1's review fixed in `createMatch`, and
+            // since Phase 2d-6-7a the one policy `adoptAfterTheCommit` holds for
+            // every match-level wrapper: an exception out of the adoption or the
+            // re-read, and one out of classifying it, travels back as the
+            // adoption's failure beside the `saved` outcome (`PROGRESS.md` D2).
+            //
+            // **The adoption the consult's Q6 asks for**, performed here so that a
+            // caller cannot obtain this result without it. `moved` is the snippet's
+            // identity in the new revision, and the selection follows it — but only
+            // when the selection is still the snippet that was saved, which is the
+            // review's fourth finding: a person who clicked another snippet while
+            // the save was in flight must not be dragged back to this one.
+            // Every read of the result that feeds the adoption runs inside the thunk, so
+            // the helper's catch covers a getter that throws (Phase 2d-6-7a's review).
+            const result = answer.value;
+            adoption = await adoptAfterTheCommit(id.document, () =>
+              adoptTheDocumentOnDisk(id.document, id, result.moved)
+            );
           }
         } else if (answer.value.outcome === 'conflict') {
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
@@ -6290,42 +6256,19 @@ export function createBrowserState(
             // barrier has been told so above; an exception out of the adoption or the
             // re-read below used to reject this promise, and the form then settled a
             // committed create as a failed send that may have written (`PROGRESS.md`
-            // D2). The exception is caught here and travels back as the adoption's
-            // failure, beside the `saved` outcome, never in place of it. What the
-            // catch does not do is make the window's own state right: the file is
-            // dropped as it is for a read that failed, so nothing minted from the
-            // replaced bytes stays on screen.
-            try {
-              const stale = await adoptTheCreatedSnippet(
-                document,
-                heldBefore,
-                answer.value.moved
-              );
-              if (stale === null) {
-                adoption = { kind: 'done' };
-              } else {
-                // The commit happened and this window could not read the file back, so
-                // everything it holds for that file was minted from bytes that have
-                // been replaced. It is dropped rather than left on screen, and the
-                // failure travels back beside the committed outcome (`PROGRESS.md` D2).
-                forgetTheReplacedDocument(document);
-                adoption = { kind: 'failed', failure: stale };
-              }
-              await readFileText();
-            } catch (raw: unknown) {
-              // Thrown before the adoption answered: nothing of the new bytes was
-              // installed, so the replaced projection is dropped, as for a read that
-              // failed. Thrown by the re-read after it: the projection is the new one
-              // and stays. Either way the window is out of step with the file, which
-              // is what a `failed` adoption beside a `saved` outcome says; a failure
-              // the adoption already answered is kept rather than replaced.
-              if (adoption.kind === 'notOwed') {
-                forgetTheReplacedDocument(document);
-              }
-              if (adoption.kind !== 'failed') {
-                adoption = { kind: 'failed', failure: classifyFailure(raw) };
-              }
-            }
+            // D2). The exception is caught and travels back as the adoption's
+            // failure, beside the `saved` outcome, never in place of it — since
+            // Phase 2d-6-7a through `adoptAfterTheCommit`, whose classification of
+            // the thrown value is guarded as well (`2d-6-6c-2-notes.md` §5 item 7).
+            // What the catch does not do is make the window's own state right: the
+            // file is dropped as it is for a read that failed, so nothing minted
+            // from the replaced bytes stays on screen.
+            // Every read of the result that feeds the adoption runs inside the thunk, so
+            // the helper's catch covers a getter that throws (Phase 2d-6-7a's review).
+            const result = answer.value;
+            adoption = await adoptAfterTheCommit(document, () =>
+              adoptTheCreatedSnippet(document, heldBefore, result.moved)
+            );
           }
         } else if (answer.value.outcome === 'conflict') {
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
@@ -6403,14 +6346,13 @@ export function createBrowserState(
           const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
           if (outOfDate) {
             forgetFileText();
-            const stale = await adoptAfterTheDeletion(id.document, heldBefore);
-            if (stale === null) {
-              adoption = { kind: 'done' };
-            } else {
-              forgetTheReplacedDocument(id.document);
-              adoption = { kind: 'failed', failure: stale };
-            }
-            await readFileText();
+            // **Nothing thrown after the commit may turn it into an error** — Phase
+            // 2d-6-7a: `adoptAfterTheCommit` answers an exception out of the
+            // adoption or the re-read as a `failed` adoption beside the `saved`
+            // outcome (`PROGRESS.md` D2).
+            adoption = await adoptAfterTheCommit(id.document, () =>
+              adoptAfterTheDeletion(id.document, heldBefore)
+            );
           }
         } else if (answer.value.outcome === 'conflict') {
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
@@ -6541,24 +6483,22 @@ export function createBrowserState(
             // for a commit; a `committed: false` here means the revision moved on
             // its own, which is another writer's doing, and the external
             // sentences are the accurate ones there.
-            const stale = await adoptAfterTheDuplicate(
-              match.document,
-              intent,
-              answer.value.moved,
-              answer.value.committed ? 'requestedDuplicate' : 'externalChange'
+            //
+            // **Nothing thrown after the commit may turn it into an error** — Phase
+            // 2d-6-7a: `adoptAfterTheCommit` answers an exception out of the
+            // adoption or the re-read as a `failed` adoption beside the `saved`
+            // outcome (`PROGRESS.md` D2).
+            // Every read of the result that feeds the adoption runs inside the thunk, so
+            // the helper's catch covers a getter that throws (Phase 2d-6-7a's review).
+            const result = answer.value;
+            adoption = await adoptAfterTheCommit(match.document, () =>
+              adoptAfterTheDuplicate(
+                match.document,
+                intent,
+                result.moved,
+                result.committed ? 'requestedDuplicate' : 'externalChange'
+              )
             );
-            if (stale === null) {
-              adoption = { kind: 'done' };
-            } else {
-              // **The commit happened and this window could not read the file
-              // back.** Everything it holds for that file was minted from bytes
-              // that have been replaced, so it is dropped rather than left on
-              // screen, and the failure travels back beside the committed
-              // outcome, never in place of it (`PROGRESS.md` D2).
-              forgetTheReplacedDocument(match.document);
-              adoption = { kind: 'failed', failure: stale };
-            }
-            await readFileText();
           }
         } else if (answer.value.outcome === 'conflict') {
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
@@ -7362,6 +7302,75 @@ export function createBrowserState(
     // that filled it.
     return held;
   } // End of function forgetTheReplacedDocument()
+
+  /**
+   * The adoption and the re-read a committed match-level write owes, answered as
+   * an {@link InvalidationStatus} and **never as an exception** — Phase 2d-6-7a,
+   * the one post-commit policy of `saveMatch`, `createMatch`, `moveMatch`,
+   * `deleteMatch` and `duplicateMatch` (`2d-6-6c-2-notes.md` §5 items 2 and 7).
+   *
+   * The transaction has written and its caller has already told the barrier so.
+   * An exception out of the adoption or the re-read used to reject the wrapper's
+   * promise, and a panel then drew a committed write as an error (`PROGRESS.md`
+   * D2). Here it travels back as a `failed` adoption, beside the `saved` outcome:
+   *
+   * - an adoption that answers a failure drops the replaced projection, because
+   *   everything this window holds for that file was minted from bytes that have
+   *   been replaced;
+   * - an exception thrown before the adoption answered drops it for the same
+   *   reason; one thrown by the re-read after it keeps the new projection;
+   * - a failure the adoption already answered is kept, never replaced;
+   * - **the classification is guarded too** (Phase 2d-6-6c-2's review):
+   *   `classifyFailure` reads `code` off the thrown value, so a getter that
+   *   throws would escape the catch. Its fallback classifies a fixed string and
+   *   never looks at the thrown value again.
+   *
+   * **What this forces**: no value thrown by `adopt` or by `readFileText` can
+   * reject the caller. **What it does not force**: that `forgetTheReplacedDocument`,
+   * which runs inside the catch, never throws — no type says so — and that a
+   * caller routes its adoption through here rather than awaiting one bare.
+   *
+   * @param document - The file the commit wrote.
+   * @param adopt - The wrapper's own adoption; answers the re-read's failure, or
+   *   `null` when the new projection was installed.
+   * @returns `done`, or `failed` with the failure the window could not recover
+   *   from.
+   */
+  async function adoptAfterTheCommit(
+    document: DocumentId,
+    adopt: () => Promise<IpcFailure | null>
+  ): Promise<InvalidationStatus> {
+    let adoption: InvalidationStatus = { kind: 'notOwed' };
+    try {
+      const stale = await adopt();
+      if (stale === null) {
+        adoption = { kind: 'done' };
+      } else {
+        // **The commit happened and this window could not read the file back.**
+        // A stale projection is not a smaller problem than an unprojected file,
+        // it is the same problem told as a fact, so it is dropped.
+        forgetTheReplacedDocument(document);
+        adoption = { kind: 'failed', failure: stale };
+      }
+      await readFileText();
+    } catch (raw: unknown) {
+      if (adoption.kind === 'notOwed') {
+        forgetTheReplacedDocument(document);
+      }
+      if (adoption.kind !== 'failed') {
+        let failure: IpcFailure;
+        try {
+          failure = classifyFailure(raw);
+        } catch {
+          failure = classifyFailure(
+            'the exception after a committed save could not be classified'
+          );
+        }
+        adoption = { kind: 'failed', failure };
+      }
+    } // End of the post-commit adoption and re-read
+    return adoption;
+  } // End of function adoptAfterTheCommit()
 
   /**
    * Forgets a replaced document and reads it again.

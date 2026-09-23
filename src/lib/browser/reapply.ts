@@ -53,7 +53,10 @@
  *    since Phase 2d-6-4, the mover's — both from the same table the subject's row
  *    is read from.
  * 3. **The adoption.** {@link adoptForReapply} spends the conflict's one
- *    authorization through the {@link AdoptTheDiskVersion} its caller passes,
+ *    authorization through the {@link AdoptTheDiskVersion} its caller passes
+ *    (the editor's, creator's, recovery form's and three operations' reapplies
+ *    spell its two steps out themselves since Phase 2d-6-7a, with a last look
+ *    between them),
  *    which on all five match surfaces is `BrowserState.adoptDiskVersion` — the
  *    existing door, whose existing authorization, spend, origin and
  *    projected-document checks precede every successful answer, whose
@@ -91,9 +94,13 @@
  * `BrowserState.adoptDiskVersion` are all exported, so the two halves can be
  * composed directly and TypeScript will not object; what holds is the
  * implementation fact that **every reapply transition in this repository that
- * adopts anything takes this route** — the five match surfaces, the raw editor's
- * and restore's having no adoption function at all — and each surface's own suite
- * is what keeps it that way. What is closed regardless of the route taken to that door — by a
+ * adopts anything takes the same two steps this function composes** — since
+ * Phase 2d-6-6b (editor, creator, recovery) and 2d-6-7a (delete, move,
+ * duplicate) each mints with `reapplyAuthorizationFor` and calls its `adopt`
+ * itself, so that a last look at the installed session can sit between the two,
+ * and none calls this function any more; the raw editor's and restore's have no
+ * adoption function at all — and each surface's own suite is what keeps it that
+ * way. What is closed regardless of the route taken to that door — by a
  * run-time check inside it rather than by a type — is narrower: no adoption can be
  * had for a conflict the window never registered, because
  * `BrowserState.adoptDiskVersion` looks the conflict's wire value up in its own

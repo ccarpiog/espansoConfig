@@ -279,11 +279,12 @@
  * replay. The reader is required at every one of them since Phase 2d-6-6a, and its
  * doc says what no type can force about it.
  *
- * **No component registers this receiver yet.** 2d-6-7 wires
- * `BrowserState.registerObservationReceiver` to it through `DetailPane` (2d-6-6b
- * wired the editor's, the new-snippet form's and the recovery form's); until
- * then every case that drives it is a model test, and `MatchMover.svelte` draws
- * neither the external conflict nor the two notices (2d-6-7's).
+ * **Registered since Phase 2d-6-7a.** `MatchMover.svelte` reports a receiver that
+ * installs this module's observation transition over the session it holds, and
+ * `DetailPane` registers it through `BrowserState.registerObservationReceiver`
+ * (`./surfaceReceivers.ts`), as 2d-6-6b did for the editor, the new-snippet form
+ * and the recovery form; `MatchMover.svelte` does not yet draw the external conflict
+ * or the two notices (Phase 2d-6-7b's).
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -345,7 +346,6 @@ import {
   type ObservationDelivery
 } from './observationDelivery';
 import {
-  adoptForReapply,
   anchorCorrespondence,
   anchorResolution,
   correspondenceRowFor,
@@ -381,7 +381,8 @@ import {
   type ConflictModel,
   type ExternalConflictModel,
   type SaveOutcomeMessage,
-  type SaveOutcomeModel
+  type SaveOutcomeModel,
+  reapplyAuthorizationFor
 } from './saveOutcome';
 
 /**
@@ -861,7 +862,7 @@ export interface MatchMoveSession {
    * session whose receiver was unregistered before the window decided is never
    * told and stays blocked until closed — nor that a wait it was *not* told of,
    * because no receiver was registered when the window held the reading, is
-   * recorded at all; both are facts about registration, which is 2d-6-7's. What
+   * recorded at all; both are facts about registration (wired since 2d-6-7a). What
    * it cannot see is a reading the barrier coalesced away without announcing it.
    */
   readonly awaitingReconciliation: ReadonlyMap<DocumentId, ExternalConflictObservation>;
@@ -2153,7 +2154,7 @@ export function reloadTheDiskVersion(
  * **The session's receiver, as a value**, in the shape `applyObservation` in
  * `./matchEditor.ts` established: a component registers a function through
  * `BrowserState.registerObservationReceiver` that calls this with the envelope and
- * installs what comes back (the wiring is 2d-6-7's), and the decision is here so a
+ * installs what comes back (wired since Phase 2d-6-7a), and the decision is here so a
  * suite can drive every arm without a window. It never re-arbitrates and reads
  * none of the window's tables.
  *
@@ -2702,11 +2703,24 @@ function anchorOfEvidence(
  * refused `observationRetained` or `writeOutcomeUnknown` when the installed
  * session now carries either, and `supersededEvidence` when the conflict it
  * shows is no longer the one being reapplied; otherwise the rebuilt session
- * carries the **installed** session's waits forward, for `rebuiltOver`'s reason
+ * carries the installed session's waits forward (the **settled** one's since 2d-6-7a, below), for `rebuiltOver`'s reason
  * in `./matchEditor.ts` — its own file's entry is absent, because the recheck
  * comes first, and the map is carried so a wait about another file survives the
  * rebuild. The reader is required (Phase 2d-6-6a); one answering a capture asks the
  * recheck of that capture ({@link ReadTheInstalledSession}).
+ *
+ * **Since Phase 2d-6-7a the looks bracket every caller-controlled read**
+ * (2d-6-6b's review, its one blocker, which that phase's §7 item 2 left
+ * unaudited here): the three facts are read off the installed session, the
+ * authorization is minted, and one last look follows them — a session displaced
+ * while they were read is answered `supersededEvidence` and the window is not
+ * asked. **And once more after the adoption**, which reads the observation's
+ * projection: a session that now shows another conflict is not rebuilt over
+ * (`supersededEvidence`), the rebuilt session carries the **settled** session's
+ * waits — so a wait recorded during the adoption keeps its ordinary send
+ * refused — and the answer is built before a last look, so a session displaced
+ * while the settled one was read is answered `supersededEvidence`. What no type
+ * forces is that the reader is honest.
  *
  * **The standing-origin guard is a parameter, and `null` is accepted for one stated
  * reason** — `reapplyToDiskVersion` in `./matchEditor.ts`'s: `MatchMover.svelte` has handed the live
@@ -2787,9 +2801,10 @@ export function reapplyToDiskVersion(
   if (refusal !== null && refusal !== 'alreadyThere') {
     return { kind: 'manualResolution', obstacle: { kind: 'moveRefused', reason: refusal } };
   }
-  // **The installed session, read once, after the last caller-controlled read
-  // and immediately before the spend.** Nothing caller-controlled runs between
-  // this read and the door.
+  // **The installed session, read after the last caller-controlled read of the
+  // reapply's own**; its three facts below are read off it, and a last look
+  // follows them, before the door (Phase 2d-6-7a — 2d-6-6b's review, its one
+  // blocker, carried here by that phase's §7 item 2).
   const installed = current();
   if (installed.uncertaintyUnresolved) {
     return { kind: 'manualResolution', obstacle: { kind: 'writeOutcomeUnknown' } };
@@ -2800,16 +2815,40 @@ export function reapplyToDiskVersion(
   if (conflictOf(installed)?.source !== entry.conflict.source) {
     return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
   }
-  if (adoptForReapply(entry.conflict, adopt) === 'refused') {
+  // **Everything the spend needs, taken now, then one last look**: the three
+  // reads above are of the installed session, which is caller data, and a getter
+  // or `Proxy` trap among them can displace it. The authorization reads the
+  // conflict's origin, so it is minted before the look too; after it nothing
+  // caller-controlled runs before the door.
+  const adopted = entry.conflict;
+  const authorization = reapplyAuthorizationFor(adopted);
+  if (current() !== installed) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  if (adopt(adopted, authorization) === 'refused') {
     return { kind: 'adoptionRefused' };
   }
-  const rebuilt: MatchMoveSession = {
-    ...chosen,
-    awaitingReconciliation: installed.awaitingReconciliation
-  };
-  return refusal === 'alreadyThere'
-    ? { kind: 'alreadySatisfied', session: rebuilt }
-    : { kind: 'reapplied', session: rebuilt };
+  // **Read again after the adoption**, which read caller data of its own: a
+  // session that now shows another conflict is not rebuilt over, and the same
+  // conflict with a wait recorded during the adoption hands the rebuilt session
+  // that wait, so its ordinary send stays refused.
+  const settled = current();
+  if (conflictOf(settled)?.source !== entry.conflict.source) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  const waiting = settled.awaitingReconciliation;
+  const rebuilt: MatchMoveSession = { ...chosen, awaitingReconciliation: waiting };
+  const result: MatchMoveReapply =
+    refusal === 'alreadyThere'
+      ? { kind: 'alreadySatisfied', session: rebuilt }
+      : { kind: 'reapplied', session: rebuilt };
+  // **Built first, then one last look at the installed session**: every read of
+  // the settled session above is caller data, and a session displaced during
+  // them is not rebuilt over; nothing caller-controlled runs after the look.
+  if (current() !== settled) {
+    return { kind: 'manualResolution', obstacle: { kind: 'supersededEvidence' } };
+  }
+  return result;
 } // End of function reapplyToDiskVersion()
 
 /**

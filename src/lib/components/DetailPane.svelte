@@ -733,10 +733,10 @@
    * reads the roster at the call**, not at registration, so a kind whose receiver
    * is displaced or withdrawn stops arbitrating at once.
    *
-   * **It is still a no-op for the five kinds whose receivers are not reported**
-   * — the three operation panels (2d-6-7) and the raw editor and restore
-   * (2d-6-8) — and for a receiving kind with no live binding. Arbitrating there
-   * would register a standing origin no session is told of, so the coordinator's
+   * **It is still a no-op for the two kinds whose receivers are not reported**
+   * — the raw editor and restore (2d-6-8); the three operation panels report
+   * theirs since Phase 2d-6-7a — and for a receiving kind with no live binding.
+   * Arbitrating there would register a standing origin no session is told of, so the coordinator's
    * own effect is what remains: the file is marked stale and nothing is reloaded
    * under the surface; the save command's revision check is what refuses a stale
    * write. That no-binding state is not reachable through this pane — every
@@ -1351,6 +1351,7 @@
         browser.deleteMatch(id, baseRevision, acknowledgement)}
       {adoptDiskVersion}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
+      reportReceiver={bindReceiver('matchDeleter')}
       close={() => (deletingMatch = null)}
     />
   {:else if movingMatch !== null}
@@ -1372,6 +1373,7 @@
       reload={(document) => browser.rereadDocument(document)}
       {adoptDiskVersion}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
+      reportReceiver={bindReceiver('matchMover')}
       close={() => (movingMatch = null)}
     />
   {:else if duplicatingMatch !== null}
@@ -1394,6 +1396,7 @@
       reload={(document) => browser.rereadDocument(document)}
       {adoptDiskVersion}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
+      reportReceiver={bindReceiver('matchDuplicator')}
       close={() => (duplicatingMatch = null)}
     />
   {:else if creating}

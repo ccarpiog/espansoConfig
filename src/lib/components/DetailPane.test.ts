@@ -270,6 +270,8 @@ interface PaneScript {
   readonly views?: readonly DocumentView[];
   /** What `save_match` answers, called once per save. */
   readonly saveMatch?: () => Promise<CommandResult<SaveResult>>;
+  /** What `delete_match` answers, called once per deletion (Phase 2d-6-7a). */
+  readonly deleteMatch?: () => Promise<CommandResult<SaveResult>>;
   /** The batches the drain answers, in order; past the end it refuses. */
   readonly batches?: CommandResult<ReconciliationBatch>[];
 }
@@ -331,7 +333,10 @@ function scriptedCommands(
         script.saveMatch === undefined ? refusal : script.saveMatch()
     ),
     createMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
-    deleteMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+    deleteMatch: vi.fn(
+      async (): Promise<CommandResult<SaveResult>> =>
+        script.deleteMatch === undefined ? refusal : script.deleteMatch()
+    ),
     duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     saveRawDocument: vi.fn(
       async (
@@ -2098,6 +2103,278 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
     pane.stop();
   }); // End of the "reapply handler order" case
 }); // End of the "delivery host" suite
+
+/**
+ * The projection of `match/a.yml` with **two** snippets — Phase 2d-6-7a.
+ *
+ * A file of one snippet refuses every deletion (`lastSnippet`) and offers a move
+ * no destination, so the operation panels' delivery cases need a second item in
+ * the same sequence. Same revision as {@link documentA}, so the observation the
+ * drain carries is about the parse the panels opened over.
+ *
+ * @returns The document view.
+ */
+function documentAWithTwo(): DocumentView {
+  return makeDocument({
+    id: 1,
+    relativePath: 'match/a.yml',
+    revision: 'a'.repeat(64),
+    matches: [
+      makeMatch({
+        node: 10,
+        document: 1,
+        revision: 'a'.repeat(64),
+        trigger: ':a',
+        replace: 'ay',
+        path: matchListPath(0)
+      }),
+      makeMatch({
+        node: 11,
+        document: 1,
+        revision: 'a'.repeat(64),
+        trigger: ':a2',
+        replace: 'ay2',
+        path: matchListPath(1)
+      })
+    ]
+  });
+} // End of function documentAWithTwo()
+
+/** The three operation kinds this suite drives, as the pane's registry names them. */
+type OperationKind = 'matchDeleter' | 'matchMover' | 'matchDuplicator';
+
+/** How a case reaches one operation panel and tells whether it may still send. */
+interface OperationWalk {
+  /** The pane's control that opens the panel. */
+  readonly open: TranslationKey;
+  /** The panel's own close control. */
+  readonly close: TranslationKey;
+  /**
+   * Brings the panel to the point where its send is offered and enabled.
+   *
+   * @param target - Where the pane was mounted.
+   */
+  arm(target: HTMLElement): void;
+  /**
+   * Whether the panel's send is offered and enabled now.
+   *
+   * @param target - Where the pane was mounted.
+   * @returns `true` while a person could press it.
+   */
+  mayStillSend(target: HTMLElement): boolean;
+  /** The command the send would reach. */
+  readonly command: 'deleteMatch' | 'moveMatch' | 'duplicateMatch';
+}
+
+/**
+ * The button labelled with one key's English rendering, or `null` when none is
+ * drawn.
+ *
+ * @param target - Where the pane was mounted.
+ * @param key - The label's key.
+ * @returns The button, or `null`.
+ */
+function maybeControl(target: HTMLElement, key: TranslationKey): HTMLButtonElement | null {
+  const label = DICTIONARIES.en[key];
+  return (
+    [...target.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent?.trim() === label
+    ) ?? null
+  );
+} // End of function maybeControl()
+
+/**
+ * Whether a control is drawn and enabled.
+ *
+ * @param target - Where the pane was mounted.
+ * @param key - The label's key.
+ * @returns `true` when a person could press it.
+ */
+function offered(target: HTMLElement, key: TranslationKey): boolean {
+  const found = maybeControl(target, key);
+  return found !== null && !found.disabled;
+} // End of function offered()
+
+/** The walk for each operation panel. */
+const OPERATIONS: Record<OperationKind, OperationWalk> = {
+  matchDeleter: {
+    open: 'browser.matchDeletion.open',
+    close: 'browser.matchDeletion.close',
+    // The panel opens with the question already asked (`requestDelete`).
+    arm: () => undefined,
+    mayStillSend: (target) => offered(target, 'browser.matchDeletion.confirm'),
+    command: 'deleteMatch'
+  },
+  matchMover: {
+    open: 'browser.matchMove.open',
+    close: 'browser.matchMove.close',
+    arm: (target) => {
+      control(target, 'browser.matchMove.position.end').click();
+      flushSync();
+    },
+    mayStillSend: (target) => offered(target, 'browser.matchMove.move'),
+    command: 'moveMatch'
+  },
+  matchDuplicator: {
+    open: 'browser.matchDuplication.open',
+    close: 'browser.matchDuplication.close',
+    arm: () => undefined,
+    mayStillSend: (target) => offered(target, 'browser.matchDuplication.duplicate'),
+    command: 'duplicateMatch'
+  }
+};
+
+describe('the pane as a delivery host for the operation panels — Phase 2d-6-7a', () => {
+  // **Through the real registry and the real coordinator boundary**, as the
+  // Phase 2d-6-6b suite above: each case opens its panel through the pane's own
+  // control, starts the lifecycle over a finite drain queue counted exactly, and
+  // wakes the window. What these cases assert is what 2d-6-7a wires — the
+  // registration, the envelope, the send withdrawn — and not the sentences the
+  // panels draw about the conflict, which are Phase 2d-6-7b's.
+
+  it.each(['matchDeleter', 'matchMover', 'matchDuplicator'] as const)(
+    'an open %s is delivered its file’s change, and its send is withdrawn',
+    async (kind) => {
+      expectedDrains = 3;
+      const events = paneEvents();
+      const pane = await mountPane(
+        false,
+        {
+          views: [documentAWithTwo(), documentB()],
+          batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])]
+        },
+        events.source
+      );
+      const walk = OPERATIONS[kind];
+      const log = watchDeliveries(pane.state);
+      await pane.state.select(snippetOf(pane.state, 1));
+      flushSync();
+      control(pane.target, walk.open).click();
+      flushSync();
+      walk.arm(pane.target);
+      expect(registered(pane.state)).toEqual([
+        { kind, target: { kind: 'document', document: 1 } }
+      ]);
+      expect(log.live()).toEqual([1]);
+      expect(walk.mayStillSend(pane.target)).toBe(true);
+
+      events.wake(5, 5);
+      await settleWake();
+
+      // **One decision, to the one registration over the file**, and the
+      // origin the window now holds is the external change.
+      expect(log.delivered.map((one) => [one.document, one.delivery.verdict.kind])).toEqual([
+        [1, 'raised']
+      ]);
+      expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+      // **The send is withdrawn** — the session the receiver installed refuses it.
+      expect(walk.mayStillSend(pane.target)).toBe(false);
+      // Protected rather than reloaded under the panel, and nothing was sent.
+      expect(pane.state.externalDocumentStatus(1)).toEqual({ kind: 'stale' });
+      expect(pane.commands.reloadDocument).not.toHaveBeenCalled();
+      expect(pane.commands[walk.command]).not.toHaveBeenCalled();
+      pane.stop();
+    }
+  ); // End of the "operation panel delivered" case
+
+  it.each(['matchDeleter', 'matchMover', 'matchDuplicator'] as const)(
+    'never hands a reopened %s what its previous instance was told',
+    async (kind) => {
+      expectedDrains = 4;
+      const events = paneEvents();
+      const pane = await mountPane(
+        false,
+        {
+          views: [documentAWithTwo(), documentB()],
+          batches: [
+            batch(0),
+            batch(0),
+            batch(5, [changed(5, 1, 'match/a.yml')]),
+            batch(6, [changed(6, 1, 'match/a.yml', 'd'.repeat(64))])
+          ]
+        },
+        events.source
+      );
+      const walk = OPERATIONS[kind];
+      const log = watchDeliveries(pane.state);
+      await pane.state.select(snippetOf(pane.state, 1));
+      flushSync();
+      control(pane.target, walk.open).click();
+      flushSync();
+      events.wake(5, 5);
+      await settleWake();
+      walk.arm(pane.target);
+      expect(walk.mayStillSend(pane.target)).toBe(false);
+
+      control(pane.target, walk.close).click();
+      flushSync();
+      expect(log.live()).toEqual([]);
+      expect(registered(pane.state)).toEqual([]);
+      control(pane.target, walk.open).click();
+      flushSync();
+      walk.arm(pane.target);
+      // **A fresh session**: the old instance's delivery did not follow it.
+      expect(walk.mayStillSend(pane.target)).toBe(true);
+      expect(log.live()).toEqual([1]);
+
+      events.wake(5, 6);
+      await settleWake();
+      // The first registration was told once and never again; only the second —
+      // the reopened panel's — was told of the later reading.
+      expect(log.delivered.map((one) => one.registration)).toEqual([0, 1]);
+      expect(walk.mayStillSend(pane.target)).toBe(false);
+      expect(pane.commands[walk.command]).not.toHaveBeenCalled();
+      pane.stop();
+    }
+  ); // End of the "reopened operation panel" case
+
+  it('lands a settlement after the deletion it settles, in the order it was decided', async () => {
+    expectedDrains = 3;
+    const events = paneEvents();
+    let answer: ((value: CommandResult<SaveResult>) => void) | null = null;
+    const pane = await mountPane(
+      false,
+      {
+        views: [documentAWithTwo(), documentB()],
+        deleteMatch: () =>
+          new Promise<CommandResult<SaveResult>>((resolve) => {
+            answer = resolve;
+          }),
+        batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])]
+      },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+    control(pane.target, 'browser.matchDeletion.open').click();
+    flushSync();
+    control(pane.target, 'browser.matchDeletion.confirm').click();
+    await settle();
+    expect(pane.commands.deleteMatch).toHaveBeenCalledTimes(1);
+
+    // **Arrives while the deletion is in flight**: the barrier holds it (ruling
+    // 27), and the receiver records the wait inside the session.
+    events.wake(5, 5);
+    await settleWake();
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['retained']);
+
+    // The command refuses: nothing was written, so the settlement arbitrates the
+    // held reading and publishes it — before the deletion's own continuation.
+    const settleDeletion = answer as ((value: CommandResult<SaveResult>) => void) | null;
+    settleDeletion?.({ ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } });
+    await settleWake();
+
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['retained', 'raised']);
+    // **Entry 5**: the continuation did not overwrite what the settlement
+    // delivered — the deleter ends holding the external conflict, and asks nothing.
+    expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+    expect(OPERATIONS.matchDeleter.mayStillSend(pane.target)).toBe(false);
+    expect(maybeControl(pane.target, 'browser.matchDeletion.request')).toBeNull();
+    expect(pane.commands.deleteMatch).toHaveBeenCalledTimes(1);
+    pane.stop();
+  }); // End of the "deletion settlement lands in order" case
+}); // End of the "delivery host for the operation panels" suite
 
 /**
  * The text one element of the pane draws, insisted upon — Phase 2d-6-6c-1.

@@ -7,8 +7,10 @@
  *
  * The **parent's binding record** the consult's Q1 rules: "put the receiver,
  * instance token and registry lease together in the parent's binding record".
- * A child component — `MatchEditor.svelte`, `MatchCreator.svelte`, or the
- * `RecoveryPanel.svelte` either of them mounts — reports the receiver that
+ * A child component — `MatchEditor.svelte`, `MatchCreator.svelte`, the
+ * `RecoveryPanel.svelte` either of them mounts, and since Phase 2d-6-7a
+ * `MatchDeleter.svelte`, `MatchMover.svelte` and `MatchDuplicator.svelte` —
+ * reports the receiver that
  * applies an envelope to its own session through a required callback prop
  * ({@link BindObservationReceiver}); `DetailPane.svelte` hands that prop down,
  * keeps one {@link ReceiverRoster}, and asks it to follow the pane's exhaustive
@@ -17,10 +19,11 @@
  * returns each registration when the surface closes, moves, or its component
  * is replaced.
  *
- * **Three kinds receive, and the other five do not yet.** The editor, the creator
- * and the recovery form are this step's ({@link ReceivingSurfaceKind}); the three
- * operation panels are 2d-6-7's and the raw editor and restore 2d-6-8's, and the
- * roster refuses nothing about them — it is simply never handed one.
+ * **Six kinds receive, and the other two do not yet.** The editor, the creator
+ * and the recovery form since Phase 2d-6-6b, and the three operation panels —
+ * the deleter, the mover and the duplicator — since Phase 2d-6-7a
+ * ({@link ReceivingSurfaceKind}); the raw editor and restore are 2d-6-8's, and
+ * the roster refuses nothing about them — it is simply never handed one.
  *
  * ## Instance-bound, by construction
  *
@@ -60,15 +63,16 @@ import type { OpenWriteSurface, OpenWriteSurfaceKind, WriteSurfaceTarget } from 
 import type { ObservationReceiver, UnregisterObservationReceiver } from './workspace.svelte';
 
 /**
- * The kinds whose receivers are reported and registered since Phase 2d-6-6b.
+ * The kinds whose receivers are reported and registered: the three authored
+ * surfaces since Phase 2d-6-6b, the three operation panels since Phase 2d-6-7a.
  *
  * **A subset of `OpenWriteSurfaceKind`, written out rather than derived**: the
- * five kinds left out are left out because their steps have not landed
- * (2d-6-7, 2d-6-8), not because of any property a type could name.
+ * two kinds left out (`rawEditor`, `restore`) are left out because their step has
+ * not landed (2d-6-8), not because of any property a type could name.
  */
 export type ReceivingSurfaceKind = Extract<
   OpenWriteSurfaceKind,
-  'matchEditor' | 'matchCreator' | 'recovery'
+  'matchEditor' | 'matchCreator' | 'recovery' | 'matchDeleter' | 'matchMover' | 'matchDuplicator'
 >;
 
 /**
@@ -83,9 +87,10 @@ export interface SurfaceBinding {
    * Reports which file the surface would write now, or that none is open.
    *
    * Used by the recovery form, whose form opens and closes inside its panel and
-   * whose destination only it knows. The editor and the creator do not call it:
-   * the pane already knows the editor's file, and the creator reports its
-   * destination through its own `reportDestination` prop.
+   * whose destination only it knows. The editor, the creator and the three
+   * operation panels do not call it: the pane already knows the editor's and each
+   * operation panel's file, and the creator reports its destination through its
+   * own `reportDestination` prop.
    *
    * @param target - The surface's target, or `null` when no surface is open.
    */
@@ -180,13 +185,33 @@ interface LiveBinding {
 }
 
 /**
- * Whether a kind is one of the three that receive.
+ * Whether a kind is one of the six that receive.
+ *
+ * **Exhaustive by construction**: the `switch` covers every
+ * `OpenWriteSurfaceKind`, so a ninth kind is a compile error here rather than a
+ * kind silently answered `false`. What it cannot force is that the answer for a
+ * kind agrees with {@link ReceivingSurfaceKind}; the roster's suite pins both.
  *
  * @param kind - Any surface kind.
  * @returns The narrowing.
  */
 function isReceivingKind(kind: OpenWriteSurfaceKind): kind is ReceivingSurfaceKind {
-  return kind === 'matchEditor' || kind === 'matchCreator' || kind === 'recovery';
+  switch (kind) {
+    case 'matchEditor':
+    case 'matchCreator':
+    case 'recovery':
+    case 'matchDeleter':
+    case 'matchMover':
+    case 'matchDuplicator':
+      return true;
+    case 'rawEditor':
+    case 'restore':
+      return false;
+    default: {
+      const unreachable: never = kind;
+      return unreachable;
+    }
+  }
 } // End of function isReceivingKind()
 
 /**

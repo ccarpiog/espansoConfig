@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { ConflictSource } from '../browser/conflictSource';
   import { labelText, triggerLabel } from '../browser/labels';
   import { identityInProjection } from '../browser/matchDeletion';
@@ -6,6 +7,7 @@
     acknowledgeDuplicationFindings,
     acknowledgementOf,
     applyDuplication,
+    applyDuplicationObservation,
     askToReloadDiskVersion,
     baseRevisionOf,
     beginDuplicate,
@@ -26,6 +28,7 @@
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
   import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
+  import type { BindObservationReceiver } from '../browser/surfaceReceivers';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
   import RecoveryWithoutCreation from './RecoveryWithoutCreation.svelte';
   import { revealOutcome, revealReapplyReport } from './reveal';
@@ -187,6 +190,7 @@
     reload,
     adoptDiskVersion,
     standingConflictFor,
+    reportReceiver,
     close
   }: {
     /**
@@ -284,6 +288,21 @@
      * window's answer rather than a captured one.
      */
     standingConflictFor: (document: DocumentId) => ConflictSource | null;
+    /**
+     * Reports this panel's observation receiver to the host — Phase 2d-6-7a, the
+     * 2d-6 record's §3 entry 1, the pattern `MatchEditor.svelte` has followed
+     * since 2d-6-6b.
+     *
+     * **Required**, so a host cannot mount this panel without a way to be told
+     * what the window decided about its file. It is called once, when this
+     * component starts, and the binding it answers is withdrawn when it is
+     * destroyed; what the receiver does is `applyDuplicationObservation` in
+     * `../browser/matchDuplication.ts`, installed over whatever this panel holds.
+     * **What the required prop forces is that a host supplies one; nothing in
+     * TypeScript forces this component to call it or to withdraw** — the mounted
+     * suites are what establish both.
+     */
+    reportReceiver: BindObservationReceiver;
     close: () => void;
   } = $props();
 
@@ -295,6 +314,29 @@
   // must notice rather than absorb.
   // svelte-ignore state_referenced_locally
   let session = $state.raw(startMatchDuplication(projection, match, unsavedDraftInDocument()));
+
+  /*
+   * **The receiver, reported when this duplicator starts and withdrawn when it is
+   * destroyed** — Phase 2d-6-7a, `MatchEditor.svelte`'s pattern. A synchronous
+   * call in the component's own initialisation rather than an effect: the host
+   * registers this panel as a write surface from an effect of its own, which runs
+   * after this, so a surface the coordinator can see always has its receiver. The
+   * receiver installs `applyDuplicationObservation`'s answer over the session
+   * held **now**, so a delivery that arrives while this panel's own write is in
+   * flight is held inside the session and consumed by `applyDuplication`
+   * (entry 5). The binding is instance-bound: a later panel's report displaces
+   * this one, and this one's withdrawal then reaches nothing. Drawing what a
+   * delivery installs is Phase 2d-6-7b's; what this wiring already changes is
+   * what the session's own view and its door derive from an installed conflict
+   * (`beginDuplicate` refuses a session showing one, or holding a wait).
+   */
+  // svelte-ignore state_referenced_locally
+  const receiving = reportReceiver((delivery) => {
+    session = applyDuplicationObservation(session, delivery);
+  });
+  onDestroy(() => {
+    receiving.withdraw();
+  });
 
   /**
    * The last *Keep my draft* attempt, or `null` when this panel has made none.

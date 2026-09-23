@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-22T23:36:57Z",
+ "updated": "2026-09-23T00:02:19Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -555,8 +555,32 @@
   {
    "id": "2d-6-7",
    "title": "Operation-surface rendering",
+   "status": "in_progress",
+   "summary": "Cut into 7a (owed audits and receiver registration), 7b (panel rendering and mounted tests) and 7c (window reading); 7a done.",
+   "risk": "high"
+  },
+  {
+   "id": "2d-6-7a",
+   "title": "Operation wrappers, reapply audit and receiver registration",
+   "status": "done",
+   "risk": "high",
+   "summary": "The delete, move and duplicate wrappers keep committed writes, the reapplies read nothing after their look, and the three receivers are registered.",
+   "review": "docs/reviews/phase-2d-6-7a.md",
+   "narrative": "docs/decisions/2d-6-7a-notes.md"
+  },
+  {
+   "id": "2d-6-7b",
+   "title": "Operation panels' rendering and bilingual mounted tests",
    "status": "queued",
-   "summary": "Draws the external origin, the offers and the blocked state on the delete, move and duplicate surfaces, with bilingual mounted evidence."
+   "risk": "high",
+   "summary": "The delete, move and duplicate panels draw origin, comparison, reapply or manual resolution and reload, pinned by bilingual mounted tests."
+  },
+  {
+   "id": "2d-6-7c",
+   "title": "Operation panels' window reading",
+   "status": "queued",
+   "risk": "high",
+   "summary": "The delete, move and duplicate panels are read in a real window in English and Spanish, and 2d-6-7's acceptance is checked."
   },
   {
    "id": "2d-6-8",
