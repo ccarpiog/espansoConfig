@@ -622,7 +622,8 @@
    "risk": "high",
    "summary": "Read the raw editor and restore pane in a real window over the hard fixture, EN and ES, and checked 2d-6-8 whole; no defect found.",
    "review": "docs/reviews/phase-2d-6-8c.md",
-   "narrative": "docs/decisions/2d-6-8c-notes.md"
+   "narrative": "docs/decisions/2d-6-8c-notes.md",
+   "commit": "b369a35"
   },
   {
    "id": "2d-6-9",
