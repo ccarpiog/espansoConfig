@@ -2055,6 +2055,64 @@ describe('the external session — Phase 2d-6-4', () => {
       expect(matchMoveView(askToReloadDiskVersion(next), HELD).reloadWarning).toBe('positionalDestination');
     }); // End of the "raised over the file" case
 
+    it('names no operation and no chosen destination for a mover raised before anything was chosen (Phase 2d-6-7b)', () => {
+      // A save conflict needs a send, and a send needs a destination that moves the
+      // snippet; an observation needs neither. A mover opened and left alone holds
+      // its origin as the draft, so a summary read off that draft would say the
+      // person asked for a move they never asked for.
+      const pristine = applyMoveObservation(session(), raised(observation()));
+      expect(externalOf(pristine).draft.value).toEqual({ kind: 'top' });
+      const view = matchMoveView(pristine, HELD);
+      expect(view.conflictOperation).toBeNull();
+      expect(view.awaitingReloadConfirmation).toBe(false);
+      const warned = matchMoveView(askToReloadDiskVersion(pristine), HELD);
+      expect(warned.awaitingReloadConfirmation).toBe(true);
+      expect(warned.reloadWarning).toBeNull();
+      // Choosing the origin again after another destination is the same fact.
+      const back = choosePlacement(choosePlacement(session(), { kind: 'end' }), { kind: 'top' });
+      const returned = applyMoveObservation(back, raised(observation()));
+      expect(matchMoveView(returned, HELD).conflictOperation).toBeNull();
+      // A destination that was chosen is still described, and still warned about.
+      const moving = applyMoveObservation(chosen(), raised(observation()));
+      expect(matchMoveView(moving, HELD).conflictOperation).toBe('moveToEnd');
+      const movingWarned = matchMoveView(askToReloadDiskVersion(moving), HELD);
+      expect(movingWarned.awaitingReloadConfirmation).toBe(true);
+      expect(movingWarned.reloadWarning).toBe('positionalDestination');
+    }); // End of the "pristine mover" case
+
+    it('withholds and refuses the reapply for a mover raised before anything was chosen (2d-6-7b review, finding 1)', () => {
+      // Evidence that would rebuild, so only the missing request can refuse: the
+      // subject's twin is found, and rebuilding its origin placement against the
+      // reordered disk version would set up a move nobody asked for.
+      const seen = observation({
+        correspondences: {
+          base_revision: BASE,
+          disk_revision: AFTER,
+          entries: [
+            {
+              base: file().matches[0]!.id,
+              exact: { Identified: { target: snippet(diskFile(), ':sig') } },
+              editor: { Refused: { reason: 'AmbiguousTrigger' } }
+            }
+          ]
+        }
+      });
+      const pristine = applyMoveObservation(session(), raised(seen));
+      const view = matchMoveView(pristine, HELD);
+      expect(view.conflictChoices).toEqual<readonly ConflictChoice[]>(['keepEditing', 'reloadDiskVersion']);
+      expect(view.reapplyOffered).toBe(false);
+      const source = externalOf(pristine).source;
+      const recorder = adopting();
+      expect(reapplyToDiskVersion(pristine, null, recorder.adopt, () => source, () => pristine)).toEqual({
+        kind: 'manualResolution',
+        obstacle: { kind: 'nothingRequested' }
+      });
+      expect(recorder.adoptions).toEqual([]);
+      // A chosen destination is still offered the reapply.
+      const moving = applyMoveObservation(chosen(), raised(observation()));
+      expect(matchMoveView(moving, HELD).conflictChoices).toContain('keepMyDraft');
+    }); // End of the "pristine mover reapply withheld" case
+
     it('answers null from beginMove called directly under an external conflict, refusal path included', () => {
       const blocked = applyMoveObservation(refusedOnce(), raised(observation()));
       expect(blocked.outcome?.kind).toBe('refused');

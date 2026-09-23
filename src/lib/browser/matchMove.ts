@@ -304,6 +304,7 @@ import type {
 } from '../ipc/types';
 import {
   amendDraft,
+  isDirty,
   savedDraft,
   startDraft,
   structuredDraftRules,
@@ -342,6 +343,7 @@ import type { RawSaveChoice } from './rawSave';
 import type { ConflictSource, ExternalConflictObservation } from './conflictSource';
 import {
   externalConflictNoticeKey,
+  noticesBesideRefusal,
   type ExternalConflictNotice,
   type ObservationDelivery
 } from './observationDelivery';
@@ -2392,6 +2394,21 @@ export type MoveReapplyObstacle =
     }
   | {
       /**
+       * The conflict retained no destination the person chose — Phase 2d-6-7b's
+       * review, its first finding.
+       *
+       * A mover opened and left alone holds the snippet's own position as its
+       * draft, and an external conflict can reach it. Rebuilding that position
+       * against a disk version in which the snippet has moved would set up a move
+       * nobody asked for, so there is nothing to keep: the reapply is withheld
+       * from the choices ({@link effectiveCapabilitiesOf}) and refused here before
+       * any evidence is read. The test is the draft's own dirtiness (`isDirty` in
+       * `./draft.ts`), the same fact `MatchMoveView.conflictOperation` reads.
+       */
+      readonly kind: 'nothingRequested';
+    }
+  | {
+      /**
        * The rebuilt move cannot be sent, for one of the ordinary reasons.
        *
        * {@link moveSubmissionRefusal}'s own verdict over the newly parsed
@@ -2493,6 +2510,8 @@ export function moveReapplyObstacleKey(obstacle: MoveReapplyObstacle): Translati
       return 'browser.matchMove.reapply.anchorNotInSequence';
     case 'moveRefused':
       return 'browser.matchMove.reapply.moveRefused';
+    case 'nothingRequested':
+      return 'browser.matchMove.reapply.nothingRequested';
     case 'correspondence':
     case 'evidenceNotATarget':
       return sharedReapplyObstacleKey(obstacle);
@@ -2763,6 +2782,12 @@ export function reapplyToDiskVersion(
     }
     if (awaitedFor(session) !== null) {
       return { kind: 'manualResolution', obstacle: { kind: 'observationRetained' } };
+    }
+    // Nothing chosen, nothing to keep (the 2d-6-7b review's first finding): the
+    // retained draft is where the snippet already was, and rebuilding it would
+    // manufacture a destination.
+    if (!isDirty(conflict.draft)) {
+      return { kind: 'manualResolution', obstacle: { kind: 'nothingRequested' } };
     }
   }
   const entry = enterReapply(CONFLICT_CAPABILITIES, conflict, standing ?? unaskedGuard(conflict));
@@ -3042,15 +3067,18 @@ export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
 
 /**
  * What this surface offers about the conflict it is showing **now**, derived from
- * the declaration and two facts about the session — Phase 2d-6-4, the 2d-6
- * record's §3 entry 11.
+ * the declaration and three facts about the session — Phase 2d-6-4, the 2d-6
+ * record's §3 entry 11, and the third since Phase 2d-6-7b's review.
  *
  * The declaration above is permanent; this is the "effective capabilities" the
  * consult's Q3 names. The reload and the reapply are both withheld under an
  * unacknowledged write uncertainty, for the match editor's reason. The reapply
  * alone is withheld while the window holds an undecided reading, because it
  * hands back a session whose ordinary send is live; the reload is not, because
- * it closes the session and sends nothing. It feeds `conflictChoicesFor`, which
+ * it closes the session and sends nothing. The reapply alone is also withheld
+ * when the conflict's retained draft is not dirty — a destination nobody chose —
+ * because rebuilding it would manufacture a move ({@link reapplyToDiskVersion}
+ * refuses it `nothingRequested`). It feeds `conflictChoicesFor`, which
  * stays the only producer of a choice list; what this cannot force is that the
  * transitions honour the same facts, which is why each asks
  * {@link reloadableConflictOf} or the fields themselves.
@@ -3060,7 +3088,12 @@ export const CONFLICT_CAPABILITIES: ConflictCapabilities = {
  */
 function effectiveCapabilitiesOf(session: MatchMoveSession): ConflictCapabilities {
   const reloadWithheld = session.uncertaintyUnresolved;
-  const reapplyWithheld = reloadWithheld || awaitedFor(session) !== null;
+  // The reapply is also withheld for a conflict whose retained draft asked for
+  // nothing — a mover left at the snippet's own position (Phase 2d-6-7b's review,
+  // its first finding); `reapplyToDiskVersion` refuses it `nothingRequested`.
+  const conflict = conflictOf(session);
+  const nothingRequested = conflict !== null && !isDirty(conflict.draft);
+  const reapplyWithheld = reloadWithheld || awaitedFor(session) !== null || nothingRequested;
   if (!reloadWithheld && !reapplyWithheld) {
     return CONFLICT_CAPABILITIES;
   }
@@ -3390,17 +3423,29 @@ export interface MatchMoveView {
    * Beside {@link MatchMoveView.messages} and never merged into it, for
    * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
    * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
-   * twice. Rendered through `tConflictMessage`. No component reads it yet;
-   * 2d-6-7 does.
+   * twice. Rendered through `tConflictMessage`; `MatchMover.svelte` draws it
+   * since Phase 2d-6-7b.
    */
   readonly externalMessages: readonly ConflictMessage[];
   /**
    * The lines owed while an observation cannot be acted on — Phase 2d-6-4.
    *
    * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
-   * own fields. No component reads it yet; 2d-6-7 and 2d-6-9 do.
+   * own fields. `MatchMover.svelte` draws them through
+   * {@link MatchMoveView.noticesBesideRefusal} since Phase 2d-6-7b; the control
+   * that acknowledges the second is 2d-6-9's.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
+  /**
+   * {@link MatchMoveView.externalNotices} less the one
+   * {@link MatchMoveView.cannotMove} already says — Phase 2d-6-7b.
+   *
+   * `observationRetained` is rendered through the retained notice's own sentence
+   * ({@link moveSubmissionRefusalKey}), so a panel drawing the refusal and every
+   * notice would print it twice. `noticesBesideRefusal` in
+   * `./observationDelivery.ts` is the rule; this is what the panel draws.
+   */
+  readonly noticesBesideRefusal: readonly ExternalConflictNotice[];
   /**
    * The presentation changes a saved arm disclosed, in report order.
    *
@@ -3427,14 +3472,26 @@ export interface MatchMoveView {
   /** What to offer about the conflict. */
   readonly conflictChoices: readonly ConflictChoice[];
   /**
-   * What the confirmation step warns about the destination, or `null`.
+   * Whether the reload's warning is showing and the destructive choice is one
+   * click away — the boolean the other five surfaces carry.
    *
-   * **Non-`null` is exactly "the warning is showing and the destructive choice is
-   * one click away"** — the boolean the other five surfaces carry, replaced here
-   * rather than joined by a second field. Two fields that have to agree is how a
-   * capability came to be expressed twice at 2c-4a-2, and there is nothing for
-   * them to disagree about: this is that condition and the arm it selects, decided
-   * together.
+   * **A field of its own since Phase 2d-6-7b**, beside
+   * {@link MatchMoveView.reloadWarning} rather than read off it: that field is
+   * `null` at this step for a conflict whose retained destination was never
+   * chosen, so it no longer says whether the step has been reached.
+   */
+  readonly awaitingReloadConfirmation: boolean;
+  /**
+   * What the confirmation step warns about the chosen destination, or `null`.
+   *
+   * Non-`null` only at the warning step ({@link MatchMoveView.awaitingReloadConfirmation})
+   * **and** only when the conflict retained a destination the person chose — a
+   * retained draft that differs from where the snippet already was. An external
+   * conflict can reach a mover whose person chose nothing (Phase 2d-6-7b): its
+   * draft is the snippet's own position, and both arms of
+   * {@link MoveReloadWarning} begin *the destination you chose*, which would be
+   * false. The shared close/abandon line in the conflict's own messages still
+   * says what the reload does.
    *
    * The arm is {@link MoveReloadWarning}, and the 2c-4a-3b review's finding 1 is
    * why there is an arm at all.
@@ -3489,6 +3546,14 @@ export interface MatchMoveView {
    * is why this view takes them: the sentence that points at the marked
    * destination may be shown only while a marked destination is there. See
    * {@link operationOf}.
+   *
+   * **`null` for a conflict whose retained draft is not dirty** (Phase 2d-6-7b):
+   * every arm begins *you asked to move this snippet*, and a draft still at the
+   * snippet's own position asked for nothing. A save conflict never has one — a
+   * send needs a destination that moves the snippet — but an external conflict
+   * reaches a mover the person opened and left alone. What this reads is the
+   * draft's own dirtiness (`isDirty` in `./draft.ts`), so a destination chosen and
+   * then chosen back to the origin is the same fact.
    */
   readonly conflictOperation: ConflictOperation | null;
   /**
@@ -3560,6 +3625,11 @@ export function matchMoveView(
       ? []
       : conflictChoicesFor(effectiveCapabilitiesOf(session), offeredReloadStep(session.reload));
   const cannotMove = moveSubmissionRefusal(session, views);
+  // What the conflict's retained draft asked for, or `null` when it asked for
+  // nothing — a draft still at the snippet's own position (Phase 2d-6-7b).
+  const asked = conflict !== null && isDirty(conflict.draft) ? conflict.draft.value : null;
+  const warning = conflict !== null && atTheReloadWarning(session.reload);
+  const notices = externalNoticesOf(session);
   const externallyBlocked = session.externalConflict !== null || awaitedFor(session) !== null;
   const refusalChoices = offeredRefusalChoices(refused, stale);
   return {
@@ -3579,7 +3649,11 @@ export function matchMoveView(
     outcome,
     messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
     externalMessages: session.externalConflict === null ? [] : session.externalConflict.messages,
-    externalNotices: externalNoticesOf(session),
+    externalNotices: notices,
+    noticesBesideRefusal: noticesBesideRefusal(
+      notices,
+      cannotMove === 'observationRetained' ? 'observationRetained' : null
+    ),
     notes: saved === null ? [] : saved.notes,
     // The one offer a refusal panel may keep under an external block is the
     // dismissal: `beginMove` would answer `null` to the other, and a control that
@@ -3590,14 +3664,12 @@ export function matchMoveView(
     findingsAreStale: refused !== null && stale,
     conflict,
     conflictChoices,
-    reloadWarning:
-      conflict !== null && atTheReloadWarning(session.reload)
-        ? reloadWarningOf(conflict.draft.value)
-        : null,
+    awaitingReloadConfirmation: warning,
+    reloadWarning: warning && asked !== null ? reloadWarningOf(asked) : null,
     reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
     reapplyOffered: reapplyIsOffered(conflictChoices),
     diskText: conflictDiskText(conflict),
-    conflictOperation: conflict === null ? null : operationOf(session, conflict.draft.value, views),
+    conflictOperation: asked === null ? null : operationOf(session, asked, views),
     closed: session.closed
   };
 } // End of function matchMoveView()

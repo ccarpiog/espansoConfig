@@ -450,6 +450,7 @@
   "browser.matchMove.cannotMove.alreadyThere": "Aquí es donde el archivo ya escribe este fragmento. Elige otro sitio para él.",
   "browser.matchMove.reapply.notTheSameSequence": "El fragmento encontrado en la versión en disco no está en la lista en la que trabaja este movimiento, y esta aplicación no mueve un fragmento de una lista a otra.",
   "browser.matchMove.reapply.anchorNotInSequence": "El fragmento tras el cual debía colocarse este no es uno que este movimiento pueda nombrar en la lista tal como la tiene la versión en disco.",
+  "browser.matchMove.reapply.nothingRequested": "Aquí no se eligió ningún destino, así que no hay nada que conservar frente a la versión en disco: el fragmento debía quedarse donde esta ventana lo leyó.",
   "browser.matchMove.reapply.moveRefused": "El movimiento no se puede enviar contra la versión en disco.",
 
   "browser.matchDuplication.open": "Duplicar este fragmento…",

@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import type { ConflictSource } from '../browser/conflictSource';
+  import {
+    conflictOriginMessage,
+    conflictRevisionsOf,
+    type ConflictSource
+  } from '../browser/conflictSource';
   import { labelText, triggerLabel } from '../browser/labels';
   import { identityInProjection } from '../browser/matchDeletion';
   import {
@@ -32,7 +36,7 @@
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { MovePlacement } from '../browser/matchMove';
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
-  import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
+  import { isExternalConflict, outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import type { BindObservationReceiver } from '../browser/surfaceReceivers';
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
   import RecoveryWithoutCreation from './RecoveryWithoutCreation.svelte';
@@ -41,10 +45,13 @@
   import {
     t,
     tConflictChoice,
+    tConflictMessage,
     tConflictOperation,
+    tConflictOriginMessage,
     tDetailField,
     tDraftError,
     tEditError,
+    tExternalConflictNotice,
     tFindingCode,
     tIpcFailure,
     tMoveReapplyObstacle,
@@ -162,7 +169,10 @@
    * is* is that exit. Offering a *Move it anyway* would be a control that cannot
    * work.
    *
-   * **The conflict panel shows two sides and identifies nothing across them.** The
+   * **A conflict of either origin shows two sides and identifies nothing across
+   * them** — a save's inside the outcome panel, an observation's in a panel of its
+   * own outside it (Phase 2d-6-7b, the 2d-6 record's §3 entries 10 and 23), both
+   * through the one `comparison` snippet. The
    * retained side is `view.conflictOperation` — the model's summary of the
    * placement the conflict kept — because a `MovePlacement` is a positional choice
    * and not authored text, which is why the consult's Q4 refuses a copy here as a
@@ -348,10 +358,10 @@
    * **now**, so a delivery that arrives while this panel's own write is in
    * flight is held inside the session and consumed by `applyMove`
    * (entry 5). The binding is instance-bound: a later panel's report displaces
-   * this one, and this one's withdrawal then reaches nothing. Drawing what a
-   * delivery installs is Phase 2d-6-7b's; what this wiring already changes is
-   * what the session's own view and its door derive from an installed conflict
-   * (`beginMove` refuses a session showing one, or holding a wait).
+   * this one, and this one's withdrawal then reaches nothing. What a delivery
+   * installs is drawn below since Phase 2d-6-7b: the external panel, the refusal
+   * beside *Move* and the notices it does not already say (`beginMove` refuses a
+   * session showing a conflict, or holding a wait, either way).
    */
   // svelte-ignore state_referenced_locally
   const receiving = reportReceiver((delivery) => {
@@ -418,6 +428,22 @@
 
   /** The outcome panel's own element, so a reveal has something to point at. */
   let outcomePanel = $state<HTMLElement | null>(null);
+
+  /**
+   * The external conflict on screen, narrowed, or `null` — Phase 2d-6-7b.
+   *
+   * Through `isExternalConflict` rather than the nested `source.kind`, which
+   * narrows the source and leaves the model the union (the 2d-6 record's §3
+   * entry 10): this is the one place the panel below learns that it may read the
+   * external arm.
+   */
+  const external = $derived(
+    current.view.conflict !== null && isExternalConflict(current.view.conflict)
+      ? current.view.conflict
+      : null
+  );
+  /** The external conflict panel's own element, the reveal's target when it shows. */
+  let externalPanel = $state<HTMLElement | null>(null);
   /** The conflict arm's row of controls, which is the second step's target. */
   let outcomeChoices = $state<HTMLElement | null>(null);
 
@@ -428,16 +454,32 @@
    * it appeared. The decision is `./reveal.ts`'s and the two `bind:this` targets are
    * this file's.
    *
-   * **The confirmation step is `reloadWarning !== null` here and not a boolean**,
-   * which is `matchMove.ts`'s own arrangement: this surface's warning has two arms,
-   * so the condition and the arm it selects are decided together rather than in two
-   * fields that have to agree.
+   * **The confirmation step is `awaitingReloadConfirmation`**, as on the other
+   * panels. It used to be `reloadWarning !== null`, which stopped being the same
+   * fact at Phase 2d-6-7b: the warning is `null` at that step for a conflict whose
+   * destination was never chosen (`MatchMoveView.reloadWarning`).
+   *
+   * **An active external conflict is revealed as a conflict panel is, and ahead
+   * of any outcome** (Phase 2d-6-7b, and its review's second finding): the cue
+   * is `conflict` and the target its own panel while it shows, including its
+   * second step, even beside a `saved` or `refused` outcome kept as history —
+   * that outcome is not what the person must act on.
    */
   const reveal = $derived(
-    outcomeReveal(current.view.outcome?.kind ?? null, current.view.reloadWarning !== null)
+    outcomeReveal(
+      external !== null ? 'conflict' : (current.view.outcome?.kind ?? null),
+      current.view.awaitingReloadConfirmation
+    )
   );
+  /**
+   * Whether the external panel, rather than the outcome panel, is the reveal's
+   * target. A boolean `$derived` rather than a read of the view inside the
+   * effect, which would re-run — and ask for a scroll again — on every
+   * transition.
+   */
+  const externalShown = $derived(external !== null);
   $effect(() => {
-    revealOutcome(reveal, outcomePanel, outcomeChoices);
+    revealOutcome(reveal, externalShown ? externalPanel : outcomePanel, outcomeChoices);
   });
 
   /** The reapply report's own block, so an answer to a press can be seen. */
@@ -708,6 +750,74 @@
   } // End of function conflictAction()
 </script>
 
+<!-- **What a conflict of either origin shows beside its own lines** — Phase
+     2d-6-7b, `MatchEditor.svelte`'s arrangement. One snippet for both panels, so
+     the operation, the disk side, the reload warning and the choices cannot drift
+     apart between the save arm and the external arm (the 2d-6 record's §3 entry
+     23). Only one conflict is active at a time (entry 7), so the one
+     `outcomeChoices` element it binds belongs to whichever panel is drawn. -->
+{#snippet comparison()}
+  <!-- What this session asked for, as the model summarises it from the placement
+       the conflict retained — and nothing, heading included, when it retained no
+       chosen destination: an external conflict can reach a mover the person never
+       touched, and every summary begins *you asked* (Phase 2d-6-7b;
+       `MatchMoveView.conflictOperation`). Nothing was typed here, so there is no
+       draft to render and no copy to offer (consult Q4). Whether the summary may
+       send the reader to the marked destination above is decided against the same
+       option list this panel draws, in `matchMove.ts` and not here (2c-4a-3b
+       review, finding 2). -->
+  {#if current.view.conflictOperation !== null}
+    <h3>{t('browser.saveOutcome.retainedOperation')}</h3>
+    <p>{tConflictOperation(current.view.conflictOperation)}</p>
+  {/if}
+  <p class="kind">{t('browser.saveOutcome.operationIdentityIsOld')}</p>
+
+  <h3>{t('browser.saveOutcome.diskVersion')}</h3>
+  <!-- The whole file as the command layer (or the observation) read it, and never
+       a projection of "the same snippet" — which this application will not
+       identify across revisions (consult Q5). Which arm is drawn is
+       `conflictDiskText`'s decision and not this markup's (2c-4a-3a review,
+       finding 5). -->
+  {#if current.view.diskText !== null && current.view.diskText.kind === 'text'}
+    <SourceText text={current.view.diskText.text} documentStart />
+  {:else}
+    <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
+  {/if}
+
+  <!-- The second step's warning. The shared line above is the whole close/abandon
+       guarantee and this one never restates it (2c-4a-3b review, finding 3); it
+       says only what becomes of the chosen destination, and **which** of its two
+       sentences that is belongs to the model, because a destination that names a
+       snippet and one that names a position lose different things (finding 1).
+       With no chosen destination there is nothing of that kind to lose, and the
+       model says nothing. -->
+  {#if current.view.reloadWarning !== null}
+    <p class="kind">{tMoveReloadWarning(current.view.reloadWarning)}</p>
+  {/if}
+
+  <!-- A control that has just gone, with the reason in its place. -->
+  {#if current.view.reloadUnavailable}
+    <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
+  {/if}
+
+  <!-- The line beside *Keep my draft*: what this app will **try**, what it works
+       from, when it writes nothing, and what a later save may still do. Drawn
+       when the model names that choice and never from this surface's own
+       declaration, so the sentence and the control cannot disagree (consult
+       Q6). -->
+  {#if current.view.reapplyOffered}
+    <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
+  {/if}
+
+  <p class="choices" bind:this={outcomeChoices}>
+    {#each current.view.conflictChoices as choice (choice)}
+      <button type="button" onclick={() => conflictAction(choice)}>
+        {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
+      </button>
+    {/each}
+  </p>
+{/snippet}
+
 <section class="mover" aria-label={t('browser.matchMove.label')}>
   <div class="head">
     <h2>{t('browser.matchMove.label')}</h2>
@@ -817,6 +927,16 @@
     {#if current.view.cannotMove !== null}
       <p class="kind">{tMoveSubmissionRefusal(current.view.cannotMove)}</p>
     {/if}
+
+    <!-- What else stands over the file that the refusal above does not already
+         say — a reading the window holds undecided behind a stronger refusal, or
+         a conflict raised while an earlier write's outcome is unknown (Phase
+         2d-6-7b). The model drops the one notice the refusal line renders, so no
+         sentence is printed twice; the control that acknowledges the second is
+         2d-6-9's. -->
+    {#each current.view.noticesBesideRefusal as notice (notice.kind)}
+      <p class="kind">{tExternalConflictNotice(notice)}</p>
+    {/each}
   </div>
 
   {#if current.view.sendFailure !== null}
@@ -895,6 +1015,27 @@
        move whose send may or may not have written, and it is a list of controls. -->
   <RecoveryWithoutCreation kind="operationChoice" conflict={current.view.conflict} />
 
+  <!-- **The external conflict, outside the save-outcome branch** (the 2d-6
+       record's §3 entry 10) — Phase 2d-6-7b. The origin line first, then the
+       model's own lines for this origin — never `view.messages`, which are a
+       save's — then the one revision an observation has, then everything the save
+       panel shows (entry 23). No *expected* and no *found*: there was no save. -->
+  {#if external !== null}
+    {@const revisions = conflictRevisionsOf(external.source)}
+    <div class="panel external" role="status" bind:this={externalPanel}>
+      <p>{tConflictOriginMessage(conflictOriginMessage(external.source))}</p>
+      {#each current.view.externalMessages as message, index (index)}
+        <p>{tConflictMessage(message)}</p>
+      {/each}
+      {#if revisions.kind === 'externalChange'}
+        <p class="kind">
+          {t('browser.externalConflict.revisionObserved', { revision: revisions.observed })}
+        </p>
+      {/if}
+      {@render comparison()}
+    </div>
+  {/if}
+
   {#if current.view.outcome !== null}
     {@const outcome = current.view.outcome}
     <div class="panel" role="status" bind:this={outcomePanel}>
@@ -966,6 +1107,8 @@
         </p>
       {:else}
         {@const conflict = outcome}
+        <!-- Where this conflict came from: a move this panel sent. -->
+        <p>{tConflictOriginMessage(conflictOriginMessage(conflict.source))}</p>
         <p class="kind">
           {t('browser.matchMove.revisionExpected', { revision: conflict.expected })}
         </p>
@@ -974,61 +1117,7 @@
           {t('browser.matchMove.revisionDisk', { revision: conflict.diskRevision })}
         </p>
 
-        <h3>{t('browser.saveOutcome.retainedOperation')}</h3>
-        <!-- What this session asked for, as the model summarises it from the
-             placement the conflict retained. Nothing was typed here, so there is no
-             draft to render and no copy to offer (consult Q4). Whether the summary
-             may send the reader to the marked destination above is decided against
-             the same option list this panel draws, in `matchMove.ts` and not here
-             (2c-4a-3b review, finding 2). -->
-        {#if current.view.conflictOperation !== null}
-          <p>{tConflictOperation(current.view.conflictOperation)}</p>
-        {/if}
-        <p class="kind">{t('browser.saveOutcome.operationIdentityIsOld')}</p>
-
-        <h3>{t('browser.saveOutcome.diskVersion')}</h3>
-        <!-- The whole file as the command layer read it, paired with
-             `diskRevision`, and never a projection of "the same snippet" — which
-             this application will not identify across revisions (consult Q5).
-             Which arm is drawn is `conflictDiskText`'s decision and not this
-             markup's (2c-4a-3a review, finding 5). -->
-        {#if current.view.diskText !== null && current.view.diskText.kind === 'text'}
-          <SourceText text={current.view.diskText.text} documentStart />
-        {:else}
-          <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
-        {/if}
-
-        <!-- The second step's warning. The shared line above is the whole
-             close/abandon guarantee and this one never restates it (2c-4a-3b
-             review, finding 3); it says only what becomes of the destination, and
-             **which** of its two sentences that is belongs to the model, because a
-             destination that names a snippet and one that names a position lose
-             different things (finding 1). -->
-        {#if current.view.reloadWarning !== null}
-          <p class="kind">{tMoveReloadWarning(current.view.reloadWarning)}</p>
-        {/if}
-
-        <!-- A control that has just gone, with the reason in its place. -->
-        {#if current.view.reloadUnavailable}
-          <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
-        {/if}
-
-        <!-- The line beside *Keep my draft*: what this app will **try**, what it
-             works from, when it writes nothing, and what a later save may still
-             do. Drawn when the model names that choice and never from this
-             surface's own declaration, so the sentence and the control cannot
-             disagree (consult Q6). -->
-        {#if current.view.reapplyOffered}
-          <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
-        {/if}
-
-        <p class="choices" bind:this={outcomeChoices}>
-          {#each current.view.conflictChoices as choice (choice)}
-            <button type="button" onclick={() => conflictAction(choice)}>
-              {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
-            </button>
-          {/each}
-        </p>
+        {@render comparison()}
       {/if}
     </div>
   {/if}

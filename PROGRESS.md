@@ -49,10 +49,10 @@ sections and review dispositions are in `phase-0.md`, `phase-1.md`, `phase-2a.md
 | _**2d-6-1a**, **2d-6-1b** and **2d-6-1c** — the three sub-phases of 2d-6-1 (the orchestrator's cut): the delivery envelope, the shared conflict primitives and the origin-correct messages; the observation-protocol members on `BrowserState` and the seventh verdict arm `writtenHere`; the coordinator and workspace members. 2d-6-1's full acceptance is checked in [`2d-6-1c-notes.md`](docs/decisions/2d-6-1c-notes.md) §3_ | every review **Codex**, `ship-with-fixes` (0 / 1 / 1 blockers), every finding re-derived before it was fixed; the rung climbing `2474 → 2574`. **Components: none; no Rust** | ✅ **all three complete and CLOSED, and 2d-6-1 with them.** **Rows archived 2026-09-21 at 2d-6-4** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The status rows of the closed 2d-6-1a, 2d-6-1b and 2d-6-1c sub-phases"*; notes `docs/decisions/2d-6-1{a,b,c}-notes.md`, reviews `docs/reviews/phase-2d-6-1{a,b,c}.md` |
 | _**2d-6-2**, **2d-6-3**, **2d-6-4** and **2d-6-5** — the four model-only session steps: the match-editor session and the shared `reapply.ts` primitives; the creation and recovery sessions; the delete, duplicate and move sessions; the raw and restore sessions — all eight receivers as values_ | every review **Codex**, `ship-with-fixes` (2 / 2 / 3 / 2 blockers), every finding re-derived before it was fixed; the rung climbing `2574 → 2817`. **Components: none; no Rust** | ✅ **all four complete and CLOSED.** **Rows archived 2026-09-22 at 2d-6-6b** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The status rows of the closed 2d-6-2, 2d-6-3, 2d-6-4 and 2d-6-5 steps"*; notes `docs/decisions/2d-6-{2,3,4,5}-notes.md`, reviews `docs/reviews/phase-2d-6-{2,3,4,5}.md` |
 | _**2d-6-6a**_ | The model-side obligations before the wiring, the first third of 2d-6-6 | ✅ **complete and CLOSED** (Codex, `ship-with-fixes`, 2 BLOCKERS + 1 SHOULD-FIX, all fixed; rung `1323 / 447 / 2833 / 192`). **Row archived 2026-09-23 at 2d-6-6c-1** to [`status-table.md`](docs/progress-archive/status-table.md); notes `docs/decisions/2d-6-6a-notes.md`, review `docs/reviews/phase-2d-6-6a.md` |
-| _**2d-6-6b** and **2d-6-6c-1**_ | The registration and delivery wiring, and the three authored panels' rendering with the bilingual mounted acceptance tests | ✅ **both complete and CLOSED** (Codex, `ship-with-fixes`, 1 and 2 BLOCKERS, all fixed; rungs `2899`, `2920`). **Rows archived 2026-09-23 at 2d-6-6c-2** to [`status-table.md`](docs/progress-archive/status-table.md); notes `docs/decisions/2d-6-6{b,c-1}-notes.md`, reviews `docs/reviews/phase-2d-6-6{b,c-1}.md` |
-| **2d-6-6c-2** | The second half of 2d-6-6c, and 2d-6-6's close: (1) carried item 6 — `MatchEditor.svelte`'s copy disclosure bound to the exact conflict and text copied, a late clipboard answer ignored; (2) carried item 7 — `BrowserState.saveMatch` answers a committed write as `saved` with a `failed` adoption when adoption or the reread throws; (3) **the narrow window reading** — six proof launches L01-L06 into fresh bundle paths, language through the picker, the editor over a file changed on disk, the destination-less creator, recovery over a file other than its host's, EN and ES, every drawn sentence matched verbatim against the dictionaries; WebKit page snapshots because the screen was locked; (4) **2d-6-6's whole acceptance checked clause by clause** (notes §3, every clause met, the window reading narrowly). **Components: one (`MatchEditor.svelte`); no new module or key; no committed Rust** — the instrument and a rebuilt harness at `/private/tmp/espansoconfig-harness-2d-6-6c-2/` extended, uncommitted | ✅ **complete and CLOSED, and 2d-6-6 with it.** Risk class **high**; worker model **opus** (one worker, resumed once for the fix round; review by **Codex**, `autoclaude-review.sh` exiting 0, no fallback agent). Review **`ship-with-fixes`, 1 BLOCKER, 0 SHOULD-FIX** ([`docs/reviews/phase-2d-6-6c-2.md`](docs/reviews/phase-2d-6-6c-2.md)): a thrown value whose `code` getter throws escaped `saveMatch`'s post-commit catch through `classifyFailure`, rejecting a committed write — re-derived by a two-row failing case, **held and fixed**: the classification runs in its own `try` with a fixed-string fallback. `createMatch`'s identical shape **recorded, not fixed** (notes §5 item 7, owed in 2d-6-7). New rung **`1323 / 449 / 2926 / 193`**. Records: [`2d-6-6c-2-notes.md`](docs/decisions/2d-6-6c-2-notes.md), [`2d-6-6c-2-window-reading.md`](docs/decisions/2d-6-6c-2-window-reading.md) |
+| _**2d-6-6b**, **2d-6-6c-1** and **2d-6-6c-2**_ | The registration and delivery wiring, the three authored panels' rendering with the bilingual mounted acceptance tests, and their window reading (2d-6-6 closes) | ✅ **all three complete and CLOSED** (Codex, `ship-with-fixes`, 1, 2 and 1 BLOCKERS, all fixed; rungs `2899`, `2920`, `2926`). **Rows archived 2026-09-23 at 2d-6-6c-2 (6c-2's at 2d-6-7b)** to [`status-table.md`](docs/progress-archive/status-table.md); notes `docs/decisions/2d-6-6{b,c-1,c-2}-notes.md`, the window reading `2d-6-6c-2-window-reading.md`, reviews `docs/reviews/phase-2d-6-6{b,c-1,c-2}.md` |
 | **2d-6-7a** | The first third of 2d-6-7, cut 2026-09-23 into 7a/7b/7c (`2d-6-split-notes.md` §2). **(1)** All five match-level wrappers (`saveMatch`, `createMatch`, `deleteMatch`, `moveMatch`, `duplicateMatch`) now share `adoptAfterTheCommit` in `workspace.svelte.ts`: a throw after a commit, including one from classifying the thrown value, comes back as a `failed` adoption beside `saved` and never rejects. `delete`, `move` and `duplicate` did reject before. **(2)** The three operation reapplies recheck the installed session after their reads and after adoption, and a wait recorded during adoption is carried into the rebuilt session. **(3)** The deleter, mover and duplicator report receivers that `DetailPane.svelte` registers (`ReceivingSurfaceKind` now has six kinds), pinned by mounted delivery tests through the real registry. Every defect was shown failing first. **Components: `DetailPane` and the three operation panels (wiring only, no new text); no new module or key; no Rust** | ✅ **complete and CLOSED.** Risk class **high**; worker model **opus** (one worker, resumed once for the fix round). Review by **Codex**, `autoclaude-review.sh` exited 0, no fallback agent. Verdict **`ship-with-fixes`, 0 BLOCKERS, 1 SHOULD-FIX** ([`docs/reviews/phase-2d-6-7a.md`](docs/reviews/phase-2d-6-7a.md)): the refactor read `answer.value.moved`/`committed` outside the helper's `try`, so a throwing getter rejected a committed write. **Re-derived with a failing 4-row case, held and fixed**: those reads now run inside the thunk. One residue is recorded and not fixed: `outcome`, `committed`, `revision` and `settlementOfOutcome` are still read before the helper (notes §7). New rung **`1323 / 449 / 2964 / 193`**. Record: [`2d-6-7a-notes.md`](docs/decisions/2d-6-7a-notes.md) |
-| **2d-6 … 2d-8** | The remaining three steps of the 2d consult's eight; 2d-6 is eleven sub-steps `2d-6-1` … `2d-6-11` per its consult, 2d-6-1 cut into `1a`/`1b`/`1c`, 2d-6-6 into `6a`/`6b`/`6c`, 6c into `6c-1`/`6c-2`, and 2d-6-7 into `7a`/`7b`/`7c` | 🔶 **2d-6-1 … 2d-6-6 and 2d-6-7a done**; **2d-6-7b is next**: the delete, move and duplicate panels' external rendering |
+| **2d-6-7b** | The second third of 2d-6-7: the external-conflict rendering on `MatchDeleter.svelte`, `MatchMover.svelte` and `MatchDuplicator.svelte` — origin, the observed revision, the operation beside the whole disk text, reapply ("Keep what I asked for") or the manual-resolution reason, and the two-step reload — copying 2d-6-6c-1's pattern, with bilingual mounted cases for every offered control, direct submission refused, supersession withdrawing the warning, and each 7a §4 item 1 sentence. Two model defects found and fixed failing-first: the deleter's "Delete it" stayed enabled under a held reading (new `canConfirm`); an untouched mover claimed a request it never made (`null` sentences, `awaitingReloadConfirmation`). `noticesBesideRefusal` stops a doubled "waiting" sentence. **Components: the three operation panels; no new module or component; one new key EN/ES; no Rust** | ✅ **complete and CLOSED.** Risk class **high**; worker model **opus** (one worker, resumed once for the fix round). Review by **Codex**, `autoclaude-review.sh` exited 0, no fallback agent. Verdict **`ship-with-fixes`, 0 BLOCKERS, 2 SHOULD-FIX** ([`docs/reviews/phase-2d-6-7b.md`](docs/reviews/phase-2d-6-7b.md)): (1) an untouched mover offered "Keep what I asked for", which could manufacture a move — **held and fixed** in `matchMove.ts` (reapply withheld and refused as `nothingRequested`, key `browser.matchMove.reapply.nothingRequested`); (2) an earlier save refusal kept as history took the reveal and scroll target from the active external conflict on all three panels — **held and fixed**, the active conflict now first. Each re-derived by a case failing first (notes §5). The same scroll shape on the three authored panels is recorded, not fixed (notes §4 item 8). New rung **`1323 / 449 / 3057 / 193`**. Record: [`2d-6-7b-notes.md`](docs/decisions/2d-6-7b-notes.md) |
+| **2d-6 … 2d-8** | The remaining three steps of the 2d consult's eight; 2d-6 is eleven sub-steps `2d-6-1` … `2d-6-11` per its consult, 2d-6-1 cut into `1a`/`1b`/`1c`, 2d-6-6 into `6a`/`6b`/`6c`, 6c into `6c-1`/`6c-2`, and 2d-6-7 into `7a`/`7b`/`7c` | 🔶 **2d-6-1 … 2d-6-6, 2d-6-7a and 2d-6-7b done**; **2d-6-7c is next**: the operation panels' narrow window reading and 2d-6-7's whole acceptance |
 | **2d** | External change reconciliation — plan §6.5 | 🔶 in progress |
 | **3–5** | Validation, packaging, hardening | ⬜️ not started |
 | **M — checkpoint split** | This file cut from 21,803 lines to the live head; the rest archived verbatim under `docs/progress-archive/` | ✅ complete (2026-08-29) — preflight maintenance, unreviewed by rule |
@@ -142,36 +142,35 @@ any of them anything.
 
 ---
 ## Next action
-### Phase 2d-6-7a is complete and CLOSED. 2d-6-7 was cut on 2026-09-23 into **7a / 7b / 7c** (`2d-6-split-notes.md` §2, *The orchestrator's cut of 2d-6-7*). The next action is **Phase 2d-6-7b: the operation panels' rendering and the bilingual mounted tests**.
+### Phase 2d-6-7b is complete and CLOSED. The next action is **Phase 2d-6-7c: the operation panels' narrow window reading, and 2d-6-7's whole acceptance checked in one place** — the last third of 2d-6-7.
 
 **The three documents that bind every 2d-6 step, in reading order**:
 [`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (the consult; it binds),
-[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (§2 the split — **the `### 2d-6-7` entry is
-this step's scope and acceptance**; §3 the binding rulings; §5 the nine corrections; §7 the map of handed-on items) and
-[`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md).
+[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (§2 the split — **the `### 2d-6-7` entry and
+*The orchestrator's cut of 2d-6-7* are this step's scope and acceptance**; §3 the binding rulings; §7 the map of handed-on
+items) and [`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md).
 
-**What the closed steps landed — read each record's §1, never re-derive from the code**: 2d-6-1
-(`2d-6-1{a,b,c}-notes.md`) the delivery protocol on `BrowserState`; 2d-6-2 … 2d-6-5 all eight session receivers as
-values; 2d-6-6a the installed-session reader; 2d-6-6b the registration wiring (`surfaceReceivers.ts`, the pane
-registering editor, creator and recovery); 2d-6-6c-1 the rendering on the three authored panels, the pattern 2d-6-7
-copies; **2d-6-6c-2** the carried editor fixes and the window reading
-([`2d-6-6c-2-window-reading.md`](docs/decisions/2d-6-6c-2-window-reading.md) — §2-§3 the rebuilt harness and the
-launch recipe 2d-6-7's own narrow reading starts from).
+**What 2d-6-7a and 2d-6-7b landed — read each record's §1, never re-derive from the code**:
+[`2d-6-7a-notes.md`](docs/decisions/2d-6-7a-notes.md) (the post-commit helper `adoptAfterTheCommit`, the reapply
+rechecks, the three operation receivers registered from `DetailPane.svelte`) and
+[`2d-6-7b-notes.md`](docs/decisions/2d-6-7b-notes.md) (the deleter, mover and duplicator drawing origin, comparison,
+reapply or manual resolution and reload, EN/ES; §3 its acceptance clause by clause; **§4 lists what 7c's window reading
+must look at**; §5 the review's two fixes).
 
-**What 2d-6-7a landed** ([`2d-6-7a-notes.md`](docs/decisions/2d-6-7a-notes.md) §1): all five match-level wrappers
-end in one post-commit helper, `adoptAfterTheCommit` in `src/lib/browser/workspace.svelte.ts`, and no exception after a
-commit can reject one. The three operation reapplies recheck the installed session after their reads and again after
-adoption. The deleter, mover and duplicator report receivers that `DetailPane.svelte` registers
-(`ReceivingSurfaceKind` now has six kinds).
+**Executable cold: 2d-6-7c.** Start from the harness and launch recipe of
+[`2d-6-6c-2-window-reading.md`](docs/decisions/2d-6-6c-2-window-reading.md) §2-§3 (harness at
+`/private/tmp/espansoconfig-harness-2d-6-6c-2/`, the uncommitted instrument; one plan per launch into a fresh bundle path,
+language through the picker; WebKit page snapshots if the screen is locked). Read the deleter, the mover and the
+duplicator over a file changed on disk, EN and ES, every drawn sentence matched verbatim against the dictionaries; then
+check 2d-6-7's whole acceptance (bilingual mounted interactions, direct submission refusal, supersession withdrawing the
+warning, the narrow window reading) clause by clause in `docs/decisions/2d-6-7c-notes.md`. Risk **high**. Components: none
+expected (a defect the reading finds is pinned failing-first and fixed in the file it names).
 
-**Executable cold: 2d-6-7b.** The rendering on `MatchDeleter.svelte`, `MatchMover.svelte` and
-`MatchDuplicator.svelte`: origin, comparison, reapply or manual resolution, and reload. 2d-6-6c-1's three authored
-panels are the pattern to copy. Acceptance: bilingual mounted interactions for every offered control, direct
-submission refusal, supersession withdrawing the warning. Risk **high**. Start from 7a notes §4 item 1: the wiring
-already makes some existing sentences reachable, none of them tested yet. These are the mover's and duplicator's
-`externalConflict` refusal, `RecoveryWithoutCreation` over `view.conflict`, and the deleter's withdrawn question with
-no sentence saying why. **2d-6-7c** then does the narrow window reading and checks 2d-6-7's whole acceptance. 7a notes
-§4 item 3: `adoptForReapply` in `reapply.ts` has no production caller any more, and deleting it is a later decision.
+**Open items carried from 7b** (notes §4): the ES close button and the "keep editing" choice on the deleter and
+duplicator both read "Dejarlo como está" while doing different things — 2d-6-11's bilingual wording review; the editor,
+creator and recovery panels share the scroll-priority shape 7b's review fixed on the operation panels (§4 item 8) —
+a later phase takes it deliberately. From 7a §4 item 3: `adoptForReapply` in `reapply.ts` has no production caller;
+deleting it is a later decision.
 
 **Open items carried** (6c-2 notes §5): (1)/(3) repeated "No save was initiated…" clauses — 2d-6-11's wording
 review; (4) the creator draws its reload warning while no reload is offered — 2d-6-11 or later; (5) the editor's and
@@ -179,8 +178,8 @@ creator's choice rows land below the fold after the reveal — new behaviour for
 copy under a real gesture is not window-established — 2d-7; `recovery.ts`'s stale "Nothing draws this yet". From
 6b §7: (1) raw's `loadDiskVersion` and restore's `reloadTheDiskVersion` read after the post-adoption `current()` —
 fix **before 2d-6-8 registers their receivers**; (3) the eight sessions' doors not re-audited for reads after the
-last `current()`. **2d-8 now deletes `/private/tmp/espansoconfig-harness-2d-6-6c-2/`** (the 2d-5-7b harness no longer
-exists) and the instrument's new commands `probe_other_writer`, `probe_snapshot`, `probe_snapshot_state`.
+last `current()`. **2d-8 deletes `/private/tmp/espansoconfig-harness-2d-6-6c-2/`** and the instrument's commands
+`probe_other_writer`, `probe_snapshot`, `probe_snapshot_state`.
 
 **Orchestrator's rulings standing from 1b's close**: (1) the `ReconciliationWorkspace` interface may be widened as
 entries require; (2) the acknowledgement operand stays `ConflictSource` (2d-6-9 draws the exit); (3) the
@@ -188,7 +187,7 @@ entries require; (2) the acknowledgement operand stays `ConflictSource` (2d-6-9 
 the three authored kinds; 2d-6-7/-8 register the other five, and any remaining hold is 2d-6-9's.
 
 **Older open items**: archived verbatim in
-[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The 2d-6-6c-1 → 2d-6-6c-2 handoff"*
+[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The 2d-6-7a → 2d-6-7b handoff"*
 and the handoffs before it; the live map is the split record's §7.
 
 
@@ -223,32 +222,20 @@ harness-free closure; corrects the `main.rs` comment and deletes the harness und
 
 ## Verification baseline
 
-### Phase 2d-6-7a's verification: every gate measured by the orchestrator, the frontend three twice
+### Phase 2d-6-7b's verification: every gate measured by the orchestrator, twice
 
-**`1323 / 449 / 2964 / 193`** at 2d-6-7a, from `1323 / 449 / 2926 / 193`. The worker's tree was measured once, each
-gate alone with its exit read from a redirected file: `npm run check` gave 449 files, 0 errors, 0 warnings;
-`npm test` 2960 passed; `npm run build` 193 modules, server-only markers absent, client-only present (2);
-`cargo test --workspace -- --test-threads=1` 1323 passed; clippy `-D warnings` and `cargo fmt --check` exited 0.
-After the review's fix round the frontend three were measured again: 449 / 0 / 0, **2964 passed** (+4, the
-fix's case), 193 modules, markers the same. No Rust changed in the fix round. The instrument pair diff is still
-`5 insertions(+), 1 deletion(-)`.
-
-### Phase 2d-6-6c-2's verification (superseded rung)
-
-**`1323 / 449 / 2926 / 193`** at 2d-6-6c-2, from `1323 / 449 / 2920 / 193`. Measured by the orchestrator on the
-tree the worker reported and again after the review's fix round, each gate on its own, each exit read from a
-redirected file: `npm run check` **449 files, 0 errors, 0 warnings**; `npm test` **2926 passed, 65 files** (+6:
-+2 `MatchEditor.test.ts` for carried item 6, +2 `workspace.test.ts` for item 7, +2 for the review's blocker, each
-shown failing first); `npm run build` **193 modules**, server-only markers **absent**, client-only **present (2)**.
-`cargo test --workspace -- --test-threads=1` **1323 passed, 0 failed**; clippy `-D warnings` and `cargo fmt --check`
-exit 0 (only the untracked `probe.rs` changed on the Rust side). `cargo tree -p espansoconfig-core | rg tauri` finds
-nothing. The instrument's pair diff is still `5 insertions(+), 1 deletion(-)`. 2d-6-6c-1's narrative is archived in
-[`phase-2d.md`](docs/progress-archive/phase-2d.md).
+**`1323 / 449 / 3057 / 193`** at 2d-6-7b, from `1323 / 449 / 2964 / 193`. On the worker's tree, each gate alone with
+its output redirected to a file: `npm run check` 449 files, 0 errors, 0 warnings; `npm test` 3053 passed (65 files);
+`npm run build` 193 modules, server-only markers absent, client-only present (2); `cargo test --workspace --
+--test-threads=1` 1323 passed, 0 failed; clippy `-D warnings` and `cargo fmt --check` exit 0. After the review's fix
+round (one new dictionary key): `npm run check` 449 / 0 / 0, **`npm test` 3057 passed** (+4, the fix's cases),
+`npm run build` 193 modules, markers the same, and `cargo test` re-run for the dictionary contract, 1323 passed, 0
+failed. No Rust source changed. The instrument pair diff is still `5 insertions(+), 1 deletion(-)`.
 
 ### The ladder's live rung
 
-**`1323 / 449 / 2964 / 193`** at 2d-6-7a, **with the instrument in the tree** (a committed tree builds 192
-modules). The rung below it is `1323 / 449 / 2926 / 193` at 2d-6-6c-2, below that `1323 / 449 / 2920 / 193` at 2d-6-6c-1, below that `1323 / 449 / 2899 / 193` at 2d-6-6b, below that `1323 / 447 / 2833 / 192` at 2d-6-6a, below that `1323 / 447 / 2817 / 192` at 2d-6-5, below that `2754` at 2d-6-4, below that `2669` at 2d-6-3, `2618` at 2d-6-2, `2574` at 2d-6-1c, `2549` at 2d-6-1b and `2520` at
+**`1323 / 449 / 3057 / 193`** at 2d-6-7b, **with the instrument in the tree** (a committed tree builds 192
+modules). The rung below it is `1323 / 449 / 2964 / 193` at 2d-6-7a, below that `1323 / 449 / 2926 / 193` at 2d-6-6c-2, below that `1323 / 449 / 2920 / 193` at 2d-6-6c-1, below that `1323 / 449 / 2899 / 193` at 2d-6-6b, below that `1323 / 447 / 2833 / 192` at 2d-6-6a, below that `1323 / 447 / 2817 / 192` at 2d-6-5, below that `2754` at 2d-6-4, below that `2669` at 2d-6-3, `2618` at 2d-6-2, `2574` at 2d-6-1c, `2549` at 2d-6-1b and `2520` at
 2d-6-1a, below that
 `1323 / 444 / 2474 / 191` at 2d-5-7a, held through 2d-5-7b and the 2d-6 design consult; below that
 `1320 / 443 / 2467 / 189` at 2d-5-6, below that `2466` at 2d-5-5b, `2433` at 2d-5-5a and `2415` at 2d-5-4-G,
@@ -344,10 +331,9 @@ all of it is in `git log`._
 | _**2d-5-4** through **2d-5-4-G** — **the whole 2d-5-4 chain, closed**, 8 rows: the observation state transitions and the seven §7.1 rounds over them. Every round `ship-with-fixes` by **Codex**, every finding re-derived before it was fixed, the rung climbing `2380 → 2415` with the other three figures never moving. The chain's product is `src/lib/browser/observationTransitions.ts`_ | `81e54db` … `ff183e1` | ✅ all pushed; **archived 2026-09-21 at 2d-5-5a** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state rows of the closed 2d-5-4 chain"* |
 | _**2d-5-5a**, **2d-5-5b**, **2d-5-6**, **2d-5-7a** and **2d-5-7b** — the close of 2d-5, five rows, every review `ship-with-fixes` by **Codex**, every finding re-derived before it was fixed, the rung climbing `2415 → 2474`_ | `20ff191` … `6467ba8` | ✅ all pushed; **archived 2026-09-21 at 2d-6-1a** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state rows of the closed 2d-5-5a … 2d-5-7b chain"* |
 | **2d-6 design consult — brief, Codex consult, record, the record's review; four new files under `docs/` plus this checkpoint pair, no source touched.** Also archives the superseded 2d-5-7b Next-action handoff (161 lines) to `next-action-history.md` and 2d-5-7b's verification narrative (15 lines) to `phase-2d.md`. Stages `PROGRESS.md`, `PROGRESS.json` and `docs/` **by path**; the four instrument paths stay uncommitted | **`2de66e2`** | ✅ pushed to `origin/main` (`f46f52a..2de66e2`); this SHA record is the following commit |
-| _**2d-6-1a** through **2d-6-6b** — nine rows, every review `ship-with-fixes` by **Codex**, the rung climbing `2474 → 2899`_ | `e88498d` … `2237dca` | ✅ all pushed; **archived 2026-09-23 at 2d-6-6c-2** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state rows of 2d-6-1a … 2d-6-6b"* |
-| **2d-6-6c-1 — the three authored panels' rendering, the first half of 2d-6-6c.** Origin, evidence, comparison, copy and recovery drawn on the editor, creator and recovery panels, 6b's carried items 1, 2 and 7 fixed and 4, 5 and the hold gap recorded, fourteen bilingual mounted acceptance cases, three new keys EN/ES, the 6c-1/6c-2 cut in `2d-6-split-notes.md` §2, the notes, the review brief and file. Review **Codex, `ship-with-fixes`, 2 BLOCKERS**, both re-derived, both held, both fixed in this commit with four pinning cases (`BrowserState.createMatch` keeping a committed result when the reread throws; the creator's copy feedback bound to the copied snapshot). New rung `1323 / 449 / 2920 / 193`. Also archives the superseded 2d-6-6b → 2d-6-6c handoff to `next-action-history.md`, 2d-6-6b's verification narrative to `phase-2d.md` and 2d-6-6a's status row to `status-table.md`. Stages `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/`, `src/lib/i18n/` and the six `src/lib/components/` files **by path** — **no path under `src-tauri/`**; the four instrument paths stay uncommitted | **`ebf45be`** | ✅ pushed to `origin/main` (`3d5e764..ebf45be`); this SHA record is the following commit |
-| **2d-6-6c-2 — the window reading of the three authored panels, the last half of 2d-6-6c; 2d-6-6 closes with it.** Carried item 6 (the editor's copy disclosure bound to its snapshot) and item 7 (`saveMatch` answering a committed write as saved when adoption or the reread throws) fixed with failing-first cases; six proof launches L01-L06, three panels × EN/ES; 2d-6-6's acceptance checked clause by clause; the notes, the window-reading record, the review brief and file. Review **Codex, `ship-with-fixes`, 1 BLOCKER** (a throwing `code` getter in the post-commit classification), re-derived, held, fixed in this commit with two pinning cases. New rung `1323 / 449 / 2926 / 193`. Also archives the 2d-6-6b and 2d-6-6c-1 status rows and the 2d-6-1a … 2d-6-6b git rows to `status-table.md`, the 6c-1 → 6c-2 handoff to `next-action-history.md` and 6c-1's verification narrative to `phase-2d.md`. Stages `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/` and the two `src/lib/components/` files **by path** — **no path under `src-tauri/`**; the four instrument paths stay uncommitted | **`ae941cb`** | ✅ pushed to `origin/main` (`5802e92..ae941cb`); this SHA record is the following commit |
+| _**2d-6-1a** through **2d-6-6c-2** — eleven rows, every review `ship-with-fixes` by **Codex**, the rung climbing `2474 → 2899`_ | `e88498d` … `ae941cb` | ✅ all pushed; **archived 2026-09-23 at 2d-6-6c-2 (the last two at 2d-6-7b)** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state rows of 2d-6-1a … 2d-6-6b"* |
 | **2d-6-7a — the owed wrapper and reapply fixes, and the three operation receivers registered; the first third of 2d-6-7.** The 7a/7b/7c cut is in `2d-6-split-notes.md` §2. The commit includes the notes, the review brief and file. Review **Codex, `ship-with-fixes`, 0 BLOCKERS, 1 SHOULD-FIX**, re-derived, held and fixed in this commit. New rung `1323 / 449 / 2964 / 193`. Stages `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/` and the eight `src/lib/components/` files **by path**, with **no path under `src-tauri/`**. The four instrument paths stay uncommitted | **`335e253`** | ✅ pushed to `origin/main` (`136ea52..335e253`); this SHA record is the following commit |
+| **2d-6-7b — the three operation panels' external-conflict rendering; the second third of 2d-6-7.** Deleter, mover and duplicator draw origin, comparison, reapply or manual resolution and reload, EN/ES, with bilingual mounted cases; two model defects fixed failing-first; the notes, the review brief and file. Review **Codex, `ship-with-fixes`, 0 BLOCKERS, 2 SHOULD-FIX**, both re-derived, held and fixed in this commit (one new key EN/ES). New rung `1323 / 449 / 3057 / 193`. Also archives the 2d-6-6c-2 status row to `status-table.md`, the 7a → 7b handoff to `next-action-history.md` and 6c-2's verification narrative to `phase-2d.md`. Stages `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/`, `src/lib/i18n/` and the seven `src/lib/components/` files **by path**, with **no path under `src-tauri/`**. The four instrument paths stay uncommitted | _recorded in the following commit_ | _recorded in the following commit_ |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed

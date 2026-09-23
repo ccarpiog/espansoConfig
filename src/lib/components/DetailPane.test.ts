@@ -2229,8 +2229,9 @@ describe('the pane as a delivery host for the operation panels — Phase 2d-6-7a
   // Phase 2d-6-6b suite above: each case opens its panel through the pane's own
   // control, starts the lifecycle over a finite drain queue counted exactly, and
   // wakes the window. What these cases assert is what 2d-6-7a wires — the
-  // registration, the envelope, the send withdrawn — and not the sentences the
-  // panels draw about the conflict, which are Phase 2d-6-7b's.
+  // registration, the envelope, the send withdrawn. The sentences the panels
+  // draw about the conflict are read by the suite after this one (Phase 2d-6-7b)
+  // and by each panel's own suite.
 
   it.each(['matchDeleter', 'matchMover', 'matchDuplicator'] as const)(
     'an open %s is delivered its file’s change, and its send is withdrawn',
@@ -2375,6 +2376,88 @@ describe('the pane as a delivery host for the operation panels — Phase 2d-6-7a
     pane.stop();
   }); // End of the "deletion settlement lands in order" case
 }); // End of the "delivery host for the operation panels" suite
+
+describe('the operation panels’ drawn sentences through the pane, in English and Spanish — Phase 2d-6-7b', () => {
+  // **Read off the screen through the real registry and coordinator boundary**,
+  // so the sentences each panel's own suite reads through its reported receiver
+  // are shown to be what a real delivery produces too (the 2d-6 record's §3
+  // entries 34 and 35). Opened by the pane's controls in the case's locale, a
+  // finite drain queue counted exactly, a wake admitted by the coordinator.
+
+  it.each(
+    (['matchDeleter', 'matchMover', 'matchDuplicator'] as const).flatMap((kind) =>
+      LOCALES.map((lang) => [kind, lang] as const)
+    )
+  )('an open %s draws the external origin, its revision and the comparison, and refuses to send (%s)', async (kind, lang) => {
+    expectedDrains = 3;
+    const events = paneEvents();
+    const pane = await mountPane(
+      false,
+      {
+        views: [documentAWithTwo(), documentB()],
+        batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])]
+      },
+      events.source
+    );
+    locale.setOverride(lang);
+    const walk = OPERATIONS[kind];
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+    controlIn(pane.target, lang, walk.open).click();
+    flushSync();
+    if (kind === 'matchMover') {
+      controlIn(pane.target, lang, 'browser.matchMove.position.end').click();
+      flushSync();
+    }
+    expect(isDrawn(pane.target, '.panel.external')).toBe(false);
+
+    events.wake(5, 5);
+    await settleWake();
+
+    const panel = drawn(pane.target, '.panel.external');
+    expect(panel).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(panel).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    expect(panel).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: 'c'.repeat(64) })
+    );
+    expect(panel).toContain(translate(lang, 'browser.saveOutcome.diskVersion'));
+    expect(panel).not.toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
+    expect(panel).not.toContain(translate(lang, 'browser.saveOutcome.changedElsewhere'));
+    // The three choices, in this locale, and the recovery reason beside them.
+    for (const choice of ['keepEditing', 'keepMyDraft', 'reloadDiskVersion'] as const) {
+      const label = translate(lang, conflictChoiceKey(choice, 'operationChoice'));
+      expect(
+        [...(pane.target.querySelector('.panel.external')?.querySelectorAll('button') ?? [])].some(
+          (one) => one.textContent?.trim() === label
+        )
+      ).toBe(true);
+    } // End of the loop over the three offered choices
+    expect(pane.target.textContent).toContain(translate(lang, 'browser.recovery.unavailable.operationDraft'));
+    // Direct submission is refused, read in this locale: the deleter's question
+    // is withdrawn, and the mover's and the duplicator's send is disabled with the
+    // reason beside it. (`walk.mayStillSend` reads English labels, so it would be
+    // vacuous here in Spanish.)
+    const sendKey: TranslationKey =
+      kind === 'matchDeleter'
+        ? 'browser.matchDeletion.confirm'
+        : kind === 'matchMover'
+          ? 'browser.matchMove.move'
+          : 'browser.matchDuplication.duplicate';
+    const send = [...pane.target.querySelectorAll('button')].find(
+      (one) => one.textContent?.trim() === translate(lang, sendKey)
+    );
+    if (kind === 'matchDeleter') {
+      expect(send).toBeUndefined();
+    } else {
+      expect(send?.disabled).toBe(true);
+      expect(pane.target.querySelector('.actions')?.textContent).toContain(
+        translate(lang, 'browser.externalConflict.fileChangedWhileOpen')
+      );
+    }
+    expect(pane.commands[walk.command]).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "operation panel drawn sentences" case
+}); // End of the "operation panels’ drawn sentences through the pane" suite
 
 /**
  * The text one element of the pane draws, insisted upon — Phase 2d-6-6c-1.

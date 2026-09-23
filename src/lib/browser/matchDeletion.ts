@@ -1993,6 +1993,20 @@ export interface MatchDeletionView {
   readonly refusal: DeletionRefusal | null;
   /** Whether the person has been asked and has not answered. */
   readonly confirming: boolean;
+  /**
+   * Whether answering the question with *Delete it* can send anything — Phase
+   * 2d-6-7b.
+   *
+   * `false` while no question is pending, and `false` while one is pending but
+   * {@link canRequestDelete} refuses: a held reading of the file withdraws no
+   * question (the 2d-6 record's §3 entry 11's `retained` row) and still blocks the
+   * send (entry 8), so without this the panel offered a live control that
+   * {@link confirmDelete} answered `null` to — drawn as the stale-reading
+   * sentence, which is false of a reading nobody installed. Why it is off is said
+   * by {@link MatchDeletionView.externalNotices}. **What this cannot force** is
+   * that a panel reads it; `confirmDelete` refuses either way.
+   */
+  readonly canConfirm: boolean;
   /** Whether a deletion is in flight. */
   readonly deleting: boolean;
   /** Whether one has committed, so this session is spent. */
@@ -2011,15 +2025,16 @@ export interface MatchDeletionView {
    * Beside {@link MatchDeletionView.messages} and never merged into it, for
    * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
    * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
-   * twice. Rendered through `tConflictMessage`. No component reads it yet;
-   * 2d-6-7 does.
+   * twice. Rendered through `tConflictMessage`; `MatchDeleter.svelte` draws it
+   * since Phase 2d-6-7b.
    */
   readonly externalMessages: readonly ConflictMessage[];
   /**
    * The lines owed while an observation cannot be acted on — Phase 2d-6-4.
    *
    * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
-   * own fields. No component reads it yet; 2d-6-7 and 2d-6-9 do.
+   * own fields. `MatchDeleter.svelte` draws them beside the question's controls
+   * since Phase 2d-6-7b; the control that acknowledges the second is 2d-6-9's.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
   /**
@@ -2119,6 +2134,7 @@ export function matchDeletionView(session: MatchDeletionSession): MatchDeletionV
     canDelete: canRequestDelete(session),
     refusal: session.eligibility.kind === 'refused' ? session.eligibility.reason : null,
     confirming: session.pending !== null,
+    canConfirm: session.pending !== null && canRequestDelete(session),
     deleting: session.phase === 'saving',
     deleted: session.deleted,
     sendFailure: session.sendFailure,

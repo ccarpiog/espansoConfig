@@ -247,6 +247,7 @@ import type { RawSaveChoice } from './rawSave';
 import type { ConflictSource, ExternalConflictObservation } from './conflictSource';
 import {
   externalConflictNoticeKey,
+  noticesBesideRefusal,
   type ExternalConflictNotice,
   type ObservationDelivery
 } from './observationDelivery';
@@ -2389,17 +2390,29 @@ export interface MatchDuplicationView {
    * Beside {@link MatchDuplicationView.messages} and never merged into it, for
    * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
    * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
-   * twice. Rendered through `tConflictMessage`. No component reads it yet;
-   * 2d-6-7 does.
+   * twice. Rendered through `tConflictMessage`; `MatchDuplicator.svelte` draws
+   * it since Phase 2d-6-7b.
    */
   readonly externalMessages: readonly ConflictMessage[];
   /**
    * The lines owed while an observation cannot be acted on — Phase 2d-6-4.
    *
    * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
-   * own fields. No component reads it yet; 2d-6-7 and 2d-6-9 do.
+   * own fields. `MatchDuplicator.svelte` draws them through
+   * {@link MatchDuplicationView.noticesBesideRefusal} since Phase 2d-6-7b; the
+   * control that acknowledges the second is 2d-6-9's.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
+  /**
+   * {@link MatchDuplicationView.externalNotices} less the one
+   * {@link MatchDuplicationView.cannotDuplicate} already says — Phase 2d-6-7b.
+   *
+   * `observationRetained` is rendered through the retained notice's own sentence
+   * ({@link duplicationSubmissionRefusalKey}), so a panel drawing the refusal and
+   * every notice would print it twice. `noticesBesideRefusal` in
+   * `./observationDelivery.ts` is the rule; this is what the panel draws.
+   */
+  readonly noticesBesideRefusal: readonly ExternalConflictNotice[];
   /**
    * The presentation changes a saved arm disclosed, in report order.
    *
@@ -2537,6 +2550,7 @@ export function matchDuplicationView(
       ? []
       : conflictChoicesFor(effectiveCapabilitiesOf(session), offeredReloadStep(session.reload));
   const cannotDuplicate = duplicationSubmissionRefusal(session, views);
+  const notices = externalNoticesOf(session);
   const externallyBlocked = session.externalConflict !== null || awaitedFor(session) !== null;
   const refusalChoices = offeredRefusalChoices(refused, stale);
   return {
@@ -2555,7 +2569,11 @@ export function matchDuplicationView(
     outcome,
     messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
     externalMessages: session.externalConflict === null ? [] : session.externalConflict.messages,
-    externalNotices: externalNoticesOf(session),
+    externalNotices: notices,
+    noticesBesideRefusal: noticesBesideRefusal(
+      notices,
+      cannotDuplicate === 'observationRetained' ? 'observationRetained' : null
+    ),
     notes: saved === null ? [] : saved.notes,
     // The one offer a refusal panel may keep under an external block is the
     // dismissal: `beginDuplicate` would answer `null` to the other, and a control

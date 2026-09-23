@@ -41,6 +41,7 @@ import {
   externalConflictActionKey,
   externalConflictNoticeKey,
   isReplacingVerdict,
+  noticesBesideRefusal,
   retainedDelivery,
   writtenHereDelivery,
   type AutomaticReloadDecision,
@@ -430,3 +431,13 @@ describe('the external-conflict notices and action', () => {
     } // End of the loop over every action
   }); // End of the "reaches the screen through the accessor" case
 }); // End of the "external-conflict notices and action" suite
+
+describe('the notices drawn beside a refusal line — Phase 2d-6-7b', () => {
+  it('drops only the notice the refusal already says, keeps the order, and keeps every notice otherwise', () => {
+    const both = [{ kind: 'writeOutcomeUnknown' }, { kind: 'observationRetained' }] as const;
+    expect(noticesBesideRefusal(both, 'observationRetained')).toEqual([{ kind: 'writeOutcomeUnknown' }]);
+    expect(noticesBesideRefusal(both, 'writeOutcomeUnknown')).toEqual([{ kind: 'observationRetained' }]);
+    expect(noticesBesideRefusal(both, null)).toBe(both);
+    expect(noticesBesideRefusal([], 'observationRetained')).toEqual([]);
+  }); // End of the "drops only the restated notice" case
+}); // End of the "notices beside a refusal" suite

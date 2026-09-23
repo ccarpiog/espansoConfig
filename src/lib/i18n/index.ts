@@ -825,11 +825,12 @@ export function tSaveOutcomeMessage(message: SaveOutcomeMessage): string {
  * of `view.conflict` calls this one for both arms and never narrows the union in
  * markup.
  *
- * **Three components call it since Phase 2d-6-6c-1** — `MatchEditor.svelte`,
- * `MatchCreator.svelte` and `RecoveryPanel.svelte`, over `view.externalMessages`
- * in the external conflict panel each draws outside the save-outcome branch (the
- * 2d-6 record's §3 entry 10). The other five surfaces' panels are 2d-6-7's and
- * 2d-6-8's. Every component still draws a save outcome's lines through
+ * **Six components call it** — `MatchEditor.svelte`, `MatchCreator.svelte` and
+ * `RecoveryPanel.svelte` since Phase 2d-6-6c-1, `MatchDeleter.svelte`,
+ * `MatchMover.svelte` and `MatchDuplicator.svelte` since 2d-6-7b — over
+ * `view.externalMessages` in the external conflict panel each draws outside the
+ * save-outcome branch (the 2d-6 record's §3 entry 10). The raw editor's and
+ * restore's panels are 2d-6-8's. Every component still draws a save outcome's lines through
  * {@link tSaveOutcomeMessage} over `view.messages`, whose type is unchanged.
  *
  * @param message - A line of either conflict arm.
@@ -844,10 +845,11 @@ export function tConflictMessage(message: ConflictMessage): string {
  * or a write's outcome is unknown, in the current language.
  *
  * The reactive wrapper over `describeExternalConflictNotice` in `./codes` (the
- * 2d-6 record's §3 entries 13 and 14). **Three components call it since Phase
- * 2d-6-6c-1** — `MatchEditor.svelte`, `MatchCreator.svelte` and
- * `RecoveryPanel.svelte`, over their views' `externalNotices`, beside the control
- * a notice explains. The acknowledgement that ends the second state exists —
+ * 2d-6 record's §3 entries 13 and 14). **Six components call it** —
+ * `MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte` since
+ * Phase 2d-6-6c-1, `MatchDeleter.svelte`, `MatchMover.svelte` and
+ * `MatchDuplicator.svelte` since 2d-6-7b — over their views' notices, beside the
+ * control a notice explains. The acknowledgement that ends the second state exists —
  * `BrowserState.acknowledgeWriteUncertainty` in `../browser/workspace.svelte.ts`,
  * since 2d-6-1b — and no component calls it yet: 2d-6-9 draws that control.
  *
@@ -885,10 +887,12 @@ export function tExternalConflictAction(action: ExternalConflictAction): string 
  * names a file, a revision or a time — the watcher line says in as many words that
  * this application cannot say what changed the file or when.
  *
- * **Three components draw it since Phase 2d-6-6c-1** — `MatchEditor.svelte`,
- * `MatchCreator.svelte` and `RecoveryPanel.svelte`, as the first line of a
- * conflict panel of either origin, over `conflictOriginMessage(conflict.source)`.
- * The other five surfaces' panels are 2d-6-7's and 2d-6-8's.
+ * **Six components draw it** — `MatchEditor.svelte`, `MatchCreator.svelte` and
+ * `RecoveryPanel.svelte` since Phase 2d-6-6c-1, `MatchDeleter.svelte`,
+ * `MatchMover.svelte` and `MatchDuplicator.svelte` since 2d-6-7b — as the first
+ * line of a conflict panel of either origin, over
+ * `conflictOriginMessage(conflict.source)`. The raw editor's and restore's panels
+ * are 2d-6-8's.
  *
  * @param message - Which origin line the model asked for.
  * @returns The translated sentence.
@@ -1824,6 +1828,7 @@ export function describeMoveReapplyObstacle(
     case 'supersededEvidence':
     case 'writeOutcomeUnknown':
     case 'observationRetained':
+    case 'nothingRequested':
       return translate(locale, key);
     case 'correspondence':
     case 'evidenceNotATarget':

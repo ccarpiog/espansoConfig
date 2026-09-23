@@ -378,6 +378,7 @@ describe('the reapply obstacle sentences', () => {
     { kind: 'notTheSameSequence' },
     { kind: 'anchorNotInSequence' },
     { kind: 'moveRefused', reason: 'outOfDate' },
+    { kind: 'nothingRequested' },
     { kind: 'correspondence', reason: 'AmbiguousExact' },
     { kind: 'evidenceNotATarget' },
     // The external-origin arms, Phase 2d-6-4, as above; `matchMove.test.ts` pins

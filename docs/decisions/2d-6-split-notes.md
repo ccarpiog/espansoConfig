@@ -209,7 +209,7 @@ plus the two hand-on obligations; the acceptance above is checked in full when 2
   resolution and reload rendering on `MatchDeleter.svelte`, `MatchMover.svelte` and
   `MatchDuplicator.svelte`; the bilingual mounted tests of the acceptance above — every offered
   control, direct submission refusal, supersession withdrawing the warning. Record:
-  `2d-6-7b-notes.md`.
+  [`2d-6-7b-notes.md`](2d-6-7b-notes.md).
 - **2d-6-7c — the narrow window reading, and 2d-6-7's whole acceptance checked in one place**,
   starting from the harness and launch recipe of
   [`2d-6-6c-2-window-reading.md`](2d-6-6c-2-window-reading.md) §2-§3. Record: `2d-6-7c-notes.md`.

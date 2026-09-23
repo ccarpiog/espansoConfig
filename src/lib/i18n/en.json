@@ -450,6 +450,7 @@
   "browser.matchMove.cannotMove.alreadyThere": "This is where the file already writes this snippet. Choose another place for it.",
   "browser.matchMove.reapply.notTheSameSequence": "The snippet found in the version on disk is not in the list this move works in, and this app does not move a snippet from one list to another.",
   "browser.matchMove.reapply.anchorNotInSequence": "The snippet this one was to be placed after is not one this move may name in the list as the version on disk holds it.",
+  "browser.matchMove.reapply.nothingRequested": "No destination was chosen here, so there is nothing to keep against the version on disk: the snippet was to stay where this window read it.",
   "browser.matchMove.reapply.moveRefused": "The move cannot be sent against the version on disk.",
 
   "browser.matchDuplication.open": "Duplicate this snippet…",

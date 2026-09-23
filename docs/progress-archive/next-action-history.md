@@ -15336,3 +15336,57 @@ and (3) of the 2d-5 hand-off by 1b in the code's own doc comments.
 in `src/probe.ts`, not from the consult's description), **2d-8** (instrument removal and harness-free closure;
 corrects the `main.rs` comment and deletes `/private/tmp/espansoconfig-harness-2d-5-7b/`).
 ---
+
+
+## The 2d-6-7a → 2d-6-7b handoff — archived 2026-09-23 at 2d-6-7b
+
+### Phase 2d-6-7a is complete and CLOSED. 2d-6-7 was cut on 2026-09-23 into **7a / 7b / 7c** (`2d-6-split-notes.md` §2, *The orchestrator's cut of 2d-6-7*). The next action is **Phase 2d-6-7b: the operation panels' rendering and the bilingual mounted tests**.
+
+**The three documents that bind every 2d-6 step, in reading order**:
+[`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (the consult; it binds),
+[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (§2 the split — **the `### 2d-6-7` entry is
+this step's scope and acceptance**; §3 the binding rulings; §5 the nine corrections; §7 the map of handed-on items) and
+[`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md).
+
+**What the closed steps landed — read each record's §1, never re-derive from the code**: 2d-6-1
+(`2d-6-1{a,b,c}-notes.md`) the delivery protocol on `BrowserState`; 2d-6-2 … 2d-6-5 all eight session receivers as
+values; 2d-6-6a the installed-session reader; 2d-6-6b the registration wiring (`surfaceReceivers.ts`, the pane
+registering editor, creator and recovery); 2d-6-6c-1 the rendering on the three authored panels, the pattern 2d-6-7
+copies; **2d-6-6c-2** the carried editor fixes and the window reading
+([`2d-6-6c-2-window-reading.md`](docs/decisions/2d-6-6c-2-window-reading.md) — §2-§3 the rebuilt harness and the
+launch recipe 2d-6-7's own narrow reading starts from).
+
+**What 2d-6-7a landed** ([`2d-6-7a-notes.md`](docs/decisions/2d-6-7a-notes.md) §1): all five match-level wrappers
+end in one post-commit helper, `adoptAfterTheCommit` in `src/lib/browser/workspace.svelte.ts`, and no exception after a
+commit can reject one. The three operation reapplies recheck the installed session after their reads and again after
+adoption. The deleter, mover and duplicator report receivers that `DetailPane.svelte` registers
+(`ReceivingSurfaceKind` now has six kinds).
+
+**Executable cold: 2d-6-7b.** The rendering on `MatchDeleter.svelte`, `MatchMover.svelte` and
+`MatchDuplicator.svelte`: origin, comparison, reapply or manual resolution, and reload. 2d-6-6c-1's three authored
+panels are the pattern to copy. Acceptance: bilingual mounted interactions for every offered control, direct
+submission refusal, supersession withdrawing the warning. Risk **high**. Start from 7a notes §4 item 1: the wiring
+already makes some existing sentences reachable, none of them tested yet. These are the mover's and duplicator's
+`externalConflict` refusal, `RecoveryWithoutCreation` over `view.conflict`, and the deleter's withdrawn question with
+no sentence saying why. **2d-6-7c** then does the narrow window reading and checks 2d-6-7's whole acceptance. 7a notes
+§4 item 3: `adoptForReapply` in `reapply.ts` has no production caller any more, and deleting it is a later decision.
+
+**Open items carried** (6c-2 notes §5): (1)/(3) repeated "No save was initiated…" clauses — 2d-6-11's wording
+review; (4) the creator draws its reload warning while no reload is offered — 2d-6-11 or later; (5) the editor's and
+creator's choice rows land below the fold after the reveal — new behaviour for a later phase to decide; (3) a real
+copy under a real gesture is not window-established — 2d-7; `recovery.ts`'s stale "Nothing draws this yet". From
+6b §7: (1) raw's `loadDiskVersion` and restore's `reloadTheDiskVersion` read after the post-adoption `current()` —
+fix **before 2d-6-8 registers their receivers**; (3) the eight sessions' doors not re-audited for reads after the
+last `current()`. **2d-8 now deletes `/private/tmp/espansoconfig-harness-2d-6-6c-2/`** (the 2d-5-7b harness no longer
+exists) and the instrument's new commands `probe_other_writer`, `probe_snapshot`, `probe_snapshot_state`.
+
+**Orchestrator's rulings standing from 1b's close**: (1) the `ReconciliationWorkspace` interface may be widened as
+entries require; (2) the acknowledgement operand stays `ConflictSource` (2d-6-9 draws the exit); (3) the
+`projectionReplaced` refusal at an outlived arrival generation stands (2d-6-9's). The declared hold gap: no hold for
+the three authored kinds; 2d-6-7/-8 register the other five, and any remaining hold is 2d-6-9's.
+
+**Older open items**: archived verbatim in
+[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The 2d-6-6c-1 → 2d-6-6c-2 handoff"*
+and the handoffs before it; the live map is the split record's §7.
+
+

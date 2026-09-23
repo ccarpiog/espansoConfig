@@ -394,7 +394,10 @@ export function decideAutomaticReload(inputs: AutomaticReloadGuardInputs): Autom
  * `MatchDuplicationView.externalNotices`), and the raw editor's and restore's
  * since 2d-6-5 (`RawEditorView.externalNotices`, `RestoreView.externalNotices`).
  * `MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte` draw the
- * first three views' notices; the other five panels are 2d-6-7's and 2d-6-8's.
+ * first three views' notices, and `MatchDeleter.svelte`, `MatchMover.svelte` and
+ * `MatchDuplicator.svelte` the next three since Phase 2d-6-7b (the mover and the
+ * duplicator through {@link noticesBesideRefusal}); the raw editor's and
+ * restore's are 2d-6-8's.
  * The acknowledgement that ends the second exists
  * (`BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, since
  * 2d-6-1b) and no component calls it — 2d-6-9 draws the control. The codes exist
@@ -437,6 +440,32 @@ export function externalConflictNoticeKey(notice: ExternalConflictNotice): Trans
     }
   }
 } // End of function externalConflictNoticeKey()
+
+/**
+ * The notices a surface draws beside a refusal line that may already say one of
+ * them — Phase 2d-6-7b.
+ *
+ * The mover's and the duplicator's submission refusals render
+ * `observationRetained` through this very notice's sentence
+ * (`moveSubmissionRefusalKey` in `./matchMove.ts`,
+ * `duplicationSubmissionRefusalKey` in `./matchDuplication.ts`), so a panel drawing
+ * both would print one sentence twice, one line apart. This answers the notices
+ * less the one the refusal line already says, in their order, and every notice
+ * when it says none. **What it forces** is only that: it compares kinds, so it is
+ * correct exactly while a refusal that names a notice kind renders that notice's
+ * sentence — which the two key functions do by calling
+ * {@link externalConflictNoticeKey}, and which nothing here can check.
+ *
+ * @param notices - The view's notices, in its order.
+ * @param refusalSays - The notice the refusal line on screen renders, or `null`.
+ * @returns The notices still to draw.
+ */
+export function noticesBesideRefusal(
+  notices: readonly ExternalConflictNotice[],
+  refusalSays: ExternalConflictNotice['kind'] | null
+): readonly ExternalConflictNotice[] {
+  return refusalSays === null ? notices : notices.filter((notice) => notice.kind !== refusalSays);
+} // End of function noticesBesideRefusal()
 
 /**
  * One thing a person may do about an external-conflict notice, as a code.

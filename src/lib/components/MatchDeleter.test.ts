@@ -45,7 +45,13 @@ import {
   type DiskAdoptionOutcome
 } from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
-import { saveConflictSource, type ConflictSource } from '../browser/conflictSource';
+import {
+  externalConflictSource,
+  saveConflictSource,
+  standingConflictOf,
+  type ConflictSource,
+  type ExternalConflictObservation
+} from '../browser/conflictSource';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeDocument, makeMatch, makeSummary } from '../browser/fixtures';
 import type { InvalidationStatus } from '../browser/invalidation';
@@ -54,7 +60,8 @@ import {
   createBrowserState,
   type BrowserCommands,
   type BrowserState,
-  type MatchSaveAnswer
+  type MatchSaveAnswer,
+  type ObservationReceiver
 } from '../browser/workspace.svelte';
 import { DICTIONARIES, translate, type TranslationKey } from '../i18n/dictionaries';
 import { locale } from '../stores/locale.svelte';
@@ -73,6 +80,12 @@ import type {
 } from '../ipc/types';
 import MatchDeleter from './MatchDeleter.svelte';
 import type { SurfaceBinding } from '../browser/surfaceReceivers';
+import {
+  arbitratedDelivery,
+  retainedDelivery,
+  type ObservationDelivery
+} from '../browser/observationDelivery';
+import { LOCALES, type Locale } from '../i18n/locale';
 
 /** The revision the file is projected at before anything is written. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -210,6 +223,13 @@ interface Mounted {
   readonly closed: () => number;
   /** Replaces what the projections reader answers, as a re-read would. */
   readonly reproject: (views: readonly DocumentView[]) => void;
+  /**
+   * Hands the receiver this panel reported one sealed envelope, as the window's
+   * registration would, and flushes — Phase 2d-6-7b. A replacing verdict also
+   * becomes what the stand-in for `standingConflictFor` answers for the file, as
+   * the window registers the origin it delivered.
+   */
+  readonly deliver: (delivery: ObservationDelivery) => void;
   /** Tears the component down. */
   readonly stop: () => void;
 }
@@ -242,6 +262,9 @@ function mountDeleter(
   // `conflict`, and the reapply's live guard asks it at the end of its entry;
   // answering `null` would make every reapply refuse as superseded.
   const standing = new Map<DocumentId, ConflictSource>();
+  // The receiver the panel reports, kept so a case can deliver to it (Phase
+  // 2d-6-7b); the window's own registration is `DetailPane.test.ts`'s.
+  let receiver: ObservationReceiver | null = null;
   const component = mount(MatchDeleter, {
     target,
     props: {
@@ -279,7 +302,10 @@ function mountDeleter(
       },
       standingConflictFor: (document: DocumentId): ConflictSource | null =>
         standing.get(document) ?? null,
-      reportReceiver: inertBinding,
+      reportReceiver: (reported: ObservationReceiver): SurfaceBinding => {
+        receiver = reported;
+        return inertBinding();
+      },
       close: (): void => {
         closes += 1;
       }
@@ -292,6 +318,14 @@ function mountDeleter(
     closed: () => closes,
     reproject: (next: readonly DocumentView[]) => {
       views = next;
+    },
+    deliver: (delivery: ObservationDelivery): void => {
+      const verdict = delivery.verdict;
+      if (verdict.kind === 'raised' || verdict.kind === 'raisedWithoutReload' || verdict.kind === 'supersedes') {
+        standing.set(delivery.observation.document, verdict.source);
+      }
+      receiver?.(delivery);
+      flushSync();
     },
     stop: () => {
       void unmount(component);
@@ -805,6 +839,54 @@ describe('the deletion panel asks for its outcome to be brought into view', () =
     panel.stop();
   });
 
+  it('asks for the external panel when an observation raises a conflict (Phase 2d-6-7b)', () => {
+    const panel = mountDeleter();
+    scrolled.length = 0;
+    panel.deliver(raisedBy(observed(5)));
+
+    const external = panel.target.querySelector('.panel.external');
+    expect(external).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(external);
+    expect(scrolled[0]?.block).toBe('start');
+
+    // The second step points at the controls inside that panel.
+    scrolled.length = 0;
+    control(panel.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(panel.target.querySelector('.panel.external .choices'));
+    panel.stop();
+  });
+
+  it('reveals the external panel over a refusal kept as history, and its controls at the reload step (2d-6-7b review, finding 2)', async () => {
+    // A refusal stays on screen as history when an observation raises a conflict
+    // (entry 7). The active conflict is what the person must act on, so it is the
+    // reveal's cue and target — and its second step is revealed too.
+    const panel = mountDeleter([{ result: REFUSED }]);
+    control(panel.target, 'browser.matchDeletion.confirm').click();
+    await settle();
+    expect(panel.target.textContent).toContain(DICTIONARIES.en['browser.matchDeletion.findings']);
+    scrolled.length = 0;
+
+    panel.deliver(raisedBy(observed(5)));
+
+    const external = panel.target.querySelector('.panel.external');
+    expect(external).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(external);
+
+    scrolled.length = 0;
+    const reload = [...(external?.querySelectorAll('button') ?? [])].find(
+      (one) => one.textContent?.trim() === DICTIONARIES.en[conflictChoiceKey('reloadDiskVersion', 'operationChoice')]
+    );
+    reload?.click();
+    flushSync();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(panel.target.querySelector('.panel.external .choices'));
+    panel.stop();
+  });
+
   it('asks for the controls at the reload’s second step', async () => {
     const panel = await conflicted();
     scrolled.length = 0;
@@ -1281,3 +1363,419 @@ describe('what the deletion panel says about recovery', () => {
     panel.stop();
   }); // End of the "dismissal ends the sentence" case
 }); // End of the "what the deletion panel says about recovery" suite
+
+/** The revision an observation of the deleter's file reads. */
+const OBSERVED: ContentRevision = 'c'.repeat(64);
+
+/** The revision a later observation of the same file reads. */
+const OBSERVED_LATER: ContentRevision = 'd'.repeat(64);
+
+/** The whole file text an observation carried, distinguishable from {@link DISK_TEXT}. */
+const OBSERVED_TEXT = 'matches:\n  - trigger: y\n    replace: elsewhere\n';
+
+/** A word that appears in {@link OBSERVED_TEXT} and nowhere else on the screen. */
+const OBSERVED_MARKER = 'elsewhere';
+
+/**
+ * The deleter's file as another writer left it: the same two snippets under a new
+ * parse, with new arena nodes.
+ *
+ * @param revision - The revision the observation read.
+ * @returns The disk projection.
+ */
+function observedFile(revision: ContentRevision = OBSERVED): DocumentView {
+  return makeDocument({
+    id: 2,
+    relativePath: 'match/base.yml',
+    revision,
+    matches: [
+      makeMatch({ node: 20, document: 2, revision, trigger: ':sig' }),
+      makeMatch({ node: 21, document: 2, revision, trigger: ':date' })
+    ]
+  });
+} // End of function observedFile()
+
+/**
+ * One narrowed observation of the deleter's file — Phase 2d-6-7b.
+ *
+ * A fresh object every call: the memo in `../browser/conflictSource.ts` and a
+ * session's wait are both keyed on identity.
+ *
+ * @param sequence - The sequence it was admitted under.
+ * @param revision - The revision it read.
+ * @param withTwin - Whether it carries a correspondence naming the first
+ *   snippet's twin, so a reapply can rebuild over it.
+ * @returns The observation.
+ */
+function observed(
+  sequence: number,
+  revision: ContentRevision = OBSERVED,
+  withTwin = false
+): ExternalConflictObservation {
+  const disk = observedFile(revision);
+  return {
+    sequence,
+    document: 2,
+    previousRevision: BASE,
+    diskRevision: revision,
+    diskText: OBSERVED_TEXT,
+    disk,
+    findings: [],
+    correspondences: withTwin
+      ? {
+          base_revision: BASE,
+          disk_revision: revision,
+          entries: [
+            {
+              base: file().matches[0]!.id,
+              exact: { Identified: { target: disk.matches[0]! } },
+              editor: { Refused: { reason: 'AmbiguousTrigger' } }
+            }
+          ]
+        }
+      : null
+  };
+} // End of function observed()
+
+/**
+ * The envelope a window seals for a first observation of the file.
+ *
+ * @param seen - The observation.
+ * @param uncertain - Whether the last settled write may have written.
+ * @returns The `raised` (or `raisedWithoutReload`) envelope.
+ */
+function raisedBy(seen: ExternalConflictObservation, uncertain = false): ObservationDelivery {
+  return arbitratedDelivery(null, seen, uncertain);
+} // End of function raisedBy()
+
+/**
+ * The envelope a window seals for a later observation over one that stands.
+ *
+ * @param prior - The observation whose origin stands.
+ * @param seen - The later observation.
+ * @returns The `supersedes` envelope.
+ */
+function supersededBy(
+  prior: ExternalConflictObservation,
+  seen: ExternalConflictObservation
+): ObservationDelivery {
+  return arbitratedDelivery(standingConflictOf(externalConflictSource(prior)), seen, false);
+} // End of function supersededBy()
+
+/**
+ * The button labelled with one key's rendering in one language, insisted upon.
+ *
+ * @param target - Where the component was mounted.
+ * @param lang - The language the case runs in.
+ * @param key - The key holding the label.
+ * @returns The button.
+ */
+function controlIn(target: HTMLElement, lang: Locale, key: TranslationKey): HTMLButtonElement {
+  const label = translate(lang, key);
+  const found = [...target.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent?.trim() === label
+  );
+  if (found === undefined) {
+    throw new Error(`this case needs the control labelled ${label}`);
+  }
+  return found;
+} // End of function controlIn()
+
+/**
+ * The external conflict's own panel, insisted upon.
+ *
+ * **Conflict choices are pressed inside it and never found on the whole panel**:
+ * in Spanish the header's close control and the operation's *keep editing* choice
+ * read identically (*Dejarlo como está*), so a search of the whole panel finds the
+ * close control first. That is a wording defect recorded in
+ * `docs/decisions/2d-6-7b-notes.md` §4, not something this suite may paper over by
+ * pressing whichever comes first.
+ *
+ * @param target - Where the component was mounted.
+ * @returns The panel.
+ */
+function externalPanel(target: HTMLElement): HTMLElement {
+  const found = target.querySelector<HTMLElement>('.panel.external');
+  if (found === null) {
+    throw new Error('this case needs the external conflict panel');
+  }
+  return found;
+} // End of function externalPanel()
+
+/**
+ * Whether a button labelled with one key's rendering in one language is drawn.
+ *
+ * @param target - Where the component was mounted.
+ * @param lang - The language the case runs in.
+ * @param key - The key holding the label.
+ * @returns `true` when one is.
+ */
+function offersIn(target: HTMLElement, lang: Locale, key: TranslationKey): boolean {
+  const label = translate(lang, key);
+  return [...target.querySelectorAll('button')].some(
+    (candidate) => candidate.textContent?.trim() === label
+  );
+} // End of function offersIn()
+
+/**
+ * The text of the external conflict's own panel, or `null` when none is drawn.
+ *
+ * @param target - Where the component was mounted.
+ * @returns The panel's text.
+ */
+function externalText(target: HTMLElement): string | null {
+  return target.querySelector('.panel.external')?.textContent ?? null;
+} // End of function externalText()
+
+describe('the deletion panel under an external conflict, in English and Spanish — Phase 2d-6-7b', () => {
+  // **2d-6-7's acceptance for this panel, read off the screen** (the 2d-6 record's
+  // §3 entries 23, 34 and 35). The receiver is the one the panel reported, handed
+  // envelopes the real `arbitratedDelivery` sealed; the window's own registration
+  // and arbitration are `DetailPane.test.ts`'s. Every sentence is pinned to its
+  // dictionary value in the case's locale: that protects which code is drawn
+  // where, never the quality of a translation.
+
+  it.each(LOCALES)('holds the question while a reading waits, refuses to send it, and says why (%s)', (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter([{ result: COMMITTED }]);
+    expect(offersIn(panel.target, lang, 'browser.matchDeletion.confirm')).toBe(true);
+
+    panel.deliver(retainedDelivery(observed(5)));
+
+    // The question stays — a held reading withdraws nothing (entry 11) — but the
+    // answer that would send is refused, and the notice says why.
+    const confirm = controlIn(panel.target, lang, 'browser.matchDeletion.confirm');
+    expect(confirm.disabled).toBe(true);
+    expect(panel.target.textContent).toContain(translate(lang, 'browser.externalConflict.observationRetained'));
+    confirm.click();
+    flushSync();
+    expect(panel.calls).toEqual([]);
+    // Never the stale-reading sentence: this window has read nothing again.
+    expect(panel.target.textContent).not.toContain(
+      translate(lang, 'browser.matchDeletion.confirmationRefused')
+    );
+    expect(externalText(panel.target)).toBeNull();
+    panel.stop();
+  }); // End of the "held question" case
+
+  it.each(LOCALES)('draws the origin, evidence and comparison, and withdraws the question (%s)', (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter([{ result: COMMITTED }]);
+    expect(offersIn(panel.target, lang, 'browser.matchDeletion.confirm')).toBe(true);
+
+    panel.deliver(raisedBy(observed(5)));
+
+    // **Direct submission is refused**: the question is withdrawn (entry 12), and
+    // nothing takes its place that could send.
+    expect(offersIn(panel.target, lang, 'browser.matchDeletion.confirm')).toBe(false);
+    expect(offersIn(panel.target, lang, 'browser.matchDeletion.request')).toBe(false);
+    // The origin, the observation's own lines, its one revision — and none of the
+    // save arm's: there was no save, so no *expected* and no *found*.
+    const shown = externalText(panel.target);
+    expect(shown).not.toBeNull();
+    expect(shown).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(shown).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.operationKeptInMemory'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.reloadAbandonsOperation'));
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: OBSERVED })
+    );
+    expect(panel.target.textContent).not.toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
+    expect(panel.target.textContent).not.toContain(translate(lang, 'browser.saveOutcome.changedElsewhere'));
+    expect(panel.target.textContent).not.toContain(
+      translate(lang, 'browser.matchDeletion.revisionExpected', { revision: BASE })
+    );
+    // The comparison the save panel has (entry 23): the operation, the whole disk
+    // text, the readiness line and the three choices.
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.retainedOperation'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.operation.deleteSnippet'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.operationIdentityIsOld'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.diskVersion'));
+    expect(shown).toContain(OBSERVED_MARKER);
+    expect(shown).toContain(translate(lang, 'browser.reapply.readyOperation'));
+    for (const choice of ['keepEditing', 'keepMyDraft', 'reloadDiskVersion'] as const) {
+      expect(offersIn(externalPanel(panel.target), lang, conflictChoiceKey(choice, 'operationChoice'))).toBe(true);
+    } // End of the loop over the three offered choices
+    // Recovery is a reason on this surface, drawn by the shared renderer.
+    expect(recoveryNote(panel.target)).toBe('operationDraft');
+    expect(panel.target.textContent).toContain(translate(lang, recoveryUnavailableKey('operationDraft')));
+    expect(panel.calls).toEqual([]);
+    expect(panel.adoptions).toEqual([]);
+    panel.stop();
+  }); // End of the "origin and comparison" case
+
+  it.each(LOCALES)('keeps the conflict through Leave this as it is, and resets the reload step (%s)', (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter();
+    panel.deliver(raisedBy(observed(5)));
+    controlIn(externalPanel(panel.target), lang, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    expect(externalText(panel.target)).toContain(
+      translate(lang, 'browser.matchDeletion.reloadIdentifiesNoSnippet')
+    );
+    expect(offersIn(externalPanel(panel.target), lang, conflictChoiceKey('confirmReload', 'operationChoice'))).toBe(true);
+
+    controlIn(externalPanel(panel.target), lang, conflictChoiceKey('keepEditing', 'operationChoice')).click();
+    flushSync();
+
+    // The warning is gone and the first step is back; the conflict stands (entry
+    // 9), so nothing can be asked or sent.
+    expect(externalText(panel.target)).not.toContain(
+      translate(lang, 'browser.matchDeletion.reloadIdentifiesNoSnippet')
+    );
+    expect(offersIn(externalPanel(panel.target), lang, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))).toBe(true);
+    expect(offersIn(panel.target, lang, 'browser.matchDeletion.request')).toBe(false);
+    expect(panel.adoptions).toEqual([]);
+    expect(panel.closed()).toBe(0);
+    panel.stop();
+  }); // End of the "keep editing" case
+
+  it.each(
+    LOCALES.flatMap((lang) =>
+      (['installed', 'alreadyThere', 'refused'] as const).map((adoption) => [lang, adoption] as const)
+    )
+  )('reloads in two steps and closes on what the window answers (%s, %s)', (lang, adoption) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter([], file(), 0, adoption);
+    const seen = observed(5);
+    panel.deliver(raisedBy(seen));
+    controlIn(externalPanel(panel.target), lang, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    expect(panel.adoptions).toEqual([]);
+    controlIn(externalPanel(panel.target), lang, conflictChoiceKey('confirmReload', 'operationChoice')).click();
+    flushSync();
+
+    // One adoption, of this observation's conflict and no other.
+    expect(panel.adoptions).toHaveLength(1);
+    expect(panel.adoptions[0]?.source).toBe(externalConflictSource(seen));
+    if (adoption === 'refused') {
+      // Nothing closes over a window that did not move, and the control that has
+      // just gone is replaced by the reason.
+      expect(panel.closed()).toBe(0);
+      expect(externalText(panel.target)).toContain(translate(lang, reloadUnavailableKey('operationChoice')));
+      expect(offersIn(externalPanel(panel.target), lang, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))).toBe(false);
+    } else {
+      expect(panel.closed()).toBe(1);
+    }
+    expect(panel.calls).toEqual([]);
+    panel.stop();
+  }); // End of the "two-step reload" case
+
+  it.each(LOCALES)('rebuilds over the disk version through Keep what I asked for, and asks again (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter([{ result: COMMITTED }]);
+    const seen = observed(5, OBSERVED, true);
+    panel.deliver(raisedBy(seen));
+
+    controlIn(externalPanel(panel.target), lang, conflictChoiceKey('keepMyDraft', 'operationChoice')).click();
+    flushSync();
+
+    // The window was asked to move once, for this conflict; the report says what
+    // happened, the external panel is gone, and the question has to be asked again.
+    expect(panel.adoptions.map((one) => one.source)).toEqual([externalConflictSource(seen)]);
+    expect(panel.target.querySelector('.panel.reapply')?.textContent).toContain(
+      translate(lang, 'browser.reapply.reapplied')
+    );
+    expect(externalText(panel.target)).toBeNull();
+    expect(panel.calls).toEqual([]);
+    controlIn(panel.target, lang, 'browser.matchDeletion.request').click();
+    flushSync();
+    panel.reproject([observedFile()]);
+    controlIn(panel.target, lang, 'browser.matchDeletion.confirm').click();
+    await settle();
+    // What goes out is the twin, against the version the reapply adopted.
+    expect(panel.calls).toHaveLength(1);
+    expect(panel.calls[0]?.id).toEqual(observedFile().matches[0]!.id);
+    expect(panel.calls[0]?.baseRevision).toBe(OBSERVED);
+    panel.stop();
+  }); // End of the "reapply rebuilds" case
+
+  it.each(LOCALES)('refuses Keep what I asked for without evidence, says why, and keeps the conflict (%s)', (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter();
+    panel.deliver(raisedBy(observed(5)));
+
+    controlIn(externalPanel(panel.target), lang, conflictChoiceKey('keepMyDraft', 'operationChoice')).click();
+    flushSync();
+
+    const report = panel.target.querySelector('.panel.reapply')?.textContent ?? '';
+    expect(report).toContain(translate(lang, 'browser.reapply.manualResolution'));
+    expect(report).toContain(translate(lang, 'browser.reapply.externalEvidence.noCorrespondence'));
+    expect(externalText(panel.target)).not.toBeNull();
+    expect(panel.adoptions).toEqual([]);
+    expect(offersIn(panel.target, lang, 'browser.matchDeletion.request')).toBe(false);
+    panel.stop();
+  }); // End of the "reapply refused" case
+
+  it.each(LOCALES)('withdraws the reload warning when a later reading supersedes the conflict (%s)', (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter();
+    const first = observed(5);
+    panel.deliver(raisedBy(first));
+    controlIn(externalPanel(panel.target), lang, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    expect(offersIn(externalPanel(panel.target), lang, conflictChoiceKey('confirmReload', 'operationChoice'))).toBe(true);
+
+    panel.deliver(supersededBy(first, observed(6, OBSERVED_LATER)));
+
+    // Entry 12: the confirmation collected for the first conflict is not
+    // spendable against this one, and its warning does not stay on screen.
+    expect(offersIn(externalPanel(panel.target), lang, conflictChoiceKey('confirmReload', 'operationChoice'))).toBe(false);
+    expect(offersIn(externalPanel(panel.target), lang, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))).toBe(true);
+    const shown = externalText(panel.target) ?? '';
+    expect(shown).not.toContain(translate(lang, 'browser.matchDeletion.reloadIdentifiesNoSnippet'));
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: OBSERVED_LATER })
+    );
+    expect(shown).not.toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: OBSERVED })
+    );
+    expect(panel.adoptions).toEqual([]);
+    panel.stop();
+  }); // End of the "supersession" case
+
+  it.each(LOCALES)('withholds the reload and the reapply while an earlier write’s outcome is unknown (%s)', (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter();
+    panel.deliver(raisedBy(observed(5), true));
+
+    expect(panel.target.textContent).toContain(translate(lang, 'browser.externalConflict.writeOutcomeUnknown'));
+    expect(externalText(panel.target)).not.toBeNull();
+    expect(offersIn(externalPanel(panel.target), lang, conflictChoiceKey('keepEditing', 'operationChoice'))).toBe(true);
+    expect(offersIn(externalPanel(panel.target), lang, conflictChoiceKey('keepMyDraft', 'operationChoice'))).toBe(false);
+    expect(offersIn(externalPanel(panel.target), lang, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))).toBe(false);
+    expect(externalText(panel.target)).not.toContain(translate(lang, 'browser.reapply.readyOperation'));
+    panel.stop();
+  }); // End of the "unknown outcome" case
+
+  it.each(LOCALES)('keeps its session across a change of language (%s)', (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter();
+    panel.deliver(raisedBy(observed(5)));
+    controlIn(externalPanel(panel.target), lang, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+
+    const other: Locale = lang === 'en' ? 'es' : 'en';
+    locale.setOverride(other);
+    flushSync();
+
+    // The same step of the same conflict, now in the other language.
+    const shown = externalText(panel.target) ?? '';
+    expect(shown).toContain(translate(other, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(shown).toContain(translate(other, 'browser.matchDeletion.reloadIdentifiesNoSnippet'));
+    expect(offersIn(externalPanel(panel.target), other, conflictChoiceKey('confirmReload', 'operationChoice'))).toBe(true);
+    panel.stop();
+  }); // End of the "language switch" case
+
+  it.each(LOCALES)('names a save as the origin of a save conflict, beside its three revisions (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter([{ result: CONFLICTED }]);
+    controlIn(panel.target, lang, 'browser.matchDeletion.confirm').click();
+    await settle();
+
+    expect(panel.target.textContent).toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
+    expect(panel.target.textContent).not.toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(externalText(panel.target)).toBeNull();
+    panel.stop();
+  }); // End of the "save origin" case
+}); // End of the "deletion panel under an external conflict" suite

@@ -5108,3 +5108,27 @@ failing first); `npm run build` **193 modules** (no new module), server-only mar
 JSON changed); the fix round touched no Rust and no dictionary. The instrument's pair diff is still `5
 insertions(+), 1 deletion(-)`. 2d-6-6b's narrative is archived verbatim in
 [`phase-2d.md`](docs/progress-archive/phase-2d.md) under *"Phase 2d-6-6b's verification narrative"*.
+
+
+## Phase 2d-6-6c-2's verification narrative — archived 2026-09-23 at 2d-6-7b
+
+**`1323 / 449 / 2926 / 193`** at 2d-6-6c-2, from `1323 / 449 / 2920 / 193`. Measured by the orchestrator on the
+tree the worker reported and again after the review's fix round, each gate on its own, each exit read from a
+redirected file: `npm run check` **449 files, 0 errors, 0 warnings**; `npm test` **2926 passed, 65 files** (+6:
++2 `MatchEditor.test.ts` for carried item 6, +2 `workspace.test.ts` for item 7, +2 for the review's blocker, each
+shown failing first); `npm run build` **193 modules**, server-only markers **absent**, client-only **present (2)**.
+`cargo test --workspace -- --test-threads=1` **1323 passed, 0 failed**; clippy `-D warnings` and `cargo fmt --check`
+exit 0 (only the untracked `probe.rs` changed on the Rust side). `cargo tree -p espansoconfig-core | rg tauri` finds
+nothing. The instrument's pair diff is still `5 insertions(+), 1 deletion(-)`. 2d-6-6c-1's narrative is archived in
+[`phase-2d.md`](docs/progress-archive/phase-2d.md).
+
+
+## Phase 2d-6-7a's verification narrative — archived 2026-09-23 at 2d-6-7b
+
+**`1323 / 449 / 2964 / 193`** at 2d-6-7a, from `1323 / 449 / 2926 / 193`. The worker's tree was measured once, each
+gate alone with its exit read from a redirected file: `npm run check` gave 449 files, 0 errors, 0 warnings;
+`npm test` 2960 passed; `npm run build` 193 modules, server-only markers absent, client-only present (2);
+`cargo test --workspace -- --test-threads=1` 1323 passed; clippy `-D warnings` and `cargo fmt --check` exited 0.
+After the review's fix round the frontend three were measured again: 449 / 0 / 0, **2964 passed** (+4, the
+fix's case), 193 modules, markers the same. No Rust changed in the fix round. The instrument pair diff is still
+`5 insertions(+), 1 deletion(-)`.
