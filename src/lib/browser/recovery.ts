@@ -45,13 +45,17 @@
  * from supported fields_**, and what that name promises is the whole of what it
  * does:
  *
- * - what is **carried** is six projected values — `trigger`, `replace`, `label`,
- *   `word`, `left_word`, `right_word` — each as logical text, spelled into the
- *   file by Rust's own encoder;
+ * - what is **carried** is the editor's seventeen projected values (six until
+ *   Phase 3-5-1) — the literal `trigger`, **one** content key (whichever the
+ *   retained draft would have left, a drafted switch included), `label`,
+ *   `comment` and the nine options — each as logical text, spelled into the file
+ *   by Rust's own encoder, and every field has an explicit disposition
+ *   ({@link FieldTransfer}); ruling 23 of `docs/decisions/3-split-notes.md`;
  * - what is **not carried** is everything else the source held: comments, unknown
- *   keys, key order, scalar spelling and quoting, tags, anchors, the sixteen other
- *   scalar fields and the four collections. The projection is read-only and cannot
- *   support a stronger promise (`CLAUDE.md` section 3);
+ *   keys, key order, scalar spelling and quoting, tags, anchors, `regex`, the four
+ *   collections (`triggers`, `search_terms`, `vars`, `form_fields`) and any second
+ *   content key. The projection is read-only and cannot support a stronger
+ *   promise (`CLAUDE.md` section 3);
  * - what it **writes** is a new snippet at the end of a chosen destination.
  *   Whatever the file now holds is left exactly as it is, and nothing here rebases
  *   the pending change onto it — that is `./reapply.ts`'s transition, and this is
@@ -63,7 +67,7 @@
  *    {@link RecoveryChoice} list and of the destination list, so capability is
  *    expressed once — `conflictChoicesFor`'s own argument, whose split is why a
  *    newly offered control could once compile and do nothing.
- * 2. **The six transfer decisions.** {@link transferOfMatchDraft} turns a match
+ * 2. **The seventeen transfer decisions** (six until Phase 3-5-1). {@link transferOfMatchDraft} turns a match
  *    editor's baseline and buffers into what a new snippet would be born holding,
  *    honouring step 1's contract that **`None` is not `Some("")`**.
  * 3. **Destination selection.** {@link recoveryDestinationsOf} offers only files
@@ -174,6 +178,7 @@ import type { TranslationKey } from '../i18n/dictionaries';
 import { classifyFailure, type IpcFailure } from '../ipc/errors';
 import type {
   Acknowledgement,
+  ContentForm,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -236,10 +241,14 @@ import {
   type CreationField
 } from './matchCreation';
 import {
+  CONTENT_FIELDS,
   EDITABLE_FIELDS,
   fieldIntent,
   fieldLabelName,
+  NO_SWITCH,
+  switchRoleOf,
   type AcknowledgeTheUncertainty,
+  type SwitchRole,
   type EditableField,
   type FieldBaseline,
   type FieldBuffer,
@@ -285,7 +294,7 @@ import { recordTyping, type Clock, type TypingRun } from './typing';
  *
  * Four values where `ConflictDraftKind` has two, and the refinement is the whole
  * of the consult's Q4 surface matrix: *authored text* is not one thing when the
- * question is *can a new snippet be made out of it?* — the match editor drafts six
+ * question is *can a new snippet be made out of it?* — the match editor drafts seventeen
  * projected fields, the creator drafts two authored ones, and the raw editor
  * drafts a whole document that has no match shape at all.
  *
@@ -295,7 +304,7 @@ import { recordTyping, type Clock, type TypingRun } from './typing';
  * here.
  */
 export type RecoveryDraftKind =
-  /** The match editor's six-field draft over a projected snippet. */
+  /** The match editor's seventeen-field draft over a projected snippet. */
   | 'matchFields'
   /** The creator's two authored fields, which were never in a file. */
   | 'creationFields'
@@ -654,6 +663,21 @@ export type TransferRefusal =
        * {@link beginRecoveryCreate}.
        */
       readonly kind: 'carriageReturn';
+    }
+  | {
+      /**
+       * The draft switches this content key to another, so the new snippet is
+       * born holding that other key instead — Phase 3-5-1.
+       */
+      readonly kind: 'switchedAway';
+    }
+  | {
+      /**
+       * A new snippet is born with **one** content key, and an earlier one in
+       * `CONTENT_FIELDS` order is already carried — Phase 3-5-1. Reached only
+       * from a source holding two content keys, a shape espanso does not accept.
+       */
+      readonly kind: 'oneContentOnly';
     };
 
 /**
@@ -685,7 +709,7 @@ export type FieldTransfer =
       readonly reason: TransferRefusal;
     };
 
-/** What all six fields of a retained draft become. */
+/** What all seventeen fields of a retained draft become. */
 export type RecoveryTransfer = Readonly<Record<EditableField, FieldTransfer>>;
 
 /**
@@ -707,18 +731,36 @@ export type RecoveryTransfer = Readonly<Record<EditableField, FieldTransfer>>;
  * because the *reason* is what a screen shows, and "the file did not hold this
  * key" would be false of a `notDecodable` field that holds one.
  *
+ * **A drafted content switch** (Phase 3-5-1) is read through `role`: the source
+ * is `switchedAway` and the destination is carried with its box's text, which is
+ * what the switch would have left in the file under that key.
+ *
  * @param baseline - What the file held for this field.
  * @param buffer - What its control holds.
+ * @param role - The field's part in the retained draft's switch; {@link NO_SWITCH}
+ *   when the draft drafted none.
  * @returns What the new snippet is born holding for it.
  */
-export function transferOfField(baseline: FieldBaseline, buffer: FieldBuffer): FieldTransfer {
+export function transferOfField(
+  baseline: FieldBaseline,
+  buffer: FieldBuffer,
+  role: SwitchRole
+): FieldTransfer {
   if (baseline.eligibility.kind !== 'editable') {
     return {
       kind: 'notCarried',
       reason: { kind: 'fieldNotEditable', reason: baseline.eligibility.reason }
     };
   }
-  const intent = fieldIntent(baseline, buffer);
+  if (role.kind === 'source') {
+    return { kind: 'notCarried', reason: { kind: 'switchedAway' } };
+  }
+  if (role.kind === 'destination') {
+    return buffer.text.includes('\r')
+      ? { kind: 'notCarried', reason: { kind: 'carriageReturn' } }
+      : { kind: 'carried', text: buffer.text };
+  }
+  const intent = fieldIntent(baseline, buffer, NO_SWITCH);
   if (intent === 'Remove') {
     return { kind: 'notCarried', reason: { kind: 'removedByTheDraft' } };
   }
@@ -734,17 +776,17 @@ export function transferOfField(baseline: FieldBaseline, buffer: FieldBuffer): F
 /**
  * What a match editor's retained draft becomes in the new snippet.
  *
- * All six fields, in {@link EDITABLE_FIELDS} order — which is also the relative
- * order `NewMatch::entries()` writes them in, and the two agree without either being
- * derived from the other: Rust writes its order out literally so that a reorder
- * here could not silently reorder written bytes (2c-4c-1's D3).
+ * All seventeen fields, in {@link EDITABLE_FIELDS} order — which is also the
+ * relative order `NewMatch::entries()` writes them in, and the two agree without
+ * either being derived from the other: Rust writes its order out literally so that
+ * a reorder here could not silently reorder written bytes (2c-4c-1's D3).
  *
- * **The sixteen other scalar fields and the four collections are not transferred
- * at all.** Some of them are in `NewMatch` since Phase 3-4 (`comment`, the other
- * options, `search_terms`), but this editor never drafted them: what it sends for
- * them is *leave this alone*, which is a statement about an existing snippet and
- * means nothing for one that does not exist yet. Carrying them is a later step's
- * (3-5), together with a control for each.
+ * **Every field the editor drafts is transferred since Phase 3-5-1** (ruling 23):
+ * an option the draft left alone is carried with the file's value, exactly as the
+ * label was; `regex` and the four collections are not drafted by this editor and
+ * are not in the table. **One content key at most**: the first carried in
+ * {@link CONTENT_FIELDS} order stays carried and any later one becomes
+ * `oneContentOnly`, because `NewContent` is one alternative.
  *
  * @param baseline - What the file held when the editing session was seeded.
  * @param buffers - The draft the conflict retained.
@@ -758,20 +800,37 @@ export function transferOfMatchDraft(
     EditableField,
     FieldTransfer
   >;
+  const drafted = buffers.contentSwitch;
+  const contentSwitch =
+    drafted === null ? null : { from: drafted.from, to: drafted.to, confirmed: drafted.confirmed };
   for (const field of EDITABLE_FIELDS) {
-    transfer[field] = transferOfField(baseline[field], buffers[field]);
+    transfer[field] = transferOfField(
+      baseline[field],
+      buffers[field],
+      switchRoleOf(baseline, contentSwitch, field)
+    );
   }
+  let bodyFound = false;
+  for (const field of CONTENT_FIELDS) {
+    if (transfer[field].kind !== 'carried') {
+      continue;
+    }
+    if (bodyFound) {
+      transfer[field] = { kind: 'notCarried', reason: { kind: 'oneContentOnly' } };
+    }
+    bodyFound = true;
+  } // End of the loop that keeps one carried content key
   return transfer;
 } // End of function transferOfMatchDraft()
 
 /**
  * What a creator's retained draft becomes in the new snippet.
  *
- * **Two authored fields and four keys nobody authored.** The creation form writes
- * `trigger` and `replace` and omits the four optional schema-known fields, which
- * asks Rust to write no key for them — a different request from sending them
- * empty. So the four are `notInTheFile` here, in the literal sense: there was no
- * file and there was no key.
+ * **Two authored fields and fifteen keys nobody authored.** The creation form
+ * writes `trigger` and `replace` and omits every optional schema-known field,
+ * which asks Rust to write no key for them — a different request from sending them
+ * empty. So the other fifteen are `notInTheFile` here, in the literal sense: there
+ * was no file and there was no key.
  *
  * There is no baseline to consult, so the only refusal a value can meet is the
  * carriage return, which no control in this window can produce and which a caller
@@ -795,7 +854,7 @@ export function transferOfCreationDraft(buffers: CreationBuffers): RecoveryTrans
     } else {
       transfer[field] = { kind: 'carried', text: typed };
     }
-  } // End of the loop over the six fields a new snippet may be born holding
+  } // End of the loop over the seventeen fields a new snippet may be born holding
   return transfer;
 } // End of function transferOfCreationDraft()
 
@@ -812,11 +871,14 @@ function carriedText(transfer: FieldTransfer): string | null {
 /**
  * The new snippet a recovery would create.
  *
- * **The two mandatory fields come from the buffers and the four optional ones from
+ * **The two mandatory fields come from the buffers and the optional ones from
  * the transfer**, and the asymmetry is the consult's Q1: the trigger and the body
  * are editable — seeded from the transfer when it carried them, blank when it
- * could not, and never invented — while the four optional fields are carried or
- * omitted and there is no control for them.
+ * could not, and never invented — while the fourteen optional fields (`label`,
+ * `comment`, the nine options; four until Phase 3-5-1) are carried or omitted
+ * and there is no control for them. The body is written under
+ * {@link recoveryBodyFieldOf}'s key, which is the retained draft's one content
+ * key.
  *
  * **An omitted optional field is a key the new snippet is not born holding**, and
  * an empty carried one is a key with an empty value. The object literal below is
@@ -832,19 +894,67 @@ export function newMatchOfRecovery(
   transfer: RecoveryTransfer,
   buffers: CreationBuffers
 ): NewMatch {
-  const label = carriedText(transfer.label);
-  const word = carriedText(transfer.word);
-  const leftWord = carriedText(transfer.left_word);
-  const rightWord = carriedText(transfer.right_word);
+  const carried: Partial<Record<OptionalRecoveryField, string>> = {};
+  for (const field of OPTIONAL_RECOVERY_FIELDS) {
+    const text = carriedText(transfer[field]);
+    if (text !== null) {
+      carried[field] = text;
+    }
+  }
   return {
     trigger: { Single: buffers.trigger },
-    content: { Replace: buffers.replace },
-    ...(label === null ? {} : { label }),
-    ...(word === null ? {} : { word }),
-    ...(leftWord === null ? {} : { left_word: leftWord }),
-    ...(rightWord === null ? {} : { right_word: rightWord })
+    content: newContentOf(recoveryBodyFieldOf(transfer), buffers.replace),
+    ...carried
   };
 } // End of function newMatchOfRecovery()
+
+/**
+ * The optional keys a recovered snippet may be born holding: every editable field
+ * except the trigger and the content keys — Phase 3-5-1.
+ */
+type OptionalRecoveryField = Exclude<EditableField, 'trigger' | ContentForm>;
+
+/** {@link OptionalRecoveryField}, in `NewMatch::entries()`'s relative order. */
+const OPTIONAL_RECOVERY_FIELDS: readonly OptionalRecoveryField[] = EDITABLE_FIELDS.filter(
+  (field): field is OptionalRecoveryField =>
+    field !== 'trigger' && !(CONTENT_FIELDS as readonly EditableField[]).includes(field)
+);
+
+/**
+ * The content key a recovered snippet's body is written under — Phase 3-5-1.
+ *
+ * The one content key the transfer carries (a retained switch's destination
+ * included), and `replace` when it carries none — the key a body typed into a
+ * blank box has always been written under.
+ *
+ * @param transfer - What the retained draft became.
+ * @returns The content key.
+ */
+export function recoveryBodyFieldOf(transfer: RecoveryTransfer): ContentForm {
+  return CONTENT_FIELDS.find((field) => transfer[field].kind === 'carried') ?? 'replace';
+} // End of function recoveryBodyFieldOf()
+
+/**
+ * The creation alternative for one content key.
+ *
+ * @param field - The content key.
+ * @param text - The body.
+ * @returns The `NewContent` arm that writes that key.
+ */
+function newContentOf(field: ContentForm, text: string): NewMatch['content'] {
+  switch (field) {
+    case 'replace':
+      return { Replace: text };
+    case 'markdown':
+      return { Markdown: text };
+    case 'html':
+      return { Html: text };
+    case 'image_path':
+      return { ImagePath: text };
+    case 'form':
+      return { Form: text };
+  }
+} // End of function newContentOf()
 
 /**
  * Where a recovered snippet goes, and there is no other value.
@@ -1165,7 +1275,10 @@ function openedRecovery<T>(
     // the consult requires of a value this application could not transfer: the
     // person supplies one, and nothing here invents content.
     trigger: carriedText(transfer.trigger) ?? '',
-    replace: carriedText(transfer.replace) ?? ''
+    // The body box holds whichever content key the transfer carries (Phase
+    // 3-5-1); `CreationBuffers` calls it `replace` because the creation form's
+    // body was always `replace`, and `recoveryBodyFieldOf` names the key.
+    replace: carriedText(transfer[recoveryBodyFieldOf(transfer)]) ?? ''
   };
   return {
     origin: {
@@ -1272,7 +1385,7 @@ function revisionOf(
 /**
  * Opens recovery from a **match editor's** conflict.
  *
- * The six transfer decisions are made here, from the baseline the editing session
+ * The seventeen transfer decisions are made here, from the baseline the editing session
  * was seeded with and the buffers the conflict retained — never from the live
  * session's buffers, because what is being recovered is the draft that was
  * refused.
@@ -3335,7 +3448,8 @@ export interface RecoveryFieldModel {
   /**
    * Whether a control holds this value rather than the transfer.
    *
-   * `true` for the two mandatory fields and `false` for the four optional ones:
+   * `true` for the trigger and the body's content key ({@link recoveryBodyFieldOf})
+   * and `false` for every other field:
    * the consult's Q1 makes the trigger an explicit editable literal, and the body
    * is editable for the same reason — a recovery that could not carry one has to
    * be completable by hand.
@@ -3357,6 +3471,11 @@ export interface RecoveryView {
   readonly trigger: string;
   /** What the body control shows. */
   readonly replace: string;
+  /**
+   * The content key the body is written under — Phase 3-5-1,
+   * {@link recoveryBodyFieldOf}. The body control's label is this key's.
+   */
+  readonly bodyField: ContentForm;
   /** Whether either control has been changed since the form opened. Derived. */
   readonly dirty: boolean;
   /** Whether there is a step to go back to. Derived. */
@@ -3486,8 +3605,9 @@ export function recoveryView(session: RecoverySession): RecoveryView {
       field,
       label: fieldLabelName(field),
       transfer: session.transfer[field],
-      editable: field === 'trigger' || field === 'replace'
+      editable: field === 'trigger' || field === recoveryBodyFieldOf(session.transfer)
     })),
+    bodyField: recoveryBodyFieldOf(session.transfer),
     trigger: session.draft.value.trigger,
     replace: session.draft.value.replace,
     dirty: isDirty(session.draft),
@@ -3819,6 +3939,10 @@ export function transferRefusalKey(refusal: TransferRefusal): TranslationKey {
       return 'browser.recovery.transfer.fieldNotEditable';
     case 'carriageReturn':
       return 'browser.recovery.transfer.carriageReturn';
+    case 'switchedAway':
+      return 'browser.recovery.transfer.switchedAway';
+    case 'oneContentOnly':
+      return 'browser.recovery.transfer.oneContentOnly';
   }
 } // End of function transferRefusalKey()
 

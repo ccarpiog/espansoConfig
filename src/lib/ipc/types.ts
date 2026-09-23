@@ -2329,6 +2329,33 @@ export type MatchField =
 export type SequenceField = 'triggers' | 'search_terms';
 
 /**
+ * One of the five content keys, spelled as its espanso key — Phase 3-5-1.
+ *
+ * Mirrors Rust's `ContentForm`, which serializes as the key for
+ * {@link MatchField}'s reason: a field identifier, not a code, so it owes no
+ * dictionary entry (`NOT_A_CODE` in `src-tauri/src/dictionary_contract.rs`).
+ */
+export type ContentForm = 'replace' | 'markdown' | 'html' | 'image_path' | 'form';
+
+/**
+ * A drafted switch of content kind: the match's one content key renamed to
+ * another, in place — Phase 3-5-1, mirroring Rust's `ContentSwitch`.
+ *
+ * **Two different forms.** Rust refuses `from === to` while reading the
+ * command's arguments; this type cannot say so, and `contentSwitchOf` in
+ * `../browser/matchEditor.ts` is the one producer, which never builds one.
+ * What it converts: nothing — the value is kept unless the draft's own field
+ * for {@link ContentSwitch.to} says otherwise, and no companion key is added
+ * or removed.
+ */
+export interface ContentSwitch {
+  /** The content key the match holds now. */
+  readonly from: ContentForm;
+  /** The content key it is renamed to. */
+  readonly to: ContentForm;
+}
+
+/**
  * One schema-known scalar field of a variable of `vars`.
  *
  * A field identifier for {@link MatchField}'s reason, and pinned by
@@ -2513,6 +2540,14 @@ export interface MatchDraft {
   readonly vars: readonly VariableDraft[];
   /** Drafted entries of `form_fields`, by index in the projected list. */
   readonly form_fields: readonly FormFieldDraft[];
+  /**
+   * A drafted switch of content kind, or `null` — Phase 3-5-1.
+   *
+   * One more substitution beside the draft: its source key must be
+   * `'Unchanged'` above, and its destination's value is the destination field
+   * above (`'Unchanged'` keeps the value's bytes exactly).
+   */
+  readonly content_switch: ContentSwitch | null;
 }
 
 // ---------------------------------------------------------------------------

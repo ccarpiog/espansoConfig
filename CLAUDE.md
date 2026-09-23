@@ -170,8 +170,10 @@ the phase records under `docs/decisions/` hold the details.
   only. **R25:** a move is the only edit in its batch. **Duplicate** is a true duplicate — the item's
   owned runs cloned byte-identically, trigger included — never a projection copy, which would drop
   comments, key order and scalar spelling.
-- `word`, `left_word` and `right_word` are three independent source-text fields and stay textual
-  controls; a checkbox would have to decide that `word: on` means boolean true, which D2u forbids.
+- Every one of the nine options (`word`, `left_word`, `right_word`, `propagate_case`, `uppercase_style`,
+  `force_mode`, `force_clipboard`, `paragraph`, `anchor`) is an independent source-text field and stays a
+  textual control; a checkbox would have to decide that `word: on` means boolean true, which D2u
+  forbids. Suggestions (`OPTION_SUGGESTIONS` in `matchEditor.ts`) are compared by `===` only.
 
 **Text on the wire and on screen**
 
@@ -203,8 +205,10 @@ the phase records under `docs/decisions/` hold the details.
   default. A mounted test proves a handler fires, not that a window draws. **A green suite is not a
   screen**: a claim about what a window draws needs a look at a window.
 - `MatchBaseline` is what the file held, including whether it held the key at all; `MatchBuffers` is
-  what the controls hold; `fieldIntent` is the only function that reads both. **An initially absent
-  field left blank is `'Unchanged'`, not `Set("")`.**
+  what the controls hold (and the drafted content switch); `fieldIntent` is the only function that
+  derives an intent from both, handed the field's switch role by `intentsOf`. **An initially absent
+  field left blank is `'Unchanged'`, not `Set("")`.** Which control draws a field is the model's
+  (`fieldControlOf`): a one-line field whose value holds a line feed is read-only.
 - `conflictChoicesFor` is the only producer of a conflict choice list, and `adoptDiskVersion` is the
   only door that installs a disk version (`DiskAdoptionOutcome` = `installed | alreadyThere | refused`;
   callers stop only on `refused`). A conflict installs nothing until a confirmed reload.

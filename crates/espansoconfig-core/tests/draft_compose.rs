@@ -26,8 +26,8 @@
 use espansoconfig_core::discovery::FileKind;
 use espansoconfig_core::draft::{
     check_batch_independence, check_closed_surface, plan_match_edits,
-    plan_match_edits_with_substitutions, ContentForm, DraftError, FieldSubstitution, MatchDraft,
-    MatchField, TriggerForm,
+    plan_match_edits_with_substitutions, ContentForm, ContentSwitch, DraftError, FieldSubstitution,
+    MatchDraft, MatchField, TriggerForm,
 };
 use espansoconfig_core::model::{DocumentContext, MatchView, ScalarView};
 use espansoconfig_core::patch::{
@@ -1016,3 +1016,197 @@ fn a_refused_substitution_writes_nothing() {
         source
     );
 } // End of function a_refused_substitution_writes_nothing()
+
+// ---------------------------------------------------------------------------
+// Phase 3-5-1: the content switch as a field of the draft
+// ---------------------------------------------------------------------------
+
+/// `replace`→`markdown` as the draft's own `content_switch`.
+fn drafted_switch() -> ContentSwitch {
+    ContentSwitch::new(ContentForm::Replace, ContentForm::Markdown).expect("two different forms")
+}
+
+/// A draft carrying a content switch plans through `plan_match_edits` alone,
+/// exactly as the 3-1 substitution argument does: the key renamed in place, the
+/// value's bytes kept.
+#[test]
+fn a_drafted_content_switch_plans_through_plan_match_edits() {
+    for source in [COMMENTED, CONTENT_FIRST, QUOTED_KEY] {
+        let view = first_match(source);
+        let drafted = plan_match_edits(
+            &view,
+            &MatchDraft::new().with_content_switch(drafted_switch()),
+        )
+        .expect("the drafted switch plans");
+        let argued = plan_match_edits_with_substitutions(
+            &view,
+            &MatchDraft::new(),
+            &[replace_to_markdown()],
+        )
+        .expect("the argued substitution plans");
+        assert_eq!(drafted, argued, "one switch, two spellings, one batch");
+        let patched = apply_edits(source, &drafted).expect("the switch applies");
+        assert_eq!(comments(patched.text()), comments(source));
+        let after = first_match(patched.text());
+        assert!(scalar(&after, MatchField::Replace).is_none());
+        assert_eq!(
+            scalar(&after, MatchField::Markdown).map(|one| one.text.clone()),
+            scalar(&view, MatchField::Replace).map(|one| one.text.clone())
+        );
+    } // End of the loop over the three source shapes
+} // End of function a_drafted_content_switch_plans_through_plan_match_edits()
+
+/// The destination's drafted value is the renamed entry's new value, and the
+/// switch is one batch with the other drafted fields.
+#[test]
+fn a_drafted_switch_carries_the_destination_value_and_other_fields() {
+    let view = first_match(COMMENTED);
+    let draft = MatchDraft::new()
+        .with(MatchField::Markdown, "hello **there**")
+        .with(MatchField::Paragraph, "true")
+        .with_content_switch(drafted_switch());
+    let edits = plan_match_edits(&view, &draft).expect("the draft plans");
+    let patched = apply_edits(COMMENTED, &edits).expect("the draft applies");
+    assert!(
+        patched.text().contains("    markdown: hello **there**\n"),
+        "{}",
+        patched.text()
+    );
+    let after = first_match(patched.text());
+    assert!(scalar(&after, MatchField::Replace).is_none());
+    assert_eq!(
+        scalar(&after, MatchField::Paragraph).map(|one| one.text.as_str()),
+        Some("true")
+    );
+    assert_eq!(comments(patched.text()), comments(COMMENTED));
+} // End of function a_drafted_switch_carries_the_destination_value_and_other_fields()
+
+/// The switch's source may carry no other intent, and a stale source is refused
+/// by name — the 3-1 refusals, reached through the draft field.
+#[test]
+fn a_drafted_switch_is_refused_by_the_substitution_rules() {
+    let view = first_match(COMMENTED);
+    assert_eq!(
+        plan_match_edits(
+            &view,
+            &MatchDraft::new()
+                .with(MatchField::Replace, "other")
+                .with_content_switch(drafted_switch())
+        ),
+        Err(DraftError::SubstitutionConflictsWithField {
+            field: MatchField::Replace,
+        })
+    );
+    let markdown_first = first_match("matches:\n  - trigger: ':x'\n    markdown: a\n");
+    assert_eq!(
+        plan_match_edits(
+            &markdown_first,
+            &MatchDraft::new().with_content_switch(drafted_switch())
+        ),
+        Err(DraftError::SubstitutionSourceAbsent {
+            field: MatchField::Replace,
+        })
+    );
+    assert_eq!(
+        plan_match_edits_with_substitutions(
+            &view,
+            &MatchDraft::new().with_content_switch(drafted_switch()),
+            &[replace_to_markdown()]
+        ),
+        Err(DraftError::SubstitutionConflictsWithField {
+            field: MatchField::Replace,
+        })
+    );
+} // End of function a_drafted_switch_is_refused_by_the_substitution_rules()
+
+/// The wire form: espanso keys, two different forms, nothing else.
+#[test]
+fn the_content_switch_wire_form_is_closed() {
+    let written = serde_json::to_value(MatchDraft::new().with_content_switch(drafted_switch()))
+        .expect("serializes");
+    assert_eq!(
+        written["content_switch"],
+        serde_json::json!({ "from": "replace", "to": "markdown" })
+    );
+    let read: MatchDraft =
+        serde_json::from_str(r#"{"content_switch": {"from": "image_path", "to": "form"}}"#)
+            .expect("a switch between two forms is read");
+    assert_eq!(
+        read.content_switch,
+        ContentSwitch::new(ContentForm::ImagePath, ContentForm::Form)
+    );
+    let absent: MatchDraft = serde_json::from_str("{}").expect("an absent switch is read");
+    assert_eq!(absent.content_switch, None);
+    for refused in [
+        r#"{"content_switch": {"from": "replace", "to": "replace"}}"#,
+        r#"{"content_switch": {"from": "replace", "to": "regex"}}"#,
+        r#"{"content_switch": {"from": "Replace", "to": "Markdown"}}"#,
+        r#"{"content_switch": {"from": "replace", "to": "markdown", "keep": true}}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<MatchDraft>(refused).is_err(),
+            "{refused} must be refused"
+        );
+    } // End of the loop over the refused wire forms
+    assert_eq!(
+        ContentSwitch::new(ContentForm::Html, ContentForm::Html),
+        None
+    );
+} // End of function the_content_switch_wire_form_is_closed()
+
+/// A drafted switch commits through `save_document`.
+#[test]
+fn a_drafted_switch_commits_through_the_save_transaction() {
+    let (_directory, target) = on_disk(COMMENTED);
+    let edits = plan_match_edits(
+        &first_match(COMMENTED),
+        &MatchDraft::new().with_content_switch(drafted_switch()),
+    )
+    .expect("the draft plans");
+    let saved = save(&target, COMMENTED, &edits).expect("the save commits");
+    assert!(saved.committed);
+    let written = std::fs::read_to_string(&target).expect("the file is readable");
+    assert_eq!(
+        written,
+        COMMENTED.replacen("    replace: hello there", "    markdown: hello there", 1)
+    );
+} // End of function a_drafted_switch_commits_through_the_save_transaction()
+
+/// A content switch never travels with a removal of its companion `paragraph`
+/// (ruling 8; Phase 3-5-1's review fix), whether the switch is the draft's own
+/// field or a 3-1 substitution argument; a `Set` of it is an ordinary edit.
+#[test]
+fn a_content_switch_with_a_removed_paragraph_is_refused() {
+    let source = "matches:\n  - trigger: ':hi'\n    replace: hello\n    paragraph: 'true'\n";
+    let view = first_match(source);
+    let refused = Err(DraftError::SubstitutionConflictsWithField {
+        field: MatchField::Paragraph,
+    });
+    assert_eq!(
+        plan_match_edits(
+            &view,
+            &MatchDraft::new()
+                .without(MatchField::Paragraph)
+                .with_content_switch(drafted_switch())
+        ),
+        refused
+    );
+    assert_eq!(
+        plan_match_edits_with_substitutions(
+            &view,
+            &MatchDraft::new().without(MatchField::Paragraph),
+            &[replace_to_markdown()]
+        ),
+        refused
+    );
+    let kept = plan_match_edits(
+        &view,
+        &MatchDraft::new()
+            .with(MatchField::Paragraph, "false")
+            .with_content_switch(drafted_switch()),
+    )
+    .expect("a switch beside a paragraph edit plans");
+    let patched = apply_edits(source, &kept).expect("the batch applies");
+    assert!(patched.text().contains("markdown: hello"));
+    assert!(patched.text().contains("paragraph: 'false'"));
+} // End of function a_content_switch_with_a_removed_paragraph_is_refused()

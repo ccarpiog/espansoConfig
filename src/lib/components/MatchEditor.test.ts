@@ -258,7 +258,8 @@ const UNTOUCHED: MatchDraft = {
   triggers: [],
   search_terms: [],
   vars: [],
-  form_fields: []
+  form_fields: [],
+  content_switch: null
 };
 
 /** One call the component made to the boundary. */
@@ -1315,9 +1316,9 @@ describe('the mounted small editor', () => {
 
     expect(says(editor.target, 'browser.saveOutcome.retainedDraft')).toBe(true);
     expect(says(editor.target, 'browser.saveOutcome.diskVersion')).toBe(true);
-    // Six fields of the draft plus the disk text, all through the one rendering
-    // surface for file text.
-    expect(editor.target.querySelectorAll('.panel .sourceText')).toHaveLength(7);
+    // Seventeen fields of the draft (six until Phase 3-5-1) plus the disk text,
+    // all through the one rendering surface for file text.
+    expect(editor.target.querySelectorAll('.panel .sourceText')).toHaveLength(18);
     expect(editor.target.textContent).toContain(DISK_TEXT_MARKER);
     // Both revisions, always, and the third beside them — each with its own digest
     // substituted, which is what makes them two statements rather than one.
@@ -1474,7 +1475,7 @@ describe('the mounted small editor', () => {
       expect(says(editor.target, 'browser.saveOutcome.draftCopied')).toBe(true);
       expect(says(editor.target, 'browser.saveOutcome.draftCopyFailed')).toBe(false);
       // **Exactly what the model would render, and only what was selected.** The
-      // expectation is built here from the six fields this projection and this
+      // expectation is built here from the seventeen fields this projection and this
       // edit produce, so it pins the order, the labels, the statuses and every
       // string byte for byte — and because the mock records the *selection* rather
       // than the carrier's whole value, a carrier that was never selected copies
@@ -1483,10 +1484,21 @@ describe('the mounted small editor', () => {
         tDraftCopy([
           { label: 'trigger', text: ':a', status: 'unchanged' },
           { label: 'replace', text: 'c', status: 'setting' },
+          { label: 'markdown', text: '', status: 'unchanged' },
+          { label: 'html', text: '', status: 'unchanged' },
+          { label: 'imagePath', text: '', status: 'unchanged' },
+          { label: 'form', text: '', status: 'unchanged' },
           { label: 'label', text: 'Signature', status: 'unchanged' },
+          { label: 'comment', text: '', status: 'unchanged' },
           { label: 'word', text: '', status: 'unchanged' },
           { label: 'leftWord', text: '', status: 'unchanged' },
-          { label: 'rightWord', text: '', status: 'unchanged' }
+          { label: 'rightWord', text: '', status: 'unchanged' },
+          { label: 'propagateCase', text: '', status: 'unchanged' },
+          { label: 'uppercaseStyle', text: '', status: 'unchanged' },
+          { label: 'forceMode', text: '', status: 'unchanged' },
+          { label: 'forceClipboard', text: '', status: 'unchanged' },
+          { label: 'paragraph', text: '', status: 'unchanged' },
+          { label: 'anchor', text: '', status: 'unchanged' }
         ])
       ]);
       const text = copied.selections[0] ?? '';
@@ -1495,8 +1507,9 @@ describe('the mounted small editor', () => {
       expect(text).toContain(DICTIONARIES.en['browser.saveOutcome.copyHeading']);
       expect(text).not.toContain('matches:');
       expect(text).not.toContain('replace: c');
-      // And the carrier is gone again.
-      expect(document.querySelectorAll('textarea')).toHaveLength(1);
+      // And the carrier is gone again: what is left are the editor's own six
+      // multi-line boxes (the five content keys and the comment, Phase 3-5-1).
+      expect(document.querySelectorAll('textarea')).toHaveLength(6);
       editor.stop();
     } finally {
       if (original === undefined) {

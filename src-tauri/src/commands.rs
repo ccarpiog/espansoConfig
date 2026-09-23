@@ -5685,6 +5685,46 @@ mod tests {
         );
     } // End of function a_scalar_save_commits_and_answers_with_an_identity_that_resolves()
 
+    /// A draft carrying a switch of content kind (Phase 3-5-1) renames the key in
+    /// place through `save_match` and `run_one_save`, keeping the value's bytes and
+    /// every byte around the key token.
+    #[test]
+    fn a_drafted_content_switch_renames_the_key_through_save_match() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[0].id;
+        let switch = espansoconfig_core::draft::ContentSwitch::new(
+            espansoconfig_core::draft::ContentForm::Replace,
+            espansoconfig_core::draft::ContentForm::Markdown,
+        )
+        .expect("two different forms");
+
+        let result = session
+            .save_match(
+                held,
+                &MatchDraft::new().with_content_switch(switch),
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("the switch plans and the save runs");
+        let (_revision, moved) = expect_saved(result, "content switch");
+        let found = session
+            .match_view(moved.expect("a committed save names the match it saved"))
+            .expect("the answered identity resolves");
+        assert!(found.content.replace.is_none());
+        assert_eq!(
+            found.content.markdown.as_ref().map(|one| one.text.as_str()),
+            Some("first")
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap(),
+            BASE_YML.replacen("replace: first", "markdown: first", 1),
+            "only the key token changes"
+        );
+    } // End of function a_drafted_content_switch_renames_the_key_through_save_match()
+
     /// A draft that asks for the value already there is a **success** that writes
     /// nothing.
     ///

@@ -538,7 +538,9 @@ pub enum DraftError {
     /// The source key of a substitution may carry no other intent (it is being
     /// renamed, so it has no value of its own to set or remove afterwards); the
     /// destination key may carry a `Set` — that is the renamed entry's new value
-    /// — but not a `Remove`; and no key may be named by two substitutions.
+    /// — but not a `Remove`; no key may be named by two substitutions; and a
+    /// content substitution may not travel with a `Remove` of `paragraph`, the
+    /// companion a switch keeps (Phase 3-5-1).
     /// **Intent level, before any diffing**, for
     /// [`DraftError::SequenceItemDraftedTwice`]'s reason.
     SubstitutionConflictsWithField {

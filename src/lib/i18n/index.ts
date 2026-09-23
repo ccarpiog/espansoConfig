@@ -56,10 +56,12 @@ import {
   type MoveSubmissionRefusal
 } from '../browser/matchMove';
 import {
+  cursorAdvisoryKey,
   editorReapplyObstacleKey,
   fieldLabelName,
   fieldRefusalKey,
   reprojectionRefusalKey,
+  type CursorAdvisory,
   type EditorReapplyObstacle,
   type FieldRefusal,
   type ReprojectionRefusal
@@ -671,6 +673,20 @@ export function tRawEditorDiskRefusal(refusal: RawEditorRefusal): string {
 export function tFieldRefusal(reason: FieldRefusal): string {
   return translate(locale.current, fieldRefusalKey(reason));
 } // End of function tFieldRefusal()
+
+/**
+ * Renders the cursor action's advisory, in the current language — Phase 3-5-1.
+ *
+ * The model answers a code with its count (`insertCursorPosition` in
+ * `../browser/matchEditor.ts`); this is where it becomes a sentence, so no
+ * component builds the key.
+ *
+ * @param advisory - What the cursor action answered.
+ * @returns The translated sentence, with the count filled in.
+ */
+export function tCursorAdvisory(advisory: CursorAdvisory): string {
+  return translate(locale.current, cursorAdvisoryKey(advisory), { count: advisory.count });
+} // End of function tCursorAdvisory()
 
 /**
  * Renders why this window cannot read one snippet again.

@@ -4263,7 +4263,8 @@ function editedDraft(): MatchDraft {
     triggers: [],
     search_terms: [],
     vars: [],
-    form_fields: []
+    form_fields: [],
+    content_switch: null
   };
 } // End of function editedDraft()
 

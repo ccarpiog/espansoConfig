@@ -1579,7 +1579,9 @@ export function copyOfDraft<T>(conflict: ConflictModel<T>): T {
  *
  * **Three arms, because those are the three things a draft says about a key**, and
  * they are exactly the arms of the wire's own `DraftField<T>`: leave it alone,
- * write this text, take the key out. A two-valued *present / marked for removal*
+ * write this text, take the key out — **plus two since Phase 3-5-1** for the two
+ * keys of a drafted content switch, which the wire says with a `content_switch`
+ * beside the fields rather than with a field's own intent. A two-valued *present / marked for removal*
  * status would have had to call an absent field left blank "present", which is a
  * claim about what a save writes and is the opposite of what it writes — the one
  * rule the whole draft-versus-projection arrangement exists for
@@ -1591,7 +1593,19 @@ export type DraftFieldStatus =
   /** This text is what the save would write. */
   | 'setting'
   /** The key would be taken out of the file. */
-  | 'removing';
+  | 'removing'
+  /**
+   * The key would be renamed to another content kind, its text kept — the
+   * source of a drafted content switch (Phase 3-5-1). A fourth arm rather than
+   * `unchanged`, which the wire intent of a switch's source is, because a copy
+   * saying *left as the file has it* would hide the one change the switch makes.
+   */
+  | 'switchingAway'
+  /**
+   * The content kind a drafted switch renames the source key to, holding this
+   * text (Phase 3-5-1) — whether or not the text differs from the source's.
+   */
+  | 'switchingTo';
 
 /**
  * One labelled piece of a draft a conflict retained.
@@ -1683,6 +1697,10 @@ export function draftFieldStatusKey(status: DraftFieldStatus): TranslationKey {
       return 'browser.saveOutcome.field.setting';
     case 'removing':
       return 'browser.saveOutcome.field.removing';
+    case 'switchingAway':
+      return 'browser.saveOutcome.field.switchingAway';
+    case 'switchingTo':
+      return 'browser.saveOutcome.field.switchingTo';
   }
 } // End of function draftFieldStatusKey()
 

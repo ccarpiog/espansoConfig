@@ -183,6 +183,28 @@ cover every added field. It also delivers **R36's conservative rule** (ruling 24
 
 **Risk `high`. Driven:** implementation yes; the window half per ruling 30. **Depends on** 3-1, 3-4.
 
+**Addendum, 2026-09-23 — cut into two pieces before starting.** The step touches ten files across three
+layers, so the orchestrator cut it:
+
+- **3-5-1 — the model and the coordination.** Everything below the components: the editor model
+  (`matchEditor.ts` and its baseline, buffers and `fieldIntent`) widened to every eligible scalar field;
+  the content-switch intent as one compound, all-or-nothing save intention whose confirmation state is a
+  model value; the buffer-only `$|$` action for `replace` with its undo and its several-markers
+  advisory as a code; exact-string suggestion data for `uppercase_style` and `force_mode`; the `\r`
+  refusal at eligibility, `editField` and `beginSave` for every added field; save, conflict, compare,
+  copy, reapply and recovery (`recovery.ts`, `reapply.ts`) covering every added field with a model test
+  per path; R36's conservative rule in the workspace coordination, pinned by a test; and any Rust or wire
+  work those need, with its dictionaries and accessors in the same piece. **No window half** — it draws
+  nothing new.
+- **3-5-2 — the components, the i18n and the window half.** `MatchEditor.svelte`, `MatchCreator.svelte`,
+  `RecoveryPanel.svelte` and the detail integration drawing 3-5-1's values; the textual option groups
+  (one *Insertion* group for `force_mode` and `force_clipboard`); the switch preview and confirmation;
+  the cursor action's control; the dictionary keys those need; mounted tests; and the step's window
+  half (EN and ES through the picker, one block-scalar content conflict), per ruling 30 and §4.1.
+
+Each piece is one phase with one worker and one review. The acceptance list above is the union of the
+two; 3-5-2 closes the step.
+
 ### 3-6 — Multiple and regex trigger controls, and `search_terms`
 
 **Delivers** list editing, trigger-form switching, the `Several`/`Absent` presentation (no silent

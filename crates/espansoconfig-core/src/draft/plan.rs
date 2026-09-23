@@ -79,7 +79,9 @@ use crate::patch::{
 ///    be invisible to every later check;
 /// 5. no drafted entry says both "this scalar" and "these elements", and no
 ///    substitution contradicts another intent of the draft
-///    ([`plan_match_edits_with_substitutions`]);
+///    ([`plan_match_edits_with_substitutions`]); a drafted
+///    [`MatchDraft::content_switch`] is one more substitution here, since Phase
+///    3-5-1, so `plan_match_edits` alone plans a switch of content kind;
 /// 6. every drafted field is planned, in [`MatchField::ALL`] order, then every
 ///    drafted sequence element, then every drafted variable, then every drafted
 ///    `form_fields` entry, each in the draft's own order, and last the absent
@@ -211,6 +213,21 @@ pub fn plan_match_edits_with(
     draft: &MatchDraft,
     structure: &MatchStructure,
 ) -> Result<Vec<DocumentEdit>, DraftError> {
+    // A drafted content switch (Phase 3-5-1) is one more substitution beside the
+    // structure's own, so every rule below — the source carries no other intent,
+    // no key is named twice, the destination's value is its own field — applies
+    // to it unchanged. A structure that already names the same substitution is
+    // refused by `check_substitutions_are_coherent` as a key named twice.
+    let merged;
+    let structure = match draft.content_switch {
+        None => structure,
+        Some(switch) => {
+            let mut widened = structure.clone();
+            widened.substitutions.push(switch.substitution());
+            merged = widened;
+            &merged
+        }
+    };
     let substitutions = structure.substitutions.as_slice();
     let path = view.path.as_ref().ok_or(DraftError::MatchHasNoPath {})?;
     if let Some(repeated) = view
@@ -635,6 +652,18 @@ fn check_substitutions_are_coherent(
         }
         if draft.field(to).is_remove() {
             return Err(DraftError::SubstitutionConflictsWithField { field: to });
+        }
+        // **A content switch removes no companion field** (ruling 8 of
+        // `docs/decisions/3-split-notes.md`; Phase 3-5-1's review fix). Of the
+        // companions a switch leaves in place, `paragraph` is the one a draft can
+        // remove, and a batch that renames the content key and removes it would
+        // take a companion out beside the switch; it is refused by name here.
+        if matches!(substitution, FieldSubstitution::Content { .. })
+            && draft.field(MatchField::Paragraph).is_remove()
+        {
+            return Err(DraftError::SubstitutionConflictsWithField {
+                field: MatchField::Paragraph,
+            });
         }
         for other in &substitutions[..position] {
             for field in [from, to] {

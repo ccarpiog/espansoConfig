@@ -193,7 +193,13 @@ impl TriggerForm {
 
 /// One of the five scalar content keys a [`FieldSubstitution`] may switch
 /// between.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// **It serializes as the espanso key** (`replace`, `markdown`, `html`,
+/// `image_path`, `form`), for [`MatchField`]'s reason: since Phase 3-5-1 it
+/// crosses the wire inside a [`ContentSwitch`], and what a screen puts beside a
+/// content form is that key, spelled the same in every language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ContentForm {
     /// `replace`.
     Replace,
@@ -219,6 +225,85 @@ impl ContentForm {
         }
     }
 } // End of impl ContentForm
+
+/// A drafted **switch of content kind**: the match's one content key renamed to
+/// another content key, in place, as part of one [`MatchDraft`] (Phase 3-5-1).
+///
+/// The wire form of a [`FieldSubstitution::Content`]. It is a field of the draft
+/// rather than a separate argument because a switch is **one save intention**
+/// with the value it carries (ruling 8 of `docs/decisions/3-split-notes.md`): the
+/// destination's drafted value is [`MatchDraft`]'s own field for the destination
+/// key, exactly as for any substitution, and a draft and its switch cannot travel
+/// apart.
+///
+/// **Two different forms, and the type is what enforces it**: the only
+/// constructor is [`ContentSwitch::new`], which answers `None` for a form
+/// switched to itself, and serde goes through the same check (`try_from`), so
+/// `{"from": "replace", "to": "replace"}` is refused while a command's arguments
+/// are read. What it converts: nothing — the value's bytes are kept unless the
+/// destination field is drafted to a different value, and no companion key
+/// (`form_fields`, `vars`, `paragraph`) is added or removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "ContentSwitchWire", into = "ContentSwitchWire")]
+pub struct ContentSwitch {
+    /// The content key the match holds now.
+    from: ContentForm,
+    /// The content key it is renamed to.
+    to: ContentForm,
+}
+
+impl ContentSwitch {
+    /// The switch from `from` to `to`, or `None` when the two are one form.
+    pub fn new(from: ContentForm, to: ContentForm) -> Option<ContentSwitch> {
+        (from != to).then_some(ContentSwitch { from, to })
+    }
+
+    /// The content key the match holds now.
+    pub fn from(self) -> ContentForm {
+        self.from
+    }
+
+    /// The content key it is renamed to.
+    pub fn to(self) -> ContentForm {
+        self.to
+    }
+
+    /// The substitution the planner derives an edit from.
+    pub fn substitution(self) -> FieldSubstitution {
+        FieldSubstitution::Content {
+            from: self.from,
+            to: self.to,
+        }
+    }
+} // End of impl ContentSwitch
+
+/// [`ContentSwitch`] as it crosses the wire, before the two forms are checked.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContentSwitchWire {
+    /// The content key the match holds now.
+    from: ContentForm,
+    /// The content key it is renamed to.
+    to: ContentForm,
+}
+
+impl TryFrom<ContentSwitchWire> for ContentSwitch {
+    type Error = String;
+
+    fn try_from(wire: ContentSwitchWire) -> Result<ContentSwitch, String> {
+        ContentSwitch::new(wire.from, wire.to)
+            .ok_or_else(|| "a content switch names two different content forms".to_owned())
+    }
+}
+
+impl From<ContentSwitch> for ContentSwitchWire {
+    fn from(switch: ContentSwitch) -> ContentSwitchWire {
+        ContentSwitchWire {
+            from: switch.from,
+            to: switch.to,
+        }
+    }
+}
 
 /// A closed **scalar-to-scalar substitution**: one key of a match renamed to
 /// another key of the same family, in place (Phase 3-1).
@@ -768,6 +853,13 @@ pub struct MatchDraft {
     /// Drafted entries of `form_fields`, by index in the projected list.
     #[serde(default)]
     pub form_fields: Vec<FormFieldDraft>,
+    /// A drafted switch of content kind, or `None` (Phase 3-5-1).
+    ///
+    /// Planned as one more [`FieldSubstitution`] beside a structure's own, so
+    /// its source key may carry no other intent and its destination's value is
+    /// the destination field above. See [`ContentSwitch`].
+    #[serde(default)]
+    pub content_switch: Option<ContentSwitch>,
 }
 
 impl MatchDraft {
@@ -875,6 +967,12 @@ impl MatchDraft {
     /// Builder: adds one drafted `form_fields` entry.
     pub fn with_form_field(mut self, field: FormFieldDraft) -> MatchDraft {
         self.form_fields.push(field);
+        self
+    }
+
+    /// Builder: drafts a switch of content kind (Phase 3-5-1).
+    pub fn with_content_switch(mut self, switch: ContentSwitch) -> MatchDraft {
+        self.content_switch = Some(switch);
         self
     }
 } // End of impl MatchDraft

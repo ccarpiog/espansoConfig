@@ -1,5 +1,6 @@
 /**
- * The small editor's state machine: six fields of one snippet, drafted and saved.
+ * The small editor's state machine: every eligible scalar field of one snippet,
+ * drafted and saved.
  *
  * **No component and no screen.** This is the whole protocol as a value, exactly
  * as `./rawEditor.ts` is for the raw editor and for the same standing reason
@@ -8,17 +9,43 @@
  * decision written in markup is a decision nothing can check. A later step of
  * 2c-2 draws what this module decides.
  *
- * ## The four things it edits, and the six fields they are
+ * ## What it edits: seventeen scalar fields, since Phase 3-5-1
  *
- * The literal **trigger**, the **`replace`** body, the **label** and the three
- * **word-boundary** keys — which is `word`, `left_word` and `right_word`, three
- * fields and not one control. Six `DraftField<string>`s of a twenty-two-field
- * {@link MatchDraft}; the other sixteen and all four lists go out `'Unchanged'`.
+ * The literal **trigger**, the five **content** keys (`replace`, `markdown`,
+ * `html`, `image_path`, and `form` as layout text only — ruling 9 of
+ * `docs/decisions/3-split-notes.md`; `form_fields` stays read-only), the
+ * **label**, the **comment**, and the nine **options** — `word`, `left_word`,
+ * `right_word`, `propagate_case`, `uppercase_style`, `force_mode`,
+ * `force_clipboard`, `paragraph` and `anchor`, each its own textual field and
+ * never one control over several. Seventeen `DraftField<string>`s of a
+ * twenty-two-field {@link MatchDraft}; `regex` and all four lists go out
+ * `'Unchanged'` (3-6 owns the trigger forms and the lists). Until Phase 3-5-1 it
+ * was six: the trigger, `replace`, the label and the three word-boundary keys.
+ *
+ * **Three further things are drafted beside the fields** (Phase 3-5-1), and each
+ * is a value of this model rather than a rule of a renderer:
+ *
+ * - **the content switch** ({@link chooseContentSwitch}): one compound,
+ *   all-or-nothing intention that renames the snippet's one content key to
+ *   another in place (rulings 8 and 23). It converts no content — the text is
+ *   carried as it is — and removes no companion key; which companion keys stay
+ *   is preview data ({@link ContentSwitchPreview}). A switch cannot be sent
+ *   unconfirmed: {@link canSave} refuses until {@link confirmContentSwitch}, and
+ *   the confirmation is part of the drafted value, so undo walks it back;
+ * - **the cursor action** ({@link insertCursorPosition}), for `replace` only
+ *   (ruling 18): buffer-only and undoable, it inserts `$|$`, selects the one
+ *   already there, or answers a several-markers advisory as a code;
+ * - **exact-string suggestions** for `uppercase_style` and `force_mode`
+ *   ({@link OPTION_SUGGESTIONS}): a suggestion is a string compared with `===`,
+ *   an unfamiliar value is kept exactly, and nothing here infers a boolean.
  *
  * The word-boundary keys stay **textual**, which is the design consult's Q1 and
  * D2u restated for an editor: a checkbox over `word` would have to decide that
  * `on`, `yes` and `true` are the same value, and this application does not know
  * that — it shows a scalar's source text as written and never an inferred type.
+ * Since Phase 3-5-1 the same holds for every option (ruling 10): `force_mode` and
+ * `force_clipboard` are two separate fields with no inferred precedence, and
+ * `propagate_case` and `paragraph` are text like the rest.
  *
  * ## The failure this phase is named after, made structural
  *
@@ -34,7 +61,9 @@
  *   `Draft<T>` snapshots, freezes and walks backwards through.
  *
  * {@link fieldIntent} is the only thing that reads both, and the `DraftField`
- * tri-state it produces is the authoritative intent. That is the consult's Q3:
+ * tri-state it produces is the authoritative intent. Since Phase 3-5-1 it takes
+ * the field's part in a drafted content switch as a third argument, and
+ * {@link intentsOf} is the one production caller that builds that argument. That is the consult's Q3:
  * *absent*, *present* and *removed* are **not** three equivalent value states.
  *
  * The rule that pays for the whole arrangement is the second one below. An
@@ -143,7 +172,7 @@
  * The **live draft still updates on every keystroke**; only the history snapshot
  * is coalesced. Without that, a moderately long `replace` exhausts all hundred
  * history entries and performs a hundred deep clones and recursive freezes of a
- * six-field object, and every one of the person's earlier edits is dropped to make
+ * seventeen-field object, and every one of the person's earlier edits is dropped to make
  * room for the tail of one word.
  *
  * The clock is a **parameter**, never `Date.now()` reached for inside this module
@@ -216,6 +245,7 @@ import type { TranslationKey } from '../i18n/dictionaries';
 import type { IpcFailure } from '../ipc/errors';
 import type {
   Acknowledgement,
+  ContentForm,
   ContentRevision,
   DraftField,
   MatchDraft,
@@ -327,23 +357,81 @@ import {
  * in step. {@link fieldLabelName} maps each to the label the detail pane already
  * has a sentence for.
  */
-export type EditableField = 'trigger' | 'replace' | 'label' | 'word' | 'left_word' | 'right_word';
+export type EditableField =
+  | 'trigger'
+  | ContentForm
+  | 'label'
+  | 'comment'
+  | 'word'
+  | 'left_word'
+  | 'right_word'
+  | 'propagate_case'
+  | 'uppercase_style'
+  | 'force_mode'
+  | 'force_clipboard'
+  | 'paragraph'
+  | 'anchor';
 
 /**
- * The six fields, in the order a screen shows them.
+ * The five content keys, in `MatchField`'s order — Phase 3-5-1.
  *
- * Trigger and body first, because they are what a snippet *is*; the label next,
- * because it is what a person calls it; the three word-boundary keys last,
- * because they qualify the trigger rather than state it.
+ * A snippet is written with **one** of them; which one is its content kind, and
+ * changing it is {@link chooseContentSwitch}'s compound intent, never an edit of
+ * two fields.
+ */
+export const CONTENT_FIELDS: readonly ContentForm[] = [
+  'replace',
+  'markdown',
+  'html',
+  'image_path',
+  'form'
+];
+
+/**
+ * The nine options, in `MatchField`'s order — Phase 3-5-1.
+ *
+ * Every one is a textual field (D2u, ruling 10). `word` is first, which is what
+ * the renderer's *matching* heading keys on.
+ */
+export const OPTION_FIELDS: readonly EditableField[] = [
+  'word',
+  'left_word',
+  'right_word',
+  'propagate_case',
+  'uppercase_style',
+  'force_mode',
+  'force_clipboard',
+  'paragraph',
+  'anchor'
+];
+
+/**
+ * The seventeen fields, in the order a screen shows them.
+ *
+ * Trigger and content first, because they are what a snippet *is*; the label and
+ * the comment next, because they are what a person calls it and says about it;
+ * the nine options last, because they qualify the trigger and the insertion
+ * rather than state them. The relative order is `MatchField::ALL`'s and
+ * `NewMatch::entries()`'s, so recovery's carried fields and a creation's written
+ * keys agree without either being derived from the other.
  */
 export const EDITABLE_FIELDS: readonly EditableField[] = [
   'trigger',
-  'replace',
+  ...CONTENT_FIELDS,
   'label',
-  'word',
-  'left_word',
-  'right_word'
+  'comment',
+  ...OPTION_FIELDS
 ];
+
+/**
+ * Whether a field is one of the five content keys.
+ *
+ * @param field - Which field.
+ * @returns `true` for `replace`, `markdown`, `html`, `image_path` and `form`.
+ */
+export function isContentField(field: EditableField): field is ContentForm {
+  return (CONTENT_FIELDS as readonly EditableField[]).includes(field);
+} // End of function isContentField()
 
 /**
  * Why one field may not be edited.
@@ -363,7 +451,46 @@ export type FieldRefusal =
   | 'carriageReturn'
   | 'ownsNoBytes'
   | 'unmodelledShape'
-  | 'triggerNotSingle';
+  | 'triggerNotSingle'
+  | 'lineBreak';
+
+/**
+ * Which kind of text control a field is drawn in — Phase 3-5-1.
+ *
+ * **A decision of this model, not of a renderer** (`CLAUDE.md` section 6): an
+ * `<input type="text">` strips every line break from its value and a
+ * `<textarea>` keeps them as line feeds, so which control draws a field decides
+ * whether a value survives a round trip through it. The five content keys and
+ * the comment are `multiLine`; the trigger, the label and the nine options are
+ * `singleLine`, and a `singleLine` field whose value holds a line feed is
+ * read-only (`lineBreak`) and refused at {@link editField} and {@link beginSave}.
+ * What no type forces is that a renderer draws the control named here.
+ */
+export type FieldControl = 'multiLine' | 'singleLine';
+
+/**
+ * The control one field is drawn in.
+ *
+ * @param field - Which field.
+ * @returns `multiLine` for the content keys and the comment, `singleLine` otherwise.
+ */
+export function fieldControlOf(field: EditableField): FieldControl {
+  return isContentField(field) || field === 'comment' ? 'multiLine' : 'singleLine';
+} // End of function fieldControlOf()
+
+/**
+ * Whether a text cannot pass through a field's control unchanged.
+ *
+ * A carriage return passes through no control in this window; a line feed passes
+ * through a `multiLine` one and not through a `singleLine` one.
+ *
+ * @param field - Which field.
+ * @param text - A value for it.
+ * @returns `true` when the control would change it.
+ */
+function unreadableIn(field: EditableField, text: string): boolean {
+  return text.includes('\r') || (fieldControlOf(field) === 'singleLine' && text.includes('\n'));
+} // End of function unreadableIn()
 
 /**
  * Whether one field may be edited, and why not when it may not.
@@ -579,7 +706,7 @@ export interface FieldBaseline {
   readonly shown: readonly ShownValue[];
 }
 
-/** What the file held for all six fields. */
+/** What the file held for all seventeen fields. */
 export type MatchBaseline = Readonly<Record<EditableField, FieldBaseline>>;
 
 /**
@@ -617,8 +744,37 @@ export interface FieldBuffer {
   readonly removed: boolean;
 }
 
-/** What all six fields' controls hold now. */
-export type MatchBuffers = Readonly<Record<EditableField, FieldBuffer>>;
+/**
+ * A drafted switch of content kind, as the draft holds it — Phase 3-5-1.
+ *
+ * **Part of the drafted value**, so it is snapshotted, undone, retained by a
+ * conflict, copied, reapplied and recovered with the fields. `confirmed` is the
+ * model value ruling 8's confirmation is: {@link canSave} and {@link beginSave}
+ * refuse a switch that is not confirmed, and {@link chooseContentSwitch} always
+ * drafts one unconfirmed. `contentSwitchOf` turns it into the wire's
+ * `ContentSwitch`, which has no confirmation because Rust is only ever sent a
+ * confirmed one.
+ */
+export interface DraftedContentSwitch {
+  /** The content key the file holds now. */
+  readonly from: ContentForm;
+  /** The content key it is to be renamed to. */
+  readonly to: ContentForm;
+  /** Whether the person has confirmed the switch after its preview. */
+  readonly confirmed: boolean;
+}
+
+/**
+ * What all seventeen fields' controls hold now, and the drafted content switch.
+ *
+ * The switch is a property beside the fields rather than a field: a
+ * `Record<EditableField, …>` walk sees every field and never the switch, and the
+ * switch is read by {@link intentsOf} and nothing that walks fields alone.
+ */
+export type MatchBuffers = Readonly<Record<EditableField, FieldBuffer>> & {
+  /** The drafted switch of content kind, or `null`. */
+  readonly contentSwitch: DraftedContentSwitch | null;
+};
 
 /**
  * How this editor compares and snapshots its drafted value.
@@ -657,7 +813,7 @@ export { TYPING_GROUP_IDLE_MS };
 export type TypingGroup = TypingRun<EditableField>;
 
 /**
- * One editing session over one snippet's six editable fields.
+ * One editing session over one snippet's seventeen editable fields.
  *
  * **A value with pure transitions, never a store**, which is 2c-1a's D1 one layer
  * up: a component holds one in a `$state.raw` and reassigns it, and every function
@@ -676,7 +832,7 @@ export interface MatchEditorSession {
    *
    * `matchEditability`'s answer, taken once from the projection. It is defence in
    * depth beside Rust's own semantic gate, and it is what {@link isEditable}
-   * consults before any of the six verdicts are looked at.
+   * consults before any of the per-field verdicts are looked at.
    */
   readonly editability: MatchEditability;
   /** What the file held, per field. Not drafted. */
@@ -843,15 +999,54 @@ export interface MatchEditorSession {
    * against a continuation; the order here is a fact its own suite drives.
    */
   readonly heldDeliveries: readonly ObservationDelivery[];
+  /**
+   * The content-related keys the snippet held when the session was seeded,
+   * which a content switch keeps — Phase 3-5-1, ruling 8's *removes no companion
+   * field silently*. Taken from the projection once, with the baseline, and read
+   * only by {@link ContentSwitchPreview}.
+   */
+  readonly companions: readonly CompanionKey[];
   /** Where the group boundary's readings come from. */
   readonly clock: Clock;
 }
 
 /**
+ * A key a content switch leaves where it is, named in its preview — Phase
+ * 3-5-1.
+ *
+ * Spelled as the espanso key, like `MatchField`: `vars` and `form_fields` are
+ * collections this editor never drafts, and `paragraph` is an option whose
+ * meaning espanso ties to `markdown`. A switch renames one key and touches none
+ * of these; the preview says which of them the snippet holds so that keeping them
+ * is never silent.
+ */
+export type CompanionKey = 'vars' | 'form_fields' | 'paragraph';
+
+/**
+ * The companion keys one snippet holds, in a fixed order.
+ *
+ * @param match - The snippet's projection.
+ * @returns The keys, possibly none.
+ */
+function companionsOf(match: MatchView): readonly CompanionKey[] {
+  const held: CompanionKey[] = [];
+  if (match.vars.length > 0) {
+    held.push('vars');
+  }
+  if (match.form_fields.length > 0) {
+    held.push('form_fields');
+  }
+  if (match.options.paragraph !== null) {
+    held.push('paragraph');
+  }
+  return held;
+} // End of function companionsOf()
+
+/**
  * The projected scalar of one editable field, or `null`.
  *
- * A `switch` over the six rather than a lookup table, so a seventh field is a
- * compile error here rather than an `undefined` at run time.
+ * A `switch` over the seventeen rather than a lookup table, so an eighteenth
+ * field is a compile error here rather than an `undefined` at run time.
  *
  * @param match - The snippet's projection.
  * @param field - Which field.
@@ -863,22 +1058,36 @@ export function projectedScalar(match: MatchView, field: EditableField): ScalarV
       return match.trigger.trigger;
     case 'replace':
       return match.content.replace;
+    case 'markdown':
+      return match.content.markdown;
+    case 'html':
+      return match.content.html;
+    case 'image_path':
+      return match.content.image_path;
+    case 'form':
+      return match.content.form;
     case 'label':
       return match.label;
+    case 'comment':
+      return match.comment;
     case 'word':
-      return match.options.word;
     case 'left_word':
-      return match.options.left_word;
     case 'right_word':
-      return match.options.right_word;
+    case 'propagate_case':
+    case 'uppercase_style':
+    case 'force_mode':
+    case 'force_clipboard':
+    case 'paragraph':
+    case 'anchor':
+      return match.options[field];
   }
 } // End of function projectedScalar()
 
 /**
  * The label the detail pane already has a sentence for.
  *
- * Reused rather than duplicated: `browser.detail.field.*` names these six fields
- * in both languages, and a second set of labels would be a second thing to
+ * Reused rather than duplicated: `browser.detail.field.*` names these seventeen
+ * fields in both languages, and a second set of labels would be a second thing to
  * translate and a second thing to disagree.
  *
  * @param field - Which field.
@@ -890,14 +1099,36 @@ export function fieldLabelName(field: EditableField): DetailFieldName {
       return 'trigger';
     case 'replace':
       return 'replace';
+    case 'markdown':
+      return 'markdown';
+    case 'html':
+      return 'html';
+    case 'image_path':
+      return 'imagePath';
+    case 'form':
+      return 'form';
     case 'label':
       return 'label';
+    case 'comment':
+      return 'comment';
     case 'word':
       return 'word';
     case 'left_word':
       return 'leftWord';
     case 'right_word':
       return 'rightWord';
+    case 'propagate_case':
+      return 'propagateCase';
+    case 'uppercase_style':
+      return 'uppercaseStyle';
+    case 'force_mode':
+      return 'forceMode';
+    case 'force_clipboard':
+      return 'forceClipboard';
+    case 'paragraph':
+      return 'paragraph';
+    case 'anchor':
+      return 'anchor';
   }
 } // End of function fieldLabelName()
 
@@ -952,6 +1183,9 @@ export function fieldEligibility(match: MatchView, field: EditableField): FieldE
   }
   if (scalar.text.includes('\r')) {
     return { kind: 'readOnly', reason: 'carriageReturn' };
+  }
+  if (fieldControlOf(field) === 'singleLine' && scalar.text.includes('\n')) {
+    return { kind: 'readOnly', reason: 'lineBreak' };
   }
   if (scalar.span.start === scalar.span.end) {
     return { kind: 'readOnly', reason: 'ownsNoBytes' };
@@ -1068,7 +1302,7 @@ function shownValuesOf(
 } // End of function shownValuesOf()
 
 /**
- * What the file holds for all six fields, and which of them may be edited.
+ * What the file holds for all seventeen fields, and which of them may be edited.
  *
  * @param match - The snippet's projection.
  * @returns The baseline, frozen, so nothing downstream can change what the file
@@ -1092,22 +1326,23 @@ export function baselineOf(match: MatchView): MatchBaseline {
       eligibility,
       shown: shownValuesOf(match, field, eligibility)
     };
-  } // End of the loop over the six editable fields
+  } // End of the loop over the seventeen editable fields
   return deepFreeze(baseline);
 } // End of function baselineOf()
 
 /**
- * The buffers a session starts with: exactly what the file holds, nothing removed.
+ * The buffers a session starts with: exactly what the file holds, nothing removed
+ * and no content switch drafted.
  *
  * @param baseline - What the file holds.
  * @returns The starting buffers.
  */
 export function buffersOf(baseline: MatchBaseline): MatchBuffers {
-  const buffers: Record<EditableField, FieldBuffer> = {} as Record<EditableField, FieldBuffer>;
+  const fields: Record<EditableField, FieldBuffer> = {} as Record<EditableField, FieldBuffer>;
   for (const field of EDITABLE_FIELDS) {
-    buffers[field] = { text: baseline[field].value, removed: false };
+    fields[field] = { text: baseline[field].value, removed: false };
   }
-  return buffers;
+  return { ...fields, contentSwitch: null };
 } // End of function buffersOf()
 
 /**
@@ -1126,13 +1361,38 @@ export function buffersOf(baseline: MatchBaseline): MatchBuffers {
  * as a no-op, so the two agree, and what this adds is that the draft does not
  * claim an edit it does not have.
  *
+ * **A drafted content switch changes two rows, and only through `role`** (Phase
+ * 3-5-1). The switch's **source** key is renamed rather than written, so its
+ * intent is `'Unchanged'` — Rust's planner refuses any other intent on it. The
+ * **destination**'s intent is `'Unchanged'` when its text is the reference text
+ * (the source's projected value, or the destination's own once a commit has made
+ * it present), which keeps the value's bytes exactly, and `Set` otherwise — `Set('')`
+ * included, because the key the switch creates holds whatever the box holds.
+ * Neither can be removed while the switch stands.
+ *
+ * **The role defaults to {@link NO_SWITCH}**, and that is a statement about a
+ * caller holding one field without the buffers it sits in; every production
+ * caller goes through {@link intentsOf}, which reads the drafted switch and passes
+ * the role it implies. What no type forces is that a new caller does the same.
+ *
  * @param baseline - What the file holds for this field.
  * @param buffer - What its controls hold.
+ * @param role - The field's part in a drafted content switch.
  * @returns The tri-state to put in the {@link MatchDraft}.
  */
-export function fieldIntent(baseline: FieldBaseline, buffer: FieldBuffer): DraftField<string> {
+export function fieldIntent(
+  baseline: FieldBaseline,
+  buffer: FieldBuffer,
+  role: SwitchRole = NO_SWITCH
+): DraftField<string> {
   if (baseline.eligibility.kind !== 'editable') {
     return 'Unchanged';
+  }
+  if (role.kind === 'source') {
+    return 'Unchanged';
+  }
+  if (role.kind === 'destination') {
+    return buffer.text === role.reference ? 'Unchanged' : { Set: buffer.text };
   }
   if (buffer.removed) {
     return baseline.present ? 'Remove' : 'Unchanged';
@@ -1144,6 +1404,111 @@ export function fieldIntent(baseline: FieldBaseline, buffer: FieldBuffer): Draft
 } // End of function fieldIntent()
 
 /**
+ * One field's part in a drafted content switch — Phase 3-5-1.
+ *
+ * `destination` carries the **reference** text its intent is measured against:
+ * the source's projected value while the file still holds the source key, and the
+ * destination's own once a commit has made it present.
+ */
+export type SwitchRole =
+  | {
+      /** The field takes no part in a switch. */
+      readonly kind: 'none';
+    }
+  | {
+      /** The key a drafted switch renames away from. */
+      readonly kind: 'source';
+    }
+  | {
+      /** The key a drafted switch renames to. */
+      readonly kind: 'destination';
+      /** The text whose equality keeps the value's bytes. */
+      readonly reference: string;
+    };
+
+/** The role of a field no switch names, shared rather than rebuilt. */
+export const NO_SWITCH: SwitchRole = Object.freeze({ kind: 'none' as const });
+
+/**
+ * One field's part in a drafted content switch.
+ *
+ * @param baseline - What the file holds.
+ * @param contentSwitch - The drafted switch, **read once by the caller**, or `null`.
+ * @param field - Which field.
+ * @returns The role {@link fieldIntent} takes.
+ */
+export function switchRoleOf(
+  baseline: MatchBaseline,
+  contentSwitch: DraftedContentSwitch | null,
+  field: EditableField
+): SwitchRole {
+  if (contentSwitch === null) {
+    return NO_SWITCH;
+  }
+  if (field === contentSwitch.from) {
+    return { kind: 'source' };
+  }
+  if (field === contentSwitch.to) {
+    const destination = baseline[field];
+    return {
+      kind: 'destination',
+      reference: destination.present ? destination.value : baseline[contentSwitch.from].value
+    };
+  }
+  return NO_SWITCH;
+} // End of function switchRoleOf()
+
+/**
+ * A drafted switch copied into a plain value, so it is read exactly once.
+ *
+ * **The check-and-spend rule of `CLAUDE.md` section 6**: `MatchBuffers` carries
+ * no brand, so a caller can hand in a switch whose properties are getters. Every
+ * function below that both decides and derives from a switch reads it through
+ * this, once, and uses the copy.
+ *
+ * @param buffers - What the controls hold.
+ * @returns A plain copy of the drafted switch, or `null`.
+ */
+function capturedSwitch(buffers: MatchBuffers): DraftedContentSwitch | null {
+  const drafted = buffers.contentSwitch;
+  if (drafted === null) {
+    return null;
+  }
+  return { from: drafted.from, to: drafted.to, confirmed: drafted.confirmed };
+} // End of function capturedSwitch()
+
+/**
+ * Every field's intent, the drafted switch taken into account — Phase 3-5-1.
+ *
+ * **The one production caller of {@link fieldIntent}**: it reads the switch once
+ * and each field's buffer once, so a buffer or a switch behind a getter cannot
+ * answer one thing to the role and another to the intent.
+ *
+ * @param baseline - What the file holds.
+ * @param buffers - What the controls hold.
+ * @param contentSwitch - The drafted switch, read once by the caller.
+ * @returns One intent per field.
+ */
+export function intentsOf(
+  baseline: MatchBaseline,
+  buffers: MatchBuffers,
+  contentSwitch: DraftedContentSwitch | null
+): Readonly<Record<EditableField, DraftField<string>>> {
+  const intents: Record<EditableField, DraftField<string>> = {} as Record<
+    EditableField,
+    DraftField<string>
+  >;
+  for (const field of EDITABLE_FIELDS) {
+    intents[field] = fieldIntent(
+      baseline[field],
+      buffers[field],
+      switchRoleOf(baseline, contentSwitch, field)
+    );
+  }
+  return intents;
+} // End of function intentsOf()
+
+/**
  * The whole twenty-two-field draft to send.
  *
  * **An exhaustive literal, and it must stay one.** No property of `MatchDraft` is
@@ -1151,43 +1516,81 @@ export function fieldIntent(baseline: FieldBaseline, buffer: FieldBuffer): Draft
  * phase breaks this function rather than being silently omitted. A spread over a
  * partial would give both of those away, and what it would buy is six fewer lines.
  *
- * The sixteen fields this editor does not touch and all four lists go out saying
- * *leave this alone*, which is what makes an unedited field's spelling, quoting
- * and surrounding comments survive a save byte for byte.
+ * `regex` and all four lists go out saying *leave this alone*, which is what
+ * makes an unedited field's spelling, quoting and surrounding comments survive a
+ * save byte for byte; so does every field whose intent is `'Unchanged'`. Since
+ * Phase 3-5-1 the draft also carries `content_switch`, built from the switch read
+ * once and used for both the intents and the wire value.
  *
  * @param baseline - What the file holds.
  * @param buffers - What the controls hold.
  * @returns The draft `save_match` takes.
  */
 export function matchDraftOf(baseline: MatchBaseline, buffers: MatchBuffers): MatchDraft {
-  return {
-    trigger: fieldIntent(baseline.trigger, buffers.trigger),
-    regex: 'Unchanged',
-    replace: fieldIntent(baseline.replace, buffers.replace),
-    markdown: 'Unchanged',
-    html: 'Unchanged',
-    image_path: 'Unchanged',
-    form: 'Unchanged',
-    label: fieldIntent(baseline.label, buffers.label),
-    comment: 'Unchanged',
-    word: fieldIntent(baseline.word, buffers.word),
-    left_word: fieldIntent(baseline.left_word, buffers.left_word),
-    right_word: fieldIntent(baseline.right_word, buffers.right_word),
-    propagate_case: 'Unchanged',
-    uppercase_style: 'Unchanged',
-    force_mode: 'Unchanged',
-    force_clipboard: 'Unchanged',
-    paragraph: 'Unchanged',
-    anchor: 'Unchanged',
-    triggers: [],
-    search_terms: [],
-    vars: [],
-    form_fields: []
-  };
+  return draftWith(baseline, buffers, capturedSwitch(buffers));
 } // End of function matchDraftOf()
 
 /**
- * Starts an editing session over one snippet's six fields.
+ * {@link matchDraftOf} over a switch the caller has already read once.
+ *
+ * @param baseline - What the file holds.
+ * @param buffers - What the controls hold.
+ * @param contentSwitch - The drafted switch, captured by the caller, or `null`.
+ * @returns The draft `save_match` takes.
+ */
+function draftWith(
+  baseline: MatchBaseline,
+  buffers: MatchBuffers,
+  contentSwitch: DraftedContentSwitch | null
+): MatchDraft {
+  const intents = intentsOf(baseline, buffers, contentSwitch);
+  return {
+    trigger: intents.trigger,
+    regex: 'Unchanged',
+    replace: intents.replace,
+    markdown: intents.markdown,
+    html: intents.html,
+    image_path: intents.image_path,
+    form: intents.form,
+    label: intents.label,
+    comment: intents.comment,
+    word: intents.word,
+    left_word: intents.left_word,
+    right_word: intents.right_word,
+    propagate_case: intents.propagate_case,
+    uppercase_style: intents.uppercase_style,
+    force_mode: intents.force_mode,
+    force_clipboard: intents.force_clipboard,
+    paragraph: intents.paragraph,
+    anchor: intents.anchor,
+    triggers: [],
+    search_terms: [],
+    vars: [],
+    form_fields: [],
+    content_switch: contentSwitchOf(contentSwitch)
+  };
+} // End of function draftWith()
+
+/**
+ * The wire's `ContentSwitch` for a drafted one, or `null`.
+ *
+ * The one producer of a wire switch, and it never builds `from === to`:
+ * {@link chooseContentSwitch} refuses to draft one, and a hand-built draft with
+ * one is answered `null` here and refused by {@link switchIsReady} before a save.
+ *
+ * @param drafted - The drafted switch, already captured, or `null`.
+ * @returns The two keys, or `null`.
+ */
+export function contentSwitchOf(
+  drafted: DraftedContentSwitch | null
+): MatchDraft['content_switch'] {
+  return drafted === null || drafted.from === drafted.to
+    ? null
+    : { from: drafted.from, to: drafted.to };
+} // End of function contentSwitchOf()
+
+/**
+ * Starts an editing session over one snippet's seventeen fields.
  *
  * The base revision is the snippet's own `id.revision` and is not a separate
  * argument, which closes by construction the pairing hazard 2c-1b had to reason
@@ -1224,6 +1627,7 @@ export function startMatchEditor(match: MatchView, clock: Clock): MatchEditorSes
     uncertaintyUnresolved: false,
     awaitingReconciliation: null,
     heldDeliveries: [],
+    companions: companionsOf(match),
     clock
   };
 } // End of function startMatchEditor()
@@ -1299,8 +1703,156 @@ export function isEditable(session: MatchEditorSession): boolean {
  * @returns `true` when {@link editField} would do anything.
  */
 export function isFieldEditable(session: MatchEditorSession, field: EditableField): boolean {
-  return isEditable(session) && session.baseline[field].eligibility.kind === 'editable';
+  if (!isEditable(session) || session.baseline[field].eligibility.kind !== 'editable') {
+    return false;
+  }
+  if (!isContentField(field)) {
+    return true;
+  }
+  const role = contentRoleOf(session.baseline, capturedSwitch(session.draft.value), field);
+  return role === 'current' || role === 'open' || role === 'switchTarget';
 } // End of function isFieldEditable()
+
+/**
+ * What one content key is to this session — Phase 3-5-1.
+ *
+ * - `current` — the file holds it, and no switch is drafted: edited in place;
+ * - `open` — the file holds **no** content key at all, so any of the five may
+ *   be typed into (a snippet with no content is repaired, not switched);
+ * - `dormant` — the file holds another content key: writing this one would give
+ *   the snippet two, so it is reached only through {@link chooseContentSwitch};
+ * - `switchedAway` — the drafted switch renames this key away; its box is not
+ *   edited, because its text now lives in the destination;
+ * - `switchTarget` — the drafted switch renames the source to this key; its box
+ *   holds the text the key will have.
+ */
+export type ContentRole = 'current' | 'open' | 'dormant' | 'switchedAway' | 'switchTarget';
+
+/**
+ * Whether the file holds a key, whether or not the projection modelled it.
+ *
+ * @param baseline - What the file holds for one field.
+ * @returns `true` when the key is there as a scalar or as an unmodelled shape.
+ */
+function holdsKey(baseline: FieldBaseline): boolean {
+  return (
+    baseline.present ||
+    (baseline.eligibility.kind === 'readOnly' && baseline.eligibility.reason === 'unmodelledShape')
+  );
+} // End of function holdsKey()
+
+/**
+ * One content key's role, from the baseline and the drafted switch.
+ *
+ * @param baseline - What the file holds.
+ * @param contentSwitch - The drafted switch, read once by the caller, or `null`.
+ * @param field - Which content key.
+ * @returns Its role.
+ */
+export function contentRoleOf(
+  baseline: MatchBaseline,
+  contentSwitch: DraftedContentSwitch | null,
+  field: ContentForm
+): ContentRole {
+  if (contentSwitch !== null) {
+    if (field === contentSwitch.from) {
+      return 'switchedAway';
+    }
+    return field === contentSwitch.to ? 'switchTarget' : 'dormant';
+  }
+  if (baseline[field].present) {
+    return 'current';
+  }
+  return CONTENT_FIELDS.some((one) => holdsKey(baseline[one])) ? 'dormant' : 'open';
+} // End of function contentRoleOf()
+
+/**
+ * The content key a switch would rename, or `null` when there is none to rename.
+ *
+ * Exactly one content key held, as an editable scalar the draft has not asked to
+ * remove: a snippet with two content keys is a shape to repair, not to switch,
+ * and a removed or ineligible key has nothing a rename could keep.
+ *
+ * @param baseline - What the file holds.
+ * @param buffers - What the controls hold.
+ * @returns The source key, or `null`.
+ */
+function switchSourceOf(baseline: MatchBaseline, buffers: MatchBuffers): ContentForm | null {
+  const held = CONTENT_FIELDS.filter((field) => holdsKey(baseline[field]));
+  const only = held[0];
+  if (held.length !== 1 || only === undefined) {
+    return null;
+  }
+  return baseline[only].present &&
+    baseline[only].eligibility.kind === 'editable' &&
+    !buffers[only].removed
+    ? only
+    : null;
+} // End of function switchSourceOf()
+
+/**
+ * Whether a drafted switch may be sent, or `true` when none is drafted.
+ *
+ * **The confirmation is here, and so is the shape** (ruling 8): an unconfirmed
+ * switch is never sent, and neither is one whose keys the baseline does not hold
+ * in the state the switch was drafted against — which a hand-built buffer can
+ * express and {@link chooseContentSwitch} never drafts.
+ *
+ * @param baseline - What the file holds.
+ * @param contentSwitch - The drafted switch, read once by the caller, or `null`.
+ * @returns `true` when there is nothing to hold the save back for.
+ */
+export function switchIsReady(
+  baseline: MatchBaseline,
+  contentSwitch: DraftedContentSwitch | null
+): boolean {
+  if (contentSwitch === null) {
+    return true;
+  }
+  const source = baseline[contentSwitch.from];
+  const destination = baseline[contentSwitch.to];
+  return (
+    contentSwitch.confirmed &&
+    contentSwitch.from !== contentSwitch.to &&
+    source.present &&
+    source.eligibility.kind === 'editable' &&
+    !holdsKey(destination) &&
+    destination.eligibility.kind === 'editable'
+  );
+} // End of function switchIsReady()
+
+/**
+ * What a draft says about one companion key: the drafted intent for
+ * `paragraph`, and `'Unchanged'` for `vars` and `form_fields`, which this editor
+ * never drafts.
+ *
+ * @param key - The companion key.
+ * @param intents - The draft's intents.
+ * @returns The intent.
+ */
+function companionIntentOf(
+  key: CompanionKey,
+  intents: Readonly<Record<EditableField, DraftField<string>>>
+): DraftField<string> {
+  return key === 'paragraph' ? intents.paragraph : 'Unchanged';
+} // End of function companionIntentOf()
+
+/**
+ * Whether a wire draft switches content kind **and** removes a companion key —
+ * ruling 8, Phase 3-5-1's review fix.
+ *
+ * Asked of the **built draft**, which is the captured candidate's own values:
+ * a removal drafted before the switch was chosen and one drafted after it are the
+ * same `paragraph: 'Remove'` here. Rust refuses the same batch
+ * (`SubstitutionConflictsWithField { field: paragraph }`); this is the model's
+ * refusal before anything is sent.
+ *
+ * @param draft - The draft that would be sent.
+ * @returns `true` when it would remove a companion beside a switch.
+ */
+export function removesACompanion(draft: MatchDraft): boolean {
+  return draft.content_switch !== null && draft.paragraph === 'Remove';
+} // End of function removesACompanion()
 
 /**
  * The buffers with one field replaced.
@@ -1318,7 +1870,9 @@ function withField(
   field: EditableField,
   buffer: FieldBuffer
 ): MatchBuffers {
-  const next: Record<EditableField, FieldBuffer> = { ...buffers };
+  const next: Record<EditableField, FieldBuffer> & {
+    contentSwitch: DraftedContentSwitch | null;
+  } = { ...buffers };
   next[field] = buffer;
   return next;
 } // End of function withField()
@@ -1378,7 +1932,7 @@ export function editField(
   field: EditableField,
   text: string
 ): MatchEditorSession {
-  if (!isFieldEditable(session, field) || text.includes('\r')) {
+  if (!isFieldEditable(session, field) || unreadableIn(field, text)) {
     return session;
   }
   return recordChange(session, field, withField(session.draft.value, field, { text, removed: false }));
@@ -1403,6 +1957,13 @@ export function removeField(
   field: EditableField
 ): MatchEditorSession {
   if (!isFieldEditable(session, field) || !session.baseline[field].present) {
+    return session;
+  }
+  const drafted = capturedSwitch(session.draft.value);
+  if (drafted !== null && (field === drafted.from || field === drafted.to || field === 'paragraph')) {
+    // Neither key of a drafted switch is removed: the source is renamed and the
+    // destination is created by the switch. Nor is `paragraph`, the companion a
+    // switch keeps (ruling 8). Cancelling the switch comes first.
     return session;
   }
   const buffer = session.draft.value[field];
@@ -1434,6 +1995,350 @@ export function restoreField(
   const draft = editDraft(session.draft, withField(session.draft.value, field, { ...buffer, removed: false }));
   return { ...session, draft, group: null, sendFailure: null };
 } // End of function restoreField()
+
+/**
+ * The content keys a switch may rename to right now — Phase 3-5-1.
+ *
+ * **The choices a screen offers, derived from the session alone**: the source is
+ * the one content key the baseline holds (or the drafted switch's own source),
+ * and a target is any other content key the file does not hold in any shape and
+ * that is eligible — a key the projection carries as an unmodelled shape would
+ * make the rename a duplicate, which Rust refuses by name.
+ *
+ * **R37, stated where it binds**: the view that draws these, the choice list and
+ * the submission identity ({@link beginSave}'s `content_switch` and
+ * `session.match`) all come from the one projection this session was seeded
+ * from — one read, at {@link startMatchEditor} — and a component that derives
+ * them in one synchronous block from the session it holds agrees with itself.
+ * TypeScript does not force that: a caller that asks with a stale session gets
+ * the stale session's answer, consistently, and the command's revision check is
+ * what refuses its submission.
+ *
+ * @param session - The session to ask about.
+ * @returns The keys, in {@link CONTENT_FIELDS} order; empty when no switch can
+ *   be drafted.
+ */
+export function contentSwitchTargets(session: MatchEditorSession): readonly ContentForm[] {
+  if (!isEditable(session)) {
+    return [];
+  }
+  const buffers = session.draft.value;
+  const drafted = capturedSwitch(buffers);
+  const from = drafted === null ? switchSourceOf(session.baseline, buffers) : drafted.from;
+  if (from === null) {
+    return [];
+  }
+  return CONTENT_FIELDS.filter(
+    (field) =>
+      field !== from &&
+      !holdsKey(session.baseline[field]) &&
+      session.baseline[field].eligibility.kind === 'editable'
+  );
+} // End of function contentSwitchTargets()
+
+/**
+ * Drafts a switch of content kind to `to`, unconfirmed — Phase 3-5-1.
+ *
+ * **One compound intention, all or nothing** (rulings 8 and 23): the source key is
+ * renamed to `to` in place and its text travels with it **unconverted** — the
+ * destination's box is given exactly what the source's box held, and nothing
+ * here rewrites markup or paths. No companion key is removed; the preview names
+ * the ones that stay. Choosing a second target while one is drafted re-points the
+ * switch, carrying whatever the destination's box now holds, and the confirmation
+ * is dropped, because what was confirmed was the first target.
+ *
+ * A structural action: its own history step, so undo takes it back whole.
+ *
+ * @param session - The session being edited.
+ * @param to - The content key to switch to.
+ * @returns The session with the switch drafted, or the same session when `to` is
+ *   not one of {@link contentSwitchTargets} or is already the drafted target.
+ */
+export function chooseContentSwitch(
+  session: MatchEditorSession,
+  to: ContentForm
+): MatchEditorSession {
+  if (!contentSwitchTargets(session).includes(to)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const drafted = capturedSwitch(buffers);
+  const from = drafted === null ? switchSourceOf(session.baseline, buffers) : drafted.from;
+  if (from === null || (drafted !== null && drafted.to === to)) {
+    return session;
+  }
+  if (intentsOf(session.baseline, buffers, drafted).paragraph === 'Remove') {
+    // A companion removal drafted before the switch: the switch would remove a
+    // companion beside it (ruling 8). Restoring `paragraph` comes first.
+    return session;
+  }
+  const carried = drafted === null ? buffers[from].text : buffers[drafted.to].text;
+  const next: Record<EditableField, FieldBuffer> = { ...buffers };
+  if (drafted !== null) {
+    next[drafted.to] = { text: session.baseline[drafted.to].value, removed: false };
+  }
+  next[to] = { text: carried, removed: false };
+  const value: MatchBuffers = { ...next, contentSwitch: { from, to, confirmed: false } };
+  return { ...session, draft: editDraft(session.draft, value), group: null, sendFailure: null };
+} // End of function chooseContentSwitch()
+
+/**
+ * Confirms the drafted switch after its preview — Phase 3-5-1, ruling 8.
+ *
+ * The confirmation is part of the drafted value, so it is its own history step
+ * and undo withdraws it; {@link canSave} refuses until it has happened.
+ *
+ * @param session - The session being edited.
+ * @returns The session with the switch confirmed, or the same session when none
+ *   is drafted, it is already confirmed, or the session is not accepting changes.
+ */
+export function confirmContentSwitch(session: MatchEditorSession): MatchEditorSession {
+  if (!isEditable(session)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const drafted = capturedSwitch(buffers);
+  if (drafted === null || drafted.confirmed) {
+    return session;
+  }
+  const value: MatchBuffers = { ...buffers, contentSwitch: { ...drafted, confirmed: true } };
+  return { ...session, draft: editDraft(session.draft, value), group: null, sendFailure: null };
+} // End of function confirmContentSwitch()
+
+/**
+ * Withdraws the drafted switch, giving its text back to the source's box.
+ *
+ * Nothing typed into the destination is lost: the source's box is given what the
+ * destination's box holds, and the destination goes back to what the file holds
+ * for it (nothing, since a target is a key the file does not have).
+ *
+ * @param session - The session being edited.
+ * @returns The session with no switch drafted, or the same session.
+ */
+export function cancelContentSwitch(session: MatchEditorSession): MatchEditorSession {
+  if (!isEditable(session)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const drafted = capturedSwitch(buffers);
+  if (drafted === null) {
+    return session;
+  }
+  const next: Record<EditableField, FieldBuffer> = { ...buffers };
+  next[drafted.from] = { text: buffers[drafted.to].text, removed: false };
+  next[drafted.to] = { text: session.baseline[drafted.to].value, removed: false };
+  const value: MatchBuffers = { ...next, contentSwitch: null };
+  return { ...session, draft: editDraft(session.draft, value), group: null, sendFailure: null };
+} // End of function cancelContentSwitch()
+
+/** The cursor marker espanso reads in a `replace` body (ruling 18). */
+export const CURSOR_MARKER = '$|$';
+
+/**
+ * A selection in a text control, in **UTF-16 code units** of the box's string.
+ *
+ * A JavaScript string index, which is what a `<textarea>`'s `selectionStart`
+ * and `selectionEnd` are, and never a byte offset: the cursor action works on
+ * the buffer, which is a string, and slices nothing of the file.
+ */
+export interface TextSelection {
+  /** The first code unit selected, or the caret when nothing is. */
+  readonly start: number;
+  /** One past the last code unit selected; equal to `start` for a caret. */
+  readonly end: number;
+}
+
+/**
+ * Why the cursor action did nothing to the text, as a code with its operands —
+ * never a sentence (`cursorAdvisoryKey` names the key).
+ */
+export type CursorAdvisory = {
+  /** The body holds more than one marker, so the action neither adds nor picks. */
+  readonly kind: 'severalMarkers';
+  /** How many, at least two. */
+  readonly count: number;
+};
+
+/** What the cursor action did. */
+export type CursorActionResult =
+  | {
+      /** A marker was inserted in place of the selection; one history step. */
+      readonly kind: 'inserted';
+      /** The session with the marker drafted. */
+      readonly session: MatchEditorSession;
+      /** The marker's own range, for the control to select. */
+      readonly selection: TextSelection;
+    }
+  | {
+      /** The one marker already there; nothing changed. */
+      readonly kind: 'selected';
+      /** The same session. */
+      readonly session: MatchEditorSession;
+      /** The marker's range, for the control to select. */
+      readonly selection: TextSelection;
+    }
+  | {
+      /** Several markers are there; nothing changed, and a sentence is owed. */
+      readonly kind: 'advisory';
+      /** The same session. */
+      readonly session: MatchEditorSession;
+      /** Which advisory. */
+      readonly advisory: CursorAdvisory;
+    }
+  | {
+      /** The action is not offered: `replace` is not an editable body now. */
+      readonly kind: 'unavailable';
+      /** The same session. */
+      readonly session: MatchEditorSession;
+    };
+
+/**
+ * How many non-overlapping cursor markers a text holds.
+ *
+ * @param text - A body.
+ * @returns The count.
+ */
+export function cursorMarkerCount(text: string): number {
+  return text.split(CURSOR_MARKER).length - 1;
+} // End of function cursorMarkerCount()
+
+/**
+ * Whether the cursor action is offered — `replace` only, and only while its box
+ * accepts changes (ruling 18). A `replace` a drafted switch renames away is not
+ * offered it; a `replace` a switch renames *to* is.
+ *
+ * @param session - The session to ask about.
+ * @returns `true` when {@link insertCursorPosition} can do anything.
+ */
+export function cursorActionOffered(session: MatchEditorSession): boolean {
+  return isFieldEditable(session, 'replace');
+} // End of function cursorActionOffered()
+
+/**
+ * A position clamped into a text, or the text's end when it is not an integer.
+ *
+ * @param position - What the control reported.
+ * @param length - The text's length in code units.
+ * @returns A usable index.
+ */
+function clampedPosition(position: number, length: number): number {
+  if (!Number.isInteger(position)) {
+    return length;
+  }
+  return Math.min(Math.max(position, 0), length);
+} // End of function clampedPosition()
+
+/**
+ * *Insert cursor position* — Phase 3-5-1, ruling 18. **Buffer-only**: it drafts
+ * text and writes nothing, adds no finding and asks nothing of Rust.
+ *
+ * With no marker in the body it puts one in place of the selection, as its own
+ * history step, so undo takes it back; with exactly one it answers that marker's
+ * range and changes nothing; with several it answers the `severalMarkers`
+ * advisory and changes nothing, because choosing which one espanso honours is
+ * not this action's to decide.
+ *
+ * The body is read **once**, and the count, the position and the new text are
+ * all taken from that one string.
+ *
+ * @param session - The session being edited.
+ * @param selection - The body control's selection, in UTF-16 code units.
+ * @returns What happened, with the session to hold.
+ */
+export function insertCursorPosition(
+  session: MatchEditorSession,
+  selection: TextSelection
+): CursorActionResult {
+  if (!cursorActionOffered(session)) {
+    return { kind: 'unavailable', session };
+  }
+  const text = session.draft.value.replace.text;
+  const count = cursorMarkerCount(text);
+  if (count >= 2) {
+    return { kind: 'advisory', session, advisory: { kind: 'severalMarkers', count } };
+  }
+  if (count === 1) {
+    const at = text.indexOf(CURSOR_MARKER);
+    return { kind: 'selected', session, selection: { start: at, end: at + CURSOR_MARKER.length } };
+  }
+  const first = clampedPosition(selection.start, text.length);
+  const second = clampedPosition(selection.end, text.length);
+  const start = Math.min(first, second);
+  const end = Math.max(first, second);
+  const next = `${text.slice(0, start)}${CURSOR_MARKER}${text.slice(end)}`;
+  const draft = editDraft(
+    session.draft,
+    withField(session.draft.value, 'replace', { text: next, removed: false })
+  );
+  return {
+    kind: 'inserted',
+    session: { ...session, draft, focus: 'replace', group: null, sendFailure: null },
+    selection: { start, end: start + CURSOR_MARKER.length }
+  };
+} // End of function insertCursorPosition()
+
+/**
+ * The dictionary key holding one cursor advisory's sentence.
+ *
+ * @param advisory - What {@link insertCursorPosition} answered.
+ * @returns The key; its `{count}` placeholder takes `advisory.count`.
+ */
+export function cursorAdvisoryKey(advisory: CursorAdvisory): TranslationKey {
+  switch (advisory.kind) {
+    case 'severalMarkers':
+      return 'browser.matchEditor.cursor.severalMarkers';
+  }
+} // End of function cursorAdvisoryKey()
+
+/**
+ * The exact strings offered as suggestions for two options — Phase 3-5-1,
+ * ruling 10.
+ *
+ * **Data, not a vocabulary**: a suggestion is compared with the box's text by
+ * `===` and nothing else, so `Keys` is not `keys` and neither is `keys ` — and a
+ * value outside the list is kept exactly as written, never replaced, flagged as
+ * wrong or normalised. The strings are espanso's own spellings and are drawn as
+ * written in every language. No other field has suggestions, and none of the
+ * nine options is ever turned into a boolean.
+ */
+export const OPTION_SUGGESTIONS: Readonly<Partial<Record<EditableField, readonly string[]>>> =
+  Object.freeze({
+    uppercase_style: Object.freeze(['uppercase', 'capitalize', 'capitalize_words']),
+    force_mode: Object.freeze(['clipboard', 'keys'])
+  });
+
+/**
+ * The suggestions for one field, or none.
+ *
+ * @param field - Which field.
+ * @returns The exact strings, possibly none.
+ */
+export function suggestionsFor(field: EditableField): readonly string[] {
+  return OPTION_SUGGESTIONS[field] ?? [];
+} // End of function suggestionsFor()
+
+/**
+ * Puts one suggestion into its field's box, as its own history step.
+ *
+ * Refused unless `value` is one of that field's suggestions **exactly** — this is
+ * the one door by which a suggestion is chosen, and typing is {@link editField}'s.
+ *
+ * @param session - The session being edited.
+ * @param field - Which field.
+ * @param value - The suggestion chosen.
+ * @returns The session with the value drafted, or the same session.
+ */
+export function applySuggestion(
+  session: MatchEditorSession,
+  field: EditableField,
+  value: string
+): MatchEditorSession {
+  if (!isFieldEditable(session, field) || !suggestionsFor(field).includes(value)) {
+    return session;
+  }
+  const draft = editDraft(session.draft, withField(session.draft.value, field, { text: value, removed: false }));
+  return draft === session.draft ? session : { ...session, draft, group: null, sendFailure: null };
+} // End of function applySuggestion()
 
 /**
  * Records which field has the focus, ending the typing group when it moves.
@@ -1527,11 +2432,21 @@ export function outcomeIsStale(session: MatchEditorSession): boolean {
  * stale value gets an answer about that value, and one synchronous decision over
  * one snapshot is the whole of the guarantee.
  *
+ * **A drafted content switch must be confirmed** (Phase 3-5-1, ruling 8), and
+ * {@link switchIsReady} is where that lives: a switch cannot be submitted
+ * unconfirmed, whatever a control shows.
+ *
  * @param session - The session to ask about.
  * @returns `true` when {@link beginSave} would produce a submission.
  */
 export function canSave(session: MatchEditorSession): boolean {
-  return isEditable(session) && isDirty(session.draft) && session.awaitingReconciliation === null;
+  return (
+    isEditable(session) &&
+    isDirty(session.draft) &&
+    session.awaitingReconciliation === null &&
+    switchIsReady(session.baseline, capturedSwitch(session.draft.value)) &&
+    !removesACompanion(matchDraftOf(session.baseline, session.draft.value))
+  );
 } // End of function canSave()
 
 /** A save about to be sent: the session that is waiting, and what to send. */
@@ -1561,13 +2476,17 @@ export interface StartedMatchSave {
  * carrying one, because Rust would write it and no control in this window could
  * ever read it back.
  *
+ * Since Phase 3-5-1 it asks the same of a line feed in a `singleLine` field
+ * ({@link fieldControlOf}), which its control would have stripped.
+ *
  * @param draft - The draft that would be sent.
- * @returns `true` when some field would be written with a carriage return in it.
+ * @returns `true` when some field would be written with a carriage return in it,
+ *   or with a line feed its control cannot hold.
  */
 function writesACarriageReturn(draft: MatchDraft): boolean {
   return EDITABLE_FIELDS.some((field) => {
     const intent = draft[field];
-    return typeof intent === 'object' && intent.Set.includes('\r');
+    return typeof intent === 'object' && unreadableIn(field, intent.Set);
   });
 } // End of function writesACarriageReturn()
 
@@ -1657,8 +2576,15 @@ export function beginSave(
     return null;
   }
   const submission = submissionOf(session.draft);
-  const draft = matchDraftOf(session.baseline, submission.candidate);
-  if (writesACarriageReturn(draft)) {
+  // **The candidate's switch, read once and used for the check and the draft**
+  // (Phase 3-5-1): `canSave` read the live draft, and the value sent is the
+  // candidate, so the confirmation is checked again on what is sent.
+  const captured = capturedSwitch(submission.candidate);
+  if (!switchIsReady(session.baseline, captured)) {
+    return null;
+  }
+  const draft = draftWith(session.baseline, submission.candidate, captured);
+  if (writesACarriageReturn(draft) || removesACompanion(draft)) {
     return null;
   }
   const started: StartedMatchSave = {
@@ -1694,17 +2620,25 @@ export function beginSave(
  */
 function committedBaseline(baseline: MatchBaseline, buffers: MatchBuffers): MatchBaseline {
   const next: Record<EditableField, FieldBaseline> = {} as Record<EditableField, FieldBaseline>;
+  const contentSwitch = capturedSwitch(buffers);
+  const intents = intentsOf(baseline, buffers, contentSwitch);
   for (const field of EDITABLE_FIELDS) {
     const was = baseline[field];
-    const intent = fieldIntent(was, buffers[field]);
-    if (intent === 'Unchanged') {
+    const intent = intents[field];
+    if (contentSwitch !== null && field === contentSwitch.from) {
+      // The switch renamed this key away: the file no longer holds it.
+      next[field] = { ...was, present: false, value: '' };
+    } else if (contentSwitch !== null && field === contentSwitch.to) {
+      // …and holds the destination, with the text the switch carried.
+      next[field] = { ...was, present: true, value: buffers[field].text };
+    } else if (intent === 'Unchanged') {
       next[field] = was;
     } else if (intent === 'Remove') {
       next[field] = { ...was, present: false, value: '' };
     } else {
       next[field] = { ...was, present: true, value: intent.Set };
     }
-  } // End of the loop over the six editable fields
+  } // End of the loop over the seventeen editable fields
   return deepFreeze(next);
 } // End of function committedBaseline()
 
@@ -2525,10 +3459,57 @@ export function fieldReapply(
     : { kind: 'collision' };
 } // End of function fieldReapply()
 
-/** What a reapply would do with all six fields. */
+/**
+ * What a reapply does with a drafted content switch — Phase 3-5-1.
+ *
+ * **All or nothing** (ruling 23): the switch is one intent over two keys, and
+ * it is `applicable` only when the new projection holds **both** in the state
+ * the draft was built against; `satisfied` when the disk already holds the
+ * destination as editable text equal to what the switch would write and no longer
+ * holds the source; and a `collision` of both keys otherwise.
+ */
+export type SwitchReapplyVerdict = 'applicable' | 'satisfied' | 'collision';
+
+/**
+ * The reapply verdict of a drafted switch.
+ *
+ * @param was - What the file held when the session was seeded.
+ * @param buffers - What the retained draft holds.
+ * @param now - What the newly parsed projection holds.
+ * @param contentSwitch - The retained switch, read once by the caller.
+ * @returns The verdict.
+ */
+function switchReapply(
+  was: MatchBaseline,
+  buffers: MatchBuffers,
+  now: MatchBaseline,
+  contentSwitch: DraftedContentSwitch
+): SwitchReapplyVerdict {
+  const { from, to } = contentSwitch;
+  if (sameBaselineState(was[from], now[from]) && sameBaselineState(was[to], now[to])) {
+    return 'applicable';
+  }
+  const sourceGone = !holdsKey(now[from]) && now[from].eligibility.kind === 'editable';
+  const destinationThere =
+    now[to].present && now[to].eligibility.kind === 'editable' && now[to].value === buffers[to].text;
+  return sourceGone && destinationThere ? 'satisfied' : 'collision';
+} // End of function switchReapply()
+
+/** What a reapply would do with all seventeen fields and a drafted switch. */
 export interface MatchReapplyPlan {
-  /** One verdict per field, in {@link EDITABLE_FIELDS} order. */
+  /**
+   * One verdict per field, in {@link EDITABLE_FIELDS} order.
+   *
+   * **The two keys of a drafted switch carry the switch's verdict** (Phase
+   * 3-5-1): both `collision` together, both `satisfied` together, and when the
+   * switch applies the source is `unchanged` (it is renamed, not written) and the
+   * destination is `applicable` with its `Set` when the text differs from the
+   * source's, `unchanged` when the bytes are kept. {@link MatchReapplyPlan.contentSwitch}
+   * is the switch's own verdict.
+   */
   readonly verdicts: Readonly<Record<EditableField, FieldReapplyVerdict>>;
+  /** The drafted switch's verdict, or `null` when none was retained. */
+  readonly contentSwitch: SwitchReapplyVerdict | null;
   /**
    * The drafted fields the new projection does not hold in the state the draft
    * was built against, in field order.
@@ -2577,15 +3558,20 @@ export function planMatchReapply(
     EditableField,
     FieldReapplyVerdict
   >;
-  const collisions: EditableField[] = [];
   const rebuilt: Record<EditableField, FieldBuffer> = {} as Record<EditableField, FieldBuffer>;
   let writesAnything = false;
+  const contentSwitch = capturedSwitch(buffers);
+  const switched =
+    contentSwitch === null ? null : switchReapply(was, buffers, now, contentSwitch);
   for (const field of EDITABLE_FIELDS) {
+    if (contentSwitch !== null && switched !== null && (field === contentSwitch.from || field === contentSwitch.to)) {
+      verdicts[field] = switchedFieldVerdict(was, buffers, contentSwitch, switched, field);
+      rebuilt[field] = switchedFieldBuffer(buffers, now, contentSwitch, switched, field);
+      writesAnything ||= switched === 'applicable';
+      continue;
+    }
     const verdict = fieldReapply(was[field], buffers[field], now[field]);
     verdicts[field] = verdict;
-    if (verdict.kind === 'collision') {
-      collisions.push(field);
-    }
     if (verdict.kind === 'applicable') {
       writesAnything = true;
     }
@@ -2596,9 +3582,69 @@ export function planMatchReapply(
       verdict.kind === 'applicable' && verdict.intent !== 'Remove'
         ? { text: verdict.intent.Set, removed: false }
         : { text: now[field].value, removed: verdict.kind === 'applicable' };
-  } // End of the loop over the six editable fields
-  return { verdicts, collisions, buffers: rebuilt, writesAnything };
+  } // End of the loop over the seventeen editable fields
+  const collisions = EDITABLE_FIELDS.filter((field) => verdicts[field].kind === 'collision');
+  return {
+    verdicts,
+    contentSwitch: switched,
+    collisions,
+    buffers: {
+      ...rebuilt,
+      contentSwitch: switched === 'applicable' ? contentSwitch : null
+    },
+    writesAnything
+  };
 } // End of function planMatchReapply()
+
+/**
+ * The verdict one key of a drafted switch reports, from the switch's own.
+ *
+ * @param was - What the file held when the session was seeded.
+ * @param buffers - What the retained draft holds.
+ * @param contentSwitch - The retained switch.
+ * @param switched - The switch's verdict.
+ * @param field - The source or the destination.
+ * @returns That key's verdict.
+ */
+function switchedFieldVerdict(
+  was: MatchBaseline,
+  buffers: MatchBuffers,
+  contentSwitch: DraftedContentSwitch,
+  switched: SwitchReapplyVerdict,
+  field: EditableField
+): FieldReapplyVerdict {
+  if (switched !== 'applicable') {
+    return { kind: switched };
+  }
+  const intent = fieldIntent(was[field], buffers[field], switchRoleOf(was, contentSwitch, field));
+  return intent === 'Unchanged' ? { kind: 'unchanged' } : { kind: 'applicable', intent };
+} // End of function switchedFieldVerdict()
+
+/**
+ * The buffer one key of a drafted switch is rebuilt with.
+ *
+ * Applicable: the source holds what the new projection holds and the destination
+ * holds the retained text, with the switch carried; otherwise both hold what the
+ * new projection holds, and no switch is carried.
+ *
+ * @param buffers - What the retained draft holds.
+ * @param now - What the newly parsed projection holds.
+ * @param contentSwitch - The retained switch.
+ * @param switched - The switch's verdict.
+ * @param field - The source or the destination.
+ * @returns The buffer.
+ */
+function switchedFieldBuffer(
+  buffers: MatchBuffers,
+  now: MatchBaseline,
+  contentSwitch: DraftedContentSwitch,
+  switched: SwitchReapplyVerdict,
+  field: EditableField
+): FieldBuffer {
+  return switched === 'applicable' && field === contentSwitch.to
+    ? { text: buffers[field].text, removed: false }
+    : { text: now[field].value, removed: false };
+} // End of function switchedFieldBuffer()
 
 /**
  * Why a reapply of this editor's draft could not be carried out.
@@ -2810,7 +3856,7 @@ function reapplied(
  * because the editor is the one surface whose tier may fall back from the exact
  * item to a unique unchanged trigger; a refused table or row and superseded
  * evidence each end in manual resolution with their own typed sentence. What
- * follows the subject is the same for both origins: editability, the six-field
+ * follows the subject is the same for both origins: editability, the seventeen-field
  * plan, the adoption, the rebuilt session.
  *
  * **Under an unacknowledged write uncertainty, and while the window holds a
@@ -2828,7 +3874,7 @@ function reapplied(
  * **The two blocks and the conflict's identity are asked again of the installed
  * session, once, immediately before the adoption** (Phase 2d-6-6a — 2d-6-4's
  * pattern (c)): every read between the entry and the door — the table's row, the
- * row's `editor` tier, the target projection, the six-field plan over it — is a
+ * row's `editor` tier, the target projection, the seventeen-field plan over it — is a
  * read of caller data, and a getter there can tell the window of a reading whose
  * receiver records a wait, an uncertainty or a new conflict on the installed
  * session. So the adoption is refused `observationRetained` or
@@ -3085,7 +4131,7 @@ function subjectOfEvidence(
  * driven by this module's own suite since then — and `MatchEditor.svelte`'s
  * `conflictAction` calls them from the two controls `conflictChoicesFor` now names.
  * The copy is {@link MatchEditorView.retainedDraft} put through `tDraftCopy`: a
- * labelled reference copy of the six buffers, **never YAML**.
+ * labelled reference copy of the seventeen buffers, **never YAML**.
  *
  * **`offersReapply` is `true` as of 2c-4b-3**, over the transition 2c-4b-2 built
  * and this module's suite already drove. `MatchEditor.svelte`'s `conflictAction` is
@@ -3173,6 +4219,8 @@ export interface EditableFieldModel {
   readonly removed: boolean;
   /** Whether the control accepts changes. */
   readonly editable: boolean;
+  /** Which control draws it — {@link fieldControlOf}. */
+  readonly control: FieldControl;
   /** Why it does not, as a code, or `null`. */
   readonly refusal: FieldRefusal | null;
   /**
@@ -3191,12 +4239,88 @@ export interface EditableFieldModel {
   readonly canRemove: boolean;
   /** Whether a *Restore* control would do anything. */
   readonly canRestore: boolean;
+  /**
+   * What this content key is to the session, or `null` for a field that is not
+   * one of the five — Phase 3-5-1. A `dormant` or `switchedAway` key is not
+   * editable, and its reason is this role, not a {@link FieldRefusal}.
+   */
+  readonly contentRole: ContentRole | null;
+  /**
+   * The exact strings offered for this field, or none — `uppercase_style` and
+   * `force_mode` only ({@link OPTION_SUGGESTIONS}).
+   */
+  readonly suggestions: readonly string[];
+  /**
+   * Whether the box holds one of {@link EditableFieldModel.suggestions} exactly.
+   * `false` for an unfamiliar value, which is kept as written: this is a fact
+   * about a string comparison and never a verdict on the value.
+   */
+  readonly suggested: boolean;
 }
+
+/**
+ * What a drafted content switch will do, for its preview — Phase 3-5-1.
+ *
+ * Data only: a renderer draws it and asks for the confirmation, and every
+ * sentence comes from the i18n layer.
+ */
+export interface ContentSwitchPreview {
+  /** The key renamed away from. */
+  readonly from: ContentForm;
+  /** The key renamed to. */
+  readonly to: ContentForm;
+  /** `from`'s label, for `tDetailField`. */
+  readonly fromLabel: DetailFieldName;
+  /** `to`'s label, for `tDetailField`. */
+  readonly toLabel: DetailFieldName;
+  /** The text the renamed key will hold: the destination's box, unconverted. */
+  readonly text: string;
+  /**
+   * Whether that text is exactly the source's projected value, in which case
+   * the value's bytes are kept as the file writes them (Rust renames the key
+   * token and nothing else).
+   */
+  readonly textKept: boolean;
+  /**
+   * The companion keys the snippet holds **and the drafted value keeps** — read
+   * off the same intents the save would send, so a companion the draft removes is
+   * never listed here (Phase 3-5-1's review fix).
+   */
+  readonly companionsKept: readonly CompanionKey[];
+  /**
+   * Companion keys the drafted value would remove beside the switch. Never sent:
+   * {@link canSave} and {@link beginSave} refuse such a draft
+   * ({@link removesACompanion}); it is reported so the refusal is not silent.
+   */
+  readonly companionsRemoved: readonly CompanionKey[];
+  /** Whether the switch has been confirmed. {@link canSave} requires it. */
+  readonly confirmed: boolean;
+}
+
+/** Why a dirty session's save is held back, as a code. */
+export type SaveWithheld =
+  /** A content switch is drafted and not confirmed (ruling 8). */
+  | 'contentSwitchUnconfirmed'
+  /**
+   * A content switch is drafted beside the removal of a companion key it keeps
+   * (ruling 8: a switch removes no companion field silently).
+   */
+  | 'switchRemovesCompanion';
 
 /** Everything a screen needs about one session, derived on every read. */
 export interface MatchEditorView {
-  /** The six fields, in {@link EDITABLE_FIELDS} order. */
+  /** The seventeen fields, in {@link EDITABLE_FIELDS} order. */
   readonly fields: readonly EditableFieldModel[];
+  /** The drafted content switch's preview, or `null` — Phase 3-5-1. */
+  readonly contentSwitch: ContentSwitchPreview | null;
+  /** The content keys a switch may be drafted to now — {@link contentSwitchTargets}. */
+  readonly switchTargets: readonly ContentForm[];
+  /** Whether the cursor action is offered — {@link cursorActionOffered}. */
+  readonly cursorActionOffered: boolean;
+  /** How many cursor markers the `replace` box holds now. */
+  readonly cursorMarkers: number;
+  /** Why the save is held back although the draft is dirty, or `null`. */
+  readonly saveWithheld: SaveWithheld | null;
   /** Whether the draft differs from what the file held. Derived. */
   readonly dirty: boolean;
   /** Whether there is a step to go back to. Derived. */
@@ -3355,10 +4479,17 @@ export interface MatchEditorView {
  * @param field - Which field.
  * @returns The field's model.
  */
-function fieldModel(session: MatchEditorSession, field: EditableField): EditableFieldModel {
+function fieldModel(
+  session: MatchEditorSession,
+  field: EditableField,
+  intent: DraftField<string>,
+  contentSwitch: DraftedContentSwitch | null
+): EditableFieldModel {
   const baseline = session.baseline[field];
   const buffer = session.draft.value[field];
   const editable = isFieldEditable(session, field);
+  const suggestions = suggestionsFor(field);
+  const switched = contentSwitch !== null && (field === contentSwitch.from || field === contentSwitch.to);
   return {
     field,
     label: fieldLabelName(field),
@@ -3366,13 +4497,74 @@ function fieldModel(session: MatchEditorSession, field: EditableField): Editable
     present: baseline.present,
     removed: buffer.removed,
     editable,
+    control: fieldControlOf(field),
     refusal: baseline.eligibility.kind === 'readOnly' ? baseline.eligibility.reason : null,
     shown: baseline.shown,
-    intent: fieldIntent(baseline, buffer),
-    canRemove: editable && baseline.present && !buffer.removed,
-    canRestore: editable && buffer.removed
+    intent,
+    canRemove: editable && baseline.present && !buffer.removed && !switched,
+    canRestore: editable && buffer.removed,
+    contentRole: isContentField(field)
+      ? contentRoleOf(session.baseline, contentSwitch, field)
+      : null,
+    suggestions,
+    suggested: suggestions.includes(buffer.text)
   };
 } // End of function fieldModel()
+
+/**
+ * Why a drafted switch holds the save back, or `null`.
+ *
+ * @param contentSwitch - The drafted switch, read once by the caller.
+ * @param intents - The intents built from that same read.
+ * @returns The code.
+ */
+function saveWithheldOf(
+  contentSwitch: DraftedContentSwitch | null,
+  intents: Readonly<Record<EditableField, DraftField<string>>>
+): SaveWithheld | null {
+  if (contentSwitch === null) {
+    return null;
+  }
+  if (intents.paragraph === 'Remove') {
+    return 'switchRemovesCompanion';
+  }
+  return contentSwitch.confirmed ? null : 'contentSwitchUnconfirmed';
+} // End of function saveWithheldOf()
+
+/**
+ * The preview of a drafted switch, or `null`.
+ *
+ * **Derived from the same captured values the save would send**: the switch read
+ * once by the caller and the intents {@link intentsOf} built from that read, so
+ * the companions it says are kept are the ones the draft does not remove.
+ *
+ * @param session - The session to describe.
+ * @param contentSwitch - The drafted switch, read once by the caller.
+ * @param intents - The intents built from that same read.
+ * @returns The preview.
+ */
+function switchPreviewOf(
+  session: MatchEditorSession,
+  contentSwitch: DraftedContentSwitch | null,
+  intents: Readonly<Record<EditableField, DraftField<string>>>
+): ContentSwitchPreview | null {
+  if (contentSwitch === null) {
+    return null;
+  }
+  const text = session.draft.value[contentSwitch.to].text;
+  const removed = session.companions.filter((key) => companionIntentOf(key, intents) === 'Remove');
+  return {
+    from: contentSwitch.from,
+    to: contentSwitch.to,
+    fromLabel: fieldLabelName(contentSwitch.from),
+    toLabel: fieldLabelName(contentSwitch.to),
+    text,
+    textKept: text === session.baseline[contentSwitch.from].value,
+    companionsKept: session.companions.filter((key) => !removed.includes(key)),
+    companionsRemoved: removed,
+    confirmed: contentSwitch.confirmed
+  };
+} // End of function switchPreviewOf()
 
 /**
  * What a save would do with one field, as the phrase a copy names it by.
@@ -3397,7 +4589,7 @@ function statusOfIntent(intent: DraftField<string>): DraftFieldStatus {
 /**
  * The retained draft of one conflict, labelled, for the panel and for the copy.
  *
- * **All six fields, in {@link EDITABLE_FIELDS} order**, which is the consult's Q4
+ * **All seventeen fields, in {@link EDITABLE_FIELDS} order**, which is the consult's Q4
  * read literally: a field left out of the copy is a piece of the drafted value
  * that was not copied, and a removed field keeps its text in its buffer, so
  * dropping either the text or the status would not preserve what was drafted.
@@ -3411,12 +4603,36 @@ function retainedDraftOf(
   conflict: ConflictModel<MatchBuffers>
 ): readonly RetainedDraftField[] {
   const buffers = copyOfDraft(conflict);
+  const contentSwitch = capturedSwitch(buffers);
+  const intents = intentsOf(session.baseline, buffers, contentSwitch);
   return EDITABLE_FIELDS.map((field) => ({
     label: fieldLabelName(field),
     text: buffers[field].text,
-    status: statusOfIntent(fieldIntent(session.baseline[field], buffers[field]))
+    status: retainedStatusOf(field, intents[field], contentSwitch)
   }));
 } // End of function retainedDraftOf()
+
+/**
+ * The status one retained field is copied with, the drafted switch included.
+ *
+ * @param field - Which field.
+ * @param intent - Its intent, from {@link intentsOf}.
+ * @param contentSwitch - The retained switch, or `null`.
+ * @returns The status.
+ */
+function retainedStatusOf(
+  field: EditableField,
+  intent: DraftField<string>,
+  contentSwitch: DraftedContentSwitch | null
+): DraftFieldStatus {
+  if (contentSwitch !== null && field === contentSwitch.from) {
+    return 'switchingAway';
+  }
+  if (contentSwitch !== null && field === contentSwitch.to) {
+    return 'switchingTo';
+  }
+  return statusOfIntent(intent);
+} // End of function retainedStatusOf()
 
 /**
  * Everything a screen needs about one session.
@@ -3440,8 +4656,17 @@ export function matchEditorView(session: MatchEditorSession): MatchEditorView {
       : conflictChoicesFor(effectiveCapabilitiesOf(session), offeredReloadStep(session.reload));
   const externallyBlocked = session.externalConflict !== null || session.awaitingReconciliation !== null;
   const refusalChoices = offeredRefusalChoices(refused, stale);
+  const contentSwitch = capturedSwitch(session.draft.value);
+  const intents = intentsOf(session.baseline, session.draft.value, contentSwitch);
   return {
-    fields: EDITABLE_FIELDS.map((field) => fieldModel(session, field)),
+    fields: EDITABLE_FIELDS.map((field) =>
+      fieldModel(session, field, intents[field], contentSwitch)
+    ),
+    contentSwitch: switchPreviewOf(session, contentSwitch, intents),
+    switchTargets: contentSwitchTargets(session),
+    cursorActionOffered: cursorActionOffered(session),
+    cursorMarkers: cursorMarkerCount(session.draft.value.replace.text),
+    saveWithheld: saveWithheldOf(contentSwitch, intents),
     dirty: isDirty(session.draft),
     canUndo: canUndo(session.draft),
     canRedo: canRedo(session.draft),
@@ -3559,6 +4784,8 @@ export function fieldRefusalKey(reason: FieldRefusal): TranslationKey {
       return 'browser.matchEditor.readOnly.unmodelledShape';
     case 'triggerNotSingle':
       return 'browser.matchEditor.readOnly.triggerNotSingle';
+    case 'lineBreak':
+      return 'browser.matchEditor.readOnly.lineBreak';
   }
 } // End of function fieldRefusalKey()
 

@@ -523,7 +523,8 @@ describe('what a field’s edit-eligibility is decided from', () => {
       'carriageReturn',
       'ownsNoBytes',
       'unmodelledShape',
-      'triggerNotSingle'
+      'triggerNotSingle',
+      'lineBreak'
     ];
     for (const locale of LOCALES) {
       for (const reason of reasons) {
@@ -1147,20 +1148,31 @@ describe('the conflict, which is terminal in this sub-phase', () => {
 
   it('labels the retained draft field by field, and says what each would do', () => {
     // **The list the panel draws and the copy is built from, and it is one list.**
-    // All six fields in `EDITABLE_FIELDS` order, each with the label the detail
-    // pane uses, the buffer's exact text, and what a save would actually say about
-    // it — never a presence flag. An untouched field is `unchanged`, so an
-    // initially absent field left blank cannot be described as "this text would be
-    // written", which is the rule the whole draft-versus-projection arrangement
-    // exists for.
+    // All seventeen fields in `EDITABLE_FIELDS` order (six until Phase 3-5-1),
+    // each with the label the detail pane uses, the buffer's exact text, and what
+    // a save would actually say about it — never a presence flag. An untouched
+    // field is `unchanged`, so an initially absent field left blank cannot be
+    // described as "this text would be written", which is the rule the whole
+    // draft-versus-projection arrangement exists for.
     const view = matchEditorView(conflicted());
     expect(view.retainedDraft.map((field) => field.label)).toEqual([
       'trigger',
       'replace',
+      'markdown',
+      'html',
+      'imagePath',
+      'form',
       'label',
+      'comment',
       'word',
       'leftWord',
-      'rightWord'
+      'rightWord',
+      'propagateCase',
+      'uppercaseStyle',
+      'forceMode',
+      'forceClipboard',
+      'paragraph',
+      'anchor'
     ]);
     const replace = view.retainedDraft.find((field) => field.label === 'replace');
     expect(replace?.text).toBe('c');
@@ -1208,29 +1220,51 @@ describe('the conflict, which is terminal in this sub-phase', () => {
 }); // End of the "conflict" suite
 
 describe('the view a screen draws', () => {
-  it('describes all six fields, in order, with their labels and their verdicts', () => {
+  it('describes all seventeen fields, in order, with their labels and their verdicts', () => {
     const view = matchEditorView(session(unmodelledLabel()));
     expect(view.fields.map((field) => field.field)).toEqual<readonly EditableField[]>([
       'trigger',
       'replace',
+      'markdown',
+      'html',
+      'image_path',
+      'form',
       'label',
+      'comment',
       'word',
       'left_word',
-      'right_word'
+      'right_word',
+      'propagate_case',
+      'uppercase_style',
+      'force_mode',
+      'force_clipboard',
+      'paragraph',
+      'anchor'
     ]);
     expect(view.fields.map((field) => field.label)).toEqual([
       'trigger',
       'replace',
+      'markdown',
+      'html',
+      'imagePath',
+      'form',
       'label',
+      'comment',
       'word',
       'leftWord',
-      'rightWord'
+      'rightWord',
+      'propagateCase',
+      'uppercaseStyle',
+      'forceMode',
+      'forceClipboard',
+      'paragraph',
+      'anchor'
     ]);
     const label = view.fields.find((field) => field.field === 'label');
     expect(label?.editable).toBe(false);
     expect(label?.refusal).toBe('unmodelledShape');
     expect(label?.intent).toBe('Unchanged');
-  }); // End of the "describes all six fields" case
+  }); // End of the "describes all seventeen fields" case
 
   it('offers a removal only for a present field that is not already removed', () => {
     const editor = session();

@@ -65,6 +65,7 @@ import {
   matchMoveView,
   membersOfSequence,
   moveCouldNotBeSent,
+  hasStaleMatchDraft,
   moveEligibility,
   movePlacementOptionsOf,
   moveReapplyObstacleKey,
@@ -480,21 +481,30 @@ describe('whether one snippet may be moved at all', () => {
     });
   });
 
-  it('does not treat an identity from another parse as the snippet being moved', () => {
+  it('withholds every move in the file while a stale draft is open — R36, ruling 24', () => {
     // **A `MatchId` is session-local**, so `{document: 2, node: 10}` of another
     // parse is not this snippet: after a reprojection that arena node can hold
-    // something unrelated, and a rule that ignored the revision would refuse the
-    // move for a snippet nobody is editing. The comparison is all three fields.
+    // something unrelated. Until Phase 3-5-1 that made the move *allowed*, and a
+    // commit stranded the draft. R36's conservative rule withholds instead —
+    // every snippet of the file, the one at node 10 included, and under its own
+    // code, never `unsavedDraft`, which would claim the draft is about that node.
     const document = file();
     const otherParse: MatchId = { document: 2, revision: AFTER, node: 10 };
-    expect(moveEligibility(document, document.matches[0]!, otherParse)).toEqual({
+    for (const match of document.matches) {
+      expect(moveEligibility(document, match, otherParse)).toEqual({
+        kind: 'refused',
+        reason: 'staleDraftInDocument'
+      });
+    } // End of the loop over every snippet of the file
+    expect(hasStaleMatchDraft(document, [otherParse])).toBe(true);
+    // A draft of another file, stale or not, withholds nothing here…
+    const elsewhere: MatchId = { document: 3, revision: AFTER, node: 10 };
+    expect(moveEligibility(document, document.matches[0]!, elsewhere)).toEqual({ kind: 'movable' });
+    // …and a live draft keeps the narrow `unsavedDraft` rule for its own snippet.
+    expect(hasStaleMatchDraft(document, [document.matches[0]!.id])).toBe(false);
+    expect(moveEligibility(document, document.matches[1]!, document.matches[0]!.id)).toEqual({
       kind: 'movable'
     });
-    // **What that costs, said plainly rather than papered over**: a draft really
-    // held over an older parse of this snippet is not recognised here, so the move
-    // is allowed and a commit strands those edits. What closes it is a caller
-    // reading the draft's identity from the same projection it passes as
-    // `document`, and no type can say where an argument came from.
   });
 
   it('has a sentence for every refusal, in both languages', () => {
@@ -503,7 +513,8 @@ describe('whether one snippet may be moved at all', () => {
       'notInDocument',
       'noSequencePosition',
       'onlySnippetInSequence',
-      'unsavedDraft'
+      'unsavedDraft',
+      'staleDraftInDocument'
     ];
     for (const locale of LOCALES) {
       for (const reason of reasons) {

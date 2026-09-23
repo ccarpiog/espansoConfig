@@ -101,7 +101,8 @@
   import SourceText from './SourceText.svelte';
 
   /*
-   * The small editor: one snippet's six editable fields, drafted and saved.
+   * The small editor: one snippet's editable fields, drafted and saved (seventeen
+   * since Phase 3-5-1, which widened the model and not this file's layout).
    *
    * **This file is presentation.** Every decision about what may be edited, what
    * a draft means, when a save may start, what it says and what a commit moves is
@@ -152,7 +153,8 @@
    * `on`, `yes` and `true` mean the same thing. The heading above them is
    * `tOptionGroup('matching')`, which is the detail pane's own name for the group;
    * `field.field === 'word'` is where the group starts because `EDITABLE_FIELDS`
-   * puts the three boundary keys last, in that order.
+   * puts the nine options last with `word` first. Since Phase 3-5-1 the six other
+   * options follow under that one heading; their own groups are 3-5-2's.
    *
    * **An absent key says so, in the box that would create it.** The phase's named
    * failure is a draft-versus-projection mistake, and the one rule that pays for
@@ -1048,8 +1050,9 @@
 
   {#each view.fields as field (field.field)}
     {#if field.field === 'word'}
-      <!-- The three word-boundary keys are last in `EDITABLE_FIELDS`, so this is
-           where that group starts. Three text boxes and never a checkbox: D2u. -->
+      <!-- The nine options are last in `EDITABLE_FIELDS`, `word` first, so this is
+           where they start (one heading until 3-5-2 draws their groups). Text
+           boxes and never a checkbox: D2u. -->
       <h3>{tOptionGroup('matching')}</h3>
     {/if}
     <div class="field">
@@ -1097,7 +1100,10 @@
       {:else}
         <label>
           <span class="name">{tDetailField(field.label)}</span>
-          {#if field.field === 'replace'}
+          <!-- The control is the model's decision (`fieldControlOf` in
+               `matchEditor.ts`, Phase 3-5-1): a text input strips line breaks,
+               so every field whose value may span lines is a text area. -->
+          {#if field.control === 'multiLine'}
             <textarea
               class="text body"
               spellcheck="false"

@@ -87,6 +87,7 @@ import {
   applyRecoveryObservation,
   askToReloadRecoveryDiskVersion,
   beginRecoveryCreate,
+  transferRefusalKey,
   confirmRecoveryDiskReload,
   reapplyRecoveryToDiskVersion,
   reloadRecoveryDiskVersion,
@@ -861,7 +862,23 @@ describe('what a retained draft becomes in the new snippet', () => {
     const transfer = transferOfCreationDraft({ trigger: ':new', replace: 'A body' });
     expect(transfer.trigger).toEqual({ kind: 'carried', text: ':new' });
     expect(transfer.replace).toEqual({ kind: 'carried', text: 'A body' });
-    expect(fieldsNotCarried(transfer)).toEqual(['label', 'word', 'left_word', 'right_word']);
+    expect(fieldsNotCarried(transfer)).toEqual([
+      'markdown',
+      'html',
+      'image_path',
+      'form',
+      'label',
+      'comment',
+      'word',
+      'left_word',
+      'right_word',
+      'propagate_case',
+      'uppercase_style',
+      'force_mode',
+      'force_clipboard',
+      'paragraph',
+      'anchor'
+    ]);
     expect(transfer.word).toEqual({ kind: 'notCarried', reason: { kind: 'notInTheFile' } });
   });
 
@@ -1444,6 +1461,8 @@ const NOT_A_FORM_TRANSITION: readonly string[] = [
   'newMatchOfRecovery',
   // Phase 3-4: a `NewMatch` in, its texts out; it takes no form.
   'textsOfNewMatch',
+  // Phase 3-5-1: a transfer in, the body's content key out; it takes no form.
+  'recoveryBodyFieldOf',
   'conflictDraftKindOf',
   'recoveryRouteOf',
   'fieldsNotCarried',
@@ -1878,21 +1897,69 @@ describe('editing the two values a recovery may still change', () => {
 }); // End of the "editing" suite
 
 describe('what a screen would draw', () => {
-  it('lays the six fields out in the editor’s order, with two of them editable', () => {
+  it('recovers a drafted content switch under the destination key, with every option carried (Phase 3-5-1)', () => {
+    const match = snippet({ label: 'A name', options: { force_mode: 'keys' } });
+    const opened = openedOverEditor(match, {
+      markdown: { text: '**Regards**', removed: false },
+      comment: { text: 'a note', removed: false },
+      contentSwitch: { from: 'replace', to: 'markdown', confirmed: true }
+    });
+    const view = recoveryView(opened);
+    expect(view.bodyField).toBe('markdown');
+    expect(view.replace).toBe('**Regards**');
+    const byField = (field: string) => view.fields.find((one) => one.field === field)!;
+    expect(byField('markdown').editable).toBe(true);
+    expect(byField('replace').editable).toBe(false);
+    expect(byField('replace').transfer).toEqual({
+      kind: 'notCarried',
+      reason: { kind: 'switchedAway' }
+    });
+    const started = ((onHand) => beginRecoveryCreate(onHand, () => onHand))(opened);
+    expect(started?.newMatch).toEqual({
+      trigger: { Single: ':sig' },
+      content: { Markdown: '**Regards**' },
+      label: 'A name',
+      comment: 'a note',
+      force_mode: 'keys'
+    });
+    for (const locale of LOCALES) {
+      for (const kind of ['switchedAway', 'oneContentOnly'] as const) {
+        expect(DICTIONARIES[locale][transferRefusalKey({ kind })].length).toBeGreaterThan(0);
+      }
+    } // End of the loop over the two locales
+  });
+
+  it('lays the seventeen fields out in the editor’s order, with two of them editable', () => {
     const view = recoveryView(openedOverEditor(snippet({ label: 'A name' })));
     expect(view.fields.map((one) => one.field)).toEqual([
       'trigger',
       'replace',
+      'markdown',
+      'html',
+      'image_path',
+      'form',
       'label',
+      'comment',
       'word',
       'left_word',
-      'right_word'
+      'right_word',
+      'propagate_case',
+      'uppercase_style',
+      'force_mode',
+      'force_clipboard',
+      'paragraph',
+      'anchor'
     ]);
-    expect(view.fields.map((one) => one.editable)).toEqual([true, true, false, false, false, false]);
-    expect(view.fields[2]!.label).toBe('label');
-    expect(view.fields[4]!.label).toBe('leftWord');
-    expect(view.fields[2]!.transfer).toEqual({ kind: 'carried', text: 'A name' });
-    expect(view.fields[3]!.transfer).toEqual({
+    expect(view.fields.filter((one) => one.editable).map((one) => one.field)).toEqual([
+      'trigger',
+      'replace'
+    ]);
+    expect(view.bodyField).toBe('replace');
+    const byField = (field: string) => view.fields.find((one) => one.field === field)!;
+    expect(byField('label').label).toBe('label');
+    expect(byField('left_word').label).toBe('leftWord');
+    expect(byField('label').transfer).toEqual({ kind: 'carried', text: 'A name' });
+    expect(byField('word').transfer).toEqual({
       kind: 'notCarried',
       reason: { kind: 'notInTheFile' }
     });

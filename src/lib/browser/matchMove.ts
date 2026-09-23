@@ -556,7 +556,14 @@ export type MoveRefusal =
    * **This application's workflow policy, not the core's rule** — see this
    * module's header, and consult correction 2.
    */
-  | 'unsavedDraft';
+  | 'unsavedDraft'
+  /**
+   * A match editor is open in this file over an **older** revision — R36's
+   * conservative rule (ruling 24 of `docs/decisions/3-split-notes.md`, Phase
+   * 3-5-1). No relation can follow that draft to the snippet it now means, so
+   * every move in the file is withheld until the draft is saved or discarded.
+   */
+  | 'staleDraftInDocument';
 
 /**
  * Whether one snippet may be moved, and why not when it may not.
@@ -610,8 +617,15 @@ const MOVABLE: MoveEligibility = Object.freeze({ kind: 'movable' as const });
  * move is allowed**, and a committed move then strands those edits exactly as the
  * dictionary sentence describes.
  *
- * **Nothing in this application closes that today, and `identityInProjection` is
- * not what closes it.** That function resolves a node against whatever projection
+ * **Since Phase 3-5-1 R36's conservative rule closes it** (ruling 24): a draft
+ * identity of this file whose revision is not the projection's is a *stale*
+ * draft, and {@link hasStaleMatchDraft} withholds **every** move in the file —
+ * `staleDraftInDocument` — rather than guessing which snippet the draft now
+ * means. It over-refuses by design, and it compares the document and the
+ * revision only: no node number is looked up in any projection. The paragraph
+ * below is the history of why nothing narrower is used.
+ *
+ * **`identityInProjection` is not what closes it.** That function resolves a node against whatever projection
  * the window now holds and answers *that* projection's identity, and its own doc
  * comment says it must not be used to follow a snippet across a reparse: node 10 of
  * the new parse can be an unrelated snippet, so feeding its answer in here would
@@ -653,11 +667,49 @@ export function moveEligibility(
   if (membersOfSequence(document, sequence).length <= 1) {
     return { kind: 'refused', reason: 'onlySnippetInSequence' };
   }
+  if (unsavedDraftFor !== null && hasStaleMatchDraft(document, [unsavedDraftFor])) {
+    return { kind: 'refused', reason: 'staleDraftInDocument' };
+  }
   if (unsavedDraftFor !== null && sameIdentity(unsavedDraftFor, match.id)) {
     return { kind: 'refused', reason: 'unsavedDraft' };
   }
   return MOVABLE;
 } // End of function moveEligibility()
+
+/**
+ * Whether any open match draft of this file is **stale** — R36's conservative
+ * rule, ruling 24 of `docs/decisions/3-split-notes.md` (Phase 3-5-1).
+ *
+ * A draft is stale when it is of this file and its identity's revision is not the
+ * revision this projection is of: the file has been re-read since the editor was
+ * seeded, and nothing in this application can say which snippet the draft now
+ * means. **While one is open, a move and every other target-changing structural
+ * action in the file is withheld**; this is the one predicate, and
+ * {@link moveEligibility} is its caller.
+ *
+ * **What it compares, and what it never does.** The document number and the
+ * revision string, both carried by the draft's own identity — never a node
+ * number, and never a lookup of any node in any projection: an arena-node lookup
+ * would answer *some* snippet of the new parse, which is the producer R36 forbids.
+ * It therefore over-refuses — a stale draft of an unrelated snippet withholds
+ * every move in the file — and that is the rule, not a defect: a person closes
+ * one editor, and no draft is stranded.
+ *
+ * **What no type forces**: that a caller passes every draft it holds open, nor
+ * that the list comes from the same read as `document`. `DetailPane.svelte`
+ * holds one editor and passes its identity; the argument being required is what
+ * stops silence compiling into "there are none".
+ *
+ * @param document - The file's projection, as this window holds it now.
+ * @param drafts - The identity of every snippet this window has a match editor
+ *   open over, as each editor's own projection gave it.
+ * @returns `true` when one of them is of this file and of another revision.
+ */
+export function hasStaleMatchDraft(document: DocumentView, drafts: readonly MatchId[]): boolean {
+  return drafts.some(
+    (draft) => draft.document === document.id && draft.revision !== document.revision
+  );
+} // End of function hasStaleMatchDraft()
 
 /** Where the person has said the snippet should go. */
 export type MovePlacement =
@@ -3702,6 +3754,8 @@ export function moveRefusalKey(reason: MoveRefusal): TranslationKey {
       return 'browser.matchMove.refused.onlySnippetInSequence';
     case 'unsavedDraft':
       return 'browser.matchMove.refused.unsavedDraft';
+    case 'staleDraftInDocument':
+      return 'browser.matchMove.refused.staleDraftInDocument';
   }
 } // End of function moveRefusalKey()
 

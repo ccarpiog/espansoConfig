@@ -139,8 +139,8 @@ pub use audit::{check_batch_independence, check_closed_surface, NestedKeys};
 pub use error::DraftError;
 pub use field::DraftField;
 pub use match_draft::{
-    ContentForm, DraftTarget, EntryDraft, FieldSubstitution, FormFieldDraft, ItemDraft, MatchDraft,
-    MatchField, SequenceField, TriggerForm, VariableDraft, VariableField,
+    ContentForm, ContentSwitch, DraftTarget, EntryDraft, FieldSubstitution, FormFieldDraft,
+    ItemDraft, MatchDraft, MatchField, SequenceField, TriggerForm, VariableDraft, VariableField,
 };
 pub use new_match::{NewContent, NewMatch, NewTrigger, TriggerList};
 pub use plan::{plan_match_edits, plan_match_edits_with, plan_match_edits_with_substitutions};

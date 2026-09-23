@@ -542,6 +542,13 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          pins it variant by variant",
     ),
     (
+        "ContentForm",
+        "a field identifier, not a code, for the same reason as `MatchField` and \
+         with the same spelling on the wire: it names one of the five content \
+         keys inside a `ContentSwitch` (Phase 3-5-1), which espanso spells one \
+         way and which `the_content_switch_wire_form_is_closed` pins",
+    ),
+    (
         "SequenceField",
         "a field identifier, not a code, for the same reason as `MatchField` and \
          with the same spelling on the wire: it names `triggers` or \
@@ -1216,11 +1223,13 @@ fn every_typescript_wire_union_has_a_namespace() {
         vec![
             "MatchField".to_owned(),
             "SequenceField".to_owned(),
+            "ContentForm".to_owned(),
             "VariableField".to_owned(),
             "ObservedDocumentName".to_owned()
         ],
-        "the unions exempted by NOT_A_CODE changed. The first three are field \
-         identifiers that serialize as espanso keys; the fourth is Phase 2d-4b's \
+        "the unions exempted by NOT_A_CODE changed. The first four are field \
+         identifiers that serialize as espanso keys (`ContentForm` since Phase \
+         3-5-1); the fifth is Phase 2d-4b's \
          mirror of the one reconciliation enum this table already classifies as an \
          address rather than a code, and it appears here — as the `…Name` twin \
          rather than as the value union — because the value union has no \

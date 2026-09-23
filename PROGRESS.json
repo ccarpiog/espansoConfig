@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T22:34:18Z",
+ "updated": "2026-09-23T23:16:55Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
  "phases": [
@@ -935,8 +935,24 @@
   {
    "id": "3-5",
    "title": "Scalar content and options editor, and the cursor action",
+   "status": "in_progress",
+   "summary": "Split into 3-5-1 (model and coordination, done) and 3-5-2 (components, i18n, window half, queued); 3-5-2 closes the step."
+  },
+  {
+   "id": "3-5-1",
+   "title": "Scalar content and options: the model and the coordination",
+   "status": "done",
+   "risk": "high",
+   "summary": "Widens the editor model, save, conflict, reapply and recovery to 17 scalar fields, with the switch and cursor intents and R36's rule.",
+   "review": "docs/reviews/phase-3-5-1.md",
+   "narrative": "docs/decisions/3-5-1-notes.md"
+  },
+  {
+   "id": "3-5-2",
+   "title": "Scalar content and options: components, i18n and the window half",
    "status": "queued",
-   "summary": "Queued: Scalar content and options editor, and the cursor action."
+   "risk": "high",
+   "summary": "Draws the widened editor, option groups, switch confirmation and cursor action, and takes the window half."
   },
   {
    "id": "3-6",
