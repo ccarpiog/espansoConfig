@@ -15764,3 +15764,46 @@ Risk **high**. No source is touched until the record closes.
 **Open items from 2d-7-8, for 2d-7-10** ([`2d-7-8-notes.md`](docs/decisions/2d-7-8-notes.md) §7 items 2-4; observations, not defects): (1) **`listenRefused` draws `registrationFailed.rejected`, not `noTransport`** — the app gives `noTransport` only for its own `NO_RECONCILIATION_TRANSPORT` error, so the consult's "constructed by `listenRefused`" does not hold; (2) **`unavailable` draws no retry control** (`G4-01`) — `externalConflict.action.retry` belongs to a held observation, so the consult's G4 row 1 premise may not match the code; (3) **the refused-save silence** — a foreign write followed within about 0.1 s by a save refused on those bytes emitted no observation (`emitted=0`) in `G4-07`, `-08`, `-09` and `-13`, the `status-stale` launches included; cause not established, to be classed as expected coalescing or a gap.
 
 **Open items from 2d-7-9, for 2d-7-10** ([`2d-7-9-notes.md`](docs/decisions/2d-7-9-notes.md) §7 items 1-9; observations, not defects; 2d-7 changes no wording, entry 26): (1) **the delete panel's choice row is below the fold** at 1180x728 in EN and ES (the owner's) — a ruling for a later phase; (2) the delete panel's two opening paragraphs say the same thing (a model's look) — wording; (3) the ES row count wraps under the file name (`G5-19`, a model's look beside the owner's "Name intact"): the name stays whole, the row grows taller — layout; (4) **raw *Undo* drawn enabled under a held save**, not exercised, and *Stop editing* drawn dark there where 2d-7-6-1 §7 item 4 recorded it disabled in the DOM — whether a disabled control is drawn muted is 2d-7-10's to reconcile; (5) **the foreground premise**: an occluded page holding by IPC round trips did not stop in ≥10 s hidden; `CLAUDE.md` §6's `setTimeout` host fact is neither confirmed nor refuted; (6) each activation costs one drain per `focus` and one per visible `visibilitychange`, none on `blur` or on hiding — two when the window was also hidden; (7) the unread rows (notes §3a rows 2-4, the disabled status control in a visible launch, §3b's unread rows) for the unread-row inventory; (8) the copy row is refused by host clipboard state (`types=public.file-url,public.png`, so `external-editor` exits 73) — a later run needs the clipboard cleared or holding plain text; (9) scratch for 2d-8's manifest: `launches/G5-01` … `G5-19` and their ledger lines, `~/Library/{WebKit,Caches}/cc.carpio.espansoConfig.probe.G5-*`, `/private/tmp/2d7-9-*`.
+
+
+## The 2d-7-10 → 2d-8 next action (archived verbatim 2026-09-23 at 2d-8)
+
+### 2d-7-10 is complete and CLOSED; 2d-7 is finished. The next step is **Phase 2d-8: instrument removal and harness-free closure.**
+
+**Spec:** [`phase-2d-design.md`](docs/reviews/phase-2d-design.md) item 8 (line 132) and [`2d-7-split-notes.md`](docs/decisions/2d-7-split-notes.md) §3 **entry 32**. **The deletion manifest is [`2d-7-10-notes.md`](docs/decisions/2d-7-10-notes.md) §4**, every entry shown to exist with `ls -ld` on 2026-09-23: the instrument (§4.1: `src-tauri/src/probe.rs`, `src/probe.ts`, the hook lines in `src-tauri/src/main.rs` and `src/main.ts`), the harness tree (§4.2), the eight probe-related pre-edit files (§4.3), 2d-7's own copies (§4.4) and the probe WebKit/Caches data (§4.5). **§4.6 is checked and reported, never deleted on a guess** (the shipped identifier's own WebKit/Caches entries; `/private/tmp/espanso.err` and `espanso.out` — the latter was modified at 19:46 on 2026-09-23 by something outside 2d-7-10, so it may belong to a live process). §4.7 is outside item 8's scope. 2d-8 also corrects the `"permissions": []` comment in `main.rs` (2d-6 split §7 item 7).
+
+**2d-8 owes no new model, mounted or window evidence.** It re-derives the gates harness-free. The instrument's share re-derived at 2d-7-10 is **`7 / 1 / 1 / 1`** (Rust tests / svelte-check files / vitest tests / Vite modules; tree `1330 / 462 / 3547 / 201`, pristine `c5fed6b` `1323 / 461 / 3546 / 200`), so the expected harness-free rung is `1323 / 461 / 3546 / 200`, plus clippy, fmt and both bundle-token lines (`CLAUDE.md` §4). **It must preserve the reading record and carry forward, never convert deletion into proof:** `2d-7-10-notes.md` §5 is the carried-forward list (CF-1 … CF-55; every *constructed* and *unread* row, each with its missing plan capability), which 2d-8 cites and does not shrink.
+
+**Deletion touches the four paths `AUTOCLAUDE_PREFLIGHT_DIRTY` names.** That is the plan's assignment (entry 32, consult item 8), not a reconciliation of leftovers. After 2d-8 the tree is clean, and `CLAUDE.md` §6 *Window readings* and this file's *READ FIRST* note describe an instrument that no longer exists — 2d-8 edits those sentences to present state. Reviewed copies of the instrument sit at `/private/tmp/2d7-instrument-reviewed/`, itself a manifest entry. Risk: **routine** unless a manifest entry does not match `ls`. Never run `git stash`, `git checkout`, `git restore` or `git reset`.
+
+**Handed on by 2d-7-10** (`2d-7-10-notes.md` §6 and §9): 2d-7-9 item 4 — raw *Undo* enabled while `saving` is **a gap** (`canUndo` depends on the draft alone), carried as CF-55 with a ruling owed to a later phase; the rest classed expected behaviour or a wording ruling owed to a later phase (entry 26). R35 (native-speaker review) stays the owner's, before Phase 5, with its input now produced (§3, 145 rows). A records correction not yet made: the split notes' §7 row "Each activation costs one drain" should read "one per event".
+
+**Reviews:** Codex answered at 2d-7-10 (`autoclaude-review.sh` exited 0).
+
+#### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
+
+`git status --short --untracked-files=all` shows **four uncommitted instrument paths** — `M
+src-tauri/src/main.rs` and `M src/main.ts` (two hook lines each; `git diff --stat` over the pair is `5
+insertions(+), 1 deletion(-)` and must stay that way), `?? src-tauri/src/probe.rs` and `?? src/probe.ts`.
+**Do not commit them, do not revert them, and do not treat them as unaccounted-for work.** They are the
+temporary window-reading instrument (`CLAUDE.md` §6, *Window readings*); 2d-8 deletes it. 2d-6-6c-2 extended
+`probe.rs`/`probe.ts` (a new `HARNESS_ROOT`, three new commands, WebKit page snapshots —
+[`2d-6-6c-2-window-reading.md`](docs/decisions/2d-6-6c-2-window-reading.md) §2). The driver names them in
+`AUTOCLAUDE_PREFLIGHT_DIRTY`. **Stage by path**: `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/`,
+`src/lib/i18n/`, `src/lib/ipc/`, and any `src-tauri/` or `src/lib/components/` file **by name** — never
+`src-tauri/src/` as a directory. A new `.ts` module costs one Vite module, a new styled component two — re-derive
+per file. **A worker must never run `git stash`** (a stash that is not popped loses the instrument silently). Say
+so in every worker brief. The screen may be locked during a driven run: 6c-2's reading used WebKit page snapshots
+because screen captures were blank.
+
+#### Open items — the live map is the record's §7
+
+`docs/decisions/2d-6-split-notes.md` §7 states, per item, whether the consult **took it into 2d-6** (obligations
+(1)-(3), open items 5, 6, 8, 9), **deferred it** (1 — the `file:line` drift checker; 7 — the `"permissions": []`
+comment in `main.rs`, 2d-8's; 10 — the `dispose()`-on-close path) or **left it untouched** (0, 2, 3, 4, 11).
+
+#### The rest of the 2d consult, so a step is not invented
+
+**2d-6** (eleven steps, all closed), **2d-7** (the reviewed instrument and the bilingual
+WKWebView reading — start from the `fetch` recorder in `src/probe.ts`), **2d-8** (instrument removal and
+harness-free closure; corrects the `main.rs` comment and deletes the harness under `/private/tmp/`).

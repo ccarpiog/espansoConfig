@@ -1284,7 +1284,7 @@ Each item handed on to 2d-7 is listed below with what 2d-7 does with it: **taken
 | Composition-check blind spots | 11a §5 item 3 | **Untouched** | — |
 | `AppShell` removal and save-origin loops EN-only | 11a §5 item 4 | **Taken** | 2d-7-2 |
 | Visible-window foreground reading | 10 §4 item 1 | **Taken** | 2d-7-9 |
-| Each activation costs one drain | 10 §4 item 2 | **Taken** (measured) | 2d-7-9 |
+| Each activation costs one drain per event, so two when the window was also hidden | 10 §4 item 2 | **Taken** (measured) | 2d-7-9 |
 | No window-close `dispose()` | 10 §4 item 3; 2d-6 record §7 item 10 | **Untouched** — quit events only observed | 2d-7-9 observes; build deferred |
 | Disabled status control drawn as enabled | 9c §6 item 1 | **Taken** | 2d-7-2, confirmed in 2d-7-9 |
 | Long ES row mark breaks mid-word | 9c §6 item 2 | **Taken** | 2d-7-2, confirmed in 2d-7-9 |

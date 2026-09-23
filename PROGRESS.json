@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T19:06:01Z",
+ "updated": "2026-09-23T19:15:46Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish external-change reconciliation for the espanso config editor, proving it in real-window readings before packaging.",
  "phases": [
@@ -867,13 +867,15 @@
   {
    "id": "2d-8",
    "title": "Instrument removal and harness-free closure",
-   "status": "queued",
-   "summary": "Not started."
+   "status": "done",
+   "summary": "Deletes the window-reading instrument and harness per the manifest and re-derives every gate harness-free at 1323 / 461 / 3546 / 200.",
+   "risk": "routine",
+   "review": "docs/reviews/phase-2d-8.md"
   },
   {
    "id": "2d",
    "title": "Live reconciliation of external changes",
-   "status": "in_progress",
+   "status": "done",
    "risk": "high",
    "summary": "Steps 1 to 6 and 2d-7-1 to 2d-7-9 are closed; 2d-7-10 is next and may run driven, then 2d-8."
   },

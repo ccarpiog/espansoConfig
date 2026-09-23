@@ -231,10 +231,11 @@ the phase records under `docs/decisions/` hold the details.
   LaunchServices drops `--env` for a bundle path it thinks is already running: one plan per launch, into
   a fresh bundle path (`docs/decisions/1c-2b-2b-2-notes.md` §6.1).
 - The webview's `localStorage` follows the **bundle identifier**, not `HOME`, so a language override
-  survives across probe bundles; a plan sets the language through the picker explicitly.
-- The temporary window-reading instrument (`src-tauri/src/probe.rs`, `src/probe.ts`, two hook lines
-  each in `src-tauri/src/main.rs` and `src/main.ts`) is never committed; stage by path, never
-  `src-tauri/src/` as a directory.
+  survives across bundles that share an identifier; a reading sets the language through the picker
+  explicitly.
+- The tree holds no window-reading instrument: the temporary one used through 2d-7 was deleted at 2d-8
+  (`docs/decisions/2d-8-notes.md`). A later reading builds a new instrument under its own review, and
+  that instrument is never committed.
 
 ## 7. Reviews and phases
 

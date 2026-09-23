@@ -210,20 +210,26 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// menu in Rust and hardcoding either language here is what plan section 9
 /// forbids. See `crate::menu`.
 ///
-/// `capabilities/default.json` stays at `"permissions": []`, **including for
-/// the menu**. A capability grants access to **plugin** commands — everything
-/// spelled `plugin:…`, `core:…` included — and an application's own commands
-/// are dispatched without consulting the access-control list unless the
-/// application publishes an ACL manifest of its own (`tauri::webview`'s
+/// `capabilities/default.json` grants exactly two permissions,
+/// `core:event:allow-listen` and `core:event:allow-unlisten`, and nothing
+/// **for the menu**. A capability grants access to **plugin** commands —
+/// everything spelled `plugin:…`, `core:…` included — and an application's own
+/// commands are dispatched without consulting the access-control list unless
+/// the application publishes an ACL manifest of its own (`tauri::webview`'s
 /// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
 /// !is_local`). This crate publishes none, the webview's origin is local, and
-/// none of the seventeen commands is a plugin command. `core:menu`'s permissions exist for a
-/// frontend that builds menus through `@tauri-apps/api/menu`; this one does
-/// not, and asks Rust for a rebuild instead, so the empty permission list that
-/// Phase 1b-1's review narrowed to stays exactly as narrow and `core:default`
-/// stays gone. That paragraph is an argument; `dispatch_check.rs` is the
-/// evidence — and it is re-run for every command added, `document_text`
-/// included, rather than the argument being extended to cover it.
+/// none of the seventeen commands is a plugin command, so none of them needs a
+/// permission. The two event permissions are for the frontend's one event
+/// listener: Tauri's `listen` invokes the plugin command `plugin:event|listen`,
+/// and the unlisten function it resolves with invokes `plugin:event|unlisten`.
+/// `core:menu`'s permissions exist for a frontend that builds menus through
+/// `@tauri-apps/api/menu`; this one does not, and asks Rust for a rebuild
+/// instead, so no menu permission is granted and `core:default` stays gone.
+/// That paragraph is an argument; `dispatch_check.rs` is the evidence — it
+/// drives every application command and both event-plugin commands through the
+/// real dispatcher with the shipped capability, and it is re-run for every
+/// command added, `document_text` included, rather than the argument being
+/// extended to cover it.
 fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(commands::WorkspaceSession::new())
