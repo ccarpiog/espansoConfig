@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T21:45:16Z",
+ "updated": "2026-09-23T21:45:54Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
  "phases": [
@@ -919,7 +919,8 @@
    "status": "done",
    "summary": "Items are added to and removed from flow lists without changing their style; ambiguous comment placement is refused by name.",
    "risk": "high",
-   "review": "docs/reviews/phase-3-3.md"
+   "review": "docs/reviews/phase-3-3.md",
+   "commit": "3cb0098"
   },
   {
    "id": "3-4",
