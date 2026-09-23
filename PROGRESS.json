@@ -718,7 +718,8 @@
    "risk": "high",
    "summary": "Pins reviewed EN/ES wording for the safety-critical sentences, corrects false production comments and records the baselines; 2d-6 closes.",
    "review": "docs/reviews/phase-2d-6-11b.md",
-   "narrative": "docs/decisions/2d-6-11b-notes.md"
+   "narrative": "docs/decisions/2d-6-11b-notes.md",
+   "commit": "97fddc9"
   },
   {
    "id": "2d-7-design",
