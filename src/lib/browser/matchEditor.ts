@@ -3246,10 +3246,12 @@ export interface MatchEditorView {
    * `writeOutcomeUnknown` while the conflict shown was raised under a write
    * uncertainty nobody has acknowledged, which is why no reload and no reapply is
    * offered; `observationRetained` while the window holds a reading of this file
-   * it has not decided about, which is why nothing can be sent. Codes, rendered
-   * through `tExternalConflictNotice`, never sentences; the acknowledgement
-   * control that ends the first is 2d-6-9's. `MatchEditor.svelte` draws these
-   * beside its save control since Phase 2d-6-6c-1.
+   * it has not decided about, which is why nothing can be sent. Codes, never
+   * sentences, and since Phase 2d-6-9b-2 no renderer draws them (no component
+   * calls `tExternalConflictNotice` any more): the pane's
+   * `FileReconciliationStatus.svelte` block says both states once, above the panel,
+   * and `MatchEditor.svelte` reads this list only through `surfaceAcknowledgementOwed` in
+   * `./reconciliationStatus.ts`, to decide whether to draw the acknowledgement.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
   /** The presentation changes a saved arm disclosed, in report order. */

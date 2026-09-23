@@ -65,6 +65,8 @@ import type {
   VariableKind,
   VariableView
 } from '../ipc/types';
+import type { ExternalChangeConflictSource } from './conflictSource';
+import type { ReconciliationRefusal, SurfaceAcknowledgementPort } from './reconciliationStatus';
 
 /**
  * A plain scalar carrying source text.
@@ -725,3 +727,46 @@ export function makeConflict(overrides: ConflictOverrides): ConflictResult {
     disk: overrides.disk
   };
 } // End of function makeConflict()
+
+/**
+ * A scripted `SurfaceAcknowledgementPort` and what it was asked — Phase 2d-6-9b-2.
+ *
+ * The write renderers' mounted suites hand this to a panel in place of the
+ * window's port, so a case can decide what the prediction and the press answer
+ * and read back **which object** the press minted from. The window's own port is
+ * `surfaceAcknowledgementPortOf` in `./reconciliationStatus.ts`, exercised over a
+ * real `BrowserState` in `reconciliationStatus.test.ts` and in
+ * `ReconciliationStatus.test.ts`.
+ */
+export interface ScriptedAcknowledgement {
+  /** The port to hand the panel. */
+  readonly port: SurfaceAcknowledgementPort;
+  /** What `refusalFor` answers; read when the panel derives its control. */
+  refusal: ReconciliationRefusal | null;
+  /** What `acknowledge` answers on the next press. */
+  answer: ReconciliationRefusal | null;
+  /** Every source `acknowledge` was called with, in order. */
+  readonly asked: ExternalChangeConflictSource[];
+}
+
+/**
+ * A scripted acknowledgement port that predicts an enabled control and accepts
+ * every press, until a case says otherwise.
+ *
+ * @returns The script and its port.
+ */
+export function scriptedAcknowledgement(): ScriptedAcknowledgement {
+  const script: ScriptedAcknowledgement = {
+    port: {
+      refusalFor: () => script.refusal,
+      acknowledge: (source) => {
+        script.asked.push(source);
+        return script.answer;
+      }
+    },
+    refusal: null,
+    answer: null,
+    asked: []
+  };
+  return script;
+} // End of function scriptedAcknowledgement()

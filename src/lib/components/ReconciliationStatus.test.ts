@@ -36,6 +36,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExternalConflictObservation } from '../browser/conflictSource';
 import { makeDocument, makeSummary } from '../browser/fixtures';
+import { conflictChoiceKey } from '../browser/saveOutcome';
 import {
   decideWorkspaceReconciliation,
   fileFactsOf,
@@ -759,6 +760,70 @@ describe.each(LOCALES)('the per-file states and their three controls, in %s', (l
     await settle();
   });
 }); // End of the per-locale per-file suite
+
+describe.each(LOCALES)('a write panel’s own acknowledgement inside the pane, in %s — Phase 2d-6-9b-2', (lang) => {
+  beforeEach(() => {
+    locale.setOverride(lang);
+  });
+
+  /**
+   * Opens the raw editor over file 2 through the pane, as a person does, and puts
+   * the file under an unknown write outcome with a conflict raised on the editor.
+   *
+   * @returns The mounted drawings.
+   */
+  async function rawEditorUnderAnUnknownOutcome(): Promise<Mounted> {
+    const view = await mountAll({ saves: [Promise.resolve(WRITE_MAY_HAVE_HAPPENED)] });
+    view.state.show({ kind: 'document', id: 2 });
+    await view.state.showFileText(true);
+    await settle();
+    button(view.pane, lang, 'browser.rawEditor.open').click();
+    await settle();
+    expect(view.state.openWriteSurfaces().map((each) => each.kind)).toEqual(['rawEditor']);
+    await view.state.saveRawDocument(2, 'rev-r', 'matches: []\n', { accepted: [] });
+    await settle();
+    expect(view.state.writeOutcomeUncertain(2)).toBe(true);
+    expect(view.state.observeExternalChange(observationOfB(5)).verdict.kind).toBe('raisedWithoutReload');
+    await settle();
+    return view;
+  } // End of function rawEditorUnderAnUnknownOutcome()
+
+  it('draws the unknown-outcome sentence once, above the panel, and the panel’s control under its snapshot', async () => {
+    const view = await rawEditorUnderAnUnknownOutcome();
+    const sentence = words(lang, 'browser.externalConflict.writeOutcomeUnknown');
+    expect((view.pane.textContent ?? '').split(sentence)).toHaveLength(2);
+    const panel = view.pane.querySelector<HTMLElement>('.panel.external');
+    expect(panel).not.toBeNull();
+    expect(panel?.textContent).not.toContain(sentence);
+    // One acknowledgement in the whole pane, and it is the panel's.
+    const acknowledge = words(lang, 'browser.externalConflict.action.acknowledgeSnapshot');
+    const all = [...view.pane.querySelectorAll('button')].filter((each) => each.textContent?.trim() === acknowledge);
+    expect(all).toHaveLength(1);
+    expect(panel?.contains(all[0] ?? null)).toBe(true);
+    expect(all[0]?.disabled).toBe(false);
+  });
+
+  it('ends the window’s hold from the panel, minted from the panel’s own origin, and calls no command', async () => {
+    const view = await rawEditorUnderAnUnknownOutcome();
+    const standing = view.state.standingConflictFor(2);
+    expect(standing?.kind).toBe('externalChange');
+    const before = callCounts(view.commands);
+    const panel = view.pane.querySelector<HTMLElement>('.panel.external') as HTMLElement;
+
+    button(panel, lang, 'browser.externalConflict.action.acknowledgeSnapshot').click();
+    await settle();
+    expect(view.state.writeOutcomeUncertain(2)).toBe(false);
+    expect(view.pane.textContent).not.toContain(words(lang, 'browser.externalConflict.writeOutcomeUnknown'));
+    const after = view.pane.querySelector<HTMLElement>('.panel.external') as HTMLElement;
+    expect(buttonIn(after, lang, 'browser.externalConflict.action.acknowledgeSnapshot')).toBeNull();
+    // The reload is offered again from its idle step; nothing was installed or read.
+    expect(
+      buttonIn(after, lang, conflictChoiceKey('reloadDiskVersion', 'authoredText'))
+    ).not.toBeNull();
+    expect(view.state.standingConflictFor(2)).toBe(standing);
+    expect(callCounts(view.commands)).toEqual(before);
+  });
+}); // End of the per-locale panel-acknowledgement suite
 
 describe('a locale switch on a mounted status panel', () => {
   it('changes the words and nothing else: no command, no drain, the same facts', async () => {

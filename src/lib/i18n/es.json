@@ -228,6 +228,8 @@
   "browser.reconciliation.route.unlistedFile": "Un archivo que esta ventana ya no lista",
   "browser.reconciliation.route.snapshot": "La instantánea del disco a la que se refiere este reconocimiento:",
   "browser.reconciliation.route.projectionReplacedExits": "Aquí el reconocimiento seguirá sin estar disponible hasta que una escritura posterior en este archivo desde esta ventana termine con un resultado conocido o hasta que se recargue el espacio de trabajo.",
+  "browser.reconciliation.surface.observationExit": "En este panel, el reconocimiento seguirá sin estar disponible hasta que se observe otro cambio en este archivo y se muestre aquí.",
+  "browser.reconciliation.surface.holdEnded": "En este panel, cargar la versión del disco seguirá sin estar disponible hasta que se observe otro cambio en este archivo y se muestre aquí.",
   "browser.reconciliation.refusal.disposed": "Esta ventana ya no puede recargar nada.",
   "browser.reconciliation.refusal.workspaceNotReady": "El espacio de trabajo no ha terminado de cargarse.",
   "browser.reconciliation.refusal.writeInFlight": "Todavía hay una escritura en curso en un archivo. Esto estará disponible cuando termine.",

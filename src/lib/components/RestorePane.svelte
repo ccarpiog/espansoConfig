@@ -4,6 +4,7 @@
   import type { RawDocumentText } from '../browser/rawDocument';
   import type { RawSaveChoice } from '../browser/rawSave';
   import {
+    acknowledgeRestoreSnapshot,
     acknowledgeRestoreFindings,
     applyRestoreObservation,
     askToReloadDiskVersion,
@@ -41,6 +42,13 @@
   import { isExternalConflict, outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import RecoveryWithoutCreation from './RecoveryWithoutCreation.svelte';
   import { revealOutcome } from './reveal';
+  import {
+    decideSurfaceAcknowledgement,
+    surfaceAcknowledgementOwed,
+    type ReconciliationRefusal,
+    type SurfaceAcknowledgementPort
+  } from '../browser/reconciliationStatus';
+  import SnapshotAcknowledgement from './SnapshotAcknowledgement.svelte';
   import SourceText from './SourceText.svelte';
   import {
     t,
@@ -51,7 +59,6 @@
     tConflictMessage,
     tConflictOperation,
     tConflictOriginMessage,
-    tExternalConflictNotice,
     tDraftError,
     tEditError,
     tEntrySkipped,
@@ -197,7 +204,7 @@
    * (`RestoreView.messages`, 2d-6-5 §4 item 12). Which arm is drawn is decided
    * by `isExternalConflict`, because the nested `source.kind` does not narrow
    * the model. **What no type forces** is that this markup draws the origin line
-   * or the notices; `RestorePane.test.ts` and `DetailPane.test.ts` read them off
+   * or the acknowledgement; `RestorePane.test.ts` and `DetailPane.test.ts` read them off
    * the screen in both languages.
    */
 
@@ -214,6 +221,7 @@
     invalidate,
     adoptDiskVersion,
     reportReceiver,
+    acknowledgement,
     close
   }: {
     /**
@@ -355,6 +363,14 @@
      * what establish both.
      */
     reportReceiver: BindObservationReceiver;
+    /**
+     * The window's side of the acknowledgement this panel offers for an unknown
+     * write outcome — Phase 2d-6-9b-2. `surfaceAcknowledgementPortOf(browser)` in
+     * `../browser/reconciliationStatus.ts`, built by `DetailPane.svelte`; **required,
+     * and what that forces is only that a host supplies one** — nothing in
+     * TypeScript forces it to ask the window.
+     */
+    acknowledgement: SurfaceAcknowledgementPort;
     /** Leaves the restore pane. */
     close: () => void;
   } = $props();
@@ -380,7 +396,8 @@
    * `restoreDocument` answers (entry 5). The binding is instance-bound: a later
    * pane's report displaces this one, and this one's withdrawal then reaches
    * nothing. What a delivery installs is drawn since Phase 2d-6-8b: the
-   * external panel below, the refusal line and the notices beside it.
+   * external panel below and the refusal line; the held and unknown-outcome
+   * sentences are the pane's since Phase 2d-6-9b-2.
    *
    * **A delivery cannot arrive from inside the `targetRevisionObserved` effect
    * below** (2d-6-5 §4 item 9): the window delivers from its reconciliation
@@ -449,6 +466,38 @@
   );
   /** The external conflict panel's own element, the reveal's target when it shows. */
   let externalPanel = $state<HTMLElement | null>(null);
+
+  /*
+   * **The acknowledgement this panel offers for its own conflict** — Phase
+   * 2d-6-9b-2, the 2d-6 record's §3 entries 14 and 15. Whether it is drawn and
+   * whether it is enabled are `decideSurfaceAcknowledgement`'s, asked about
+   * `external.source`, the origin this panel draws; the press runs `acknowledgeRestoreSnapshot`, whose
+   * closure hands the session's own conflict source (the same object) to the port.
+   */
+  const acknowledgementControl = $derived(
+    external === null
+      ? null
+      : decideSurfaceAcknowledgement(
+          surfaceAcknowledgementOwed(current.view.externalNotices),
+          acknowledgement.refusalFor(external.source)
+        )
+  );
+
+  /**
+   * Presses the acknowledgement: the session's own transition, which asks the
+   * window through the port at most once and changes the session only when the
+   * window ended the hold.
+   *
+   * @returns The refusal the window answered, or `null` when it ended the hold.
+   */
+  function acknowledgeTheSnapshot(): ReconciliationRefusal | null {
+    const answer: { refusal: ReconciliationRefusal | null } = { refusal: null };
+    session = acknowledgeRestoreSnapshot(session, (source) => {
+      answer.refusal = acknowledgement.acknowledge(source);
+      return answer.refusal === null ? 'acknowledged' : 'refused';
+    });
+    return answer.refusal;
+  } // End of function acknowledgeTheSnapshot()
 
   /*
    * **The outcome panel's appearance asks for a scroll into view** — 2c-4a-3c's
@@ -782,6 +831,17 @@
     <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
   {/if}
 
+  <!-- The acknowledgement of an unknown write outcome, directly under the
+       snapshot it is about (Phase 2d-6-9b-2). Only the external arm carries one;
+       the sentence that the outcome is unknown is the pane's, above the panel. -->
+  {#if external !== null && acknowledgementControl !== null}
+    <SnapshotAcknowledgement
+      shown={external.source}
+      decision={acknowledgementControl}
+      acknowledge={acknowledgeTheSnapshot}
+    />
+  {/if}
+
   <!-- A control that has just gone, with the reason in its place: the reload is
        not offered again once the window has refused a spend, because the
        refusal came back with no word about its cause. That withholds a control;
@@ -1070,14 +1130,11 @@
     {#if current.view.refusal !== null}
       <p class="kind">{tRestoreRefusal(current.view.refusal)}</p>
     {/if}
-    <!-- Beside the refusal, less the one it already says — Phase 2d-6-8b. An
-         unknown write outcome is the notice this surface can owe beside an
-         `externalConflict` refusal; a held reading's sentence is the refusal
-         line itself, so `noticesBesideRefusal` drops it here. The control that
-         acknowledges the first is 2d-6-9's. -->
-    {#each current.view.noticesBesideRefusal as notice (notice.kind)}
-      <p class="kind">{tExternalConflictNotice(notice)}</p>
-    {/each}
+    <!-- A reading the window holds undecided and an unknown write outcome are said
+         once, above this panel, by the pane's `FileReconciliationStatus.svelte`
+         block, so this panel no longer draws its own notices (Phase 2d-6-9b-2);
+         the acknowledgement is drawn under the disk snapshot in the conflict panel. The refusal line above can still
+         say the held reading's sentence as its reason (the phase record's open items). -->
   </div>
 
   {#if current.view.sendFailure !== null}

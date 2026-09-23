@@ -122,6 +122,7 @@ import type {
   ReconciliationControl,
   ReconciliationRefusal,
   RouteControlNote,
+  SurfaceControlNote,
   WorkspaceReconciliationState
 } from '../browser/reconciliationStatus';
 import {
@@ -235,6 +236,7 @@ import {
   describeReconciliationFileState,
   describeReconciliationRefusal,
   describeReconciliationRouteNote,
+  describeReconciliationSurfaceNote,
   describeReconciliationWorkspaceState,
   describeRotationOutcome,
   describeSaveError,
@@ -322,6 +324,7 @@ export {
   describeReconciliationFileState,
   describeReconciliationRefusal,
   describeReconciliationRouteNote,
+  describeReconciliationSurfaceNote,
   describeReconciliationWorkspaceState,
   describeRotationOutcome,
   describeSaveError,
@@ -886,14 +889,13 @@ export function tConflictMessage(message: ConflictMessage): string {
  * or a write's outcome is unknown, in the current language.
  *
  * The reactive wrapper over `describeExternalConflictNotice` in `./codes` (the
- * 2d-6 record's §3 entries 13 and 14). **Eight components call it** —
- * `MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte` since
- * Phase 2d-6-6c-1, `MatchDeleter.svelte`, `MatchMover.svelte` and
- * `MatchDuplicator.svelte` since 2d-6-7b, `RawEditor.svelte` and
- * `RestorePane.svelte` since 2d-6-8b — over their views' notices, beside the
- * control a notice explains. The acknowledgement that ends the second state exists —
- * `BrowserState.acknowledgeWriteUncertainty` in `../browser/workspace.svelte.ts`,
- * since 2d-6-1b — and no component calls it yet: 2d-6-9 draws that control.
+ * 2d-6 record's §3 entries 13 and 14). **No component calls it since Phase
+ * 2d-6-9b-2**: the eight write panels called it over their views' notices from
+ * 2d-6-6c-1, 2d-6-7b and 2d-6-8b until the pane's `FileReconciliationStatus.svelte`
+ * block became the one drawing of both sentences (through
+ * `tReconciliationFileState`, the same two keys). Kept, with its accessor, as the
+ * reviewed rendering of the notice codes; its removal is an open item of that
+ * phase's record.
  *
  * @param notice - Which state the surface is in.
  * @returns The translated sentence.
@@ -907,9 +909,11 @@ export function tExternalConflictNotice(notice: ExternalConflictNotice): string 
  * language.
  *
  * The reactive wrapper over `describeExternalConflictAction` in `./codes`. It
- * labels the control that will call `BrowserState.acknowledgeWriteUncertainty`
- * in `../browser/workspace.svelte.ts` (the member exists since 2d-6-1b); nothing
- * draws the control yet, and the step that does is 2d-6-9.
+ * labels the control that calls `BrowserState.acknowledgeWriteUncertainty` in
+ * `../browser/workspace.svelte.ts`. The renderers draw that label through
+ * `tReconciliationControl('acknowledgeUncertainty')`, which returns the same key,
+ * so no component calls this wrapper; it is kept with its accessor as the
+ * reviewed pairing of the label with its notice.
  *
  * @param action - Which control to label.
  * @returns The translated label.
@@ -2316,3 +2320,15 @@ export function tReconciliationRefusal(refusal: ReconciliationRefusal): string {
 export function tReconciliationRouteNote(note: RouteControlNote): string {
   return describeReconciliationRouteNote(locale.current, note);
 } // End of function tReconciliationRouteNote()
+
+/**
+ * Renders one write-renderer note in the current language — Phase 2d-6-9b-2.
+ * The reactive wrapper over `describeReconciliationSurfaceNote` in `./codes`,
+ * drawn by `SnapshotAcknowledgement.svelte` inside each of the eight write panels.
+ *
+ * @param note - The note.
+ * @returns The translated sentence.
+ */
+export function tReconciliationSurfaceNote(note: SurfaceControlNote): string {
+  return describeReconciliationSurfaceNote(locale.current, note);
+} // End of function tReconciliationSurfaceNote()

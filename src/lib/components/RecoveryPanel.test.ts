@@ -55,7 +55,14 @@ import { saveConflictSource, type ConflictSource } from '../browser/conflictSour
 import { detailFieldKey } from '../browser/detail';
 import { startDraft, structuredDraftRules } from '../browser/draft';
 import type { AdoptTheDiskVersion } from '../browser/editorSave';
-import { makeConflict, makeDocument, makeMatch, makeSummary } from '../browser/fixtures';
+import {
+  makeConflict,
+  makeDocument,
+  makeMatch,
+  makeSummary,
+  scriptedAcknowledgement,
+  type ScriptedAcknowledgement
+} from '../browser/fixtures';
 import type { InvalidationStatus } from '../browser/invalidation';
 import type { CreationBuffers } from '../browser/matchCreation';
 import {
@@ -108,6 +115,11 @@ import type {
   SaveResult
 } from '../ipc/types';
 import RecoveryPanel from './RecoveryPanel.svelte';
+import { LOCALES } from '../i18n/locale';
+import type { Locale } from '../i18n/locale';
+import { externalConflictSource } from '../browser/conflictSource';
+import type { ExternalConflictObservation } from '../browser/conflictSource';
+import { reconciliationRefusalKey, type ReconciliationRefusal } from '../browser/reconciliationStatus';
 
 /** The revision the window is projecting when the conflict arrives. */
 const HELD: ContentRevision = 'a'.repeat(64);
@@ -412,6 +424,7 @@ function mountPanel(options: {
   const component = mount(RecoveryPanel, {
     target,
     props: {
+      acknowledgement: acknowledging.port,
       availability,
       open: (): RecoveryStart =>
         startMatchFieldRecovery(attempt, source, baseline, documents, views, CLOCK),
@@ -619,7 +632,15 @@ async function settle(): Promise<void> {
   flushSync();
 } // End of function settle()
 
+/**
+ * The acknowledgement port every mount here is handed (Phase 2d-6-9b-2), fresh for
+ * each case: it predicts an enabled control and accepts a press until a case
+ * scripts otherwise, and records which source each press minted from.
+ */
+let acknowledging: ScriptedAcknowledgement = scriptedAcknowledgement();
+
 beforeEach(() => {
+  acknowledging = scriptedAcknowledgement();
   locale.setOverride('en');
 });
 
@@ -1088,3 +1109,168 @@ describe('the conflict this panel was opened from', () => {
     panel.stop();
   });
 }); // End of the "source conflict" suite
+
+/**
+ * The button labelled with one key's rendering in one language, or `null` —
+ * Phase 2d-6-9b-2's acknowledgement cases.
+ *
+ * @param scope - Where to look.
+ * @param lang - The language the case runs in.
+ * @param key - The key holding the label.
+ * @returns The button, or `null`.
+ */
+function labelledIn(scope: HTMLElement, lang: Locale, key: TranslationKey): HTMLButtonElement | null {
+  const label = translate(lang, key);
+  return [...scope.querySelectorAll('button')].find((each) => each.textContent?.trim() === label) ?? null;
+} // End of function labelledIn()
+
+/**
+ * The external conflict's own panel, for the acknowledgement cases.
+ *
+ * @param target - Where the component was mounted.
+ * @returns The panel.
+ */
+function externalConflictPanel(target: HTMLElement): HTMLElement {
+  const found = target.querySelector<HTMLElement>('.panel.external');
+  if (found === null) {
+    throw new Error('this case needs the external conflict panel');
+  }
+  return found;
+} // End of function externalConflictPanel()
+
+/** The acknowledgement's label key, shared with the workspace route. */
+const ACKNOWLEDGE_SNAPSHOT: TranslationKey = 'browser.externalConflict.action.acknowledgeSnapshot';
+
+/** This panel's reload choice, whose presence says whether the reload is withheld. */
+const RELOAD_CHOICE = conflictChoiceKey('reloadDiskVersion', 'authoredText');
+
+describe('The recovery form acknowledges an unknown write outcome on its own panel, in English and Spanish — Phase 2d-6-9b-2', () => {
+  // The pane draws the unknown-outcome sentence once, above this panel
+  // (`FileReconciliationStatus.svelte`); this panel draws only the control, under
+  // the disk snapshot it is about, and mints from its own conflict's source
+  // through the port `DetailPane.svelte` hands it. The port is scripted here
+  // (`scriptedAcknowledgement` in `../browser/fixtures.ts`); the window's own is
+  // `ReconciliationStatus.test.ts`'s.
+
+  /**
+   * Mounts the panel and brings it to the point where a conflict can be shown.
+   *
+   * @param lang - The language the case runs in.
+   * @returns The mounted panel.
+   */
+  async function opened(lang: Locale): Promise<Mounted> {
+    // Opened in English, because this suite's `control` reads English labels;
+    // everything the cases assert is read in the case's own language.
+    locale.setOverride('en');
+    const mounted = mountPanel({ disk: diskFile({ topLevelKeys: [] }) });
+    openForm(mounted);
+    destination(mounted.target, 'match/other.yml')?.click();
+    flushSync();
+    locale.setOverride(lang);
+    flushSync();
+    return mounted;
+  } // End of function opened()
+
+  /**
+   * One observation of the panel's file.
+   *
+   * @returns A fresh observation, so its source is its own.
+   */
+  function seenChange(): ExternalConflictObservation {
+    return {
+      sequence: 9,
+      document: 3,
+      previousRevision: OTHER,
+      diskRevision: AFTER,
+      diskText: 'matches:\n  - trigger: y\n    replace: fromdisk\n',
+      disk: makeDocument({ id: 3, relativePath: 'match/other.yml', revision: AFTER }),
+      findings: [],
+      correspondences: null
+    };
+  } // End of function seenChange()
+
+  it.each(LOCALES)('offers it under the disk snapshot, mints from the conflict it shows, and offers the reload again (%s)', async (lang) => {
+    const mounted = await opened(lang);
+    const seen = seenChange();
+    mounted.deliver(arbitratedDelivery(null, seen, true));
+
+    const panel = externalConflictPanel(mounted.target);
+    const acknowledge = labelledIn(panel, lang, ACKNOWLEDGE_SNAPSHOT);
+    expect(acknowledge?.disabled).toBe(false);
+    // Under the snapshot it is about: the disk text comes first in the panel.
+    const text = panel.textContent ?? '';
+    expect(text.indexOf('fromdisk')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('fromdisk')).toBeLessThan(text.indexOf(translate(lang, ACKNOWLEDGE_SNAPSHOT)));
+    // The unknown-outcome sentence is the pane's and never this panel's.
+    expect(mounted.target.textContent).not.toContain(
+      translate(lang, 'browser.externalConflict.writeOutcomeUnknown')
+    );
+    expect(labelledIn(panel, lang, RELOAD_CHOICE)).toBeNull();
+
+    acknowledge?.click();
+    flushSync();
+    // One press, minted from the very source this panel shows.
+    expect(acknowledging.asked).toHaveLength(1);
+    expect(acknowledging.asked[0]).toBe(externalConflictSource(seen));
+    const after = externalConflictPanel(mounted.target);
+    expect(labelledIn(after, lang, ACKNOWLEDGE_SNAPSHOT)).toBeNull();
+    // The reload is offered again, from its idle step, and nothing was adopted.
+    expect(labelledIn(after, lang, RELOAD_CHOICE)).not.toBeNull();
+    expect(mounted.adoptions).toEqual([]);
+    mounted.stop();
+  }); // End of the "acknowledged" case
+
+  it.each(LOCALES)('draws it disabled with its refusal and this panel’s exits, and keeps the reload withheld (%s)', async (lang) => {
+    const cases: readonly (readonly [ReconciliationRefusal, TranslationKey | null])[] = [
+      ['projectionReplaced', 'browser.reconciliation.surface.observationExit'],
+      ['superseded', 'browser.reconciliation.surface.observationExit'],
+      ['holdMoved', 'browser.reconciliation.surface.holdEnded'],
+      ['writeInFlight', null]
+    ];
+    for (const [refusal, note] of cases) {
+      acknowledging.refusal = refusal;
+      const mounted = await opened(lang);
+      mounted.deliver(arbitratedDelivery(null, seenChange(), true));
+
+      const panel = externalConflictPanel(mounted.target);
+      expect(labelledIn(panel, lang, ACKNOWLEDGE_SNAPSHOT)?.disabled).toBe(true);
+      const text = panel.textContent ?? '';
+      expect(text).toContain(translate(lang, reconciliationRefusalKey(refusal)));
+      for (const exit of [
+        'browser.reconciliation.surface.observationExit',
+        'browser.reconciliation.surface.holdEnded'
+      ] as const) {
+        expect(text.includes(translate(lang, exit))).toBe(exit === note);
+      }
+      expect(labelledIn(panel, lang, RELOAD_CHOICE)).toBeNull();
+      mounted.stop();
+    } // End of the loop over the four refusals
+  }); // End of the "disabled" case
+
+  it.each(LOCALES)('draws a refused press’s reason once and changes nothing (%s)', async (lang) => {
+    acknowledging.answer = 'holdMoved';
+    const mounted = await opened(lang);
+    mounted.deliver(arbitratedDelivery(null, seenChange(), true));
+
+    labelledIn(externalConflictPanel(mounted.target), lang, ACKNOWLEDGE_SNAPSHOT)?.click();
+    flushSync();
+    expect(acknowledging.asked).toHaveLength(1);
+    const panel = externalConflictPanel(mounted.target);
+    const sentence = translate(lang, 'browser.reconciliation.refusal.holdMoved');
+    expect((panel.textContent ?? '').split(sentence)).toHaveLength(2);
+    // The window said no, so the session is as it was: still withholding.
+    expect(labelledIn(panel, lang, ACKNOWLEDGE_SNAPSHOT)).not.toBeNull();
+    expect(labelledIn(panel, lang, RELOAD_CHOICE)).toBeNull();
+    mounted.stop();
+  }); // End of the "refused press" case
+
+  it.each(LOCALES)('offers nothing to acknowledge over a conflict raised under no uncertainty (%s)', async (lang) => {
+    const mounted = await opened(lang);
+    mounted.deliver(arbitratedDelivery(null, seenChange(), false));
+
+    const panel = externalConflictPanel(mounted.target);
+    expect(labelledIn(panel, lang, ACKNOWLEDGE_SNAPSHOT)).toBeNull();
+    expect(labelledIn(panel, lang, RELOAD_CHOICE)).not.toBeNull();
+    mounted.stop();
+  }); // End of the "nothing owed" case
+}); // End of the "own acknowledgement" suite

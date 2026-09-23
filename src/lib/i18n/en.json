@@ -228,6 +228,8 @@
   "browser.reconciliation.route.unlistedFile": "A file this window no longer lists",
   "browser.reconciliation.route.snapshot": "The disk snapshot this acknowledgement is about:",
   "browser.reconciliation.route.projectionReplacedExits": "Acknowledging stays unavailable here until a later write to this file from this window ends with a known outcome, or the workspace is reloaded.",
+  "browser.reconciliation.surface.observationExit": "On this panel, acknowledging stays unavailable until a further change to this file is observed and shown here.",
+  "browser.reconciliation.surface.holdEnded": "On this panel, loading the version on disk stays unavailable until a further change to this file is observed and shown here.",
   "browser.reconciliation.refusal.disposed": "This window can no longer reload anything.",
   "browser.reconciliation.refusal.workspaceNotReady": "The workspace has not finished loading.",
   "browser.reconciliation.refusal.writeInFlight": "A write to a file is still in progress. This is available once it finishes.",

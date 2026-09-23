@@ -4332,9 +4332,10 @@ export interface RestoreView {
    * The lines owed while an observation cannot be acted on — Phase 2d-6-5.
    *
    * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
-   * own fields. `RestorePane.svelte` draws {@link RestoreView.noticesBesideRefusal}
-   * rather than this list since Phase 2d-6-8b; the acknowledgement control for the
-   * first is 2d-6-9's.
+   * own fields. Since Phase 2d-6-9b-2 no renderer draws them as sentences: the pane's
+   * `FileReconciliationStatus.svelte` block says both states once, above the panel,
+   * and `RestorePane.svelte` reads this list only through `surfaceAcknowledgementOwed` in
+   * `./reconciliationStatus.ts`, to decide whether to draw the acknowledgement.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
   /**
@@ -4347,6 +4348,9 @@ export interface RestoreView {
    * `./observationDelivery` decides it; **what it cannot check** is that the
    * refusal key keeps rendering the notice's sentence, which
    * {@link restoreRefusalKey} does today by calling `externalConflictNoticeKey`.
+   * **No renderer reads it since Phase 2d-6-9b-2**, when the panels stopped drawing
+   * their notices; it is kept as a tested value and its removal is an open item of
+   * that phase's record.
    */
   readonly noticesBesideRefusal: readonly ExternalConflictNotice[];
   /** The presentation changes a saved arm disclosed, in report order. */

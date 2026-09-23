@@ -390,6 +390,10 @@ describe('the semantic bounds of entry 40, as absences', () => {
     'browser.reconciliation.route.unlistedFile',
     'browser.reconciliation.route.snapshot',
     'browser.reconciliation.route.projectionReplacedExits',
+    // Phase 2d-6-9b-2: the two notes a write panel draws beside its disabled
+    // acknowledgement.
+    'browser.reconciliation.surface.observationExit',
+    'browser.reconciliation.surface.holdEnded',
     'browser.conflictOrigin.changedWhileOpen',
     'browser.reapply.externalEvidence.noCorrespondence',
     'browser.reapply.externalEvidence.baseRevisionMoved',

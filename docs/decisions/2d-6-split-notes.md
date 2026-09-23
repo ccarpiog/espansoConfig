@@ -314,6 +314,15 @@ the items handed on to it by name; the acceptance above is checked in full when 
   - **2d-6-9b-2** — the eight write renderers gain only typed status and acknowledgement
     presentation, including `acknowledgeSnapshot` / `acknowledgeRestoreSnapshot`
     (`2d-6-8b-notes.md` §4 item 6), bilingual mounted. Record: `2d-6-9b-2-notes.md`.
+  - **2d-6-9b-3** — the orchestrator's ruling on entry 15 (`2d-6-9b-1-notes.md` §6 item 1),
+    recorded 2026-09-23 at 9b-2: **entry 15 is to be enforced on the coordinator's automatic
+    path.** While a file is under an uncertainty hold, an automatic reread is refused, and the
+    refused observation is registered as an acknowledgeable origin, so the resulting `stale`
+    file keeps an exit (acknowledge, then reread). This is model work in a bounded corrective
+    sub-phase, scheduled after 9b-2 and before 9c so that the window reading reads the enforced
+    behaviour. Its own acceptance: a model case shown failing first for the refused reread and
+    for the registered origin; the route and acknowledgement drawn for it, EN and ES; and no
+    change to the manual `requestFileReread` path. Record: `2d-6-9b-3-notes.md`.
 - **2d-6-9c — the narrow window reading with one hard fixture (ruling 38), and 2d-6-9's whole
   acceptance checked in one place**, starting from the harness and launch recipe of
   [`2d-6-8c-window-reading.md`](2d-6-8c-window-reading.md). Record: `2d-6-9c-notes.md`.

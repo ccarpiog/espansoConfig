@@ -2033,8 +2033,10 @@ export interface MatchDeletionView {
    * The lines owed while an observation cannot be acted on — Phase 2d-6-4.
    *
    * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
-   * own fields. `MatchDeleter.svelte` draws them beside the question's controls
-   * since Phase 2d-6-7b; the control that acknowledges the second is 2d-6-9's.
+   * own fields. Since Phase 2d-6-9b-2 no renderer draws them as sentences: the pane's
+   * `FileReconciliationStatus.svelte` block says both states once, above the panel,
+   * and `MatchDeleter.svelte` reads this list only through `surfaceAcknowledgementOwed` in
+   * `./reconciliationStatus.ts`, to decide whether to draw the acknowledgement.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
   /**

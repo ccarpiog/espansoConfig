@@ -8,6 +8,7 @@
   import { labelText, triggerLabel } from '../browser/labels';
   import { identityInProjection } from '../browser/matchDeletion';
   import {
+    acknowledgeDuplicationSnapshot,
     acknowledgeDuplicationFindings,
     acknowledgementOf,
     applyDuplication,
@@ -36,6 +37,13 @@
   import type { MatchSaveAnswer } from '../browser/workspace.svelte';
   import RecoveryWithoutCreation from './RecoveryWithoutCreation.svelte';
   import { revealOutcome, revealReapplyReport } from './reveal';
+  import {
+    decideSurfaceAcknowledgement,
+    surfaceAcknowledgementOwed,
+    type ReconciliationRefusal,
+    type SurfaceAcknowledgementPort
+  } from '../browser/reconciliationStatus';
+  import SnapshotAcknowledgement from './SnapshotAcknowledgement.svelte';
   import SourceText from './SourceText.svelte';
   import {
     t,
@@ -50,7 +58,6 @@
     tDuplicationRefusal,
     tDuplicationSubmissionRefusal,
     tEditError,
-    tExternalConflictNotice,
     tFindingCode,
     tIpcFailure,
     tPresentationNote,
@@ -201,6 +208,7 @@
     adoptDiskVersion,
     standingConflictFor,
     reportReceiver,
+    acknowledgement,
     close
   }: {
     /**
@@ -313,6 +321,14 @@
      * suites are what establish both.
      */
     reportReceiver: BindObservationReceiver;
+    /**
+     * The window's side of the acknowledgement this panel offers for an unknown
+     * write outcome — Phase 2d-6-9b-2. `surfaceAcknowledgementPortOf(browser)` in
+     * `../browser/reconciliationStatus.ts`, built by `DetailPane.svelte`; **required,
+     * and what that forces is only that a host supplies one** — nothing in
+     * TypeScript forces it to ask the window.
+     */
+    acknowledgement: SurfaceAcknowledgementPort;
     close: () => void;
   } = $props();
 
@@ -336,8 +352,9 @@
    * flight is held inside the session and consumed by `applyDuplication`
    * (entry 5). The binding is instance-bound: a later panel's report displaces
    * this one, and this one's withdrawal then reaches nothing. What a delivery
-   * installs is drawn below since Phase 2d-6-7b: the external panel, the refusal
-   * beside *Duplicate* and the notices it does not already say (`beginDuplicate`
+   * installs is drawn below since Phase 2d-6-7b: the external panel, and the refusal
+   * beside *Duplicate*; the held and unknown-outcome sentences are the pane's since
+   * 2d-6-9b-2 (`beginDuplicate`
    * refuses a session showing a conflict, or holding a wait, either way).
    */
   // svelte-ignore state_referenced_locally
@@ -404,6 +421,38 @@
   );
   /** The external conflict panel's own element, the reveal's target when it shows. */
   let externalPanel = $state<HTMLElement | null>(null);
+
+  /*
+   * **The acknowledgement this panel offers for its own conflict** — Phase
+   * 2d-6-9b-2, the 2d-6 record's §3 entries 14 and 15. Whether it is drawn and
+   * whether it is enabled are `decideSurfaceAcknowledgement`'s, asked about
+   * `external.source`, the origin this panel draws; the press runs `acknowledgeDuplicationSnapshot`, whose
+   * closure hands the session's own conflict source (the same object) to the port.
+   */
+  const acknowledgementControl = $derived(
+    external === null
+      ? null
+      : decideSurfaceAcknowledgement(
+          surfaceAcknowledgementOwed(current.view.externalNotices),
+          acknowledgement.refusalFor(external.source)
+        )
+  );
+
+  /**
+   * Presses the acknowledgement: the session's own transition, which asks the
+   * window through the port at most once and changes the session only when the
+   * window ended the hold.
+   *
+   * @returns The refusal the window answered, or `null` when it ended the hold.
+   */
+  function acknowledgeTheSnapshot(): ReconciliationRefusal | null {
+    const answer: { refusal: ReconciliationRefusal | null } = { refusal: null };
+    session = acknowledgeDuplicationSnapshot(session, (source) => {
+      answer.refusal = acknowledgement.acknowledge(source);
+      return answer.refusal === null ? 'acknowledged' : 'refused';
+    });
+    return answer.refusal;
+  } // End of function acknowledgeTheSnapshot()
   /** The conflict arm's row of controls, which is the second step's target. */
   let outcomeChoices = $state<HTMLElement | null>(null);
 
@@ -709,6 +758,17 @@
     <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
   {/if}
 
+  <!-- The acknowledgement of an unknown write outcome, directly under the
+       snapshot it is about (Phase 2d-6-9b-2). Only the external arm carries one;
+       the sentence that the outcome is unknown is the pane's, above the panel. -->
+  {#if external !== null && acknowledgementControl !== null}
+    <SnapshotAcknowledgement
+      shown={external.source}
+      decision={acknowledgementControl}
+      acknowledge={acknowledgeTheSnapshot}
+    />
+  {/if}
+
   <!-- The second step's warning. The shared line above is the whole close/abandon
        guarantee and this one never restates it (2c-4a-3b review, finding 3); it
        says only what this surface alone can say — that no snippet in the new
@@ -813,15 +873,11 @@
       <p class="kind">{tDuplicationSubmissionRefusal(current.view.cannotDuplicate)}</p>
     {/if}
 
-    <!-- What else stands over the file that the refusal above does not already
-         say — a reading the window holds undecided behind a stronger refusal, or
-         a conflict raised while an earlier write's outcome is unknown (Phase
-         2d-6-7b). The model drops the one notice the refusal line renders, so no
-         sentence is printed twice; the control that acknowledges the second is
-         2d-6-9's. -->
-    {#each current.view.noticesBesideRefusal as notice (notice.kind)}
-      <p class="kind">{tExternalConflictNotice(notice)}</p>
-    {/each}
+    <!-- A reading the window holds undecided and an unknown write outcome are said
+         once, above this panel, by the pane's `FileReconciliationStatus.svelte`
+         block, so this panel no longer draws its own notices (Phase 2d-6-9b-2);
+         the acknowledgement is drawn under the disk snapshot in the conflict panel. The refusal line above can still
+         say the held reading's sentence as its reason (the phase record's open items). -->
   </div>
 
   {#if current.view.sendFailure !== null}

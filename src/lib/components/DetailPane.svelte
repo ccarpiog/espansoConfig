@@ -18,6 +18,7 @@
     headerFilesOf,
     shownFileFactsOf,
     shownFileOf,
+    surfaceAcknowledgementPortOf,
     type FileStatePlacement
   } from '../browser/reconciliationStatus';
   // The invalidation supplier below is written against `RawSaveInvalidation` and
@@ -1163,11 +1164,21 @@
    * `selectionNotice` and `surface` — as one status block, so a `removed` file's two
    * placements are one sentence rather than the same sentence twice. What the
    * surface placement leaves out is the acknowledgement, which a write renderer
-   * owns because it must mint from the origin its own panel shows (Phase 2d-6-9b-2).
+   * owns because it must mint from the origin its own panel shows: each of the
+   * eight draws it under its conflict's disk snapshot, through the port below
+   * (Phase 2d-6-9b-2), and none of them draws the held or unknown-outcome sentence
+   * this block already says.
    */
 
   /** The placements this pane's header block stands for, in its order. */
   const HEADER: readonly FileStatePlacement[] = ['header', 'selectionNotice', 'surface'];
+
+  /**
+   * The window's side of each write panel's own acknowledgement (Phase 2d-6-9b-2),
+   * built once over this pane's `BrowserState` and handed to the seven top-level
+   * renderers; the editor and the new-snippet form hand it on to the recovery form.
+   */
+  const surfaceAcknowledgement = $derived(surfaceAcknowledgementPortOf(browser));
 
   const headerFiles = $derived(
     headerFilesOf(browser.openWriteSurfaces(), shownFileOf(shownFileFactsOf(browser)))
@@ -1341,6 +1352,7 @@
       save={(document, baseRevision, text, acknowledgement) =>
         browser.saveRawDocument(document, baseRevision, text, acknowledgement)}
       reportReceiver={bindReceiver('rawEditor')}
+      acknowledgement={surfaceAcknowledgement}
       close={() => (editing = null)}
     />
   {:else if editingMatch !== null}
@@ -1363,6 +1375,7 @@
       {adoptDiskVersion}
       adoptRecoveryDiskVersion={adoptDiskVersion}
       reportReceiver={bindReceiver('matchEditor')}
+      acknowledgement={surfaceAcknowledgement}
       reportRecovery={bindReceiver('recovery')}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
       close={() => (editingMatch = null)}
@@ -1384,6 +1397,7 @@
       {adoptDiskVersion}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
       reportReceiver={bindReceiver('matchDeleter')}
+      acknowledgement={surfaceAcknowledgement}
       close={() => (deletingMatch = null)}
     />
   {:else if movingMatch !== null}
@@ -1406,6 +1420,7 @@
       {adoptDiskVersion}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
       reportReceiver={bindReceiver('matchMover')}
+      acknowledgement={surfaceAcknowledgement}
       close={() => (movingMatch = null)}
     />
   {:else if duplicatingMatch !== null}
@@ -1429,6 +1444,7 @@
       {adoptDiskVersion}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
       reportReceiver={bindReceiver('matchDuplicator')}
+      acknowledgement={surfaceAcknowledgement}
       close={() => (duplicatingMatch = null)}
     />
   {:else if creating}
@@ -1450,6 +1466,7 @@
       {adoptDiskVersion}
       reportDestination={(document) => (creatorDestination = document)}
       reportReceiver={bindReceiver('matchCreator')}
+      acknowledgement={surfaceAcknowledgement}
       reportRecovery={bindReceiver('recovery')}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
       close={stopCreating}
@@ -1512,6 +1529,7 @@
       invalidate={invalidateEverySurface}
       {adoptDiskVersion}
       reportReceiver={bindReceiver('restore')}
+      acknowledgement={surfaceAcknowledgement}
       close={() => (restoring = null)}
     />
   {:else if browser.fileText !== null && browser.fileTextTarget !== null}

@@ -65,8 +65,8 @@
 
 import type { TranslationKey } from '../i18n/dictionaries';
 import type { DocumentId, UnreadableReason } from '../ipc/types';
-import type { ConflictSource } from './conflictSource';
-import type { AutomaticReloadRefusal } from './observationDelivery';
+import type { ConflictSource, ExternalChangeConflictSource } from './conflictSource';
+import type { AutomaticReloadRefusal, ExternalConflictNotice } from './observationDelivery';
 import type { ExternalDocumentStatus, ExternalPathDrift, ObservationDetail } from './observationTransitions';
 import type { ReconciliationBlock, ReconciliationWatchState } from './reconciliationCoordinator';
 import type { OpenWriteSurface, OpenWriteSurfaceKind } from './restore';
@@ -672,8 +672,8 @@ export function fileStatesDrawnAt(
  * - `acknowledgeUncertainty` wherever the uncertain write is drawn **and only on the
  *   `workspaceRoute`**. On a surface the acknowledgement must be minted from the
  *   origin that surface's panel shows (`model.source`, entry 14), which only the
- *   write renderer holds — that presentation is Phase 2d-6-9b-2's, in the eight
- *   renderers. On the route the renderer draws the standing origin's disk text
+ *   write renderer holds; the eight renderers draw it since Phase 2d-6-9b-2,
+ *   through {@link decideSurfaceAcknowledgement}. On the route the renderer draws the standing origin's disk text
  *   beside the control and mints from that same object (`2d-6-9a-notes.md` §3.1).
  *
  * @param decision - The file's decision.
@@ -1241,6 +1241,193 @@ export function routeControlNoteKey(note: RouteControlNote): TranslationKey {
     }
   }
 } // End of function routeControlNoteKey()
+
+// ---------------------------------------------------------------------------
+// The acknowledgement a write renderer offers on its own panel
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a write renderer's panel owes the acknowledgement control — Phase
+ * 2d-6-9b-2.
+ *
+ * **Read off the view's own notices**: every one of the eight sessions lists
+ * `writeOutcomeUnknown` exactly when it shows an external conflict raised under an
+ * uncertainty it still withholds the reload for (`externalNoticesOf` in each
+ * session module), which is the one state its `acknowledge…Snapshot` transition
+ * acts on. The renderers no longer draw those notices (the pane's
+ * `FileReconciliationStatus.svelte` block draws the window's own reading of both
+ * states once, above the panel), so this is what the notice list is read for.
+ * **What this cannot force** is that a session keeps listing the notice under
+ * exactly that condition; the eight `externalNoticesOf` functions do today.
+ *
+ * @param notices - The view's `externalNotices`, in its order.
+ * @returns Whether the panel draws the acknowledgement control.
+ */
+export function surfaceAcknowledgementOwed(notices: readonly ExternalConflictNotice[]): boolean {
+  return notices.some((notice) => notice.kind === 'writeOutcomeUnknown');
+} // End of function surfaceAcknowledgementOwed()
+
+/**
+ * The acknowledgement control a write renderer draws beside its panel's disk
+ * snapshot, or `null` when its panel owes none — Phase 2d-6-9b-2, the 2d-6
+ * record's §3 entries 14 and 15.
+ *
+ * The same `acknowledgeUncertainty` control the workspace route draws, decided
+ * from what the panel shows rather than from the window's standing origin: the
+ * renderer mints from its own conflict's `source` (entry 14), so the refusal is
+ * the one {@link SurfaceAcknowledgementPort.refusalFor} answers for **that**
+ * object.
+ *
+ * @param owed - {@link surfaceAcknowledgementOwed} over the panel's view.
+ * @param refusal - What the port answered for the panel's shown source, or
+ *   `null` when it could be minted now.
+ * @returns The control, or `null`.
+ */
+export function decideSurfaceAcknowledgement(
+  owed: boolean,
+  refusal: ReconciliationRefusal | null
+): ControlDecision | null {
+  return owed ? controlOf('acknowledgeUncertainty', refusal) : null;
+} // End of function decideSurfaceAcknowledgement()
+
+/**
+ * A sentence a write renderer draws beside its disabled acknowledgement, after the
+ * refusal — Phase 2d-6-9b-2, the surface wording 9b-1 handed on
+ * (`2d-6-9b-1-notes.md` §4 item 2 and §6 item 2).
+ *
+ * **The exits differ from the route's, measured on the code.** On a surface the
+ * next observation of the file is delivered to the panel, and a replacing verdict
+ * gives the session a fresh origin, registered at the current projection
+ * generation, and a fresh uncertainty flag. So:
+ * - `observationExit`: the panel's origin is outlived (`projectionReplaced`) or no
+ *   longer the standing one (`superseded`). A later write of this window's that
+ *   ends on a named revision ends the **window's** hold but not the session's
+ *   withheld reload, so it is not an exit here; the delivery is.
+ * - `holdEnded`: the window's hold is gone (`holdMoved`, from the eligibility
+ *   reader's `noHold`) while the session still withholds its reload, the gap
+ *   `acknowledgeSnapshot` in `./matchEditor.ts` states. Only a delivery to the
+ *   panel clears that flag, so the sentence names the reload rather than the
+ *   acknowledgement.
+ *
+ * **What it cannot force** is that a further change ever happens; both sentences
+ * say "until", never "when".
+ */
+export type SurfaceControlNote = 'observationExit' | 'holdEnded';
+
+/**
+ * The note a write renderer draws beside its acknowledgement control, or `null`.
+ *
+ * @param decision - The control, as {@link decideSurfaceAcknowledgement} decided it.
+ * @returns The note, or `null` when the control is enabled or the refusal's own
+ *   sentence names its exit (`writeInFlight`).
+ */
+export function surfaceControlNoteOf(decision: ControlDecision): SurfaceControlNote | null {
+  if (decision.control !== 'acknowledgeUncertainty' || decision.enabled) {
+    return null;
+  }
+  switch (decision.reason) {
+    case 'projectionReplaced':
+    case 'superseded':
+      return 'observationExit';
+    case 'holdMoved':
+      return 'holdEnded';
+    default:
+      return null;
+  }
+} // End of function surfaceControlNoteOf()
+
+/**
+ * The dictionary key holding one surface note's sentence.
+ *
+ * @param note - The note.
+ * @returns The key.
+ */
+export function surfaceControlNoteKey(note: SurfaceControlNote): TranslationKey {
+  switch (note) {
+    case 'observationExit':
+      return 'browser.reconciliation.surface.observationExit';
+    case 'holdEnded':
+      return 'browser.reconciliation.surface.holdEnded';
+    default: {
+      const unreachable: never = note;
+      return unreachable;
+    }
+  }
+} // End of function surfaceControlNoteKey()
+
+/**
+ * What a write renderer asks the window about the acknowledgement its own panel
+ * offers — Phase 2d-6-9b-2.
+ *
+ * **Two members over one object, the panel's shown `source`.** `refusalFor`
+ * predicts whether it could be minted now; `acknowledge` mints from it and spends,
+ * and is what the renderer's `acknowledge…Snapshot` closure calls. Both answer a
+ * refusal code or `null`, so a disabled control and a refused press draw the same
+ * sentence. {@link surfaceAcknowledgementPortOf} builds the production one over a
+ * `BrowserState`; a mounted test may script both. **Nothing in TypeScript stops a
+ * port answering `null` from `acknowledge` without asking the window**, and such a
+ * port compiles; the production one asks.
+ */
+export interface SurfaceAcknowledgementPort {
+  /** Why the panel's shown source could not be acknowledged now, or `null`. */
+  readonly refusalFor: (source: ExternalChangeConflictSource) => ReconciliationRefusal | null;
+  /** Mints an acknowledgement from the source and spends it: `null` when the hold ended. */
+  readonly acknowledge: (source: ExternalChangeConflictSource) => ReconciliationRefusal | null;
+}
+
+/** The `BrowserState` members the surface port reads and calls, and nothing else. */
+export type SurfaceAcknowledgementReader = Pick<
+  BrowserState,
+  | 'standingConflictFor'
+  | 'uncertaintyAcknowledgementEligibility'
+  | 'uncertaintyAcknowledgementFor'
+  | 'acknowledgeWriteUncertainty'
+>;
+
+/**
+ * The production {@link SurfaceAcknowledgementPort} over a live `BrowserState` —
+ * Phase 2d-6-9b-2.
+ *
+ * - `refusalFor` asks the eligibility reader for the source's file. `eligible`
+ *   answers `null` only when the window's standing origin **is** the panel's
+ *   source; any other standing origin is `superseded`, because the window would
+ *   mint for an object this panel does not show. The ineligible arms map through
+ *   {@link acknowledgementMintRefusalOf}.
+ * - `acknowledge` mints through `uncertaintyAcknowledgementFor(source)` and, when
+ *   that answers `null`, asks the eligibility reader for the reason, as the
+ *   route's press does; otherwise it spends through `acknowledgeWriteUncertainty`
+ *   and maps the outcome through {@link acknowledgementRefusalOf}. It installs
+ *   nothing and calls no command (entry 14); the two members it calls do neither.
+ *
+ * Read inside a `$derived`, `refusalFor` subscribes to the hold tables through the
+ * readers, so a renderer's decision re-runs when the window's hold or origin moves.
+ *
+ * @param browser - The window.
+ * @returns The port, frozen.
+ */
+export function surfaceAcknowledgementPortOf(
+  browser: SurfaceAcknowledgementReader
+): SurfaceAcknowledgementPort {
+  return Object.freeze({
+    refusalFor: (source: ExternalChangeConflictSource): ReconciliationRefusal | null => {
+      const document = source.observation.document;
+      const eligibility = browser.uncertaintyAcknowledgementEligibility(document);
+      if (eligibility.kind === 'eligible') {
+        return browser.standingConflictFor(document) === source ? null : 'superseded';
+      }
+      return acknowledgementMintRefusalOf(eligibility);
+    },
+    acknowledge: (source: ExternalChangeConflictSource): ReconciliationRefusal | null => {
+      const token = browser.uncertaintyAcknowledgementFor(source);
+      if (token === null) {
+        return acknowledgementMintRefusalOf(
+          browser.uncertaintyAcknowledgementEligibility(source.observation.document)
+        );
+      }
+      return acknowledgementRefusalOf(browser.acknowledgeWriteUncertainty(token));
+    }
+  });
+} // End of function surfaceAcknowledgementPortOf()
 
 /**
  * The dictionary key holding one refusal's sentence.

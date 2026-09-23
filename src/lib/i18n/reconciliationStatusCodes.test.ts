@@ -33,12 +33,14 @@ import {
   reconciliationControlKey,
   reconciliationRefusalKey,
   routeControlNoteKey,
+  surfaceControlNoteKey,
   workspaceReconciliationStateKey,
   type FileReconciliationState,
   type FileStatePlacement,
   type ReconciliationControl,
   type ReconciliationRefusal,
   type RouteControlNote,
+  type SurfaceControlNote,
   type WorkspaceReconciliationState
 } from '../browser/reconciliationStatus';
 import {
@@ -46,6 +48,7 @@ import {
   describeReconciliationFileState,
   describeReconciliationRefusal,
   describeReconciliationRouteNote,
+  describeReconciliationSurfaceNote,
   describeReconciliationWorkspaceState
 } from './codes';
 import { DICTIONARIES, type TranslationKey } from './dictionaries';
@@ -55,6 +58,7 @@ import {
   tReconciliationFileState,
   tReconciliationRefusal,
   tReconciliationRouteNote,
+  tReconciliationSurfaceNote,
   tReconciliationWorkspaceState
 } from './index';
 import { DEFAULT_LOCALE, LOCALES } from './locale';
@@ -156,6 +160,11 @@ const ROUTE_NOTES = ['projectionReplacedExits'] as const satisfies readonly Rout
 
 export type _RouteNotesAreComplete = ExpectNever<Missing<RouteControlNote, typeof ROUTE_NOTES>>;
 
+/** Every write-panel note, pinned to the union (Phase 2d-6-9b-2). */
+const SURFACE_NOTES = ['observationExit', 'holdEnded'] as const satisfies readonly SurfaceControlNote[];
+
+export type _SurfaceNotesAreComplete = ExpectNever<Missing<SurfaceControlNote, typeof SURFACE_NOTES>>;
+
 /**
  * Every key this step's key functions can return.
  *
@@ -179,6 +188,9 @@ function everyKey(): readonly TranslationKey[] {
   }
   for (const note of ROUTE_NOTES) {
     keys.add(routeControlNoteKey(note));
+  }
+  for (const note of SURFACE_NOTES) {
+    keys.add(surfaceControlNoteKey(note));
   }
   return [...keys];
 } // End of function everyKey()
@@ -227,6 +239,9 @@ describe('the reconciliation-status accessors', () => {
     }
     for (const note of ROUTE_NOTES) {
       expectWhole(describeReconciliationRouteNote(locale, note), `${locale}:${note}`);
+    }
+    for (const note of SURFACE_NOTES) {
+      expectWhole(describeReconciliationSurfaceNote(locale, note), `${locale}:${note}`);
     }
   });
 
@@ -302,6 +317,9 @@ describe('the reconciliation-status accessors', () => {
     );
     expect(tReconciliationRouteNote('projectionReplacedExits')).toBe(
       describeReconciliationRouteNote(DEFAULT_LOCALE, 'projectionReplacedExits')
+    );
+    expect(tReconciliationSurfaceNote('observationExit')).toBe(
+      describeReconciliationSurfaceNote(DEFAULT_LOCALE, 'observationExit')
     );
   });
 }); // End of the "reconciliation-status accessors" suite
@@ -421,3 +439,30 @@ describe('the route’s wording after Phase 2d-6-9b-1', () => {
     );
   });
 }); // End of the "route's wording" suite
+
+describe('a write panel’s wording after Phase 2d-6-9b-2', () => {
+  it('pin the two surface notes: the observation shown on this panel is the exit, in both locales', () => {
+    // Measured, not assumed: on a surface the next observation is delivered to the
+    // panel and replaces its origin and its uncertainty flag; a later write of this
+    // window's ends the window's hold but not the panel's withheld reload.
+    expect(DICTIONARIES.en['browser.reconciliation.surface.observationExit']).toBe(
+      'On this panel, acknowledging stays unavailable until a further change to this file is observed and shown here.'
+    );
+    expect(DICTIONARIES.es['browser.reconciliation.surface.observationExit']).toBe(
+      'En este panel, el reconocimiento seguirá sin estar disponible hasta que se observe otro cambio en este archivo y se muestre aquí.'
+    );
+    expect(DICTIONARIES.en['browser.reconciliation.surface.holdEnded']).toBe(
+      'On this panel, loading the version on disk stays unavailable until a further change to this file is observed and shown here.'
+    );
+    expect(DICTIONARIES.es['browser.reconciliation.surface.holdEnded']).toBe(
+      'En este panel, cargar la versión del disco seguirá sin estar disponible hasta que se observe otro cambio en este archivo y se muestre aquí.'
+    );
+    for (const locale of LOCALES) {
+      for (const note of SURFACE_NOTES) {
+        const sentence = DICTIONARIES[locale][surfaceControlNoteKey(note)].toLowerCase();
+        // An exit that is not one here is never offered: no write, no reload of the workspace.
+        expect(sentence).not.toMatch(/write|escritura|workspace|espacio de trabajo/);
+      }
+    } // End of the loop over the locales
+  });
+}); // End of the "write panel's wording" suite

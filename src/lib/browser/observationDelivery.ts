@@ -392,15 +392,15 @@ export function decideAutomaticReload(inputs: AutomaticReloadGuardInputs): Autom
  * (`MatchDeletionView.externalNotices`, `MatchMoveView.externalNotices`,
  * `MatchDuplicationView.externalNotices`), and the raw editor's and restore's
  * since 2d-6-5 (`RawEditorView.externalNotices`, `RestoreView.externalNotices`).
- * `MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte` draw the
- * first three views' notices, and `MatchDeleter.svelte`, `MatchMover.svelte` and
- * `MatchDuplicator.svelte` the next three since Phase 2d-6-7b (the mover and the
- * duplicator through {@link noticesBesideRefusal}), and `RawEditor.svelte` and
- * `RestorePane.svelte` the last two since Phase 2d-6-8b (restore through
- * `RestoreView.noticesBesideRefusal`).
- * The acknowledgement that ends the second exists
- * (`BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, since
- * 2d-6-1b) and no component calls it — 2d-6-9 draws the control. The codes exist
+ * The eight write sessions list them in their views' `externalNotices`. **Since
+ * Phase 2d-6-9b-2 no renderer draws them as sentences**: the pane's
+ * `FileReconciliationStatus.svelte` block draws the window's own reading of both
+ * states once, above the panel, through the same two keys
+ * (`fileReconciliationStateKey` in `./reconciliationStatus.ts`), and a panel reads
+ * its list only to decide whether it owes the acknowledgement
+ * (`surfaceAcknowledgementOwed`). The acknowledgement that ends the second is
+ * `BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, called by
+ * the workspace route since 2d-6-9b-1 and by the eight panels since 2d-6-9b-2. The codes exist
  * because a code with no string is worse than a code with no caller, and because
  * the wording is reviewed once, here, before anything draws it.
  */
@@ -443,7 +443,9 @@ export function externalConflictNoticeKey(notice: ExternalConflictNotice): Trans
 
 /**
  * The notices a surface draws beside a refusal line that may already say one of
- * them — Phase 2d-6-7b.
+ * them — Phase 2d-6-7b. **No renderer calls for its answer since Phase
+ * 2d-6-9b-2**, when the panels stopped drawing their notices; the three view fields
+ * built from it remain as tested values (that phase's record, open items).
  *
  * The mover's and the duplicator's submission refusals render
  * `observationRetained` through this very notice's sentence
@@ -472,8 +474,10 @@ export function noticesBesideRefusal(
  *
  * **One arm today, and it is a label rather than a transition.** The
  * acknowledgement that ends an uncertainty hold (entry 14) is
- * `BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, which no
- * component calls yet; this names the control's label and nothing else, so that
+ * `BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, which the
+ * workspace route and the eight write panels call since Phase 2d-6-9b-1 and 2d-6-9b-2
+ * (through `reconciliationControlKey` in `./reconciliationStatus.ts`, which returns
+ * the same key); this names the control's label and nothing else, so that
  * the wording — *I have reviewed this snapshot* — is fixed here with the sentence
  * it answers. It is not a {@link ExternalConflictNotice} arm because a label is
  * not a line: a renderer that iterated notices and drew each as a paragraph would

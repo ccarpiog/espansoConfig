@@ -2,6 +2,7 @@
   import { onDestroy } from 'svelte';
   import { triggerLabel } from '../browser/labels';
   import {
+    acknowledgeSnapshot,
     acknowledgeCreationFindings,
     acknowledgementOf,
     applyCreate,
@@ -50,6 +51,13 @@
   import { copyReferenceText } from './clipboard';
   import RecoveryPanel from './RecoveryPanel.svelte';
   import { revealOutcome, revealReapplyReport } from './reveal';
+  import {
+    decideSurfaceAcknowledgement,
+    surfaceAcknowledgementOwed,
+    type ReconciliationRefusal,
+    type SurfaceAcknowledgementPort
+  } from '../browser/reconciliationStatus';
+  import SnapshotAcknowledgement from './SnapshotAcknowledgement.svelte';
   import SourceText from './SourceText.svelte';
   import {
     t,
@@ -64,7 +72,6 @@
     tDraftError,
     tDraftFieldStatus,
     tEditError,
-    tExternalConflictNotice,
     tFindingCode,
     tIpcFailure,
     tPresentationNote,
@@ -194,6 +201,7 @@
     adoptDiskVersion,
     reportDestination,
     reportReceiver,
+    acknowledgement,
     reportRecovery,
     standingConflictFor,
     close,
@@ -278,6 +286,14 @@
      * suites establish both.
      */
     reportReceiver: BindObservationReceiver;
+    /**
+     * The window's side of the acknowledgement this panel offers for an unknown
+     * write outcome — Phase 2d-6-9b-2. `surfaceAcknowledgementPortOf(browser)` in
+     * `../browser/reconciliationStatus.ts`, built by `DetailPane.svelte`; **required,
+     * and what that forces is only that a host supplies one** — nothing in
+     * TypeScript forces it to ask the window.
+     */
+    acknowledgement: SurfaceAcknowledgementPort;
     /** The same reporter for the recovery form this one mounts, handed down untouched. */
     reportRecovery: BindObservationReceiver;
     /**
@@ -431,6 +447,38 @@
   );
   /** The external conflict panel's own element, the reveal's target when it shows. */
   let externalPanel = $state<HTMLElement | null>(null);
+
+  /*
+   * **The acknowledgement this panel offers for its own conflict** — Phase
+   * 2d-6-9b-2, the 2d-6 record's §3 entries 14 and 15. Whether it is drawn and
+   * whether it is enabled are `decideSurfaceAcknowledgement`'s, asked about
+   * `external.source`, the origin this panel draws; the press runs `acknowledgeSnapshot`, whose
+   * closure hands the session's own conflict source (the same object) to the port.
+   */
+  const acknowledgementControl = $derived(
+    external === null
+      ? null
+      : decideSurfaceAcknowledgement(
+          surfaceAcknowledgementOwed(view.externalNotices),
+          acknowledgement.refusalFor(external.source)
+        )
+  );
+
+  /**
+   * Presses the acknowledgement: the session's own transition, which asks the
+   * window through the port at most once and changes the session only when the
+   * window ended the hold.
+   *
+   * @returns The refusal the window answered, or `null` when it ended the hold.
+   */
+  function acknowledgeTheSnapshot(): ReconciliationRefusal | null {
+    const answer: { refusal: ReconciliationRefusal | null } = { refusal: null };
+    session = acknowledgeSnapshot(session, (source) => {
+      answer.refusal = acknowledgement.acknowledge(source);
+      return answer.refusal === null ? 'acknowledged' : 'refused';
+    });
+    return answer.refusal;
+  } // End of function acknowledgeTheSnapshot()
 
   // An external conflict is revealed as a conflict panel is, and an outcome kept as
   // history beside it keeps its own cue (`MatchEditor.svelte`, Phase 2d-6-6c-1).
@@ -903,6 +951,17 @@
     <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
   {/if}
 
+  <!-- The acknowledgement of an unknown write outcome, directly under the
+       snapshot it is about (Phase 2d-6-9b-2). Only the external arm carries one;
+       the sentence that the outcome is unknown is the pane's, above the panel. -->
+  {#if external !== null && acknowledgementControl !== null}
+    <SnapshotAcknowledgement
+      shown={external.source}
+      decision={acknowledgementControl}
+      acknowledge={acknowledgeTheSnapshot}
+    />
+  {/if}
+
   <!-- The second step's warning. The shared line above is the whole
        close/abandon guarantee and this one never restates it (2c-4a-3b
        review, finding 3); it says only what this surface alone can say —
@@ -1076,12 +1135,10 @@
       {/if}
     </p>
 
-    <!-- Why *Add this snippet* may be refusing beyond the refusal below: a reading
-         held undecided, or a conflict raised while an earlier write's outcome is
-         unknown (the control that acknowledges it is 2d-6-9's). -->
-    {#each view.externalNotices as notice (notice.kind)}
-      <p class="kind">{tExternalConflictNotice(notice)}</p>
-    {/each}
+    <!-- A reading the window holds undecided and an unknown write outcome are said
+         once, above this panel, by the pane's `FileReconciliationStatus.svelte`
+         block, so this panel no longer draws its own notices (Phase 2d-6-9b-2);
+         the acknowledgement is drawn under the disk snapshot in the conflict panel. -->
 
     <!-- **Every refusal has a code here**, unlike the small editor's, whose
          `beginSave` can only answer `null`. So a disabled control says why. -->
@@ -1154,6 +1211,7 @@
     {create}
     {adoptDiskVersion}
     reportSurface={reportRecovery}
+    {acknowledgement}
     {standingConflictFor}
   />
 

@@ -2861,8 +2861,10 @@ export interface MatchCreationView {
    * The lines owed while an observation cannot be acted on — Phase 2d-6-3.
    *
    * `writeOutcomeUnknown` first, `observationRetained` second, from the form's
-   * own fields. `MatchCreator.svelte` draws it beside the create control since
-   * Phase 2d-6-6c-1; the acknowledgement control is 2d-6-9's.
+   * own fields. Since Phase 2d-6-9b-2 no renderer draws them as sentences: the pane's
+   * `FileReconciliationStatus.svelte` block says both states once, above the panel,
+   * and `MatchCreator.svelte` reads this list only through `surfaceAcknowledgementOwed` in
+   * `./reconciliationStatus.ts`, to decide whether to draw the acknowledgement.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
   /**

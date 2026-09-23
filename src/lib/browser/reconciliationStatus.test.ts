@@ -22,13 +22,14 @@ import type { CommandResult } from '../ipc/commands';
 import type { DocumentId, DocumentSummary, DocumentView, WorkspaceSummary } from '../ipc/types';
 import type { ExpectNever, Missing } from '../i18n/exhaustive';
 import { makeDocument, makeSummary } from './fixtures';
-import type { ConflictSource } from './conflictSource';
+import type { ConflictSource, ExternalChangeConflictSource } from './conflictSource';
 import type { ExternalDocumentStatus } from './observationTransitions';
 import type { OpenWriteSurface } from './restore';
 import {
   acknowledgementMintRefusalOf,
   acknowledgementRefusalOf,
   decideFileReconciliation,
+  decideSurfaceAcknowledgement,
   decideShellComposition,
   decideWorkspaceReconciliation,
   fileControlsDrawnAt,
@@ -44,6 +45,9 @@ import {
   shownFileFactsOf,
   shownFileOf,
   standingSnapshotOf,
+  surfaceAcknowledgementOwed,
+  surfaceAcknowledgementPortOf,
+  surfaceControlNoteOf,
   workspaceBannersDrawnIn,
   workspaceFactsOf,
   type ControlDecision,
@@ -51,6 +55,7 @@ import {
   type ReconciliationControl,
   type ReconciliationStatusReader,
   type ShellComposition,
+  type SurfaceAcknowledgementReader,
   type WorkspaceReconciliationFacts
 } from './reconciliationStatus';
 import { createBrowserState, type BrowserCommands } from './workspace.svelte';
@@ -942,3 +947,115 @@ describe('what one renderer draws of a file — Phase 2d-6-9b-1', () => {
     ).toBe(2);
   });
 }); // End of the "what one renderer draws" suite
+
+describe('the acknowledgement a write panel offers — Phase 2d-6-9b-2', () => {
+  /** Two origins of file 2, so a case can tell the panel's from the window's. */
+  const shown = { kind: 'externalChange', observation: { document: 2 } } as unknown as ExternalChangeConflictSource;
+  const other = { kind: 'externalChange', observation: { document: 2 } } as unknown as ExternalChangeConflictSource;
+
+  /**
+   * A reader over scripted answers, recording what it was asked.
+   *
+   * @param answers - What the four members answer.
+   * @returns The reader and its record.
+   */
+  function reader(answers: {
+    readonly eligibility: ReturnType<SurfaceAcknowledgementReader['uncertaintyAcknowledgementEligibility']>;
+    readonly standing: ConflictSource | null;
+    readonly minted: boolean;
+    readonly spent?: ReturnType<SurfaceAcknowledgementReader['acknowledgeWriteUncertainty']>;
+  }): { readonly browser: SurfaceAcknowledgementReader; readonly minted: unknown[]; readonly spent: unknown[] } {
+    const minted: unknown[] = [];
+    const spent: unknown[] = [];
+    const token = { token: true };
+    const browser = {
+      standingConflictFor: () => answers.standing,
+      uncertaintyAcknowledgementEligibility: () => answers.eligibility,
+      uncertaintyAcknowledgementFor: (source: ConflictSource) => {
+        minted.push(source);
+        return answers.minted ? token : null;
+      },
+      acknowledgeWriteUncertainty: (acknowledgement: unknown) => {
+        spent.push(acknowledgement);
+        return answers.spent ?? { kind: 'acknowledged' };
+      }
+    } as unknown as SurfaceAcknowledgementReader;
+    return { browser, minted, spent };
+  } // End of function reader()
+
+  it('is owed exactly when the panel lists the unknown-outcome notice', () => {
+    expect(surfaceAcknowledgementOwed([])).toBe(false);
+    expect(surfaceAcknowledgementOwed([{ kind: 'observationRetained' }])).toBe(false);
+    expect(
+      surfaceAcknowledgementOwed([{ kind: 'writeOutcomeUnknown' }, { kind: 'observationRetained' }])
+    ).toBe(true);
+  });
+
+  it('decides the control from what is owed and what the port predicted', () => {
+    expect(decideSurfaceAcknowledgement(false, null)).toBeNull();
+    expect(decideSurfaceAcknowledgement(false, 'holdMoved')).toBeNull();
+    expect(decideSurfaceAcknowledgement(true, null)).toEqual({ control: 'acknowledgeUncertainty', enabled: true });
+    expect(decideSurfaceAcknowledgement(true, 'projectionReplaced')).toEqual({
+      control: 'acknowledgeUncertainty',
+      enabled: false,
+      reason: 'projectionReplaced'
+    });
+  });
+
+  it('adds the observation exit to an outlived or superseded origin and the reload note to an ended hold', () => {
+    /**
+     * The note beside one disabled acknowledgement.
+     *
+     * @param reason - Why it is disabled.
+     * @returns The note.
+     */
+    const noteFor = (reason: Parameters<typeof decideSurfaceAcknowledgement>[1]) =>
+      surfaceControlNoteOf(decideSurfaceAcknowledgement(true, reason) as ControlDecision);
+    expect(noteFor('projectionReplaced')).toBe('observationExit');
+    expect(noteFor('superseded')).toBe('observationExit');
+    expect(noteFor('holdMoved')).toBe('holdEnded');
+    expect(noteFor('writeInFlight')).toBeNull();
+    expect(noteFor(null)).toBeNull();
+    expect(surfaceControlNoteOf({ control: 'retryRetainedObservation', enabled: false, reason: 'holdMoved' })).toBeNull();
+  });
+
+  it('predicts an enabled control only for the origin the window holds as standing', () => {
+    const eligible = { kind: 'eligible' } as const;
+    expect(surfaceAcknowledgementPortOf(reader({ eligibility: eligible, standing: shown, minted: true }).browser).refusalFor(shown)).toBeNull();
+    expect(surfaceAcknowledgementPortOf(reader({ eligibility: eligible, standing: other, minted: true }).browser).refusalFor(shown)).toBe('superseded');
+    for (const [reason, refusal] of [
+      ['noHold', 'holdMoved'],
+      ['noStandingOrigin', 'superseded'],
+      ['writeInFlight', 'writeInFlight'],
+      ['projectionReplaced', 'projectionReplaced']
+    ] as const) {
+      const port = surfaceAcknowledgementPortOf(
+        reader({ eligibility: { kind: 'ineligible', reason }, standing: shown, minted: false }).browser
+      );
+      expect(port.refusalFor(shown)).toBe(refusal);
+    }
+  });
+
+  it('mints from the very source it is handed, spends that token, and maps both refusals', () => {
+    // The window's standing origin is another object, so a port that minted from
+    // what the window holds rather than from what the panel shows is caught here.
+    const accepted = reader({ eligibility: { kind: 'eligible' }, standing: other, minted: true });
+    expect(surfaceAcknowledgementPortOf(accepted.browser).acknowledge(shown)).toBeNull();
+    expect(accepted.minted).toEqual([shown]);
+    expect(accepted.minted[0]).toBe(shown);
+    expect(accepted.spent).toHaveLength(1);
+
+    const spentAlready = reader({
+      eligibility: { kind: 'eligible' },
+      standing: shown,
+      minted: true,
+      spent: { kind: 'refused', reason: 'spent' }
+    });
+    expect(surfaceAcknowledgementPortOf(spentAlready.browser).acknowledge(shown)).toBe('spent');
+
+    const unminted = reader({ eligibility: { kind: 'ineligible', reason: 'noHold' }, standing: null, minted: false });
+    expect(surfaceAcknowledgementPortOf(unminted.browser).acknowledge(shown)).toBe('holdMoved');
+    // Nothing was spent when nothing was minted.
+    expect(unminted.spent).toEqual([]);
+  });
+}); // End of the "write panel acknowledgement" suite

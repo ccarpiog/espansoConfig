@@ -55,7 +55,12 @@ import {
 } from '../browser/saveOutcome';
 import { CONFLICT_CAPABILITIES } from '../browser/rawEditor';
 import type { RoundTripText } from '../browser/rawEditor';
-import { makeDocument, makeSummary } from '../browser/fixtures';
+import {
+  makeDocument,
+  makeSummary,
+  scriptedAcknowledgement,
+  type ScriptedAcknowledgement
+} from '../browser/fixtures';
 import { DICTIONARIES, translate, type TranslationKey } from '../i18n/dictionaries';
 import { locale } from '../stores/locale.svelte';
 import type {
@@ -80,6 +85,7 @@ import {
 } from '../browser/observationDelivery';
 import { codePointLabel } from '../browser/sourceText';
 import { LOCALES, type Locale } from '../i18n/locale';
+import { reconciliationRefusalKey, type ReconciliationRefusal } from '../browser/reconciliationStatus';
 
 /** The revision the text was read at. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -255,6 +261,7 @@ function mountEditor(
   const component = mount(RawEditor, {
     target,
     props: {
+      acknowledgement: acknowledging.port,
       file: FILE,
       baseRevision: BASE,
       reportReceiver: (reported: ObservationReceiver): SurfaceBinding => {
@@ -433,7 +440,15 @@ function recoveryNote(target: HTMLElement): string | null {
   return note?.getAttribute(RECOVERY_WITHOUT_CREATION_ATTRIBUTE) ?? null;
 } // End of function recoveryNote()
 
+/**
+ * The acknowledgement port every mount here is handed (Phase 2d-6-9b-2), fresh for
+ * each case: it predicts an enabled control and accepts a press until a case
+ * scripts otherwise, and records which source each press minted from.
+ */
+let acknowledging: ScriptedAcknowledgement = scriptedAcknowledgement();
+
 beforeEach(() => {
+  acknowledging = scriptedAcknowledgement();
   // The dictionary this file matches against is the English one, so the
   // interface is pinned to it rather than left to whatever `navigator.languages`
   // says under the runner.
@@ -1533,9 +1548,11 @@ describe('the raw editor under an external conflict, in English and Spanish — 
     editor.deliver(retainedDelivery(observed(5)));
 
     // A held reading is a restriction on sending alone (2d-6-5 §1.2): the box
-    // stays editable, the save is off, and the sentence under it says why.
+    // stays editable and the save is off. The sentence that says why is the
+    // pane's, drawn once above this panel since Phase 2d-6-9b-2, never this
+    // panel's (`ReconciliationStatus.test.ts` reads it there).
     const save = controlIn(editor.target, lang, 'browser.rawEditor.save');
-    expect(editor.target.textContent).toContain(
+    expect(editor.target.textContent).not.toContain(
       translate(lang, 'browser.externalConflict.observationRetained')
     );
     expect(textArea(editor.target).readOnly).toBe(false);
@@ -1707,10 +1724,13 @@ describe('the raw editor under an external conflict, in English and Spanish — 
     const editor = editedEditor(lang);
     editor.deliver(raisedBy(observed(5), true));
 
-    expect(editor.target.textContent).toContain(
+    // The sentence is the pane's since Phase 2d-6-9b-2; this panel draws the
+    // acknowledgement instead (the suite at the end of this file).
+    expect(editor.target.textContent).not.toContain(
       translate(lang, 'browser.externalConflict.writeOutcomeUnknown')
     );
     const panel = externalPanel(editor.target);
+    expect(buttonIn(panel, lang, 'browser.externalConflict.action.acknowledgeSnapshot')).not.toBeNull();
     expect(buttonIn(panel, lang, CHOICE.keepEditing)).not.toBeNull();
     expect(buttonIn(panel, lang, CHOICE.copyDraft)).not.toBeNull();
     expect(buttonIn(panel, lang, CHOICE.reloadDiskVersion)).toBeNull();
@@ -1795,3 +1815,152 @@ describe('the raw editor under an external conflict, in English and Spanish — 
     editor.stop();
   }); // End of the "refusal kept as history" case
 }); // End of the "raw editor under an external conflict" suite
+
+/**
+ * The button labelled with one key's rendering in one language, or `null` —
+ * Phase 2d-6-9b-2's acknowledgement cases.
+ *
+ * @param scope - Where to look.
+ * @param lang - The language the case runs in.
+ * @param key - The key holding the label.
+ * @returns The button, or `null`.
+ */
+function labelledIn(scope: HTMLElement, lang: Locale, key: TranslationKey): HTMLButtonElement | null {
+  const label = translate(lang, key);
+  return [...scope.querySelectorAll('button')].find((each) => each.textContent?.trim() === label) ?? null;
+} // End of function labelledIn()
+
+/**
+ * The external conflict's own panel, for the acknowledgement cases.
+ *
+ * @param target - Where the component was mounted.
+ * @returns The panel.
+ */
+function externalConflictPanel(target: HTMLElement): HTMLElement {
+  const found = target.querySelector<HTMLElement>('.panel.external');
+  if (found === null) {
+    throw new Error('this case needs the external conflict panel');
+  }
+  return found;
+} // End of function externalConflictPanel()
+
+/** The acknowledgement's label key, shared with the workspace route. */
+const ACKNOWLEDGE_SNAPSHOT: TranslationKey = 'browser.externalConflict.action.acknowledgeSnapshot';
+
+/** This panel's reload choice, whose presence says whether the reload is withheld. */
+const RELOAD_CHOICE = conflictChoiceKey('reloadDiskVersion', 'authoredText');
+
+describe('The raw editor acknowledges an unknown write outcome on its own panel, in English and Spanish — Phase 2d-6-9b-2', () => {
+  // The pane draws the unknown-outcome sentence once, above this panel
+  // (`FileReconciliationStatus.svelte`); this panel draws only the control, under
+  // the disk snapshot it is about, and mints from its own conflict's source
+  // through the port `DetailPane.svelte` hands it. The port is scripted here
+  // (`scriptedAcknowledgement` in `../browser/fixtures.ts`); the window's own is
+  // `ReconciliationStatus.test.ts`'s.
+
+  /**
+   * Mounts the panel and brings it to the point where a conflict can be shown.
+   *
+   * @param lang - The language the case runs in.
+   * @returns The mounted panel.
+   */
+  async function opened(lang: Locale): Promise<Mounted> {
+    locale.setOverride(lang);
+    const mounted = editedEditor(lang);
+    return mounted;
+  } // End of function opened()
+
+  /**
+   * One observation of the panel's file.
+   *
+   * @returns A fresh observation, so its source is its own.
+   */
+  function seenChange(): ExternalConflictObservation {
+    return observed(5);
+  } // End of function seenChange()
+
+  it.each(LOCALES)('offers it under the disk snapshot, mints from the conflict it shows, and offers the reload again (%s)', async (lang) => {
+    const mounted = await opened(lang);
+    const seen = seenChange();
+    mounted.deliver(arbitratedDelivery(null, seen, true));
+
+    const panel = externalConflictPanel(mounted.target);
+    const acknowledge = labelledIn(panel, lang, ACKNOWLEDGE_SNAPSHOT);
+    expect(acknowledge?.disabled).toBe(false);
+    // Under the snapshot it is about: the disk text comes first in the panel.
+    const text = panel.textContent ?? '';
+    expect(text.indexOf('observedondisk')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('observedondisk')).toBeLessThan(text.indexOf(translate(lang, ACKNOWLEDGE_SNAPSHOT)));
+    // The unknown-outcome sentence is the pane's and never this panel's.
+    expect(mounted.target.textContent).not.toContain(
+      translate(lang, 'browser.externalConflict.writeOutcomeUnknown')
+    );
+    expect(labelledIn(panel, lang, RELOAD_CHOICE)).toBeNull();
+
+    acknowledge?.click();
+    flushSync();
+    // One press, minted from the very source this panel shows.
+    expect(acknowledging.asked).toHaveLength(1);
+    expect(acknowledging.asked[0]).toBe(externalConflictSource(seen));
+    const after = externalConflictPanel(mounted.target);
+    expect(labelledIn(after, lang, ACKNOWLEDGE_SNAPSHOT)).toBeNull();
+    // The reload is offered again, from its idle step, and nothing was adopted.
+    expect(labelledIn(after, lang, RELOAD_CHOICE)).not.toBeNull();
+    expect(mounted.adoptions).toEqual([]);
+    mounted.stop();
+  }); // End of the "acknowledged" case
+
+  it.each(LOCALES)('draws it disabled with its refusal and this panel’s exits, and keeps the reload withheld (%s)', async (lang) => {
+    const cases: readonly (readonly [ReconciliationRefusal, TranslationKey | null])[] = [
+      ['projectionReplaced', 'browser.reconciliation.surface.observationExit'],
+      ['superseded', 'browser.reconciliation.surface.observationExit'],
+      ['holdMoved', 'browser.reconciliation.surface.holdEnded'],
+      ['writeInFlight', null]
+    ];
+    for (const [refusal, note] of cases) {
+      acknowledging.refusal = refusal;
+      const mounted = await opened(lang);
+      mounted.deliver(arbitratedDelivery(null, seenChange(), true));
+
+      const panel = externalConflictPanel(mounted.target);
+      expect(labelledIn(panel, lang, ACKNOWLEDGE_SNAPSHOT)?.disabled).toBe(true);
+      const text = panel.textContent ?? '';
+      expect(text).toContain(translate(lang, reconciliationRefusalKey(refusal)));
+      for (const exit of [
+        'browser.reconciliation.surface.observationExit',
+        'browser.reconciliation.surface.holdEnded'
+      ] as const) {
+        expect(text.includes(translate(lang, exit))).toBe(exit === note);
+      }
+      expect(labelledIn(panel, lang, RELOAD_CHOICE)).toBeNull();
+      mounted.stop();
+    } // End of the loop over the four refusals
+  }); // End of the "disabled" case
+
+  it.each(LOCALES)('draws a refused press’s reason once and changes nothing (%s)', async (lang) => {
+    acknowledging.answer = 'holdMoved';
+    const mounted = await opened(lang);
+    mounted.deliver(arbitratedDelivery(null, seenChange(), true));
+
+    labelledIn(externalConflictPanel(mounted.target), lang, ACKNOWLEDGE_SNAPSHOT)?.click();
+    flushSync();
+    expect(acknowledging.asked).toHaveLength(1);
+    const panel = externalConflictPanel(mounted.target);
+    const sentence = translate(lang, 'browser.reconciliation.refusal.holdMoved');
+    expect((panel.textContent ?? '').split(sentence)).toHaveLength(2);
+    // The window said no, so the session is as it was: still withholding.
+    expect(labelledIn(panel, lang, ACKNOWLEDGE_SNAPSHOT)).not.toBeNull();
+    expect(labelledIn(panel, lang, RELOAD_CHOICE)).toBeNull();
+    mounted.stop();
+  }); // End of the "refused press" case
+
+  it.each(LOCALES)('offers nothing to acknowledge over a conflict raised under no uncertainty (%s)', async (lang) => {
+    const mounted = await opened(lang);
+    mounted.deliver(arbitratedDelivery(null, seenChange(), false));
+
+    const panel = externalConflictPanel(mounted.target);
+    expect(labelledIn(panel, lang, ACKNOWLEDGE_SNAPSHOT)).toBeNull();
+    expect(labelledIn(panel, lang, RELOAD_CHOICE)).not.toBeNull();
+    mounted.stop();
+  }); // End of the "nothing owed" case
+}); // End of the "own acknowledgement" suite

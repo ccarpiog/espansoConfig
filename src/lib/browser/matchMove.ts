@@ -3431,9 +3431,10 @@ export interface MatchMoveView {
    * The lines owed while an observation cannot be acted on — Phase 2d-6-4.
    *
    * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
-   * own fields. `MatchMover.svelte` draws them through
-   * {@link MatchMoveView.noticesBesideRefusal} since Phase 2d-6-7b; the control
-   * that acknowledges the second is 2d-6-9's.
+   * own fields. Since Phase 2d-6-9b-2 no renderer draws them as sentences: the pane's
+   * `FileReconciliationStatus.svelte` block says both states once, above the panel,
+   * and `MatchMover.svelte` reads this list only through `surfaceAcknowledgementOwed` in
+   * `./reconciliationStatus.ts`, to decide whether to draw the acknowledgement.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
   /**
@@ -3443,7 +3444,10 @@ export interface MatchMoveView {
    * `observationRetained` is rendered through the retained notice's own sentence
    * ({@link moveSubmissionRefusalKey}), so a panel drawing the refusal and every
    * notice would print it twice. `noticesBesideRefusal` in
-   * `./observationDelivery.ts` is the rule; this is what the panel draws.
+   * `./observationDelivery.ts` is the rule.
+   * **No renderer reads it since Phase 2d-6-9b-2**, when the panels stopped drawing
+   * their notices; it is kept as a tested value and its removal is an open item of
+   * that phase's record.
    */
   readonly noticesBesideRefusal: readonly ExternalConflictNotice[];
   /**
