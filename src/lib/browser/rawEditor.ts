@@ -114,9 +114,10 @@
  *
  * **`RawEditor.svelte` reports this receiver since Phase 2d-6-8a**, and
  * `DetailPane.svelte` registers it through `./surfaceReceivers.ts` over the
- * editor's file. The result is not drawn deliberately yet: `RawEditor.svelte`
- * draws neither the external conflict's own lines nor the two notices — that
- * is 2d-6-8b's.
+ * editor's file. Since Phase 2d-6-8b `RawEditor.svelte` draws the result: an
+ * external conflict in a panel of its own outside the save-outcome branch, with
+ * its origin, its lines, its one revision and the comparison, and the two
+ * notices under the save control.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -1712,15 +1713,17 @@ export interface RawEditorView {
    * Beside {@link RawEditorView.messages} and never merged into it, for
    * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
    * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
-   * twice. Rendered through `tConflictMessage`. No component reads it yet;
-   * 2d-6-8 does.
+   * twice. Rendered through `tConflictMessage`; `RawEditor.svelte` draws it in
+   * its external panel since Phase 2d-6-8b.
    */
   readonly externalMessages: readonly ConflictMessage[];
   /**
    * The lines owed while an observation cannot be acted on — Phase 2d-6-5.
    *
    * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
-   * own fields. No component reads it yet; 2d-6-8 and 2d-6-9 do.
+   * own fields. `RawEditor.svelte` draws them under its save control since Phase
+   * 2d-6-8b, which is what says why that control is off when nothing else on
+   * screen does; the acknowledgement control for the first is 2d-6-9's.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
   /** The presentation changes a saved arm disclosed, in report order. */

@@ -395,8 +395,9 @@ export function decideAutomaticReload(inputs: AutomaticReloadGuardInputs): Autom
  * `MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte` draw the
  * first three views' notices, and `MatchDeleter.svelte`, `MatchMover.svelte` and
  * `MatchDuplicator.svelte` the next three since Phase 2d-6-7b (the mover and the
- * duplicator through {@link noticesBesideRefusal}); the raw editor's and
- * restore's are 2d-6-8's.
+ * duplicator through {@link noticesBesideRefusal}), and `RawEditor.svelte` and
+ * `RestorePane.svelte` the last two since Phase 2d-6-8b (restore through
+ * `RestoreView.noticesBesideRefusal`).
  * The acknowledgement that ends the second exists
  * (`BrowserState.acknowledgeWriteUncertainty` in `./workspace.svelte.ts`, since
  * 2d-6-1b) and no component calls it — 2d-6-9 draws the control. The codes exist

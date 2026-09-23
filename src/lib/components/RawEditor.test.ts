@@ -67,6 +67,19 @@ import type {
 } from '../ipc/types';
 import RawEditor from './RawEditor.svelte';
 import type { SurfaceBinding } from '../browser/surfaceReceivers';
+import type { ObservationReceiver } from '../browser/workspace.svelte';
+import {
+  externalConflictSource,
+  standingConflictOf,
+  type ExternalConflictObservation
+} from '../browser/conflictSource';
+import {
+  arbitratedDelivery,
+  retainedDelivery,
+  type ObservationDelivery
+} from '../browser/observationDelivery';
+import { codePointLabel } from '../browser/sourceText';
+import { LOCALES, type Locale } from '../i18n/locale';
 
 /** The revision the text was read at. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -173,6 +186,12 @@ interface Mounted {
    * and one entry is what a confirmed reload owes.
    */
   readonly adoptions: ConflictModel<RoundTripText>[];
+  /**
+   * Hands the receiver this editor reported one sealed envelope, as the
+   * window's registration would, and flushes — Phase 2d-6-8b. The window's own
+   * registration and arbitration are `DetailPane.test.ts`'s.
+   */
+  readonly deliver: (delivery: ObservationDelivery) => void;
   /** Tears the component down. */
   readonly stop: () => void;
 }
@@ -228,6 +247,9 @@ function mountEditor(
   const calls: RecordedSave[] = [];
   const adoptions: ConflictModel<RoundTripText>[] = [];
   let closes = 0;
+  // The receiver the editor reports, kept so a case can deliver to it (Phase
+  // 2d-6-8b); the window's own registration is `DetailPane.test.ts`'s.
+  let receiver: ObservationReceiver | null = null;
   const target = document.createElement('div');
   document.body.append(target);
   const component = mount(RawEditor, {
@@ -235,7 +257,10 @@ function mountEditor(
     props: {
       file: FILE,
       baseRevision: BASE,
-      reportReceiver: (): SurfaceBinding => inertBinding(),
+      reportReceiver: (reported: ObservationReceiver): SurfaceBinding => {
+        receiver = reported;
+        return inertBinding();
+      },
       text: loaded,
       adoptDiskVersion: (conflict: ConflictModel<RoundTripText>): DiskAdoptionOutcome => {
         adoptions.push(conflict);
@@ -275,6 +300,10 @@ function mountEditor(
     calls,
     closed: () => closes,
     adoptions,
+    deliver: (delivery: ObservationDelivery): void => {
+      receiver?.(delivery);
+      flushSync();
+    },
     stop: () => {
       void unmount(component);
       target.remove();
@@ -1111,7 +1140,43 @@ describe('the raw editor asks for its outcome to be brought into view', () => {
     expect(scrolled[0]?.block).toBe('start');
     editor.stop();
   }); // End of the "arm replacing an arm" case
+
+  it('asks for the external panel when an observation raises a conflict (Phase 2d-6-8b)', () => {
+    const editor = mountEditor([]);
+    type(editor.target, `${ORIGINAL}# one more line\n`);
+    scrolled.length = 0;
+    editor.deliver(arbitratedDelivery(null, observed(5), false));
+
+    const panel = editor.target.querySelector('.panel.external');
+    expect(panel).not.toBeNull();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(panel);
+    expect(scrolled[0]?.block).toBe('start');
+    editor.stop();
+  });
+
+  it('reveals the external panel over a refusal kept as history, and its controls at the reload step (Phase 2d-6-8b)', async () => {
+    const editor = mountEditor([{ result: REFUSED }]);
+    type(editor.target, `${ORIGINAL}# one more line\n`);
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+    scrolled.length = 0;
+
+    editor.deliver(arbitratedDelivery(null, observed(5), false));
+
+    const panel = editor.target.querySelector('.panel.external');
+    expect(panel).not.toBeNull();
+    expect(scrolled.map((one) => one.target)).toEqual([panel]);
+    scrolled.length = 0;
+    control(editor.target, 'browser.saveOutcome.choice.reloadDiskVersion').click();
+    flushSync();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(panel?.querySelector('.choices'));
+    expect(scrolled[0]?.block).toBe('end');
+    editor.stop();
+  });
 }); // End of the "raw editor asks for its outcome" suite
+
 
 describe('the raw editor never offers *Keep my draft*', () => {
   it('draws neither the control nor the line that would stand beside it', async () => {
@@ -1279,3 +1344,454 @@ describe('what the raw editor says about recovery', () => {
     editor.stop();
   }); // End of the "dismissal ends the sentence" case
 }); // End of the "what the raw editor says about recovery" suite
+
+/** The revision a watcher observation of the file read. */
+const OBSERVED: ContentRevision = 'c'.repeat(64);
+
+/** The revision a later observation read. */
+const OBSERVED_LATER: ContentRevision = 'd'.repeat(64);
+
+/** The whole text an observation read, with a word nothing else on screen holds. */
+const OBSERVED_TEXT = 'matches:\n  - trigger: ":disk"\n    replace: observedondisk\n';
+
+/** The word that tells the observed disk text apart on screen. */
+const OBSERVED_MARKER = 'observedondisk';
+
+/**
+ * A disk text holding a lone carriage return and a CRLF — what this editor will
+ * neither draw into its box nor reseed from (`CLAUDE.md` §6). The lone one is
+ * the one a rendering can be held to: `SourceText` names it, and the DOM keeps a
+ * CRLF indistinguishable from a line feed.
+ */
+const OBSERVED_CR_TEXT = 'matches:\r\n  - trigger: ":cr"\r    replace: crondisk\n';
+
+/** The draft the cases below have typed before the file changes. */
+const EDITED = `${ORIGINAL}# one more line\n`;
+
+/**
+ * One narrowed observation of the editor's file.
+ *
+ * A fresh object every call: the memo in `../browser/conflictSource.ts` and a
+ * session's wait are both keyed on identity.
+ *
+ * @param sequence - The sequence it was admitted under.
+ * @param revision - The revision it read.
+ * @param diskText - The whole text it read.
+ * @returns The observation.
+ */
+function observed(
+  sequence: number,
+  revision: ContentRevision = OBSERVED,
+  diskText: string = OBSERVED_TEXT
+): ExternalConflictObservation {
+  return {
+    sequence,
+    document: FILE.id,
+    previousRevision: BASE,
+    diskRevision: revision,
+    diskText,
+    disk: makeDocument({ id: FILE.id, relativePath: FILE.relative_path, revision }),
+    findings: [],
+    correspondences: null
+  };
+} // End of function observed()
+
+/**
+ * The envelope a window seals for a first observation of the file.
+ *
+ * @param seen - The observation.
+ * @param uncertain - Whether the last settled write may have written.
+ * @returns The `raised` (or `raisedWithoutReload`) envelope.
+ */
+function raisedBy(seen: ExternalConflictObservation, uncertain = false): ObservationDelivery {
+  return arbitratedDelivery(null, seen, uncertain);
+} // End of function raisedBy()
+
+/**
+ * The envelope a window seals for a later observation over one that stands.
+ *
+ * @param prior - The observation whose origin stands.
+ * @param seen - The later observation.
+ * @returns The `supersedes` envelope.
+ */
+function supersededBy(
+  prior: ExternalConflictObservation,
+  seen: ExternalConflictObservation
+): ObservationDelivery {
+  return arbitratedDelivery(standingConflictOf(externalConflictSource(prior)), seen, false);
+} // End of function supersededBy()
+
+/**
+ * The text of the external conflict's own panel, or `null` when none is drawn.
+ *
+ * @param target - Where the component was mounted.
+ * @returns The panel's text.
+ */
+function externalText(target: HTMLElement): string | null {
+  return target.querySelector('.panel.external')?.textContent ?? null;
+} // End of function externalText()
+
+/**
+ * The external conflict's own panel, insisted upon.
+ *
+ * @param target - Where the component was mounted.
+ * @returns The panel.
+ */
+function externalPanel(target: HTMLElement): HTMLElement {
+  const found = target.querySelector<HTMLElement>('.panel.external');
+  if (found === null) {
+    throw new Error('this case needs the external conflict panel');
+  }
+  return found;
+} // End of function externalPanel()
+
+/**
+ * The button labelled with one key's rendering in one language, or `null`.
+ *
+ * @param scope - Where to look.
+ * @param lang - The language the case runs in.
+ * @param key - The key holding the label.
+ * @returns The button, or `null`.
+ */
+function buttonIn(scope: HTMLElement, lang: Locale, key: TranslationKey): HTMLButtonElement | null {
+  const label = translate(lang, key);
+  return (
+    [...scope.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent?.trim() === label
+    ) ?? null
+  );
+} // End of function buttonIn()
+
+/**
+ * The same button, insisted upon.
+ *
+ * @param scope - Where to look.
+ * @param lang - The language the case runs in.
+ * @param key - The key holding the label.
+ * @returns The button.
+ */
+function controlIn(scope: HTMLElement, lang: Locale, key: TranslationKey): HTMLButtonElement {
+  const found = buttonIn(scope, lang, key);
+  if (found === null) {
+    throw new Error(`this case needs the control labelled ${translate(lang, key)}`);
+  }
+  return found;
+} // End of function controlIn()
+
+/**
+ * Presses a control the screen has disabled, as a person could not and a
+ * script could — Phase 2d-6-8b's *direct submission refused*.
+ *
+ * `click()` on a disabled button dispatches nothing in jsdom, so a case that only
+ * clicked would prove the attribute and never the handler. This lifts the
+ * attribute for the one press, so the component's own handler runs and the model
+ * door behind it is what refuses.
+ *
+ * @param control_ - The disabled button.
+ */
+function forcePress(control_: HTMLButtonElement): void {
+  expect(control_.disabled).toBe(true);
+  control_.disabled = false;
+  control_.click();
+} // End of function forcePress()
+
+/**
+ * An editor whose draft is edited, so a save would be offered.
+ *
+ * @param lang - The language the case runs in.
+ * @param adoption - What the window answers when asked to adopt.
+ * @returns The mounted editor.
+ */
+function editedEditor(lang: Locale, adoption: DiskAdoptionOutcome = 'installed'): Mounted {
+  locale.setOverride(lang);
+  const editor = mountEditor([{ result: COMMITTED }], ORIGINAL, adoption);
+  type(editor.target, EDITED);
+  expect(controlIn(editor.target, lang, 'browser.rawEditor.save').disabled).toBe(false);
+  return editor;
+} // End of function editedEditor()
+
+/** The raw editor's conflict choices, labelled by its own draft kind. */
+const CHOICE = {
+  keepEditing: conflictChoiceKey('keepEditing', CONFLICT_CAPABILITIES.draftKind),
+  copyDraft: conflictChoiceKey('copyDraft', CONFLICT_CAPABILITIES.draftKind),
+  reloadDiskVersion: conflictChoiceKey('reloadDiskVersion', CONFLICT_CAPABILITIES.draftKind),
+  confirmReload: conflictChoiceKey('confirmReload', CONFLICT_CAPABILITIES.draftKind),
+  keepMyDraft: conflictChoiceKey('keepMyDraft', CONFLICT_CAPABILITIES.draftKind)
+} as const;
+
+describe('the raw editor under an external conflict, in English and Spanish — Phase 2d-6-8b', () => {
+  // **2d-6-8's acceptance for this editor, read off the screen** (the 2d-6
+  // record's §3 entries 23, 34 and 35). The receiver is the one the editor
+  // reported, handed envelopes the real `arbitratedDelivery` / `retainedDelivery`
+  // sealed; the window's own registration and arbitration are
+  // `DetailPane.test.ts`'s. Every sentence is pinned to its dictionary value in
+  // the case's locale: that protects which code is drawn where, never the
+  // quality of a translation.
+
+  it.each(LOCALES)('says a reading waits under Save, keeps the box editable, and a forced save sends nothing (%s)', async (lang) => {
+    const editor = editedEditor(lang);
+    editor.deliver(retainedDelivery(observed(5)));
+
+    // A held reading is a restriction on sending alone (2d-6-5 §1.2): the box
+    // stays editable, the save is off, and the sentence under it says why.
+    const save = controlIn(editor.target, lang, 'browser.rawEditor.save');
+    expect(editor.target.textContent).toContain(
+      translate(lang, 'browser.externalConflict.observationRetained')
+    );
+    expect(textArea(editor.target).readOnly).toBe(false);
+    expect(externalText(editor.target)).toBeNull();
+    forcePress(save);
+    await settle();
+    expect(editor.calls).toEqual([]);
+    editor.stop();
+  }); // End of the "held reading" case
+
+  it.each(LOCALES)('draws the origin, its lines, its revision and the comparison, freezes the box, and a forced save sends nothing (%s)', async (lang) => {
+    const editor = editedEditor(lang);
+    editor.deliver(raisedBy(observed(5)));
+
+    const shown = externalText(editor.target);
+    expect(shown).not.toBeNull();
+    // The origin and the observation's own lines — and none of a save's.
+    expect(shown).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(shown).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.draftKeptInMemory'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.reloadDiscardsDraft'));
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: OBSERVED })
+    );
+    const all = editor.target.textContent ?? '';
+    expect(all).not.toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
+    expect(all).not.toContain(translate(lang, 'browser.saveOutcome.changedElsewhere'));
+    expect(all).not.toContain(translate(lang, 'browser.saveOutcome.nothingWasWritten'));
+    expect(all).not.toContain(translate(lang, 'browser.rawEditor.revisionExpected', { revision: BASE }));
+    // The comparison: the draft in the frozen box beside the whole disk text.
+    expect(textArea(editor.target).value).toBe(EDITED);
+    expect(textArea(editor.target).readOnly).toBe(true);
+    expect(shown).toContain(translate(lang, 'browser.rawEditor.diskVersion'));
+    expect(shown).toContain(OBSERVED_MARKER);
+    // The three choices, and never *Keep my draft* (`reapplySupport: 'unavailable'`).
+    const panel = externalPanel(editor.target);
+    for (const key of [CHOICE.keepEditing, CHOICE.copyDraft, CHOICE.reloadDiskVersion]) {
+      expect(buttonIn(panel, lang, key)).not.toBeNull();
+    } // End of the loop over the three offered choices
+    expect(buttonIn(panel, lang, CHOICE.keepMyDraft)).toBeNull();
+    // Recovery is the shared sentence for a whole document.
+    expect(recoveryNote(editor.target)).toBe('wholeDocumentDraft');
+    // **Direct submission is refused**, past the disabled control too.
+    forcePress(controlIn(editor.target, lang, 'browser.rawEditor.save'));
+    await settle();
+    expect(editor.calls).toEqual([]);
+    expect(editor.adoptions).toEqual([]);
+    editor.stop();
+  }); // End of the "origin and comparison" case
+
+  it.each(
+    LOCALES.flatMap((lang) =>
+      (['installed', 'alreadyThere', 'refused'] as const).map((adoption) => [lang, adoption] as const)
+    )
+  )('reseeds the box from the disk version in two steps, on what the window answers (%s, %s)', (lang, adoption) => {
+    const editor = editedEditor(lang, adoption);
+    const seen = observed(5);
+    editor.deliver(raisedBy(seen));
+    controlIn(externalPanel(editor.target), lang, CHOICE.reloadDiskVersion).click();
+    flushSync();
+    expect(editor.adoptions).toEqual([]);
+    controlIn(externalPanel(editor.target), lang, CHOICE.confirmReload).click();
+    flushSync();
+
+    // One adoption, of this observation's conflict and no other.
+    expect(editor.adoptions).toHaveLength(1);
+    expect(editor.adoptions[0]?.source).toBe(externalConflictSource(seen));
+    if (adoption === 'refused') {
+      // Nothing is reseeded over a window that did not move, and the control that
+      // has just gone is replaced by the reason.
+      expect(textArea(editor.target).value).toBe(EDITED);
+      expect(externalText(editor.target)).toContain(
+        translate(lang, reloadUnavailableKey(CONFLICT_CAPABILITIES.draftKind))
+      );
+      expect(buttonIn(externalPanel(editor.target), lang, CHOICE.reloadDiskVersion)).toBeNull();
+    } else {
+      // **Reseeded, not closed and not retargeted**: the box holds the disk text,
+      // takes edits again, and the panel is gone.
+      expect(textArea(editor.target).value).toBe(OBSERVED_TEXT);
+      expect(textArea(editor.target).readOnly).toBe(false);
+      expect(externalText(editor.target)).toBeNull();
+      expect(editor.target.textContent).not.toContain(translate(lang, 'browser.rawEditor.unsaved'));
+      expect(controlIn(editor.target, lang, 'browser.rawEditor.save').disabled).toBe(true);
+    }
+    expect(editor.closed()).toBe(0);
+    expect(editor.calls).toEqual([]);
+    editor.stop();
+  }); // End of the "two-step reseed" case
+
+  it.each(LOCALES)('keeps the conflict through Keep editing, and resets the reload step (%s)', (lang) => {
+    const editor = editedEditor(lang);
+    editor.deliver(raisedBy(observed(5)));
+    controlIn(externalPanel(editor.target), lang, CHOICE.reloadDiskVersion).click();
+    flushSync();
+    expect(buttonIn(externalPanel(editor.target), lang, CHOICE.confirmReload)).not.toBeNull();
+
+    controlIn(externalPanel(editor.target), lang, CHOICE.keepEditing).click();
+    flushSync();
+
+    // The first step is back; the conflict stands (entry 9), so the box stays
+    // frozen and nothing can be sent.
+    expect(buttonIn(externalPanel(editor.target), lang, CHOICE.confirmReload)).toBeNull();
+    expect(buttonIn(externalPanel(editor.target), lang, CHOICE.reloadDiskVersion)).not.toBeNull();
+    expect(textArea(editor.target).readOnly).toBe(true);
+    expect(controlIn(editor.target, lang, 'browser.rawEditor.save').disabled).toBe(true);
+    expect(editor.adoptions).toEqual([]);
+    editor.stop();
+  }); // End of the "keep editing" case
+
+  it.each(LOCALES)('copies the draft under the conflict, and a later reading withdraws the disclosure (%s)', async (lang) => {
+    const original = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      writable: true,
+      value: (command: string): boolean => command === 'copy'
+    });
+    try {
+      const editor = editedEditor(lang);
+      const first = observed(5);
+      editor.deliver(raisedBy(first));
+      controlIn(externalPanel(editor.target), lang, CHOICE.copyDraft).click();
+      await settle();
+      expect(externalText(editor.target)).toContain(translate(lang, 'browser.rawEditor.draftCopied'));
+
+      editor.deliver(supersededBy(first, observed(6, OBSERVED_LATER)));
+
+      // Entry 12: the disclosure was about the conflict that was on screen, and a
+      // replaced conflict is a different snapshot nothing was copied of.
+      expect(externalText(editor.target)).not.toContain(translate(lang, 'browser.rawEditor.draftCopied'));
+      expect(textArea(editor.target).value).toBe(EDITED);
+      editor.stop();
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(document, 'execCommand');
+      } else {
+        Object.defineProperty(document, 'execCommand', original);
+      }
+    }
+  }); // End of the "copy disclosure withdrawn" case
+
+  it.each(LOCALES)('withdraws the reload warning when a later reading supersedes the conflict (%s)', (lang) => {
+    const editor = editedEditor(lang);
+    const first = observed(5);
+    editor.deliver(raisedBy(first));
+    controlIn(externalPanel(editor.target), lang, CHOICE.reloadDiskVersion).click();
+    flushSync();
+    expect(buttonIn(externalPanel(editor.target), lang, CHOICE.confirmReload)).not.toBeNull();
+
+    editor.deliver(supersededBy(first, observed(6, OBSERVED_LATER)));
+
+    // Entry 12: the confirmation collected for the first conflict is not
+    // spendable against this one, and its second step does not stay on screen.
+    expect(buttonIn(externalPanel(editor.target), lang, CHOICE.confirmReload)).toBeNull();
+    expect(buttonIn(externalPanel(editor.target), lang, CHOICE.reloadDiskVersion)).not.toBeNull();
+    const shown = externalText(editor.target) ?? '';
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: OBSERVED_LATER })
+    );
+    expect(shown).not.toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: OBSERVED })
+    );
+    // The draft is the superseded conflict's own, still in the frozen box.
+    expect(textArea(editor.target).value).toBe(EDITED);
+    expect(editor.adoptions).toEqual([]);
+    editor.stop();
+  }); // End of the "supersession" case
+
+  it.each(LOCALES)('withholds the reload while an earlier write’s outcome is unknown (%s)', (lang) => {
+    const editor = editedEditor(lang);
+    editor.deliver(raisedBy(observed(5), true));
+
+    expect(editor.target.textContent).toContain(
+      translate(lang, 'browser.externalConflict.writeOutcomeUnknown')
+    );
+    const panel = externalPanel(editor.target);
+    expect(buttonIn(panel, lang, CHOICE.keepEditing)).not.toBeNull();
+    expect(buttonIn(panel, lang, CHOICE.copyDraft)).not.toBeNull();
+    expect(buttonIn(panel, lang, CHOICE.reloadDiskVersion)).toBeNull();
+    editor.stop();
+  }); // End of the "unknown outcome" case
+
+  it.each(LOCALES)('names the carriage returns of a disk version it will not reseed from, and a forced reload loads nothing (%s)', (lang) => {
+    const editor = editedEditor(lang);
+    editor.deliver(raisedBy(observed(5, OBSERVED, OBSERVED_CR_TEXT)));
+    controlIn(externalPanel(editor.target), lang, CHOICE.reloadDiskVersion).click();
+    flushSync();
+
+    const shown = externalText(editor.target) ?? '';
+    // **Disclosed, not normalized**: the disk text is drawn through `SourceText`,
+    // which names the lone carriage return, and the reload's own refusal sentence
+    // stands beside it.
+    expect(shown).toContain(
+      translate(lang, 'browser.source.invisible.carriageReturn', { code: codePointLabel('\r') })
+    );
+    expect(shown).toContain('crondisk');
+    expect(shown).toContain(translate(lang, 'browser.rawEditor.diskLineEndingsNotPreserved'));
+    expect(shown).not.toContain(translate(lang, 'browser.rawEditor.lineEndingsNotPreserved'));
+    // Never into a box: the editor's own box is the only one, and it holds the
+    // draft, which has no carriage return.
+    expect(editor.target.querySelectorAll('textarea, input')).toHaveLength(1);
+    expect(textArea(editor.target).value).toBe(EDITED);
+    forcePress(controlIn(externalPanel(editor.target), lang, CHOICE.confirmReload));
+    flushSync();
+    expect(editor.adoptions).toEqual([]);
+    expect(textArea(editor.target).value).toBe(EDITED);
+    editor.stop();
+  }); // End of the "carriage returns on disk" case
+
+  it.each(LOCALES)('keeps its session across a change of language (%s)', (lang) => {
+    const editor = editedEditor(lang);
+    editor.deliver(raisedBy(observed(5)));
+    controlIn(externalPanel(editor.target), lang, CHOICE.reloadDiskVersion).click();
+    flushSync();
+
+    const other: Locale = lang === 'en' ? 'es' : 'en';
+    locale.setOverride(other);
+    flushSync();
+
+    // The same step of the same conflict, now in the other language.
+    const shown = externalText(editor.target) ?? '';
+    expect(shown).toContain(translate(other, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(buttonIn(externalPanel(editor.target), other, CHOICE.confirmReload)).not.toBeNull();
+    expect(textArea(editor.target).value).toBe(EDITED);
+    editor.stop();
+  }); // End of the "language switch" case
+
+  it.each(LOCALES)('names a save as the origin of a save conflict, beside its three revisions (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const editor = mountEditor([{ result: CONFLICTED }]);
+    type(editor.target, EDITED);
+    controlIn(editor.target, lang, 'browser.rawEditor.save').click();
+    await settle();
+
+    const all = editor.target.textContent ?? '';
+    expect(all).toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
+    expect(all).toContain(translate(lang, 'browser.rawEditor.revisionExpected', { revision: BASE }));
+    expect(all).not.toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(externalText(editor.target)).toBeNull();
+    editor.stop();
+  }); // End of the "save origin" case
+
+  it.each(LOCALES)('withdraws Save anyway under a refusal kept as history once the file changes (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const editor = mountEditor([{ result: REFUSED }]);
+    type(editor.target, EDITED);
+    controlIn(editor.target, lang, 'browser.rawEditor.save').click();
+    await settle();
+    expect(buttonIn(editor.target, lang, 'browser.rawSave.choice.saveAnyway')).not.toBeNull();
+
+    editor.deliver(raisedBy(observed(5)));
+
+    // The refusal stays as history (entry 7) with only its dismissal: *Save
+    // anyway* would reach a door that refuses it.
+    expect(buttonIn(editor.target, lang, 'browser.rawSave.choice.saveAnyway')).toBeNull();
+    expect(externalText(editor.target)).not.toBeNull();
+    expect(editor.calls).toHaveLength(1);
+    editor.stop();
+  }); // End of the "refusal kept as history" case
+}); // End of the "raw editor under an external conflict" suite

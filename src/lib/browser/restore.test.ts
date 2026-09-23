@@ -4181,3 +4181,80 @@ describe('the external session — Phase 2d-6-5', () => {
     }); // End of the "delivery made by the queue read" case
   }); // End of the "against the installed session" suite
 }); // End of the "external session" suite
+
+describe('a candidate dropped under a standing conflict — Phase 2d-6-8b, 2d-6-5 §4 item 12', () => {
+  // **The decision: the lines follow the live preview, derived at the view.**
+  // `chooseBatch` and `chooseEntry` stay open under a conflict of either origin —
+  // freezing the selection would take the catalogue away from a person who is
+  // only looking — so a candidate can be dropped while the panel stands. What
+  // must not survive the drop is a sentence saying the candidate is kept: the
+  // model's `operationKeptInMemory` and `reloadRetargetsCandidate` lines, the
+  // operation summary naming *the backup entry selected here*, and the
+  // reload-unavailable sentence that says *what you asked for here is still set
+  // up*. Each is decided by `restoreView` from `session.preview` on every read.
+
+  /** The two lines that describe a retained candidate. */
+  const CANDIDATE_LINES = ['operationKeptInMemory', 'reloadRetargetsCandidate'];
+
+  /**
+   * A session showing a save conflict over its candidate.
+   *
+   * @returns The session.
+   */
+  async function saveConflicted(): Promise<RestoreSession> {
+    const { session } = await roundTrip(pending(), conflictResult(ELSEWHERE));
+    return session;
+  } // End of function saveConflicted()
+
+  it('keeps every candidate line while the candidate is retained', async () => {
+    const session = await saveConflicted();
+    const view = restoreView(session, at(BASE));
+    expect(view.messages.map((line) => line.kind)).toEqual(
+      expect.arrayContaining(CANDIDATE_LINES)
+    );
+    expect(view.conflictOperation).toBe('replaceFileFromBackup');
+    const over = applyRestoreObservation(withCandidate(), watched.raised(watched.observation()));
+    expect(restoreView(over, at(BASE)).externalMessages.map((line) => line.kind)).toEqual([
+      'fileChangedWhileOpen',
+      ...CANDIDATE_LINES
+    ]);
+  }); // End of the "kept while retained" case
+
+  it.each([
+    ['another batch is chosen', (held: RestoreSession) => chooseBatch(held, { name: 'another' })],
+    ['another entry is chosen', (held: RestoreSession) => chooseEntry(held, entryOf('match/other.yml').id)]
+  ] as const)('says nothing about a kept candidate on a save conflict once %s', async (_name, drop) => {
+    const dropped = drop(await saveConflicted());
+    expect(dropped.preview).toBeNull();
+    // The conflict itself stands: dropping a candidate resolves nothing.
+    expect(conflictOf(dropped)).not.toBeNull();
+    const view = restoreView(dropped, at(BASE));
+    const kinds = view.messages.map((line) => line.kind);
+    expect(kinds).toContain('nothingWasWritten');
+    expect(kinds.filter((kind) => CANDIDATE_LINES.includes(kind))).toEqual([]);
+    expect(view.conflictOperation).toBeNull();
+  }); // End of the "save conflict, dropped" cases
+
+  it('says nothing about a kept candidate on an external conflict once it is dropped', () => {
+    const over = applyRestoreObservation(withCandidate(), watched.raised(watched.observation()));
+    const dropped = chooseEntry(over, entryOf('match/other.yml').id);
+    expect(dropped.preview).toBeNull();
+    expect(dropped.externalConflict).not.toBeNull();
+    const view = restoreView(dropped, at(BASE));
+    expect(view.externalMessages.map((line) => line.kind)).toEqual(['fileChangedWhileOpen']);
+    expect(view.conflictOperation).toBeNull();
+  }); // End of the "external conflict, dropped" case
+
+  it('names the reload-unavailable line by whether a candidate is still retained', async () => {
+    const session = await saveConflicted();
+    const confirmed = confirmDiskReload(askToReloadDiskVersion(session));
+    const refused = reloadTheDiskVersion(confirmed, adopting('refused').adopt, () => confirmed);
+    const kept = restoreView(refused, at(BASE));
+    expect(kept.reloadUnavailable).toBe(true);
+    expect(kept.reloadUnavailableLine).toBe('candidateKept');
+    const dropped = restoreView(chooseBatch(refused, { name: 'another' }), at(BASE));
+    expect(dropped.reloadUnavailable).toBe(true);
+    expect(dropped.reloadUnavailableLine).toBe('noCandidate');
+    expect(restoreView(session, at(BASE)).reloadUnavailableLine).toBeNull();
+  }); // End of the "reload-unavailable line" case
+}); // End of the "candidate dropped under a standing conflict" suite

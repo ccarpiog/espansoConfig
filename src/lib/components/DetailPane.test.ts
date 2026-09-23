@@ -279,6 +279,17 @@ interface PaneScript {
   readonly saveRawDocument?: () => Promise<RawSaveOutcome>;
   /** The batches the drain answers, in order; past the end it refuses. */
   readonly batches?: CommandResult<ReconciliationBatch>[];
+  /**
+   * What `reload_document` answers for one file, or `undefined` to answer the
+   * held projection as every earlier case did (Phase 2d-6-8b). Read at each call,
+   * so a case can move the file on between two wakes.
+   */
+  readonly reloadDocument?: (id: DocumentId) => DocumentView | undefined;
+  /**
+   * What `document_text` answers for one file, or `undefined` to answer
+   * {@link FILE_TEXT} for `match/a.yml` as every earlier case did (Phase 2d-6-8b).
+   */
+  readonly documentText?: (id: DocumentId) => string | undefined;
 }
 
 /**
@@ -326,10 +337,18 @@ function scriptedCommands(
     // replacement answers the projection the write installed rather than the one
     // it replaced.
     reloadDocument: vi.fn(async (id: number): Promise<CommandResult<DocumentView>> => {
+      const moved = script.reloadDocument?.(id);
+      if (moved !== undefined) {
+        views.set(id, moved);
+      }
       const held = views.get(id);
       return held === undefined ? refusal : { ok: true, value: held };
     }),
     documentText: vi.fn(async (id: number): Promise<CommandResult<string>> => {
+      const scripted = script.documentText?.(id);
+      if (scripted !== undefined) {
+        return { ok: true, value: scripted };
+      }
       return id === 1 ? { ok: true, value: FILE_TEXT } : refusal;
     }),
     moveMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
@@ -3080,3 +3099,196 @@ describe('the conflict panels’ drawn sentences, in English and Spanish — Pha
     }
   ); // End of the "settlement drawn in order" case
 }); // End of the "drawn sentences" suite
+
+describe('the raw editor’s and restore’s drawn sentences through the pane, in English and Spanish — Phase 2d-6-8b', () => {
+  // **Read off the screen through the real registry and coordinator boundary**,
+  // so the sentences `RawEditor.test.ts` and `RestorePane.test.ts` read through a
+  // reported receiver are shown to be what a real delivery produces too (the
+  // 2d-6 record's §3 entries 34 and 35). Opened by the pane's own controls, a
+  // finite drain queue counted exactly, a wake admitted by the coordinator.
+
+  /**
+   * Opens one of the two surfaces and arms its send: the raw editor's box
+   * edited, restore's candidate read.
+   *
+   * @param pane - The mounted pane.
+   * @param kind - Which surface.
+   */
+  async function armed(pane: Mounted, kind: 'rawEditor' | 'restore'): Promise<void> {
+    await WALKS[kind].open(pane);
+    flushSync();
+    if (kind === 'rawEditor') {
+      const body = box(pane.target, 'textarea');
+      body.value = `${body.value}# edited\n`;
+      body.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      return;
+    }
+    control(pane.target, 'browser.restore.listBatches').click();
+    await settle();
+    control(pane.target, 'browser.restore.batchNamed', { name: BATCH.name }).click();
+    await settle();
+    entryControl(pane.target, 'match/a.yml').click();
+    await settle();
+  } // End of function armed()
+
+  it.each(
+    (['rawEditor', 'restore'] as const).flatMap((kind) => LOCALES.map((lang) => [kind, lang] as const))
+  )('an open %s draws the external origin, its revision and the comparison, and refuses to send (%s)', async (kind, lang) => {
+    expectedDrains = 3;
+    const events = paneEvents();
+    const pane = await mountPane(
+      true,
+      { batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])] },
+      events.source
+    );
+    await armed(pane, kind);
+    locale.setOverride(lang);
+    flushSync();
+    expect(isDrawn(pane.target, '.panel.external')).toBe(false);
+
+    events.wake(5, 5);
+    await settleWake();
+
+    const panel = drawn(pane.target, '.panel.external');
+    expect(panel).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(panel).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    expect(panel).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: 'c'.repeat(64) })
+    );
+    expect(panel).toContain('ondisk');
+    expect(panel).not.toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
+    expect(panel).not.toContain(translate(lang, 'browser.saveOutcome.changedElsewhere'));
+    if (kind === 'rawEditor') {
+      // The reseed is what this editor's reload does, and the box is frozen.
+      expect(panel).toContain(translate(lang, 'browser.saveOutcome.reloadDiscardsDraft'));
+      expect(panel).toContain(translate(lang, 'browser.rawEditor.diskVersion'));
+      expect((box(pane.target, 'textarea') as HTMLTextAreaElement).readOnly).toBe(true);
+      expect(controlIn(pane.target, lang, 'browser.rawEditor.save').disabled).toBe(true);
+    } else {
+      // The retarget is what restore's reload does, and the candidate survives.
+      expect(panel).toContain(translate(lang, 'browser.saveOutcome.reloadRetargetsCandidate'));
+      expect(panel).toContain(translate(lang, 'browser.saveOutcome.diskVersion'));
+      expect(pane.target.textContent).toContain('restoredbytes');
+      expect(controlIn(pane.target, lang, 'browser.restore.prepare').disabled).toBe(true);
+      expect(pane.target.querySelector('.actions')?.textContent).toContain(
+        translate(lang, 'browser.externalConflict.fileChangedWhileOpen')
+      );
+    }
+    expect(pane.commands.saveRawDocument).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "raw or restore drawn sentences" case
+
+  it.each(LOCALES)('refreshes the raw viewer through the guarded reread, and the raw editor over the same file conflicts instead while another file still refreshes (%s)', async (lang) => {
+    // **The viewer/editor distinction** (the 2d-5 record's entry 20, the 2d-6
+    // record's §3 entry 34): the viewer is ordinary browser state and the clean
+    // path — `rereadUnderGuard` — refreshes it; the editor is a registered write
+    // surface, so the same kind of change to its file raises its conflict and
+    // installs nothing, while a change to a file no surface is over is still
+    // reread through the guarded path beside it.
+    expectedDrains = 5;
+    const events = paneEvents();
+    const FIRST = 'matches:\n  - trigger: ":a"\n    replace: firstchange\n';
+    const SECOND = 'matches:\n  - trigger: ":a"\n    replace: secondchange\n';
+    /**
+     * `match/a.yml` at a new revision with its one snippet unchanged, so the
+     * selection repair keeps the snippet and the viewer stays pointed at the file.
+     *
+     * @param revision - The revision it is at.
+     * @returns The projection.
+     */
+    const aAt = (revision: ContentRevision): DocumentView =>
+      makeDocument({
+        id: 1,
+        relativePath: 'match/a.yml',
+        revision,
+        matches: [
+          makeMatch({
+            node: 10,
+            document: 1,
+            revision,
+            trigger: ':a',
+            replace: 'ay',
+            path: matchListPath(0)
+          })
+        ]
+      }); // End of function aAt()
+    let text: string | undefined;
+    let moved: DocumentView | undefined;
+    let movedC: DocumentView | undefined;
+    const pane = await mountPane(
+      false,
+      {
+        ...THREE_FILES,
+        batches: [
+          batch(0),
+          batch(0),
+          batch(5, [changed(5, 1, 'match/a.yml')]),
+          batch(6, [changed(6, 1, 'match/a.yml', 'd'.repeat(64))]),
+          batch(7, [changed(7, 3, 'match/c.yml', '8'.repeat(64))])
+        ],
+        reloadDocument: (id) => (id === 1 ? moved : id === 3 ? movedC : undefined),
+        documentText: (id) => (id === 1 ? text : undefined)
+      },
+      events.source
+    );
+    locale.setOverride(lang);
+    const log = watchDeliveries(pane.state);
+    await pane.state.select(snippetOf(pane.state, 1));
+    await pane.state.showFileText(true);
+    await settle();
+    expect(pane.target.textContent).toContain('wholefiletext');
+
+    // **The viewer alone**: the change is reread and the viewer draws it.
+    moved = aAt('c'.repeat(64));
+    text = FIRST;
+    events.wake(5, 5);
+    await settleWake();
+    await settle();
+    expect(pane.commands.reloadDocument).toHaveBeenCalledWith(1);
+    expect(log.delivered).toEqual([]);
+    expect(pane.state.standingConflictFor(1)).toBeNull();
+    expect(pane.target.textContent).toContain('firstchange');
+    expect(pane.target.textContent).not.toContain('wholefiletext');
+
+    // **The editor over the same file**: the next change conflicts instead.
+    controlIn(pane.target, lang, 'browser.rawEditor.open').click();
+    flushSync();
+    const body = box(pane.target, 'textarea');
+    expect(body.value).toBe(FIRST);
+    body.value = `${FIRST}# edited\n`;
+    body.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const reloadsBefore = vi.mocked(pane.commands.reloadDocument).mock.calls.length;
+    const textsBefore = vi.mocked(pane.commands.documentText).mock.calls.length;
+    moved = aAt('d'.repeat(64));
+    text = SECOND;
+    events.wake(5, 6);
+    await settleWake();
+
+    expect(log.delivered.map((one) => [one.document, one.delivery.verdict.kind])).toEqual([
+      [1, 'raised']
+    ]);
+    const panel = drawn(pane.target, '.panel.external');
+    expect(panel).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(pane.state.externalDocumentStatus(1)).toEqual({ kind: 'stale' });
+    expect(vi.mocked(pane.commands.reloadDocument).mock.calls.length).toBe(reloadsBefore);
+    expect(vi.mocked(pane.commands.documentText).mock.calls.length).toBe(textsBefore);
+    // The viewer's snapshot underneath is the first change, not the second.
+    expect(pane.state.fileText).toEqual({ kind: 'text', text: FIRST });
+    expect(body.value).toBe(`${FIRST}# edited\n`);
+
+    // **A file no surface is over is still reread**, beside the standing conflict.
+    movedC = diskView(3, 'match/c.yml', '8'.repeat(64));
+    events.wake(5, 7);
+    await settleWake();
+    expect(pane.commands.reloadDocument).toHaveBeenLastCalledWith(3);
+    expect(pane.state.views.find((view) => view.id === 3)?.revision).toBe('8'.repeat(64));
+    expect(log.delivered).toHaveLength(1);
+    expect(drawn(pane.target, '.panel.external')).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: 'd'.repeat(64) })
+    );
+    expect(pane.commands.saveRawDocument).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "viewer refreshes, editor conflicts" case
+}); // End of the "raw editor’s and restore’s drawn sentences" suite

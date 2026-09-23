@@ -312,7 +312,10 @@
  *
  * **`RestorePane.svelte` reports this receiver since Phase 2d-6-8a**, and
  * `DetailPane.svelte` registers it through `./surfaceReceivers.ts` over the
- * destination. The result is not drawn deliberately yet — that is 2d-6-8b's.
+ * destination. Since Phase 2d-6-8b the pane draws the result: an external
+ * conflict in a panel of its own outside the save-outcome branch, with its
+ * origin, its lines, its one revision and the comparison, and the notices beside
+ * the refusal line.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -370,6 +373,7 @@ import type { AcknowledgeTheUncertainty } from './matchEditor';
 import type { ConflictSource, ExternalConflictObservation } from './conflictSource';
 import {
   externalConflictNoticeKey,
+  noticesBesideRefusal,
   type ExternalConflictNotice,
   type ObservationDelivery
 } from './observationDelivery';
@@ -387,6 +391,7 @@ import {
   describeWholeDocumentSave,
   externalConflictMessageKey,
   invalidationFailureMessage,
+  reloadUnavailableKey,
   supersedeConflict,
   type ConflictCapabilities,
   type ConflictChoice,
@@ -892,6 +897,37 @@ export function restoreRefusalKey(refusal: RestoreRefusal): TranslationKey {
       return 'browser.restore.refused.alreadyRestored';
   }
 } // End of function restoreRefusalKey()
+
+/**
+ * Which sentence stands where the reload control has gone — Phase 2d-6-8b, the
+ * decision 2d-6-5 §4 item 12 handed on.
+ *
+ * `candidateKept` is the shared operation sentence, which ends *what you asked
+ * for here is still set up*; `noCandidate` is this pane's own, for a conflict
+ * whose candidate was dropped while it stood (`chooseBatch` and `chooseEntry`
+ * stay open under a conflict), where that clause would describe a selection the
+ * session no longer holds. Chosen by {@link restoreView} from the live preview.
+ */
+export type RestoreReloadUnavailable = 'candidateKept' | 'noCandidate';
+
+/**
+ * The dictionary key holding one reload-unavailable sentence — Phase 2d-6-8b.
+ *
+ * The `candidateKept` arm delegates to `reloadUnavailableKey` in `./saveOutcome`
+ * over this surface's own draft kind, so the sentence every operation surface
+ * shows is said in one place; the `noCandidate` arm is this pane's key.
+ *
+ * @param line - What {@link RestoreView.reloadUnavailableLine} answered.
+ * @returns The key holding that sentence.
+ */
+export function restoreReloadUnavailableKey(line: RestoreReloadUnavailable): TranslationKey {
+  switch (line) {
+    case 'candidateKept':
+      return reloadUnavailableKey(CONFLICT_CAPABILITIES.draftKind);
+    case 'noCandidate':
+      return 'browser.restore.reloadUnavailableNoCandidate';
+  }
+} // End of function restoreReloadUnavailableKey()
 
 /**
  * What one catalogue read has answered so far.
@@ -4126,7 +4162,10 @@ function replacedBy(
  * a model built over no candidate carries no sentence about one; **what it does
  * not** is that a candidate chosen *afterwards*, under the standing conflict,
  * regains the two lines — the model is built when the verdict lands and a later
- * selection rebuilds nothing, which the phase record's §4 admits.
+ * selection rebuilds nothing. The other direction, a candidate *dropped* under
+ * the standing conflict, is the view's since Phase 2d-6-8b: {@link restoreView}
+ * leaves both lines out of what it answers whenever no candidate is retained
+ * (2d-6-5 §4 item 12).
  *
  * @param model - The model as the declaration described it.
  * @returns The same disk side and draft, with the file's line alone.
@@ -4263,7 +4302,19 @@ export interface RestoreView {
   readonly failureLines: readonly SendFailureLine[];
   /** How the last attempt ended, or `null`. */
   readonly outcome: SaveOutcomeModel<string> | null;
-  /** The outcome's lines followed by anything to be said beside them. */
+  /**
+   * The outcome's lines followed by anything to be said beside them.
+   *
+   * **Less `operationKeptInMemory` and `reloadRetargetsCandidate` once no
+   * candidate is retained** — Phase 2d-6-8b, the decision 2d-6-5 §4 item 12
+   * handed on. `chooseBatch` and `chooseEntry` stay open under a conflict, so a
+   * person can drop the candidate while the panel stands, and the two lines the
+   * model wrote when the conflict arrived would then say a candidate is kept and
+   * that a reload keeps it. The lines follow the live preview on every read;
+   * what this forces is that no view derived from a session without a preview
+   * carries either line, and what it does not is anything about a sentence a
+   * renderer draws from somewhere else.
+   */
   readonly messages: readonly SaveOutcomeMessage[];
   /**
    * The external conflict's own lines, or none — Phase 2d-6-5.
@@ -4271,17 +4322,33 @@ export interface RestoreView {
    * Beside {@link RestoreView.messages} and never merged into it, for
    * `MatchEditorView.externalMessages`'s reason: a panel drawing `view.conflict`
    * outside the save-outcome branch (the 2d-6 record's §3 entry 10) draws nothing
-   * twice. Rendered through `tConflictMessage`. No component reads it yet;
-   * 2d-6-8 does.
+   * twice. Rendered through `tConflictMessage`; `RestorePane.svelte` draws it in
+   * its external panel since Phase 2d-6-8b. **Less the two candidate lines once
+   * no candidate is retained** (2d-6-8b, 2d-6-5 §4 item 12): see
+   * {@link RestoreView.messages}.
    */
   readonly externalMessages: readonly ConflictMessage[];
   /**
    * The lines owed while an observation cannot be acted on — Phase 2d-6-5.
    *
    * `writeOutcomeUnknown` first, `observationRetained` second, from the session's
-   * own fields. No component reads it yet; 2d-6-8 and 2d-6-9 do.
+   * own fields. `RestorePane.svelte` draws {@link RestoreView.noticesBesideRefusal}
+   * rather than this list since Phase 2d-6-8b; the acknowledgement control for the
+   * first is 2d-6-9's.
    */
   readonly externalNotices: readonly ExternalConflictNotice[];
+  /**
+   * The notices less the one the refusal line on screen already says — Phase
+   * 2d-6-8b, `MatchMoveView.noticesBesideRefusal`'s rule.
+   *
+   * `restoreRefusalKey` renders an `observationRetained` refusal through that
+   * notice's own sentence, so a pane drawing the refusal and every notice would
+   * print it twice, one line apart. `noticesBesideRefusal` in
+   * `./observationDelivery` decides it; **what it cannot check** is that the
+   * refusal key keeps rendering the notice's sentence, which
+   * {@link restoreRefusalKey} does today by calling `externalConflictNoticeKey`.
+   */
+  readonly noticesBesideRefusal: readonly ExternalConflictNotice[];
   /** The presentation changes a saved arm disclosed, in report order. */
   readonly notes: readonly PresentationNote[];
   /**
@@ -4315,15 +4382,27 @@ export interface RestoreView {
   readonly awaitingReloadConfirmation: boolean;
   /** Whether a confirmed reload was spent and the window refused it. */
   readonly reloadUnavailable: boolean;
+  /**
+   * Which sentence stands where the reload control has gone, or `null` when it
+   * has not gone — Phase 2d-6-8b, 2d-6-5 §4 item 12.
+   *
+   * `candidateKept` while a candidate is retained and `noCandidate` once none
+   * is: the shared operation sentence says *what you asked for here is still set
+   * up*, which a candidate dropped under the standing conflict falsifies.
+   * Rendered through `tRestoreReloadUnavailable`.
+   */
+  readonly reloadUnavailableLine: RestoreReloadUnavailable | null;
   /** The disk side of that conflict, or `null` when none is showing. */
   readonly diskText: ConflictDiskText | null;
   /**
    * What the retained candidate **asked for**, or `null` when no conflict is
-   * showing — or when the conflict showing is the watcher's and no candidate is
-   * retained (Phase 2d-6-5's review, its fourth finding): the sentence names
-   * *the backup entry selected here*, and a session told of a change before any
-   * entry was read has selected none. A save conflict always names it, because
-   * a send happened and it was of a candidate.
+   * showing — or when no candidate is retained, of either origin: the sentence
+   * names *the backup entry selected here*, and a session told of a change
+   * before any entry was read has selected none (Phase 2d-6-5's review, its
+   * fourth finding), while one whose candidate was dropped under the standing
+   * conflict no longer has one selected (Phase 2d-6-8b, 2d-6-5 §4 item 12). A
+   * save conflict names it for as long as the candidate that was sent is
+   * retained.
    *
    * Constant while a conflict is showing over a candidate, because a restore
    * asks for one thing. It is decided here rather than assembled in markup,
@@ -4377,6 +4456,33 @@ function externalNoticesOf(session: RestoreSession): readonly ExternalConflictNo
 } // End of function externalNoticesOf()
 
 /**
+ * One conflict's lines, less the two that describe a retained candidate when
+ * none is retained — Phase 2d-6-8b, the decision 2d-6-5 §4 item 12 handed on.
+ *
+ * `operationKeptInMemory` says *what you asked for here is still set up* and
+ * `reloadRetargetsCandidate` says a reload leaves *the same text still selected
+ * here*; a session whose candidate was dropped under the standing conflict has
+ * neither. Every other line is kept in its order. **What it forces** is only
+ * that: it filters by kind, so a third line about a candidate added to a
+ * producer later is not caught here.
+ *
+ * @typeParam M - The line type of the list.
+ * @param lines - The lines as the model wrote them.
+ * @param retained - Whether the session retains a candidate now.
+ * @returns The lines, the same list when a candidate is retained.
+ */
+function aboutTheCandidate<M extends { readonly kind: string }>(
+  lines: readonly M[],
+  retained: boolean
+): readonly M[] {
+  return retained
+    ? lines
+    : lines.filter(
+        (line) => line.kind !== 'operationKeptInMemory' && line.kind !== 'reloadRetargetsCandidate'
+      );
+} // End of function aboutTheCandidate()
+
+/**
  * Everything a screen needs about one restore.
  *
  * Derived on every call and stored nowhere, which is 2c-1a's D2 carried up.
@@ -4406,6 +4512,14 @@ export function restoreView(
       : conflictChoicesFor(effectiveCapabilitiesOf(session), offeredReloadStep(session.reload));
   const externallyBlocked = session.externalConflict !== null || awaitedFor(session) !== null;
   const refusalChoices = offeredRefusalChoices(refused, stale);
+  const refusal = restoreRefusal(session, context);
+  const notices = externalNoticesOf(session);
+  // **Whether a candidate is retained, read once and on every view** — the
+  // decision 2d-6-5 §4 item 12 handed to Phase 2d-6-8b: the lines that say a
+  // candidate is kept follow the live preview rather than the moment the
+  // conflict arrived.
+  const retained = session.preview !== null;
+  const unavailable = conflict !== null && reloadWasRefused(session.reload);
   return {
     target: session.target,
     baseRevision: session.baseRevision,
@@ -4415,16 +4529,26 @@ export function restoreView(
     entry: session.entry,
     preview: session.preview,
     canPrepare: canPrepareRestore(session, context) && session.pending === null,
-    refusal: restoreRefusal(session, context),
+    refusal,
     confirming: session.pending !== null,
     restoring: session.phase === 'saving',
     restored: session.restored,
     sendFailure: session.sendFailure,
     failureLines: sendFailureLines(session.sendFailure?.reason ?? null),
     outcome,
-    messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
-    externalMessages: session.externalConflict === null ? [] : session.externalConflict.messages,
-    externalNotices: externalNoticesOf(session),
+    messages:
+      outcome === null
+        ? []
+        : aboutTheCandidate([...outcome.messages, ...session.extraMessages], retained),
+    externalMessages:
+      session.externalConflict === null
+        ? []
+        : aboutTheCandidate(session.externalConflict.messages, retained),
+    externalNotices: notices,
+    noticesBesideRefusal: noticesBesideRefusal(
+      notices,
+      refusal?.kind === 'observationRetained' ? 'observationRetained' : null
+    ),
     notes: saved === null ? [] : saved.notes,
     refusalChoices: externallyBlocked
       ? refusalChoices.filter((choice) => choice === 'keepEditing')
@@ -4433,14 +4557,13 @@ export function restoreView(
     conflict,
     conflictChoices,
     awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
-    reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
+    reloadUnavailable: unavailable,
+    reloadUnavailableLine: unavailable ? (retained ? 'candidateKept' : 'noCandidate') : null,
     diskText: conflictDiskText(conflict),
-    // An external conflict over no retained candidate names no operation: the
-    // sentence would describe an entry nobody selected.
-    conflictOperation:
-      conflict === null || (session.externalConflict !== null && session.preview === null)
-        ? null
-        : 'replaceFileFromBackup'
+    // A conflict of either origin over no retained candidate names no operation:
+    // the sentence would describe an entry nobody selected, or one the person
+    // has since dropped (2d-6-5 §4 item 12).
+    conflictOperation: conflict === null || !retained ? null : 'replaceFileFromBackup'
   };
 } // End of function restoreView()
 

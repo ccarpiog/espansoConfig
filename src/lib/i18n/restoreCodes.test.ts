@@ -31,9 +31,12 @@ import { describe, expect, it } from 'vitest';
 import {
   openWriteSurfaceKey,
   restoreRefusalKey,
+  restoreReloadUnavailableKey,
   type CompetingWriteSurfaceKind,
-  type RestoreRefusal
+  type RestoreRefusal,
+  type RestoreReloadUnavailable
 } from '../browser/restore';
+import { reloadUnavailableKey } from '../browser/saveOutcome';
 import { DICTIONARIES, translate, type TranslationKey } from './dictionaries';
 import en from './en.json';
 import type { ExpectNever, Missing } from './exhaustive';
@@ -141,6 +144,43 @@ describe('the restore refusal accessor', () => {
     } // End of the loop over every refusal
   }); // End of the "never a code" case
 }); // End of the "restore refusal accessor" suite
+
+/**
+ * Both reload-unavailable lines the pane can draw — Phase 2d-6-8b. Written out
+ * with a `satisfies`, which forces that each entry is a member; the arm count
+ * below is what notices a third member nobody listed.
+ */
+const RELOAD_UNAVAILABLE = [
+  'candidateKept',
+  'noCandidate'
+] as const satisfies readonly RestoreReloadUnavailable[];
+
+// `never` exactly when the table above names every line. See `./exhaustive`.
+export type _ReloadUnavailableLinesAreComplete = ExpectNever<
+  Missing<RestoreReloadUnavailable, typeof RELOAD_UNAVAILABLE>
+>;
+
+describe('the restore reload-unavailable accessor — Phase 2d-6-8b', () => {
+  it('delegates the kept-candidate line to the shared operation sentence and gives the other its own', () => {
+    expect(restoreReloadUnavailableKey('candidateKept')).toBe(reloadUnavailableKey('operationChoice'));
+    expect(restoreReloadUnavailableKey('noCandidate')).toBe(
+      'browser.restore.reloadUnavailableNoCandidate'
+    );
+  });
+
+  it.each(LOCALES)('renders a distinct sentence for both lines in %s, and only the shared one claims a kept request', (locale) => {
+    const rendered = RELOAD_UNAVAILABLE.map((line) => translate(locale, restoreReloadUnavailableKey(line)));
+    expect(new Set(rendered).size).toBe(2);
+    for (const one of rendered) {
+      expect(one.trim()).not.toBe('');
+      expect(one).not.toContain('{');
+    } // End of the loop over both sentences
+    // The no-candidate sentence must not carry the clause it exists to drop.
+    const kept = translate(locale, 'browser.saveOutcome.operationKeptInMemory').split('.')[0] ?? '';
+    expect(kept.length).toBeGreaterThan(0);
+    expect(rendered[1]).not.toContain(kept.split(',')[0]);
+  }); // End of the "renders both lines" case
+}); // End of the "restore reload-unavailable accessor" suite
 
 /**
  * Vocabulary that would claim more about a backup than a catalogue establishes.

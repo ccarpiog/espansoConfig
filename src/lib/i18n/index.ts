@@ -106,7 +106,12 @@ import {
 // add — nothing drew them then, and this module is reachable from the application
 // entry, so importing a model nothing drew would have put it in the production
 // bundle. `RestorePane.svelte` draws them now.
-import { restoreRefusalKey, type RestoreRefusal } from '../browser/restore';
+import {
+  restoreRefusalKey,
+  restoreReloadUnavailableKey,
+  type RestoreRefusal,
+  type RestoreReloadUnavailable
+} from '../browser/restore';
 import type {
   ExternalConflictAction,
   ExternalConflictNotice
@@ -798,6 +803,24 @@ export function tRestoreRefusal(refusal: RestoreRefusal): string {
 } // End of function tRestoreRefusal()
 
 /**
+ * Renders the sentence the restore pane draws where its reload control has gone,
+ * in the current language — Phase 2d-6-8b.
+ *
+ * The accessor over `restoreReloadUnavailableKey` in `../browser/restore`, which
+ * delegates the `candidateKept` arm to the shared `reloadUnavailableKey` and
+ * answers the pane's own key for `noCandidate` — a conflict whose candidate was
+ * dropped while it stood, where the shared sentence's *what you asked for here
+ * is still set up* would be false (2d-6-5 §4 item 12). Which arm is drawn is
+ * `RestoreView.reloadUnavailableLine`'s decision.
+ *
+ * @param line - What the view answered.
+ * @returns The translated sentence.
+ */
+export function tRestoreReloadUnavailable(line: RestoreReloadUnavailable): string {
+  return translate(locale.current, restoreReloadUnavailableKey(line));
+} // End of function tRestoreReloadUnavailable()
+
+/**
  * Renders one line a save outcome shows, in the current language.
  *
  * The accessor over the save-outcome model, here for `tRawSaveMessage`'s
@@ -825,12 +848,12 @@ export function tSaveOutcomeMessage(message: SaveOutcomeMessage): string {
  * of `view.conflict` calls this one for both arms and never narrows the union in
  * markup.
  *
- * **Six components call it** — `MatchEditor.svelte`, `MatchCreator.svelte` and
+ * **Eight components call it** — `MatchEditor.svelte`, `MatchCreator.svelte` and
  * `RecoveryPanel.svelte` since Phase 2d-6-6c-1, `MatchDeleter.svelte`,
- * `MatchMover.svelte` and `MatchDuplicator.svelte` since 2d-6-7b — over
- * `view.externalMessages` in the external conflict panel each draws outside the
- * save-outcome branch (the 2d-6 record's §3 entry 10). The raw editor's and
- * restore's panels are 2d-6-8's. Every component still draws a save outcome's lines through
+ * `MatchMover.svelte` and `MatchDuplicator.svelte` since 2d-6-7b, `RawEditor.svelte`
+ * and `RestorePane.svelte` since 2d-6-8b — over `view.externalMessages` in the
+ * external conflict panel each draws outside the save-outcome branch (the 2d-6
+ * record's §3 entry 10). Every component still draws a save outcome's lines through
  * {@link tSaveOutcomeMessage} over `view.messages`, whose type is unchanged.
  *
  * @param message - A line of either conflict arm.
@@ -845,10 +868,11 @@ export function tConflictMessage(message: ConflictMessage): string {
  * or a write's outcome is unknown, in the current language.
  *
  * The reactive wrapper over `describeExternalConflictNotice` in `./codes` (the
- * 2d-6 record's §3 entries 13 and 14). **Six components call it** —
+ * 2d-6 record's §3 entries 13 and 14). **Eight components call it** —
  * `MatchEditor.svelte`, `MatchCreator.svelte` and `RecoveryPanel.svelte` since
  * Phase 2d-6-6c-1, `MatchDeleter.svelte`, `MatchMover.svelte` and
- * `MatchDuplicator.svelte` since 2d-6-7b — over their views' notices, beside the
+ * `MatchDuplicator.svelte` since 2d-6-7b, `RawEditor.svelte` and
+ * `RestorePane.svelte` since 2d-6-8b — over their views' notices, beside the
  * control a notice explains. The acknowledgement that ends the second state exists —
  * `BrowserState.acknowledgeWriteUncertainty` in `../browser/workspace.svelte.ts`,
  * since 2d-6-1b — and no component calls it yet: 2d-6-9 draws that control.
@@ -887,12 +911,11 @@ export function tExternalConflictAction(action: ExternalConflictAction): string 
  * names a file, a revision or a time — the watcher line says in as many words that
  * this application cannot say what changed the file or when.
  *
- * **Six components draw it** — `MatchEditor.svelte`, `MatchCreator.svelte` and
+ * **Eight components draw it** — `MatchEditor.svelte`, `MatchCreator.svelte` and
  * `RecoveryPanel.svelte` since Phase 2d-6-6c-1, `MatchDeleter.svelte`,
- * `MatchMover.svelte` and `MatchDuplicator.svelte` since 2d-6-7b — as the first
- * line of a conflict panel of either origin, over
- * `conflictOriginMessage(conflict.source)`. The raw editor's and restore's panels
- * are 2d-6-8's.
+ * `MatchMover.svelte` and `MatchDuplicator.svelte` since 2d-6-7b, `RawEditor.svelte`
+ * and `RestorePane.svelte` since 2d-6-8b — as the first line of a conflict panel
+ * of either origin, over `conflictOriginMessage(conflict.source)`.
  *
  * @param message - Which origin line the model asked for.
  * @returns The translated sentence.

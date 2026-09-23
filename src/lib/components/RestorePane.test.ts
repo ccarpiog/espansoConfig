@@ -43,9 +43,11 @@
  *    itself back into step;
  * 7. **no sentence on the rendered screen makes a forbidden historical or
  *    authenticity claim**, in either language, scanned over the whole pane in each
- *    of sixteen **mutually exclusive** states — the catalogue and the question, the
+ *    of nineteen **mutually exclusive** states — the catalogue and the question, the
  *    five things a transaction can answer, both send-failure arms, three conflict
- *    states, and each of the six open-surface refusals. The outcome states cannot
+ *    states, a change the watcher observed and a refused reload after the
+ *    candidate was dropped (both since Phase 2d-6-8b), and each of the seven
+ *    open-surface refusals. The outcome states cannot
  *    coexist, so one walk cannot reach them all; `panels()` is the table and every
  *    entry proves it arrived before the scan runs.
  *
@@ -106,6 +108,14 @@ import type {
 } from '../ipc/types';
 import RestorePane from './RestorePane.svelte';
 import type { SurfaceBinding } from '../browser/surfaceReceivers';
+import type { ObservationReceiver } from '../browser/workspace.svelte';
+import type { ConflictModel, ReloadConfirmation } from '../browser/saveOutcome';
+import { externalConflictSource, type ExternalConflictObservation } from '../browser/conflictSource';
+import {
+  arbitratedDelivery,
+  retainedDelivery,
+  type ObservationDelivery
+} from '../browser/observationDelivery';
 
 /**
  * The Tauri boundary, replaced for the whole file — on the same terms as
@@ -418,6 +428,23 @@ interface Mounted {
    * @param revision - The revision the file now holds.
    */
   readonly moveTheFileOn: (revision: ContentRevision) => Promise<void>;
+  /**
+   * Hands the receiver this pane reported one sealed envelope directly, and
+   * flushes — Phase 2d-6-8b. For the envelopes a case builds itself: a held
+   * reading, or a conflict raised under an unknown write outcome.
+   */
+  readonly deliver: (delivery: ObservationDelivery) => void;
+  /**
+   * Tells the real state of one observation and flushes — Phase 2d-6-8b.
+   *
+   * `BrowserState.observeExternalChange`: the window arbitrates it once, registers
+   * the origin and delivers the decision to the receivers over the file — which,
+   * in an {@link Opened.live} mount, is this pane's. Nothing here drains or
+   * starts a coordinator.
+   *
+   * @param observation - The narrowed observation.
+   */
+  readonly observe: (observation: ExternalConflictObservation) => void;
   /** Tears the pane down. */
   readonly stop: () => void;
 }
@@ -434,6 +461,12 @@ interface Opened {
   readonly adoption?: DiskAdoptionOutcome;
   /** What this window had loaded of the destination's text. */
   readonly loaded?: RawDocumentText | null;
+  /**
+   * Whether the pane's receiver is registered with the real state and its reload
+   * adopts through the real `BrowserState.adoptDiskVersion` — Phase 2d-6-8b. An
+   * explicit {@link Opened.adoption} still answers instead of the window.
+   */
+  readonly live?: boolean;
 }
 
 /**
@@ -572,6 +605,10 @@ async function mountRestore(
   const invalidations: RawSaveInvalidation[] = [];
   const adoptions: unknown[] = [];
   let closes = 0;
+  // The receiver the pane reports (Phase 2d-6-8b), and in a live mount its
+  // registration with the real state over the destination.
+  let receiver: ObservationReceiver | null = null;
+  let unregister: (() => void) | null = null;
   const target = document.createElement('div');
   document.body.append(target);
   const component = mount(RestorePane, {
@@ -586,12 +623,29 @@ async function mountRestore(
       listEntries: (batch: BackupBatchId) => state.listBackupEntries(batch),
       readEntry: (entry: BackupEntryId, into: DocumentId) => state.readBackupText(entry, into),
       restore: state.restoreDocument,
-      reportReceiver: (): SurfaceBinding => inertBinding(),
+      reportReceiver: (reported: ObservationReceiver): SurfaceBinding => {
+        receiver = reported;
+        if (opened.live === true) {
+          unregister = state.registerObservationReceiver(TARGET, reported);
+        }
+        return {
+          ...inertBinding(),
+          withdraw: () => {
+            unregister?.();
+          }
+        };
+      },
       invalidate: (invalidation: RawSaveInvalidation): void => {
         invalidations.push(invalidation);
       },
-      adoptDiskVersion: (conflict: unknown): DiskAdoptionOutcome => {
+      adoptDiskVersion: (
+        conflict: ConflictModel<string>,
+        confirmation: ReloadConfirmation
+      ): DiskAdoptionOutcome => {
         adoptions.push(conflict);
+        if (opened.adoption === undefined && opened.live === true) {
+          return state.adoptDiskVersion(conflict, confirmation);
+        }
         return opened.adoption ?? 'installed';
       },
       close: (): void => {
@@ -611,6 +665,14 @@ async function mountRestore(
     moveTheFileOn: async (revision: ContentRevision): Promise<void> => {
       views.set(TARGET, projectionAt(revision));
       await state.rereadDocument(TARGET);
+    },
+    deliver: (delivery: ObservationDelivery): void => {
+      receiver?.(delivery);
+      flushSync();
+    },
+    observe: (observation: ExternalConflictObservation): void => {
+      state.observeExternalChange(observation);
+      flushSync();
     },
     stop: () => {
       void unmount(component);
@@ -1533,6 +1595,32 @@ function panels(): readonly {
       },
       proof: saying('browser.saveOutcome.reloadUnavailableOperation')
     },
+    {
+      // Phase 2d-6-8b: the external panel, its origin and its lines.
+      name: 'a change the watcher observed',
+      reach: async (): Promise<Mounted> => {
+        const pane = await mountRestore([], { live: true });
+        await walkToCandidate(pane);
+        pane.observe(observed(5));
+        return pane;
+      },
+      proof: saying('browser.conflictOrigin.changedWhileOpen')
+    },
+    {
+      // Phase 2d-6-8b: the reload-unavailable line once the candidate is dropped.
+      name: 'a refused reload after the candidate was dropped',
+      reach: async (): Promise<Mounted> => {
+        const pane = await answered({ result: CONFLICTED }, { adoption: 'refused' });
+        control(pane.target, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+        flushSync();
+        control(pane.target, conflictChoiceKey('confirmReloadKeeping', 'operationChoice')).click();
+        flushSync();
+        control(pane.target, 'browser.restore.batchNamed', { name: BATCH.name }).click();
+        await settle();
+        return pane;
+      },
+      proof: saying('browser.restore.reloadUnavailableNoCandidate')
+    },
     ...COMPETING_SURFACES.map((kind) => ({
       name: `a ${kind} open over the destination`,
       reach: async (): Promise<Mounted> => {
@@ -1617,3 +1705,469 @@ describe('the mounted restore pane claims nothing it cannot establish (consult Q
     pane.stop();
   }); // End of the "a label and never a time" case
 }); // End of the "claims nothing" suite
+
+/** The revision a watcher observation of the destination read. */
+const OBSERVED: ContentRevision = 'd'.repeat(64);
+
+/** The revision a later observation read. */
+const OBSERVED_LATER: ContentRevision = '9'.repeat(64);
+
+/** The whole text an observation read, with a word nothing else on screen holds. */
+const OBSERVED_TEXT = 'matches:\n  - trigger: ":seen"\n    replace: "observedbytes"\n';
+
+/** The word that tells the observed disk text apart on screen. */
+const OBSERVED_MARKER = 'observedbytes';
+
+/** A disk text holding a lone carriage return, which `SourceText` names. */
+const OBSERVED_CR_TEXT = 'matches:\r\n  - trigger: ":seen"\r    replace: "crbytes"\n';
+
+/**
+ * One narrowed observation of the destination.
+ *
+ * A fresh object every call: the memo in `../browser/conflictSource.ts` and a
+ * session's wait are both keyed on identity.
+ *
+ * @param sequence - The sequence it was admitted under.
+ * @param revision - The revision it read.
+ * @param diskText - The whole text it read.
+ * @returns The observation.
+ */
+function observed(
+  sequence: number,
+  revision: ContentRevision = OBSERVED,
+  diskText: string = OBSERVED_TEXT
+): ExternalConflictObservation {
+  return {
+    sequence,
+    document: TARGET,
+    previousRevision: BASE,
+    diskRevision: revision,
+    diskText,
+    disk: projectionAt(revision),
+    findings: [],
+    correspondences: null
+  };
+} // End of function observed()
+
+/**
+ * The text of the external conflict's own panel, or `null` when none is drawn.
+ *
+ * @param target - Where the pane was mounted.
+ * @returns The panel's text.
+ */
+function externalText(target: HTMLElement): string | null {
+  return target.querySelector('.panel.external')?.textContent ?? null;
+} // End of function externalText()
+
+/**
+ * The external conflict's own panel, insisted upon.
+ *
+ * @param target - Where the pane was mounted.
+ * @returns The panel.
+ */
+function externalPanel(target: HTMLElement): HTMLElement {
+  const found = target.querySelector<HTMLElement>('.panel.external');
+  if (found === null) {
+    throw new Error('this case needs the external conflict panel');
+  }
+  return found;
+} // End of function externalPanel()
+
+/**
+ * The text of the pane's sticky action row.
+ *
+ * @param target - Where the pane was mounted.
+ * @returns Its text.
+ */
+function actionsText(target: HTMLElement): string {
+  return target.querySelector('.actions')?.textContent ?? '';
+} // End of function actionsText()
+
+/**
+ * How many times one string occurs in another.
+ *
+ * @param haystack - Where to count.
+ * @param needle - What to count.
+ * @returns The number of non-overlapping occurrences.
+ */
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+} // End of function occurrences()
+
+/**
+ * Presses a control the screen has disabled, as a script could — Phase 2d-6-8b's
+ * *direct submission refused*.
+ *
+ * `click()` on a disabled button dispatches nothing in jsdom, so this lifts the
+ * attribute for the one press: the pane's own handler runs, and the model door
+ * behind it is what refuses.
+ *
+ * @param control_ - The disabled button.
+ */
+function forcePress(control_: HTMLButtonElement): void {
+  expect(control_.disabled).toBe(true);
+  control_.disabled = false;
+  control_.click();
+} // End of function forcePress()
+
+/** Restore's conflict choices, labelled by its own draft kind. */
+const CHOICE = {
+  keepEditing: conflictChoiceKey('keepEditing', 'operationChoice'),
+  copyDraft: conflictChoiceKey('copyDraft', 'operationChoice'),
+  keepMyDraft: conflictChoiceKey('keepMyDraft', 'operationChoice'),
+  reloadDiskVersion: conflictChoiceKey('reloadDiskVersion', 'operationChoice'),
+  confirmReloadKeeping: conflictChoiceKey('confirmReloadKeeping', 'operationChoice')
+} as const;
+
+describe('the restore pane under an external conflict, in English and Spanish — Phase 2d-6-8b', () => {
+  // **2d-6-8's acceptance for this pane, read off the screen** (the 2d-6 record's
+  // §3 entries 23, 34 and 35). A `live` mount registers the pane's own receiver
+  // with the real state, so `observe` is the window's arbitration delivering to
+  // it and the reload adopts through the window's own `adoptDiskVersion`; the
+  // envelopes a case needs that the window would seal only around a write in
+  // flight are handed to the receiver directly. Every sentence is pinned to its
+  // dictionary value in the case's locale: that protects which code is drawn
+  // where, never the quality of a translation.
+
+  it.each(LOCALES)('holds a prepared question while a reading waits, says why once, and a forced confirmation sends nothing (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([{ result: COMMITTED }]);
+    await walkToQuestion(pane);
+    const retained = translate(lang, 'browser.externalConflict.observationRetained');
+
+    pane.deliver(retainedDelivery(observed(5)));
+
+    // A wait carries the question (2d-6-5 §1.3) and the door refuses it: the
+    // destructive control is off, and the sentence that says why is the refusal
+    // line — drawn once, not again as a notice beside it.
+    expect(says(pane.target, 'browser.restore.question')).toBe(true);
+    const confirm = control(pane.target, 'browser.restore.confirm');
+    expect(occurrences(pane.target.textContent ?? '', retained)).toBe(1);
+    expect(actionsText(pane.target)).toContain(retained);
+    expect(externalText(pane.target)).toBeNull();
+    forcePress(confirm);
+    await settle();
+    expect(pane.saves).toEqual([]);
+    pane.stop();
+  }); // End of the "held reading" case
+
+  it.each(LOCALES)('withdraws the question, keeps the candidate, and draws the origin and comparison (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([{ result: COMMITTED }], { live: true });
+    await walkToQuestion(pane);
+
+    pane.observe(observed(5));
+
+    expect(pane.state.standingConflictFor(TARGET)?.kind).toBe('externalChange');
+    // **Direct submission is refused**: the question is withdrawn (entry 12), the
+    // prepare control is off with the reason beside it, and pressing it anyway
+    // asks nothing.
+    expect(says(pane.target, 'browser.restore.question')).toBe(false);
+    expect(button(pane.target, 'browser.restore.confirm')).toBeNull();
+    expect(actionsText(pane.target)).toContain(
+      translate(lang, 'browser.externalConflict.fileChangedWhileOpen')
+    );
+    forcePress(control(pane.target, 'browser.restore.prepare'));
+    flushSync();
+    expect(says(pane.target, 'browser.restore.question')).toBe(false);
+    // **The candidate survives**, drawn where it always is.
+    expect(candidateBox(pane.target).textContent).toContain(CANDIDATE_MARKER);
+    // The origin, the observation's own lines and its one revision — none of a save's.
+    const shown = externalText(pane.target) ?? '';
+    expect(shown).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(shown).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.operationKeptInMemory'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.reloadRetargetsCandidate'));
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: OBSERVED })
+    );
+    const all = pane.target.textContent ?? '';
+    expect(all).not.toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
+    expect(all).not.toContain(translate(lang, 'browser.saveOutcome.changedElsewhere'));
+    expect(all).not.toContain(translate(lang, 'browser.saveOutcome.nothingWasWritten'));
+    expect(all).not.toContain(translate(lang, 'browser.restore.revisionExpected', { revision: BASE }));
+    // The comparison: what was asked for, and the whole disk text.
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.retainedOperation'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.operation.replaceFileFromBackup'));
+    expect(shown).toContain(translate(lang, 'browser.saveOutcome.diskVersion'));
+    expect(shown).toContain(OBSERVED_MARKER);
+    // Two choices: no copy (the candidate is not typed text) and no reapply.
+    const panel = externalPanel(pane.target);
+    const labels = [...panel.querySelectorAll('button')].map((one) => one.textContent?.trim());
+    expect(labels).toEqual([translate(lang, CHOICE.keepEditing), translate(lang, CHOICE.reloadDiskVersion)]);
+    expect(pane.saves).toEqual([]);
+    expect(pane.adoptions).toEqual([]);
+    pane.stop();
+  }); // End of the "origin and comparison" case
+
+  it.each(LOCALES)('retargets the kept candidate through the window and confirms it again against the adopted revision (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([{ result: COMMITTED }], { live: true });
+    await walkToCandidate(pane);
+    const seen = observed(5);
+    pane.observe(seen);
+
+    control(externalPanel(pane.target), CHOICE.reloadDiskVersion).click();
+    flushSync();
+    expect(pane.adoptions).toEqual([]);
+    control(externalPanel(pane.target), CHOICE.confirmReloadKeeping).click();
+    flushSync();
+
+    // **Retargeted, not reseeded and not closed**: the window adopted this
+    // observation, the panel is gone, the pane is open and the same candidate is
+    // still drawn — now measured against the adopted revision.
+    expect(pane.adoptions).toHaveLength(1);
+    expect((pane.adoptions[0] as ConflictModel<string>).source).toBe(externalConflictSource(seen));
+    expect(pane.state.views.find((view) => view.id === TARGET)?.revision).toBe(OBSERVED);
+    expect(externalText(pane.target)).toBeNull();
+    expect(pane.closed()).toBe(0);
+    expect(candidateBox(pane.target).textContent).toContain(CANDIDATE_MARKER);
+    control(pane.target, 'browser.restore.prepare').click();
+    flushSync();
+    control(pane.target, 'browser.restore.confirm').click();
+    await settle();
+    expect(pane.saves).toHaveLength(1);
+    expect(pane.saves[0]?.text).toBe(CANDIDATE);
+    expect(pane.saves[0]?.baseRevision).toBe(OBSERVED);
+    pane.stop();
+  }); // End of the "retarget through the window" case
+
+  it.each(
+    LOCALES.flatMap((lang) => (['alreadyThere', 'refused'] as const).map((adoption) => [lang, adoption] as const))
+  )('keeps the candidate whatever the window answers (%s, %s)', async (lang, adoption) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([], { live: true, adoption });
+    await walkToCandidate(pane);
+    pane.observe(observed(5));
+    control(externalPanel(pane.target), CHOICE.reloadDiskVersion).click();
+    flushSync();
+    control(externalPanel(pane.target), CHOICE.confirmReloadKeeping).click();
+    flushSync();
+
+    expect(pane.adoptions).toHaveLength(1);
+    expect(candidateBox(pane.target).textContent).toContain(CANDIDATE_MARKER);
+    if (adoption === 'refused') {
+      // Nothing re-pointed over a window that did not move; the control that has
+      // just gone is replaced by the reason, and the candidate is still set up.
+      expect(externalText(pane.target)).toContain(
+        translate(lang, 'browser.saveOutcome.reloadUnavailableOperation')
+      );
+      expect(button(externalPanel(pane.target), CHOICE.reloadDiskVersion)).toBeNull();
+    } else {
+      expect(externalText(pane.target)).toBeNull();
+    }
+    expect(pane.closed()).toBe(0);
+    expect(pane.saves).toEqual([]);
+    pane.stop();
+  }); // End of the "whatever the window answers" case
+
+  it.each(LOCALES)('keeps the conflict through Leave this as it is, and resets the reload step (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([], { live: true });
+    await walkToCandidate(pane);
+    pane.observe(observed(5));
+    control(externalPanel(pane.target), CHOICE.reloadDiskVersion).click();
+    flushSync();
+    expect(button(externalPanel(pane.target), CHOICE.confirmReloadKeeping)).not.toBeNull();
+
+    control(externalPanel(pane.target), CHOICE.keepEditing).click();
+    flushSync();
+
+    // The first step is back; the conflict stands (entry 9), so nothing can be
+    // prepared.
+    expect(button(externalPanel(pane.target), CHOICE.confirmReloadKeeping)).toBeNull();
+    expect(button(externalPanel(pane.target), CHOICE.reloadDiskVersion)).not.toBeNull();
+    expect(control(pane.target, 'browser.restore.prepare').disabled).toBe(true);
+    expect(pane.adoptions).toEqual([]);
+    pane.stop();
+  }); // End of the "keep editing" case
+
+  it.each(LOCALES)('withdraws the reload warning when a later reading supersedes the conflict (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([], { live: true });
+    await walkToCandidate(pane);
+    pane.observe(observed(5));
+    control(externalPanel(pane.target), CHOICE.reloadDiskVersion).click();
+    flushSync();
+    expect(button(externalPanel(pane.target), CHOICE.confirmReloadKeeping)).not.toBeNull();
+
+    pane.observe(observed(6, OBSERVED_LATER));
+
+    // Entry 12: the confirmation collected for the first conflict is not
+    // spendable against this one, and its second step does not stay on screen.
+    expect(button(externalPanel(pane.target), CHOICE.confirmReloadKeeping)).toBeNull();
+    expect(button(externalPanel(pane.target), CHOICE.reloadDiskVersion)).not.toBeNull();
+    const shown = externalText(pane.target) ?? '';
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: OBSERVED_LATER })
+    );
+    expect(shown).not.toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: OBSERVED })
+    );
+    expect(candidateBox(pane.target).textContent).toContain(CANDIDATE_MARKER);
+    expect(pane.adoptions).toEqual([]);
+    pane.stop();
+  }); // End of the "supersession" case
+
+  it.each(LOCALES)('withholds the reload while an earlier write’s outcome is unknown, and says so beside the refusal (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore();
+    await walkToCandidate(pane);
+    pane.deliver(arbitratedDelivery(null, observed(5), true));
+
+    expect(actionsText(pane.target)).toContain(
+      translate(lang, 'browser.externalConflict.writeOutcomeUnknown')
+    );
+    expect(button(externalPanel(pane.target), CHOICE.keepEditing)).not.toBeNull();
+    expect(button(externalPanel(pane.target), CHOICE.reloadDiskVersion)).toBeNull();
+    pane.stop();
+  }); // End of the "unknown outcome" case
+
+  it.each(LOCALES)('names a disk version’s carriage return and draws no file text into a box (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([], { live: true });
+    await walkToCandidate(pane);
+    pane.observe(observed(5, OBSERVED, OBSERVED_CR_TEXT));
+
+    const shown = externalText(pane.target) ?? '';
+    expect(shown).toContain('crbytes');
+    expect(shown).toContain(
+      translate(lang, 'browser.source.invisible.carriageReturn', { code: codePointLabel('\r') })
+    );
+    // Nothing on this screen is a text control: the candidate, the loaded text and
+    // the disk version are all `SourceText`.
+    expect(pane.target.querySelectorAll('textarea, input')).toHaveLength(0);
+    pane.stop();
+  }); // End of the "carriage return on disk" case
+
+  it.each(LOCALES)('keeps its session across a change of language (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([], { live: true });
+    await walkToCandidate(pane);
+    pane.observe(observed(5));
+    control(externalPanel(pane.target), CHOICE.reloadDiskVersion).click();
+    flushSync();
+
+    const other: Locale = lang === 'en' ? 'es' : 'en';
+    locale.setOverride(other);
+    flushSync();
+
+    // The same step of the same conflict, over the same candidate, now in the
+    // other language.
+    const shown = externalText(pane.target) ?? '';
+    expect(shown).toContain(translate(other, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(button(externalPanel(pane.target), CHOICE.confirmReloadKeeping)).not.toBeNull();
+    expect(candidateBox(pane.target).textContent).toContain(CANDIDATE_MARKER);
+    pane.stop();
+  }); // End of the "language switch" case
+
+  it.each(LOCALES)('names a replacement as the origin of a save conflict, beside its three revisions (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([{ result: CONFLICTED }]);
+    await walkToQuestion(pane);
+    control(pane.target, 'browser.restore.confirm').click();
+    await settle();
+
+    const all = pane.target.textContent ?? '';
+    expect(all).toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
+    expect(all).toContain(translate(lang, 'browser.restore.revisionExpected', { revision: BASE }));
+    expect(all).not.toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(externalText(pane.target)).toBeNull();
+    pane.stop();
+  }); // End of the "save origin" case
+}); // End of the "restore pane under an external conflict" suite
+
+describe('a candidate dropped under a standing conflict, on screen — Phase 2d-6-8b, 2d-6-5 §4 item 12', () => {
+  // **The decision is the model's** (`restoreView` in `../browser/restore.ts`):
+  // the lines that say a candidate is kept follow the live preview. These cases
+  // are the renderer's half — the pane draws what the view answers, in both
+  // languages, and the catalogue stays open under the conflict.
+
+  it.each(LOCALES)('drops the kept-candidate lines and the operation when the candidate goes (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([], { live: true });
+    await walkToCandidate(pane);
+    pane.observe(observed(5));
+    expect(externalText(pane.target)).toContain(
+      translate(lang, 'browser.saveOutcome.operationKeptInMemory')
+    );
+
+    // Choosing the batch again drops the candidate, as it always has.
+    control(pane.target, 'browser.restore.batchNamed', { name: BATCH.name }).click();
+    await settle();
+
+    expect(pane.target.textContent).not.toContain(CANDIDATE_MARKER);
+    const shown = externalText(pane.target) ?? '';
+    expect(shown).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    expect(shown).not.toContain(translate(lang, 'browser.saveOutcome.operationKeptInMemory'));
+    expect(shown).not.toContain(translate(lang, 'browser.saveOutcome.reloadRetargetsCandidate'));
+    expect(shown).not.toContain(translate(lang, 'browser.saveOutcome.retainedOperation'));
+    expect(shown).not.toContain(translate(lang, 'browser.saveOutcome.operation.replaceFileFromBackup'));
+    pane.stop();
+  }); // End of the "external conflict, dropped" case
+
+  it.each(LOCALES)('says no candidate is selected where a refused reload’s control has gone (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const pane = await mountRestore([{ result: CONFLICTED }], { adoption: 'refused' });
+    await walkToQuestion(pane);
+    control(pane.target, 'browser.restore.confirm').click();
+    await settle();
+    control(pane.target, CHOICE.reloadDiskVersion).click();
+    flushSync();
+    control(pane.target, CHOICE.confirmReloadKeeping).click();
+    flushSync();
+    expect(says(pane.target, 'browser.saveOutcome.reloadUnavailableOperation')).toBe(true);
+
+    control(pane.target, 'browser.restore.batchNamed', { name: BATCH.name }).click();
+    await settle();
+
+    expect(says(pane.target, 'browser.saveOutcome.reloadUnavailableOperation')).toBe(false);
+    expect(says(pane.target, 'browser.restore.reloadUnavailableNoCandidate')).toBe(true);
+    expect(says(pane.target, 'browser.saveOutcome.operationKeptInMemory')).toBe(false);
+    expect(says(pane.target, 'browser.saveOutcome.nothingWasWritten')).toBe(true);
+    pane.stop();
+  }); // End of the "refused reload, dropped" case
+}); // End of the "candidate dropped on screen" suite
+
+describe('the restore pane reveals its external panel — Phase 2d-6-8b', () => {
+  /** Every `scrollIntoView` the mounted pane asked for, in order. */
+  const scrolled: { readonly target: Element; readonly block: unknown }[] = [];
+
+  beforeEach(() => {
+    scrolled.length = 0;
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value(this: Element, options?: ScrollIntoViewOptions) {
+        scrolled.push({ target: this, block: options?.block });
+      }
+    });
+  });
+
+  afterEach(() => {
+    // jsdom leaves the property absent, so it is deleted rather than restored.
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  it('reveals the external panel over a refusal kept as history, and its controls at the reload step', async () => {
+    const pane = await mountRestore([{ result: REFUSED }], { live: true });
+    await walkToQuestion(pane);
+    control(pane.target, 'browser.restore.confirm').click();
+    await settle();
+    expect(says(pane.target, 'browser.restore.acknowledgedAsksAgain')).toBe(true);
+    scrolled.length = 0;
+
+    pane.observe(observed(5));
+
+    const panel = pane.target.querySelector('.panel.external');
+    expect(panel).not.toBeNull();
+    expect(scrolled.map((one) => one.target)).toEqual([panel]);
+    scrolled.length = 0;
+    control(externalPanel(pane.target), CHOICE.reloadDiskVersion).click();
+    flushSync();
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.target).toBe(panel?.querySelector('.choices'));
+    expect(scrolled[0]?.block).toBe('end');
+    pane.stop();
+  });
+}); // End of the "restore pane reveals its external panel" suite

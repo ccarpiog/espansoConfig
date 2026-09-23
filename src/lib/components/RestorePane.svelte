@@ -35,9 +35,10 @@
     type RestoreView,
     type StartedRestore
   } from '../browser/restore';
+  import { conflictOriginMessage, conflictRevisionsOf } from '../browser/conflictSource';
   import { candidateMeasurements, distinctReasons } from '../browser/restoreFacts';
   import type { BindObservationReceiver } from '../browser/surfaceReceivers';
-  import { outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
+  import { isExternalConflict, outcomeReveal, type ConflictChoice } from '../browser/saveOutcome';
   import RecoveryWithoutCreation from './RecoveryWithoutCreation.svelte';
   import { revealOutcome } from './reveal';
   import SourceText from './SourceText.svelte';
@@ -47,7 +48,10 @@
     tBackupRootState,
     tBatchSkipped,
     tConflictChoice,
+    tConflictMessage,
     tConflictOperation,
+    tConflictOriginMessage,
+    tExternalConflictNotice,
     tDraftError,
     tEditError,
     tEntrySkipped,
@@ -56,8 +60,8 @@
     tPresentationNote,
     tRawSaveChoice,
     tRawSaveMessage,
-    tReloadUnavailable,
     tRestoreRefusal,
+    tRestoreReloadUnavailable,
     tSaveError,
     tSaveOutcomeMessage,
     tSaveVerdict,
@@ -174,6 +178,27 @@
    * bring itself back into step says so **beside** it, through the shared
    * `windowOutOfStep` line the model puts in `view.messages`, and never in place
    * of it (`PROGRESS.md` D2).
+   *
+   * **A conflict of either origin is drawn, and each panel says which origin it
+   * has** — Phase 2d-6-8b, the 2d-6 record's §3 entries 10 and 23, in the shape
+   * the six match panels have. A save conflict stays inside the outcome panel; a
+   * change the watcher observed has no outcome (the session keeps it in
+   * `externalConflict`), so it is drawn by a panel of its own **outside the
+   * save-outcome branch**, opening with its origin line, the model's own lines
+   * for that origin and the one revision an observation has — never *expected*
+   * or *found*. What the two share — the operation summary, the whole disk text,
+   * the reload-unavailable line and the choices — is one `comparison` snippet.
+   * **The candidate survives both**: the step above keeps drawing it, and the
+   * confirmed reload **retargets** — the window adopts the disk version, the
+   * base moves to it and the same candidate is measured against it — rather
+   * than reseeding a draft (the raw editor) or closing the panel (a match
+   * panel). **Which candidate lines are said is the model's**: a candidate
+   * dropped while the conflict stands takes its lines with it
+   * (`RestoreView.messages`, 2d-6-5 §4 item 12). Which arm is drawn is decided
+   * by `isExternalConflict`, because the nested `source.kind` does not narrow
+   * the model. **What no type forces** is that this markup draws the origin line
+   * or the notices; `RestorePane.test.ts` and `DetailPane.test.ts` read them off
+   * the screen in both languages.
    */
 
   const {
@@ -354,8 +379,8 @@
    * flight is held inside the session and consumed by the settlement
    * `restoreDocument` answers (entry 5). The binding is instance-bound: a later
    * pane's report displaces this one, and this one's withdrawal then reaches
-   * nothing. What a delivery installs is not drawn deliberately until Phase
-   * 2d-6-8b.
+   * nothing. What a delivery installs is drawn since Phase 2d-6-8b: the
+   * external panel below, the refusal line and the notices beside it.
    *
    * **A delivery cannot arrive from inside the `targetRevisionObserved` effect
    * below** (2d-6-5 §4 item 9): the window delivers from its reconciliation
@@ -409,6 +434,22 @@
   /** The conflict arm's row of controls, which is the second step's target. */
   let outcomeChoices = $state<HTMLElement | null>(null);
 
+  /**
+   * The external conflict on screen, narrowed, or `null` — Phase 2d-6-8b.
+   *
+   * Through `isExternalConflict` rather than `view.conflict.source.kind`: the
+   * nested discriminant narrows the source and leaves the model the union (the
+   * 2d-6 record's §3 entry 10), so this is the one place the panel below learns
+   * that it may read the external arm.
+   */
+  const external = $derived(
+    current.view.conflict !== null && isExternalConflict(current.view.conflict)
+      ? current.view.conflict
+      : null
+  );
+  /** The external conflict panel's own element, the reveal's target when it shows. */
+  let externalPanel = $state<HTMLElement | null>(null);
+
   /*
    * **The outcome panel's appearance asks for a scroll into view** — 2c-4a-3c's
    * findings 10.3 and 10.4, which measured every one of the six write surfaces
@@ -416,12 +457,27 @@
    * This pane is the longest of them all: a catalogue, a candidate and a second
    * stacked document sit above its outcome. The decision is `./reveal.ts`'s and
    * the two `bind:this` targets are this file's.
+   *
+   * **An active external conflict is revealed ahead of any outcome kept as
+   * history** (Phase 2d-6-8b, the shape 2d-6-7b's review gave the operation
+   * panels): a refusal stays in `outcome` beside it (entry 7), and a cue taken
+   * from that outcome would point the reveal at the old panel and never at the
+   * reload's second step.
    */
   const reveal = $derived(
-    outcomeReveal(current.view.outcome?.kind ?? null, current.view.awaitingReloadConfirmation)
+    outcomeReveal(
+      external !== null ? 'conflict' : (current.view.outcome?.kind ?? null),
+      current.view.awaitingReloadConfirmation
+    )
   );
+  /**
+   * Whether the external panel, rather than the outcome one, is the reveal's
+   * target. A boolean `$derived`, so the effect re-runs on a change of cue and
+   * not on every new view object.
+   */
+  const externalShown = $derived(external !== null);
   $effect(() => {
-    revealOutcome(reveal, outcomePanel, outcomeChoices);
+    revealOutcome(reveal, externalShown ? externalPanel : outcomePanel, outcomeChoices);
   });
 
   /*
@@ -695,6 +751,56 @@
   } // End of function backupReadReasonOf()
 </script>
 
+<!-- **What a conflict of either origin shows beside its own lines** — Phase
+     2d-6-8b. One snippet for both panels rather than two copies, so the
+     operation summary, the disk side, the reload-unavailable line and the
+     choices cannot drift apart between the save arm and the external arm (the
+     2d-6 record's §3 entry 23). The candidate itself is the step above, drawn
+     unchanged by either conflict. Only one conflict is active at a time (entry
+     7), so the one `outcomeChoices` element it binds belongs to whichever panel
+     is drawn. -->
+{#snippet comparison(shown: RestoreView)}
+  <!-- What this session asked for, as the model summarises it, and only while
+       a candidate is retained: the sentence names *the backup entry selected
+       here*, and one dropped under the conflict is not selected any more
+       (2d-6-5 §4 item 12). There is nothing typed here and no copy to offer
+       (consult Q4). -->
+  {#if shown.conflictOperation !== null}
+    <h3>{t('browser.saveOutcome.retainedOperation')}</h3>
+    <p>{tConflictOperation(shown.conflictOperation)}</p>
+  {/if}
+
+  <h3>{t('browser.saveOutcome.diskVersion')}</h3>
+  <!-- The whole file as the command layer read it, paired with its revision.
+       Which arm is drawn is `conflictDiskText`'s decision and not this
+       markup's. **Through `SourceText`, never a box**: a disk version holding a
+       carriage return is named here rather than drawn as a line break
+       (`CLAUDE.md` §6). -->
+  {#if shown.diskText !== null && shown.diskText.kind === 'text'}
+    <SourceText text={shown.diskText.text} documentStart />
+  {:else}
+    <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
+  {/if}
+
+  <!-- A control that has just gone, with the reason in its place: the reload is
+       not offered again once the window has refused a spend, because the
+       refusal came back with no word about its cause. That withholds a control;
+       it claims nothing about a later ask. Which sentence is the model's: the
+       shared one says the request is still set up, which a dropped candidate
+       falsifies. -->
+  {#if shown.reloadUnavailableLine !== null}
+    <p class="kind">{tRestoreReloadUnavailable(shown.reloadUnavailableLine)}</p>
+  {/if}
+
+  <p class="choices" bind:this={outcomeChoices}>
+    {#each shown.conflictChoices as choice (choice)}
+      <button type="button" onclick={() => conflictAction(choice)}>
+        {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
+      </button>
+    {/each}
+  </p>
+{/snippet}
+
 <section class="restore" aria-label={t('browser.restore.label')}>
   <div class="head">
     <h2>{t('browser.restore.label')}</h2>
@@ -964,6 +1070,14 @@
     {#if current.view.refusal !== null}
       <p class="kind">{tRestoreRefusal(current.view.refusal)}</p>
     {/if}
+    <!-- Beside the refusal, less the one it already says — Phase 2d-6-8b. An
+         unknown write outcome is the notice this surface can owe beside an
+         `externalConflict` refusal; a held reading's sentence is the refusal
+         line itself, so `noticesBesideRefusal` drops it here. The control that
+         acknowledges the first is 2d-6-9's. -->
+    {#each current.view.noticesBesideRefusal as notice (notice.kind)}
+      <p class="kind">{tExternalConflictNotice(notice)}</p>
+    {/each}
   </div>
 
   {#if current.view.sendFailure !== null}
@@ -993,6 +1107,27 @@
           </p>
         {/each}
       {/if}
+    </div>
+  {/if}
+
+  <!-- **The external conflict, outside the save-outcome branch** (the 2d-6
+       record's §3 entry 10). The origin line first, then the model's own lines
+       for this origin — never `view.messages`, which are a save's — then the one
+       revision an observation has, then everything the save panel shows (entry
+       23). -->
+  {#if external !== null}
+    {@const revisions = conflictRevisionsOf(external.source)}
+    <div class="panel external" role="status" bind:this={externalPanel}>
+      <p>{tConflictOriginMessage(conflictOriginMessage(external.source))}</p>
+      {#each current.view.externalMessages as message, index (index)}
+        <p>{tConflictMessage(message)}</p>
+      {/each}
+      {#if revisions.kind === 'externalChange'}
+        <p class="kind">
+          {t('browser.externalConflict.revisionObserved', { revision: revisions.observed })}
+        </p>
+      {/if}
+      {@render comparison(current.view)}
     </div>
   {/if}
 
@@ -1063,6 +1198,8 @@
         </p>
       {:else}
         {@const conflict = outcome}
+        <!-- Where this conflict came from: a replacement this pane sent. -->
+        <p>{tConflictOriginMessage(conflictOriginMessage(conflict.source))}</p>
         <p class="kind">
           {t('browser.restore.revisionExpected', { revision: conflict.expected })}
         </p>
@@ -1071,39 +1208,7 @@
           {t('browser.restore.revisionDisk', { revision: conflict.diskRevision })}
         </p>
 
-        <h3>{t('browser.saveOutcome.retainedOperation')}</h3>
-        <!-- What this session asked for, as the model summarises it. The
-             candidate itself is above, unchanged by the conflict; there is
-             nothing typed here and no copy to offer (consult Q4). -->
-        {#if current.view.conflictOperation !== null}
-          <p>{tConflictOperation(current.view.conflictOperation)}</p>
-        {/if}
-
-        <h3>{t('browser.saveOutcome.diskVersion')}</h3>
-        <!-- The whole file as the command layer read it after the refusal,
-             paired with `diskRevision`. Which arm is drawn is
-             `conflictDiskText`'s decision and not this markup's. -->
-        {#if current.view.diskText !== null && current.view.diskText.kind === 'text'}
-          <SourceText text={current.view.diskText.text} documentStart />
-        {:else}
-          <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
-        {/if}
-
-        <!-- A control that has just gone, with the reason in its place: the
-             reload is not offered again once the window has refused a spend,
-             because the refusal came back with no word about its cause. That
-             withholds a control; it claims nothing about a later ask. -->
-        {#if current.view.reloadUnavailable}
-          <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
-        {/if}
-
-        <p class="choices" bind:this={outcomeChoices}>
-          {#each current.view.conflictChoices as choice (choice)}
-            <button type="button" onclick={() => conflictAction(choice)}>
-              {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
-            </button>
-          {/each}
-        </p>
+        {@render comparison(current.view)}
       {/if}
     </div>
   {/if}
