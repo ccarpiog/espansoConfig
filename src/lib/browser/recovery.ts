@@ -3476,6 +3476,12 @@ export interface RecoveryView {
    * {@link recoveryBodyFieldOf}. The body control's label is this key's.
    */
   readonly bodyField: ContentForm;
+  /**
+   * That key's label, for `tDetailField` — Phase 3-5-2-1. The body control is
+   * drawn under this name, so a body written under `markdown` is not labelled
+   * as replacement text.
+   */
+  readonly bodyLabel: DetailFieldName;
   /** Whether either control has been changed since the form opened. Derived. */
   readonly dirty: boolean;
   /** Whether there is a step to go back to. Derived. */
@@ -3608,6 +3614,7 @@ export function recoveryView(session: RecoverySession): RecoveryView {
       editable: field === 'trigger' || field === recoveryBodyFieldOf(session.transfer)
     })),
     bodyField: recoveryBodyFieldOf(session.transfer),
+    bodyLabel: fieldLabelName(recoveryBodyFieldOf(session.transfer)),
     trigger: session.draft.value.trigger,
     replace: session.draft.value.replace,
     dirty: isDirty(session.draft),

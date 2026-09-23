@@ -257,7 +257,7 @@ import type {
   ValueKind,
   ValueView
 } from '../ipc/types';
-import type { DetailFieldName } from './detail';
+import type { DetailFieldName, OptionGroupName } from './detail';
 import { matchEditability, type MatchEditability } from './detail';
 import {
   canRedo,
@@ -4256,7 +4256,150 @@ export interface EditableFieldModel {
    * about a string comparison and never a verdict on the value.
    */
   readonly suggested: boolean;
+  /**
+   * Whether the screen says the value is not one of the suggestions — Phase
+   * 3-5-2-1. `true` only for a field that has suggestions and a non-empty box
+   * holding none of them exactly; the sentence says the value is kept as
+   * written, never that it is wrong.
+   */
+  readonly unfamiliar: boolean;
+  /**
+   * The sentence a content key's role owes beside its box, or `null` —
+   * Phase 3-5-2-1 ({@link contentRoleNoteOf}).
+   */
+  readonly roleNote: ContentRoleNote | null;
+  /**
+   * Whether the screen says the file does not hold this key. `false` for a key
+   * whose {@link EditableFieldModel.roleNote} says what the box is instead,
+   * because *typing in it adds the key* is false for a dormant key and says
+   * nothing true about a switch's source or destination.
+   */
+  readonly saysAbsent: boolean;
+  /**
+   * Whether this field's block draws the *Insert cursor position* control —
+   * `replace` only, and only while {@link cursorActionOffered} (ruling 18).
+   */
+  readonly cursorAction: boolean;
 }
+
+/**
+ * What a content key's role says beside its box — Phase 3-5-2-1.
+ *
+ * The three {@link ContentRole}s whose box does not behave as an ordinary field:
+ * a `dormant` key is not added because another content key is held; a
+ * `switchedAway` key is renamed by the drafted switch; a `switchTarget` key is
+ * what the switch renames to. `current` and `open` owe nothing.
+ */
+export type ContentRoleNote = 'dormant' | 'switchedAway' | 'switchTarget';
+
+/**
+ * The note one content role owes, or `null`.
+ *
+ * @param role - The field's role, or `null` for a field that is not content.
+ * @returns The note, or `null` for `current`, `open` and a non-content field.
+ */
+export function contentRoleNoteOf(role: ContentRole | null): ContentRoleNote | null {
+  return role === 'dormant' || role === 'switchedAway' || role === 'switchTarget' ? role : null;
+} // End of function contentRoleNoteOf()
+
+/**
+ * The dictionary key holding one content role's sentence.
+ *
+ * @param note - The note {@link contentRoleNoteOf} answered.
+ * @returns The key.
+ */
+export function contentRoleNoteKey(note: ContentRoleNote): TranslationKey {
+  switch (note) {
+    case 'dormant':
+      return 'browser.matchEditor.contentRole.dormant';
+    case 'switchedAway':
+      return 'browser.matchEditor.contentRole.switchedAway';
+    case 'switchTarget':
+      return 'browser.matchEditor.contentRole.switchTarget';
+  }
+} // End of function contentRoleNoteKey()
+
+/**
+ * The option groups the editor draws, each with its fields, in the order a
+ * screen shows them — Phase 3-5-2-1, ruling 10.
+ *
+ * The detail pane's own four groups (`describeOptions` in `./detail.ts`) and its
+ * own headings, so the pane and the editor name a group alike. **`injection` is
+ * the one *Insertion* group, and it holds `force_mode` and `force_clipboard` as
+ * two fields**: two separately labelled text boxes, with no inferred precedence
+ * between them and no migration of one into the other. Every field in
+ * {@link OPTION_FIELDS} is in exactly one group; `the option groups` in
+ * `scalarFields.test.ts` checks that, since no type here can.
+ */
+export const OPTION_GROUPS: readonly {
+  readonly group: OptionGroupName;
+  readonly fields: readonly EditableField[];
+}[] = [
+  { group: 'matching', fields: ['word', 'left_word', 'right_word'] },
+  { group: 'case', fields: ['propagate_case', 'uppercase_style'] },
+  { group: 'injection', fields: ['force_mode', 'force_clipboard'] },
+  { group: 'other', fields: ['paragraph', 'anchor'] }
+];
+
+/**
+ * One section of the editor, in the order a screen draws them — Phase 3-5-2-1.
+ *
+ * `fields` is a run of field blocks under an option group's heading, or under no
+ * heading (`group: null`) for the trigger, the content keys, the label and the
+ * comment. `contentSwitch` is where the change of content kind — its choices,
+ * its preview and its confirmation — is drawn: directly under the five content
+ * keys, and only when there is something to draw.
+ */
+export type EditorSection =
+  | {
+      readonly kind: 'fields';
+      /** The option group's heading, or `null` for no heading. */
+      readonly group: OptionGroupName | null;
+      /** The field blocks, in {@link EDITABLE_FIELDS} order. */
+      readonly fields: readonly EditableFieldModel[];
+    }
+  | { readonly kind: 'contentSwitch' };
+
+/**
+ * The editor's sections, from the field models already built.
+ *
+ * @param fields - The seventeen field models, in {@link EDITABLE_FIELDS} order.
+ * @param switchDrawn - Whether the content-switch section has anything to draw.
+ * @returns The sections.
+ */
+function sectionsOf(
+  fields: readonly EditableFieldModel[],
+  switchDrawn: boolean
+): readonly EditorSection[] {
+  const pick = (names: readonly EditableField[]): readonly EditableFieldModel[] =>
+    fields.filter((one) => names.includes(one.field));
+  const sections: EditorSection[] = [
+    { kind: 'fields', group: null, fields: pick(['trigger', ...CONTENT_FIELDS]) }
+  ];
+  if (switchDrawn) {
+    sections.push({ kind: 'contentSwitch' });
+  }
+  sections.push({ kind: 'fields', group: null, fields: pick(['label', 'comment']) });
+  for (const { group, fields: names } of OPTION_GROUPS) {
+    sections.push({ kind: 'fields', group, fields: pick(names) });
+  } // End of the loop over the option groups
+  return sections;
+} // End of function sectionsOf()
+
+/**
+ * The dictionary key holding the sentence for why a save is held back.
+ *
+ * @param code - What {@link MatchEditorView.saveWithheld} answered.
+ * @returns The key.
+ */
+export function saveWithheldKey(code: SaveWithheld): TranslationKey {
+  switch (code) {
+    case 'contentSwitchUnconfirmed':
+      return 'browser.matchEditor.saveWithheld.contentSwitchUnconfirmed';
+    case 'switchRemovesCompanion':
+      return 'browser.matchEditor.saveWithheld.switchRemovesCompanion';
+  }
+} // End of function saveWithheldKey()
 
 /**
  * What a drafted content switch will do, for its preview — Phase 3-5-1.
@@ -4297,6 +4440,16 @@ export interface ContentSwitchPreview {
   readonly confirmed: boolean;
 }
 
+/** One control offering a change of content kind — Phase 3-5-2-1. */
+export interface SwitchChoice {
+  /** The content key the switch would rename to. */
+  readonly to: ContentForm;
+  /** Its label, for `tDetailField`. */
+  readonly label: DetailFieldName;
+  /** Whether the drafted switch already points here. */
+  readonly drafted: boolean;
+}
+
 /** Why a dirty session's save is held back, as a code. */
 export type SaveWithheld =
   /** A content switch is drafted and not confirmed (ruling 8). */
@@ -4311,10 +4464,23 @@ export type SaveWithheld =
 export interface MatchEditorView {
   /** The seventeen fields, in {@link EDITABLE_FIELDS} order. */
   readonly fields: readonly EditableFieldModel[];
+  /**
+   * The same seventeen field models, cut into the sections a screen draws, with
+   * the content-switch section placed among them — Phase 3-5-2-1
+   * ({@link EditorSection}).
+   */
+  readonly sections: readonly EditorSection[];
   /** The drafted content switch's preview, or `null` — Phase 3-5-1. */
   readonly contentSwitch: ContentSwitchPreview | null;
   /** The content keys a switch may be drafted to now — {@link contentSwitchTargets}. */
   readonly switchTargets: readonly ContentForm[];
+  /**
+   * One control per switch target, for a screen to draw — Phase 3-5-2-1.
+   * `drafted` marks the target the drafted switch already points at, whose
+   * control would do nothing ({@link chooseContentSwitch} answers the same
+   * session) and is drawn disabled.
+   */
+  readonly switchChoices: readonly SwitchChoice[];
   /** Whether the cursor action is offered — {@link cursorActionOffered}. */
   readonly cursorActionOffered: boolean;
   /** How many cursor markers the `replace` box holds now. */
@@ -4477,6 +4643,8 @@ export interface MatchEditorView {
  *
  * @param session - The session to describe.
  * @param field - Which field.
+ * @param intent - Its intent, from {@link intentsOf}.
+ * @param contentSwitch - The drafted switch, read once by the caller, or `null`.
  * @returns The field's model.
  */
 function fieldModel(
@@ -4490,6 +4658,11 @@ function fieldModel(
   const editable = isFieldEditable(session, field);
   const suggestions = suggestionsFor(field);
   const switched = contentSwitch !== null && (field === contentSwitch.from || field === contentSwitch.to);
+  const contentRole = isContentField(field)
+    ? contentRoleOf(session.baseline, contentSwitch, field)
+    : null;
+  const roleNote = contentRoleNoteOf(contentRole);
+  const suggested = suggestions.includes(buffer.text);
   return {
     field,
     label: fieldLabelName(field),
@@ -4503,11 +4676,13 @@ function fieldModel(
     intent,
     canRemove: editable && baseline.present && !buffer.removed && !switched,
     canRestore: editable && buffer.removed,
-    contentRole: isContentField(field)
-      ? contentRoleOf(session.baseline, contentSwitch, field)
-      : null,
+    contentRole,
     suggestions,
-    suggested: suggestions.includes(buffer.text)
+    suggested,
+    unfamiliar: suggestions.length > 0 && buffer.text !== '' && !suggested,
+    roleNote,
+    saysAbsent: !baseline.present && roleNote === null,
+    cursorAction: field === 'replace' && cursorActionOffered(session)
   };
 } // End of function fieldModel()
 
@@ -4658,12 +4833,21 @@ export function matchEditorView(session: MatchEditorSession): MatchEditorView {
   const refusalChoices = offeredRefusalChoices(refused, stale);
   const contentSwitch = capturedSwitch(session.draft.value);
   const intents = intentsOf(session.baseline, session.draft.value, contentSwitch);
+  const fields = EDITABLE_FIELDS.map((field) =>
+    fieldModel(session, field, intents[field], contentSwitch)
+  );
+  const preview = switchPreviewOf(session, contentSwitch, intents);
+  const switchTargets = contentSwitchTargets(session);
   return {
-    fields: EDITABLE_FIELDS.map((field) =>
-      fieldModel(session, field, intents[field], contentSwitch)
-    ),
-    contentSwitch: switchPreviewOf(session, contentSwitch, intents),
-    switchTargets: contentSwitchTargets(session),
+    fields,
+    sections: sectionsOf(fields, preview !== null || switchTargets.length > 0),
+    contentSwitch: preview,
+    switchTargets,
+    switchChoices: switchTargets.map((to) => ({
+      to,
+      label: fieldLabelName(to),
+      drafted: contentSwitch !== null && contentSwitch.to === to
+    })),
     cursorActionOffered: cursorActionOffered(session),
     cursorMarkers: cursorMarkerCount(session.draft.value.replace.text),
     saveWithheld: saveWithheldOf(contentSwitch, intents),

@@ -1,18 +1,23 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import {
     acknowledgeSnapshot,
     acknowledgeFindings,
     acknowledgementOf,
     applyObservation,
     applySave,
+    applySuggestion,
     askToReloadDiskVersion,
     baseRevisionOf,
     beginSave,
+    cancelContentSwitch,
+    chooseContentSwitch,
+    confirmContentSwitch,
     confirmDiskReload,
     CONFLICT_CAPABILITIES,
     editField,
     focusField,
+    insertCursorPosition,
     keepEditing,
     matchEditorView,
     reapplyToDiskVersion,
@@ -23,8 +28,11 @@
     saveCouldNotBeSent,
     startMatchEditor,
     type Clock,
+    type CursorAdvisory,
     type EditableField,
+    type EditableFieldModel,
     type EditorReapplyAttempt,
+    type MatchEditorSession,
     type Reprojection,
     undoEdit
   } from '../browser/matchEditor';
@@ -59,6 +67,8 @@
     tConflictChoice,
     tConflictMessage,
     tConflictOriginMessage,
+    tContentRoleNote,
+    tCursorAdvisory,
     tDetailField,
     tDraftCopy,
     tDraftError,
@@ -79,10 +89,12 @@
     tSaveError,
     tSaveOutcomeMessage,
     tSaveVerdict,
+    tSaveWithheld,
     tValueKind
   } from '../i18n';
   import type {
     Acknowledgement,
+    ContentForm,
     ContentRevision,
     DocumentId,
     DocumentSummary,
@@ -101,8 +113,9 @@
   import SourceText from './SourceText.svelte';
 
   /*
-   * The small editor: one snippet's editable fields, drafted and saved (seventeen
-   * since Phase 3-5-1, which widened the model and not this file's layout).
+   * The small editor: one snippet's editable fields, drafted and saved — seventeen
+   * since Phase 3-5-1, drawn in the model's sections since Phase 3-5-2-1, with the
+   * change of content kind, the option suggestions and the cursor action.
    *
    * **This file is presentation.** Every decision about what may be edited, what
    * a draft means, when a save may start, what it says and what a commit moves is
@@ -147,14 +160,14 @@
    * still shows nothing, and that is right: its span is zero-width, so the file
    * holds no value there to show.
    *
-   * **The three word-boundary fields are three text boxes and none of them is a
-   * checkbox.** D2u: this application shows a scalar's source text as written and
-   * never an inferred type, and a checkbox over `word` would have to decide that
-   * `on`, `yes` and `true` mean the same thing. The heading above them is
-   * `tOptionGroup('matching')`, which is the detail pane's own name for the group;
-   * `field.field === 'word'` is where the group starts because `EDITABLE_FIELDS`
-   * puts the nine options last with `word` first. Since Phase 3-5-1 the six other
-   * options follow under that one heading; their own groups are 3-5-2's.
+   * **The nine options are nine text boxes and none of them is a checkbox.** D2u:
+   * this application shows a scalar's source text as written and never an
+   * inferred type, and a checkbox over `word` would have to decide that `on`,
+   * `yes` and `true` mean the same thing. They are drawn in the four groups of
+   * `view.sections` (`OPTION_GROUPS` in `matchEditor.ts`), under the detail
+   * pane's own headings through `tOptionGroup`; the *Insertion* group holds
+   * `force_mode` and `force_clipboard` as two separately labelled boxes (ruling
+   * 10). Suggestions are exact-string buttons, never a replacement for the box.
    *
    * **An absent key says so, in the box that would create it.** The phase's named
    * failure is a draft-versus-projection mistake, and the one rule that pays for
@@ -651,6 +664,86 @@
     session = restoreField(session, field);
   } // End of function onRestore()
 
+  /**
+   * Puts one suggested value into its field's box — an exact string from the
+   * model's list, as its own history step (`applySuggestion` refuses anything
+   * else).
+   *
+   * @param field - Which field.
+   * @param value - The suggestion pressed.
+   */
+  function onSuggest(field: EditableField, value: string): void {
+    session = applySuggestion(session, field, value);
+  } // End of function onSuggest()
+
+  /**
+   * Drafts a change of content kind, unconfirmed.
+   *
+   * @param to - The content key to switch to.
+   */
+  function onSwitch(to: ContentForm): void {
+    session = chooseContentSwitch(session, to);
+  } // End of function onSwitch()
+
+  /** Confirms the drafted change of content kind after its preview. */
+  function onConfirmSwitch(): void {
+    session = confirmContentSwitch(session);
+  } // End of function onConfirmSwitch()
+
+  /** Withdraws the drafted change of content kind. */
+  function onCancelSwitch(): void {
+    session = cancelContentSwitch(session);
+  } // End of function onCancelSwitch()
+
+  /**
+   * The cursor action's advisory, held with the session it was answered for.
+   *
+   * **Held with the session**, as the reapply report is: the advisory is about
+   * the body as it stood when the control was pressed, and every transition
+   * returns a new session, so `cursorAdvisory` stops drawing it the moment
+   * anything changes. Nothing here has to remember to clear it.
+   */
+  let cursorNotice = $state.raw<{
+    readonly session: MatchEditorSession;
+    readonly advisory: CursorAdvisory;
+  } | null>(null);
+
+  /** The advisory to draw now, or `null`. */
+  const cursorAdvisory = $derived(
+    cursorNotice !== null && cursorNotice.session === session ? cursorNotice.advisory : null
+  );
+
+  /**
+   * *Insert cursor position* (ruling 18): hands the body box's selection to the
+   * model and, when it answers a range, selects that range in the box.
+   *
+   * **The decision is `insertCursorPosition`'s** — insert, select the one marker,
+   * or answer the several-markers advisory — and this only carries the box's
+   * selection in (UTF-16 indices, which is what the model counts in) and the
+   * answered range back out, after the box has been redrawn with the new text.
+   *
+   * @param box - The `replace` field's text area, or `null` when none is drawn.
+   */
+  async function onInsertCursor(box: HTMLTextAreaElement | null): Promise<void> {
+    const selection =
+      box === null
+        ? { start: Number.NaN, end: Number.NaN }
+        : { start: box.selectionStart, end: box.selectionEnd };
+    const result = insertCursorPosition(session, selection);
+    session = result.session;
+    if (result.kind === 'advisory') {
+      cursorNotice = { session: result.session, advisory: result.advisory };
+      return;
+    }
+    cursorNotice = null;
+    if (result.kind === 'unavailable' || box === null) {
+      return;
+    }
+    await tick();
+    box.focus();
+    box.setSelectionRange(result.selection.start, result.selection.end);
+  } // End of function onInsertCursor()
+
   /** Goes back one step. */
   function onUndo(): void {
     session = undoEdit(session);
@@ -1002,6 +1095,241 @@
   </p>
 {/snippet}
 
+<!-- One field's block: its label, its control or what it shows instead, and
+     whatever the model says beside it. One snippet for every section, so a field
+     is drawn the same way under every heading. -->
+{#snippet fieldBlock(field: EditableFieldModel)}
+  <div class="field">
+    {#if field.refusal !== null}
+      <!-- Shown and not edited. Through `SourceText` rather than a disabled
+           control, because a text control's value normalises every carriage
+           return to a line feed and this is exactly the value that may hold
+           one — the box would misdraw the file even while refusing to write
+           to it.
+
+           **`field.shown`, never `field.text`.** One scalar is not what a
+           refused field holds: a `triggers:` list has no scalar behind
+           `trigger:` at all, so drawing `field.text` drew nothing and a person
+           editing a multi-trigger snippet could see their triggers nowhere,
+           because this editor replaces the whole detail pane while it is open.
+           The model answers one entry per trigger. -->
+      <p class="name">{tDetailField(field.label)}</p>
+      {#each field.shown as one, index (index)}
+        <div class="shownValue">
+          <!-- Which key this value came from, when the field's own label does
+               not say. A `Several` draws a `trigger:` box and a `regex:` box
+               that are otherwise identical, and while this editor is open the
+               detail pane that labels them is not on screen to consult. The
+               name is the detail pane's own, through `tDetailField`; the model
+               says why `tTriggerKind` will not do. -->
+          {#if one.source !== null}
+            <span class="marker">{tDetailField(one.source)}</span>
+          {/if}
+          <!-- **A caption per arm, because the two arms show different things.**
+               One `valueAsWritten` above the whole list claimed every entry was
+               the file's own bytes, and a `notScalar` entry is a *localized shape
+               name* — so a nested list in `triggers:` was captioned "shown here
+               as the file writes it" over the words "a list", which the file does
+               not contain. Each entry now carries the caption that is true of it. -->
+          {#if one.kind === 'text'}
+            <span class="marker">{t('browser.detail.valueAsWritten')}</span>
+            <SourceText text={one.text} />
+          {:else}
+            <span class="marker">{t('browser.matchEditor.shapeOnly')}</span>
+            <span class="marker">{tValueKind(one.shape)}</span>
+          {/if}
+        </div>
+      {/each}
+      <p class="kind">{tFieldRefusal(field.refusal)}</p>
+    {:else}
+      <label>
+        <span class="name">{tDetailField(field.label)}</span>
+        <!-- The control is the model's decision (`fieldControlOf` in
+             `matchEditor.ts`, Phase 3-5-1): a text input strips line breaks,
+             so every field whose value may span lines is a text area. -->
+        {#if field.control === 'multiLine'}
+          <textarea
+            class="text body"
+            spellcheck="false"
+            readonly={!field.editable}
+            value={field.text}
+            oninput={(event) => onTyped(field.field, event.currentTarget.value)}
+            onfocus={() => onFocus(field.field)}
+            onblur={() => onBlur()}
+          ></textarea>
+        {:else}
+          <input
+            class="text"
+            type="text"
+            spellcheck="false"
+            readonly={!field.editable}
+            value={field.text}
+            oninput={(event) => onTyped(field.field, event.currentTarget.value)}
+            onfocus={() => onFocus(field.field)}
+            onblur={() => onBlur()}
+          />
+        {/if}
+      </label>
+      <!-- What a content key's role makes of its box (Phase 3-5-2-1). The model
+           says which sentence is owed: *typing in it adds the key* is false for a
+           dormant key, so `saysAbsent` is `false` wherever a role note speaks. -->
+      {#if field.roleNote !== null}
+        <p class="kind">{tContentRoleNote(field.roleNote)}</p>
+      {/if}
+      {#if field.saysAbsent}
+        <p class="kind">{t('browser.matchEditor.fieldAbsent')}</p>
+      {/if}
+      <!-- **Suggestions are exact strings, offered and never imposed** (ruling
+           10, D2u). Each is a button whose label is the value itself, as espanso
+           spells it, in every language; pressing one puts exactly that string in
+           the box. A value outside the list is kept as written, and the sentence
+           under it says so without calling it wrong. -->
+      {#if field.suggestions.length > 0}
+        <p class="choices suggestions">
+          <span class="marker">{t('browser.matchEditor.suggestions')}</span>
+          {#each field.suggestions as suggestion (suggestion)}
+            <button
+              type="button"
+              class="source"
+              disabled={!field.editable}
+              onclick={() => onSuggest(field.field, suggestion)}
+            >
+              {suggestion}
+            </button>
+          {/each}
+        </p>
+        {#if field.unfamiliar}
+          <p class="kind">{t('browser.matchEditor.suggestions.unfamiliar')}</p>
+        {/if}
+      {/if}
+      <!-- *Insert cursor position*, `replace` only (ruling 18) — which field
+           carries it is the model's `cursorAction`. The box is found from the
+           control's own block, so the selection handed over is this field's. -->
+      {#if field.cursorAction}
+        <p class="choices">
+          <button
+            type="button"
+            onclick={(event) =>
+              void onInsertCursor(
+                event.currentTarget.closest('.field')?.querySelector('textarea') ?? null
+              )}
+          >
+            {t('browser.matchEditor.cursor.insert')}
+          </button>
+        </p>
+        <p class="kind">{t('browser.matchEditor.cursor.hint')}</p>
+        {#if cursorAdvisory !== null}
+          <p class="kind" role="status">{tCursorAdvisory(cursorAdvisory)}</p>
+        {/if}
+      {/if}
+      <!-- **Gated on the intent, not on the buffer's flag.** The sentence says
+           the key *will be* taken out when you save, and after a committed
+           removal the buffer still carries `removed` while the file no longer
+           has the key — so a flag-gated marker promised a future write of
+           something already written. `field.intent` is what a save would
+           actually say about this field. -->
+      {#if field.intent === 'Remove'}
+        <p class="kind">{t('browser.matchEditor.fieldRemoved')}</p>
+      {/if}
+      {#if field.present}
+        <p class="choices">
+          {#if field.removed}
+            <button
+              type="button"
+              disabled={!field.canRestore}
+              onclick={() => onRestore(field.field)}
+            >
+              {t('browser.matchEditor.restore')}
+            </button>
+          {:else}
+            <button
+              type="button"
+              disabled={!field.canRemove}
+              onclick={() => onRemove(field.field)}
+            >
+              {t('browser.matchEditor.remove')}
+            </button>
+          {/if}
+        </p>
+      {/if}
+    {/if}
+  </div>
+{/snippet}
+
+<!-- **The change of content kind** (ruling 8, Phase 3-5-2-1): the choices, then
+     the preview of a drafted switch — what is renamed, whether the text is kept
+     as written, which companion keys stay — and its confirmation. The save is
+     withheld until the confirmation (`view.saveWithheld`, drawn beside *Save*);
+     undo takes back the choice and the confirmation one step each. -->
+{#snippet contentKind()}
+  <div class="group" role="group" aria-label={t('browser.matchEditor.switch.heading')}>
+    <h3>{t('browser.matchEditor.switch.heading')}</h3>
+    <p class="kind">{t('browser.matchEditor.switch.offer')}</p>
+    {#if view.switchChoices.length > 0}
+      <p class="choices">
+        {#each view.switchChoices as choice (choice.to)}
+          <button
+            type="button"
+            disabled={choice.drafted || !view.editable}
+            onclick={() => onSwitch(choice.to)}
+          >
+            {t('browser.matchEditor.switch.to', { kind: tDetailField(choice.label) })}
+          </button>
+        {/each}
+      </p>
+    {/if}
+    {#if view.contentSwitch !== null}
+      {@const preview = view.contentSwitch}
+      <div class="panel preview" role="status">
+        <p>
+          {t('browser.matchEditor.switch.preview', {
+            from: tDetailField(preview.fromLabel),
+            to: tDetailField(preview.toLabel)
+          })}
+        </p>
+        <p class="kind">
+          {preview.textKept
+            ? t('browser.matchEditor.switch.textKept')
+            : t('browser.matchEditor.switch.textEdited')}
+        </p>
+        <!-- The companion keys are drawn as the file spells them: they are keys
+             in the file, and the preview is about which of them stay. -->
+        {#if preview.companionsKept.length > 0}
+          <p class="kind">{t('browser.matchEditor.switch.companionsKept')}</p>
+          <ul>
+            {#each preview.companionsKept as key (key)}
+              <li><code class="source">{key}</code></li>
+            {/each}
+          </ul>
+        {:else if preview.companionsRemoved.length === 0}
+          <p class="kind">{t('browser.matchEditor.switch.noCompanions')}</p>
+        {/if}
+        {#if preview.companionsRemoved.length > 0}
+          <p class="kind">{t('browser.matchEditor.switch.companionsRemoved')}</p>
+          <ul>
+            {#each preview.companionsRemoved as key (key)}
+              <li><code class="source">{key}</code></li>
+            {/each}
+          </ul>
+        {/if}
+        {#if preview.confirmed}
+          <p class="kind">{t('browser.matchEditor.switch.confirmed')}</p>
+        {/if}
+        <p class="choices">
+          {#if !preview.confirmed}
+            <button type="button" disabled={!view.editable} onclick={() => onConfirmSwitch()}>
+              {t('browser.matchEditor.switch.confirm')}
+            </button>
+          {/if}
+          <button type="button" disabled={!view.editable} onclick={() => onCancelSwitch()}>
+            {t('browser.matchEditor.switch.cancel')}
+          </button>
+        </p>
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
 <section class="matchEditor" aria-label={t('browser.matchEditor.label')}>
   <div class="head">
     {#if file !== null}
@@ -1048,119 +1376,28 @@
     </div>
   {/if}
 
-  {#each view.fields as field (field.field)}
-    {#if field.field === 'word'}
-      <!-- The nine options are last in `EDITABLE_FIELDS`, `word` first, so this is
-           where they start (one heading until 3-5-2 draws their groups). Text
-           boxes and never a checkbox: D2u. -->
-      <h3>{tOptionGroup('matching')}</h3>
-    {/if}
-    <div class="field">
-      {#if field.refusal !== null}
-        <!-- Shown and not edited. Through `SourceText` rather than a disabled
-             control, because a text control's value normalises every carriage
-             return to a line feed and this is exactly the value that may hold
-             one — the box would misdraw the file even while refusing to write
-             to it.
-
-             **`field.shown`, never `field.text`.** One scalar is not what a
-             refused field holds: a `triggers:` list has no scalar behind
-             `trigger:` at all, so drawing `field.text` drew nothing and a person
-             editing a multi-trigger snippet could see their triggers nowhere,
-             because this editor replaces the whole detail pane while it is open.
-             The model answers one entry per trigger. -->
-        <p class="name">{tDetailField(field.label)}</p>
-        {#each field.shown as one, index (index)}
-          <div class="shownValue">
-            <!-- Which key this value came from, when the field's own label does
-                 not say. A `Several` draws a `trigger:` box and a `regex:` box
-                 that are otherwise identical, and while this editor is open the
-                 detail pane that labels them is not on screen to consult. The
-                 name is the detail pane's own, through `tDetailField`; the model
-                 says why `tTriggerKind` will not do. -->
-            {#if one.source !== null}
-              <span class="marker">{tDetailField(one.source)}</span>
-            {/if}
-            <!-- **A caption per arm, because the two arms show different things.**
-                 One `valueAsWritten` above the whole list claimed every entry was
-                 the file's own bytes, and a `notScalar` entry is a *localized shape
-                 name* — so a nested list in `triggers:` was captioned "shown here
-                 as the file writes it" over the words "a list", which the file does
-                 not contain. Each entry now carries the caption that is true of it. -->
-            {#if one.kind === 'text'}
-              <span class="marker">{t('browser.detail.valueAsWritten')}</span>
-              <SourceText text={one.text} />
-            {:else}
-              <span class="marker">{t('browser.matchEditor.shapeOnly')}</span>
-              <span class="marker">{tValueKind(one.shape)}</span>
-            {/if}
-          </div>
+  <!-- **The sections are the model's** (`view.sections`, Phase 3-5-2-1): the
+       trigger and the five content keys, the change of content kind directly
+       under them when there is one to offer or show, the label and the comment,
+       then the four option groups under the detail pane's own headings. Each
+       option is a text box and never a checkbox (D2u); the *Insertion* group
+       holds `force_mode` and `force_clipboard` as two boxes, each with its own
+       label, and nothing here relates one to the other. -->
+  {#each view.sections as section, index (index)}
+    {#if section.kind === 'contentSwitch'}
+      {@render contentKind()}
+    {:else if section.group !== null}
+      <div class="group" role="group" aria-label={tOptionGroup(section.group)}>
+        <h3>{tOptionGroup(section.group)}</h3>
+        {#each section.fields as field (field.field)}
+          {@render fieldBlock(field)}
         {/each}
-        <p class="kind">{tFieldRefusal(field.refusal)}</p>
-      {:else}
-        <label>
-          <span class="name">{tDetailField(field.label)}</span>
-          <!-- The control is the model's decision (`fieldControlOf` in
-               `matchEditor.ts`, Phase 3-5-1): a text input strips line breaks,
-               so every field whose value may span lines is a text area. -->
-          {#if field.control === 'multiLine'}
-            <textarea
-              class="text body"
-              spellcheck="false"
-              readonly={!field.editable}
-              value={field.text}
-              oninput={(event) => onTyped(field.field, event.currentTarget.value)}
-              onfocus={() => onFocus(field.field)}
-              onblur={() => onBlur()}
-            ></textarea>
-          {:else}
-            <input
-              class="text"
-              type="text"
-              spellcheck="false"
-              readonly={!field.editable}
-              value={field.text}
-              oninput={(event) => onTyped(field.field, event.currentTarget.value)}
-              onfocus={() => onFocus(field.field)}
-              onblur={() => onBlur()}
-            />
-          {/if}
-        </label>
-        {#if !field.present}
-          <p class="kind">{t('browser.matchEditor.fieldAbsent')}</p>
-        {/if}
-        <!-- **Gated on the intent, not on the buffer's flag.** The sentence says
-             the key *will be* taken out when you save, and after a committed
-             removal the buffer still carries `removed` while the file no longer
-             has the key — so a flag-gated marker promised a future write of
-             something already written. `field.intent` is what a save would
-             actually say about this field. -->
-        {#if field.intent === 'Remove'}
-          <p class="kind">{t('browser.matchEditor.fieldRemoved')}</p>
-        {/if}
-        {#if field.present}
-          <p class="choices">
-            {#if field.removed}
-              <button
-                type="button"
-                disabled={!field.canRestore}
-                onclick={() => onRestore(field.field)}
-              >
-                {t('browser.matchEditor.restore')}
-              </button>
-            {:else}
-              <button
-                type="button"
-                disabled={!field.canRemove}
-                onclick={() => onRemove(field.field)}
-              >
-                {t('browser.matchEditor.remove')}
-              </button>
-            {/if}
-          </p>
-        {/if}
-      {/if}
-    </div>
+      </div>
+    {:else}
+      {#each section.fields as field (field.field)}
+        {@render fieldBlock(field)}
+      {/each}
+    {/if}
   {/each}
 
   <p class="choices">
@@ -1177,6 +1414,10 @@
       <span class="marker">{t('browser.matchEditor.saving')}</span>
     {/if}
   </p>
+  <!-- Why a dirty draft cannot be saved yet, beside the control it disables. -->
+  {#if view.saveWithheld !== null}
+    <p class="kind">{tSaveWithheld(view.saveWithheld)}</p>
+  {/if}
 
   <!-- A reading the window holds undecided and an unknown write outcome are said
        once, above this panel, by the pane's `FileReconciliationStatus.svelte`
@@ -1388,6 +1629,14 @@
     margin: 0.375rem 0 0;
     font-size: 0.8125rem;
     font-weight: 600;
+  }
+
+  /* One section of fields under its heading: an option group, or the change of
+     content kind. */
+  .group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
   }
 
   .field {

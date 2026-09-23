@@ -205,6 +205,18 @@ layers, so the orchestrator cut it:
 Each piece is one phase with one worker and one review. The acceptance list above is the union of the
 two; 3-5-2 closes the step.
 
+**Addendum, 2026-09-24 — 3-5-2 cut into two pieces before starting.** The driven iteration that took
+3-5-2 found the screen locked, so the window half could not be read in it. It cut 3-5-2 so the code
+could be reviewed and committed on its own:
+
+- **3-5-2-1 — the components and the i18n.** Everything in 3-5-2 above except the window half: the
+  components, the option groups, the switch preview and confirmation, the cursor action's control, the
+  dictionary keys and accessors, the mounted tests, the ES sentences for ruling 29's inventory, and the
+  creation-form decision. Its record says: *"No window reading was performed or claimed."*
+- **3-5-2-2 — the window half.** EN and ES through the picker, one block-scalar content conflict, per
+  ruling 30 and §4.1, with a minimal uncommitted instrument brought inside its own single review. It
+  needs a visible, unlocked screen, and it closes 3-5-2 and step 3-5.
+
 ### 3-6 — Multiple and regex trigger controls, and `search_terms`
 
 **Delivers** list editing, trigger-form switching, the `Several`/`Absent` presentation (no silent

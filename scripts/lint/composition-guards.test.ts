@@ -88,6 +88,10 @@ const MOUNTED_SUITES: ReadonlyMap<string, { readonly guard: SuiteGuard; readonly
       { guard: 'invokeZero', reason: 'a real BrowserState over injected commands' }
     ],
     ['src/lib/components/MatchEditor.test.ts', { guard: 'invokeZero', reason: 'injected props only' }],
+    [
+      'src/lib/components/MatchEditorScalar.test.ts',
+      { guard: 'invokeZero', reason: 'injected props only' }
+    ],
     ['src/lib/components/MatchCreator.test.ts', { guard: 'invokeZero', reason: 'injected props only' }],
     [
       'src/lib/components/MatchDeleter.test.ts',

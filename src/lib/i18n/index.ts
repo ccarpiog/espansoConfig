@@ -56,15 +56,19 @@ import {
   type MoveSubmissionRefusal
 } from '../browser/matchMove';
 import {
+  contentRoleNoteKey,
   cursorAdvisoryKey,
   editorReapplyObstacleKey,
   fieldLabelName,
   fieldRefusalKey,
   reprojectionRefusalKey,
+  saveWithheldKey,
+  type ContentRoleNote,
   type CursorAdvisory,
   type EditorReapplyObstacle,
   type FieldRefusal,
-  type ReprojectionRefusal
+  type ReprojectionRefusal,
+  type SaveWithheld
 } from '../browser/matchEditor';
 import {
   externalEvidenceRefusalKey,
@@ -687,6 +691,33 @@ export function tFieldRefusal(reason: FieldRefusal): string {
 export function tCursorAdvisory(advisory: CursorAdvisory): string {
   return translate(locale.current, cursorAdvisoryKey(advisory), { count: advisory.count });
 } // End of function tCursorAdvisory()
+
+/**
+ * Renders why a dirty editor's save is held back, in the current language —
+ * Phase 3-5-2-1.
+ *
+ * The model answers a code (`MatchEditorView.saveWithheld` in
+ * `../browser/matchEditor.ts`); `saveWithheldKey` there names the key, so no
+ * component builds one.
+ *
+ * @param code - Why the save is held back.
+ * @returns The translated sentence.
+ */
+export function tSaveWithheld(code: SaveWithheld): string {
+  return translate(locale.current, saveWithheldKey(code));
+} // End of function tSaveWithheld()
+
+/**
+ * Renders what a content key's role means for its box, in the current language —
+ * Phase 3-5-2-1.
+ *
+ * @param note - The note `contentRoleNoteOf` in `../browser/matchEditor.ts`
+ *   answered for the field.
+ * @returns The translated sentence.
+ */
+export function tContentRoleNote(note: ContentRoleNote): string {
+  return translate(locale.current, contentRoleNoteKey(note));
+} // End of function tContentRoleNote()
 
 /**
  * Renders why this window cannot read one snippet again.

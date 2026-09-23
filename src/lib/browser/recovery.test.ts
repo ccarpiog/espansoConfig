@@ -1906,6 +1906,8 @@ describe('what a screen would draw', () => {
     });
     const view = recoveryView(opened);
     expect(view.bodyField).toBe('markdown');
+    // The body control's label is the key it is written under (Phase 3-5-2-1).
+    expect(view.bodyLabel).toBe('markdown');
     expect(view.replace).toBe('**Regards**');
     const byField = (field: string) => view.fields.find((one) => one.field === field)!;
     expect(byField('markdown').editable).toBe(true);
@@ -1955,6 +1957,7 @@ describe('what a screen would draw', () => {
       'replace'
     ]);
     expect(view.bodyField).toBe('replace');
+    expect(view.bodyLabel).toBe('replace');
     const byField = (field: string) => view.fields.find((one) => one.field === field)!;
     expect(byField('label').label).toBe('label');
     expect(byField('left_word').label).toBe('leftWord');

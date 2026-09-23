@@ -1,1043 +1,1059 @@
 {
- "schema_version": 1,
- "updated": "2026-09-23T23:17:09Z",
- "plan": "IMPLEMENTATION_PLAN.md",
- "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
- "phases": [
-  {
-   "id": "0",
-   "title": "Fidelity spike and architectural gate",
-   "status": "done",
-   "summary": "Parser substrate chosen, syntax index, scalar codec, patch engine and four edit operations; the round-trip gate passed over both corpora.",
-   "narrative": "docs/progress-archive/phase-0.md"
-  },
-  {
-   "id": "1",
-   "title": "Read-only browser",
-   "status": "done",
-   "summary": "Core read model, Tauri shell, i18n layer and the three-pane browser; the owner's whole real config renders in a window.",
-   "narrative": "docs/progress-archive/phase-1.md"
-  },
-  {
-   "id": "2a",
-   "title": "The save transaction in Rust",
-   "status": "done",
-   "summary": "The whole save transaction with lock, revision check, reparse, acknowledgement and backup, built with no caller.",
-   "narrative": "docs/progress-archive/phase-2a.md"
-  },
-  {
-   "id": "2b",
-   "title": "The writing commands",
-   "status": "done",
-   "summary": "Eleven Tauri commands, five of them writers, every writer ending in one run_one_save.",
-   "narrative": "docs/progress-archive/phase-2b.md"
-  },
-  {
-   "id": "2c",
-   "title": "The editing UI",
-   "status": "done",
-   "summary": "Ten sub-phases: the raw and small editors, create, delete, move, duplicate, conflict capture, reapply, recovery and restore from backup.",
-   "narrative": "docs/progress-archive/phase-2c.md"
-  },
-  {
-   "id": "2d-design",
-   "title": "2d design consult",
-   "status": "done",
-   "summary": "The consult changed the phase in four places and cut it into eight steps.",
-   "review": "docs/reviews/phase-2d-design.md"
-  },
-  {
-   "id": "2d-1",
-   "title": "2d step 1",
-   "status": "done",
-   "summary": "Complete after five review rounds.",
-   "narrative": "docs/progress-archive/phase-2d.md"
-  },
-  {
-   "id": "2d-2",
-   "title": "2d step 2",
-   "status": "done",
-   "summary": "Complete, READY at round 5.",
-   "narrative": "docs/progress-archive/phase-2d.md"
-  },
-  {
-   "id": "2d-3",
-   "title": "2d step 3",
-   "status": "done",
-   "summary": "Complete and closed; its rows are archived in status-table.md.",
-   "narrative": "docs/progress-archive/status-table.md"
-  },
-  {
-   "id": "2d-4a",
-   "title": "2d step 4a and its five corrective phases",
-   "status": "done",
-   "summary": "Complete and closed after a thirteen-round tail; its rows are archived in status-table.md.",
-   "narrative": "docs/progress-archive/status-table.md"
-  },
-  {
-   "id": "2d-4a-C-1",
-   "title": "2d-4a corrective C step 1",
-   "status": "done",
-   "summary": "Complete and closed.",
-   "narrative": "docs/progress-archive/2d-4a-c-closure.md"
-  },
-  {
-   "id": "2d-4a-C-2",
-   "title": "2d-4a corrective C step 2",
-   "status": "done",
-   "summary": "Complete and closed after a nine-round tail.",
-   "narrative": "docs/progress-archive/2d-4a-c-closure.md"
-  },
-  {
-   "id": "2d-4b-design",
-   "title": "2d-4b design consult",
-   "status": "done",
-   "summary": "Complete and closed.",
-   "narrative": "docs/progress-archive/status-table.md"
-  },
-  {
-   "id": "2d-4b",
-   "title": "2d step 4b and its seven corrective phases",
-   "status": "done",
-   "summary": "Complete and closed; its rows are archived in status-table.md.",
-   "narrative": "docs/progress-archive/status-table.md"
-  },
-  {
-   "id": "2d-5-design",
-   "title": "2d-5 design consult",
-   "status": "done",
-   "summary": "Complete on 2026-08-31 with Codex at high effort as the second provider; it binds every 2d-5 step.",
-   "review": "docs/reviews/phase-2d-5-design.md"
-  },
-  {
-   "id": "2d-5",
-   "title": "2d step 5 — live reconciliation, seven steps",
-   "status": "done",
-   "risk": "high",
-   "summary": "All seven steps are closed; the coordinator runs in production and its lifecycle was read in a real window."
-  },
-  {
-   "id": "2d-5-1",
-   "title": "2d-5 step 1 with its three corrective phases",
-   "status": "done",
-   "summary": "Complete and closed; its rows are archived in status-table.md.",
-   "narrative": "docs/progress-archive/status-table.md"
-  },
-  {
-   "id": "2d-5-2",
-   "title": "2d-5 step 2 with its three corrective phases",
-   "status": "done",
-   "summary": "Complete and closed; its rows are archived in status-table.md.",
-   "narrative": "docs/progress-archive/status-table.md"
-  },
-  {
-   "id": "2d-5-3",
-   "title": "The drain lifecycle coordinator",
-   "status": "done",
-   "risk": "high",
-   "summary": "The drain lifecycle coordinator, complete and closed: its review returned do-not-ship with 2 blockers, and the fix opened a fourteen-round tail that ended by rule at 2d-5-3-N.",
-   "review": "docs/reviews/phase-2d-5-3.md"
-  },
-  {
-   "id": "2d-5-3-A",
-   "title": "Review round for 2d-5-3's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-B: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-A.md",
-   "narrative": "docs/decisions/2d-5-3-A-notes.md"
-  },
-  {
-   "id": "2d-5-3-B",
-   "title": "Review round for 2d-5-3-A's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-C: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-B.md",
-   "narrative": "docs/decisions/2d-5-3-B-notes.md"
-  },
-  {
-   "id": "2d-5-3-C",
-   "title": "Review round for 2d-5-3-B's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-D: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-C.md",
-   "narrative": "docs/decisions/2d-5-3-C-notes.md"
-  },
-  {
-   "id": "2d-5-3-D",
-   "title": "Review round for 2d-5-3-C's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-E: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-D.md",
-   "narrative": "docs/decisions/2d-5-3-D-notes.md"
-  },
-  {
-   "id": "2d-5-3-E",
-   "title": "Review round for 2d-5-3-D's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-F: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-E.md",
-   "narrative": "docs/decisions/2d-5-3-E-notes.md"
-  },
-  {
-   "id": "2d-5-3-F",
-   "title": "Review round for 2d-5-3-E's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-G: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-F.md",
-   "narrative": "docs/decisions/2d-5-3-F-notes.md"
-  },
-  {
-   "id": "2d-5-3-G",
-   "title": "Review round for 2d-5-3-F's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-H: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-G.md",
-   "narrative": "docs/decisions/2d-5-3-G-notes.md"
-  },
-  {
-   "id": "2d-5-3-H",
-   "title": "Review round for 2d-5-3-G's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-I: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-H.md",
-   "narrative": "docs/decisions/2d-5-3-H-notes.md"
-  },
-  {
-   "id": "2d-5-3-I",
-   "title": "Review round for 2d-5-3-H's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-J: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-I.md",
-   "narrative": "docs/decisions/2d-5-3-I-notes.md"
-  },
-  {
-   "id": "2d-5-3-J",
-   "title": "Review round for 2d-5-3-I's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-K: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-J.md",
-   "narrative": "docs/decisions/2d-5-3-J-notes.md"
-  },
-  {
-   "id": "2d-5-3-K",
-   "title": "Review round for 2d-5-3-J's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-L: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-K.md",
-   "narrative": "docs/decisions/2d-5-3-K-notes.md"
-  },
-  {
-   "id": "2d-5-3-L",
-   "title": "Review round for 2d-5-3-K's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-M: the review round was taken (2 SHOULD-FIX, both in source, both fixed), and its own comment-only fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-3-L.md",
-   "narrative": "docs/decisions/2d-5-3-L-notes.md",
-   "commit": "c39831f"
-  },
-  {
-   "id": "2d-5-3-M",
-   "title": "Review round for 2d-5-3-L's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-3-N: the review round was taken (Codex, 2 SHOULD-FIX, one in source and one in the record, both fixed), and its own comment-only fix commissioned the next round.",
-   "review": "docs/reviews/phase-2d-5-3-M.md",
-   "narrative": "docs/decisions/2d-5-3-M-notes.md",
-   "commit": "1e80603"
-  },
-  {
-   "id": "2d-5-3-N",
-   "title": "Review round for 2d-5-3-M's fix",
-   "status": "done",
-   "risk": "high",
-   "summary": "Codex, ship-with-fixes, 0 blockers, 2 Low both in the record; its fix changed no source file, so CLAUDE.md 7.2 closed the fourteen-round 2d-5-3 tail by rule.",
-   "review": "docs/reviews/phase-2d-5-3-N.md",
-   "narrative": "docs/decisions/2d-5-3-N-notes.md",
-   "commit": "a8bb43f"
-  },
-  {
-   "id": "2d-5-4",
-   "title": "The observation state transitions",
-   "status": "done",
-   "summary": "The observation state transitions, complete: Codex returned ship-with-fixes with 2 blockers, all five findings were re-derived and fixed, and the fix commissioned round 2d-5-4-A.",
-   "risk": "high"
-  },
-  {
-   "id": "2d-5-4-A",
-   "title": "Review round for 2d-5-4's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-4-B: the review round was taken and all six findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
-   "review": "docs/reviews/phase-2d-5-4-A.md",
-   "narrative": "docs/decisions/2d-5-4-A-notes.md"
-  },
-  {
-   "id": "2d-5-4-B",
-   "title": "Review round for 2d-5-4-A's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-4-C: the round was taken, all six findings re-derived and fixed plus three the review missed, and its own fix changed four source files.",
-   "review": "docs/reviews/phase-2d-5-4-B.md"
-  },
-  {
-   "id": "2d-5-4-C",
-   "title": "The round 2d-5-4-B's fix commissions",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-4-D: the round was taken, all four findings re-derived and fixed plus five the review missed, and its own fix changed four source files.",
-   "review": "docs/reviews/phase-2d-5-4-C.md",
-   "commit": "f3ba2cd"
-  },
-  {
-   "id": "2d-5-4-D",
-   "title": "The round §7.1 commissions for 2d-5-4-C's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-4-E: the round was taken, its one blocker re-derived and fixed plus five more found by sweeping, and its own fix changed eight source files.",
-   "review": "docs/reviews/phase-2d-5-4-D.md",
-   "commit": "4f7c500"
-  },
-  {
-   "id": "2d-5-4-E",
-   "title": "The round §7.1 commissions for 2d-5-4-D's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-4-F: the round was taken, all three findings re-derived and fixed plus five the review missed, and its own fix changed four source files.",
-   "review": "docs/reviews/phase-2d-5-4-E.md",
-   "narrative": "docs/decisions/2d-5-4-E-notes.md",
-   "commit": "fe7d61b"
-  },
-  {
-   "id": "2d-5-4-F",
-   "title": "The round §7.1 commissions for 2d-5-4-E's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Superseded by 2d-5-4-G: the round was taken, all four findings re-derived and fixed plus seven the review missed, and its own fix changed four source files.",
-   "review": "docs/reviews/phase-2d-5-4-F.md",
-   "narrative": "docs/decisions/2d-5-4-F-notes.md"
-  },
-  {
-   "id": "2d-5-4-G",
-   "title": "The round §7.1 commissions for 2d-5-4-F's fix",
-   "status": "done",
-   "risk": "high",
-   "summary": "Closes the 2d-5-4 chain: all four findings re-derived and fixed plus eleven found by sweeping, committed at ff183e1 and verified; 2d-5-4-H was withdrawn.",
-   "review": "docs/reviews/phase-2d-5-4-G.md",
-   "narrative": "docs/decisions/2d-5-4-G-notes.md",
-   "commit": "ff183e1"
-  },
-  {
-   "id": "2d-5-4-H",
-   "title": "The round §7.1 commissions for 2d-5-4-G's fix",
-   "status": "skipped",
-   "risk": "high",
-   "summary": "Withdrawn 2026-09-20 with the CLAUDE.md 7.1 rule that commissioned it; 2d-5-4-G's fix is committed and verified, so no round is owed."
-  },
-  {
-   "id": "2d-5-5",
-   "title": "External conflicts and save arbitration",
-   "status": "done",
-   "risk": "high",
-   "summary": "Step 5, split on 2026-09-21 into 2d-5-5a and 2d-5-5b; both halves are closed, so the step is done."
-  },
-  {
-   "id": "2d-5-5a",
-   "title": "The ConflictSource union, the memoized save source and the six registrations",
-   "status": "done",
-   "risk": "high",
-   "summary": "ConflictModel splits into save and external arms, both identity-keyed maps re-key to the origin union, and reapply evidence switches on origin behind a two-revision gate.",
-   "review": "docs/reviews/phase-2d-5-5a.md",
-   "narrative": "docs/decisions/2d-5-5a-notes.md"
-  },
-  {
-   "id": "2d-5-5b",
-   "title": "Save arbitration — coalescing, supersession and the in-flight write barrier",
-   "status": "done",
-   "risk": "high",
-   "summary": "A save conflict beats an equal-revision observation, a higher-sequence different revision supersedes it, and an in-flight write retains observations behind a per-file barrier.",
-   "review": "docs/reviews/phase-2d-5-5b.md",
-   "narrative": "docs/decisions/2d-5-5b-notes.md",
-   "commit": "72243f1"
-  },
-  {
-   "id": "2d-5-6",
-   "title": "The file-wide route-guard closure",
-   "status": "done",
-   "summary": "The hoisted core spy and file-wide route, coordinator, lease and exact drain-budget assertions land in three test files; the review found the queue finite in one direction only, fixed.",
-   "risk": "high",
-   "review": "docs/reviews/phase-2d-5-6.md",
-   "narrative": "docs/decisions/2d-5-6-notes.md",
-   "commit": "7605852"
-  },
-  {
-   "id": "2d-5-7",
-   "title": "Production activation, capability widening and baseline re-measure",
-   "status": "done",
-   "summary": "Split into 7a and 7b on 2026-09-21; both halves are closed, so step 7 is done."
-  },
-  {
-   "id": "2d-5-7a",
-   "title": "Production activation, capability widening, dispatcher evidence and baselines",
-   "status": "done",
-   "risk": "high",
-   "summary": "AppShell passes the real event source and starts and disposes the coordinator; the capability holds exactly the two event permissions with dispatcher evidence; rung 1323 / 444 / 2474 / 191.",
-   "review": "docs/reviews/phase-2d-5-7a.md",
-   "narrative": "docs/decisions/2d-5-7a-notes.md",
-   "commit": "094da04"
-  },
-  {
-   "id": "2d-5-7b",
-   "title": "The harness rebuild and the narrow window lifecycle reading",
-   "status": "done",
-   "risk": "high",
-   "summary": "The harness is rebuilt, and a real window shows the wake listener registers, the open drains once, and an external edit produces a drain carrying the observation; disposal on close is not shown.",
-   "review": "docs/reviews/phase-2d-5-7b.md",
-   "narrative": "docs/decisions/2d-5-7b-window-reading.md",
-   "commit": "6467ba8"
-  },
-  {
-   "id": "2d-6-design",
-   "title": "2d-6 design consult",
-   "status": "done",
-   "risk": "high",
-   "summary": "Puts 2d-6 to a Codex design consult: brief, consult, a binding record of 43 rulings and a 114-row audit, one review of the record; cuts 2d-6 into eleven steps.",
-   "review": "docs/reviews/phase-2d-6-design-record-review.md",
-   "narrative": "docs/decisions/2d-6-split-notes.md",
-   "commit": "2de66e2"
-  },
-  {
-   "id": "2d-6",
-   "title": "Components, i18n and mounted evidence",
-   "status": "done",
-   "summary": "Every write surface receives, draws and resolves external changes; all eleven steps are closed."
-  },
-  {
-   "id": "2d-6-1",
-   "title": "Delivery, retained-state and uncertainty protocol",
-   "status": "done",
-   "summary": "All three sub-phases 2d-6-1a, 2d-6-1b and 2d-6-1c are closed; the full 2d-6-1 acceptance is checked in one place, 2d-6-1c-notes.md section 3."
-  },
-  {
-   "id": "2d-6-1a",
-   "title": "Delivery values, shared conflict primitives and origin-correct messages",
-   "status": "done",
-   "risk": "high",
-   "summary": "Adds the delivery envelope value, the shared revision description and reload-guard primitives, and the EN/ES reconciliation sentences; no component, no BrowserState member; rung 1323/447/2520/192.",
-   "review": "docs/reviews/phase-2d-6-1a.md — Codex, ship-with-fixes, 0 blockers, 3 SHOULD-FIX, all fixed",
-   "narrative": "docs/decisions/2d-6-1a-notes.md",
-   "commit": "e88498d"
-  },
-  {
-   "id": "2d-6-1b",
-   "title": "Observation-protocol members on BrowserState",
-   "status": "done",
-   "summary": "Adds the arbitration/delivery member with settlement publication, receiver registration, the person-requested retry, the one-shot uncertainty acknowledgement and per-file reload-guard state.",
-   "risk": "high",
-   "review": "docs/reviews/phase-2d-6-1b.md — Codex, ship-with-fixes, 1 blocker, 2 SHOULD-FIX, all fixed",
-   "narrative": "docs/decisions/2d-6-1b-notes.md",
-   "commit": "874f0ae"
-  },
-  {
-   "id": "2d-6-1c",
-   "title": "Coordinator and workspace members on BrowserState",
-   "status": "done",
-   "summary": "Adds the coordinator revision signal, watchState and sanitized registration-state exposure, the two guarded reload requests and the guarded file reread; rung 1323/447/2574/192.",
-   "risk": "high",
-   "review": "docs/reviews/phase-2d-6-1c.md — Codex, ship-with-fixes, 1 blocker, 1 SHOULD-FIX, both fixed",
-   "narrative": "docs/decisions/2d-6-1c-notes.md",
-   "commit": "32ce4e2"
-  },
-  {
-   "id": "2d-6-2",
-   "title": "Match-editor external session and reapply",
-   "status": "done",
-   "summary": "Gives the match editor its external-conflict session, the submission block at canSave and beginSave, the seven-arm receiver with an arrival-order replay queue and the full-identity reapply lookup.",
-   "risk": "high",
-   "review": "docs/reviews/phase-2d-6-2.md — Codex, ship-with-fixes, 2 blockers, 0 SHOULD-FIX, both fixed",
-   "narrative": "docs/decisions/2d-6-2-notes.md",
-   "commit": "a9dec80"
-  },
-  {
-   "id": "2d-6-3",
-   "title": "Creation and recovery external sessions",
-   "status": "done",
-   "summary": "Gives the creator and recovery form their external-conflict sessions, the submission block at every door, the destination-less refusal and the origin kept unspent; 2 review blockers fixed.",
-   "risk": "high",
-   "review": "docs/reviews/phase-2d-6-3.md",
-   "narrative": "docs/decisions/2d-6-3-notes.md",
-   "commit": "1c48d52"
-  },
-  {
-   "id": "2d-6-4",
-   "title": "Operation-session external conflicts",
-   "status": "done",
-   "summary": "Gives the delete, move and duplicate sessions external-conflict handling: seven-arm receivers, the block at every door with an installed-session reader, the exact subject and anchor lookup.",
-   "risk": "high",
-   "review": "docs/reviews/phase-2d-6-4.md",
-   "narrative": "docs/decisions/2d-6-4-notes.md",
-   "commit": "60585fc"
-  },
-  {
-   "id": "2d-6-5",
-   "title": "Raw and restore external sessions",
-   "status": "done",
-   "summary": "Gives the raw editor and the restore surface their external-conflict sessions: seven-arm receivers, the block at every door, the CR-refusing reseed, candidate-keeping withdrawal, reapply unavailable.",
-   "risk": "high",
-   "review": "docs/reviews/phase-2d-6-5.md",
-   "narrative": "docs/decisions/2d-6-5-notes.md",
-   "commit": "c5ffed3"
-  },
-  {
-   "id": "2d-6-6",
-   "title": "Authored-surface delivery and complete registration",
-   "status": "done",
-   "risk": "high",
-   "summary": "Cut into 6a, 6b and 6c (6c-1, 6c-2); all done, the whole acceptance checked in 2d-6-6c-2-notes.md."
-  },
-  {
-   "id": "2d-6-6a",
-   "title": "Model-side obligations before the wiring",
-   "status": "done",
-   "risk": "high",
-   "summary": "The installed-session reader is required on all eight sessions, the operation doors read it last, and authored reapplies recheck around adoption.",
-   "review": "docs/reviews/phase-2d-6-6a.md",
-   "commit": "3e1657e"
-  },
-  {
-   "id": "2d-6-6b",
-   "title": "Registration and delivery wiring",
-   "status": "done",
-   "summary": "Editor, creator and recovery receivers are registered from the detail pane; recovery is the eighth kind; reloads read the installed session last.",
-   "risk": "high",
-   "review": "docs/reviews/phase-2d-6-6b.md",
-   "narrative": "docs/decisions/2d-6-6b-notes.md",
-   "commit": "2237dca"
-  },
-  {
-   "id": "2d-6-6c",
-   "title": "Authored panels' external rendering",
-   "status": "done",
-   "risk": "high",
-   "summary": "Split into 6c-1 (panel rendering and bilingual mounted tests) and 6c-2 (the window reading and 2d-6-6's full acceptance), both done."
-  },
-  {
-   "id": "2d-6-6c-1",
-   "title": "Authored panels' rendering and bilingual mounted tests",
-   "status": "done",
-   "risk": "high",
-   "summary": "The editor, creator and recovery panels draw an external conflict's origin, evidence, comparison and copy, pinned by bilingual mounted tests.",
-   "review": "docs/reviews/phase-2d-6-6c-1.md",
-   "narrative": "docs/decisions/2d-6-6c-1-notes.md",
-   "commit": "ebf45be"
-  },
-  {
-   "id": "2d-6-6c-2",
-   "title": "Authored panels' window reading",
-   "status": "done",
-   "risk": "high",
-   "summary": "The editor, creator and recovery panels read in a real window in English and Spanish, two carried editor fixes landed, and 2d-6-6 closes.",
-   "review": "docs/reviews/phase-2d-6-6c-2.md",
-   "narrative": "docs/decisions/2d-6-6c-2-notes.md",
-   "commit": "ae941cb"
-  },
-  {
-   "id": "2d-6-7",
-   "title": "Operation-surface rendering",
-   "status": "done",
-   "summary": "The delete, move and duplicate panels draw external conflicts in both languages, proved by mounted tests and a window reading (7a, 7b, 7c).",
-   "risk": "high"
-  },
-  {
-   "id": "2d-6-7a",
-   "title": "Operation wrappers, reapply audit and receiver registration",
-   "status": "done",
-   "risk": "high",
-   "summary": "The delete, move and duplicate wrappers keep committed writes, the reapplies read nothing after their look, and the three receivers are registered.",
-   "review": "docs/reviews/phase-2d-6-7a.md",
-   "narrative": "docs/decisions/2d-6-7a-notes.md",
-   "commit": "335e253"
-  },
-  {
-   "id": "2d-6-7b",
-   "title": "Operation panels' rendering and bilingual mounted tests",
-   "status": "done",
-   "risk": "high",
-   "summary": "The delete, move and duplicate panels draw origin, comparison, reapply or manual resolution and reload in English and Spanish, pinned by mounted tests.",
-   "review": "docs/reviews/phase-2d-6-7b.md",
-   "narrative": "docs/decisions/2d-6-7b-notes.md",
-   "commit": "788e22f"
-  },
-  {
-   "id": "2d-6-7c",
-   "title": "Operation panels' window reading",
-   "status": "done",
-   "risk": "high",
-   "summary": "The delete, move and duplicate panels were read in a real window in English and Spanish, over a hard fixture too; 2d-6-7's acceptance is met.",
-   "review": "docs/reviews/phase-2d-6-7c.md",
-   "narrative": "docs/decisions/2d-6-7c-notes.md",
-   "commit": "41cf680"
-  },
-  {
-   "id": "2d-6-8",
-   "title": "Raw and restore rendering",
-   "status": "done",
-   "summary": "Cut into 8a (owed model fixes and receiver registration), 8b (the two panels rendering) and 8c (window reading); all three are done."
-  },
-  {
-   "id": "2d-6-8a",
-   "title": "Raw and restore: owed model fixes and receiver registration",
-   "status": "done",
-   "risk": "high",
-   "summary": "Fixed reads after adoption in the raw and restore reloads and the raw save wrapper, and registered the last two receivers; no new rendering.",
-   "review": "docs/reviews/phase-2d-6-8a.md",
-   "narrative": "docs/decisions/2d-6-8a-notes.md",
-   "commit": "e9ab39b"
-  },
-  {
-   "id": "2d-6-8b",
-   "title": "Raw and restore panels rendering",
-   "status": "done",
-   "risk": "high",
-   "summary": "Draws origin, comparison, notices and the reseed or retarget reload on the raw editor and restore pane, with bilingual mounted tests.",
-   "review": "docs/reviews/phase-2d-6-8b.md",
-   "narrative": "docs/decisions/2d-6-8b-notes.md",
-   "commit": "d601110"
-  },
-  {
-   "id": "2d-6-8c",
-   "title": "Raw and restore window reading",
-   "status": "done",
-   "risk": "high",
-   "summary": "Read the raw editor and restore pane in a real window over the hard fixture, EN and ES, and checked 2d-6-8 whole; no defect found.",
-   "review": "docs/reviews/phase-2d-6-8c.md",
-   "narrative": "docs/decisions/2d-6-8c-notes.md",
-   "commit": "b369a35"
-  },
-  {
-   "id": "2d-6-9",
-   "title": "Reconciliation status and explicit exits",
-   "status": "done",
-   "summary": "The reconciliation status as values, drawn in the shell and panels, and read in a real window; closed at 2d-6-9c."
-  },
-  {
-   "id": "2d-6-9a",
-   "title": "Reconciliation status decisions and words",
-   "status": "done",
-   "risk": "high",
-   "summary": "Decides as values which reconciliation state and exit each file and the workspace show, with EN/ES words; review fixes made the readers reactive.",
-   "review": "docs/reviews/phase-2d-6-9a.md",
-   "narrative": "docs/decisions/2d-6-9a-notes.md",
-   "commit": "3fdbeae"
-  },
-  {
-   "id": "2d-6-9b",
-   "title": "Reconciliation status rendering and controls",
-   "status": "done",
-   "risk": "high",
-   "summary": "Draws the reconciliation states and wires the five exits, EN and ES; cut into 9b-1 (shell, sidebar, pane), 9b-2 (the eight write panels) and 9b-3 (entry 15)."
-  },
-  {
-   "id": "2d-6-9b-1",
-   "title": "Shell, sidebar and detail-pane status and the five controls",
-   "status": "done",
-   "risk": "high",
-   "summary": "Draws the reconciliation states in the shell, sidebar and detail pane, wires the five exits, and marks a file stale after a refused save; rung 1323/456/3280/198.",
-   "review": "docs/reviews/phase-2d-6-9b-1.md — fallback agent (Codex malformed), ship-with-fixes, 0 blockers, 2 SHOULD-FIX, both fixed",
-   "narrative": "docs/decisions/2d-6-9b-1-notes.md",
-   "commit": "2cf57ca"
-  },
-  {
-   "id": "2d-6-9b-2",
-   "title": "Write renderers status and acknowledgement presentation",
-   "status": "done",
-   "risk": "high",
-   "summary": "Each write panel draws the snapshot acknowledgement from its own conflict source, EN and ES; the doubly drawn held/uncertain sentences removed; rung 1323/457/3357/200.",
-   "review": "docs/reviews/phase-2d-6-9b-2.md — fallback agent (Codex usage limit), ship-with-fixes, 0 blockers, 1 SHOULD-FIX, fixed",
-   "narrative": "docs/decisions/2d-6-9b-2-notes.md",
-   "commit": "5b24da5"
-  },
-  {
-   "id": "2d-6-9b-3",
-   "title": "Entry 15 enforced on the automatic reread",
-   "status": "done",
-   "risk": "high",
-   "summary": "Refuses the automatic reread of a file under an uncertainty hold and registers the refused observation so it can be acknowledged.",
-   "review": "docs/reviews/phase-2d-6-9b-3.md",
-   "commit": "5ff784e"
-  },
-  {
-   "id": "2d-6-9c",
-   "title": "Reconciliation status window reading",
-   "status": "done",
-   "risk": "high",
-   "summary": "Reads the reconciliation states and exits in a real window, EN and ES, fixes a layout squeeze, and checks 2d-6-9 whole.",
-   "review": "docs/reviews/phase-2d-6-9c.md",
-   "narrative": "docs/decisions/2d-6-9c-notes.md",
-   "commit": "5aff303"
-  },
-  {
-   "id": "2d-6-10",
-   "title": "Foreground fallback",
-   "status": "done",
-   "summary": "Replaces the inert foreground source with a DOM visibilitychange-plus-focus source in AppShell; a real foregrounding is still unread.",
-   "risk": "routine",
-   "review": "docs/reviews/phase-2d-6-10.md",
-   "commit": "ca4f633"
-  },
-  {
-   "id": "2d-6-11",
-   "title": "Complete composition evidence and baseline accounting",
-   "status": "done",
-   "summary": "Composition evidence and baseline accounting, done in two halves (11a and 11b)."
-  },
-  {
-   "id": "2d-6-11a",
-   "title": "Cross-surface matrix, finite drain scripts and the import and guard inventory check",
-   "status": "done",
-   "risk": "high",
-   "summary": "Adds the composition guards check, exact DetailPane drain scripts and the completed cross-surface matrix; reviewed ship-with-fixes, fixed.",
-   "review": "docs/reviews/phase-2d-6-11a.md",
-   "commit": "b90dc37"
-  },
-  {
-   "id": "2d-6-11b",
-   "title": "Bilingual fixtures, production-comment sweep and baselines",
-   "status": "done",
-   "risk": "high",
-   "summary": "Pins reviewed EN/ES wording for the safety-critical sentences, corrects false production comments and records the baselines; 2d-6 closes.",
-   "review": "docs/reviews/phase-2d-6-11b.md",
-   "narrative": "docs/decisions/2d-6-11b-notes.md",
-   "commit": "97fddc9"
-  },
-  {
-   "id": "2d-7-design",
-   "title": "2d-7 design consult",
-   "status": "done",
-   "risk": "high",
-   "summary": "Cuts 2d-7 into ten steps with 36 binding rulings, from an Opus-agent consult; the record is reviewed and fixed.",
-   "review": "docs/reviews/phase-2d-7-design-record-review.md",
-   "narrative": "docs/decisions/2d-7-split-notes.md",
-   "commit": "5b9f4d8"
-  },
-  {
-   "id": "2d-7-1",
-   "title": "The stale ruling and its fix",
-   "status": "done",
-   "risk": "high",
-   "summary": "Rules that a stale mark clears once nothing the window holds backs it, gated on a status-write count; two handed-on defects fixed test-first.",
-   "review": "docs/reviews/phase-2d-7-1.md",
-   "narrative": "docs/decisions/2d-7-1-notes.md",
-   "commit": "38d3337"
-  },
-  {
-   "id": "2d-7-2",
-   "title": "Presentation and comment fixes, ES mounted cases",
-   "status": "done",
-   "risk": "routine",
-   "summary": "Greys disabled status buttons, keeps file names whole in rows, stops the invisible marker wrapping, fixes a false comment and adds Spanish mounted tests.",
-   "review": "docs/reviews/phase-2d-7-2.md",
-   "commit": "bf4f5c6"
-  },
-  {
-   "id": "2d-7-3",
-   "title": "The instrument, Rust side",
-   "status": "done",
-   "risk": "high",
-   "summary": "The instrument Rust side: probe.rs formatted, command parity test, dispatch and wake tallies, read-only witness, snapshot token, no-follow locks.",
-   "review": "docs/reviews/phase-2d-7-3.md",
-   "narrative": "docs/decisions/2d-7-3-notes.md",
-   "commit": "73ef08c"
-  },
-  {
-   "id": "2d-7-4",
-   "title": "The instrument, page side and harness, and the instrument review",
-   "status": "done",
-   "risk": "high",
-   "summary": "Split into 2d-7-4-1 (harness and tools) and 2d-7-4-2 (page side, shakedowns, the instrument review); both closed."
-  },
-  {
-   "id": "2d-7-4-1",
-   "title": "The instrument harness and tools",
-   "status": "done",
-   "risk": "high",
-   "summary": "Builds launch-7.sh with per-launch bundle ids, window-only captures, lock preflight, writers and a SHA-checked fixture import, plus the input tool.",
-   "review": "docs/reviews/phase-2d-7-4-1.md",
-   "narrative": "docs/decisions/2d-7-4-1-notes.md",
-   "commit": "268a87f"
-  },
-  {
-   "id": "2d-7-4-2",
-   "title": "The instrument page side, shakedowns and the instrument review",
-   "status": "done",
-   "risk": "high",
-   "summary": "Finishes probe.ts, runs the five shakedown controls, and passes the one instrument review after fixing its two blockers.",
-   "review": "docs/reviews/phase-2d-7-4-2.md",
-   "narrative": "docs/decisions/2d-7-4-2-notes.md",
-   "commit": "3b4e5d3"
-  },
-  {
-   "id": "2d-7-5",
-   "title": "Reading: delivery, watcher and counters",
-   "status": "done",
-   "risk": "high",
-   "summary": "Reads delivery, the watcher and the counters in a real window; emits equal deliveries, and rows the frozen instrument cannot reach are recorded unread.",
-   "review": "docs/reviews/phase-2d-7-5.md",
-   "narrative": "docs/decisions/2d-7-5-notes.md",
-   "commit": "8b91dce"
-  },
-  {
-   "id": "2d-7-6",
-   "title": "Reading: retention, conflict timing, choices and adoption",
-   "status": "done",
-   "risk": "high",
-   "summary": "Cut into 2d-7-6-1 (G2) and 2d-7-6-2 (G3), both closed on owner rulings of 2026-09-23 with their unread rows handed to 2d-7-9 and 2d-7-10."
-  },
-  {
-   "id": "2d-7-6-1",
-   "title": "Reading: surface retention, conflict timing and the locale switch (G2)",
-   "status": "done",
-   "risk": "high",
-   "summary": "Read and reviewed; clauses 2 and 5 unmet with the frozen instrument, recorded unread by the owner's ruling of 2026-09-23 and handed to 2d-7-9 and 2d-7-10.",
-   "review": "docs/reviews/phase-2d-7-6-1.md",
-   "narrative": "docs/decisions/2d-7-6-1-notes.md",
-   "commit": "ad90ba9"
-  },
-  {
-   "id": "2d-7-6-2",
-   "title": "Reading: conflict choices and adoption arms (G3)",
-   "status": "done",
-   "risk": "high",
-   "summary": "G3 read and reviewed; clause 1 unmet with the frozen instrument, its choices recorded unread by the owner's ruling of 2026-09-23 and handed to 2d-7-9 and 2d-7-10.",
-   "review": "docs/reviews/phase-2d-7-6-2.md",
-   "narrative": "docs/decisions/2d-7-6-2-notes.md",
-   "commit": "ee4e149"
-  },
-  {
-   "id": "2d-7-7",
-   "title": "Reading: the fifteen byte-exact fixtures (R38)",
-   "status": "done",
-   "risk": "routine",
-   "summary": "R38 read and reviewed (ship); the panel/refresh half unmet with the frozen instrument, recorded unread for all fifteen under the owner's standing ruling of 2026-09-23 (entry 37).",
-   "review": "docs/reviews/phase-2d-7-7.md",
-   "narrative": "docs/decisions/2d-7-7-notes.md",
-   "commit": "384f4a4"
-  },
-  {
-   "id": "2d-7-8",
-   "title": "Reading: the status states 9c left unread",
-   "status": "done",
-   "risk": "routine",
-   "summary": "G4 read and reviewed (ship): one row held, thirteen unread, the plan-less ones handed to 2d-7-9 and 2d-7-10 under the standing ruling (entry 37).",
-   "review": "docs/reviews/phase-2d-7-8.md",
-   "narrative": "docs/decisions/2d-7-8-notes.md",
-   "commit": "2aa798a"
-  },
-  {
-   "id": "2d-7-9",
-   "title": "Owner-present visible session",
-   "status": "done",
-   "risk": "high",
-   "summary": "G5 read with the owner present and reviewed (ship-with-fixes, fixed): three rows read, one in part, three unread under entry 37.",
-   "review": "docs/reviews/phase-2d-7-9.md",
-   "narrative": "docs/decisions/2d-7-9-notes.md",
-   "commit": "8b81f54"
-  },
-  {
-   "id": "2d-7-10",
-   "title": "Consolidation",
-   "status": "done",
-   "risk": "routine",
-   "summary": "Wrote the 2d-7 matrix, the ES sentence inventory, the 2d-8 deletion manifest and the carried-forward list; reviewed ship-with-fixes, fixed.",
-   "review": "docs/reviews/2d-7-10.md",
-   "narrative": "docs/decisions/2d-7-10-notes.md",
-   "commit": "5a0baee"
-  },
-  {
-   "id": "2d-8",
-   "title": "Instrument removal and harness-free closure",
-   "status": "done",
-   "summary": "Deletes the window-reading instrument and harness per the manifest and re-derives every gate harness-free at 1323 / 461 / 3546 / 200.",
-   "risk": "routine",
-   "review": "docs/reviews/phase-2d-8.md",
-   "commit": "522c9b1"
-  },
-  {
-   "id": "2d",
-   "title": "Live reconciliation of external changes",
-   "status": "done",
-   "risk": "high",
-   "summary": "Steps 1 to 6 and 2d-7-1 to 2d-7-9 are closed; 2d-7-10 is next and may run driven, then 2d-8."
-  },
-  {
-   "id": "3-design",
-   "title": "Phase 3 design consult",
-   "status": "done",
-   "risk": "high",
-   "summary": "Phase 3 put to a Codex design consult and split into fifteen bounded steps, 3-1 to 3-15; records only.",
-   "review": "docs/reviews/phase-3-design-record.md",
-   "commit": "c89f029"
-  },
-  {
-   "id": "3",
-   "title": "Complete match editing",
-   "status": "in_progress",
-   "summary": "Complete match editing, split by the design consult into steps 3-1 to 3-15; 3-1 and 3-2 are done."
-  },
-  {
-   "id": "3-1",
-   "title": "Compositional mapping edits and scalar form substitution",
-   "status": "done",
-   "risk": "high",
-   "review": "docs/reviews/phase-3-1.md",
-   "narrative": "docs/decisions/3-1-notes.md",
-   "summary": "The core can add several missing fields in one save and switch trigger/regex or content keys in place."
-  },
-  {
-   "id": "3-2",
-   "title": "Sequence projection and block scalar-list edits",
-   "status": "done",
-   "risk": "high",
-   "review": "docs/reviews/phase-3-2.md",
-   "narrative": "docs/decisions/3-2-notes.md",
-   "summary": "The core tells absent from empty lists and adds or removes items in block trigger and search-term lists."
-  },
-  {
-   "id": "3-3",
-   "title": "Flow scalar-list cardinality",
-   "status": "done",
-   "summary": "Items are added to and removed from flow lists without changing their style; ambiguous comment placement is refused by name.",
-   "risk": "high",
-   "review": "docs/reviews/phase-3-3.md",
-   "commit": "3cb0098"
-  },
-  {
-   "id": "3-4",
-   "title": "Bounded creation for the wider editor",
-   "status": "done",
-   "risk": "high",
-   "summary": "A closed typed NewMatch creates one item with any trigger form, content key, optional field or list; None and empty stay distinct.",
-   "review": "docs/reviews/phase-3-4.md",
-   "narrative": "docs/decisions/3-4-notes.md",
-   "commit": "3e593f0"
-  },
-  {
-   "id": "3-5",
-   "title": "Scalar content and options editor, and the cursor action",
-   "status": "in_progress",
-   "summary": "Split into 3-5-1 (model and coordination, done) and 3-5-2 (components, i18n, window half, queued); 3-5-2 closes the step."
-  },
-  {
-   "id": "3-5-1",
-   "title": "Scalar content and options: the model and the coordination",
-   "status": "done",
-   "risk": "high",
-   "summary": "Widens the editor model, save, conflict, reapply and recovery to 17 scalar fields, with the switch and cursor intents and R36's rule.",
-   "review": "docs/reviews/phase-3-5-1.md",
-   "narrative": "docs/decisions/3-5-1-notes.md",
-   "commit": "cffb301"
-  },
-  {
-   "id": "3-5-2",
-   "title": "Scalar content and options: components, i18n and the window half",
-   "status": "queued",
-   "risk": "high",
-   "summary": "Draws the widened editor, option groups, switch confirmation and cursor action, and takes the window half."
-  },
-  {
-   "id": "3-6",
-   "title": "Multiple and regex trigger controls, and search_terms",
-   "status": "queued",
-   "summary": "Queued: Multiple and regex trigger controls, and search_terms."
-  },
-  {
-   "id": "3-7",
-   "title": "The local raw-item core edit",
-   "status": "queued",
-   "summary": "Queued: The local raw-item core edit."
-  },
-  {
-   "id": "3-8",
-   "title": "The local raw UI, and CF-55",
-   "status": "queued",
-   "summary": "Queued: The local raw UI, and CF-55."
-  },
-  {
-   "id": "3-9",
-   "title": "File-scope inspector",
-   "status": "queued",
-   "summary": "Queued: File-scope inspector."
-  },
-  {
-   "id": "3-10",
-   "title": "Per-file bulk coordinator",
-   "status": "queued",
-   "summary": "Queued: Per-file bulk coordinator."
-  },
-  {
-   "id": "3-11",
-   "title": "Bulk selection and inspector",
-   "status": "queued",
-   "summary": "Queued: Bulk selection and inspector."
-  },
-  {
-   "id": "3-12",
-   "title": "The application sidecar store",
-   "status": "queued",
-   "summary": "Queued: The application sidecar store."
-  },
-  {
-   "id": "3-13",
-   "title": "Display names and visible creation defaults",
-   "status": "queued",
-   "summary": "Queued: Display names and visible creation defaults."
-  },
-  {
-   "id": "3-14",
-   "title": "Delete-conflict wording and action placement",
-   "status": "queued",
-   "summary": "Queued: Delete-conflict wording and action placement."
-  },
-  {
-   "id": "3-15",
-   "title": "Cross-layer preservation and Phase 3 closure",
-   "status": "queued",
-   "summary": "Queued: Cross-layer preservation and Phase 3 closure."
-  },
-  {
-   "id": "4",
-   "title": "Variables and forms",
-   "status": "queued",
-   "summary": "Not started."
-  },
-  {
-   "id": "5",
-   "title": "Profiles, polish, ship",
-   "status": "queued",
-   "summary": "Not started."
-  },
-  {
-   "id": "M",
-   "title": "Checkpoint split",
-   "status": "done",
-   "summary": "Preflight maintenance on 2026-08-29, unreviewed by rule."
-  },
-  {
-   "id": "M2",
-   "title": "Tail termination",
-   "status": "done",
-   "summary": "Two review rounds on 2026-08-29, both not-ready, all findings fixed; CLAUDE.md 7 is its product."
-  }
- ]
+  "schema_version": 1,
+  "updated": "2026-09-23T23:36:55Z",
+  "plan": "IMPLEMENTATION_PLAN.md",
+  "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
+  "phases": [
+    {
+      "id": "0",
+      "title": "Fidelity spike and architectural gate",
+      "status": "done",
+      "summary": "Parser substrate chosen, syntax index, scalar codec, patch engine and four edit operations; the round-trip gate passed over both corpora.",
+      "narrative": "docs/progress-archive/phase-0.md"
+    },
+    {
+      "id": "1",
+      "title": "Read-only browser",
+      "status": "done",
+      "summary": "Core read model, Tauri shell, i18n layer and the three-pane browser; the owner's whole real config renders in a window.",
+      "narrative": "docs/progress-archive/phase-1.md"
+    },
+    {
+      "id": "2a",
+      "title": "The save transaction in Rust",
+      "status": "done",
+      "summary": "The whole save transaction with lock, revision check, reparse, acknowledgement and backup, built with no caller.",
+      "narrative": "docs/progress-archive/phase-2a.md"
+    },
+    {
+      "id": "2b",
+      "title": "The writing commands",
+      "status": "done",
+      "summary": "Eleven Tauri commands, five of them writers, every writer ending in one run_one_save.",
+      "narrative": "docs/progress-archive/phase-2b.md"
+    },
+    {
+      "id": "2c",
+      "title": "The editing UI",
+      "status": "done",
+      "summary": "Ten sub-phases: the raw and small editors, create, delete, move, duplicate, conflict capture, reapply, recovery and restore from backup.",
+      "narrative": "docs/progress-archive/phase-2c.md"
+    },
+    {
+      "id": "2d-design",
+      "title": "2d design consult",
+      "status": "done",
+      "summary": "The consult changed the phase in four places and cut it into eight steps.",
+      "review": "docs/reviews/phase-2d-design.md"
+    },
+    {
+      "id": "2d-1",
+      "title": "2d step 1",
+      "status": "done",
+      "summary": "Complete after five review rounds.",
+      "narrative": "docs/progress-archive/phase-2d.md"
+    },
+    {
+      "id": "2d-2",
+      "title": "2d step 2",
+      "status": "done",
+      "summary": "Complete, READY at round 5.",
+      "narrative": "docs/progress-archive/phase-2d.md"
+    },
+    {
+      "id": "2d-3",
+      "title": "2d step 3",
+      "status": "done",
+      "summary": "Complete and closed; its rows are archived in status-table.md.",
+      "narrative": "docs/progress-archive/status-table.md"
+    },
+    {
+      "id": "2d-4a",
+      "title": "2d step 4a and its five corrective phases",
+      "status": "done",
+      "summary": "Complete and closed after a thirteen-round tail; its rows are archived in status-table.md.",
+      "narrative": "docs/progress-archive/status-table.md"
+    },
+    {
+      "id": "2d-4a-C-1",
+      "title": "2d-4a corrective C step 1",
+      "status": "done",
+      "summary": "Complete and closed.",
+      "narrative": "docs/progress-archive/2d-4a-c-closure.md"
+    },
+    {
+      "id": "2d-4a-C-2",
+      "title": "2d-4a corrective C step 2",
+      "status": "done",
+      "summary": "Complete and closed after a nine-round tail.",
+      "narrative": "docs/progress-archive/2d-4a-c-closure.md"
+    },
+    {
+      "id": "2d-4b-design",
+      "title": "2d-4b design consult",
+      "status": "done",
+      "summary": "Complete and closed.",
+      "narrative": "docs/progress-archive/status-table.md"
+    },
+    {
+      "id": "2d-4b",
+      "title": "2d step 4b and its seven corrective phases",
+      "status": "done",
+      "summary": "Complete and closed; its rows are archived in status-table.md.",
+      "narrative": "docs/progress-archive/status-table.md"
+    },
+    {
+      "id": "2d-5-design",
+      "title": "2d-5 design consult",
+      "status": "done",
+      "summary": "Complete on 2026-08-31 with Codex at high effort as the second provider; it binds every 2d-5 step.",
+      "review": "docs/reviews/phase-2d-5-design.md"
+    },
+    {
+      "id": "2d-5",
+      "title": "2d step 5 — live reconciliation, seven steps",
+      "status": "done",
+      "risk": "high",
+      "summary": "All seven steps are closed; the coordinator runs in production and its lifecycle was read in a real window."
+    },
+    {
+      "id": "2d-5-1",
+      "title": "2d-5 step 1 with its three corrective phases",
+      "status": "done",
+      "summary": "Complete and closed; its rows are archived in status-table.md.",
+      "narrative": "docs/progress-archive/status-table.md"
+    },
+    {
+      "id": "2d-5-2",
+      "title": "2d-5 step 2 with its three corrective phases",
+      "status": "done",
+      "summary": "Complete and closed; its rows are archived in status-table.md.",
+      "narrative": "docs/progress-archive/status-table.md"
+    },
+    {
+      "id": "2d-5-3",
+      "title": "The drain lifecycle coordinator",
+      "status": "done",
+      "risk": "high",
+      "summary": "The drain lifecycle coordinator, complete and closed: its review returned do-not-ship with 2 blockers, and the fix opened a fourteen-round tail that ended by rule at 2d-5-3-N.",
+      "review": "docs/reviews/phase-2d-5-3.md"
+    },
+    {
+      "id": "2d-5-3-A",
+      "title": "Review round for 2d-5-3's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-B: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-A.md",
+      "narrative": "docs/decisions/2d-5-3-A-notes.md"
+    },
+    {
+      "id": "2d-5-3-B",
+      "title": "Review round for 2d-5-3-A's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-C: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-B.md",
+      "narrative": "docs/decisions/2d-5-3-B-notes.md"
+    },
+    {
+      "id": "2d-5-3-C",
+      "title": "Review round for 2d-5-3-B's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-D: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-C.md",
+      "narrative": "docs/decisions/2d-5-3-C-notes.md"
+    },
+    {
+      "id": "2d-5-3-D",
+      "title": "Review round for 2d-5-3-C's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-E: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-D.md",
+      "narrative": "docs/decisions/2d-5-3-D-notes.md"
+    },
+    {
+      "id": "2d-5-3-E",
+      "title": "Review round for 2d-5-3-D's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-F: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-E.md",
+      "narrative": "docs/decisions/2d-5-3-E-notes.md"
+    },
+    {
+      "id": "2d-5-3-F",
+      "title": "Review round for 2d-5-3-E's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-G: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-F.md",
+      "narrative": "docs/decisions/2d-5-3-F-notes.md"
+    },
+    {
+      "id": "2d-5-3-G",
+      "title": "Review round for 2d-5-3-F's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-H: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-G.md",
+      "narrative": "docs/decisions/2d-5-3-G-notes.md"
+    },
+    {
+      "id": "2d-5-3-H",
+      "title": "Review round for 2d-5-3-G's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-I: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-H.md",
+      "narrative": "docs/decisions/2d-5-3-H-notes.md"
+    },
+    {
+      "id": "2d-5-3-I",
+      "title": "Review round for 2d-5-3-H's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-J: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-I.md",
+      "narrative": "docs/decisions/2d-5-3-I-notes.md"
+    },
+    {
+      "id": "2d-5-3-J",
+      "title": "Review round for 2d-5-3-I's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-K: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-J.md",
+      "narrative": "docs/decisions/2d-5-3-J-notes.md"
+    },
+    {
+      "id": "2d-5-3-K",
+      "title": "Review round for 2d-5-3-J's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-L: the review round was taken and its findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-K.md",
+      "narrative": "docs/decisions/2d-5-3-K-notes.md"
+    },
+    {
+      "id": "2d-5-3-L",
+      "title": "Review round for 2d-5-3-K's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-M: the review round was taken (2 SHOULD-FIX, both in source, both fixed), and its own comment-only fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-3-L.md",
+      "narrative": "docs/decisions/2d-5-3-L-notes.md",
+      "commit": "c39831f"
+    },
+    {
+      "id": "2d-5-3-M",
+      "title": "Review round for 2d-5-3-L's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-3-N: the review round was taken (Codex, 2 SHOULD-FIX, one in source and one in the record, both fixed), and its own comment-only fix commissioned the next round.",
+      "review": "docs/reviews/phase-2d-5-3-M.md",
+      "narrative": "docs/decisions/2d-5-3-M-notes.md",
+      "commit": "1e80603"
+    },
+    {
+      "id": "2d-5-3-N",
+      "title": "Review round for 2d-5-3-M's fix",
+      "status": "done",
+      "risk": "high",
+      "summary": "Codex, ship-with-fixes, 0 blockers, 2 Low both in the record; its fix changed no source file, so CLAUDE.md 7.2 closed the fourteen-round 2d-5-3 tail by rule.",
+      "review": "docs/reviews/phase-2d-5-3-N.md",
+      "narrative": "docs/decisions/2d-5-3-N-notes.md",
+      "commit": "a8bb43f"
+    },
+    {
+      "id": "2d-5-4",
+      "title": "The observation state transitions",
+      "status": "done",
+      "summary": "The observation state transitions, complete: Codex returned ship-with-fixes with 2 blockers, all five findings were re-derived and fixed, and the fix commissioned round 2d-5-4-A.",
+      "risk": "high"
+    },
+    {
+      "id": "2d-5-4-A",
+      "title": "Review round for 2d-5-4's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-4-B: the review round was taken and all six findings fixed, and its own fix commissioned the next round, so it is never recorded complete.",
+      "review": "docs/reviews/phase-2d-5-4-A.md",
+      "narrative": "docs/decisions/2d-5-4-A-notes.md"
+    },
+    {
+      "id": "2d-5-4-B",
+      "title": "Review round for 2d-5-4-A's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-4-C: the round was taken, all six findings re-derived and fixed plus three the review missed, and its own fix changed four source files.",
+      "review": "docs/reviews/phase-2d-5-4-B.md"
+    },
+    {
+      "id": "2d-5-4-C",
+      "title": "The round 2d-5-4-B's fix commissions",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-4-D: the round was taken, all four findings re-derived and fixed plus five the review missed, and its own fix changed four source files.",
+      "review": "docs/reviews/phase-2d-5-4-C.md",
+      "commit": "f3ba2cd"
+    },
+    {
+      "id": "2d-5-4-D",
+      "title": "The round §7.1 commissions for 2d-5-4-C's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-4-E: the round was taken, its one blocker re-derived and fixed plus five more found by sweeping, and its own fix changed eight source files.",
+      "review": "docs/reviews/phase-2d-5-4-D.md",
+      "commit": "4f7c500"
+    },
+    {
+      "id": "2d-5-4-E",
+      "title": "The round §7.1 commissions for 2d-5-4-D's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-4-F: the round was taken, all three findings re-derived and fixed plus five the review missed, and its own fix changed four source files.",
+      "review": "docs/reviews/phase-2d-5-4-E.md",
+      "narrative": "docs/decisions/2d-5-4-E-notes.md",
+      "commit": "fe7d61b"
+    },
+    {
+      "id": "2d-5-4-F",
+      "title": "The round §7.1 commissions for 2d-5-4-E's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Superseded by 2d-5-4-G: the round was taken, all four findings re-derived and fixed plus seven the review missed, and its own fix changed four source files.",
+      "review": "docs/reviews/phase-2d-5-4-F.md",
+      "narrative": "docs/decisions/2d-5-4-F-notes.md"
+    },
+    {
+      "id": "2d-5-4-G",
+      "title": "The round §7.1 commissions for 2d-5-4-F's fix",
+      "status": "done",
+      "risk": "high",
+      "summary": "Closes the 2d-5-4 chain: all four findings re-derived and fixed plus eleven found by sweeping, committed at ff183e1 and verified; 2d-5-4-H was withdrawn.",
+      "review": "docs/reviews/phase-2d-5-4-G.md",
+      "narrative": "docs/decisions/2d-5-4-G-notes.md",
+      "commit": "ff183e1"
+    },
+    {
+      "id": "2d-5-4-H",
+      "title": "The round §7.1 commissions for 2d-5-4-G's fix",
+      "status": "skipped",
+      "risk": "high",
+      "summary": "Withdrawn 2026-09-20 with the CLAUDE.md 7.1 rule that commissioned it; 2d-5-4-G's fix is committed and verified, so no round is owed."
+    },
+    {
+      "id": "2d-5-5",
+      "title": "External conflicts and save arbitration",
+      "status": "done",
+      "risk": "high",
+      "summary": "Step 5, split on 2026-09-21 into 2d-5-5a and 2d-5-5b; both halves are closed, so the step is done."
+    },
+    {
+      "id": "2d-5-5a",
+      "title": "The ConflictSource union, the memoized save source and the six registrations",
+      "status": "done",
+      "risk": "high",
+      "summary": "ConflictModel splits into save and external arms, both identity-keyed maps re-key to the origin union, and reapply evidence switches on origin behind a two-revision gate.",
+      "review": "docs/reviews/phase-2d-5-5a.md",
+      "narrative": "docs/decisions/2d-5-5a-notes.md"
+    },
+    {
+      "id": "2d-5-5b",
+      "title": "Save arbitration — coalescing, supersession and the in-flight write barrier",
+      "status": "done",
+      "risk": "high",
+      "summary": "A save conflict beats an equal-revision observation, a higher-sequence different revision supersedes it, and an in-flight write retains observations behind a per-file barrier.",
+      "review": "docs/reviews/phase-2d-5-5b.md",
+      "narrative": "docs/decisions/2d-5-5b-notes.md",
+      "commit": "72243f1"
+    },
+    {
+      "id": "2d-5-6",
+      "title": "The file-wide route-guard closure",
+      "status": "done",
+      "summary": "The hoisted core spy and file-wide route, coordinator, lease and exact drain-budget assertions land in three test files; the review found the queue finite in one direction only, fixed.",
+      "risk": "high",
+      "review": "docs/reviews/phase-2d-5-6.md",
+      "narrative": "docs/decisions/2d-5-6-notes.md",
+      "commit": "7605852"
+    },
+    {
+      "id": "2d-5-7",
+      "title": "Production activation, capability widening and baseline re-measure",
+      "status": "done",
+      "summary": "Split into 7a and 7b on 2026-09-21; both halves are closed, so step 7 is done."
+    },
+    {
+      "id": "2d-5-7a",
+      "title": "Production activation, capability widening, dispatcher evidence and baselines",
+      "status": "done",
+      "risk": "high",
+      "summary": "AppShell passes the real event source and starts and disposes the coordinator; the capability holds exactly the two event permissions with dispatcher evidence; rung 1323 / 444 / 2474 / 191.",
+      "review": "docs/reviews/phase-2d-5-7a.md",
+      "narrative": "docs/decisions/2d-5-7a-notes.md",
+      "commit": "094da04"
+    },
+    {
+      "id": "2d-5-7b",
+      "title": "The harness rebuild and the narrow window lifecycle reading",
+      "status": "done",
+      "risk": "high",
+      "summary": "The harness is rebuilt, and a real window shows the wake listener registers, the open drains once, and an external edit produces a drain carrying the observation; disposal on close is not shown.",
+      "review": "docs/reviews/phase-2d-5-7b.md",
+      "narrative": "docs/decisions/2d-5-7b-window-reading.md",
+      "commit": "6467ba8"
+    },
+    {
+      "id": "2d-6-design",
+      "title": "2d-6 design consult",
+      "status": "done",
+      "risk": "high",
+      "summary": "Puts 2d-6 to a Codex design consult: brief, consult, a binding record of 43 rulings and a 114-row audit, one review of the record; cuts 2d-6 into eleven steps.",
+      "review": "docs/reviews/phase-2d-6-design-record-review.md",
+      "narrative": "docs/decisions/2d-6-split-notes.md",
+      "commit": "2de66e2"
+    },
+    {
+      "id": "2d-6",
+      "title": "Components, i18n and mounted evidence",
+      "status": "done",
+      "summary": "Every write surface receives, draws and resolves external changes; all eleven steps are closed."
+    },
+    {
+      "id": "2d-6-1",
+      "title": "Delivery, retained-state and uncertainty protocol",
+      "status": "done",
+      "summary": "All three sub-phases 2d-6-1a, 2d-6-1b and 2d-6-1c are closed; the full 2d-6-1 acceptance is checked in one place, 2d-6-1c-notes.md section 3."
+    },
+    {
+      "id": "2d-6-1a",
+      "title": "Delivery values, shared conflict primitives and origin-correct messages",
+      "status": "done",
+      "risk": "high",
+      "summary": "Adds the delivery envelope value, the shared revision description and reload-guard primitives, and the EN/ES reconciliation sentences; no component, no BrowserState member; rung 1323/447/2520/192.",
+      "review": "docs/reviews/phase-2d-6-1a.md — Codex, ship-with-fixes, 0 blockers, 3 SHOULD-FIX, all fixed",
+      "narrative": "docs/decisions/2d-6-1a-notes.md",
+      "commit": "e88498d"
+    },
+    {
+      "id": "2d-6-1b",
+      "title": "Observation-protocol members on BrowserState",
+      "status": "done",
+      "summary": "Adds the arbitration/delivery member with settlement publication, receiver registration, the person-requested retry, the one-shot uncertainty acknowledgement and per-file reload-guard state.",
+      "risk": "high",
+      "review": "docs/reviews/phase-2d-6-1b.md — Codex, ship-with-fixes, 1 blocker, 2 SHOULD-FIX, all fixed",
+      "narrative": "docs/decisions/2d-6-1b-notes.md",
+      "commit": "874f0ae"
+    },
+    {
+      "id": "2d-6-1c",
+      "title": "Coordinator and workspace members on BrowserState",
+      "status": "done",
+      "summary": "Adds the coordinator revision signal, watchState and sanitized registration-state exposure, the two guarded reload requests and the guarded file reread; rung 1323/447/2574/192.",
+      "risk": "high",
+      "review": "docs/reviews/phase-2d-6-1c.md — Codex, ship-with-fixes, 1 blocker, 1 SHOULD-FIX, both fixed",
+      "narrative": "docs/decisions/2d-6-1c-notes.md",
+      "commit": "32ce4e2"
+    },
+    {
+      "id": "2d-6-2",
+      "title": "Match-editor external session and reapply",
+      "status": "done",
+      "summary": "Gives the match editor its external-conflict session, the submission block at canSave and beginSave, the seven-arm receiver with an arrival-order replay queue and the full-identity reapply lookup.",
+      "risk": "high",
+      "review": "docs/reviews/phase-2d-6-2.md — Codex, ship-with-fixes, 2 blockers, 0 SHOULD-FIX, both fixed",
+      "narrative": "docs/decisions/2d-6-2-notes.md",
+      "commit": "a9dec80"
+    },
+    {
+      "id": "2d-6-3",
+      "title": "Creation and recovery external sessions",
+      "status": "done",
+      "summary": "Gives the creator and recovery form their external-conflict sessions, the submission block at every door, the destination-less refusal and the origin kept unspent; 2 review blockers fixed.",
+      "risk": "high",
+      "review": "docs/reviews/phase-2d-6-3.md",
+      "narrative": "docs/decisions/2d-6-3-notes.md",
+      "commit": "1c48d52"
+    },
+    {
+      "id": "2d-6-4",
+      "title": "Operation-session external conflicts",
+      "status": "done",
+      "summary": "Gives the delete, move and duplicate sessions external-conflict handling: seven-arm receivers, the block at every door with an installed-session reader, the exact subject and anchor lookup.",
+      "risk": "high",
+      "review": "docs/reviews/phase-2d-6-4.md",
+      "narrative": "docs/decisions/2d-6-4-notes.md",
+      "commit": "60585fc"
+    },
+    {
+      "id": "2d-6-5",
+      "title": "Raw and restore external sessions",
+      "status": "done",
+      "summary": "Gives the raw editor and the restore surface their external-conflict sessions: seven-arm receivers, the block at every door, the CR-refusing reseed, candidate-keeping withdrawal, reapply unavailable.",
+      "risk": "high",
+      "review": "docs/reviews/phase-2d-6-5.md",
+      "narrative": "docs/decisions/2d-6-5-notes.md",
+      "commit": "c5ffed3"
+    },
+    {
+      "id": "2d-6-6",
+      "title": "Authored-surface delivery and complete registration",
+      "status": "done",
+      "risk": "high",
+      "summary": "Cut into 6a, 6b and 6c (6c-1, 6c-2); all done, the whole acceptance checked in 2d-6-6c-2-notes.md."
+    },
+    {
+      "id": "2d-6-6a",
+      "title": "Model-side obligations before the wiring",
+      "status": "done",
+      "risk": "high",
+      "summary": "The installed-session reader is required on all eight sessions, the operation doors read it last, and authored reapplies recheck around adoption.",
+      "review": "docs/reviews/phase-2d-6-6a.md",
+      "commit": "3e1657e"
+    },
+    {
+      "id": "2d-6-6b",
+      "title": "Registration and delivery wiring",
+      "status": "done",
+      "summary": "Editor, creator and recovery receivers are registered from the detail pane; recovery is the eighth kind; reloads read the installed session last.",
+      "risk": "high",
+      "review": "docs/reviews/phase-2d-6-6b.md",
+      "narrative": "docs/decisions/2d-6-6b-notes.md",
+      "commit": "2237dca"
+    },
+    {
+      "id": "2d-6-6c",
+      "title": "Authored panels' external rendering",
+      "status": "done",
+      "risk": "high",
+      "summary": "Split into 6c-1 (panel rendering and bilingual mounted tests) and 6c-2 (the window reading and 2d-6-6's full acceptance), both done."
+    },
+    {
+      "id": "2d-6-6c-1",
+      "title": "Authored panels' rendering and bilingual mounted tests",
+      "status": "done",
+      "risk": "high",
+      "summary": "The editor, creator and recovery panels draw an external conflict's origin, evidence, comparison and copy, pinned by bilingual mounted tests.",
+      "review": "docs/reviews/phase-2d-6-6c-1.md",
+      "narrative": "docs/decisions/2d-6-6c-1-notes.md",
+      "commit": "ebf45be"
+    },
+    {
+      "id": "2d-6-6c-2",
+      "title": "Authored panels' window reading",
+      "status": "done",
+      "risk": "high",
+      "summary": "The editor, creator and recovery panels read in a real window in English and Spanish, two carried editor fixes landed, and 2d-6-6 closes.",
+      "review": "docs/reviews/phase-2d-6-6c-2.md",
+      "narrative": "docs/decisions/2d-6-6c-2-notes.md",
+      "commit": "ae941cb"
+    },
+    {
+      "id": "2d-6-7",
+      "title": "Operation-surface rendering",
+      "status": "done",
+      "summary": "The delete, move and duplicate panels draw external conflicts in both languages, proved by mounted tests and a window reading (7a, 7b, 7c).",
+      "risk": "high"
+    },
+    {
+      "id": "2d-6-7a",
+      "title": "Operation wrappers, reapply audit and receiver registration",
+      "status": "done",
+      "risk": "high",
+      "summary": "The delete, move and duplicate wrappers keep committed writes, the reapplies read nothing after their look, and the three receivers are registered.",
+      "review": "docs/reviews/phase-2d-6-7a.md",
+      "narrative": "docs/decisions/2d-6-7a-notes.md",
+      "commit": "335e253"
+    },
+    {
+      "id": "2d-6-7b",
+      "title": "Operation panels' rendering and bilingual mounted tests",
+      "status": "done",
+      "risk": "high",
+      "summary": "The delete, move and duplicate panels draw origin, comparison, reapply or manual resolution and reload in English and Spanish, pinned by mounted tests.",
+      "review": "docs/reviews/phase-2d-6-7b.md",
+      "narrative": "docs/decisions/2d-6-7b-notes.md",
+      "commit": "788e22f"
+    },
+    {
+      "id": "2d-6-7c",
+      "title": "Operation panels' window reading",
+      "status": "done",
+      "risk": "high",
+      "summary": "The delete, move and duplicate panels were read in a real window in English and Spanish, over a hard fixture too; 2d-6-7's acceptance is met.",
+      "review": "docs/reviews/phase-2d-6-7c.md",
+      "narrative": "docs/decisions/2d-6-7c-notes.md",
+      "commit": "41cf680"
+    },
+    {
+      "id": "2d-6-8",
+      "title": "Raw and restore rendering",
+      "status": "done",
+      "summary": "Cut into 8a (owed model fixes and receiver registration), 8b (the two panels rendering) and 8c (window reading); all three are done."
+    },
+    {
+      "id": "2d-6-8a",
+      "title": "Raw and restore: owed model fixes and receiver registration",
+      "status": "done",
+      "risk": "high",
+      "summary": "Fixed reads after adoption in the raw and restore reloads and the raw save wrapper, and registered the last two receivers; no new rendering.",
+      "review": "docs/reviews/phase-2d-6-8a.md",
+      "narrative": "docs/decisions/2d-6-8a-notes.md",
+      "commit": "e9ab39b"
+    },
+    {
+      "id": "2d-6-8b",
+      "title": "Raw and restore panels rendering",
+      "status": "done",
+      "risk": "high",
+      "summary": "Draws origin, comparison, notices and the reseed or retarget reload on the raw editor and restore pane, with bilingual mounted tests.",
+      "review": "docs/reviews/phase-2d-6-8b.md",
+      "narrative": "docs/decisions/2d-6-8b-notes.md",
+      "commit": "d601110"
+    },
+    {
+      "id": "2d-6-8c",
+      "title": "Raw and restore window reading",
+      "status": "done",
+      "risk": "high",
+      "summary": "Read the raw editor and restore pane in a real window over the hard fixture, EN and ES, and checked 2d-6-8 whole; no defect found.",
+      "review": "docs/reviews/phase-2d-6-8c.md",
+      "narrative": "docs/decisions/2d-6-8c-notes.md",
+      "commit": "b369a35"
+    },
+    {
+      "id": "2d-6-9",
+      "title": "Reconciliation status and explicit exits",
+      "status": "done",
+      "summary": "The reconciliation status as values, drawn in the shell and panels, and read in a real window; closed at 2d-6-9c."
+    },
+    {
+      "id": "2d-6-9a",
+      "title": "Reconciliation status decisions and words",
+      "status": "done",
+      "risk": "high",
+      "summary": "Decides as values which reconciliation state and exit each file and the workspace show, with EN/ES words; review fixes made the readers reactive.",
+      "review": "docs/reviews/phase-2d-6-9a.md",
+      "narrative": "docs/decisions/2d-6-9a-notes.md",
+      "commit": "3fdbeae"
+    },
+    {
+      "id": "2d-6-9b",
+      "title": "Reconciliation status rendering and controls",
+      "status": "done",
+      "risk": "high",
+      "summary": "Draws the reconciliation states and wires the five exits, EN and ES; cut into 9b-1 (shell, sidebar, pane), 9b-2 (the eight write panels) and 9b-3 (entry 15)."
+    },
+    {
+      "id": "2d-6-9b-1",
+      "title": "Shell, sidebar and detail-pane status and the five controls",
+      "status": "done",
+      "risk": "high",
+      "summary": "Draws the reconciliation states in the shell, sidebar and detail pane, wires the five exits, and marks a file stale after a refused save; rung 1323/456/3280/198.",
+      "review": "docs/reviews/phase-2d-6-9b-1.md — fallback agent (Codex malformed), ship-with-fixes, 0 blockers, 2 SHOULD-FIX, both fixed",
+      "narrative": "docs/decisions/2d-6-9b-1-notes.md",
+      "commit": "2cf57ca"
+    },
+    {
+      "id": "2d-6-9b-2",
+      "title": "Write renderers status and acknowledgement presentation",
+      "status": "done",
+      "risk": "high",
+      "summary": "Each write panel draws the snapshot acknowledgement from its own conflict source, EN and ES; the doubly drawn held/uncertain sentences removed; rung 1323/457/3357/200.",
+      "review": "docs/reviews/phase-2d-6-9b-2.md — fallback agent (Codex usage limit), ship-with-fixes, 0 blockers, 1 SHOULD-FIX, fixed",
+      "narrative": "docs/decisions/2d-6-9b-2-notes.md",
+      "commit": "5b24da5"
+    },
+    {
+      "id": "2d-6-9b-3",
+      "title": "Entry 15 enforced on the automatic reread",
+      "status": "done",
+      "risk": "high",
+      "summary": "Refuses the automatic reread of a file under an uncertainty hold and registers the refused observation so it can be acknowledged.",
+      "review": "docs/reviews/phase-2d-6-9b-3.md",
+      "commit": "5ff784e"
+    },
+    {
+      "id": "2d-6-9c",
+      "title": "Reconciliation status window reading",
+      "status": "done",
+      "risk": "high",
+      "summary": "Reads the reconciliation states and exits in a real window, EN and ES, fixes a layout squeeze, and checks 2d-6-9 whole.",
+      "review": "docs/reviews/phase-2d-6-9c.md",
+      "narrative": "docs/decisions/2d-6-9c-notes.md",
+      "commit": "5aff303"
+    },
+    {
+      "id": "2d-6-10",
+      "title": "Foreground fallback",
+      "status": "done",
+      "summary": "Replaces the inert foreground source with a DOM visibilitychange-plus-focus source in AppShell; a real foregrounding is still unread.",
+      "risk": "routine",
+      "review": "docs/reviews/phase-2d-6-10.md",
+      "commit": "ca4f633"
+    },
+    {
+      "id": "2d-6-11",
+      "title": "Complete composition evidence and baseline accounting",
+      "status": "done",
+      "summary": "Composition evidence and baseline accounting, done in two halves (11a and 11b)."
+    },
+    {
+      "id": "2d-6-11a",
+      "title": "Cross-surface matrix, finite drain scripts and the import and guard inventory check",
+      "status": "done",
+      "risk": "high",
+      "summary": "Adds the composition guards check, exact DetailPane drain scripts and the completed cross-surface matrix; reviewed ship-with-fixes, fixed.",
+      "review": "docs/reviews/phase-2d-6-11a.md",
+      "commit": "b90dc37"
+    },
+    {
+      "id": "2d-6-11b",
+      "title": "Bilingual fixtures, production-comment sweep and baselines",
+      "status": "done",
+      "risk": "high",
+      "summary": "Pins reviewed EN/ES wording for the safety-critical sentences, corrects false production comments and records the baselines; 2d-6 closes.",
+      "review": "docs/reviews/phase-2d-6-11b.md",
+      "narrative": "docs/decisions/2d-6-11b-notes.md",
+      "commit": "97fddc9"
+    },
+    {
+      "id": "2d-7-design",
+      "title": "2d-7 design consult",
+      "status": "done",
+      "risk": "high",
+      "summary": "Cuts 2d-7 into ten steps with 36 binding rulings, from an Opus-agent consult; the record is reviewed and fixed.",
+      "review": "docs/reviews/phase-2d-7-design-record-review.md",
+      "narrative": "docs/decisions/2d-7-split-notes.md",
+      "commit": "5b9f4d8"
+    },
+    {
+      "id": "2d-7-1",
+      "title": "The stale ruling and its fix",
+      "status": "done",
+      "risk": "high",
+      "summary": "Rules that a stale mark clears once nothing the window holds backs it, gated on a status-write count; two handed-on defects fixed test-first.",
+      "review": "docs/reviews/phase-2d-7-1.md",
+      "narrative": "docs/decisions/2d-7-1-notes.md",
+      "commit": "38d3337"
+    },
+    {
+      "id": "2d-7-2",
+      "title": "Presentation and comment fixes, ES mounted cases",
+      "status": "done",
+      "risk": "routine",
+      "summary": "Greys disabled status buttons, keeps file names whole in rows, stops the invisible marker wrapping, fixes a false comment and adds Spanish mounted tests.",
+      "review": "docs/reviews/phase-2d-7-2.md",
+      "commit": "bf4f5c6"
+    },
+    {
+      "id": "2d-7-3",
+      "title": "The instrument, Rust side",
+      "status": "done",
+      "risk": "high",
+      "summary": "The instrument Rust side: probe.rs formatted, command parity test, dispatch and wake tallies, read-only witness, snapshot token, no-follow locks.",
+      "review": "docs/reviews/phase-2d-7-3.md",
+      "narrative": "docs/decisions/2d-7-3-notes.md",
+      "commit": "73ef08c"
+    },
+    {
+      "id": "2d-7-4",
+      "title": "The instrument, page side and harness, and the instrument review",
+      "status": "done",
+      "risk": "high",
+      "summary": "Split into 2d-7-4-1 (harness and tools) and 2d-7-4-2 (page side, shakedowns, the instrument review); both closed."
+    },
+    {
+      "id": "2d-7-4-1",
+      "title": "The instrument harness and tools",
+      "status": "done",
+      "risk": "high",
+      "summary": "Builds launch-7.sh with per-launch bundle ids, window-only captures, lock preflight, writers and a SHA-checked fixture import, plus the input tool.",
+      "review": "docs/reviews/phase-2d-7-4-1.md",
+      "narrative": "docs/decisions/2d-7-4-1-notes.md",
+      "commit": "268a87f"
+    },
+    {
+      "id": "2d-7-4-2",
+      "title": "The instrument page side, shakedowns and the instrument review",
+      "status": "done",
+      "risk": "high",
+      "summary": "Finishes probe.ts, runs the five shakedown controls, and passes the one instrument review after fixing its two blockers.",
+      "review": "docs/reviews/phase-2d-7-4-2.md",
+      "narrative": "docs/decisions/2d-7-4-2-notes.md",
+      "commit": "3b4e5d3"
+    },
+    {
+      "id": "2d-7-5",
+      "title": "Reading: delivery, watcher and counters",
+      "status": "done",
+      "risk": "high",
+      "summary": "Reads delivery, the watcher and the counters in a real window; emits equal deliveries, and rows the frozen instrument cannot reach are recorded unread.",
+      "review": "docs/reviews/phase-2d-7-5.md",
+      "narrative": "docs/decisions/2d-7-5-notes.md",
+      "commit": "8b91dce"
+    },
+    {
+      "id": "2d-7-6",
+      "title": "Reading: retention, conflict timing, choices and adoption",
+      "status": "done",
+      "risk": "high",
+      "summary": "Cut into 2d-7-6-1 (G2) and 2d-7-6-2 (G3), both closed on owner rulings of 2026-09-23 with their unread rows handed to 2d-7-9 and 2d-7-10."
+    },
+    {
+      "id": "2d-7-6-1",
+      "title": "Reading: surface retention, conflict timing and the locale switch (G2)",
+      "status": "done",
+      "risk": "high",
+      "summary": "Read and reviewed; clauses 2 and 5 unmet with the frozen instrument, recorded unread by the owner's ruling of 2026-09-23 and handed to 2d-7-9 and 2d-7-10.",
+      "review": "docs/reviews/phase-2d-7-6-1.md",
+      "narrative": "docs/decisions/2d-7-6-1-notes.md",
+      "commit": "ad90ba9"
+    },
+    {
+      "id": "2d-7-6-2",
+      "title": "Reading: conflict choices and adoption arms (G3)",
+      "status": "done",
+      "risk": "high",
+      "summary": "G3 read and reviewed; clause 1 unmet with the frozen instrument, its choices recorded unread by the owner's ruling of 2026-09-23 and handed to 2d-7-9 and 2d-7-10.",
+      "review": "docs/reviews/phase-2d-7-6-2.md",
+      "narrative": "docs/decisions/2d-7-6-2-notes.md",
+      "commit": "ee4e149"
+    },
+    {
+      "id": "2d-7-7",
+      "title": "Reading: the fifteen byte-exact fixtures (R38)",
+      "status": "done",
+      "risk": "routine",
+      "summary": "R38 read and reviewed (ship); the panel/refresh half unmet with the frozen instrument, recorded unread for all fifteen under the owner's standing ruling of 2026-09-23 (entry 37).",
+      "review": "docs/reviews/phase-2d-7-7.md",
+      "narrative": "docs/decisions/2d-7-7-notes.md",
+      "commit": "384f4a4"
+    },
+    {
+      "id": "2d-7-8",
+      "title": "Reading: the status states 9c left unread",
+      "status": "done",
+      "risk": "routine",
+      "summary": "G4 read and reviewed (ship): one row held, thirteen unread, the plan-less ones handed to 2d-7-9 and 2d-7-10 under the standing ruling (entry 37).",
+      "review": "docs/reviews/phase-2d-7-8.md",
+      "narrative": "docs/decisions/2d-7-8-notes.md",
+      "commit": "2aa798a"
+    },
+    {
+      "id": "2d-7-9",
+      "title": "Owner-present visible session",
+      "status": "done",
+      "risk": "high",
+      "summary": "G5 read with the owner present and reviewed (ship-with-fixes, fixed): three rows read, one in part, three unread under entry 37.",
+      "review": "docs/reviews/phase-2d-7-9.md",
+      "narrative": "docs/decisions/2d-7-9-notes.md",
+      "commit": "8b81f54"
+    },
+    {
+      "id": "2d-7-10",
+      "title": "Consolidation",
+      "status": "done",
+      "risk": "routine",
+      "summary": "Wrote the 2d-7 matrix, the ES sentence inventory, the 2d-8 deletion manifest and the carried-forward list; reviewed ship-with-fixes, fixed.",
+      "review": "docs/reviews/2d-7-10.md",
+      "narrative": "docs/decisions/2d-7-10-notes.md",
+      "commit": "5a0baee"
+    },
+    {
+      "id": "2d-8",
+      "title": "Instrument removal and harness-free closure",
+      "status": "done",
+      "summary": "Deletes the window-reading instrument and harness per the manifest and re-derives every gate harness-free at 1323 / 461 / 3546 / 200.",
+      "risk": "routine",
+      "review": "docs/reviews/phase-2d-8.md",
+      "commit": "522c9b1"
+    },
+    {
+      "id": "2d",
+      "title": "Live reconciliation of external changes",
+      "status": "done",
+      "risk": "high",
+      "summary": "Steps 1 to 6 and 2d-7-1 to 2d-7-9 are closed; 2d-7-10 is next and may run driven, then 2d-8."
+    },
+    {
+      "id": "3-design",
+      "title": "Phase 3 design consult",
+      "status": "done",
+      "risk": "high",
+      "summary": "Phase 3 put to a Codex design consult and split into fifteen bounded steps, 3-1 to 3-15; records only.",
+      "review": "docs/reviews/phase-3-design-record.md",
+      "commit": "c89f029"
+    },
+    {
+      "id": "3",
+      "title": "Complete match editing",
+      "status": "in_progress",
+      "summary": "Complete match editing, split by the design consult into steps 3-1 to 3-15; 3-1 and 3-2 are done."
+    },
+    {
+      "id": "3-1",
+      "title": "Compositional mapping edits and scalar form substitution",
+      "status": "done",
+      "risk": "high",
+      "review": "docs/reviews/phase-3-1.md",
+      "narrative": "docs/decisions/3-1-notes.md",
+      "summary": "The core can add several missing fields in one save and switch trigger/regex or content keys in place."
+    },
+    {
+      "id": "3-2",
+      "title": "Sequence projection and block scalar-list edits",
+      "status": "done",
+      "risk": "high",
+      "review": "docs/reviews/phase-3-2.md",
+      "narrative": "docs/decisions/3-2-notes.md",
+      "summary": "The core tells absent from empty lists and adds or removes items in block trigger and search-term lists."
+    },
+    {
+      "id": "3-3",
+      "title": "Flow scalar-list cardinality",
+      "status": "done",
+      "summary": "Items are added to and removed from flow lists without changing their style; ambiguous comment placement is refused by name.",
+      "risk": "high",
+      "review": "docs/reviews/phase-3-3.md",
+      "commit": "3cb0098"
+    },
+    {
+      "id": "3-4",
+      "title": "Bounded creation for the wider editor",
+      "status": "done",
+      "risk": "high",
+      "summary": "A closed typed NewMatch creates one item with any trigger form, content key, optional field or list; None and empty stay distinct.",
+      "review": "docs/reviews/phase-3-4.md",
+      "narrative": "docs/decisions/3-4-notes.md",
+      "commit": "3e593f0"
+    },
+    {
+      "id": "3-5",
+      "title": "Scalar content and options editor, and the cursor action",
+      "status": "in_progress",
+      "summary": "Split into 3-5-1 (done) and 3-5-2 (3-5-2-1 done, 3-5-2-2 window half blocked); 3-5-2-2 closes the step."
+    },
+    {
+      "id": "3-5-1",
+      "title": "Scalar content and options: the model and the coordination",
+      "status": "done",
+      "risk": "high",
+      "summary": "Widens the editor model, save, conflict, reapply and recovery to 17 scalar fields, with the switch and cursor intents and R36's rule.",
+      "review": "docs/reviews/phase-3-5-1.md",
+      "narrative": "docs/decisions/3-5-1-notes.md",
+      "commit": "cffb301"
+    },
+    {
+      "id": "3-5-2",
+      "title": "Scalar content and options: components, i18n and the window half",
+      "status": "in_progress",
+      "risk": "high",
+      "summary": "Split into 3-5-2-1 (components and i18n, done) and 3-5-2-2 (the window half, blocked on a locked screen); 3-5-2-2 closes the step."
+    },
+    {
+      "id": "3-5-2-1",
+      "title": "Scalar content and options: the components and the i18n",
+      "status": "done",
+      "risk": "high",
+      "summary": "Draws the widened editor, textual option groups, switch preview and confirmation and the cursor action, with 21 new EN and ES strings.",
+      "review": "docs/reviews/phase-3-5-2-1.md",
+      "narrative": "docs/decisions/3-5-2-1-notes.md"
+    },
+    {
+      "id": "3-5-2-2",
+      "title": "Scalar content and options: the window half",
+      "status": "blocked",
+      "risk": "high",
+      "summary": "Blocked: the window half needs a visible, unlocked screen, or an owner ruling to record it unread and owed."
+    },
+    {
+      "id": "3-6",
+      "title": "Multiple and regex trigger controls, and search_terms",
+      "status": "queued",
+      "summary": "Queued: Multiple and regex trigger controls, and search_terms."
+    },
+    {
+      "id": "3-7",
+      "title": "The local raw-item core edit",
+      "status": "queued",
+      "summary": "Queued: The local raw-item core edit."
+    },
+    {
+      "id": "3-8",
+      "title": "The local raw UI, and CF-55",
+      "status": "queued",
+      "summary": "Queued: The local raw UI, and CF-55."
+    },
+    {
+      "id": "3-9",
+      "title": "File-scope inspector",
+      "status": "queued",
+      "summary": "Queued: File-scope inspector."
+    },
+    {
+      "id": "3-10",
+      "title": "Per-file bulk coordinator",
+      "status": "queued",
+      "summary": "Queued: Per-file bulk coordinator."
+    },
+    {
+      "id": "3-11",
+      "title": "Bulk selection and inspector",
+      "status": "queued",
+      "summary": "Queued: Bulk selection and inspector."
+    },
+    {
+      "id": "3-12",
+      "title": "The application sidecar store",
+      "status": "queued",
+      "summary": "Queued: The application sidecar store."
+    },
+    {
+      "id": "3-13",
+      "title": "Display names and visible creation defaults",
+      "status": "queued",
+      "summary": "Queued: Display names and visible creation defaults."
+    },
+    {
+      "id": "3-14",
+      "title": "Delete-conflict wording and action placement",
+      "status": "queued",
+      "summary": "Queued: Delete-conflict wording and action placement."
+    },
+    {
+      "id": "3-15",
+      "title": "Cross-layer preservation and Phase 3 closure",
+      "status": "queued",
+      "summary": "Queued: Cross-layer preservation and Phase 3 closure."
+    },
+    {
+      "id": "4",
+      "title": "Variables and forms",
+      "status": "queued",
+      "summary": "Not started."
+    },
+    {
+      "id": "5",
+      "title": "Profiles, polish, ship",
+      "status": "queued",
+      "summary": "Not started."
+    },
+    {
+      "id": "M",
+      "title": "Checkpoint split",
+      "status": "done",
+      "summary": "Preflight maintenance on 2026-08-29, unreviewed by rule."
+    },
+    {
+      "id": "M2",
+      "title": "Tail termination",
+      "status": "done",
+      "summary": "Two review rounds on 2026-08-29, both not-ready, all findings fixed; CLAUDE.md 7 is its product."
+    }
+  ]
 }

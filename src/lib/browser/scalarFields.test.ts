@@ -49,11 +49,14 @@ import {
   isFieldEditable,
   matchDraftOf,
   matchEditorView,
+  contentRoleNoteKey,
   OPTION_FIELDS,
+  OPTION_GROUPS,
   OPTION_SUGGESTIONS,
   planMatchReapply,
   reapplyToDiskVersion,
   removeField,
+  saveWithheldKey,
   startMatchEditor,
   undoEdit,
   type EditableField,
@@ -739,5 +742,95 @@ describe('textual options — exact-string suggestions, no inferred boolean', ()
     const draft = sent(editField(held, 'force_mode', 'keys'));
     expect(draft.force_mode).toEqual({ Set: 'keys' });
     expect(draft.force_clipboard).toBe('Unchanged');
+  });
+});
+
+describe('the values the components draw — Phase 3-5-2-1', () => {
+  it('puts every option in exactly one group, and force_mode and force_clipboard in the one Insertion group', () => {
+    expect(OPTION_GROUPS.flatMap((one) => one.fields)).toEqual(OPTION_FIELDS);
+    expect(OPTION_GROUPS.map((one) => one.group)).toEqual(['matching', 'case', 'injection', 'other']);
+    expect(OPTION_GROUPS.find((one) => one.group === 'injection')?.fields).toEqual([
+      'force_mode',
+      'force_clipboard'
+    ]);
+  });
+
+  it('cuts the seventeen fields into sections, with the switch section under the content keys only when offered', () => {
+    const offered = matchEditorView(session());
+    expect(offered.sections.map((one) => (one.kind === 'fields' ? one.group : one.kind))).toEqual([
+      null,
+      'contentSwitch',
+      null,
+      'matching',
+      'case',
+      'injection',
+      'other'
+    ]);
+    const walked = offered.sections.flatMap((one) =>
+      one.kind === 'fields' ? one.fields.map((field) => field.field) : []
+    );
+    expect(walked).toEqual(EDITABLE_FIELDS);
+    // Two content keys: no switch to offer and none drafted, so no section.
+    const none = matchEditorView(session(projection({ markdown: 'm' })));
+    expect(none.switchTargets).toEqual([]);
+    expect(none.sections.some((one) => one.kind === 'contentSwitch')).toBe(false);
+  });
+
+  it('marks the drafted target among the switch choices', () => {
+    const drafted = chooseContentSwitch(session(), 'html');
+    const choices = matchEditorView(drafted).switchChoices;
+    expect(choices.map((one) => one.to)).toEqual(['markdown', 'html', 'image_path', 'form']);
+    expect(choices.filter((one) => one.drafted).map((one) => one.to)).toEqual(['html']);
+    expect(choices.find((one) => one.to === 'image_path')?.label).toBe('imagePath');
+  });
+
+  it('owes a role note instead of the absent sentence for dormant, switched-away and target keys', () => {
+    const plain = matchEditorView(session(projection({ label: null })));
+    const of = (view: ReturnType<typeof matchEditorView>, field: EditableField) =>
+      view.fields.find((one) => one.field === field)!;
+    expect(of(plain, 'replace').roleNote).toBeNull();
+    expect(of(plain, 'markdown').roleNote).toBe('dormant');
+    expect(of(plain, 'markdown').saysAbsent).toBe(false);
+    expect(of(plain, 'label').roleNote).toBeNull();
+    expect(of(plain, 'label').saysAbsent).toBe(true);
+    const switched = matchEditorView(chooseContentSwitch(session(), 'markdown'));
+    expect(of(switched, 'replace').roleNote).toBe('switchedAway');
+    expect(of(switched, 'markdown').roleNote).toBe('switchTarget');
+    expect(of(switched, 'markdown').saysAbsent).toBe(false);
+    const open = matchEditorView(session(projection({ replace: null })));
+    expect(of(open, 'markdown').roleNote).toBeNull();
+    expect(of(open, 'markdown').saysAbsent).toBe(true);
+  });
+
+  it('calls a value unfamiliar only when it is non-empty and matches no suggestion exactly', () => {
+    const of = (held: MatchEditorSession, field: EditableField) =>
+      matchEditorView(held).fields.find((one) => one.field === field)!;
+    const held = session(projection({ options: { force_mode: 'Keys' } }));
+    expect(of(held, 'force_mode').unfamiliar).toBe(true);
+    expect(of(applySuggestion(held, 'force_mode', 'keys'), 'force_mode').unfamiliar).toBe(false);
+    expect(of(held, 'uppercase_style').unfamiliar).toBe(false);
+    expect(of(editField(held, 'anchor', 'x'), 'anchor').unfamiliar).toBe(false);
+  });
+
+  it('draws the cursor action on replace only, and not once a switch renames replace away', () => {
+    const drawn = (held: MatchEditorSession) =>
+      matchEditorView(held).fields.filter((one) => one.cursorAction).map((one) => one.field);
+    expect(drawn(session())).toEqual(['replace']);
+    expect(drawn(chooseContentSwitch(session(), 'markdown'))).toEqual([]);
+    expect(drawn(session(projection({ replace: null, markdown: 'm' })))).toEqual([]);
+  });
+
+  it('has a sentence, in both languages, for both save-withheld codes and the three role notes', () => {
+    for (const locale of LOCALES) {
+      for (const code of ['contentSwitchUnconfirmed', 'switchRemovesCompanion'] as const) {
+        expect(DICTIONARIES[locale][saveWithheldKey(code)].length, `${locale} ${code}`).toBeGreaterThan(0);
+      } // End of the loop over the save-withheld codes
+      for (const note of ['dormant', 'switchedAway', 'switchTarget'] as const) {
+        expect(DICTIONARIES[locale][contentRoleNoteKey(note)].length, `${locale} ${note}`).toBeGreaterThan(0);
+      } // End of the loop over the role notes
+    } // End of the loop over the two locales
+    expect(translate('es', saveWithheldKey('switchRemovesCompanion'))).not.toBe(
+      translate('en', saveWithheldKey('switchRemovesCompanion'))
+    );
   });
 });

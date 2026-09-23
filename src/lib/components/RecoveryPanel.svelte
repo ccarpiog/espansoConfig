@@ -798,8 +798,8 @@
           <span class="marker">{tDetailField(row.field.label)}</span>
           <span class="marker">{tTransferStatus(row.status)}</span>
           {#if row.field.transfer.kind === 'carried'}
-            <!-- Through `SourceText` rather than into a box: four of the six have
-                 no control at all, and a projected value may hold a character no
+            <!-- Through `SourceText` rather than into a box: fifteen of the
+                 seventeen have no control at all, and a projected value may hold a character no
                  font draws, which this is the one surface that names. -->
             <SourceText text={row.field.transfer.text} />
           {:else}
@@ -857,7 +857,9 @@
 
     <div class="field">
       <label>
-        <span class="name">{tDetailField('replace')}</span>
+        <!-- The key the body is written under (`form.bodyLabel`, Phase 3-5-2-1):
+             `replace` unless the carried draft held another content key. -->
+        <span class="name">{tDetailField(form.bodyLabel)}</span>
         <textarea
           class="text body"
           spellcheck="false"
