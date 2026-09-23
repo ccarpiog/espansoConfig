@@ -296,6 +296,25 @@ here. **Driven:** yes. If the orchestrator judges it too large, it cuts it into 
 `2d-7-6-2` (G3) **before** it starts (the cutting rule above). **Depends on** 2d-7-5. **Bound by**
 entries 15–18, 23, 25.
 
+#### Addendum 2026-09-23 — the orchestrator's cut
+
+2d-7-6 is cut before it starts, at the consult's own G2/G3 boundary (`phase-2d-7-design.md:408-429`):
+- **`2d-7-6-1` (G2)**: the eight surfaces' retention, disabled-state timing (under `delay`),
+  enabled-state timing, and the locale switch per family. **Acceptance:** all eight surfaces retain
+  their values with `writes=0` and an unchanged witness; each timing state is read or classed per
+  family; the locale switch is read on each family; EN in full and ES covering each distinct sentence
+  these reads draw.
+- **`2d-7-6-2` (G3)**: compare, keep, reload (two steps) and recovery per family; copy by `click()`,
+  recorded as whatever it reads; the reload's `installed` arm; `alreadyThere` and `refused` under
+  `delay`, or named unread; the open-surface refusal, credited **only** with a transcript line showing
+  `competing≥1` (§5.8); committed-but-reprojection-failed named unreachable up front. **Acceptance:**
+  each choice read on each family; each adoption arm classed; EN in full and ES covering each distinct
+  sentence these reads draw.
+
+Both are records only, risk `high`, driven, with one review each (entry 35); the instrument stays
+frozen for both. Reason: the step is the longest matrix in 2d-7, and each half is a full launch series
+with its own records.
+
 ### 2d-7-7 — R38: the fifteen fixtures
 
 **Records only.** Each of the fifteen `CLAUDE.md` §4 fixtures is:

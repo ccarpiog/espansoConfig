@@ -1,8 +1,8 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T09:38:22Z",
+ "updated": "2026-09-23T10:29:14Z",
  "plan": "IMPLEMENTATION_PLAN.md",
- "goal": "Build espansoConfig's external-change reconciliation and verify it in a real window with a reviewed test instrument, EN and ES.",
+ "goal": "Finish external-change reconciliation for the espanso config editor, proving it in real-window readings before packaging.",
  "phases": [
   {
    "id": "0",
@@ -800,9 +800,25 @@
   {
    "id": "2d-7-6",
    "title": "Reading: retention, conflict timing, choices and adoption",
+   "status": "blocked",
+   "risk": "high",
+   "summary": "Cut into 2d-7-6-1 (G2) and 2d-7-6-2 (G3); waits on an owner ruling about rows the frozen instrument cannot read."
+  },
+  {
+   "id": "2d-7-6-1",
+   "title": "Reading: surface retention, conflict timing and the locale switch (G2)",
+   "status": "blocked",
+   "risk": "high",
+   "summary": "Reading done and reviewed, but two acceptance clauses are unmet because the frozen instrument lacks the plans; needs an owner ruling.",
+   "review": "docs/reviews/phase-2d-7-6-1.md",
+   "narrative": "docs/decisions/2d-7-6-1-notes.md"
+  },
+  {
+   "id": "2d-7-6-2",
+   "title": "Reading: conflict choices and adoption arms (G3)",
    "status": "queued",
    "risk": "high",
-   "summary": "Reads each of the eight write surfaces keeping its draft and every conflict choice in a real window."
+   "summary": "Reads compare, keep, reload and recovery on each surface family, and classes each outcome of adopting the disk version."
   },
   {
    "id": "2d-7-7",

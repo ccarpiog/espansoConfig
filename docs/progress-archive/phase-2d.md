@@ -5241,3 +5241,12 @@ After the review fix (comments only): `npm run check` exit 0 (462, 0/0) and `npm
 - `bash -n launch-7.sh`: exit 0, before and after the review fix.
 - `shasum -a 256` of the four instrument paths: equal to the phase-start hashes in notes §0; `launch-7.sh` `aac7c94a…` equals notes §5.
 - `git diff --stat src-tauri/src/main.rs src/main.ts`: `5 insertions(+), 1 deletion(-)`.
+
+
+## Phase 2d-7-4-2's verification block — archived 2026-09-23 at 2d-7-6-1
+
+
+**`1330 / 462 / 3547 / 201`**, unchanged. The worker ran every `CLAUDE.md` §4 gate with the instrument present, before and after the review fix, each exit 0 (notes §5.1, §9.7). The orchestrator re-ran, alone:
+- Before the review: `cargo fmt --check` exit 0; `cargo clippy --workspace --all-targets -- -D warnings` exit 0; `cargo test --workspace -- --test-threads=1 > /private/tmp/2d7-4-2-orch-cargo.log` exit 0, 26 `test result: ok` lines summing to 1330 passed, 0 failed; `npm run check` exit 0 (462 files, 0/0); `npm test` exit 0 (3547); `npm run build` exit 0 (201 modules; server oracle absent, client oracle 2).
+- After the fix round (only `src/probe.ts` changed in the repo): `npm run check` exit 0 (462, 0/0); `npm test` exit 0 (3547); `npm run build` exit 0 (201; server oracle absent, client oracle 2); `cargo fmt --check` exit 0; the worker's `/private/tmp/2d7-4-2-fix-cargo-test.log` summed to 1330 passed, 0 failed.
+- `git diff --stat src-tauri/src/main.rs src/main.ts`: `5 insertions(+), 1 deletion(-)`, before and after the fix round.
