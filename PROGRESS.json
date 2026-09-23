@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T22:33:44Z",
+ "updated": "2026-09-23T22:34:18Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
  "phases": [
@@ -929,7 +929,8 @@
    "risk": "high",
    "summary": "A closed typed NewMatch creates one item with any trigger form, content key, optional field or list; None and empty stay distinct.",
    "review": "docs/reviews/phase-3-4.md",
-   "narrative": "docs/decisions/3-4-notes.md"
+   "narrative": "docs/decisions/3-4-notes.md",
+   "commit": "3e593f0"
   },
   {
    "id": "3-5",
