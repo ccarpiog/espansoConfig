@@ -109,6 +109,7 @@ import type {
   ExternalChangeConflictSource,
   ExternalConflictObservation,
   ObservationVerdict,
+  SaveConflictSource,
   WriteSettlement
 } from './conflictSource';
 import {
@@ -1536,6 +1537,9 @@ export interface BrowserState {
    * It replaces the projection through the same `installView` every adoption uses,
    * so the snippet list, the counts and every `MatchId` minted from the old parse
    * move together; the selection is put back positionally and then checked (R27).
+   * Since Phase 2d-6-9b-1 an install also clears the file's `stale` mark when
+   * nothing has written the file's status since this conflict was registered — the
+   * orchestrator's ruling on `stale`; a status a later observation wrote stands.
    * Everything that invalidates this window happens **synchronously**; the raw
    * viewer's re-read is fired afterwards and is not waited for, because the answer
    * this method owes — *did the window move* — is settled before it starts.
@@ -1913,6 +1917,20 @@ export interface BrowserState {
    *   stands.
    */
   writeOutcomeUncertain(document: DocumentId): boolean;
+  /**
+   * Every file under a hold — a held observation or an unresolved uncertainty —
+   * Phase 2d-6-9b-1, `docs/decisions/2d-6-9a-notes.md` §5 item 3.
+   *
+   * **The reader the workspace route needs for a file nothing else names**: a
+   * removed file whose surface has closed has no row and no surface, and without
+   * this its hold would stand with nowhere to draw it and no control to end it.
+   * Held observations first, then uncertain files, each in insertion order and
+   * without repetition. Reading it subscribes a derivation to the hold tables. It
+   * writes nothing and calls no command.
+   *
+   * @returns The files, frozen.
+   */
+  heldDocuments(): readonly DocumentId[];
   /**
    * Opens a configuration directory and loads every file that holds matches.
    *
@@ -3225,6 +3243,14 @@ export function createBrowserState(
   // fact this state has about that file. Nothing in TypeScript keeps the two maps in
   // step; one function writing both is the whole of what does.
   const standingConflicts = new Map<DocumentId, ConflictSource>();
+  // **The file's status-write count at the moment each origin was registered** —
+  // Phase 2d-6-9b-1, the orchestrator's ruling on `stale`. `adoptDiskVersion`
+  // clears a `stale` mark on installation only while this count is still the
+  // file's, i.e. while nothing has written the file's status since the conflict
+  // arrived; a mark some later observation wrote is that observation's to clear.
+  // Written in {@link rememberTheConflict} beside the two maps above, and a
+  // `WeakMap` for `conflictOrigins`' reason.
+  const conflictStatusWrites = new WeakMap<ConflictSource, number>();
   // **Ruling 27's barrier: how many writes this state started are still in flight
   // for each file.** A count rather than a flag because two surfaces could write one
   // file at once — `busy` keeps the seven surfaces mutually exclusive today, which is
@@ -4009,6 +4035,7 @@ export function createBrowserState(
       return;
     }
     conflictOrigins.set(source, { document, generation });
+    conflictStatusWrites.set(source, statusWriteOf(document));
     // **And this origin is the one that speaks for the file now** — Phase 2d-5-5b.
     // Written here rather than at the call sites so that the two maps cannot be
     // updated apart, and written *after* the first-registration test so that
@@ -4017,6 +4044,48 @@ export function createBrowserState(
     standingConflicts.set(document, source);
     noticeHolds();
   } // End of function rememberTheConflict()
+
+  /**
+   * Registers a save refused as a conflict, marking the file `stale` first when the
+   * refusal read a revision the window does not show — Phase 2d-6-9b-1.
+   *
+   * **The orchestrator's ruling on `stale`**: it means *the window holds a disk
+   * snapshot of this file newer than its installed projection*, whether the snapshot
+   * came from an observation or from a save refused as a conflict. The refused
+   * save's own reading is coalesced by the backend as a duplicate
+   * (`docs/decisions/2d-6-9a-notes.md` §3.3), so no observation will ever mark the
+   * file for it, and this arm is the only place that can. The six save wrappers
+   * call this and nothing else on their conflict arm.
+   *
+   * **What it marks over, and what it leaves alone.** It writes only over no status
+   * or an existing `stale`; an `unavailable` or a `removed` is an observation's
+   * statement that this refusal cannot order itself against — a refusal carries no
+   * sequence — so it stands. With no projection installed there is nothing the
+   * snapshot is newer than, and nothing is marked. The mark is written **before**
+   * the registration so that {@link rememberTheConflict} records the status-write
+   * count that includes it, which is what lets {@link BrowserState.adoptDiskVersion}
+   * clear exactly this mark on installation and nothing written after it.
+   *
+   * **Revisions are hashes and carry no order**, so "newer" is this state's
+   * inference that a refusal's locked read is later than the projection it
+   * refused against; a different revision is the whole of the test.
+   *
+   * @param document - The file the save was aimed at.
+   * @param source - The refusal, as the memoized `save` origin.
+   */
+  function rememberTheSaveConflict(document: DocumentId, source: SaveConflictSource): void {
+    const diskRevision = source.conflict.disk_revision;
+    const held = viewOf(document);
+    const status = externalStatuses.find((entry) => entry.document === document)?.status ?? null;
+    if (
+      held !== undefined &&
+      held.revision !== diskRevision &&
+      (status === null || status.kind === 'stale')
+    ) {
+      noteDocumentStatus(document, { kind: 'stale' });
+    }
+    rememberTheConflict(document, source);
+  } // End of function rememberTheSaveConflict()
 
   /**
    * What this state currently says speaks for one file, or `null`.
@@ -5419,6 +5488,21 @@ export function createBrowserState(
       // window in which a getter can still read what it is replacing.
       forgetFileText();
       installView(disk);
+      // **The `stale` mark this conflict stands for is cleared with the install** —
+      // Phase 2d-6-9b-1, the orchestrator's ruling on `stale`: the window now shows
+      // the newest snapshot it holds of the file (the standing check above), so it
+      // holds nothing newer. Cleared only while the file's status-write count is
+      // still the one recorded when this conflict was registered: a status some
+      // later observation wrote — an `unavailable`, or a `stale` about a reading
+      // this snapshot is not — is that observation's, and stands. `WeakMap.get`
+      // and the array walk run no user code.
+      if (
+        conflictStatusWrites.get(source) === statusWriteOf(origin.document) &&
+        externalStatuses.find((entry) => entry.document === origin.document)?.status.kind ===
+          'stale'
+      ) {
+        noteDocumentStatus(origin.document, null);
+      }
       repairAfter(disk);
       // The viewer's re-read is a separate step, exactly as it is after every other
       // projection replacement, and it is fired rather than returned — the answer
@@ -5688,6 +5772,15 @@ export function createBrowserState(
     writeOutcomeUncertain(document: DocumentId): boolean {
       void holdRevision;
       return uncertainWrites.has(document);
+    },
+
+    heldDocuments(): readonly DocumentId[] {
+      void holdRevision;
+      const held = new Set<DocumentId>(retainedObservations.keys());
+      for (const document of uncertainWrites) {
+        held.add(document);
+      }
+      return Object.freeze([...held]);
     },
 
     uncertaintyAcknowledgementEligibility(document: DocumentId): UncertaintyAcknowledgementEligibility {
@@ -6197,7 +6290,7 @@ export function createBrowserState(
           // What this arm does do is **write down** which projection the conflict
           // describes, which is what lets that adoption refuse a window that has
           // moved on since. Registering is not adopting.
-          rememberTheConflict(match.document, saveConflictSource(answer.value));
+          rememberTheSaveConflict(match.document, saveConflictSource(answer.value));
         }
         return { kind: 'answered', result: answer.value, adoption };
       } finally {
@@ -6313,7 +6406,7 @@ export function createBrowserState(
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
           // says why, and the rule is one rule for all six writing wrappers. What is
           // written down is which projection the conflict describes.
-          rememberTheConflict(id.document, saveConflictSource(answer.value));
+          rememberTheSaveConflict(id.document, saveConflictSource(answer.value));
         }
         return { kind: 'answered', result: answer.value, adoption };
       } finally {
@@ -6421,7 +6514,7 @@ export function createBrowserState(
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
           // says why, and the rule is one rule for all six writing wrappers. What is
           // written down is which projection the conflict describes.
-          rememberTheConflict(document, saveConflictSource(answer.value));
+          rememberTheSaveConflict(document, saveConflictSource(answer.value));
         }
         return { kind: 'answered', result: answer.value, adoption };
       } finally {
@@ -6505,7 +6598,7 @@ export function createBrowserState(
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
           // says why, and the rule is one rule for all six writing wrappers. What is
           // written down is which projection the conflict describes.
-          rememberTheConflict(id.document, saveConflictSource(answer.value));
+          rememberTheSaveConflict(id.document, saveConflictSource(answer.value));
         }
         return { kind: 'answered', result: answer.value, adoption };
       } finally {
@@ -6651,7 +6744,7 @@ export function createBrowserState(
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
           // says why, and the rule is one rule for all six writing wrappers. What is
           // written down is which projection the conflict describes.
-          rememberTheConflict(match.document, saveConflictSource(answer.value));
+          rememberTheSaveConflict(match.document, saveConflictSource(answer.value));
         }
         return { kind: 'answered', result: answer.value, adoption };
       } finally {
@@ -6790,7 +6883,7 @@ export function createBrowserState(
         // race to lose (`docs/decisions/2c-4a-1-notes.md` section 4.1). What is
         // written down is which projection the conflict describes.
         if (answer.value.outcome === 'conflict') {
-          rememberTheConflict(document, saveConflictSource(answer.value));
+          rememberTheSaveConflict(document, saveConflictSource(answer.value));
         }
         //
         // Sealed here and nowhere else: this is the one place that knows which

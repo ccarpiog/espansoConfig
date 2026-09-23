@@ -32,17 +32,20 @@ import {
   fileReconciliationStateKey,
   reconciliationControlKey,
   reconciliationRefusalKey,
+  routeControlNoteKey,
   workspaceReconciliationStateKey,
   type FileReconciliationState,
   type FileStatePlacement,
   type ReconciliationControl,
   type ReconciliationRefusal,
+  type RouteControlNote,
   type WorkspaceReconciliationState
 } from '../browser/reconciliationStatus';
 import {
   describeReconciliationControl,
   describeReconciliationFileState,
   describeReconciliationRefusal,
+  describeReconciliationRouteNote,
   describeReconciliationWorkspaceState
 } from './codes';
 import { DICTIONARIES, type TranslationKey } from './dictionaries';
@@ -51,6 +54,7 @@ import {
   tReconciliationControl,
   tReconciliationFileState,
   tReconciliationRefusal,
+  tReconciliationRouteNote,
   tReconciliationWorkspaceState
 } from './index';
 import { DEFAULT_LOCALE, LOCALES } from './locale';
@@ -147,6 +151,11 @@ export type _PlacementsAreComplete = ExpectNever<Missing<FileStatePlacement, typ
 export type _ControlsAreComplete = ExpectNever<Missing<ReconciliationControl, typeof CONTROLS>>;
 export type _RefusalsAreComplete = ExpectNever<Missing<ReconciliationRefusal, typeof REFUSALS>>;
 
+/** Every route note, pinned to the union (Phase 2d-6-9b-1). */
+const ROUTE_NOTES = ['projectionReplacedExits'] as const satisfies readonly RouteControlNote[];
+
+export type _RouteNotesAreComplete = ExpectNever<Missing<RouteControlNote, typeof ROUTE_NOTES>>;
+
 /**
  * Every key this step's key functions can return.
  *
@@ -167,6 +176,9 @@ function everyKey(): readonly TranslationKey[] {
   }
   for (const refusal of REFUSALS) {
     keys.add(reconciliationRefusalKey(refusal));
+  }
+  for (const note of ROUTE_NOTES) {
+    keys.add(routeControlNoteKey(note));
   }
   return [...keys];
 } // End of function everyKey()
@@ -213,6 +225,32 @@ describe('the reconciliation-status accessors', () => {
     for (const refusal of REFUSALS) {
       expectWhole(describeReconciliationRefusal(locale, refusal), `${locale}:${refusal}`);
     }
+    for (const note of ROUTE_NOTES) {
+      expectWhole(describeReconciliationRouteNote(locale, note), `${locale}:${note}`);
+    }
+  });
+
+  it('give a row its short mark for the two states placed there, and the header its sentence', () => {
+    // Phase 2d-6-9b-1: a sidebar row is one line, so `stale` and `unavailable` read as
+    // a short mark there and as the whole sentence everywhere else.
+    expect(fileReconciliationStateKey({ kind: 'stale' }, 'sidebarRow')).toBe(
+      'browser.externalDocument.row.stale'
+    );
+    expect(fileReconciliationStateKey({ kind: 'stale' }, 'header')).toBe(
+      'browser.externalDocument.stale'
+    );
+    const unavailable: FileReconciliationState = {
+      kind: 'unavailable',
+      reason: { NotUtf8: { offset: 3 } }
+    };
+    expect(fileReconciliationStateKey(unavailable, 'sidebarRow')).toBe(
+      'browser.externalDocument.row.unavailable'
+    );
+    expect(fileReconciliationStateKey(unavailable, 'header')).toBe(
+      'browser.externalDocument.unavailable'
+    );
+    expect(DICTIONARIES.en['browser.externalDocument.row.stale']).toBe('Not reconciled');
+    expect(DICTIONARIES.es['browser.externalDocument.row.stale']).toBe('Sin conciliar');
   });
 
   it('give every refusal and every control its own sentence', () => {
@@ -261,6 +299,9 @@ describe('the reconciliation-status accessors', () => {
     );
     expect(tReconciliationRefusal('surfaceOpen')).toBe(
       describeReconciliationRefusal(DEFAULT_LOCALE, 'surfaceOpen')
+    );
+    expect(tReconciliationRouteNote('projectionReplacedExits')).toBe(
+      describeReconciliationRouteNote(DEFAULT_LOCALE, 'projectionReplacedExits')
     );
   });
 }); // End of the "reconciliation-status accessors" suite
@@ -311,10 +352,10 @@ describe('the seven semantic bounds, as literal reviewed wording (entry 40)', ()
 
   it('pin the route’s unknown-outcome sentence: an unknown outcome, never a failure or a success', () => {
     expect(DICTIONARIES.en['browser.externalConflict.route.writeOutcomeUnknown']).toBe(
-      'The outcome of an earlier write to this file is unknown, and the panel it was made from has closed. Until that is resolved, this window does not read the file again on its own.'
+      'The outcome of an earlier write to this file is unknown, and the panel it was made from has closed.'
     );
     expect(DICTIONARIES.es['browser.externalConflict.route.writeOutcomeUnknown']).toBe(
-      'Se desconoce el resultado de una escritura anterior en este archivo, y el panel desde el que se hizo se ha cerrado. Mientras no se resuelva, esta ventana no vuelve a leer el archivo por su cuenta.'
+      'Se desconoce el resultado de una escritura anterior en este archivo, y el panel desde el que se hizo se ha cerrado.'
     );
   });
 
@@ -350,3 +391,33 @@ describe('the seven semantic bounds, as literal reviewed wording (entry 40)', ()
     expect('el archivo se ha borrado').toMatch(/\bborrad/);
   });
 }); // End of the "seven semantic bounds" suite
+
+describe('the route’s wording after Phase 2d-6-9b-1', () => {
+  it('pin the exits note: the two exits the route really has, and no observation among them', () => {
+    // Measured, not assumed: with no surface over the file, the coordinator's
+    // automatic reread installs a later observation instead of registering it as an
+    // origin, so on the route a new observation is not an exit.
+    expect(DICTIONARIES.en['browser.reconciliation.route.projectionReplacedExits']).toBe(
+      'Acknowledging stays unavailable here until a later write to this file from this window ends with a known outcome, or the workspace is reloaded.'
+    );
+    expect(DICTIONARIES.es['browser.reconciliation.route.projectionReplacedExits']).toBe(
+      'Aquí el reconocimiento seguirá sin estar disponible hasta que una escritura posterior en este archivo desde esta ventana termine con un resultado conocido o hasta que se recargue el espacio de trabajo.'
+    );
+    for (const locale of LOCALES) {
+      expect(
+        DICTIONARIES[locale]['browser.reconciliation.route.projectionReplacedExits'].toLowerCase()
+      ).not.toMatch(/observ/);
+    }
+  });
+
+  it('never claim on the route that the window stops reading the file on its own', () => {
+    // The 9a sentence said so and the automatic path does reread under an
+    // uncertainty hold (`2d-6-9b-1-notes.md`); the claim is gone from both locales.
+    expect(DICTIONARIES.en['browser.externalConflict.route.writeOutcomeUnknown']).not.toMatch(
+      /on its own|again/
+    );
+    expect(DICTIONARIES.es['browser.externalConflict.route.writeOutcomeUnknown']).not.toMatch(
+      /por su cuenta|vuelve a leer/
+    );
+  });
+}); // End of the "route's wording" suite

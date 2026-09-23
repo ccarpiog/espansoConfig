@@ -301,6 +301,19 @@ the items handed on to it by name; the acceptance above is checked in full when 
   and controls, a locale switch on a mounted status panel with no unrelated mutation, and
   empty-workspace retention mounted. If measurement shows this is too big for one worker, it is cut
   again here before any code is written. Record: `2d-6-9b-notes.md`.
+  **Cut again by the orchestrator on 2026-09-23**, into two sub-phases in dependency order, each
+  owing the gate set and its own review; the union is 2d-6-9b exactly, and the two records replace
+  `2d-6-9b-notes.md`:
+  - **2d-6-9b-1** — the shell, sidebar and detail pane draw the 9a decisions and wire the five
+    controls; the orchestrator's ruling on `stale` implemented (the window holds a disk snapshot of
+    the file newer than its installed projection, from an observation or from a save refused as a
+    conflict); the reader for held files no row or surface names (`2d-6-9a-notes.md` §5 item 3) if
+    the route needs it; the new sidebar/status jsdom suite declaring its invoke guard (entry 37);
+    bilingual mounted state changes and controls; a locale switch on a mounted status panel with no
+    unrelated mutation; empty-workspace retention mounted. Record: `2d-6-9b-1-notes.md`.
+  - **2d-6-9b-2** — the eight write renderers gain only typed status and acknowledgement
+    presentation, including `acknowledgeSnapshot` / `acknowledgeRestoreSnapshot`
+    (`2d-6-8b-notes.md` §4 item 6), bilingual mounted. Record: `2d-6-9b-2-notes.md`.
 - **2d-6-9c — the narrow window reading with one hard fixture (ruling 38), and 2d-6-9's whole
   acceptance checked in one place**, starting from the harness and launch recipe of
   [`2d-6-8c-window-reading.md`](2d-6-8c-window-reading.md). Record: `2d-6-9c-notes.md`.

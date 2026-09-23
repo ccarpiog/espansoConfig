@@ -122,12 +122,18 @@ export type ExternalDocumentStatus =
   | {
       /**
        * The file changed on disk and this window is still showing the older
-       * projection.
+       * projection — since Phase 2d-6-9b-1, the orchestrator's ruling: the window
+       * holds a disk snapshot of this file newer than its installed projection.
        *
        * Either because a write surface that may be about it is open — the
        * conservative sentence of ruling 19 — or because the guard refused an
-       * installation after the read. **It does not say which**, and a consumer that
-       * needs to know asks the registry rather than this value.
+       * installation after the read, or because a save of this window's was refused
+       * as a conflict on a revision the window does not show (`BrowserState`'s six
+       * save wrappers, which no observation can mark for, since the backend
+       * coalesces that reading). **It does not say which**, and a consumer that
+       * needs to know asks the registry rather than this value. A confirmed
+       * `adoptDiskVersion` install clears a mark nothing has written over since its
+       * conflict was registered.
        */
       readonly kind: 'stale';
     }

@@ -2,6 +2,11 @@
   import { onMount } from 'svelte';
   import { INERT_FOREGROUND_EVENTS } from '../browser/reconciliationCoordinator';
   import {
+    decideShellComposition,
+    workspaceBannersDrawnIn,
+    workspaceFactsOf
+  } from '../browser/reconciliationStatus';
+  import {
     createBrowserState,
     REAL_BACKUP_COMMANDS,
     REAL_COMMANDS
@@ -13,6 +18,7 @@
   import { locale } from '../stores/locale.svelte';
   import DetailPane from './DetailPane.svelte';
   import LanguagePicker from './LanguagePicker.svelte';
+  import ReconciliationStatus from './ReconciliationStatus.svelte';
   import Sidebar from './Sidebar.svelte';
   import SnippetList from './SnippetList.svelte';
 
@@ -88,6 +94,15 @@
     };
   }); // End of the onMount that starts and disposes the reconciliation lifecycle
 
+  /*
+   * **Which composition is drawn is `decideShellComposition`'s, and whether the
+   * workspace banners are drawn beside it is `workspaceBannersDrawnIn`'s** — both in
+   * `../browser/reconciliationStatus.ts`, Phase 2d-6-9b-1. Until then this file
+   * held the empty-state condition inline, a second copy of a rule the model now
+   * pins (the 2d-6 record's §6 item 13: re-asserted, not re-implemented).
+   */
+  const composition = $derived(decideShellComposition(workspaceFactsOf(browser)));
+
   /**
    * The heading a failed load gets.
    *
@@ -113,11 +128,15 @@
     <LanguagePicker />
   </header>
 
-  {#if browser.status === 'loading'}
+  {#if workspaceBannersDrawnIn(composition)}
+    <ReconciliationStatus {browser} />
+  {/if}
+
+  {#if composition === 'loading'}
     <main class="state">
       <p>{t('browser.status.loading')}</p>
     </main>
-  {:else if browser.status === 'failed' && browser.failure !== null}
+  {:else if composition === 'failed' && browser.failure !== null}
     {@const failure = browser.failure}
     <main class="state">
       <h2>{failureHeading(failure)}</h2>
@@ -128,17 +147,17 @@
         </button>
       </p>
     </main>
-  {:else if browser.documents.length === 0 && browser.openWriteSurfaces().length === 0}
+  {:else if composition === 'empty'}
     <!-- **An empty list does not unmount a surface that is still open** — Phase
          2d-6-6b, the 2d-6 record's §3 entry 31 and §5.2. The empty state used to
          replace the panes the moment the last row went, which unmounted
          `DetailPane` and every session inside it: a draft over a file that was
-         removed on disk vanished with it. `openWriteSurfaces()` is the registry's
-         reactive answer, so the panes stay while any surface is registered and
-         give way once the person closes the last one. What it cannot keep is a
-         surface the pane has not registered yet — the pane registers from an
-         effect — and nothing in TypeScript ties the condition to the pane's
-         registrations rather than to some other list. -->
+         removed on disk vanished with it. `decideShellComposition` answers `empty`
+         only with no row **and** no registered surface, reading the registry's
+         reactive `openWriteSurfaces()`, so the panes stay while any surface is
+         registered and give way once the person closes the last one. What it
+         cannot keep is a surface the pane has not registered yet — the pane
+         registers from an effect. -->
     <main class="state">
       <h2>{t('browser.status.empty.heading')}</h2>
       {#if browser.summary !== null}

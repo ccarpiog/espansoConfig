@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T03:15:31Z",
+ "updated": "2026-09-23T03:46:15Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -644,9 +644,25 @@
   {
    "id": "2d-6-9b",
    "title": "Reconciliation status rendering and controls",
+   "status": "in_progress",
+   "risk": "high",
+   "summary": "Draws the reconciliation states and wires the five exits, EN and ES; cut into 9b-1 (shell, sidebar, detail pane, stale ruling) and 9b-2 (the eight write renderers)."
+  },
+  {
+   "id": "2d-6-9b-1",
+   "title": "Shell, sidebar and detail-pane status and the five controls",
+   "status": "done",
+   "risk": "high",
+   "summary": "Draws the reconciliation states in the shell, sidebar and detail pane, wires the five exits, and marks a file stale after a refused save; rung 1323/456/3280/198.",
+   "review": "docs/reviews/phase-2d-6-9b-1.md — fallback agent (Codex malformed), ship-with-fixes, 0 blockers, 2 SHOULD-FIX, both fixed",
+   "narrative": "docs/decisions/2d-6-9b-1-notes.md"
+  },
+  {
+   "id": "2d-6-9b-2",
+   "title": "Write renderers status and acknowledgement presentation",
    "status": "queued",
    "risk": "high",
-   "summary": "Draws the reconciliation states and wires the five exits in the shell, sidebar, detail pane and write panels, EN and ES."
+   "summary": "Gives the eight write panels typed status and acknowledgement presentation, including the two snapshot acknowledgements, EN and ES."
   },
   {
    "id": "2d-6-9c",

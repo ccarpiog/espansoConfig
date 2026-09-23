@@ -601,4 +601,77 @@ describe('the shell over an emptied workspace — Phase 2d-6-6b', () => {
     expect(shell.target.textContent).not.toContain(DICTIONARIES.en['browser.matchCreation.label']);
     shell.stop();
   }); // End of the "emptied workspace" case
+
+  it.each(['en', 'es'] as const)(
+    'draws the banners and their reload control over the empty state, and reloads on the press, in %s',
+    async (lang) => {
+      // **Phase 2d-6-9b-1: the retention half the banners need** (`workspaceBannersDrawnIn`
+      // in `../browser/reconciliationStatus.ts`). The shell draws the empty state
+      // and, beside it, the banner a drifted path raised with its membership-reload
+      // control — the removal that empties a list must not take the person's one way
+      // to ask for the list again with it. One press is one open, declared below.
+      locale.setOverride(lang);
+      let drained = 0;
+      script.current = (command) => {
+        switch (command) {
+          case 'open_workspace':
+            return Promise.resolve(EMPTY_SUMMARY);
+          case 'list_documents':
+            return Promise.resolve([]);
+          case 'drain_external_changes':
+            drained += 1;
+            return Promise.resolve(
+              drained === 2
+                ? {
+                    epoch: 1,
+                    newest_sequence: 1,
+                    observations: [
+                      {
+                        Removed: {
+                          sequence: 1,
+                          document: { Unnamed: { relative_path: 'match/stranger.yml' } },
+                          previous_revision: null
+                        }
+                      }
+                    ],
+                    discarded: 0
+                  }
+                : emptyBatch()
+            );
+          default:
+            return Promise.reject(new Error(`this case scripts no answer for ${command}`));
+        }
+      };
+      const shell = mountShell(false);
+      resolveRegistration(0);
+      expectedInvokes.push(['list_documents', {}], ['drain_external_changes', { afterSequence: 0 }]);
+      await settle();
+      registration(0).deliver({ event: READY, id: 1, payload: { workspace_epoch: 1, newest_sequence: 1 } });
+      expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
+      await settle();
+
+      const text = shell.target.textContent ?? '';
+      expect(text).toContain(DICTIONARIES[lang]['browser.status.empty.heading']);
+      expect(text).toContain(DICTIONARIES[lang]['browser.reconciliation.membershipReloadWanted']);
+      const label = DICTIONARIES[lang]['browser.reconciliation.action.membershipReload'];
+      const reload = [...shell.target.querySelectorAll('button')].find(
+        (candidate) => candidate.textContent?.trim() === label
+      );
+      expect(reload?.disabled).toBe(false);
+
+      reload?.click();
+      expectedInvokes.push(
+        ['open_workspace', { root: null }],
+        ['list_documents', {}],
+        ['drain_external_changes', { afterSequence: 0 }]
+      );
+      await settle();
+      await settle();
+      expect(shell.target.textContent).not.toContain(
+        DICTIONARIES[lang]['browser.reconciliation.membershipReloadWanted']
+      );
+      expect(shell.target.textContent).toContain(DICTIONARIES[lang]['browser.status.empty.heading']);
+      shell.stop();
+    }
+  ); // End of the "banners over the empty state" case
 }); // End of the describe over an emptied workspace

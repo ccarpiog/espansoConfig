@@ -121,6 +121,7 @@ import type {
   FileStatePlacement,
   ReconciliationControl,
   ReconciliationRefusal,
+  RouteControlNote,
   WorkspaceReconciliationState
 } from '../browser/reconciliationStatus';
 import {
@@ -233,6 +234,7 @@ import {
   describeReconciliationControl,
   describeReconciliationFileState,
   describeReconciliationRefusal,
+  describeReconciliationRouteNote,
   describeReconciliationWorkspaceState,
   describeRotationOutcome,
   describeSaveError,
@@ -319,6 +321,7 @@ export {
   describeReconciliationControl,
   describeReconciliationFileState,
   describeReconciliationRefusal,
+  describeReconciliationRouteNote,
   describeReconciliationWorkspaceState,
   describeRotationOutcome,
   describeSaveError,
@@ -2252,7 +2255,7 @@ export function tChangedContent(content: ChangedContent): string {
  * 2d-6-9a.
  *
  * The reactive wrapper over `describeReconciliationWorkspaceState` in `./codes`.
- * Nothing draws a banner yet; 2d-6-9b draws the decisions of
+ * `ReconciliationStatus.svelte` draws it over the decisions of
  * `decideWorkspaceReconciliation` in `../browser/reconciliationStatus.ts`.
  *
  * @param state - The banner.
@@ -2265,7 +2268,7 @@ export function tReconciliationWorkspaceState(state: WorkspaceReconciliationStat
 /**
  * Renders one per-file reconciliation state at one placement in the current
  * language — Phase 2d-6-9a. The reactive wrapper over
- * `describeReconciliationFileState` in `./codes`; nothing draws one yet (2d-6-9b).
+ * `describeReconciliationFileState` in `./codes`; drawn since Phase 2d-6-9b-1.
  *
  * @param state - The state.
  * @param placement - Where it is drawn.
@@ -2281,7 +2284,7 @@ export function tReconciliationFileState(
 /**
  * Renders one reconciliation control's label in the current language — Phase
  * 2d-6-9a. The reactive wrapper over `describeReconciliationControl` in
- * `./codes`; nothing draws one yet (2d-6-9b).
+ * `./codes`; drawn since Phase 2d-6-9b-1.
  *
  * @param control - The control.
  * @returns The translated label.
@@ -2293,7 +2296,7 @@ export function tReconciliationControl(control: ReconciliationControl): string {
 /**
  * Renders why a reconciliation control is disabled, or why its press was refused,
  * in the current language — Phase 2d-6-9a. The reactive wrapper over
- * `describeReconciliationRefusal` in `./codes`; nothing draws one yet (2d-6-9b).
+ * `describeReconciliationRefusal` in `./codes`; drawn since Phase 2d-6-9b-1.
  *
  * @param refusal - Why.
  * @returns The translated sentence.
@@ -2301,3 +2304,15 @@ export function tReconciliationControl(control: ReconciliationControl): string {
 export function tReconciliationRefusal(refusal: ReconciliationRefusal): string {
   return describeReconciliationRefusal(locale.current, refusal);
 } // End of function tReconciliationRefusal()
+
+/**
+ * Renders one workspace-route note in the current language — Phase 2d-6-9b-1.
+ * The reactive wrapper over `describeReconciliationRouteNote` in `./codes`, drawn
+ * by `ReconciliationStatus.svelte`.
+ *
+ * @param note - The note.
+ * @returns The translated sentence.
+ */
+export function tReconciliationRouteNote(note: RouteControlNote): string {
+  return describeReconciliationRouteNote(locale.current, note);
+} // End of function tReconciliationRouteNote()

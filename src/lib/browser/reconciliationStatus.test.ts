@@ -7,8 +7,9 @@
  * `BrowserState` reader each fact comes from, and over a real `createBrowserState`
  * for the empty-workspace retention the record's §3 entry 31 and §5.2 require.
  *
- * **What these cases cannot show**: that anything draws the decisions (nothing
- * does until 2d-6-9b), or that a press is refused as predicted — the `BrowserState`
+ * **What these cases cannot show**: that anything draws the decisions — the
+ * mounted suite `../components/ReconciliationStatus.test.ts` does since Phase
+ * 2d-6-9b-1 — or that a press is refused as predicted — the `BrowserState`
  * requests recheck their own guards and `workspace.test.ts` pins those.
  *
  * Per `1b-2a-notes.md` section 14, a `describe`/`it` callback whose sibling
@@ -21,18 +22,28 @@ import type { CommandResult } from '../ipc/commands';
 import type { DocumentId, DocumentSummary, DocumentView, WorkspaceSummary } from '../ipc/types';
 import type { ExpectNever, Missing } from '../i18n/exhaustive';
 import { makeDocument, makeSummary } from './fixtures';
+import type { ConflictSource } from './conflictSource';
 import type { ExternalDocumentStatus } from './observationTransitions';
 import type { OpenWriteSurface } from './restore';
 import {
+  acknowledgementMintRefusalOf,
   acknowledgementRefusalOf,
   decideFileReconciliation,
   decideShellComposition,
   decideWorkspaceReconciliation,
+  fileControlsDrawnAt,
   fileFactsOf,
+  fileStatesDrawnAt,
   filesToDecide,
+  headerFilesOf,
   reloadRefusalOf,
   rereadRefusalOf,
   retryRefusalOf,
+  routeControlNoteOf,
+  routePathOf,
+  shownFileFactsOf,
+  shownFileOf,
+  standingSnapshotOf,
   workspaceBannersDrawnIn,
   workspaceFactsOf,
   type ControlDecision,
@@ -559,7 +570,9 @@ describe('empty-workspace retention (§3 entry 31, §5.2)', () => {
     const surfaces: readonly OpenWriteSurface[] = [
       { kind: 'rawEditor', target: { kind: 'document', document: 9 } }
     ];
-    expect(filesToDecide({ documents: [], openWriteSurfaces: () => surfaces })).toEqual([9]);
+    expect(
+      filesToDecide({ documents: [], openWriteSurfaces: () => surfaces, heldDocuments: () => [] })
+    ).toEqual([9]);
     expect(
       decideShellComposition({ status: 'ready', failed: false, documentCount: 0, openSurfaces: ['rawEditor'] })
     ).toBe('panes');
@@ -627,13 +640,19 @@ function fixedReader(asked: string[]): ReconciliationStatusReader {
     uncertaintyAcknowledgementEligibility: (document: DocumentId) => {
       asked.push(`eligibility:${document}`);
       return { kind: 'ineligible', reason: 'noStandingOrigin' };
+    },
+    heldDocuments: () => {
+      asked.push('held');
+      return [2, 7];
     }
   } as unknown as ReconciliationStatusReader;
 } // End of function fixedReader()
 
 describe('the adapters over BrowserState', () => {
-  it('list every row, then every surface target no row names, without repetition', () => {
-    expect(filesToDecide(fixedReader([]))).toEqual([1, 2, 5]);
+  it('list every row, then every surface target no row names, then every held file, without repetition', () => {
+    // Phase 2d-6-9b-1: file 7 is held and neither listed nor targeted — a removed
+    // file whose surface has closed — so only `heldDocuments` names it.
+    expect(filesToDecide(fixedReader([]))).toEqual([1, 2, 5, 7]);
   });
 
   it('read the workspace facts from their readers, and a write in flight to a surface’s file', () => {
@@ -748,3 +767,178 @@ describe('the adapters over a real BrowserState', () => {
     state.dispose();
   });
 }); // End of the "real BrowserState" suite
+
+describe('what one renderer draws of a file — Phase 2d-6-9b-1', () => {
+  /** The placements `DetailPane.svelte`'s header block stands for. */
+  const HEADER = ['header', 'selectionNotice', 'surface'] as const;
+
+  it('names the surface targets while any surface is open, and the shown file otherwise', () => {
+    const surfaces: readonly OpenWriteSurface[] = [
+      { kind: 'matchCreator', target: { kind: 'unknown' } },
+      { kind: 'rawEditor', target: { kind: 'document', document: 4 } },
+      { kind: 'recovery', target: { kind: 'document', document: 4 } }
+    ];
+    expect(headerFilesOf(surfaces, 9)).toEqual([4]);
+    expect(headerFilesOf([{ kind: 'matchCreator', target: { kind: 'unknown' } }], 9)).toEqual([]);
+    expect(headerFilesOf([], 9)).toEqual([9]);
+    expect(headerFilesOf([], null)).toEqual([]);
+  });
+
+  it('draws a removed file once in the header block, and not on the route', () => {
+    const decision = decideFileReconciliation(
+      workspace(),
+      file({ hasRow: false, status: { kind: 'removed' }, surfaceOpen: true })
+    );
+    expect(fileStatesDrawnAt(decision, HEADER)).toEqual([
+      { state: { kind: 'removed' }, placement: 'header' }
+    ]);
+    expect(fileStatesDrawnAt(decision, ['workspaceRoute'])).toEqual([]);
+    expect(fileStatesDrawnAt(decision, ['sidebarRow'])).toEqual([]);
+  });
+
+  it('draws a stale file in its row and its header, and offers the reread in the header only', () => {
+    const decision = decideFileReconciliation(workspace(), file({ status: { kind: 'stale' } }));
+    expect(fileStatesDrawnAt(decision, ['sidebarRow'])).toEqual([
+      { state: { kind: 'stale' }, placement: 'sidebarRow' }
+    ]);
+    expect(fileControlsDrawnAt(decision, ['sidebarRow'])).toEqual([]);
+    expect(fileControlsDrawnAt(decision, HEADER)).toEqual([
+      { control: 'staleFileReread', enabled: true }
+    ]);
+  });
+
+  it('draws a held observation and its retry where it is placed', () => {
+    const onSurface = decideFileReconciliation(
+      workspace(),
+      file({ observationRetained: true, surfaceOpen: true })
+    );
+    expect(fileStatesDrawnAt(onSurface, HEADER)).toEqual([
+      { state: { kind: 'observationRetained' }, placement: 'surface' }
+    ]);
+    expect(fileControlsDrawnAt(onSurface, HEADER).map((each) => each.control)).toEqual([
+      'retryRetainedObservation'
+    ]);
+    expect(fileControlsDrawnAt(onSurface, ['workspaceRoute'])).toEqual([]);
+    const routed = decideFileReconciliation(workspace(), file({ observationRetained: true }));
+    expect(fileStatesDrawnAt(routed, HEADER)).toEqual([]);
+    expect(fileControlsDrawnAt(routed, ['workspaceRoute']).map((each) => each.control)).toEqual([
+      'retryRetainedObservation'
+    ]);
+  });
+
+  it('draws the acknowledgement on the route only; on a surface it is the renderer’s', () => {
+    const onSurface = decideFileReconciliation(
+      workspace(),
+      file({ uncertaintyUnresolved: true, surfaceOpen: true, acknowledgement: ELIGIBLE })
+    );
+    expect(fileStatesDrawnAt(onSurface, HEADER)).toEqual([
+      { state: { kind: 'writeOutcomeUnknown' }, placement: 'surface' }
+    ]);
+    expect(fileControlsDrawnAt(onSurface, HEADER)).toEqual([]);
+    const routed = decideFileReconciliation(
+      workspace(),
+      file({ uncertaintyUnresolved: true, acknowledgement: ELIGIBLE })
+    );
+    expect(fileControlsDrawnAt(routed, ['workspaceRoute'])).toEqual([
+      { control: 'acknowledgeUncertainty', enabled: true }
+    ]);
+  });
+
+  it('maps a refused mint to the refusal the eligibility reader explains', () => {
+    expect(acknowledgementMintRefusalOf({ kind: 'eligible' })).toBe('superseded');
+    expect(acknowledgementMintRefusalOf({ kind: 'ineligible', reason: 'writeInFlight' })).toBe(
+      'writeInFlight'
+    );
+    expect(acknowledgementMintRefusalOf({ kind: 'ineligible', reason: 'noHold' })).toBe('holdMoved');
+    expect(acknowledgementMintRefusalOf({ kind: 'ineligible', reason: 'noStandingOrigin' })).toBe(
+      'superseded'
+    );
+    expect(acknowledgementMintRefusalOf({ kind: 'ineligible', reason: 'projectionReplaced' })).toBe(
+      'projectionReplaced'
+    );
+  });
+
+  it('adds the route’s exits note to an outlived acknowledgement and to nothing else', () => {
+    expect(
+      routeControlNoteOf({ control: 'acknowledgeUncertainty', enabled: false, reason: 'projectionReplaced' })
+    ).toBe('projectionReplacedExits');
+    expect(
+      routeControlNoteOf({ control: 'acknowledgeUncertainty', enabled: false, reason: 'writeInFlight' })
+    ).toBeNull();
+    expect(routeControlNoteOf({ control: 'acknowledgeUncertainty', enabled: true })).toBeNull();
+    expect(
+      routeControlNoteOf({ control: 'staleFileReread', enabled: false, reason: 'projectionReplaced' })
+    ).toBeNull();
+  });
+
+  it('names a routed file by its row, then by the snapshot the window holds, then not at all', () => {
+    const saved = {
+      kind: 'save',
+      conflict: { disk: makeDocument({ id: 3, relativePath: 'match/saved.yml' }), disk_text: '' }
+    } as unknown as ConflictSource;
+    const observed = {
+      kind: 'externalChange',
+      observation: {
+        disk: makeDocument({ id: 3, relativePath: 'match/seen.yml' }),
+        diskText: 'a: 1\n'
+      }
+    } as unknown as ConflictSource;
+    const reader = (
+      standing: ConflictSource | null,
+      retained: string | null
+    ): Parameters<typeof routePathOf>[0] =>
+      ({
+        documents: [makeSummary({ id: 1, relativePath: 'match/row.yml' })],
+        standingConflictFor: () => standing,
+        retainedObservationFor: () =>
+          retained === null ? null : { disk: makeDocument({ id: 3, relativePath: retained }) }
+      }) as unknown as Parameters<typeof routePathOf>[0];
+    expect(routePathOf(reader(saved, null), 1)).toBe('match/row.yml');
+    expect(routePathOf(reader(saved, 'match/held.yml'), 3)).toBe('match/saved.yml');
+    expect(routePathOf(reader(observed, null), 3)).toBe('match/seen.yml');
+    expect(routePathOf(reader(null, 'match/held.yml'), 3)).toBe('match/held.yml');
+    expect(routePathOf(reader(null, null), 3)).toBeNull();
+    expect(standingSnapshotOf(saved)).toEqual({ kind: 'empty' });
+    expect(standingSnapshotOf(observed)).toEqual({ kind: 'text', text: 'a: 1\n' });
+  });
+
+  it('shows the whole text’s file, then the selected snippet’s, then the sidebar’s selected file', () => {
+    // The fix round (review finding 2): a file selected in the sidebar with no
+    // snippet and no whole text still reaches the header block.
+    expect(shownFileOf({ wholeText: 1, snippetFile: 2, selectedFile: 3 })).toBe(1);
+    expect(shownFileOf({ wholeText: null, snippetFile: 2, selectedFile: 3 })).toBe(2);
+    expect(shownFileOf({ wholeText: null, snippetFile: null, selectedFile: 3 })).toBe(3);
+    expect(shownFileOf({ wholeText: null, snippetFile: null, selectedFile: null })).toBeNull();
+  });
+
+  it('reads the three shown-file facts off the state’s readers', () => {
+    const reader = (overrides: Record<string, unknown>): Parameters<typeof shownFileFactsOf>[0] =>
+      ({
+        fileText: null,
+        fileTextTarget: null,
+        selectedMatch: null,
+        selectedDocument: null,
+        selection: { kind: 'all' },
+        ...overrides
+      }) as unknown as Parameters<typeof shownFileFactsOf>[0];
+    expect(shownFileFactsOf(reader({}))).toEqual({
+      wholeText: null,
+      snippetFile: null,
+      selectedFile: null
+    });
+    expect(shownFileFactsOf(reader({ selection: { kind: 'document', id: 3 } })).selectedFile).toBe(3);
+    // A target with no text read is not a shown text.
+    expect(shownFileFactsOf(reader({ fileTextTarget: makeSummary({ id: 1 }) })).wholeText).toBeNull();
+    expect(
+      shownFileFactsOf(
+        reader({ fileText: { kind: 'empty' }, fileTextTarget: makeSummary({ id: 1 }) })
+      ).wholeText
+    ).toBe(1);
+    // A selected document with no selected snippet is not a snippet's file.
+    expect(shownFileFactsOf(reader({ selectedDocument: makeSummary({ id: 2 }) })).snippetFile).toBeNull();
+    expect(
+      shownFileFactsOf(reader({ selectedMatch: {}, selectedDocument: makeSummary({ id: 2 }) }))
+        .snippetFile
+    ).toBe(2);
+  });
+}); // End of the "what one renderer draws" suite

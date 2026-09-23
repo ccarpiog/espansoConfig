@@ -3,12 +3,13 @@
  *
  * The 2d-6 record (`docs/decisions/2d-6-split-notes.md` §2, the orchestrator's cut
  * of 2d-6-9) splits the step into the decisions and their words (this module and
- * its keys), the rendering (2d-6-9b) and the window reading (2d-6-9c). **No
- * component reads this module yet**; 2d-6-9b draws it. Its keys are reachable
- * through `describeReconciliation*` in `../i18n/codes.ts` and the `tReconciliation*`
- * wrappers in `../i18n/index.ts`, which is why it is in the production bundle
- * before anything draws it — a code with no string is worse than a code with no
- * caller.
+ * its keys), the rendering (2d-6-9b) and the window reading (2d-6-9c). Since Phase
+ * 2d-6-9b-1 the components in `../components/` draw it: `AppShell.svelte` the
+ * composition, `ReconciliationStatus.svelte` the workspace banners and the
+ * workspace route, `Sidebar.svelte` the row marks, and `DetailPane.svelte` —
+ * through `FileReconciliationStatus.svelte` — the header, the selection notice and
+ * the surface placement. Its keys are reached through `describeReconciliation*` in
+ * `../i18n/codes.ts` and the `tReconciliation*` wrappers in `../i18n/index.ts`.
  *
  * ## The ten states and the five controls
  *
@@ -48,8 +49,10 @@
  * is a prediction the press may still refuse, and a renderer draws that refusal
  * through {@link ReconciliationRefusal}'s sentence. Where a guard cannot be
  * predicted from any public reader (the coordinator's disposal; the
- * acknowledgement's `projectionReplaced` and `holdMoved`), the decision does not
- * pretend to: the control stays enabled and the press answers.
+ * acknowledgement spend's `spent` and `holdMoved`), the decision does not pretend
+ * to: the control stays enabled and the press answers. The acknowledgement's
+ * `projectionReplaced` *is* predicted, through
+ * `BrowserState.uncertaintyAcknowledgementEligibility` (Phase 2d-6-9a's review).
  *
  * ## What this module is not
  *
@@ -62,10 +65,12 @@
 
 import type { TranslationKey } from '../i18n/dictionaries';
 import type { DocumentId, UnreadableReason } from '../ipc/types';
+import type { ConflictSource } from './conflictSource';
 import type { AutomaticReloadRefusal } from './observationDelivery';
 import type { ExternalDocumentStatus, ExternalPathDrift, ObservationDetail } from './observationTransitions';
 import type { ReconciliationBlock, ReconciliationWatchState } from './reconciliationCoordinator';
-import type { OpenWriteSurfaceKind } from './restore';
+import type { OpenWriteSurface, OpenWriteSurfaceKind } from './restore';
+import type { ConflictDiskText } from './saveOutcome';
 import type {
   BrowserState,
   BrowserStatus,
@@ -103,8 +108,9 @@ export interface WorkspaceReconciliationFacts {
    * Whether a write this window started is in flight for any file it can name.
    *
    * **A floor, not the whole answer**: {@link workspaceFactsOf} asks
-   * `BrowserState.writeInFlight` for every listed row and every surface's target,
-   * and no public reader enumerates writes to a file neither lists nor targets.
+   * `BrowserState.writeInFlight` for every file {@link filesToDecide} lists — rows,
+   * surface targets and held files — and no public reader enumerates writes to a
+   * file none of those names.
    * The reload requests recheck the outstanding writes themselves at the press.
    */
   readonly writeInFlight: boolean;
@@ -619,6 +625,97 @@ export function decideFileReconciliation(
   return Object.freeze({ states: Object.freeze(states), controls: Object.freeze(controls) });
 } // End of function decideFileReconciliation()
 
+/** One per-file state as one renderer draws it: the state, and the placement it is drawn at. */
+export interface DrawnFileState {
+  /** The state. */
+  readonly state: FileReconciliationState;
+  /** The placement whose sentence it is drawn with. */
+  readonly placement: FileStatePlacement;
+}
+
+/**
+ * The per-file states one renderer draws, given the placements it stands for —
+ * Phase 2d-6-9b-1.
+ *
+ * **Each state at most once**, with the first of `placements` (in the renderer's
+ * order) that the decision gave it. That is how `DetailPane.svelte`'s one status
+ * block stands for both the `header` and the `selectionNotice` placement of a
+ * `removed` file without drawing the sentence twice, and how the workspace route
+ * (`['workspaceRoute']`) draws only what no surface is showing. A state none of
+ * whose placements is listed is not drawn by this renderer; another one draws it.
+ *
+ * @param decision - The file's decision.
+ * @param placements - The placements this renderer stands for, in its order.
+ * @returns The states to draw, in the decision's order.
+ */
+export function fileStatesDrawnAt(
+  decision: FileReconciliationDecision,
+  placements: readonly FileStatePlacement[]
+): readonly DrawnFileState[] {
+  const drawn: DrawnFileState[] = [];
+  for (const each of decision.states) {
+    const placement = placements.find((candidate) => each.placements.includes(candidate));
+    if (placement !== undefined) {
+      drawn.push(Object.freeze({ state: each.state, placement }));
+    }
+  }
+  return Object.freeze(drawn);
+} // End of function fileStatesDrawnAt()
+
+/**
+ * The per-file controls one renderer draws, given the placements it stands for —
+ * Phase 2d-6-9b-1.
+ *
+ * - `staleFileReread` beside the `header` state it acts on (the decision offers it
+ *   only while no surface is over the file, so the header is the detail's own).
+ * - `retryRetainedObservation` wherever the held observation is drawn.
+ * - `acknowledgeUncertainty` wherever the uncertain write is drawn **and only on the
+ *   `workspaceRoute`**. On a surface the acknowledgement must be minted from the
+ *   origin that surface's panel shows (`model.source`, entry 14), which only the
+ *   write renderer holds — that presentation is Phase 2d-6-9b-2's, in the eight
+ *   renderers. On the route the renderer draws the standing origin's disk text
+ *   beside the control and mints from that same object (`2d-6-9a-notes.md` §3.1).
+ *
+ * @param decision - The file's decision.
+ * @param placements - The placements this renderer stands for.
+ * @returns The controls to draw, in the decision's order.
+ */
+export function fileControlsDrawnAt(
+  decision: FileReconciliationDecision,
+  placements: readonly FileStatePlacement[]
+): readonly ControlDecision[] {
+  /**
+   * Where the decision placed one state, or `null` when it drew none of that kind.
+   *
+   * @param kind - The state's kind.
+   * @returns Its first placement, or `null`.
+   */
+  const placementOf = (kind: FileReconciliationState['kind']): FileStatePlacement | null =>
+    decision.states.find((each) => each.state.kind === kind)?.placements[0] ?? null;
+  const drawn = decision.controls.filter((control) => {
+    switch (control.control) {
+      case 'staleFileReread':
+        return placements.includes('header');
+      case 'retryRetainedObservation': {
+        const at = placementOf('observationRetained');
+        return at !== null && placements.includes(at);
+      }
+      case 'acknowledgeUncertainty': {
+        const at = placementOf('writeOutcomeUnknown');
+        return at === 'workspaceRoute' && placements.includes(at);
+      }
+      case 'membershipReload':
+      case 'lostHistoryRecovery':
+        return false;
+      default: {
+        const unreachable: never = control.control;
+        return unreachable;
+      }
+    }
+  });
+  return Object.freeze(drawn);
+} // End of function fileControlsDrawnAt()
+
 /**
  * One frozen state decision.
  *
@@ -688,6 +785,44 @@ export function acknowledgementRefusalOf(
   return outcome.kind === 'acknowledged' ? null : outcome.reason;
 } // End of function acknowledgementRefusalOf()
 
+/**
+ * The refusal to draw when a press could not mint an acknowledgement against the
+ * snapshot it drew — Phase 2d-6-9b-1.
+ *
+ * `BrowserState.uncertaintyAcknowledgementFor` answers `null` rather than a
+ * reason, so the press asks `uncertaintyAcknowledgementEligibility` right after and
+ * maps its answer here. **`eligible` still maps to a refusal**: the mint refused the
+ * *drawn* origin while some origin is eligible, which means the one drawn is no
+ * longer the one standing — `superseded`, the same sentence a surface shows when
+ * accepted evidence changed. `noStandingOrigin` is that too, and `noHold` is the hold
+ * having ended (`holdMoved`). What it cannot tell apart is *why* the drawn origin
+ * stopped standing; the sentence claims only that it did.
+ *
+ * @param eligibility - What the eligibility reader answered after the mint refused.
+ * @returns The refusal to draw.
+ */
+export function acknowledgementMintRefusalOf(
+  eligibility: UncertaintyAcknowledgementEligibility
+): ReconciliationRefusal {
+  if (eligibility.kind === 'eligible') {
+    return 'superseded';
+  }
+  switch (eligibility.reason) {
+    case 'writeInFlight':
+      return 'writeInFlight';
+    case 'noHold':
+      return 'holdMoved';
+    case 'noStandingOrigin':
+      return 'superseded';
+    case 'projectionReplaced':
+      return 'projectionReplaced';
+    default: {
+      const unreachable: never = eligibility.reason;
+      return unreachable;
+    }
+  }
+} // End of function acknowledgementMintRefusalOf()
+
 // ---------------------------------------------------------------------------
 // The adapters over BrowserState
 // ---------------------------------------------------------------------------
@@ -708,22 +843,25 @@ export type ReconciliationStatusReader = Pick<
   | 'externalDocumentStatus'
   | 'automaticReloadGuardFor'
   | 'uncertaintyAcknowledgementEligibility'
+  | 'heldDocuments'
 >;
 
 /**
  * Every file one window can say something about: each listed row, then each file a
  * registered surface targets that no row names — a removed file's surface keeps
- * its state reachable (entry 30). Without repetition, rows first.
+ * its state reachable (entry 30) — then each file under a hold that neither names.
+ * Without repetition, in that order.
  *
- * **What it cannot list** is a file with a held observation or an uncertainty hold
- * that neither a row nor a surface names: no public reader enumerates those
- * tables. 2d-6-9a records it for 2d-6-9b.
+ * **The third group is Phase 2d-6-9b-1's** (`2d-6-9a-notes.md` §5 item 3): a
+ * removed file whose surface has closed has no row and no surface, and a hold on
+ * it would otherwise stand with nowhere to draw it. `BrowserState.heldDocuments`
+ * is the reader that lists the barrier's and the uncertain set's files.
  *
  * @param browser - The readers.
  * @returns The files, in that order.
  */
 export function filesToDecide(
-  browser: Pick<ReconciliationStatusReader, 'documents' | 'openWriteSurfaces'>
+  browser: Pick<ReconciliationStatusReader, 'documents' | 'openWriteSurfaces' | 'heldDocuments'>
 ): readonly DocumentId[] {
   const seen = new Set<DocumentId>();
   const files: DocumentId[] = [];
@@ -740,8 +878,143 @@ export function filesToDecide(
       files.push(target.document);
     }
   } // End of the loop over the registered surfaces
+  for (const document of browser.heldDocuments()) {
+    if (!seen.has(document)) {
+      seen.add(document);
+      files.push(document);
+    }
+  }
   return Object.freeze(files);
 } // End of function filesToDecide()
+
+/**
+ * Which files the detail pane's header speaks about — Phase 2d-6-9b-1.
+ *
+ * **While any surface is registered, the files the surfaces target and nothing
+ * else**, because the pane draws the surface rather than the selection; a creator
+ * with no destination yet targets no file and adds none. With no surface,
+ * {@link shownFileOf}'s file — the whole text's, the selected snippet's, or the
+ * file the sidebar selects — or none. A
+ * `removed` file stays reachable here through its surface, which is how its header
+ * and selection-notice placements are drawn with no row (entry 27).
+ *
+ * @param surfaces - The registered surfaces, `BrowserState.openWriteSurfaces()`.
+ * @param shown - The file the pane shows when no surface is open, or `null`.
+ * @returns The files, without repetition.
+ */
+export function headerFilesOf(
+  surfaces: readonly OpenWriteSurface[],
+  shown: DocumentId | null
+): readonly DocumentId[] {
+  if (surfaces.length === 0) {
+    return Object.freeze(shown === null ? [] : [shown]);
+  }
+  const files: DocumentId[] = [];
+  for (const surface of surfaces) {
+    const target = surface.target;
+    if (target.kind === 'document' && !files.includes(target.document)) {
+      files.push(target.document);
+    }
+  }
+  return Object.freeze(files);
+} // End of function headerFilesOf()
+
+/**
+ * What the detail pane is showing when no surface is open, as three facts — Phase
+ * 2d-6-9b-1's fix round (the review's finding 2).
+ */
+export interface ShownFileFacts {
+  /** The file whose whole text the pane shows, or `null`. */
+  readonly wholeText: DocumentId | null;
+  /** The file of the selected snippet, or `null` when no snippet is selected. */
+  readonly snippetFile: DocumentId | null;
+  /** The file the sidebar selects, or `null` for *All*. */
+  readonly selectedFile: DocumentId | null;
+}
+
+/**
+ * The file the detail pane's header speaks about when no surface is open — the
+ * `shown` operand of {@link headerFilesOf}.
+ *
+ * The whole-text view's file first, then the selected snippet's file, then **the
+ * file selected in the sidebar** even with no snippet selected and no text shown.
+ * The last is the fix round's: entry 27 places `stale` and `unavailable` in the
+ * affected header, and a person who picks a marked row should meet its sentence and
+ * the reread control there without first opening the text or a snippet.
+ *
+ * @param facts - What the pane shows.
+ * @returns The file, or `null` when the pane shows none.
+ */
+export function shownFileOf(facts: ShownFileFacts): DocumentId | null {
+  return facts.wholeText ?? facts.snippetFile ?? facts.selectedFile;
+} // End of function shownFileOf()
+
+/**
+ * The three facts {@link shownFileOf} is taken over, read off a live `BrowserState`.
+ *
+ * @param browser - The readers.
+ * @returns The facts.
+ */
+export function shownFileFactsOf(
+  browser: Pick<BrowserState, 'fileText' | 'fileTextTarget' | 'selectedMatch' | 'selectedDocument' | 'selection'>
+): ShownFileFacts {
+  const selection = browser.selection;
+  return Object.freeze({
+    wholeText:
+      browser.fileText !== null && browser.fileTextTarget !== null ? browser.fileTextTarget.id : null,
+    snippetFile: browser.selectedMatch !== null ? (browser.selectedDocument?.id ?? null) : null,
+    selectedFile: selection.kind === 'document' ? selection.id : null
+  });
+} // End of function shownFileFactsOf()
+
+/**
+ * The display path the workspace route names one file by, or `null` — Phase
+ * 2d-6-9b-1.
+ *
+ * The row's path first; then the path of the snapshot the window holds for it —
+ * the standing origin's projection, then the held observation's — which is what a
+ * file with no row still has. **A display path only** (entry 39): lossy, and never
+ * a command argument; every control on the route is addressed by `DocumentId`.
+ * `null` means the window holds no path for the file, and the route says so in
+ * words rather than inventing one.
+ *
+ * @param browser - The readers.
+ * @param document - The file.
+ * @returns The path, or `null`.
+ */
+export function routePathOf(
+  browser: Pick<BrowserState, 'documents' | 'standingConflictFor' | 'retainedObservationFor'>,
+  document: DocumentId
+): string | null {
+  const row = browser.documents.find((each) => each.id === document);
+  if (row !== undefined) {
+    return row.relative_path;
+  }
+  const standing = browser.standingConflictFor(document);
+  if (standing !== null) {
+    return standing.kind === 'save'
+      ? standing.conflict.disk.relative_path
+      : standing.observation.disk.relative_path;
+  }
+  return browser.retainedObservationFor(document)?.disk.relative_path ?? null;
+} // End of function routePathOf()
+
+/**
+ * The disk text one standing origin carries, as the thing the route draws beside
+ * the acknowledgement — Phase 2d-6-9b-1, ruling (2) and `2d-6-9a-notes.md` §3.1.
+ *
+ * **The snapshot an acknowledgement minted from `source` is bound to**, so the route
+ * draws exactly this beside the control and mints from the same object; an empty
+ * file is a fact about the file (`conflictDiskText`'s rule in `./saveOutcome.ts`),
+ * not a failure to obtain it. Read once, off the origin.
+ *
+ * @param source - The origin standing for the file.
+ * @returns The text to draw, or the empty arm.
+ */
+export function standingSnapshotOf(source: ConflictSource): ConflictDiskText {
+  const text = source.kind === 'save' ? source.conflict.disk_text : source.observation.diskText;
+  return text === '' ? Object.freeze({ kind: 'empty' as const }) : Object.freeze({ kind: 'text' as const, text });
+} // End of function standingSnapshotOf()
 
 /**
  * The workspace facts, asked of a live `BrowserState` in one synchronous block.
@@ -851,7 +1124,9 @@ export function workspaceReconciliationStateKey(state: WorkspaceReconciliationSt
 /**
  * The dictionary key holding one per-file state's sentence at one placement.
  *
- * **The placement matters for one state only.** On a surface the held observation
+ * **The placement matters for three states.** In a sidebar row, `stale` and
+ * `unavailable` read as a short mark (Phase 2d-6-9b-1): a row is one line, and the
+ * whole sentence is the header's. On a surface the held observation
  * and the uncertain write read as the surfaces already say them —
  * `browser.externalConflict.observationRetained` and `.writeOutcomeUnknown`, the
  * reviewed sentences of entries 13 and 14. On the workspace route the uncertain
@@ -869,9 +1144,13 @@ export function fileReconciliationStateKey(
 ): TranslationKey {
   switch (state.kind) {
     case 'stale':
-      return 'browser.externalDocument.stale';
+      return placement === 'sidebarRow'
+        ? 'browser.externalDocument.row.stale'
+        : 'browser.externalDocument.stale';
     case 'unavailable':
-      return 'browser.externalDocument.unavailable';
+      return placement === 'sidebarRow'
+        ? 'browser.externalDocument.row.unavailable'
+        : 'browser.externalDocument.unavailable';
     case 'removed':
       return 'browser.externalDocument.removed';
     case 'observationRetained':
@@ -915,6 +1194,53 @@ export function reconciliationControlKey(control: ReconciliationControl): Transl
     }
   }
 } // End of function reconciliationControlKey()
+
+/**
+ * A sentence the workspace route draws beside one disabled control, after its
+ * refusal — Phase 2d-6-9b-1, `2d-6-9a-notes.md` §4 point (c) and §7.3 item 1.
+ *
+ * `projectionReplacedExits` says how long the acknowledgement stays disabled when
+ * the standing origin is outlived. **Route-only, because the exits differ by
+ * placement, measured on the code**: on a surface the next observation of the
+ * file is registered as a fresh origin at the current generation and can be
+ * acknowledged; on the route no surface receives it, the coordinator's automatic
+ * reread installs it instead, and the outlived origin keeps standing — so there
+ * the only exits are a later write of this window's that ends on a named revision
+ * and `open()`. The refusal's own sentence is shared by both placements and so
+ * names no exit.
+ */
+export type RouteControlNote = 'projectionReplacedExits';
+
+/**
+ * The note the route draws beside one control decision, or `null`.
+ *
+ * @param decision - The control, as decided.
+ * @returns The note, or `null` when the refusal's sentence is the whole story.
+ */
+export function routeControlNoteOf(decision: ControlDecision): RouteControlNote | null {
+  return decision.control === 'acknowledgeUncertainty' &&
+    !decision.enabled &&
+    decision.reason === 'projectionReplaced'
+    ? 'projectionReplacedExits'
+    : null;
+} // End of function routeControlNoteOf()
+
+/**
+ * The dictionary key holding one route note's sentence.
+ *
+ * @param note - The note.
+ * @returns The key.
+ */
+export function routeControlNoteKey(note: RouteControlNote): TranslationKey {
+  switch (note) {
+    case 'projectionReplacedExits':
+      return 'browser.reconciliation.route.projectionReplacedExits';
+    default: {
+      const unreachable: never = note;
+      return unreachable;
+    }
+  }
+} // End of function routeControlNoteKey()
 
 /**
  * The dictionary key holding one refusal's sentence.

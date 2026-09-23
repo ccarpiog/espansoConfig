@@ -167,11 +167,13 @@ import {
   fileReconciliationStateKey,
   reconciliationControlKey,
   reconciliationRefusalKey,
+  routeControlNoteKey,
   workspaceReconciliationStateKey,
   type FileReconciliationState,
   type FileStatePlacement,
   type ReconciliationControl,
   type ReconciliationRefusal,
+  type RouteControlNote,
   type WorkspaceReconciliationState
 } from '../browser/reconciliationStatus';
 import { DICTIONARIES, translate, type TranslationKey, type TranslationParams } from './dictionaries';
@@ -1966,3 +1968,15 @@ export function describeReconciliationRefusal(
 ): string {
   return translate(locale, reconciliationRefusalKey(refusal));
 } // End of function describeReconciliationRefusal()
+
+/**
+ * The sentence one workspace-route note reads as, in one language — Phase
+ * 2d-6-9b-1. Drawn after a disabled control's refusal on the route only.
+ *
+ * @param locale - The dictionary to read from.
+ * @param note - The note.
+ * @returns The translated sentence.
+ */
+export function describeReconciliationRouteNote(locale: Locale, note: RouteControlNote): string {
+  return translate(locale, routeControlNoteKey(note));
+} // End of function describeReconciliationRouteNote()

@@ -14,6 +14,12 @@
   import { documentHasUnsavedDraft } from '../browser/matchDuplication';
   import type { RawDocumentText } from '../browser/rawDocument';
   import { rawEditorRefusal } from '../browser/rawEditor';
+  import {
+    headerFilesOf,
+    shownFileFactsOf,
+    shownFileOf,
+    type FileStatePlacement
+  } from '../browser/reconciliationStatus';
   // The invalidation supplier below is written against `RawSaveInvalidation` and
   // is checked against `InvalidateEverySurface` where it is passed, which is the
   // prop that requires one — so no type from `../ipc/commands` is needed for it
@@ -49,6 +55,7 @@
     MatchId,
     MatchView
   } from '../ipc/types';
+  import FileReconciliationStatus from './FileReconciliationStatus.svelte';
   import MatchCreator from './MatchCreator.svelte';
   import MatchDeleter from './MatchDeleter.svelte';
   import MatchDuplicator from './MatchDuplicator.svelte';
@@ -1145,6 +1152,26 @@
       restoring !== null ||
       creating
   );
+
+  /*
+   * **What the header says about reconciliation** — Phase 2d-6-9b-1, the 2d-6
+   * record's §3 entry 27. Which files it speaks about is `headerFilesOf`'s in
+   * `../browser/reconciliationStatus.ts`: the files the open surfaces target while
+   * any is registered, otherwise `shownFileOf`'s file — the whole text's, the
+   * selected snippet's, or the file the sidebar selects. Each is drawn by
+   * `FileReconciliationStatus.svelte` at three placements — `header`,
+   * `selectionNotice` and `surface` — as one status block, so a `removed` file's two
+   * placements are one sentence rather than the same sentence twice. What the
+   * surface placement leaves out is the acknowledgement, which a write renderer
+   * owns because it must mint from the origin its own panel shows (Phase 2d-6-9b-2).
+   */
+
+  /** The placements this pane's header block stands for, in its order. */
+  const HEADER: readonly FileStatePlacement[] = ['header', 'selectionNotice', 'surface'];
+
+  const headerFiles = $derived(
+    headerFilesOf(browser.openWriteSurfaces(), shownFileOf(shownFileFactsOf(browser)))
+  );
 </script>
 
 {#snippet scalarText(display: ScalarDisplay)}
@@ -1276,6 +1303,10 @@
       </button>
     </div>
   {/if}
+
+  {#each headerFiles as headerFile (headerFile)}
+    <FileReconciliationStatus {browser} document={headerFile} placements={HEADER} />
+  {/each}
 
   {#if browser.fileTextTarget !== null && editing === null}
     <p class="toggle">

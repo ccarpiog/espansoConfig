@@ -382,6 +382,14 @@ describe('the semantic bounds of entry 40, as absences', () => {
     'browser.reconciliation.refusal.superseded',
     'browser.reconciliation.refusal.projectionReplaced',
     'browser.reconciliation.refusal.holdMoved',
+    // Phase 2d-6-9b-1: the two sidebar-row marks, the status region's label, the
+    // route's unlisted-file name, its snapshot heading and its exits note.
+    'browser.externalDocument.row.stale',
+    'browser.externalDocument.row.unavailable',
+    'browser.reconciliation.label',
+    'browser.reconciliation.route.unlistedFile',
+    'browser.reconciliation.route.snapshot',
+    'browser.reconciliation.route.projectionReplacedExits',
     'browser.conflictOrigin.changedWhileOpen',
     'browser.reapply.externalEvidence.noCorrespondence',
     'browser.reapply.externalEvidence.baseRevisionMoved',

@@ -1,7 +1,15 @@
 <script lang="ts">
+  import {
+    decideFileReconciliation,
+    fileFactsOf,
+    fileStatesDrawnAt,
+    workspaceFactsOf,
+    type FileStatePlacement
+  } from '../browser/reconciliationStatus';
   import { ALL_DOCUMENTS, sameSelection, type SidebarRow } from '../browser/sidebar';
   import type { BrowserState } from '../browser/workspace.svelte';
-  import { t, tIpcFailure, tSnippetCount } from '../i18n';
+  import type { DocumentId } from '../ipc/types';
+  import { t, tIpcFailure, tReconciliationFileState, tSnippetCount } from '../i18n';
 
   /*
    * The first pane of plan section 8.1: an "All" entry, then files, profiles
@@ -32,6 +40,30 @@
    */
 
   const { browser }: { browser: BrowserState } = $props();
+
+  /*
+   * **A row's reconciliation mark is `decideFileReconciliation`'s** — Phase
+   * 2d-6-9b-1, the 2d-6 record's §3 entry 27: `stale` and `unavailable` are placed
+   * in the file's row, and nothing else is. The row draws the short mark and keeps
+   * the whole sentence for its `title`; the header draws the sentence itself, so a
+   * reader who never hovers still meets it once the file is shown. No row is ever
+   * invented for a file that has none (`removed`).
+   */
+
+  /** The one placement a row stands for. */
+  const ROW: readonly FileStatePlacement[] = ['sidebarRow'];
+
+  const workspace = $derived(workspaceFactsOf(browser));
+
+  /**
+   * The reconciliation states one row draws.
+   *
+   * @param document - The row's file.
+   * @returns The states, placed in the row.
+   */
+  function rowStates(document: DocumentId): ReturnType<typeof fileStatesDrawnAt> {
+    return fileStatesDrawnAt(decideFileReconciliation(workspace, fileFactsOf(browser, document)), ROW);
+  } // End of function rowStates()
 </script>
 
 <nav class="sidebar" aria-label={t('browser.sidebar.label')}>
@@ -89,6 +121,11 @@
               {#if row.document.disabled}
                 <span class="mark">{t('browser.sidebar.notAutoLoaded')}</span>
               {/if}
+              {#each rowStates(row.document.id) as drawn (drawn.state.kind)}
+                <span class="mark warn" title={tReconciliationFileState(drawn.state, 'header')}>
+                  {tReconciliationFileState(drawn.state, drawn.placement)}
+                </span>
+              {/each}
               {#if row.unreadable}
                 <!-- A word rather than a glyph with a tooltip: "could not read
                      this" is a different fact from "have not read this", and a

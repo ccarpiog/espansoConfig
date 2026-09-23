@@ -7234,6 +7234,48 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     }
   ); // End of the per-writer "a conflict installs nothing" case
 
+  it.each(WRITERS)(
+    'marks the file stale when $name conflicts on a revision the window does not show',
+    async ({ script, send }) => {
+      // **The orchestrator's ruling on `stale`, taken at Phase 2d-6-9b-1**
+      // (`docs/decisions/2d-6-9a-notes.md` §3.3): `stale` means the window holds a
+      // disk snapshot of this file newer than its installed projection, whether it
+      // came from an observation or from a save refused as a conflict. The refused
+      // save's stabilized reading is coalesced by the backend, so no observation
+      // will ever mark it; the conflict arm is the only place that can.
+      const commands = scriptedCommands(script);
+      const state = await withTheSecondSnippetSelected(commands);
+      expect(state.externalDocumentStatus(2)).toBeNull();
+
+      await send(state);
+
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      // Marking is not installing: the window still shows what it loaded.
+      expect(state.scopedDocument?.revision).toBe(baseDocument().revision);
+    }
+  ); // End of the per-writer "a conflict marks the file stale" case
+
+  it('marks nothing when the conflict names the revision the window already shows', async () => {
+    // The window holds no snapshot newer than its projection here, so `stale`
+    // would claim a difference nothing observed.
+    const atTheShownRevision: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'conflict',
+        reapply: { subject: { Unsupported: {} }, placement: { NotAnchored: {} } },
+        expected: 'rev-z',
+        found: baseDocument().revision,
+        disk_revision: baseDocument().revision,
+        disk_text: DISK_TEXT,
+        disk: baseDocument()
+      }
+    };
+    const commands = scriptedCommands({ raws: [atTheShownRevision] });
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(2, 'rev-z', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    expect(state.externalDocumentStatus(2)).toBeNull();
+  });
+
   /**
    * The conflict model a surface would be holding, for one scripted conflict.
    *
@@ -7278,6 +7320,142 @@ describe('what a conflict does to this window, and what only a confirmed reload 
     expect(state.selected).toBeNull();
     expect(state.notice).toBe('gone');
   }); // End of the "confirmed adoption installs" case
+
+  it('clears the conflict’s stale mark when a confirmed adoption installs the disk version', async () => {
+    // The other half of the ruling on `stale` (Phase 2d-6-9b-1): once the snapshot
+    // is installed, the window no longer holds anything newer than what it shows.
+    const commands = scriptedCommands({ raws: [CONFLICT] });
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+
+    const model = modelOf();
+    const confirmation = confirmReloadDiskVersion(model);
+    expect(state.adoptDiskVersion(modelOf(), confirmReloadDiskVersion(modelOf()))).toBe('refused');
+    // A refused adoption installs nothing, so the mark stands.
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+    expect(state.adoptDiskVersion(model, confirmation)).toBe('installed');
+    expect(state.externalDocumentStatus(2)).toBeNull();
+  });
+
+  /**
+   * A started state over `match/base.yml`, with the second snippet selected and the
+   * raw viewer showing, whose one wake drains `observations` — Phase 2d-6-9b-1's
+   * fix round, for the cases that need a status written by an observation.
+   *
+   * Three drains are declared: the registration's, the open's, and the wake's.
+   *
+   * @param script - The commands' answers, less the drains.
+   * @param observations - What the wake's batch carries, at sequence 1.
+   * @returns The state and the wake that delivers the batch.
+   */
+  async function startedWithOneWake(
+    script: Script,
+    observations: readonly ExternalObservation[]
+  ): Promise<{ readonly state: BrowserState; readonly wake: () => Promise<void> }> {
+    expectDrains([0, 0, 0]);
+    const events = testEvents();
+    const commands = scriptedCommands({
+      ...script,
+      drains: [
+        reconciliationBatch(),
+        reconciliationBatch(),
+        reconciliationBatch({ newest_sequence: 1, observations: [...observations] })
+      ]
+    });
+    const state = createBrowserState(commands, () => undefined, undefined, events.source);
+    state.start();
+    await settleDrains();
+    await state.open(null);
+    await settleDrains();
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[1]!);
+    await state.showFileText(true);
+    return {
+      state,
+      wake: async () => {
+        events.wake(5, 1);
+        await settleDrains();
+        await settleDrains();
+      }
+    };
+  } // End of function startedWithOneWake()
+
+  it('leaves a stale mark written after the conflict standing through an installed adoption', async () => {
+    // **The clear guard's failing side** (the 2d-6-9b-1 review, finding 1). A later
+    // observation, taking the automatic path with no surface over the file, marks
+    // the file `stale` again and its read fails — so the mark now describes a
+    // reading this conflict's snapshot is not. Installing the conflict must not
+    // clear it: the status-write count moved since the conflict was registered.
+    const { state, wake } = await startedWithOneWake(
+      {
+        raws: [CONFLICT],
+        reload: { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } }
+      },
+      [changedObservation(1, addressable(2, 'match/base.yml'))]
+    );
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+    await wake();
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+
+    const model = modelOf();
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('installed');
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+    state.dispose();
+  });
+
+  it('leaves an unavailable status written after the conflict standing through an installed adoption', async () => {
+    const { state, wake } = await startedWithOneWake({ raws: [CONFLICT] }, [
+      unreadableObservation(1, addressable(2, 'match/base.yml'))
+    ]);
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    await wake();
+    expect(state.externalDocumentStatus(2)?.kind).toBe('unavailable');
+
+    const model = modelOf();
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('installed');
+    expect(state.externalDocumentStatus(2)?.kind).toBe('unavailable');
+    state.dispose();
+  });
+
+  it('does not mark an unavailable file stale when a later save conflicts', async () => {
+    // An `unavailable` is an observation's statement a refusal cannot order itself
+    // against, so `rememberTheSaveConflict` leaves it.
+    const { state, wake } = await startedWithOneWake({ raws: [CONFLICT] }, [
+      unreadableObservation(1, addressable(2, 'match/base.yml'))
+    ]);
+    await wake();
+    expect(state.externalDocumentStatus(2)?.kind).toBe('unavailable');
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    expect(state.externalDocumentStatus(2)?.kind).toBe('unavailable');
+    // Nothing wrote the status after this conflict registered, so only the
+    // install's `stale` test keeps it from clearing an `unavailable`.
+    const model = modelOf();
+    expect(state.adoptDiskVersion(model, confirmReloadDiskVersion(model))).toBe('installed');
+    expect(state.externalDocumentStatus(2)?.kind).toBe('unavailable');
+    state.dispose();
+  });
+
+  it('does not mark a removed file stale when a later save conflicts', async () => {
+    const { state, wake } = await startedWithOneWake({ raws: [CONFLICT] }, [
+      removedObservation(1, addressable(2, 'match/base.yml'))
+    ]);
+    await wake();
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'removed' });
+    await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    expect(state.externalDocumentStatus(2)).toEqual({ kind: 'removed' });
+    state.dispose();
+  });
+
+  it('marks nothing when no projection of the file is installed', async () => {
+    // Document 4 is not in this window at all: there is no projection the
+    // conflict's snapshot could be newer than.
+    const commands = scriptedCommands({ raws: [CONFLICT] });
+    const state = await withTheSecondSnippetSelected(commands);
+    await state.saveRawDocument(4, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    expect(state.externalDocumentStatus(4)).toBeNull();
+  });
 
   it('refuses a confirmation issued for another conflict', async () => {
     const commands = scriptedCommands({ raws: [CONFLICT] });
