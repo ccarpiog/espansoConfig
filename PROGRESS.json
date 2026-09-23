@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T16:15:22Z",
+ "updated": "2026-09-23T16:37:50Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish external-change reconciliation for the espanso config editor, proving it in real-window readings before packaging.",
  "phases": [
@@ -837,16 +837,18 @@
   {
    "id": "2d-7-8",
    "title": "Reading: the status states 9c left unread",
-   "status": "queued",
+   "status": "done",
    "risk": "routine",
-   "summary": "Reads the reconciliation-status states that earlier readings never drew."
+   "summary": "G4 read and reviewed (ship): one row held, thirteen unread, the plan-less ones handed to 2d-7-9 and 2d-7-10 under the standing ruling (entry 37).",
+   "review": "docs/reviews/phase-2d-7-8.md",
+   "narrative": "docs/decisions/2d-7-8-notes.md"
   },
   {
    "id": "2d-7-9",
    "title": "Owner-present visible session",
-   "status": "queued",
+   "status": "blocked",
    "risk": "high",
-   "summary": "Owner-present; never selected by a driven run."
+   "summary": "Blocked on the owner: needs the owner present at an unlocked screen, or the owner's ruling that its items are recorded unread; never selected by a driven run."
   },
   {
    "id": "2d-7-10",
@@ -866,7 +868,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 6 and the 2d-7 consult are closed; 2d-7-1 is next, then the rest of 2d-7 and 2d-8."
+   "summary": "Steps 1 to 6 and 2d-7-1 to 2d-7-8 are closed; 2d-7-9 needs the owner present, then 2d-7-10 and 2d-8."
   },
   {
    "id": "3",
