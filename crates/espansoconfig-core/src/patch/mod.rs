@@ -78,6 +78,15 @@
 //! of the runs `entry_owned_runs` derives from the text, the sequence must be
 //! the original plus the clone in its slot, and the candidate's comments must be
 //! exactly the original's plus one owned copy of each comment the runs carry.
+//!
+//! **3-1 — [`FieldInsertGroup`] and [`KeySubstitution`], compositional mapping
+//! edits.** A group writes several new entries as one run, in a stated order,
+//! after one anchor — the answer to two insertions sharing an offset, which
+//! stays refused. A substitution re-spells one entry's key token in place, so the
+//! first entry of a compact `- key: value` item can change key without its `-`
+//! moving. Both are verified through the same mapping fold as an insertion and a
+//! removal, which gains one property: every key of the changed mapping is where
+//! the batch intended it ([`VerificationFailure::EntriesNotInTheIntendedOrder`]).
 
 pub mod edit;
 pub mod path;
@@ -85,9 +94,9 @@ pub mod path;
 pub use edit::{
     apply_edits, apply_scalar_edit, apply_scalar_edits, duplicate_item, insert_field, insert_item,
     insertion_landings, move_item, remove_field, remove_item, DocumentEdit, DuplicateItem,
-    DuplicateSeam, EditError, FieldInsert, FieldRemoval, InsertItem, ItemMove, ItemPlacement,
-    MoveSeam, PatchedDocument, PresentationNote, RemoveItem, Replacement, ScalarEdit,
-    VerificationFailure,
+    DuplicateSeam, EditError, FieldInsert, FieldInsertGroup, FieldRemoval, InsertItem, ItemMove,
+    ItemPlacement, KeySubstitution, MoveSeam, PatchedDocument, PresentationNote, RemoveItem,
+    Replacement, ScalarEdit, VerificationFailure,
 };
 pub use path::{
     path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,

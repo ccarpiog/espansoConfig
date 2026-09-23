@@ -172,6 +172,153 @@ impl MatchField {
     }
 } // End of impl MatchField
 
+/// One of the two scalar trigger keys a [`FieldSubstitution`] may switch between.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TriggerForm {
+    /// `trigger`.
+    Trigger,
+    /// `regex`.
+    Regex,
+}
+
+impl TriggerForm {
+    /// The schema-known field this form is written under.
+    pub fn field(self) -> MatchField {
+        match self {
+            TriggerForm::Trigger => MatchField::Trigger,
+            TriggerForm::Regex => MatchField::Regex,
+        }
+    }
+} // End of impl TriggerForm
+
+/// One of the five scalar content keys a [`FieldSubstitution`] may switch
+/// between.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ContentForm {
+    /// `replace`.
+    Replace,
+    /// `markdown`.
+    Markdown,
+    /// `html`.
+    Html,
+    /// `image_path`.
+    ImagePath,
+    /// `form`.
+    Form,
+}
+
+impl ContentForm {
+    /// The schema-known field this form is written under.
+    pub fn field(self) -> MatchField {
+        match self {
+            ContentForm::Replace => MatchField::Replace,
+            ContentForm::Markdown => MatchField::Markdown,
+            ContentForm::Html => MatchField::Html,
+            ContentForm::ImagePath => MatchField::ImagePath,
+            ContentForm::Form => MatchField::Form,
+        }
+    }
+} // End of impl ContentForm
+
+/// A closed **scalar-to-scalar substitution**: one key of a match renamed to
+/// another key of the same family, in place (Phase 3-1).
+///
+/// # Closed by its type
+///
+/// There are exactly two families, and a substitution cannot cross them: a
+/// trigger form becomes another trigger form (`trigger`↔`regex`), and a content
+/// form becomes another content form (`replace`↔`markdown`, `html`, `image_path`
+/// or `form`). No variant carries a key string or a YAML fragment, so a caller
+/// can only name keys espanso's schema fixes. `triggers` is a sequence and is not
+/// a form here: switching to or from a list is a different operation (3-2).
+///
+/// # What it does to the file
+///
+/// It becomes one [`crate::patch::KeySubstitution`]: the old key's token is
+/// re-spelled as the new key and **every other byte stays** — the compact item's
+/// `-`, the colon, the value's spelling and style, inline comments. A new value,
+/// when there is one, comes from the draft's own field for the **destination**
+/// key (`MatchDraft::regex` for `trigger`→`regex`); when that field is
+/// [`crate::draft::DraftField::Unchanged`] — or `Set` to the value the old key
+/// already decodes to — the value's bytes are kept exactly as written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FieldSubstitution {
+    /// A trigger form becomes another trigger form.
+    Trigger {
+        /// The key the match holds now.
+        from: TriggerForm,
+        /// The key it is renamed to.
+        to: TriggerForm,
+    },
+    /// A content form becomes another content form.
+    Content {
+        /// The key the match holds now.
+        from: ContentForm,
+        /// The key it is renamed to.
+        to: ContentForm,
+    },
+}
+
+impl FieldSubstitution {
+    /// The field the match holds now.
+    pub fn from(self) -> MatchField {
+        match self {
+            FieldSubstitution::Trigger { from, .. } => from.field(),
+            FieldSubstitution::Content { from, .. } => from.field(),
+        }
+    }
+
+    /// The field it is renamed to.
+    pub fn to(self) -> MatchField {
+        match self {
+            FieldSubstitution::Trigger { to, .. } => to.field(),
+            FieldSubstitution::Content { to, .. } => to.field(),
+        }
+    }
+
+    /// The substitution from `from` to `to`, or `None` when the two fields are
+    /// not two different forms of one family.
+    ///
+    /// The one place a pair of [`MatchField`]s is judged, so
+    /// [`crate::draft::check_closed_surface`] and a caller that holds two fields
+    /// ask the same question.
+    pub fn between(from: MatchField, to: MatchField) -> Option<FieldSubstitution> {
+        if from == to {
+            return None;
+        }
+        match (trigger_form(from), trigger_form(to)) {
+            (Some(from), Some(to)) => return Some(FieldSubstitution::Trigger { from, to }),
+            (None, None) => {}
+            _ => return None,
+        }
+        match (content_form(from), content_form(to)) {
+            (Some(from), Some(to)) => Some(FieldSubstitution::Content { from, to }),
+            _ => None,
+        }
+    } // End of function between()
+} // End of impl FieldSubstitution
+
+/// The trigger form a field is, when it is one.
+fn trigger_form(field: MatchField) -> Option<TriggerForm> {
+    match field {
+        MatchField::Trigger => Some(TriggerForm::Trigger),
+        MatchField::Regex => Some(TriggerForm::Regex),
+        _ => None,
+    }
+}
+
+/// The content form a field is, when it is one.
+fn content_form(field: MatchField) -> Option<ContentForm> {
+    match field {
+        MatchField::Replace => Some(ContentForm::Replace),
+        MatchField::Markdown => Some(ContentForm::Markdown),
+        MatchField::Html => Some(ContentForm::Html),
+        MatchField::ImagePath => Some(ContentForm::ImagePath),
+        MatchField::Form => Some(ContentForm::Form),
+        _ => None,
+    }
+} // End of function content_form()
+
 /// One schema-known **sequence of strings** a match may hold.
 ///
 /// A draft may edit an existing element of either. It may never add one or take

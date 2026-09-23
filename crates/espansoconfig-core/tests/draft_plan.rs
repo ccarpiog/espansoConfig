@@ -17,7 +17,10 @@
 //! Everything else is one named refusal per test. A refusal that no test can
 //! reach is a sentence rather than a rule, so each of the six batch hazards is
 //! driven through the guard that states it, and every hazard the planner can
-//! produce on its own is driven through the planner too.
+//! produce on its own is driven through the planner too. Since Phase 3-1 the
+//! planner produces neither hazard 1 (it anchors on an entry the batch leaves
+//! alone) nor hazard 6 (it writes several absent fields as one ordered group),
+//! and the two tests that used to drive them through the planner say so.
 //!
 //! # The open half
 //!
@@ -660,19 +663,30 @@ fn an_empty_draft_is_still_refused_for_a_match_that_cannot_be_edited() {
 // The six batch hazards
 // ---------------------------------------------------------------------------
 
-/// Hazard 1, through the planner: the anchor is the mapping's last visible
-/// entry, and this draft takes it away.
+/// Hazard 1 can no longer come from the planner (Phase 3-1): when the draft
+/// removes the mapping's last visible entry, the insertion is anchored on the
+/// last entry the batch **leaves alone** and whose successor it leaves alone
+/// too — `replace`'s successor is the removed `label`, whose removal run starts
+/// at the insertion point, so the anchor is `trigger`. The guard still refuses
+/// the hazard on a hand-built batch — the next test.
 #[test]
-fn inserting_after_a_key_the_same_batch_removes_is_refused() {
+fn the_planner_anchors_an_insertion_on_an_entry_the_batch_leaves_alone() {
     let view = one_match(SIMPLE);
     let draft = MatchDraft::new()
         .without(MatchField::Label)
         .with(MatchField::Word, "true");
+    let edits = plan_match_edits(&view, &draft).expect("the draft plans");
+    assert_eq!(edits.len(), 2);
+    let DocumentEdit::InsertField(insert) = &edits[1] else {
+        panic!("one absent field is one insertion");
+    };
+    assert_eq!(insert.sibling(), Some("trigger"));
+    let patched = apply_edits(SIMPLE, &edits).expect("and the batch applies");
     assert_eq!(
-        plan_match_edits(&view, &draft),
-        Err(DraftError::InsertionAnchorRemoved { edit: 1 })
+        patched.text(),
+        "matches:\n  - trigger: hello\n    word: 'true'\n    replace: world\n"
     );
-} // End of function inserting_after_a_key_the_same_batch_removes_is_refused()
+} // End of function the_planner_anchors_an_insertion_on_an_entry_the_batch_leaves_alone()
 
 /// Hazard 1, through the guard, on a batch the planner did not build.
 #[test]
@@ -912,21 +926,44 @@ fn an_anchor_whose_key_is_ambiguous_is_refused() {
     );
 } // End of function an_anchor_whose_key_is_ambiguous_is_refused()
 
-/// Hazard 6, through the planner: two absent fields would be written after one
-/// entry, and nothing says which goes first.
+/// Hazard 6, through the guard: two separate insertion edits after one entry
+/// state no order between them. The planner no longer produces this batch
+/// (Phase 3-1) — it writes two absent fields as one ordered
+/// `FieldInsertGroup`, which `tests/draft_compose.rs` covers — so the hazard
+/// is driven through the guard on a hand-built batch.
 #[test]
 fn two_insertions_sharing_one_anchor_are_refused() {
-    let view = one_match(SIMPLE);
-    let draft = MatchDraft::new()
-        .with(MatchField::Word, "true")
-        .with(MatchField::Comment, "a comment");
+    let mapping = DocumentPath::root(0).with_key("matches").with_index(0);
+    let edits = vec![
+        DocumentEdit::InsertField(FieldInsert::after(mapping.clone(), "label", "word", "true")),
+        DocumentEdit::InsertField(FieldInsert::after(
+            mapping.clone(),
+            "label",
+            "comment",
+            "a comment",
+        )),
+    ];
     assert_eq!(
-        plan_match_edits(&view, &draft),
+        check_batch_independence(
+            &mapping,
+            &keys(&["trigger", "replace", "label"]),
+            &[],
+            &edits
+        ),
         Err(DraftError::SharedInsertionAnchor {
             first: 0,
             second: 1
         })
     );
+    let view = one_match(SIMPLE);
+    let draft = MatchDraft::new()
+        .with(MatchField::Word, "true")
+        .with(MatchField::Comment, "a comment");
+    let planned = plan_match_edits(&view, &draft).expect("the planner writes one group");
+    let [DocumentEdit::InsertFields(group)] = planned.as_slice() else {
+        panic!("two absent fields are one ordered group, not two insertions");
+    };
+    assert_eq!(group.sibling(), Some("label"));
 } // End of function two_insertions_sharing_one_anchor_are_refused()
 
 /// And the engine underneath refuses the same batch, which is why the draft

@@ -4,11 +4,14 @@ use crate::draft::audit::{check_batch_independence, check_closed_surface, Nested
 use crate::draft::error::DraftError;
 use crate::draft::field::DraftField;
 use crate::draft::match_draft::{
-    DraftTarget, EntryDraft, ItemDraft, MatchDraft, MatchField, SequenceField, VariableDraft,
-    VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
+    DraftTarget, EntryDraft, FieldSubstitution, ItemDraft, MatchDraft, MatchField, SequenceField,
+    VariableDraft, VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
 };
 use crate::model::{FieldView, MatchView, ScalarView, UnknownReason, ValueKind, ValueView};
-use crate::patch::{DocumentEdit, DocumentPath, FieldInsert, FieldRemoval, ScalarEdit};
+use crate::patch::{
+    DocumentEdit, DocumentPath, FieldInsert, FieldInsertGroup, FieldRemoval, KeySubstitution,
+    ScalarEdit,
+};
 
 /// Derives the batch a draft asks for, or refuses it by name.
 ///
@@ -34,11 +37,22 @@ use crate::patch::{DocumentEdit, DocumentPath, FieldInsert, FieldRemoval, Scalar
 /// |---|---|---|
 /// | present, decoding to the drafted value | `Set` | **nothing** |
 /// | present, decoding to something else | `Set` | one [`ScalarEdit`] |
-/// | absent | `Set` | one [`FieldInsert`] |
+/// | absent | `Set` | one insertion |
 ///
 /// and the two it gives to a `Remove`: one [`FieldRemoval`] when the field is
 /// there, and **nothing** when it is not, because the desired state is already
 /// the actual state.
+///
+/// # Every insertion of one draft is one edit (Phase 3-1)
+///
+/// Every absent field a draft sets is written after **one anchor**: the last
+/// entry of the match mapping this planner can name that the batch neither
+/// removes nor renames — so the anchor survives the batch by construction. One
+/// such field becomes a [`FieldInsert`]; two or more become **one**
+/// [`FieldInsertGroup`], in [`MatchField::ALL`] order, which is the only order
+/// this module has. Two insertions sharing an anchor used to be refused
+/// ([`DraftError::SharedInsertionAnchor`]); a group states its order, so a draft
+/// that adds two absent options now saves in one batch.
 ///
 /// **The third row of that table is the match mapping's alone.** Below it —
 /// inside a variable, a `params` mapping or a `form_fields` entry — an absent
@@ -60,10 +74,13 @@ use crate::patch::{DocumentEdit, DocumentPath, FieldInsert, FieldRemoval, Scalar
 ///    nested sequence. Checked **at intent level, before any diffing**, because
 ///    an intent that asks for the value already there derives no edit and would
 ///    be invisible to every later check;
-/// 5. no drafted entry says both "this scalar" and "these elements";
+/// 5. no drafted entry says both "this scalar" and "these elements", and no
+///    substitution contradicts another intent of the draft
+///    ([`plan_match_edits_with_substitutions`]);
 /// 6. every drafted field is planned, in [`MatchField::ALL`] order, then every
 ///    drafted sequence element, then every drafted variable, then every drafted
-///    `form_fields` entry, each in the draft's own order;
+///    `form_fields` entry, each in the draft's own order, and last the absent
+///    fields as one insertion after a surviving anchor;
 /// 7. the derived batch passes [`check_closed_surface`];
 /// 8. and [`check_batch_independence`], which is now given the keys of every
 ///    open mapping the batch reached into as well as the match's own.
@@ -99,6 +116,47 @@ pub fn plan_match_edits(
     view: &MatchView,
     draft: &MatchDraft,
 ) -> Result<Vec<DocumentEdit>, DraftError> {
+    plan_match_edits_with_substitutions(view, draft, &[])
+} // End of function plan_match_edits()
+
+/// [`plan_match_edits`], plus closed scalar-to-scalar **substitutions**
+/// (Phase 3-1).
+///
+/// Each [`FieldSubstitution`] renames one key of the match mapping to another
+/// form of the same family, **in place**, through one
+/// [`crate::patch::KeySubstitution`]: the first entry of a compact
+/// `- trigger: …` item changes form without its `-` moving, which a removal plus
+/// an insertion cannot do. Every other rule of [`plan_match_edits`] applies
+/// unchanged, in the same order, and a draft with no substitution derives
+/// exactly the batch [`plan_match_edits`] derives.
+///
+/// # What the draft may say about the two keys
+///
+/// - the **source** key carries no intent of its own — it is being renamed;
+/// - the **destination** key may be `Set`, and that value is the renamed entry's
+///   new value. `Unchanged`, or a `Set` to the value the source already decodes
+///   to, keeps the value's bytes exactly as written. A `Remove` contradicts the
+///   substitution;
+/// - no key is named by two substitutions.
+///
+/// Each of those is refused as [`DraftError::SubstitutionConflictsWithField`],
+/// at intent level and before any diffing.
+///
+/// # What the match must hold
+///
+/// The source key, as a scalar ([`DraftError::SubstitutionSourceAbsent`] when it
+/// is absent — the intent is stale — and
+/// [`DraftError::FieldHasAnUnmodelledShape`] when it holds a collection), and
+/// **not** the destination key ([`DraftError::SubstitutionTargetPresent`]).
+///
+/// # Errors
+///
+/// See [`DraftError`]. Every refusal discards the whole batch.
+pub fn plan_match_edits_with_substitutions(
+    view: &MatchView,
+    draft: &MatchDraft,
+    substitutions: &[FieldSubstitution],
+) -> Result<Vec<DocumentEdit>, DraftError> {
     let path = view.path.as_ref().ok_or(DraftError::MatchHasNoPath {})?;
     if let Some(repeated) = view
         .unknown_entries
@@ -119,32 +177,175 @@ pub fn plan_match_edits(
     }
     check_no_index_is_drafted_twice(draft)?;
     check_no_entry_drafts_two_shapes(draft)?;
+    check_substitutions_are_coherent(draft, substitutions)?;
 
     let entries = visible_entries(view);
     let mut edits: Vec<DocumentEdit> = Vec::new();
     let mut insertions: Vec<(MatchField, String)> = Vec::new();
     let mut nested: Vec<NestedKeys> = Vec::new();
     for field in MatchField::ALL {
+        let substituted = substitutions
+            .iter()
+            .any(|substitution| substitution.from() == field || substitution.to() == field);
+        if substituted {
+            // Both keys of a substitution are planned by `plan_substitution`,
+            // once, as one edit: the source is renamed, and the destination's
+            // drafted value is that renamed entry's new value.
+            continue;
+        }
         plan_field(view, draft, path, field, &mut edits, &mut insertions)?;
     } // End of the loop over the schema-known scalar fields
+    for substitution in substitutions {
+        plan_substitution(view, draft, path, *substitution, &mut edits)?;
+    } // End of the loop over the drafted substitutions
     for sequence in SequenceField::ALL {
         plan_sequence(view, draft, path, sequence, &mut edits)?;
     } // End of the loop over the schema-known string sequences
     plan_vars(view, draft, &mut edits, &mut nested)?;
     plan_form_fields(view, draft, path, &mut edits, &mut nested)?;
-    if !insertions.is_empty() {
-        let anchor = last_nameable_key(&entries).ok_or(DraftError::NoInsertionAnchor {
-            field: insertions[0].0,
-        })?;
-        for (field, value) in insertions {
-            edits.push(FieldInsert::after(path.clone(), anchor, field.key(), value).into());
-        }
-    }
+    plan_insertions(path, &entries, insertions, substitutions, &mut edits)?;
 
     check_closed_surface(path, &edits)?;
     check_batch_independence(path, &original_keys(&entries), &nested, &edits)?;
     Ok(edits)
-} // End of function plan_match_edits()
+} // End of function plan_match_edits_with_substitutions()
+
+/// Refuses substitutions that contradict each other or another intent of the
+/// draft.
+///
+/// **Intent level, and before any diffing**, for
+/// [`check_no_index_is_drafted_twice`]'s reason: a `Set` to the value already
+/// there derives nothing, so a check after diffing could not see the intent.
+fn check_substitutions_are_coherent(
+    draft: &MatchDraft,
+    substitutions: &[FieldSubstitution],
+) -> Result<(), DraftError> {
+    for (position, substitution) in substitutions.iter().enumerate() {
+        let (from, to) = (substitution.from(), substitution.to());
+        if !draft.field(from).is_unchanged() {
+            return Err(DraftError::SubstitutionConflictsWithField { field: from });
+        }
+        if draft.field(to).is_remove() {
+            return Err(DraftError::SubstitutionConflictsWithField { field: to });
+        }
+        for other in &substitutions[..position] {
+            for field in [from, to] {
+                if other.from() == field || other.to() == field {
+                    return Err(DraftError::SubstitutionConflictsWithField { field });
+                }
+            }
+        } // End of the loop over the substitutions before this one
+    } // End of the loop over the drafted substitutions
+    Ok(())
+} // End of function check_substitutions_are_coherent()
+
+/// Plans one substitution as one [`KeySubstitution`].
+///
+/// The value is compared by [`plan_scalar`], the one comparison this module
+/// makes: a destination `Set` to the value the source already decodes to keeps
+/// the value's bytes, and any other `Set` becomes the substitution's new value.
+fn plan_substitution(
+    view: &MatchView,
+    draft: &MatchDraft,
+    path: &DocumentPath,
+    substitution: FieldSubstitution,
+    edits: &mut Vec<DocumentEdit>,
+) -> Result<(), DraftError> {
+    let (from, to) = (substitution.from(), substitution.to());
+    let Some(scalar) = scalar_of(view, from) else {
+        if let Some(found) = unmodelled_shape(view, from) {
+            return Err(DraftError::FieldHasAnUnmodelledShape { field: from, found });
+        }
+        return Err(DraftError::SubstitutionSourceAbsent { field: from });
+    };
+    if scalar_of(view, to).is_some() || unmodelled_shape(view, to).is_some() {
+        return Err(DraftError::SubstitutionTargetPresent { field: to });
+    }
+    let at = path.clone().with_key(from.key());
+    let mut edit = KeySubstitution::new(at.clone(), to.key());
+    if let DraftField::Set(value) = draft.field(to) {
+        let target = DraftTarget::Field(from);
+        if let Some(DocumentEdit::Scalar(rewrite)) = plan_scalar(scalar, value, at, target)? {
+            edit = edit.with_value(rewrite.value());
+        }
+    }
+    edits.push(edit.into());
+    Ok(())
+} // End of function plan_substitution()
+
+/// Writes every absent field the draft sets as one insertion after one anchor.
+///
+/// The anchor is the last nameable entry the batch **leaves alone**: an entry
+/// the batch removes or a substitution renames does not survive under the name
+/// an anchor would give it, so it is skipped rather than refused.
+///
+/// One more entry is skipped: one whose **next visible entry the batch
+/// removes**. The insertion point is the end of the anchor's line, which is
+/// exactly where that removal's run begins, and [`crate::patch::apply_edits`]
+/// refuses two replacements that share a start
+/// ([`crate::patch::EditError::OverlappingEdits`], pinned by
+/// `inserting_at_the_start_of_a_removed_item_is_an_overlap` in
+/// `tests/patch_item.rs`). So a draft that removes the last entry and adds
+/// another writes the new one after the last entry whose successor stays, rather
+/// than being refused as it was before Phase 3-1. The skip is conservative: a
+/// successor this planner cannot see (`vars`, `form_fields`) is not one a draft
+/// can take away, so it never causes one.
+///
+/// One field is a [`FieldInsert`]; two or more are one [`FieldInsertGroup`], in
+/// the order they were collected — [`MatchField::ALL`] order.
+fn plan_insertions(
+    path: &DocumentPath,
+    entries: &[VisibleEntry],
+    insertions: Vec<(MatchField, String)>,
+    substitutions: &[FieldSubstitution],
+    edits: &mut Vec<DocumentEdit>,
+) -> Result<(), DraftError> {
+    let Some(first) = insertions.first().map(|(field, _)| *field) else {
+        return Ok(());
+    };
+    let removed = |key: &str| {
+        edits.iter().any(|edit| match edit {
+            DocumentEdit::RemoveField(removal) => removal.field() == &path.clone().with_key(key),
+            _ => false,
+        })
+    };
+    let leaves_alone = |key: &str| {
+        let renamed = substitutions
+            .iter()
+            .any(|substitution| substitution.from().key() == key);
+        !removed(key) && !renamed
+    };
+    // A renamed successor does not matter: a substitution rewrites a key token,
+    // which never starts at the beginning of a line in a match mapping.
+    let successor_stays = |position: usize| {
+        entries
+            .get(position + 1)
+            .and_then(|next| next.key.as_deref())
+            .is_none_or(|key| !removed(key))
+    };
+    let anchor = entries
+        .iter()
+        .enumerate()
+        .rev()
+        .filter_map(|(position, entry)| Some((position, entry.key.as_deref()?)))
+        .find(|(position, key)| leaves_alone(key) && successor_stays(*position))
+        .map(|(_, key)| key.to_owned())
+        .ok_or(DraftError::NoInsertionAnchor { field: first })?;
+    let mut fields: Vec<(String, String)> = insertions
+        .into_iter()
+        .map(|(field, value)| (field.key().to_owned(), value))
+        .collect();
+    let edit: DocumentEdit = if fields.len() == 1 {
+        let (key, value) = fields.remove(0);
+        FieldInsert::after(path.clone(), anchor, key, value).into()
+    } else {
+        FieldInsertGroup::after(path.clone(), anchor, fields)
+            .expect("two or more entries make a non-empty group")
+            .into()
+    };
+    edits.push(edit);
+    Ok(())
+} // End of function plan_insertions()
 
 /// Refuses a draft that says two things about one sequence element.
 ///
@@ -321,8 +522,9 @@ fn check_no_entry_of_one_mapping_drafts_two_shapes(
 
 /// Plans one schema-known scalar field, appending to `edits` or `insertions`.
 ///
-/// Insertions are collected rather than emitted because they all share one
-/// anchor, which cannot be chosen until every removal of the batch is known.
+/// Insertions are collected rather than emitted because they are written as one
+/// edit after one anchor, which cannot be chosen until every removal and every
+/// substitution of the batch is known ([`plan_insertions`]).
 fn plan_field(
     view: &MatchView,
     draft: &MatchDraft,
@@ -889,11 +1091,6 @@ fn visible_entries(view: &MatchView) -> Vec<VisibleEntry> {
     entries.sort_by_key(|entry| entry.at);
     entries
 } // End of function visible_entries()
-
-/// The key of the last visible entry that a path segment can name.
-fn last_nameable_key(entries: &[VisibleEntry]) -> Option<&str> {
-    entries.iter().rev().find_map(|entry| entry.key.as_deref())
-}
 
 /// Every visible key, in source order and with repetitions.
 fn original_keys(entries: &[VisibleEntry]) -> Vec<String> {

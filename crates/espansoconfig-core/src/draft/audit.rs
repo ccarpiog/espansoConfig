@@ -32,7 +32,8 @@
 
 use crate::draft::error::DraftError;
 use crate::draft::match_draft::{
-    MatchField, SequenceField, VariableField, FORM_FIELDS_KEY, PARAMS_KEY, VARS_KEY,
+    FieldSubstitution, MatchField, SequenceField, VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
+    VARS_KEY,
 };
 use crate::patch::{DocumentEdit, DocumentPath, PathSegment};
 
@@ -72,9 +73,10 @@ impl NestedKeys {
 /// Refuses a batch that reaches outside the closed scalar surface of one match.
 ///
 /// **The invariant, stated in code:** a drafted batch may modify or remove
-/// existing addressable nodes and may insert scalar-valued mapping entries into
-/// the match's own mapping, and it may **never change a sequence's cardinality**
-/// and **never synthesize a collection node**.
+/// existing addressable nodes, may insert scalar-valued mapping entries into
+/// the match's own mapping and may rename one of that mapping's scalar-valued
+/// keys to another form of the same family, and it may **never change a
+/// sequence's cardinality** and **never synthesize a collection node**.
 ///
 /// Each clause is checked as a shape rather than as an intention:
 ///
@@ -83,14 +85,18 @@ impl NestedKeys {
 /// - a scalar edit may name one of seven shapes and nothing else, listed in
 ///   [`names_a_surface_scalar`]. Each is a scalar-node replacement at a position
 ///   that already exists, which is why none is a cardinality change;
-/// - an insertion may only join the match's **own** mapping under a
-///   schema-known scalar key. An insertion into `<match>.triggers` would be a
-///   new sequence item and an insertion into `<match>.vars[0].params` a new
+/// - an insertion — one entry or an ordered group of them — may only join the
+///   match's **own** mapping under schema-known scalar keys. An insertion into
+///   `<match>.triggers` would be a new sequence item and an insertion into `<match>.vars[0].params` a new
 ///   mapping entry under a key no schema fixes; both are refused here, and the
 ///   second is 2b-2b-2's D1 stated as a shape. That an insertion's *value* is
 ///   always a scalar needs no check — a [`crate::patch::FieldInsert`] carries a
 ///   `String` and renders it through [`crate::emit::choose_scalar`], so there is
 ///   no spelling of it that builds a collection;
+/// - a key substitution may only rename a schema-known scalar key of the match's
+///   own mapping to **another form of the same family**
+///   ([`FieldSubstitution::between`]): `trigger`↔`regex`, or one content key to
+///   another. Its optional new value is a `String`, as an insertion's is;
 /// - a removal may name one of four shapes, listed in
 ///   [`names_a_surface_field`]: the three that end in a key segment, plus the
 ///   match's own schema-known scalar keys. A path ending in an index is a
@@ -116,6 +122,16 @@ pub fn check_closed_surface(
             DocumentEdit::InsertField(insert) => {
                 insert.mapping() == mapping && MatchField::from_key(insert.key()).is_some()
             }
+            DocumentEdit::InsertFields(group) => {
+                group.mapping() == mapping
+                    && group
+                        .entries()
+                        .iter()
+                        .all(|(key, _)| MatchField::from_key(key).is_some())
+            }
+            DocumentEdit::SubstituteKey(substitution) => {
+                names_a_substitution(mapping, substitution.field(), substitution.key())
+            }
             // A sequence-item insert, remove or duplicate is a **cardinality
             // change to a sequence**, which is exactly what a closed surface
             // excludes: the draft diff describes one match's own scalar fields,
@@ -137,7 +153,7 @@ pub fn check_closed_surface(
 
 /// Refuses a batch whose edits depend on one another.
 ///
-/// Ruling 5, in seven checks: **every dependency must resolve in the original
+/// Ruling 5, in eight checks: **every dependency must resolve in the original
 /// tree, and an insertion's anchor must survive the batch.** The batch is
 /// planned against the document as it stands, so an edit that only makes sense
 /// after another one has been applied has no meaning at all — and the order the
@@ -165,8 +181,12 @@ pub fn check_closed_surface(
 ///    match's level and at every nested level the caller described;
 /// 4. an anchor the same batch inserts;
 /// 5. an anchor the original mapping does not have;
-/// 6. an anchor the same batch removes;
-/// 7. two insertions sharing one anchor.
+/// 6. an anchor the same batch removes — or renames, since a substituted key
+///    does not survive the batch under the name the anchor gives it;
+/// 7. two insertion **edits** sharing one anchor. Several entries after one
+///    anchor are legal as one [`crate::patch::FieldInsertGroup`], which states
+///    their order (Phase 3-1); two separate edits state none;
+/// 8. a substitution to a key the original mapping already holds.
 pub fn check_batch_independence(
     mapping: &DocumentPath,
     original_keys: &[String],
@@ -177,6 +197,7 @@ pub fn check_batch_independence(
     check_no_removal_contains_another_edit(edits)?;
     check_every_named_key_is_unique(mapping, original_keys, nested, edits)?;
     check_every_anchor_survives(mapping, original_keys, edits)?;
+    check_no_substitution_duplicates_a_key(original_keys, edits)?;
     Ok(())
 } // End of function check_batch_independence()
 
@@ -239,6 +260,10 @@ fn check_no_removal_contains_another_edit(edits: &[DocumentEdit]) -> Result<(), 
         .enumerate()
         .filter_map(|(position, edit)| match edit {
             DocumentEdit::RemoveField(removal) => Some((position, removal.field())),
+            // A substitution takes the old key away as surely as a removal does,
+            // so an edit of the renamed entry's value, a removal of it or a
+            // second substitution of it is a second answer about the same entry.
+            DocumentEdit::SubstituteKey(substitution) => Some((position, substitution.field())),
             _ => None,
         })
         .collect();
@@ -247,6 +272,7 @@ fn check_no_removal_contains_another_edit(edits: &[DocumentEdit]) -> Result<(), 
             let other = match edit {
                 DocumentEdit::Scalar(scalar) => scalar.path(),
                 DocumentEdit::RemoveField(nested) => nested.field(),
+                DocumentEdit::SubstituteKey(nested) => nested.field(),
                 _ => continue,
             };
             if position != *removal && contains(field, other) {
@@ -299,6 +325,10 @@ fn check_every_named_key_is_unique(
             DocumentEdit::InsertField(insert) => insert
                 .sibling()
                 .map(|key| (insert.mapping().clone(), key.to_owned())),
+            DocumentEdit::InsertFields(group) => group
+                .sibling()
+                .map(|key| (group.mapping().clone(), key.to_owned())),
+            DocumentEdit::SubstituteKey(substitution) => named_key_in_parent(substitution.field()),
             // None of the four names a key in a parent mapping: a move, a
             // duplicate and the two sequence-item primitives address a
             // **position**, and `check_closed_surface` has already refused all
@@ -331,44 +361,61 @@ fn check_every_named_key_is_unique(
 } // End of function check_every_named_key_is_unique()
 
 /// Checks 4 to 7: every insertion's anchor is an original sibling the batch
-/// leaves alone, and no two insertions share one.
+/// leaves alone, and no two insertion edits share one.
 ///
 /// **It is stated over the match's own mapping only, and Phase 2b-2b-2 did not
 /// need to generalise it**, because that phase derives no insertion below the
-/// match mapping at all (its decision D1). Every [`crate::patch::FieldInsert`] a
-/// drafted batch can hold therefore still names `mapping`, which
-/// [`check_closed_surface`] independently refuses otherwise, and `original_keys`
-/// is still the one list an anchor has to be found in. A later phase that
-/// inserts into an open mapping owes this function a nested key list of its own.
+/// match mapping at all (its decision D1). Every [`crate::patch::FieldInsert`]
+/// and [`crate::patch::FieldInsertGroup`] a drafted batch can hold therefore still
+/// names `mapping`, which [`check_closed_surface`] independently refuses
+/// otherwise, and `original_keys` is still the one list an anchor has to be found
+/// in. A later phase that inserts into an open mapping owes this function a
+/// nested key list of its own.
+///
+/// # A group is one edit, and states its order (Phase 3-1)
+///
+/// Several entries after one anchor are legal when they are **one**
+/// [`crate::patch::FieldInsertGroup`]: its entries are written as one run in the
+/// order the group lists them, so nothing but the request decides the file. Two
+/// separate insertion edits after one anchor state no order between them and are
+/// still [`DraftError::SharedInsertionAnchor`].
+///
+/// A key a [`crate::patch::KeySubstitution`] renames counts as **removed** for
+/// an anchor (the key the anchor names is gone after the batch), and the key it
+/// renames *to* counts as **inserted** (it is not in the original).
 fn check_every_anchor_survives(
     mapping: &DocumentPath,
     original_keys: &[String],
     edits: &[DocumentEdit],
 ) -> Result<(), DraftError> {
-    let inserted: Vec<&str> = edits
-        .iter()
-        .filter_map(|edit| match edit {
-            DocumentEdit::InsertField(insert) => Some(insert.key()),
-            _ => None,
-        })
-        .collect();
-    let removed: Vec<&str> = edits
-        .iter()
-        .filter_map(|edit| match edit {
-            DocumentEdit::RemoveField(removal) => key_in(mapping, removal.field()),
-            _ => None,
-        })
-        .collect();
+    let mut inserted: Vec<&str> = Vec::new();
+    let mut removed: Vec<&str> = Vec::new();
+    for edit in edits {
+        match edit {
+            DocumentEdit::InsertField(insert) => inserted.push(insert.key()),
+            DocumentEdit::InsertFields(group) => {
+                inserted.extend(group.entries().iter().map(|(key, _)| key.as_str()));
+            }
+            DocumentEdit::SubstituteKey(substitution) => {
+                inserted.push(substitution.key());
+                removed.extend(key_in(mapping, substitution.field()));
+            }
+            DocumentEdit::RemoveField(removal) => removed.extend(key_in(mapping, removal.field())),
+            _ => {}
+        }
+    } // End of the loop that collects what the batch inserts and removes
 
     let mut anchors: Vec<(usize, &str)> = Vec::new();
     for (position, edit) in edits.iter().enumerate() {
-        let DocumentEdit::InsertField(insert) = edit else {
-            continue;
+        let sibling = match edit {
+            DocumentEdit::InsertField(insert) => insert.sibling(),
+            DocumentEdit::InsertFields(group) => group.sibling(),
+            _ => continue,
         };
         // `None` means "the mapping's last entry", which is what
         // `crate::patch::edit::plan_insertion` resolves it to. Resolving it the
         // same way here is what lets this guard judge a batch it did not build.
-        let anchor = match insert.sibling() {
+        let anchor = match sibling {
             Some(key) => key,
             None => original_keys
                 .last()
@@ -394,6 +441,40 @@ fn check_every_anchor_survives(
     } // End of the loop over the batch's insertions
     Ok(())
 } // End of function check_every_anchor_survives()
+
+/// Check 8: no substitution renames a key to one the original mapping holds.
+///
+/// Stated over `original_keys`, the caller's account of the mapping, exactly as
+/// checks 3 to 7 are; [`crate::patch::apply_edits`] refuses the same batch
+/// against the document as [`crate::patch::EditError::KeyAlreadyPresent`].
+fn check_no_substitution_duplicates_a_key(
+    original_keys: &[String],
+    edits: &[DocumentEdit],
+) -> Result<(), DraftError> {
+    for edit in edits {
+        let DocumentEdit::SubstituteKey(substitution) = edit else {
+            continue;
+        };
+        if let Some(field) = MatchField::from_key(substitution.key()) {
+            if occurrences(original_keys, substitution.key()) > 0 {
+                return Err(DraftError::SubstitutionTargetPresent { field });
+            }
+        }
+    } // End of the loop over the batch's substitutions
+    Ok(())
+} // End of function check_no_substitution_duplicates_a_key()
+
+/// Whether a substitution renames a schema-known scalar key of `mapping` itself
+/// to another form of the same family.
+fn names_a_substitution(mapping: &DocumentPath, path: &DocumentPath, key: &str) -> bool {
+    let Some([PathSegment::Key(old)]) = suffix(mapping, path) else {
+        return false;
+    };
+    match (MatchField::from_key(old), MatchField::from_key(key)) {
+        (Some(from), Some(to)) => FieldSubstitution::between(from, to).is_some(),
+        _ => false,
+    }
+} // End of function names_a_substitution()
 
 /// How many times `key` occurs in `keys`.
 fn occurrences(keys: &[String], key: &str) -> usize {

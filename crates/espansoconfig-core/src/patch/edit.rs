@@ -479,6 +479,170 @@ impl FieldRemoval {
     }
 } // End of impl FieldRemoval
 
+/// One requested change: add **several** `key: value` entries to a block
+/// mapping, in a stated order, after one anchor entry.
+///
+/// # Why a group, and not several [`FieldInsert`]s
+///
+/// Two [`FieldInsert`]s after one anchor are two zero-width replacements at one
+/// offset, and nothing in a batch says which goes first — batch order is not an
+/// ordering ([`apply_edits`] splices from the highest offset down, whatever order
+/// the edits arrive in). [`apply_edits`] therefore refuses them as
+/// [`EditError::OverlappingEdits`]. A group is **one** edit that *states* an
+/// order: its entries are written as one contiguous run of lines, in the order
+/// they were given, directly after the anchor (Phase 3-1).
+///
+/// Everything else is [`FieldInsert`]'s contract, applied to each entry: the
+/// indentation comes from the mapping's own keys, the anchor is the mapping's
+/// last entry or the entry [`FieldInsertGroup::after`] names, every value is a
+/// scalar rendered through [`crate::emit::choose_scalar`], and a key the mapping
+/// already holds — or that the group holds twice — is refused with
+/// [`EditError::KeyAlreadyPresent`].
+///
+/// # Its own verified expectation
+///
+/// `verify` checks every entry the group wrote decodes to its value, and — the
+/// part a group adds — that the candidate mapping's keys are in the **intended
+/// order**: the original entries, then the group's entries directly after the
+/// anchor, in the group's order
+/// ([`VerificationFailure::EntriesNotInTheIntendedOrder`]).
+///
+/// A group is never empty: [`FieldInsertGroup::new`] and
+/// [`FieldInsertGroup::after`] return `None` for an empty entry list, so the
+/// type has no spelling of "insert nothing".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldInsertGroup {
+    /// The mapping to add the entries to.
+    mapping: DocumentPath,
+    /// The existing entry to write the group after, by decoded key. `None`
+    /// means the mapping's last entry.
+    after: Option<String>,
+    /// The new entries, as decoded `(key, value)` strings, in the order they are
+    /// written.
+    entries: Vec<(String, String)>,
+}
+
+impl FieldInsertGroup {
+    /// Builds a group appended after the mapping's last entry, or `None` when
+    /// `entries` is empty.
+    pub fn new(mapping: DocumentPath, entries: Vec<(String, String)>) -> Option<FieldInsertGroup> {
+        (!entries.is_empty()).then_some(FieldInsertGroup {
+            mapping,
+            after: None,
+            entries,
+        })
+    }
+
+    /// Builds a group written after the entry whose decoded key is `sibling`,
+    /// or `None` when `entries` is empty.
+    pub fn after(
+        mapping: DocumentPath,
+        sibling: impl Into<String>,
+        entries: Vec<(String, String)>,
+    ) -> Option<FieldInsertGroup> {
+        (!entries.is_empty()).then_some(FieldInsertGroup {
+            mapping,
+            after: Some(sibling.into()),
+            entries,
+        })
+    }
+
+    /// The mapping the entries are added to.
+    pub fn mapping(&self) -> &DocumentPath {
+        &self.mapping
+    }
+
+    /// The entry the group is written after, or `None` for the last entry.
+    pub fn sibling(&self) -> Option<&str> {
+        self.after.as_deref()
+    }
+
+    /// The new entries, in the order they are written. Never empty.
+    pub fn entries(&self) -> &[(String, String)] {
+        &self.entries
+    }
+} // End of impl FieldInsertGroup
+
+/// One requested change: **rename** one mapping entry's key in place, keeping
+/// its value's bytes — or replacing that value with a new scalar.
+///
+/// The scalar-to-scalar substitution of Phase 3-1: `trigger:` becomes `regex:`,
+/// `replace:` becomes `markdown:`. It exists because the alternative — a removal
+/// plus an insertion — cannot touch the first entry of a compact item:
+/// `- trigger: x` shares its line with the `-`, so a removal is refused
+/// ([`EditError::EntryDoesNotOwnItsLines`]). A substitution replaces **the key
+/// token and nothing else**, so the dash, the colon, the spacing, the inline
+/// comment and every other byte of the line stay where they are.
+///
+/// # What it writes
+///
+/// - the key token, re-spelled in the old key's own style where the new key
+///   fits it ([`crate::emit::preserve_scalar`] in key context): a plain key stays
+///   plain, a quoted key stays quoted;
+/// - when [`KeySubstitution::value`] is `Some`, the value too, exactly as a
+///   [`ScalarEdit`] of that value would rewrite it. When it is `None` the value's
+///   bytes are **not touched at all** — its spelling, its style and its trivia
+///   survive byte for byte.
+///
+/// # What it refuses
+///
+/// The value must be a scalar ([`EditError::NotAScalar`]): this is a
+/// scalar-to-scalar substitution and nothing else. The key must be a
+/// single-line, decoded, non-block scalar
+/// ([`EditError::KeyNotSubstitutable`]). The mapping must not already hold the
+/// new key ([`EditError::KeyAlreadyPresent`]). The mapping must be a block
+/// mapping the hazard gate admits, exactly as for a [`FieldInsert`].
+///
+/// # Its verified expectation
+///
+/// The old key is gone, the new key is present **at the same position** with
+/// the value it must decode to (the original decoded value, or the new one),
+/// the entry count is unchanged and every other entry is unchanged — the same
+/// fold [`FieldInsert`] and [`FieldRemoval`] are verified through, plus the
+/// order check a group introduced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeySubstitution {
+    /// The value node of the entry whose key is renamed.
+    field: DocumentPath,
+    /// The new key, as a decoded string.
+    key: String,
+    /// The new value, or `None` to keep the value's bytes untouched.
+    value: Option<String>,
+}
+
+impl KeySubstitution {
+    /// Builds a substitution that renames the entry `field` names to `key`,
+    /// keeping its value.
+    pub fn new(field: DocumentPath, key: impl Into<String>) -> KeySubstitution {
+        KeySubstitution {
+            field,
+            key: key.into(),
+            value: None,
+        }
+    }
+
+    /// Builder: also gives the renamed entry a new scalar value.
+    pub fn with_value(mut self, value: impl Into<String>) -> KeySubstitution {
+        self.value = Some(value.into());
+        self
+    }
+
+    /// The value node of the entry being renamed, by its **original** key.
+    pub fn field(&self) -> &DocumentPath {
+        &self.field
+    }
+
+    /// The new key.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// The new value, or `None` when the value's bytes are kept.
+    pub fn value(&self) -> Option<&str> {
+        self.value.as_deref()
+    }
+} // End of impl KeySubstitution
+
 /// One requested change: relocate a whole **sequence item** inside its own
 /// sequence.
 ///
@@ -943,6 +1107,10 @@ pub enum DocumentEdit {
     Scalar(ScalarEdit),
     /// Add an entry to a mapping.
     InsertField(FieldInsert),
+    /// Add several entries to a mapping, in a stated order, after one anchor.
+    InsertFields(FieldInsertGroup),
+    /// Rename one mapping entry's key in place.
+    SubstituteKey(KeySubstitution),
     /// Delete an entry from a mapping.
     RemoveField(FieldRemoval),
     /// Relocate a whole sequence item inside its own sequence.
@@ -964,6 +1132,18 @@ impl From<ScalarEdit> for DocumentEdit {
 impl From<FieldInsert> for DocumentEdit {
     fn from(edit: FieldInsert) -> DocumentEdit {
         DocumentEdit::InsertField(edit)
+    }
+}
+
+impl From<FieldInsertGroup> for DocumentEdit {
+    fn from(edit: FieldInsertGroup) -> DocumentEdit {
+        DocumentEdit::InsertFields(edit)
+    }
+}
+
+impl From<KeySubstitution> for DocumentEdit {
+    fn from(edit: KeySubstitution) -> DocumentEdit {
+        DocumentEdit::SubstituteKey(edit)
     }
 }
 
@@ -1881,6 +2061,19 @@ pub enum EditError {
         /// Which of the joins the duplicate creates would feed it.
         seam: DuplicateSeam,
     },
+    /// A [`KeySubstitution`] named an entry whose key it will not re-spell.
+    ///
+    /// The key must be a **single-line, decoded scalar that is not a block
+    /// scalar**, because the substitution replaces exactly the key's token and
+    /// nothing around it. An alias used as a key, a collection used as a key, a
+    /// block scalar behind an explicit `?`, and a key the decoder could not read
+    /// are each refused rather than approximated.
+    KeyNotSubstitutable {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The key node.
+        node: NodeId,
+    },
     /// The candidate document failed verification and was discarded.
     Verification(VerificationFailure),
 }
@@ -2473,6 +2666,22 @@ pub enum VerificationFailure {
         /// The candidate node that is not what the original said.
         node: NodeId,
     },
+    /// The changed mapping's keys are not in the order the batch intended.
+    ///
+    /// The order is derived from the **original** mapping before the splice:
+    /// every entry the batch keeps, under its new key where a
+    /// [`KeySubstitution`] renamed it, with each insertion's entries directly
+    /// after its anchor and a [`FieldInsertGroup`]'s in the group's own order.
+    /// It is what proves a group landed as one run where it was asked to, and a
+    /// renamed entry stayed where it was (Phase 3-1). Identified by position,
+    /// never by key text.
+    EntriesNotInTheIntendedOrder {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The first mapping position that holds a key other than the intended
+        /// one, zero-based in source order.
+        entry: usize,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -2698,6 +2907,11 @@ impl fmt::Display for EditError {
                  the block scalar at node {}",
                 block.get()
             ),
+            EditError::KeyNotSubstitutable { edit, node } => write!(
+                formatter,
+                "edit {edit}: the key at node {} is not a single-line scalar this edit can re-spell",
+                node.get()
+            ),
             EditError::Verification(failure) => write!(formatter, "{failure}"),
         }
     } // End of function fmt() for EditError
@@ -2870,6 +3084,11 @@ impl fmt::Display for VerificationFailure {
                 "edit {edit}: candidate node {} is not what the original document said, although \
                  the duplicate did not name it",
                 node.get()
+            ),
+            VerificationFailure::EntriesNotInTheIntendedOrder { edit, entry } => write!(
+                formatter,
+                "edit {edit}: mapping position {entry} does not hold the key the batch intended \
+                 there"
             ),
         }
     } // End of function fmt() for VerificationFailure
@@ -3092,6 +3311,17 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
             DocumentEdit::Scalar(scalar) => plan_one(source, &index, &trivia, position, scalar)?,
             DocumentEdit::InsertField(insert) => {
                 plan_insertion(source, &index, &trivia, position, insert)?
+            }
+            DocumentEdit::InsertFields(group) => {
+                let request = InsertionRequest {
+                    mapping: group.mapping(),
+                    sibling: group.sibling(),
+                    entries: group.entries(),
+                };
+                plan_insertion_group(source, &index, &trivia, position, request)?
+            }
+            DocumentEdit::SubstituteKey(substitution) => {
+                plan_substitution(source, &index, &trivia, position, substitution)?
             }
             DocumentEdit::RemoveField(removal) => {
                 plan_removal(source, &index, &trivia, position, removal)?
@@ -3438,15 +3668,38 @@ fn plan_one(
         edit: position,
         error,
     })?;
-    let node = index.node(resolved.value).ok_or(EditError::MalformedSpan {
+    plan_scalar_node(
+        source,
+        index,
+        trivia,
+        position,
+        resolved.value,
+        edit.value(),
+    )
+} // End of function plan_one()
+
+/// Checks one resolved scalar node and renders the bytes that give it `value`.
+///
+/// The body [`plan_one`] and a value-changing [`KeySubstitution`] share, so a
+/// substituted entry's new value is written exactly as a scalar edit would write
+/// it: gate first, then the node's kind, then the bytes.
+fn plan_scalar_node(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    target: NodeId,
+    value: &str,
+) -> Result<PlannedEdit, EditError> {
+    let node = index.node(target).ok_or(EditError::MalformedSpan {
         edit: position,
         at: ByteSpan::default(),
     })?;
 
-    if let Some(hazard) = trivia.disqualifying_hazard(index, resolved.value) {
+    if let Some(hazard) = trivia.disqualifying_hazard(index, target) {
         return Err(EditError::Refused {
             edit: position,
-            node: resolved.value,
+            node: target,
             hazard: hazard.kind,
             at: hazard.span,
         });
@@ -3468,7 +3721,7 @@ fn plan_one(
     }
 
     let presentation = &scalar.presentation;
-    let (plan, context) = choose_plan(source, index, node, presentation, edit.value());
+    let (plan, context) = choose_plan(source, index, node, presentation, value);
     let note = presentation_note(source, position, presentation, &plan);
     let replacements = render_replacements(source, position, node, presentation, &plan, context)?;
 
@@ -3500,9 +3753,9 @@ fn plan_one(
         moved: None,
         duplicated: None,
         guards: Vec::new(),
-        rewritten: Some(resolved.value),
+        rewritten: Some(target),
     })
-} // End of function plan_one()
+} // End of function plan_scalar_node()
 
 // ---------------------------------------------------------------------------
 // Structural edits: adding and removing one mapping entry
@@ -3525,8 +3778,14 @@ struct PendingField {
     entries: Vec<Entry>,
     /// The value node of an entry being removed.
     removed: Option<NodeId>,
-    /// The key and value an insertion must produce.
-    inserted: Option<(String, String)>,
+    /// The keys and values an insertion must produce, in the order it writes
+    /// them: one for a [`FieldInsert`], several for a [`FieldInsertGroup`].
+    inserted: Vec<(String, String)>,
+    /// The index, in `entries`, of the entry an insertion is anchored after.
+    anchor: Option<usize>,
+    /// A substitution: the value node of the renamed entry, its new key, and the
+    /// value that entry must decode to afterwards.
+    renamed: Option<(NodeId, String, String)>,
 }
 
 /// What [`verify`] must find in the candidate for one changed mapping.
@@ -3553,6 +3812,10 @@ struct FieldExpectation {
     siblings: Vec<(String, Option<String>)>,
     /// How many entries the mapping must hold afterwards.
     entries: usize,
+    /// Every decoded key the mapping must hold afterwards, in source order
+    /// (Phase 3-1): the kept entries under their new key where a substitution
+    /// renamed one, with each insertion's keys directly after its anchor.
+    order: Vec<String>,
 }
 
 /// Merges every claim about one mapping into a single expectation.
@@ -3585,53 +3848,89 @@ fn fold_expectations(
     pending: Vec<PendingField>,
     rewritten: &[NodeId],
 ) -> Result<Vec<FieldExpectation>, EditError> {
-    let mut folded: Vec<(NodeId, FieldExpectation, Vec<NodeId>, Vec<Entry>)> = Vec::new();
+    let mut folded: Vec<Fold> = Vec::new();
     for claim in pending {
         let slot = match folded
             .iter_mut()
-            .find(|(id, _, _, _)| *id == claim.mapping_id)
+            .find(|fold| fold.mapping_id == claim.mapping_id)
         {
             Some(slot) => slot,
             None => {
-                folded.push((
-                    claim.mapping_id,
-                    FieldExpectation {
+                folded.push(Fold {
+                    mapping_id: claim.mapping_id,
+                    expectation: FieldExpectation {
                         edit: claim.edit,
                         mapping: claim.mapping,
                         inserted: Vec::new(),
                         removed: Vec::new(),
                         siblings: Vec::new(),
                         entries: claim.entries.len(),
+                        order: Vec::new(),
                     },
-                    Vec::new(),
-                    claim.entries,
-                ));
+                    removed: Vec::new(),
+                    entries: claim.entries,
+                    renamed: Vec::new(),
+                    anchored: Vec::new(),
+                });
                 folded.last_mut().expect("just pushed")
             }
         };
         if let Some(removed) = claim.removed {
-            slot.2.push(removed);
-            slot.1.entries =
-                slot.1
+            slot.removed.push(removed);
+            slot.expectation.entries =
+                slot.expectation
                     .entries
                     .checked_sub(1)
                     .ok_or(EditError::LastEntryOfMapping {
                         edit: claim.edit,
                         mapping: claim.mapping_id,
                     })?;
-            if let Some(key) = decoded_value(index, key_of(&slot.3, removed)) {
-                slot.1.removed.push(key.to_owned());
+            if let Some(key) = decoded_value(index, key_of(&slot.entries, removed)) {
+                slot.expectation.removed.push(key.to_owned());
             }
         }
-        if let Some((key, value)) = claim.inserted {
-            if slot.1.inserted.iter().any(|(seen, _)| *seen == key) {
+        // A substitution is a removal of the old key and an insertion of the new
+        // one **at the same position**, so the count does not move: the old key
+        // must be gone, the new one present with its value, and the entry is no
+        // longer a sibling whose digest must match.
+        if let Some((value, key, decoded)) = claim.renamed {
+            if slot
+                .expectation
+                .inserted
+                .iter()
+                .any(|(seen, _)| *seen == key)
+            {
                 return Err(EditError::KeyAlreadyPresent {
                     edit: claim.edit,
                     mapping: claim.mapping_id,
                 });
             }
-            slot.1.inserted.push((key, value));
-            slot.1.entries += 1;
+            slot.removed.push(value);
+            if let Some(old) = decoded_value(index, key_of(&slot.entries, value)) {
+                slot.expectation.removed.push(old.to_owned());
+            }
+            slot.expectation.inserted.push((key.clone(), decoded));
+            slot.renamed.push((value, key));
+        }
+        let mut keys = Vec::new();
+        for (key, value) in claim.inserted {
+            if slot
+                .expectation
+                .inserted
+                .iter()
+                .any(|(seen, _)| *seen == key)
+            {
+                return Err(EditError::KeyAlreadyPresent {
+                    edit: claim.edit,
+                    mapping: claim.mapping_id,
+                });
+            }
+            keys.push(key.clone());
+            slot.expectation.inserted.push((key, value));
+            slot.expectation.entries += 1;
+        } // End of the loop over the entries this claim inserts
+        if let Some(anchor) = claim.anchor {
+            slot.anchored.push((anchor, keys));
         }
     } // End of the loop that groups every claim by the mapping it changes
 
@@ -3639,35 +3938,76 @@ fn fold_expectations(
     // mapping between them, and `a:` with nothing under it is an implicit null —
     // a different document, not a smaller one. Only the folded claim can see
     // this, because each removal was planned against the original entry count.
-    for (mapping_id, expectation, _, _) in &folded {
-        if expectation.entries == 0 {
+    for fold in &folded {
+        if fold.expectation.entries == 0 {
             return Err(EditError::LastEntryOfMapping {
-                edit: expectation.edit,
-                mapping: *mapping_id,
+                edit: fold.expectation.edit,
+                mapping: fold.mapping_id,
             });
         }
     } // End of the loop that refuses a batch which would empty a mapping
 
     Ok(folded
         .into_iter()
-        .map(|(_, mut expectation, removed, entries)| {
-            for entry in &entries {
-                if removed.contains(&entry.value) {
-                    continue;
-                }
-                let key = decoded_value(index, entry.key)
-                    .unwrap_or_default()
-                    .to_owned();
+        .map(|fold| fold.finish(index, rewritten))
+        .collect())
+} // End of function fold_expectations()
+
+/// Every claim about one mapping, while [`fold_expectations`] is merging them.
+struct Fold {
+    /// The mapping's identifier in the original index.
+    mapping_id: NodeId,
+    /// The expectation being built.
+    expectation: FieldExpectation,
+    /// The value nodes of every entry removed or renamed.
+    removed: Vec<NodeId>,
+    /// The mapping's original entries, in source order.
+    entries: Vec<Entry>,
+    /// Every renamed entry's value node and new key.
+    renamed: Vec<(NodeId, String)>,
+    /// Every insertion's anchor index and the keys it writes, in order.
+    anchored: Vec<(usize, Vec<String>)>,
+}
+
+impl Fold {
+    /// Derives the siblings and the intended key order, and hands back the
+    /// finished expectation.
+    ///
+    /// The order is stated over the **original** entries: each kept entry in
+    /// place (under its new key if a substitution renamed it), and each
+    /// insertion's keys immediately after the entry it is anchored on. An anchor
+    /// the same batch removes still marks the place: the insertion point is the
+    /// end of that entry's line, which the removal's runs end at.
+    fn finish(self, index: &SyntaxIndex, rewritten: &[NodeId]) -> FieldExpectation {
+        let Fold {
+            mut expectation,
+            removed,
+            entries,
+            renamed,
+            anchored,
+            ..
+        } = self;
+        for (position, entry) in entries.iter().enumerate() {
+            let key = decoded_value(index, entry.key)
+                .unwrap_or_default()
+                .to_owned();
+            if let Some((_, new_key)) = renamed.iter().find(|(value, _)| *value == entry.value) {
+                expectation.order.push(new_key.clone());
+            } else if !removed.contains(&entry.value) {
                 let touched = rewritten
                     .iter()
                     .any(|node| in_subtree(index, entry.value, *node));
                 let digest = (!touched).then(|| digest(index, entry.value));
+                expectation.order.push(key.clone());
                 expectation.siblings.push((key, digest));
-            } // End of the loop over the mapping's surviving entries
-            expectation
-        })
-        .collect())
-} // End of function fold_expectations()
+            }
+            for (_, keys) in anchored.iter().filter(|(anchor, _)| *anchor == position) {
+                expectation.order.extend(keys.iter().cloned());
+            } // End of the loop over the insertions anchored on this entry
+        } // End of the loop over the mapping's original entries
+        expectation
+    } // End of function finish() for Fold
+} // End of impl Fold
 
 /// The key node of the entry whose value is `value`.
 fn key_of(entries: &[Entry], value: NodeId) -> NodeId {
@@ -3688,9 +4028,9 @@ struct Entry {
 
 /// Plans an insertion, or refuses it.
 ///
-/// The order of the checks is the contract, exactly as in [`plan_one`]: address
-/// the mapping, **ask the gate**, establish that the shape is one this step
-/// understands, and only then render anything.
+/// A [`FieldInsert`] is a group of one: [`plan_insertion_group`] is the one
+/// planner both go through, so a single entry and a group cannot come to be
+/// written differently.
 fn plan_insertion(
     source: &str,
     index: &SyntaxIndex,
@@ -3698,30 +4038,67 @@ fn plan_insertion(
     position: usize,
     edit: &FieldInsert,
 ) -> Result<PlannedEdit, EditError> {
-    let (mapping, entries) = editable_mapping(index, trivia, position, edit.mapping())?;
+    let entries = [(edit.key().to_owned(), edit.value().to_owned())];
+    let group = InsertionRequest {
+        mapping: edit.mapping(),
+        sibling: edit.sibling(),
+        entries: &entries,
+    };
+    plan_insertion_group(source, index, trivia, position, group)
+} // End of function plan_insertion()
 
-    if entries
-        .iter()
-        .any(|entry| decoded_value(index, entry.key) == Some(edit.key()))
-    {
-        return Err(EditError::KeyAlreadyPresent {
-            edit: position,
-            mapping: mapping.id,
-        });
-    }
-    let anchor = match edit.sibling() {
-        None => *entries.last().ok_or(EditError::NoSuchSibling {
-            edit: position,
-            mapping: mapping.id,
-        })?,
-        Some(key) => *entries
+/// What one insertion asks for, whichever edit asked: a [`FieldInsert`] or a
+/// [`FieldInsertGroup`].
+#[derive(Clone, Copy)]
+struct InsertionRequest<'edit> {
+    /// The mapping to add the entries to.
+    mapping: &'edit DocumentPath,
+    /// The anchor's decoded key, or `None` for the mapping's last entry.
+    sibling: Option<&'edit str>,
+    /// The entries, in the order they are written. Never empty.
+    entries: &'edit [(String, String)],
+}
+
+/// Plans an ordered group of new entries after one anchor, or refuses it.
+///
+/// The order of the checks is the contract, exactly as in [`plan_one`]: address
+/// the mapping, **ask the gate**, establish that the shape is one this step
+/// understands, and only then render anything. The group is written as **one**
+/// replacement at the anchor's insertion point — the entries in the order they
+/// were given, each on its own line at the mapping's own column — so no two
+/// replacements of the batch share an offset and nothing but the request decides
+/// the order.
+fn plan_insertion_group(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    request: InsertionRequest<'_>,
+) -> Result<PlannedEdit, EditError> {
+    let (mapping, entries) = editable_mapping(index, trivia, position, request.mapping)?;
+
+    for (at, (key, _)) in request.entries.iter().enumerate() {
+        let held = entries
             .iter()
-            .find(|entry| decoded_value(index, entry.key) == Some(key))
-            .ok_or(EditError::NoSuchSibling {
+            .any(|entry| decoded_value(index, entry.key) == Some(key.as_str()));
+        if held || request.entries[..at].iter().any(|(seen, _)| seen == key) {
+            return Err(EditError::KeyAlreadyPresent {
                 edit: position,
                 mapping: mapping.id,
-            })?,
-    };
+            });
+        }
+    } // End of the loop that refuses a key the mapping or the group already holds
+    let anchor_index = match request.sibling {
+        None => entries.len().checked_sub(1),
+        Some(key) => entries
+            .iter()
+            .position(|entry| decoded_value(index, entry.key) == Some(key)),
+    }
+    .ok_or(EditError::NoSuchSibling {
+        edit: position,
+        mapping: mapping.id,
+    })?;
+    let anchor = entries[anchor_index];
 
     let indent = entry_column(source, index, position, mapping, &entries)?;
     // The **whole entry's** extent, not merely the value's: an entry written
@@ -3750,30 +4127,43 @@ fn plan_insertion(
     // mapping outright — but the context is still built through the same walk
     // D2k uses, so the two answers cannot drift apart.
     let context = ScalarContext::block(indent, line_ending);
-    let key = choose_scalar(edit.key(), context.as_key());
-    let value = choose_scalar(edit.value(), context);
-    let mut entry = format!("{}: {}", key.render(), value.render());
-    let text = if at_end_of_file {
-        // Nothing terminates the previous line, so the break goes in front and
-        // the file keeps not ending in one.
-        format!("{}{}{entry}", line_ending.as_str(), " ".repeat(indent))
-    } else {
-        // A literal block's rendering already ends with the value's own trailing
-        // breaks; only a value that ends without one needs the line terminated.
-        if !entry.ends_with(['\n', '\r']) {
-            entry.push_str(line_ending.as_str());
+    let mut text = String::new();
+    for (key, value) in request.entries {
+        let key = choose_scalar(key, context.as_key());
+        let value = choose_scalar(value, context);
+        let mut entry = format!("{}: {}", key.render(), value.render());
+        if at_end_of_file {
+            // Nothing terminates the previous line, so the break goes in front
+            // and the file keeps not ending in one. A previous entry of the
+            // group that already ends in a break (a literal block's own trailing
+            // break) needs no second one.
+            if !text.ends_with(['\n', '\r']) {
+                text.push_str(line_ending.as_str());
+            }
+            text.push_str(&" ".repeat(indent));
+            text.push_str(&entry);
+        } else {
+            // A literal block's rendering already ends with the value's own
+            // trailing breaks; only a value that ends without one needs the line
+            // terminated.
+            if !entry.ends_with(['\n', '\r']) {
+                entry.push_str(line_ending.as_str());
+            }
+            text.push_str(&" ".repeat(indent));
+            text.push_str(&entry);
         }
-        format!("{}{entry}", " ".repeat(indent))
-    };
+    } // End of the loop that renders every entry of the group, in order
 
-    let expectation = pending_field(
-        position,
-        edit.mapping().clone(),
-        mapping,
-        &entries,
-        None,
-        Some((edit.key().to_owned(), edit.value().to_owned())),
-    );
+    let expectation = PendingField {
+        edit: position,
+        mapping: request.mapping.clone(),
+        mapping_id: mapping.id,
+        entries: entries.clone(),
+        removed: None,
+        inserted: request.entries.to_vec(),
+        anchor: Some(anchor_index),
+        renamed: None,
+    };
     Ok(PlannedEdit {
         replacements: vec![Replacement {
             span: ByteSpan::new(point, point),
@@ -3791,7 +4181,147 @@ fn plan_insertion(
         guards: vec![StructuralGuard::Insertion { at: point }],
         rewritten: None,
     })
-} // End of function plan_insertion()
+} // End of function plan_insertion_group()
+
+/// Plans a key substitution, or refuses it.
+///
+/// The order of the checks is the contract, as everywhere in this engine:
+/// address the entry, **ask the gate** (through [`editable_mapping`], which also
+/// refuses a flow mapping), establish that the key and the value are the shapes
+/// this edit understands and that the new key is free, and only then render.
+///
+/// Two replacements at most: the key token, re-spelled in the old key's own
+/// style where the new key fits it, and — only when a new value was given —
+/// the value, rendered exactly as [`plan_one`] renders a scalar edit. A value
+/// that is kept is not touched at all, so its bytes, its style and its trivia
+/// survive by construction and `verify` checks it through the entry's decoded
+/// value.
+fn plan_substitution(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    edit: &KeySubstitution,
+) -> Result<PlannedEdit, EditError> {
+    let resolved = resolve_full(index, edit.field()).map_err(|error| EditError::Unresolvable {
+        edit: position,
+        error,
+    })?;
+    let Some(key) = resolved.key else {
+        // A root path and a path ending in an index name no mapping entry.
+        return Err(EditError::NotAMapping {
+            edit: position,
+            node: resolved.value,
+            kind: index
+                .node(resolved.value)
+                .map_or(NodeKind::Document, |node| node.kind),
+        });
+    };
+    let mapping_path = parent_path(edit.field()).ok_or(EditError::NotAMapping {
+        edit: position,
+        node: resolved.value,
+        kind: NodeKind::Document,
+    })?;
+    let (mapping, entries) = editable_mapping(index, trivia, position, &mapping_path)?;
+    if entries
+        .iter()
+        .any(|entry| decoded_value(index, entry.key) == Some(edit.key()))
+    {
+        return Err(EditError::KeyAlreadyPresent {
+            edit: position,
+            mapping: mapping.id,
+        });
+    }
+
+    let key_node = index.node(key).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: ByteSpan::default(),
+    })?;
+    let key_scalar = key_node
+        .scalar
+        .as_ref()
+        .filter(|scalar| !scalar.presentation.style.is_block())
+        .filter(|_| !key_node.is_zero_width())
+        .filter(|_| {
+            !key_node
+                .span
+                .slice(source)
+                .unwrap_or("\n")
+                .contains(['\n', '\r'])
+        })
+        .filter(|scalar| {
+            decode(source, &scalar.presentation).ok().as_deref() == Some(scalar.value.as_str())
+        })
+        .ok_or(EditError::KeyNotSubstitutable {
+            edit: position,
+            node: key,
+        })?;
+    let value_node = index.node(resolved.value).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: ByteSpan::default(),
+    })?;
+    let Some(value_scalar) = value_node.scalar.as_ref() else {
+        return Err(EditError::NotAScalar {
+            edit: position,
+            node: value_node.id,
+            kind: value_node.kind,
+        });
+    };
+
+    // The key, in key context at the mapping's own column. A key never holds a
+    // block (`ScalarContext::can_hold_a_block_scalar` is false for one), so the
+    // plan is a single token and one replacement over the old token is exact.
+    let body_offset = index.preamble().body_offset;
+    let column = column_of(source, key_node.span.start, body_offset);
+    let line_ending = line_ending_after(source, key_node.span.end)
+        .or_else(|| line_ending_before(source, key_node.span.start))
+        .unwrap_or(index.preamble().line_ending);
+    let key_context = ScalarContext::block(column, line_ending).as_key();
+    let key_plan = preserve_scalar(edit.key(), &key_scalar.presentation, key_context);
+    let mut replacements = vec![Replacement {
+        span: key_node.span,
+        text: key_plan.render(),
+    }];
+    let mut permitted = vec![key_node.span];
+    let mut note = None;
+    let mut rewritten = None;
+    let decoded = match edit.value() {
+        None => value_scalar.value.clone(),
+        Some(value) => {
+            let value_plan =
+                plan_scalar_node(source, index, trivia, position, resolved.value, value)?;
+            replacements.extend(value_plan.replacements);
+            permitted.extend(value_plan.permitted);
+            note = value_plan.note;
+            rewritten = Some(resolved.value);
+            value.to_owned()
+        }
+    };
+
+    let expectation = PendingField {
+        edit: position,
+        mapping: mapping_path,
+        mapping_id: mapping.id,
+        entries,
+        removed: None,
+        inserted: Vec::new(),
+        anchor: None,
+        renamed: Some((resolved.value, edit.key().to_owned(), decoded)),
+    };
+    Ok(PlannedEdit {
+        replacements,
+        // The key's own token, read off the syntax index, plus the value's
+        // permitted spans when the value is rewritten too.
+        permitted,
+        note,
+        expectation: Some(expectation),
+        items: None,
+        moved: None,
+        duplicated: None,
+        guards: Vec::new(),
+        rewritten,
+    })
+} // End of function plan_substitution()
 
 /// Plans a removal, or refuses it.
 ///
@@ -6490,7 +7020,9 @@ fn pending_field(
         mapping_id: mapping.id,
         entries: entries.to_vec(),
         removed: omit,
-        inserted,
+        inserted: inserted.into_iter().collect(),
+        anchor: None,
+        renamed: None,
     }
 } // End of function pending_field()
 
@@ -7305,7 +7837,9 @@ fn verify(
 ///    key and whole value subtree, in the same order. This is what stops an
 ///    oversized envelope: a removal that also swallowed the neighbouring entry
 ///    passes properties 1, 2 and 4 and fails only this one;
-/// 4. the mapping holds exactly one entry more, or fewer, than it did.
+/// 4. the mapping holds exactly one entry more, or fewer, than it did;
+/// 5. every key sits at the position the batch intended — a group's entries in
+///    their order directly after their anchor, a renamed entry where it was.
 fn verify_field(
     candidate: &str,
     index: &SyntaxIndex,
@@ -7409,6 +7943,20 @@ fn verify_field(
             entry: siblings.len().min(expectation.siblings.len()),
         });
     }
+    // Property 5 (Phase 3-1): every key is where the batch intended it. The
+    // checks above establish *what* the mapping holds; this one establishes
+    // *where*, which is the only thing that tells a group written as one ordered
+    // run after its anchor from the same entries scattered, and a renamed entry
+    // kept in place from one that moved.
+    for (position, entry) in entries.iter().enumerate() {
+        let key = decoded_value(index, entry.key).unwrap_or_default();
+        if expectation.order.get(position).map(String::as_str) != Some(key) {
+            return Err(VerificationFailure::EntriesNotInTheIntendedOrder {
+                edit,
+                entry: position,
+            });
+        }
+    } // End of the loop that compares every position with the key intended there
     Ok(())
 } // End of function verify_field()
 
@@ -10992,6 +11540,79 @@ mod structural_tests {
             Err(VerificationFailure::EntryCountChanged { .. })
         ));
     } // End of function verification_rejects_a_candidate_in_which_a_sibling_changed()
+
+    #[test]
+    fn verification_rejects_a_group_or_a_rename_out_of_place() {
+        // Phase 3-1's order property, driven directly: a candidate holding the
+        // right entries with the right values in the wrong places passes every
+        // other property of `verify_field` and must fail this one.
+        let source = "a: 1\nb: 2\nc: 3\n";
+        let index = SyntaxIndex::parse(source).expect("parses");
+        let mapping = resolve(&index, &DocumentPath::root(0)).expect("resolves");
+        let node = index.node(mapping).expect("the root mapping");
+        let entries = mapping_entries(node);
+        let claims = vec![
+            PendingField {
+                edit: 0,
+                mapping: DocumentPath::root(0),
+                mapping_id: node.id,
+                entries: entries.clone(),
+                removed: None,
+                inserted: vec![
+                    ("x".to_owned(), "8".to_owned()),
+                    ("y".to_owned(), "9".to_owned()),
+                ],
+                anchor: Some(0),
+                renamed: None,
+            },
+            PendingField {
+                edit: 1,
+                mapping: DocumentPath::root(0),
+                mapping_id: node.id,
+                entries: entries.clone(),
+                removed: None,
+                inserted: Vec::new(),
+                anchor: None,
+                renamed: Some((entries[2].value, "d".to_owned(), "3".to_owned())),
+            },
+        ];
+        let folded = fold_expectations(&index, claims, &[]).expect("the claims fold");
+        let expectation = &folded[0];
+        assert_eq!(expectation.order, ["a", "x", "y", "b", "d"]);
+
+        let honest = "a: 1\nx: 8\ny: 9\nb: 2\nd: 3\n";
+        let parsed = SyntaxIndex::parse(honest).expect("parses");
+        assert_eq!(verify_field(honest, &parsed, expectation), Ok(()));
+
+        // The group's two entries in the other order.
+        let swapped = "a: 1\ny: 9\nx: 8\nb: 2\nd: 3\n";
+        let parsed = SyntaxIndex::parse(swapped).expect("parses");
+        assert_eq!(
+            verify_field(swapped, &parsed, expectation),
+            Err(VerificationFailure::EntriesNotInTheIntendedOrder { edit: 0, entry: 1 })
+        );
+
+        // The group written after the wrong anchor.
+        let elsewhere = "a: 1\nb: 2\nx: 8\ny: 9\nd: 3\n";
+        let parsed = SyntaxIndex::parse(elsewhere).expect("parses");
+        assert_eq!(
+            verify_field(elsewhere, &parsed, expectation),
+            Err(VerificationFailure::EntriesNotInTheIntendedOrder { edit: 0, entry: 1 })
+        );
+
+        // The renamed entry moved.
+        let moved = "d: 3\na: 1\nx: 8\ny: 9\nb: 2\n";
+        let parsed = SyntaxIndex::parse(moved).expect("parses");
+        assert_eq!(
+            verify_field(moved, &parsed, expectation),
+            Err(VerificationFailure::EntriesNotInTheIntendedOrder { edit: 0, entry: 0 })
+        );
+
+        // The old key kept beside the new one is not a rename.
+        let kept = "a: 1\nx: 8\ny: 9\nb: 2\nc: 3\n";
+        let parsed = SyntaxIndex::parse(kept).expect("parses");
+        assert!(verify_field(kept, &parsed, expectation).is_err());
+    } // End of function verification_rejects_a_group_or_a_rename_out_of_place()
 
     #[test]
     fn the_subtree_digest_tells_shapes_apart() {

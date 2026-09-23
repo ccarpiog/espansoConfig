@@ -30,7 +30,7 @@
 //!   names *and* JSON kinds.
 //! - **That every `DraftError` variant crosses as an object**, read out of the
 //!   core's own declaration rather than out of a sample list. The operand table
-//!   pins one shape per code, and a unit variant among the thirty-two would make
+//!   pins one shape per code, and a unit variant among the thirty-five would make
 //!   that shape false for exactly one refusal.
 //! - **The registered command list**, parsed independently out of
 //!   `generate_handler!` and compared with the union of `COMMAND_NAMES` and
@@ -1274,7 +1274,7 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
 /// one shape can ever be pinned for `draftRefused.error`, no matter how many
 /// variants `DraftError` has. `serde`'s externally tagged representation writes a
 /// unit variant as a bare string and everything else as a one-key object, so a
-/// single unit variant among the thirty-two would make the pinned `'object'`
+/// single unit variant among the thirty-five would make the pinned `'object'`
 /// false for that one refusal: `isCommandError` would reject it, and the user
 /// would read the generic fallback instead of the sentence
 /// `code.draftError.matchHasNoPath` that exists for it in both dictionaries.
@@ -1290,13 +1290,13 @@ fn every_draft_error_variant_crosses_as_an_object() {
     let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of("DraftError");
     assert_eq!(
         declared.len(),
-        32,
-        "DraftError declared 32 refusals when this check was written: {declared:?}"
+        35,
+        "DraftError declares 35 refusals since Phase 3-1: {declared:?}"
     );
     assert!(
         bare.is_empty(),
         "a unit variant crosses as a bare string, which COMMAND_ERROR_OPERANDS cannot \
-         declare beside the thirty-one objects; give it empty braces: {bare:?}"
+         declare beside the thirty-four objects; give it empty braces: {bare:?}"
     );
 
     // The `serde` behaviour the assertion above stands on, observed rather than
@@ -1348,7 +1348,7 @@ fn every_draft_error_variant_crosses_as_an_object() {
 /// bottom rather than taken on trust.
 #[test]
 fn every_edit_error_variant_crosses_as_an_object() {
-    for (name, count) in [("EditError", 40), ("SaveError", 10)] {
+    for (name, count) in [("EditError", 41), ("SaveError", 10)] {
         let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of(name);
         assert_eq!(
             declared.len(),
@@ -2237,6 +2237,7 @@ fn verification_failure_samples() -> Vec<VerificationFailure> {
             edit: 0,
             node: a_node(),
         },
+        VerificationFailure::EntriesNotInTheIntendedOrder { edit: 0, entry: 1 },
     ]
 } // End of function verification_failure_samples()
 
@@ -2385,6 +2386,10 @@ fn edit_error_samples() -> Vec<EditError> {
             edit: 0,
             block: a_node(),
             seam: DuplicateSeam::CopiedRunsJoin,
+        },
+        EditError::KeyNotSubstitutable {
+            edit: 0,
+            node: a_node(),
         },
         EditError::Verification(VerificationFailure::DecoderDisagreement { edit: 0 }),
     ]
@@ -2745,7 +2750,7 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 206,
+        variants, 208,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
          eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals, \
          Phase 2b-2c-2's fix round made PresentationNote a two-variant union, \
@@ -2757,7 +2762,9 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
          ReapplyRefusal's nine, ReapplyResolution's four and — at the review \
          round, where a move's placement anchor became an operand of its own — \
          ReapplyPlacement's three, and Phase 2c-4c-1 added the creation's own \
-         FindingCode::NewMatchRepeatsLiteralTrigger; \
+         FindingCode::NewMatchRepeatsLiteralTrigger, and Phase 3-1 added \
+         EditError::KeyNotSubstitutable and \
+         VerificationFailure::EntriesNotInTheIntendedOrder; \
          this list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
@@ -2949,7 +2956,7 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (123, 12, 71),
+        (125, 12, 71),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
          and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
@@ -2964,7 +2971,8 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
          a move's placement anchor an operand of its own, ReapplyPlacement's \
          three, of which one is empty and two carry payloads, and Phase 2c-4c-1 \
          added the creation's own NewMatchRepeatsLiteralTrigger as one more \
-         struct variant; \
+         struct variant, and Phase 3-1's KeyNotSubstitutable and \
+         EntriesNotInTheIntendedOrder are two more; \
          a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
@@ -3243,7 +3251,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 206,
+        checked, 208,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

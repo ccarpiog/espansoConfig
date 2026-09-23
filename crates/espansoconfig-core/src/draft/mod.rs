@@ -38,9 +38,11 @@
 //!
 //! # The invariant
 //!
-//! **This engine may modify or remove existing addressable nodes, and may insert
-//! scalar-valued mapping entries into the match's own mapping. It may never
-//! change a sequence's cardinality and never synthesize a collection node.**
+//! **This engine may modify or remove existing addressable nodes, may insert
+//! scalar-valued mapping entries into the match's own mapping, and may rename a
+//! scalar-valued key of that mapping to another key of the same schema family.
+//! It may never change a sequence's cardinality and never synthesize a
+//! collection node.**
 //!
 //! It is stated three times, and the third statement is over the derived batch
 //! rather than over the draft:
@@ -72,6 +74,15 @@
 //! value** and with nothing else — never with the source text, and never with
 //! what the codec would re-emit. [`plan_match_edits`]'s own documentation gives
 //! the reason and the table of consequences.
+//!
+//! # Composition and substitution, since Phase 3-1
+//!
+//! Several absent fields drafted at once are written as **one ordered group**
+//! ([`crate::patch::FieldInsertGroup`]) after an anchor the batch leaves alone,
+//! rather than refused as a shared anchor. A closed [`FieldSubstitution`] —
+//! `trigger`↔`regex`, one content key↔another — renames a key in place through
+//! [`plan_match_edits_with_substitutions`], so the first entry of a compact
+//! `- trigger: …` item can change form without its `-` moving.
 //!
 //! # The match that does not exist yet, since Phase 2b-2c-2
 //!
@@ -106,8 +117,8 @@ pub use audit::{check_batch_independence, check_closed_surface, NestedKeys};
 pub use error::DraftError;
 pub use field::DraftField;
 pub use match_draft::{
-    DraftTarget, EntryDraft, FormFieldDraft, ItemDraft, MatchDraft, MatchField, SequenceField,
-    VariableDraft, VariableField,
+    ContentForm, DraftTarget, EntryDraft, FieldSubstitution, FormFieldDraft, ItemDraft, MatchDraft,
+    MatchField, SequenceField, TriggerForm, VariableDraft, VariableField,
 };
 pub use new_match::NewMatch;
-pub use plan::plan_match_edits;
+pub use plan::{plan_match_edits, plan_match_edits_with_substitutions};

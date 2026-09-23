@@ -72,7 +72,10 @@ const DRAFT_ERROR_NAMES = [
   'NestedRemovalWouldDiscardUnshownStructure',
   'NestedItemRemoval',
   'TargetDraftedTwice',
-  'AmbiguousNestedKey'
+  'AmbiguousNestedKey',
+  'SubstitutionSourceAbsent',
+  'SubstitutionTargetPresent',
+  'SubstitutionConflictsWithField'
 ] as const satisfies readonly DraftErrorName[];
 
 /**
@@ -117,7 +120,10 @@ const DRAFT_ERRORS: readonly DraftError[] = [
   { NestedRemovalWouldDiscardUnshownStructure: { target: TARGET, found: 'Sequence' } },
   { NestedItemRemoval: { target: TARGET } },
   { TargetDraftedTwice: { target: TARGET, first: 0, second: 1 } },
-  { AmbiguousNestedKey: { edit: 0 } }
+  { AmbiguousNestedKey: { edit: 0 } },
+  { SubstitutionSourceAbsent: { field: 'trigger' } },
+  { SubstitutionTargetPresent: { field: 'markdown' } },
+  { SubstitutionConflictsWithField: { field: 'regex' } }
 ];
 
 // `never` exactly when the table above names every member of the union, and the
@@ -146,8 +152,8 @@ describe('the draft refusal samples', () => {
     expect(DRAFT_ERRORS.map(nameOf)).toEqual([...DRAFT_ERROR_NAMES]);
   });
 
-  it('hold the thirty-two variants this phase measured', () => {
-    expect(DRAFT_ERROR_NAMES.length).toBe(32);
+  it('hold the thirty-five variants Phase 3-1 measured', () => {
+    expect(DRAFT_ERROR_NAMES.length).toBe(35);
   });
 }); // End of the "draft refusal samples" suite
 

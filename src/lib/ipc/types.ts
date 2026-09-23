@@ -916,7 +916,8 @@ export type VerificationFailureName =
   | 'DuplicateCarriesMoreThanTheItem'
   | 'DuplicatedBytesWereRewritten'
   | 'DuplicateNotInPlace'
-  | 'ConstructChangedOutsideTheDuplicate';
+  | 'ConstructChangedOutsideTheDuplicate'
+  | 'EntriesNotInTheIntendedOrder';
 
 /**
  * Why a candidate document was rejected after being reparsed.
@@ -996,7 +997,8 @@ export type VerificationFailure =
         readonly edit: number;
         readonly node: NodeId;
       };
-    };
+    }
+  | { readonly EntriesNotInTheIntendedOrder: { readonly edit: number; readonly entry: number } };
 
 /** The name of every {@link EditError} variant. */
 export type EditErrorName =
@@ -1039,6 +1041,7 @@ export type EditErrorName =
   | 'DuplicateWouldCopyAFileComment'
   | 'DuplicateWouldExtendAKeptBlock'
   | 'DuplicateWouldExtendABlockScalar'
+  | 'KeyNotSubstitutable'
   | 'Verification';
 
 /** Why a change was not applied to a document's bytes. */
@@ -1175,6 +1178,7 @@ export type EditError =
         readonly seam: DuplicateSeam;
       };
     }
+  | { readonly KeyNotSubstitutable: { readonly edit: number; readonly node: NodeId } }
   | { readonly Verification: VerificationFailure };
 
 /** The name of every {@link FindingCode} variant. */
@@ -2590,7 +2594,10 @@ export type DraftErrorName =
   | 'NestedRemovalWouldDiscardUnshownStructure'
   | 'NestedItemRemoval'
   | 'TargetDraftedTwice'
-  | 'AmbiguousNestedKey';
+  | 'AmbiguousNestedKey'
+  | 'SubstitutionSourceAbsent'
+  | 'SubstitutionTargetPresent'
+  | 'SubstitutionConflictsWithField';
 
 /**
  * Why a draft could not be turned into an edit batch.
@@ -2696,7 +2703,10 @@ export type DraftError =
         readonly second: number;
       };
     }
-  | { readonly AmbiguousNestedKey: { readonly edit: number } };
+  | { readonly AmbiguousNestedKey: { readonly edit: number } }
+  | { readonly SubstitutionSourceAbsent: { readonly field: MatchField } }
+  | { readonly SubstitutionTargetPresent: { readonly field: MatchField } }
+  | { readonly SubstitutionConflictsWithField: { readonly field: MatchField } };
 
 // ---------------------------------------------------------------------------
 // The external-change reconciliation wire — Phase 2d-4b

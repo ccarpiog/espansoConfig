@@ -38,7 +38,7 @@ pub enum DraftError {
     /// invented, because the alternative is a path that names something else.
     ///
     /// **The empty braces are load-bearing.** Written as a unit variant this
-    /// would be the one variant of thirty-two that `serde` writes as a bare
+    /// would be the one variant of thirty-five that `serde` writes as a bare
     /// JSON string rather than as a one-key object, and the frontend's
     /// `COMMAND_ERROR_OPERANDS` table in `src/lib/ipc/errors.ts` can pin exactly
     /// one shape for the `error` operand of `CommandError::DraftRefused`. A
@@ -46,8 +46,8 @@ pub enum DraftError {
     /// *unexpected* failure, losing its typed code and rendering a generic
     /// sentence instead of `code.draftError.matchHasNoPath`. As an empty struct
     /// variant it writes `{"MatchHasNoPath": {}}`, so "a `DraftError` is always
-    /// an object" is true by construction rather than true of thirty-one cases
-    /// out of thirty-two. `every_draft_error_variant_crosses_as_an_object` in
+    /// an object" is true by construction rather than true of thirty-four cases
+    /// out of thirty-five. `every_draft_error_variant_crosses_as_an_object` in
     /// `src-tauri/src/wire_contract.rs` fails the build if a unit variant is
     /// ever added here.
     MatchHasNoPath {},
@@ -221,9 +221,12 @@ pub enum DraftError {
     /// An insertion is anchored after an entry the same batch removes.
     ///
     /// Ruling 5: an anchor must be an original sibling **unaffected by the
-    /// batch**. Re-anchoring would silently write the new key somewhere the
-    /// caller cannot predict from the document it is looking at, so the batch is
-    /// refused and a caller that wants both changes saves twice.
+    /// batch**. A batch that names such an anchor is refused rather than
+    /// re-anchored, because re-anchoring would write the new key somewhere the
+    /// batch did not say. Since Phase 3-1 [`crate::draft::plan_match_edits`]
+    /// chooses a surviving anchor itself, so this is reached by a batch this
+    /// engine did not build — and a key a substitution renames counts as
+    /// removed.
     InsertionAnchorRemoved {
         /// Position of the insertion in the batch.
         edit: usize,
@@ -247,7 +250,10 @@ pub enum DraftError {
     /// decide the file and nothing in the batch states one.
     /// [`crate::patch::apply_edits`] refuses two replacements that share a start
     /// outright; this names the same refusal earlier, in the draft's own
-    /// vocabulary.
+    /// vocabulary. Several entries after one anchor are legal as **one**
+    /// [`crate::patch::FieldInsertGroup`], which states their order; since Phase
+    /// 3-1 the planner writes several absent fields that way, so this is reached
+    /// by a batch this engine did not build.
     SharedInsertionAnchor {
         /// Position of the first insertion in the batch.
         first: usize,
@@ -500,6 +506,38 @@ pub enum DraftError {
         /// Position of the edit in the batch.
         edit: usize,
     },
+    /// A substitution names a key the match does not hold.
+    ///
+    /// A [`crate::draft::FieldSubstitution`] renames an entry that is there; it
+    /// never creates one. The intent was made against a match that had this
+    /// key, and the match in hand does not — so the intent is stale, and it is
+    /// refused rather than turned into an insertion the caller did not ask for.
+    SubstitutionSourceAbsent {
+        /// The key the substitution was to rename.
+        field: MatchField,
+    },
+    /// A substitution would rename a key to one the match already holds.
+    ///
+    /// Two entries sharing one key make every path through the mapping
+    /// ambiguous and raise [`HazardKind::DuplicateMappingKey`]; the match would
+    /// become uneditable the moment the save landed.
+    SubstitutionTargetPresent {
+        /// The key the substitution was to rename *to*.
+        field: MatchField,
+    },
+    /// A substitution and another intent of the same draft say two things about
+    /// one key.
+    ///
+    /// The source key of a substitution may carry no other intent (it is being
+    /// renamed, so it has no value of its own to set or remove afterwards); the
+    /// destination key may carry a `Set` — that is the renamed entry's new value
+    /// — but not a `Remove`; and no key may be named by two substitutions.
+    /// **Intent level, before any diffing**, for
+    /// [`DraftError::SequenceItemDraftedTwice`]'s reason.
+    SubstitutionConflictsWithField {
+        /// The key both intents name.
+        field: MatchField,
+    },
 }
 
 impl fmt::Display for DraftError {
@@ -595,6 +633,23 @@ impl fmt::Display for DraftError {
             }
             DraftError::AmbiguousNestedKey { edit } => {
                 write!(formatter, "edit {edit} names a repeated nested key")
+            }
+            DraftError::SubstitutionSourceAbsent { field } => {
+                write!(
+                    formatter,
+                    "the match holds no {} to substitute",
+                    field.key()
+                )
+            }
+            DraftError::SubstitutionTargetPresent { field } => {
+                write!(formatter, "the match already holds {}", field.key())
+            }
+            DraftError::SubstitutionConflictsWithField { field } => {
+                write!(
+                    formatter,
+                    "{} carries a substitution and another intent",
+                    field.key()
+                )
             }
         } // End of the match over every refusal
     } // End of function fmt() for DraftError
