@@ -77,7 +77,8 @@ impl ScalarItems {
 /// it stands, so an index never means "wherever this ends up".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SequenceIntent {
-    /// Add items to an existing **block** list, at one place, in order.
+    /// Add items to an existing list — block, flow or `[]` — at one place, in
+    /// order. A flow list stays a flow list (Phase 3-3).
     InsertItems {
         /// Which list.
         field: SequenceField,
@@ -86,7 +87,8 @@ pub enum SequenceIntent {
         /// The new items.
         items: ScalarItems,
     },
-    /// Take one item away, with the comments it owns.
+    /// Take one item away, with the comments it owns — and, in a flow list,
+    /// with one of its separators (Phase 3-3).
     ///
     /// Removing every item this way is refused
     /// ([`crate::draft::DraftError::SequenceWouldBeEmpty`]):

@@ -180,7 +180,7 @@ pub fn plan_match_edits_with_substitutions(
 ///
 /// | Intent | Edit |
 /// |---|---|
-/// | [`SequenceIntent::InsertItems`] | one [`ScalarItemInsert`] into the existing block list |
+/// | [`SequenceIntent::InsertItems`] | one [`ScalarItemInsert`] into the existing list, block or flow |
 /// | [`SequenceIntent::RemoveItem`] | one [`RemoveItem`], which takes the item's own comments with it |
 /// | [`SequenceIntent::InsertField`] | a list entry of the one insertion group ([`EntryValue::ScalarList`]) |
 /// | [`SequenceIntent::RemoveField`] | one [`FieldRemoval`] of the whole field |
@@ -195,8 +195,8 @@ pub fn plan_match_edits_with_substitutions(
 /// [`DraftError::SequenceIntentsConflict`]). Then, per intent, the list's
 /// presence: an absent list ([`DraftError::SequenceFieldAbsent`]), a present one
 /// being added ([`DraftError::SequenceFieldPresent`]), a value that is not a list
-/// ([`DraftError::SequenceHasAnUnsupportedShape`]) and a flow list whose items
-/// would change ([`DraftError::SequenceIsAFlowList`]); then the items: an index
+/// ([`DraftError::SequenceHasAnUnsupportedShape`]) and a flow list a switch
+/// would reshape ([`DraftError::SequenceIsAFlowList`]); then the items: an index
 /// the list does not have ([`DraftError::SequenceItemDoesNotExist`]), an item
 /// that is not a scalar ([`DraftError::NotAScalar`], because removing it would
 /// discard structure the list editor never showed), every item removed
@@ -433,8 +433,31 @@ fn check_no_list_is_emptied(
     Ok(())
 } // End of function check_no_list_is_emptied()
 
-/// Refuses an intent about the items of a list that is not an existing block
-/// list.
+/// Refuses an intent about the items of a list that is not there or is not a
+/// list (Phase 3-3).
+///
+/// A block list, a flow list and an empty `[]` all qualify: since Phase 3-3 the
+/// engine inserts and removes a flow list's items between its brackets, never
+/// converting it. The two answers, in order: the list is not there
+/// ([`DraftError::SequenceFieldAbsent`]), or its value is not a list
+/// ([`DraftError::SequenceHasAnUnsupportedShape`]).
+fn require_list(presence: &SequencePresence, field: SequenceField) -> Result<(), DraftError> {
+    match presence {
+        SequencePresence::Absent {} => Err(DraftError::SequenceFieldAbsent { field }),
+        SequencePresence::UnsupportedShape { found, .. } => {
+            Err(DraftError::SequenceHasAnUnsupportedShape {
+                field,
+                found: *found,
+            })
+        }
+        SequencePresence::Empty { .. } | SequencePresence::Items { .. } => Ok(()),
+    }
+} // End of function require_list()
+
+/// Refuses a trigger switch from a list that is not an existing block list.
+///
+/// A switch stays block-only (`docs/decisions/3-2-notes.md` §3.4): reshaping a
+/// flow list into a scalar is not an item edit.
 ///
 /// The three answers, in order: the list is not there
 /// ([`DraftError::SequenceFieldAbsent`]), its value is not a list
@@ -506,7 +529,7 @@ fn plan_sequence_intent(
             }
         },
         SequenceIntent::InsertItems { at, items: new, .. } => {
-            require_block_list(presence, field)?;
+            require_list(presence, field)?;
             if let ItemPlacement::After(index) = at {
                 if *index >= items.len() {
                     return Err(DraftError::SequenceItemDoesNotExist {
@@ -521,7 +544,7 @@ fn plan_sequence_intent(
             edits.push(insert.into());
         }
         SequenceIntent::RemoveItem { index, .. } => {
-            require_block_list(presence, field)?;
+            require_list(presence, field)?;
             let item = items
                 .get(*index)
                 .ok_or(DraftError::SequenceItemDoesNotExist {

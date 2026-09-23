@@ -972,7 +972,8 @@ export type VerificationFailureName =
   | 'DuplicateNotInPlace'
   | 'ConstructChangedOutsideTheDuplicate'
   | 'EntriesNotInTheIntendedOrder'
-  | 'ItemNotInserted';
+  | 'ItemNotInserted'
+  | 'SequenceStyleChanged';
 
 /**
  * Why a candidate document was rejected after being reparsed.
@@ -1054,7 +1055,8 @@ export type VerificationFailure =
       };
     }
   | { readonly EntriesNotInTheIntendedOrder: { readonly edit: number; readonly entry: number } }
-  | { readonly ItemNotInserted: { readonly edit: number; readonly item: number } };
+  | { readonly ItemNotInserted: { readonly edit: number; readonly item: number } }
+  | { readonly SequenceStyleChanged: { readonly edit: number } };
 
 /** The name of every {@link EditError} variant. */
 export type EditErrorName =
@@ -1099,6 +1101,8 @@ export type EditErrorName =
   | 'DuplicateWouldExtendABlockScalar'
   | 'KeyNotSubstitutable'
   | 'ShapeSwitchUnsupported'
+  | 'FlowListTriviaAmbiguous'
+  | 'FlowListLayoutUnsupported'
   | 'Verification';
 
 /** Why a change was not applied to a document's bytes. */
@@ -1237,6 +1241,14 @@ export type EditError =
     }
   | { readonly KeyNotSubstitutable: { readonly edit: number; readonly node: NodeId } }
   | { readonly ShapeSwitchUnsupported: { readonly edit: number; readonly node: NodeId } }
+  | {
+      readonly FlowListTriviaAmbiguous: {
+        readonly edit: number;
+        readonly sequence: NodeId;
+        readonly at: ByteSpan;
+      };
+    }
+  | { readonly FlowListLayoutUnsupported: { readonly edit: number; readonly sequence: NodeId } }
   | { readonly Verification: VerificationFailure };
 
 /** The name of every {@link FindingCode} variant. */

@@ -260,6 +260,23 @@
 //! reachable by both [`item_own_lines`] and [`entry_owned_runs`], which is why the
 //! walk is now written once.
 //!
+//! # Phase 3-3 — flow lists of scalars
+//!
+//! A [`ScalarItemInsert`] into, and a [`RemoveItem`] out of, a bracket-delimited
+//! list of scalars that is not itself inside a flow collection are planned by
+//! `patch/edit/flow.rs` rather than refused: items are written and deleted
+//! between the brackets with their delimiters, a flow list never becomes a
+//! block one, and new items are spelled by [`crate::emit::choose_scalar`] in
+//! flow context, which always quotes. That module states its own placement rule
+//! for the list's comments and asks the gate **minus the list's own
+//! `CommentInFlowCollection`** — every other hazard still refuses — refusing
+//! whatever its rule cannot place ([`EditError::FlowListTriviaAmbiguous`],
+//! [`EditError::FlowListLayoutUnsupported`]). Its runs and points are bounded by
+//! two guards of their own (`StructuralGuard::FlowRemoval`,
+//! `StructuralGuard::FlowInsertion`), and verification gains
+//! [`VerificationFailure::SequenceStyleChanged`] for **every** item edit: the
+//! reparsed sequence must have the collection style it had.
+//!
 //! # What is *not* here
 //!
 //! Cross-**document** and cross-**file** moves (plan section 8.4, a UI-phase
@@ -283,6 +300,8 @@ use crate::syntax::{
     ScalarStyle, SyntaxError, SyntaxIndex, TriviaIndex, TriviaKind,
 };
 use crate::LineEnding;
+
+mod flow;
 
 // ---------------------------------------------------------------------------
 // The request
@@ -645,9 +664,11 @@ impl EntryValue {
 ///
 /// # What is refused
 ///
-/// A flow sequence (`[a, b]`, and `[]`) is
-/// [`EditError::FlowSequenceInsertionUnsupported`]: converting presentation is a
-/// change nobody asked for, and a flow list's own insertion is a later step's.
+/// A **flow list of scalars** (`[a, b]`, and `[]`) takes its items between its
+/// brackets instead (Phase 3-3, `patch/edit/flow.rs`): converting presentation
+/// is a change nobody asked for, so a flow list stays a flow list. Any other
+/// flow sequence — one holding a collection, or one inside another flow
+/// collection — is [`EditError::FlowSequenceInsertionUnsupported`].
 /// A target that is not a sequence at all — an absent value written `key:` among
 /// them — is [`EditError::NotASequence`]: a list *field* is added with
 /// [`FieldInsertGroup`] and [`EntryValue::ScalarList`] instead.
@@ -1184,6 +1205,14 @@ impl InsertItem {
 /// strand a comment describing something that is no longer there — while a
 /// comment the blank-line rule gives to the file stays exactly where it is,
 /// byte-identical, and so does every byte the surviving neighbours own.
+///
+/// # An item of a flow list of scalars (Phase 3-3)
+///
+/// Such an item has no line of its own to lift, so it is not a move's lift half:
+/// `patch/edit/flow.rs` deletes it between the brackets with one of its
+/// separators and its own trailing comment, reading the batch's other removals
+/// of the same list so adjacent removals abut. Every other flow item keeps
+/// [`EditError::FlowCollection`].
 ///
 /// # Removing the only item is refused, by name
 ///
@@ -2114,16 +2143,19 @@ pub enum EditError {
         /// Position of the offending field in the requested field list.
         field: usize,
     },
-    /// The sequence is bracket-delimited, or sits inside something that is.
+    /// The sequence is bracket-delimited, or sits inside something that is,
+    /// and the edit cannot add to it between its brackets.
     ///
-    /// **A deliberate, documented refusal.** `matches: []` and
-    /// `triggers: [":a", ":b"]` have no line of their own to add an item to, so
-    /// inserting there is a question about commas and spacing rather than about
-    /// lines — and the tempting answer, rewriting the collection as a block one,
-    /// changes the presentation of bytes the user never asked about. It is the
-    /// same argument [`EditError::FlowCollection`] makes for a mapping entry,
-    /// named separately because an *empty* flow sequence is the shape a caller
-    /// most plausibly expects to be able to add to.
+    /// **A deliberate, documented refusal.** `matches: []` has no line of its
+    /// own to add an item to, so inserting there is a question about commas and
+    /// spacing rather than about lines — and the tempting answer, rewriting the
+    /// collection as a block one, changes the presentation of bytes the user
+    /// never asked about. It is the same argument [`EditError::FlowCollection`]
+    /// makes for a mapping entry. Since Phase 3-3 a [`ScalarItemInsert`] into a
+    /// flow list of **scalars** is written between the brackets instead, so this
+    /// is what an [`InsertItem`] into any flow sequence meets, and what a
+    /// scalar insertion meets for a flow sequence holding a collection or sitting
+    /// inside another flow collection.
     FlowSequenceInsertionUnsupported {
         /// Position of the edit in the requested batch.
         edit: usize,
@@ -2322,6 +2354,38 @@ pub enum EditError {
         edit: usize,
         /// The value node of the entry.
         node: NodeId,
+    },
+    /// A comment or a comma inside a flow list sits where the edit cannot tell
+    /// which item it belongs to, or where a new item would come to share its
+    /// line (Phase 3-3).
+    ///
+    /// A flow list's comments belong to no entry under the ownership rules
+    /// (`PROGRESS.md`, R6), so a flow-list cardinality edit states its own,
+    /// narrower rule (`patch/edit/flow.rs`'s module documentation) and refuses every shape
+    /// outside it rather than guessing: a comment on a line of its own inside
+    /// the brackets, a comma that is not on the line of the item it follows, a
+    /// comment trailing a line that holds two items, a comment the removal
+    /// would strand on a surviving item's line, and an insertion that would put
+    /// a new item on a commented item's line. `at` is the comment or comma.
+    FlowListTriviaAmbiguous {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The flow sequence.
+        sequence: NodeId,
+        /// The comment or comma whose placement is ambiguous.
+        at: ByteSpan,
+    },
+    /// A flow list this step's cardinality edits do not lay out (Phase 3-3).
+    ///
+    /// An item written across several lines, an empty list whose brackets hold
+    /// a line break or a comment, and a list whose brackets are not where the
+    /// substrate's span says they are. Each is refused rather than approximated:
+    /// none of them has one layout a new item could copy.
+    FlowListLayoutUnsupported {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The flow sequence.
+        sequence: NodeId,
     },
     /// The candidate document failed verification and was discarded.
     Verification(VerificationFailure),
@@ -2947,6 +3011,17 @@ pub enum VerificationFailure {
         /// is the shorter of the two counts.
         item: usize,
     },
+    /// A sequence an item edit changed is no longer written in the collection
+    /// style it had (Phase 3-3).
+    ///
+    /// An item insertion or removal never converts presentation: a flow list
+    /// stays a flow list and a block list stays a block list. Checked on the
+    /// reparsed candidate for every sequence an item edit names, so the rule
+    /// is a verified property rather than a planner convention.
+    SequenceStyleChanged {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -3182,6 +3257,19 @@ impl fmt::Display for EditError {
                 "edit {edit}: the entry whose value is node {} cannot be switched in place",
                 node.get()
             ),
+            EditError::FlowListTriviaAmbiguous { edit, sequence, at } => write!(
+                formatter,
+                "edit {edit}: a comment or comma at {}..{} inside flow list {} has no one \
+                 placement relative to this edit",
+                at.start,
+                at.end,
+                sequence.get()
+            ),
+            EditError::FlowListLayoutUnsupported { edit, sequence } => write!(
+                formatter,
+                "edit {edit}: flow list {} is laid out in a way item edits do not support",
+                sequence.get()
+            ),
             EditError::Verification(failure) => write!(formatter, "{failure}"),
         }
     } // End of function fmt() for EditError
@@ -3363,6 +3451,11 @@ impl fmt::Display for VerificationFailure {
             VerificationFailure::ItemNotInserted { edit, item } => write!(
                 formatter,
                 "edit {edit}: list position {item} does not hold the item the batch intended there"
+            ),
+            VerificationFailure::SequenceStyleChanged { edit } => write!(
+                formatter,
+                "edit {edit}: a list the batch changed the items of is no longer written in its \
+                 own style"
             ),
         }
     } // End of function fmt() for VerificationFailure
@@ -3603,9 +3696,14 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
             DocumentEdit::InsertItem(insert) => {
                 plan_item_insertion(source, &index, &trivia, position, insert)?
             }
-            DocumentEdit::RemoveItem(removal) => {
-                plan_item_removal(source, &index, &trivia, position, removal)?
-            }
+            DocumentEdit::RemoveItem(removal) => match flow::flow_list_of_item(&index, removal) {
+                // Phase 3-3: an item of a flow list of scalars is removed with its
+                // delimiters, reading the batch's other removals of that list.
+                Some(sequence) => flow::plan_flow_removal(
+                    source, &index, &trivia, position, removal, sequence, edits,
+                )?,
+                None => plan_item_removal(source, &index, &trivia, position, removal)?,
+            },
             DocumentEdit::InsertScalarItems(insert) => {
                 plan_scalar_item_insertion(source, &index, &trivia, position, insert)?
             }
@@ -3811,6 +3909,27 @@ enum StructuralGuard {
         /// The offset the new entry is spliced at.
         at: usize,
     },
+    /// A flow-list item removal's runs (Phase 3-3): inside the brackets,
+    /// touching no node but the item and its ancestors, covering its token, and
+    /// taking no comment that does not trail a removed item.
+    FlowRemoval {
+        /// The ordered, disjoint runs the removal deletes.
+        runs: Vec<ByteSpan>,
+        /// The flow list.
+        sequence: NodeId,
+        /// The item this edit removes.
+        item: NodeId,
+        /// Every item of the list the batch removes, this one included.
+        removed: Vec<NodeId>,
+    },
+    /// A flow-list insertion point (Phase 3-3): inside the brackets, and inside
+    /// no token and no comment.
+    FlowInsertion {
+        /// The offset the new items are spliced at.
+        at: usize,
+        /// The flow list.
+        sequence: NodeId,
+    },
 }
 
 /// What a removal envelope is for, and therefore which layer bounds its runs.
@@ -3929,6 +4048,15 @@ impl StructuralGuard {
                     }
                 } // End of the loop over every leaf the point might fall inside
                 Ok(())
+            }
+            StructuralGuard::FlowRemoval {
+                runs,
+                sequence,
+                item,
+                removed,
+            } => flow::check_removal(source, index, trivia, runs, *sequence, *item, removed),
+            StructuralGuard::FlowInsertion { at, sequence } => {
+                flow::check_insertion(index, trivia, *at, *sequence)
             }
         }
     } // End of function check()
@@ -5460,6 +5588,10 @@ struct ItemExpectation {
     sequence: DocumentPath,
     /// Every position the sequence must hold afterwards, in order.
     slots: Vec<ItemSlot>,
+    /// The collection style the sequence had in the original, which it must
+    /// still have (Phase 3-3). `None` for a promotion, whose original node is
+    /// the implicit null the new block sequence replaces.
+    style: Option<CollectionStyle>,
 }
 
 /// Merges every claim about one sequence into a single ordered expectation.
@@ -5562,6 +5694,10 @@ fn fold_item_expectations(
             edit: first.edit,
             sequence: first.sequence.clone(),
             slots,
+            style: index
+                .node(sequence_id)
+                .filter(|node| node.kind == NodeKind::Sequence)
+                .and_then(|node| node.collection_style),
         });
     } // End of the loop that turns each sequence's claims into one expectation
     Ok(expectations)
@@ -6700,6 +6836,12 @@ fn plan_scalar_item_insertion(
         edit: position,
         at: ByteSpan::default(),
     })?;
+    // Phase 3-3: a flow list of scalars takes its items between its brackets,
+    // and asks the gate itself — narrowed to let its own comments be placed by
+    // the flow module's rule rather than refused wholesale.
+    if let Some(sequence) = flow::flow_scalar_list(index, resolved.value) {
+        return flow::plan_flow_insertion(source, index, trivia, position, edit, sequence);
+    }
     // The gate, before the shape is examined and before a byte is read.
     if let Some(hazard) = trivia.disqualifying_hazard(index, resolved.value) {
         return Err(EditError::Refused {
@@ -8930,6 +9072,14 @@ fn verify_items(
             expected: expectation.slots.len(),
             found: sequence.children.len(),
         });
+    }
+    // An item edit never converts presentation (ruling 5, Phase 3-3): a flow
+    // list stays bracketed and a block list stays one item per `-`.
+    if expectation
+        .style
+        .is_some_and(|style| sequence.collection_style != Some(style))
+    {
+        return Err(VerificationFailure::SequenceStyleChanged { edit });
     }
 
     for (position, (slot, item)) in expectation.slots.iter().zip(&sequence.children).enumerate() {
@@ -12557,6 +12707,7 @@ mod structural_tests {
                 ItemSlot::Kept(None),
                 ItemSlot::Inserted(NewItem::Scalar("x".to_owned())),
             ],
+            style: Some(CollectionStyle::Block),
         };
         let honest = "l:\n  - a\n  - x\n";
         let parsed = SyntaxIndex::parse(honest).expect("parses");
@@ -12572,6 +12723,13 @@ mod structural_tests {
         assert_eq!(
             verify_items(nested, &parsed, &slots),
             Err(VerificationFailure::ItemNotInserted { edit: 0, item: 1 })
+        );
+        // Phase 3-3: the right items in the other style are a converted list.
+        let converted = "l: [a, x]\n";
+        let parsed = SyntaxIndex::parse(converted).expect("parses");
+        assert_eq!(
+            verify_items(converted, &parsed, &slots),
+            Err(VerificationFailure::SequenceStyleChanged { edit: 0 })
         );
 
         let wanted = EntryValue::ScalarList(vec!["a".to_owned(), "b".to_owned()]);

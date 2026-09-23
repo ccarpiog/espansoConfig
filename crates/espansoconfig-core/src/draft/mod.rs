@@ -97,8 +97,9 @@
 //! [`SequenceIntent`]s that add or remove items of `triggers`/`search_terms` or
 //! the whole field, and one [`TriggerSwitch`] between `trigger`/`regex` and a
 //! block `triggers` list. Removing the last item of a list is refused; removing
-//! the whole field is its own explicit intent. A flow list's items are not
-//! edited here (3-3).
+//! the whole field is its own explicit intent. A flow list's items are added
+//! and removed between its brackets, never converting it (Phase 3-3); a switch
+//! still needs a block list.
 //!
 //! # The match that does not exist yet, since Phase 2b-2c-2
 //!

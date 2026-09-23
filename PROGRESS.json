@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T21:03:07Z",
+ "updated": "2026-09-23T21:45:16Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
  "phases": [
@@ -916,8 +916,10 @@
   {
    "id": "3-3",
    "title": "Flow scalar-list cardinality",
-   "status": "queued",
-   "summary": "Queued: Flow scalar-list cardinality."
+   "status": "done",
+   "summary": "Items are added to and removed from flow lists without changing their style; ambiguous comment placement is refused by name.",
+   "risk": "high",
+   "review": "docs/reviews/phase-3-3.md"
   },
   {
    "id": "3-4",

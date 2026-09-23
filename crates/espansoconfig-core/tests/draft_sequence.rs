@@ -899,7 +899,8 @@ fn conflicting_list_intents_are_refused_by_name() {
     );
 } // End of function conflicting_list_intents_are_refused_by_name()
 
-/// Every presence refusal, by name: an absent list, a flow list, a value that is
+/// Every presence refusal, by name: an absent list, a flow list a switch would
+/// reshape (item intents on a flow list plan since Phase 3-3), a value that is
 /// not a list, a present list asked for again, an index out of range and an item
 /// that is not a scalar.
 #[test]
@@ -919,11 +920,24 @@ fn a_list_intent_the_list_cannot_honour_is_refused_by_name() {
         })
     );
     for field in [SequenceField::Triggers, SequenceField::SearchTerms] {
-        assert_eq!(
-            plan_match_edits_with(&match_at(LISTS, 2), &none, &insert(field)),
-            Err(DraftError::SequenceIsAFlowList { field })
+        assert!(
+            plan_match_edits_with(&match_at(LISTS, 2), &none, &insert(field)).is_ok(),
+            "an item intent on a flow list plans since Phase 3-3"
         );
     } // End of the loop over the two flow lists
+    assert_eq!(
+        plan_match_edits_with(
+            &match_at(LISTS, 2),
+            &none,
+            &MatchStructure::new().with_switch(TriggerSwitch::FromList {
+                to: TriggerForm::Trigger,
+                value: ":x".to_owned(),
+            })
+        ),
+        Err(DraftError::SequenceIsAFlowList {
+            field: SequenceField::Triggers
+        })
+    );
     assert_eq!(
         plan_match_edits_with(
             &match_at(LISTS, 3),
@@ -1014,7 +1028,8 @@ fn new_items_copy_the_line_ending_and_keep_a_missing_final_newline() {
     );
 } // End of function new_items_copy_the_line_ending_and_keep_a_missing_final_newline()
 
-/// A flow list is never converted: inserting into one is refused by the engine.
+/// A flow list is never converted: since Phase 3-3 an item lands between its
+/// brackets (`tests/flow_list.rs` holds the rest of that step's acceptance).
 #[test]
 fn the_engine_never_converts_a_flow_list() {
     let edit = ScalarItemInsert::new(
@@ -1023,10 +1038,15 @@ fn the_engine_never_converts_a_flow_list() {
         vec!["gamma".to_owned()],
     )
     .expect("one value");
-    assert!(matches!(
-        apply_edits(LISTS, &[edit.into()]),
-        Err(EditError::FlowSequenceInsertionUnsupported { edit: 0, .. })
-    ));
+    let patched = apply_edits(LISTS, &[edit.into()]).expect("applies");
+    assert_eq!(
+        patched.text(),
+        LISTS.replace(
+            "search_terms: [alpha, beta]",
+            "search_terms: [alpha, beta, 'gamma']"
+        )
+    );
+    assert_outside_spans(LISTS, &patched);
 } // End of function the_engine_never_converts_a_flow_list()
 
 // ---------------------------------------------------------------------------

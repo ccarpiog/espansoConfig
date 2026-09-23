@@ -595,14 +595,14 @@ pub enum DraftError {
         /// What its value actually is.
         found: ValueKind,
     },
-    /// The intent would change the items of a bracket-delimited list (Phase
-    /// 3-2).
+    /// A trigger switch would reshape a bracket-delimited list into a scalar
+    /// (Phase 3-2).
     ///
-    /// `[a, b]` and `[]` are flow lists, and adding or removing one of their
-    /// items needs delimiter-aware editing that keeps the flow presentation —
-    /// a later step's (3-3), which is why this is refused rather than converted:
-    /// `[a, b]` never silently becomes a block list. Removing the whole field is
-    /// not refused, because it touches no delimiter.
+    /// `[a, b]` and `[]` are flow lists. Since Phase 3-3 their items are added
+    /// and removed between the brackets, so an item intent no longer meets this
+    /// refusal; [`crate::draft::TriggerSwitch::FromList`] still does, because a
+    /// switch reshapes only a block list. Removing the whole field is not
+    /// refused, because it touches no delimiter.
     SequenceIsAFlowList {
         /// The list the intent named.
         field: SequenceField,

@@ -102,6 +102,13 @@
 //! expectation is re-resolved by is first carried through the batch's own item
 //! position map ([`item_positions`]), so an edit of an item a removal shifted is
 //! looked for where it now is.
+//!
+//! **3-3 — flow lists of scalars.** [`ScalarItemInsert`] and [`RemoveItem`] add
+//! and remove items of a bracket-delimited list of scalars between its
+//! brackets, delimiters and the list's own comments placed by a stated rule,
+//! never converting it to block style; a comment or comma the rule cannot place
+//! is [`EditError::FlowListTriviaAmbiguous`]. Verification gains
+//! [`VerificationFailure::SequenceStyleChanged`] for every item edit.
 
 pub mod edit;
 pub mod path;

@@ -1408,7 +1408,7 @@ fn every_draft_error_variant_crosses_as_an_object() {
 /// bottom rather than taken on trust.
 #[test]
 fn every_edit_error_variant_crosses_as_an_object() {
-    for (name, count) in [("EditError", 42), ("SaveError", 10)] {
+    for (name, count) in [("EditError", 44), ("SaveError", 10)] {
         let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of(name);
         assert_eq!(
             declared.len(),
@@ -2299,6 +2299,7 @@ fn verification_failure_samples() -> Vec<VerificationFailure> {
         },
         VerificationFailure::EntriesNotInTheIntendedOrder { edit: 0, entry: 1 },
         VerificationFailure::ItemNotInserted { edit: 0, item: 1 },
+        VerificationFailure::SequenceStyleChanged { edit: 0 },
     ]
 } // End of function verification_failure_samples()
 
@@ -2455,6 +2456,15 @@ fn edit_error_samples() -> Vec<EditError> {
         EditError::ShapeSwitchUnsupported {
             edit: 0,
             node: a_node(),
+        },
+        EditError::FlowListTriviaAmbiguous {
+            edit: 0,
+            sequence: a_node(),
+            at: a_span(),
+        },
+        EditError::FlowListLayoutUnsupported {
+            edit: 0,
+            sequence: a_node(),
         },
         EditError::Verification(VerificationFailure::DecoderDisagreement { edit: 0 }),
     ]
@@ -2815,7 +2825,7 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 210,
+        variants, 213,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
          eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals, \
          Phase 2b-2c-2's fix round made PresentationNote a two-variant union, \
@@ -2830,7 +2840,10 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
          FindingCode::NewMatchRepeatsLiteralTrigger, and Phase 3-1 added \
          EditError::KeyNotSubstitutable and \
          VerificationFailure::EntriesNotInTheIntendedOrder, and Phase 3-2 added \
-         EditError::ShapeSwitchUnsupported and VerificationFailure::ItemNotInserted; \
+         EditError::ShapeSwitchUnsupported and VerificationFailure::ItemNotInserted, \
+         and Phase 3-3 added EditError::FlowListTriviaAmbiguous, \
+         EditError::FlowListLayoutUnsupported and \
+         VerificationFailure::SequenceStyleChanged; \
          this list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
@@ -3022,7 +3035,7 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (127, 12, 71),
+        (130, 12, 71),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
          and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
@@ -3039,7 +3052,9 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
          added the creation's own NewMatchRepeatsLiteralTrigger as one more \
          struct variant, and Phase 3-1's KeyNotSubstitutable and \
          EntriesNotInTheIntendedOrder are two more, and so are Phase 3-2's \
-         ShapeSwitchUnsupported and ItemNotInserted; \
+         ShapeSwitchUnsupported and ItemNotInserted, and so are Phase 3-3's \
+         FlowListTriviaAmbiguous, FlowListLayoutUnsupported and \
+         SequenceStyleChanged; \
          a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
@@ -3318,7 +3333,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 210,
+        checked, 213,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

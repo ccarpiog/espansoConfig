@@ -414,11 +414,23 @@ impl<'source> Builder<'source> {
         anchor: usize,
         tag: Option<TagSpelling>,
     ) -> Result<(), SyntaxError> {
-        // A flow collection's start event covers exactly its opening bracket;
-        // a block collection's is zero width. Checking the character as well
-        // keeps the test honest when a block mapping's first key happens to be
-        // a flow collection.
-        let flow = marker.len() == 1 && matches!(marker.slice(self.source), Some("[") | Some("{"));
+        // A flow collection's start event begins at its opening bracket; a
+        // block collection's is zero width. The event is **not** always one byte
+        // wide: when spaces follow `[` on its line the substrate widens it
+        // (`[ a]`), and for `[ ]` it reports it zero width at the bracket — both
+        // were once read as block (Phase 3-3). A block sequence opens at a `-`,
+        // never at a `[`, so a sequence opening at `[` is flow whatever the
+        // event's width. A mapping keeps the width test as well, because a block
+        // mapping whose first key is a flow mapping opens, zero width, at `{`.
+        let opens_with = |bracket: char| {
+            self.source
+                .get(marker.start..)
+                .is_some_and(|rest| rest.starts_with(bracket))
+        };
+        let flow = match kind {
+            NodeKind::Sequence => opens_with('['),
+            _ => !marker.is_empty() && opens_with('{'),
+        };
         let role = self.next_role()?;
         let id = self.allocate(Node {
             id: NodeId::from_index(0),
@@ -472,6 +484,22 @@ impl<'source> Builder<'source> {
     /// [`SyntaxIndex::unaccountable_collection_extents`].
     fn close_collection(&mut self, marker: ByteSpan) -> Result<(), SyntaxError> {
         let frame = self.pop_frame()?;
+        // A flow collection's end event **starts** at its closing bracket, but
+        // the substrate's scanner consumes the spaces and a comment after it
+        // before recording the event's end (`[a, b]  # note`). The bracket is
+        // the delimiter, so the marker is cut back to it; the trivia after it
+        // stays outside the collection (Phase 3-3 review, finding 2).
+        let marker = if frame.flow
+            && matches!(
+                self.source
+                    .get(marker.start..)
+                    .and_then(|rest| rest.chars().next()),
+                Some(']') | Some('}')
+            ) {
+            ByteSpan::new(marker.start, marker.start + 1)
+        } else {
+            marker
+        };
         let child_extent = self.children_extent(frame.node);
         let start = frame.opening.start;
         let end = if frame.flow {
@@ -1079,6 +1107,48 @@ mod tests {
         assert_eq!(sequence.collection_style, Some(CollectionStyle::Flow));
         assert_eq!(sequence.span.slice(source), Some("[one, two]"));
     }
+
+    #[test]
+    fn a_bracket_followed_by_spaces_still_opens_a_flow_collection() {
+        // Phase 3-3: the substrate widens a flow collection's start event when
+        // spaces follow the bracket, and reports `[ ]`'s zero width. Both were
+        // once read as block collections, with a span that stopped short of the
+        // closing bracket. A block mapping whose first key is a flow collection
+        // still opens as a block mapping.
+        for (source, wanted) in [
+            ("l: [ a]\n", "[ a]"),
+            ("l: [ ]\n", "[ ]"),
+            ("l: [ 'x' ,'y' ]\n", "[ 'x' ,'y' ]"),
+            ("l: { a: 1}\n", "{ a: 1}"),
+            ("l: { }\n", "{ }"),
+        ] {
+            let index = SyntaxIndex::parse(source).unwrap();
+            let collection = index
+                .nodes()
+                .iter()
+                .find(|node| node.collection_style.is_some() && node.span.start == 3)
+                .expect("the value collection");
+            assert_eq!(
+                collection.collection_style,
+                Some(CollectionStyle::Flow),
+                "{source:?}"
+            );
+            assert_eq!(collection.span.slice(source), Some(wanted), "{source:?}");
+        } // End of the loop over the padded shapes
+        for source in ["[a]: b\n", "{a: 1}: b\n"] {
+            let index = SyntaxIndex::parse(source).unwrap();
+            let root = index
+                .nodes()
+                .iter()
+                .find(|node| node.kind == NodeKind::Mapping && node.span.start == 0)
+                .expect("the root mapping");
+            assert_eq!(
+                root.collection_style,
+                Some(CollectionStyle::Block),
+                "{source:?}"
+            );
+        } // End of the loop over the block mappings with a flow first key
+    } // End of function a_bracket_followed_by_spaces_still_opens_a_flow_collection()
 
     #[test]
     fn a_block_collection_ends_where_its_last_child_ends_not_at_the_next_token() {
