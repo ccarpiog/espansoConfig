@@ -5261,3 +5261,14 @@ After the review fix (comments only): `npm run check` exit 0 (462, 0/0) and `npm
 - `npm run check > /private/tmp/2d7-5-orch-check.log`: exit 0, 462 files, 0 errors, 0 warnings.
 - `/private/tmp/2d7-5-cargo.log`: 26 `test result: ok` lines, no failure line.
 - The review fix touched only the two records; `git status --short` showed no tracked source change.
+
+
+### Phase 2d-7-6-1's verification block — archived 2026-09-23 at 2d-7-7
+
+**`1330 / 462 / 3547 / 201`**, unchanged (no tracked source changed). The worker ran every `CLAUDE.md` §4 gate with the instrument present, each exit 0: `cargo fmt --check`; clippy `-D warnings`; `cargo test --workspace -- --test-threads=1 > /private/tmp/2d7-6-1-cargo.log` (1330 passed); `npm run check` (462, 0/0); `npm test` (3547); `npm run build` (201; server oracle absent, client oracle 2). Instrument hashes 18/18 equal the frozen set at 11:06 and 11:18. The orchestrator re-ran, alone, after the worker:
+- `shasum -a 256` of `src-tauri/src/main.rs`, `src/main.ts`, `src-tauri/src/probe.rs`, `src/probe.ts` and `launch-7.sh`: each equal to `/private/tmp/2d7-instrument-reviewed/SHA256SUMS`.
+- `git diff --stat src-tauri/src/main.rs src/main.ts`: `5 insertions(+), 1 deletion(-)`.
+- `npm test`: exit 0, `Tests 3547 passed (3547)`.
+- `/private/tmp/2d7-6-1-cargo.log`: 26 `test result: ok` lines, every one `0 failed`.
+- The review fix touched only the two new records; no gate re-run was owed.
+- The owner-ruling commit of 2026-09-23 touched records only (the notes, this checkpoint pair, the archive); no gate re-run was owed.
