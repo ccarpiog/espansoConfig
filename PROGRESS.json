@@ -655,7 +655,8 @@
    "risk": "high",
    "summary": "Draws the reconciliation states in the shell, sidebar and detail pane, wires the five exits, and marks a file stale after a refused save; rung 1323/456/3280/198.",
    "review": "docs/reviews/phase-2d-6-9b-1.md — fallback agent (Codex malformed), ship-with-fixes, 0 blockers, 2 SHOULD-FIX, both fixed",
-   "narrative": "docs/decisions/2d-6-9b-1-notes.md"
+   "narrative": "docs/decisions/2d-6-9b-1-notes.md",
+   "commit": "2cf57ca"
   },
   {
    "id": "2d-6-9b-2",
