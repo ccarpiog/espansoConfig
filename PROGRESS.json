@@ -612,7 +612,8 @@
    "risk": "high",
    "summary": "Draws origin, comparison, notices and the reseed or retarget reload on the raw editor and restore pane, with bilingual mounted tests.",
    "review": "docs/reviews/phase-2d-6-8b.md",
-   "narrative": "docs/decisions/2d-6-8b-notes.md"
+   "narrative": "docs/decisions/2d-6-8b-notes.md",
+   "commit": "d601110"
   },
   {
    "id": "2d-6-8c",
