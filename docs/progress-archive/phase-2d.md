@@ -5217,3 +5217,16 @@ After the review fix (comments only): `npm run check` exit 0 (462, 0/0) and `npm
 - Rust: not re-run (no Rust changed; rung's Rust figure carried from 2d-7-1).
 
 `git diff --stat src-tauri/src/main.rs src/main.ts` still `5 insertions(+), 1 deletion(-)`. `rg -n tSupersededEvidence src/lib/browser/matchEditor.ts` shows one line, stating the accessor has no caller.
+
+
+## Phase 2d-7-3's verification block — archived 2026-09-23 at 2d-7-4-2
+
+#### Phase 2d-7-3's verification
+
+**`1330 / 462 / 3547 / 201`** with the instrument (+7 Rust tests over 2d-7-2, all in the uncommitted `probe.rs`: five at the phase, two at the review fix; no TS changed, so the other three figures are the worker's re-run). The orchestrator re-ran the Rust gates after the review fix, each alone:
+- `cargo fmt --check`: exit 0 **with the instrument present** (the first time since the instrument landed).
+- `cargo clippy --workspace --all-targets -- -D warnings`: exit 0.
+- `cargo test --workspace -- --test-threads=1` (output to a file, then summed): exit 0, 1330 passed, 0 failed.
+- `rg -n "save_document|replace_file_atomically|replace_locked_file|run_one_save|begin_commit|\.setup\(" src-tauri/src/probe.rs`: one hit, the safety doc comment at line 93 (`//!`), no code line.
+- `git diff --stat src-tauri/src/main.rs src/main.ts`: `5 insertions(+), 1 deletion(-)`.
+- Worker-run (no TS changed): `npm run check` exit 0 (0/0), `npm test` exit 0 (3547), `npm run build` exit 0 (201 modules); the parity test failing once (exit 101) with `read_backup_text` removed from the probe list, then restored (`cmp` equal).
