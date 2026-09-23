@@ -304,7 +304,8 @@ all of it is in `git log`._
 | **2d-8 — instrument removal and harness-free closure, reviewed (`ship`, Codex, 0 findings) and closed; 2d complete** | `522c9b1` (the SHA record is the commit after it) | ✅ pushed, `051bc0f..522c9b1  main -> main`; tree clean |
 | **3 design consult — records only, reviewed (`ship`, Codex, 0 findings) and closed** | `c89f029` (the SHA record is the commit after it) | ✅ pushed, `a56a69d..c89f029  main -> main`; tree clean |
 | **3-1 — compositional mapping edits and scalar substitution (core), reviewed (`ship`, Codex, 0 findings) and closed** | `9513c5c` | ✅ pushed; tree clean |
-| **3-2 — sequence projection and block scalar-list edits (core), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed** | the commit carrying this row (its SHA is recorded by the next iteration from `git log`) | pushed with it; tree clean after the commit |
+| **3-2 — sequence projection and block scalar-list edits (core), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed** | `8ec005b` | ✅ pushed; tree clean |
+| **3-3 — flow scalar-list cardinality (core), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 2 SHOULD-FIX, both fixed) and closed** | `3cb0098` (this SHA record is the commit after it) | ✅ pushed, `8ec005b..3cb0098  main -> main`; tree clean |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed
