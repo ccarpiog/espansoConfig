@@ -32,6 +32,8 @@
  * helpers here do.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExternalConflictObservation } from '../browser/conflictSource';
@@ -940,3 +942,31 @@ describe('a locale switch on a mounted status panel', () => {
     expect(decideWorkspaceReconciliation(workspaceFactsOf(view.state)).states).toEqual([]);
   });
 }); // End of the locale-switch suite
+
+describe('the region’s height against the panes below it — Phase 2d-6-9c', () => {
+  /**
+   * The body of the component's own `.reconciliation { … }` rule.
+   *
+   * @returns The declarations between the braces, or `''` when the rule is absent.
+   */
+  function regionRule(): string {
+    // From the working directory rather than `import.meta.url`, which is not a
+    // `file:` URL under this suite's jsdom environment.
+    const source = readFileSync(resolve(process.cwd(), 'src/lib/components/ReconciliationStatus.svelte'), 'utf8');
+    const style = source.slice(source.indexOf('<style>'));
+    return /\.reconciliation\s*\{([^}]*)\}/u.exec(style)?.[1] ?? '';
+  } // End of function regionRule()
+
+  // 2d-6-9c's window reading measured the route over the hard fixture at 703 px of
+  // a 728 px window, and the panes below it at 0 px: the sidebar and the pane,
+  // with the pane's reread, drawn nowhere a person could reach (the shell is
+  // `height: 100vh` and `.panes` has `min-height: 0`). jsdom has no layout, so
+  // this pins the rule that prevents it — a bounded height and its own scroll —
+  // and not the layout itself, which only a window shows.
+  it('bounds its own height and scrolls, so an unbounded route cannot squeeze the panes to nothing', () => {
+    const rule = regionRule();
+    expect(rule).toMatch(/max-height:\s*\d+(?:\.\d+)?vh;/u);
+    expect(rule).toMatch(/overflow-y:\s*auto;/u);
+    expect(rule).toMatch(/flex-shrink:\s*0;/u);
+  });
+}); // End of the region-height suite

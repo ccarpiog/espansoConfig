@@ -113,10 +113,18 @@
 
 <style>
   /* Above the panes, full width, and never a fixed height: a banner is a
-     sentence, and the Spanish one is longer (plan section 9). */
+     sentence, and the Spanish one is longer (plan section 9). Bounded, though,
+     and scrolled on its own: the shell is `height: 100vh` and `.panes` has
+     `min-height: 0`, so a route drawing a whole disk snapshot squeezed the
+     sidebar and the pane to no height at all (Phase 2d-6-9c's window reading,
+     703 px of a 728 px window). The bound keeps the panes reachable; it cannot
+     make anything below the fold of this region seen without scrolling it. */
   .reconciliation {
     display: flex;
     flex-direction: column;
+    flex-shrink: 0;
+    max-height: 45vh;
+    overflow-y: auto;
     gap: 0.25rem;
     padding: 0.5rem 1rem;
     border-bottom: 1px solid var(--border);
