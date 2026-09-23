@@ -638,7 +638,8 @@
    "risk": "high",
    "summary": "Decides as values which reconciliation state and exit each file and the workspace show, with EN/ES words; review fixes made the readers reactive.",
    "review": "docs/reviews/phase-2d-6-9a.md",
-   "narrative": "docs/decisions/2d-6-9a-notes.md"
+   "narrative": "docs/decisions/2d-6-9a-notes.md",
+   "commit": "3fdbeae"
   },
   {
    "id": "2d-6-9b",
