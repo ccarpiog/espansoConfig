@@ -747,7 +747,8 @@
    "status": "done",
    "risk": "routine",
    "summary": "Greys disabled status buttons, keeps file names whole in rows, stops the invisible marker wrapping, fixes a false comment and adds Spanish mounted tests.",
-   "review": "docs/reviews/phase-2d-7-2.md"
+   "review": "docs/reviews/phase-2d-7-2.md",
+   "commit": "bf4f5c6"
   },
   {
    "id": "2d-7-3",
