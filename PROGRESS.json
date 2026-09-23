@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T15:37:45Z",
+ "updated": "2026-09-23T15:54:28Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish external-change reconciliation for the espanso config editor, proving it in real-window readings before packaging.",
  "phases": [
@@ -800,9 +800,9 @@
   {
    "id": "2d-7-6",
    "title": "Reading: retention, conflict timing, choices and adoption",
-   "status": "in_progress",
+   "status": "done",
    "risk": "high",
-   "summary": "Cut into 2d-7-6-1 (G2, done on the owner's ruling of 2026-09-23) and 2d-7-6-2 (G3, queued)."
+   "summary": "Cut into 2d-7-6-1 (G2) and 2d-7-6-2 (G3), both closed on owner rulings of 2026-09-23 with their unread rows handed to 2d-7-9 and 2d-7-10."
   },
   {
    "id": "2d-7-6-1",
@@ -817,10 +817,11 @@
   {
    "id": "2d-7-6-2",
    "title": "Reading: conflict choices and adoption arms (G3)",
-   "status": "blocked",
+   "status": "done",
    "risk": "high",
-   "summary": "G3 window reading done and reviewed; one acceptance clause is unmet, so an owner ruling is needed: record the missing choices unread, or revise the instrument.",
+   "summary": "G3 read and reviewed; clause 1 unmet with the frozen instrument, its choices recorded unread by the owner's ruling of 2026-09-23 and handed to 2d-7-9 and 2d-7-10.",
    "review": "docs/reviews/phase-2d-7-6-2.md",
+   "narrative": "docs/decisions/2d-7-6-2-notes.md",
    "commit": "ee4e149"
   },
   {

@@ -111,7 +111,8 @@ each recorded check, visible at each recorded beat, a window at each capture), n
 **Entry 16 / S5:** no per-action no-write claim is made. These are retained plans (2d-7-5 §9).
 
 **One acceptance clause is NOT MET: "each choice read on each family" (clause 1).** Clause 3 is met
-only for what was drawn. §3a says what closing clause 1 needs.
+only for what was drawn. §3a says what closing clause 1 needs, and §3b records the owner's ruling of
+2026-09-23 that closes the step with clause 1 recorded unread.
 
 ### 3a. Disposition of the unmet clause
 
@@ -135,6 +136,22 @@ Clause 1 cannot be met by more launches of the frozen plans. What is missing:
 **The worker judges this an owner decision.** The 2d-7-6-1 ruling covered that step's clauses 2 and 5
 and does not extend to this clause by an agent's reading. The orchestrator decides whether to stop the
 driven run `BLOCKED` on it.
+
+### 3b. The owner's ruling — 2026-09-23
+
+The orchestrator stopped the driven run `BLOCKED` on §3a. The owner ruled option **(a)** in their own
+message, in the interactive session that relaunched the driver. Quoted verbatim, the whole message:
+
+> Unread and close.
+
+**Effect.** Clause 1 stands **NOT MET** by the frozen instrument and its missing choices are
+**recorded unread**: the authored-text reload (both steps), *Keep editing* / *Leave this as it is* on
+every family, copy on the authored-text family and raw's *Copy my text*, and the recovery form's own
+choices. They are handed on as §8 says: to **2d-7-9** (owner-present, where copy under a real gesture
+already sits, entry 20) and to **2d-7-10** (the unread-row inventory, §7 items 1–4). **No instrument
+revision is authorized:** the frozen hashes and entry 6's single instrument review stand, and option
+(b) was not taken. The ruling covers this step's clause 1 only; it is not a standing ruling for
+2d-7-7 or 2d-7-8. 2d-7-6-2 is **closed** on it, and 2d-7-6 with it; the next step is 2d-7-7.
 
 ---
 
@@ -207,7 +224,8 @@ The rung is **`1330 / 462 / 3547 / 201`**, unchanged.
 
 1. **Clause 1's unread choices** (§3a): the authored-text reload, *Keep editing* / *Leave this as it is*
    on every family, copy on authored text and on the raw editor, and the recovery form's own choices.
-   These need an owner decision.
+   These needed an owner decision. **Ruled 2026-09-23 (§3b): recorded unread and handed to 2d-7-9 and
+   2d-7-10; no instrument revision.**
 2. **`alreadyThere` and `refused` are unread**, and the consult's shape for them may not fit the code
    path. In the operation launches the confirming press issued **no command** (reading §4), so the
    install came from the drain's snapshot. A `delay` on `reload_document` would not hold it; a plan that
