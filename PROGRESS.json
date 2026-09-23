@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T00:48:48Z",
+ "updated": "2026-09-23T01:13:17Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -421,7 +421,7 @@
    "id": "2d-6",
    "title": "Components, i18n and mounted evidence",
    "status": "in_progress",
-   "summary": "Eleven steps per its design consult; 2d-6-1 through 2d-6-6 are done, and 2d-6-7 is down to its window reading (7c)."
+   "summary": "Eleven steps per its design consult; 2d-6-1 through 2d-6-7 are done, and 2d-6-8 (raw and restore rendering) is next."
   },
   {
    "id": "2d-6-1",
@@ -555,8 +555,8 @@
   {
    "id": "2d-6-7",
    "title": "Operation-surface rendering",
-   "status": "in_progress",
-   "summary": "Cut into 7a (owed audits and receiver registration), 7b (panel rendering and mounted tests) and 7c (window reading); 7a and 7b done.",
+   "status": "done",
+   "summary": "The delete, move and duplicate panels draw external conflicts in both languages, proved by mounted tests and a window reading (7a, 7b, 7c).",
    "risk": "high"
   },
   {
@@ -582,9 +582,11 @@
   {
    "id": "2d-6-7c",
    "title": "Operation panels' window reading",
-   "status": "queued",
+   "status": "done",
    "risk": "high",
-   "summary": "The delete, move and duplicate panels are read in a real window in English and Spanish, and 2d-6-7's acceptance is checked."
+   "summary": "The delete, move and duplicate panels were read in a real window in English and Spanish, over a hard fixture too; 2d-6-7's acceptance is met.",
+   "review": "docs/reviews/phase-2d-6-7c.md",
+   "narrative": "docs/decisions/2d-6-7c-notes.md"
   },
   {
    "id": "2d-6-8",
@@ -627,7 +629,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 through 2d-6-6 done, 2d-6-7c next); 2d-7 and 2d-8 follow."
+   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 through 2d-6-7 done, 2d-6-8 next); 2d-7 and 2d-8 follow."
   },
   {
    "id": "3",

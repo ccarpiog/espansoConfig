@@ -15390,3 +15390,87 @@ the three authored kinds; 2d-6-7/-8 register the other five, and any remaining h
 and the handoffs before it; the live map is the split record's §7.
 
 
+
+
+## The 2d-6-7b → 2d-6-7c handoff — archived 2026-09-23 at 2d-6-7c
+
+### (was: Next action)
+### Phase 2d-6-7b is complete and CLOSED. The next action is **Phase 2d-6-7c: the operation panels' narrow window reading, and 2d-6-7's whole acceptance checked in one place** — the last third of 2d-6-7.
+
+**The three documents that bind every 2d-6 step, in reading order**:
+[`docs/reviews/phase-2d-6-design.md`](docs/reviews/phase-2d-6-design.md) (the consult; it binds),
+[`docs/decisions/2d-6-split-notes.md`](docs/decisions/2d-6-split-notes.md) (§2 the split — **the `### 2d-6-7` entry and
+*The orchestrator's cut of 2d-6-7* are this step's scope and acceptance**; §3 the binding rulings; §7 the map of handed-on
+items) and [`docs/decisions/2d-6-design-brief.md`](docs/decisions/2d-6-design-brief.md).
+
+**What 2d-6-7a and 2d-6-7b landed — read each record's §1, never re-derive from the code**:
+[`2d-6-7a-notes.md`](docs/decisions/2d-6-7a-notes.md) (the post-commit helper `adoptAfterTheCommit`, the reapply
+rechecks, the three operation receivers registered from `DetailPane.svelte`) and
+[`2d-6-7b-notes.md`](docs/decisions/2d-6-7b-notes.md) (the deleter, mover and duplicator drawing origin, comparison,
+reapply or manual resolution and reload, EN/ES; §3 its acceptance clause by clause; **§4 lists what 7c's window reading
+must look at**; §5 the review's two fixes).
+
+**Executable cold: 2d-6-7c.** Start from the harness and launch recipe of
+[`2d-6-6c-2-window-reading.md`](docs/decisions/2d-6-6c-2-window-reading.md) §2-§3 (harness at
+`/private/tmp/espansoconfig-harness-2d-6-6c-2/`, the uncommitted instrument; one plan per launch into a fresh bundle path,
+language through the picker; WebKit page snapshots if the screen is locked). Read the deleter, the mover and the
+duplicator over a file changed on disk, EN and ES, every drawn sentence matched verbatim against the dictionaries; then
+check 2d-6-7's whole acceptance (bilingual mounted interactions, direct submission refusal, supersession withdrawing the
+warning, the narrow window reading) clause by clause in `docs/decisions/2d-6-7c-notes.md`. Risk **high**. Components: none
+expected (a defect the reading finds is pinned failing-first and fixed in the file it names).
+
+**Open items carried from 7b** (notes §4): the ES close button and the "keep editing" choice on the deleter and
+duplicator both read "Dejarlo como está" while doing different things — 2d-6-11's bilingual wording review; the editor,
+creator and recovery panels share the scroll-priority shape 7b's review fixed on the operation panels (§4 item 8) —
+a later phase takes it deliberately. From 7a §4 item 3: `adoptForReapply` in `reapply.ts` has no production caller;
+deleting it is a later decision.
+
+**Open items carried** (6c-2 notes §5): (1)/(3) repeated "No save was initiated…" clauses — 2d-6-11's wording
+review; (4) the creator draws its reload warning while no reload is offered — 2d-6-11 or later; (5) the editor's and
+creator's choice rows land below the fold after the reveal — new behaviour for a later phase to decide; (3) a real
+copy under a real gesture is not window-established — 2d-7; `recovery.ts`'s stale "Nothing draws this yet". From
+6b §7: (1) raw's `loadDiskVersion` and restore's `reloadTheDiskVersion` read after the post-adoption `current()` —
+fix **before 2d-6-8 registers their receivers**; (3) the eight sessions' doors not re-audited for reads after the
+last `current()`. **2d-8 deletes `/private/tmp/espansoconfig-harness-2d-6-6c-2/`** and the instrument's commands
+`probe_other_writer`, `probe_snapshot`, `probe_snapshot_state`.
+
+**Orchestrator's rulings standing from 1b's close**: (1) the `ReconciliationWorkspace` interface may be widened as
+entries require; (2) the acknowledgement operand stays `ConflictSource` (2d-6-9 draws the exit); (3) the
+`projectionReplaced` refusal at an outlived arrival generation stands (2d-6-9's). The declared hold gap: no hold for
+the three authored kinds; 2d-6-7/-8 register the other five, and any remaining hold is 2d-6-9's.
+
+**Older open items**: archived verbatim in
+[`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The 2d-6-7a → 2d-6-7b handoff"*
+and the handoffs before it; the live map is the split record's §7.
+
+
+#### ⚠️ READ FIRST — the working tree is deliberately NOT clean, and that is not a killed phase
+
+`git status --short --untracked-files=all` shows **four uncommitted instrument paths** — `M
+src-tauri/src/main.rs` and `M src/main.ts` (two hook lines each; `git diff --stat` over the pair is `5
+insertions(+), 1 deletion(-)` and must stay that way), `?? src-tauri/src/probe.rs` and `?? src/probe.ts`.
+**Do not commit them, do not revert them, and do not treat them as unaccounted-for work.** They are the
+temporary window-reading instrument (`CLAUDE.md` §6, *Window readings*); 2d-8 deletes it. 2d-6-6c-2 extended
+`probe.rs`/`probe.ts` (a new `HARNESS_ROOT`, three new commands, WebKit page snapshots —
+[`2d-6-6c-2-window-reading.md`](docs/decisions/2d-6-6c-2-window-reading.md) §2). The driver names them in
+`AUTOCLAUDE_PREFLIGHT_DIRTY`. **Stage by path**: `PROGRESS.md`, `PROGRESS.json`, `docs/`, `src/lib/browser/`,
+`src/lib/i18n/`, `src/lib/ipc/`, and any `src-tauri/` or `src/lib/components/` file **by name** — never
+`src-tauri/src/` as a directory. A new `.ts` module costs one Vite module, a new styled component two — re-derive
+per file. **A worker must never run `git stash`** (a stash that is not popped loses the instrument silently). Say
+so in every worker brief. The screen may be locked during a driven run: 6c-2's reading used WebKit page snapshots
+because screen captures were blank.
+
+#### Open items — the live map is the record's §7
+
+`docs/decisions/2d-6-split-notes.md` §7 states, per item, whether the consult **took it into 2d-6** (obligations
+(1)-(3), open items 5, 6, 8, 9), **deferred it** (1 — the `file:line` drift checker; 7 — the `"permissions": []`
+comment in `main.rs`, 2d-8's; 10 — the `dispose()`-on-close path) or **left it untouched** (0, 2, 3, 4, 11).
+
+#### The rest of the 2d consult, so a step is not invented
+
+**2d-6** (eleven steps; 2d-6-1 … 2d-6-6 closed, 2d-6-7 next), **2d-7** (the reviewed instrument and the bilingual
+WKWebView reading — start from the `fetch` recorder in `src/probe.ts`), **2d-8** (instrument removal and
+harness-free closure; corrects the `main.rs` comment and deletes the harness under `/private/tmp/`).
+---
+
+

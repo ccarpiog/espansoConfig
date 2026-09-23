@@ -5132,3 +5132,17 @@ gate alone with its exit read from a redirected file: `npm run check` gave 449 f
 After the review's fix round the frontend three were measured again: 449 / 0 / 0, **2964 passed** (+4, the
 fix's case), 193 modules, markers the same. No Rust changed in the fix round. The instrument pair diff is still
 `5 insertions(+), 1 deletion(-)`.
+
+
+## Phase 2d-6-7b's verification narrative — archived 2026-09-23 at 2d-6-7c
+
+### (archived) Phase 2d-6-7b's verification: every gate measured by the orchestrator, twice
+
+**`1323 / 449 / 3057 / 193`** at 2d-6-7b, from `1323 / 449 / 2964 / 193`. On the worker's tree, each gate alone with
+its output redirected to a file: `npm run check` 449 files, 0 errors, 0 warnings; `npm test` 3053 passed (65 files);
+`npm run build` 193 modules, server-only markers absent, client-only present (2); `cargo test --workspace --
+--test-threads=1` 1323 passed, 0 failed; clippy `-D warnings` and `cargo fmt --check` exit 0. After the review's fix
+round (one new dictionary key): `npm run check` 449 / 0 / 0, **`npm test` 3057 passed** (+4, the fix's cases),
+`npm run build` 193 modules, markers the same, and `cargo test` re-run for the dictionary contract, 1323 passed, 0
+failed. No Rust source changed. The instrument pair diff is still `5 insertions(+), 1 deletion(-)`.
+
