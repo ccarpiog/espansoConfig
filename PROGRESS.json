@@ -602,7 +602,8 @@
    "risk": "high",
    "summary": "Fixed reads after adoption in the raw and restore reloads and the raw save wrapper, and registered the last two receivers; no new rendering.",
    "review": "docs/reviews/phase-2d-6-8a.md",
-   "narrative": "docs/decisions/2d-6-8a-notes.md"
+   "narrative": "docs/decisions/2d-6-8a-notes.md",
+   "commit": "e9ab39b"
   },
   {
    "id": "2d-6-8b",
