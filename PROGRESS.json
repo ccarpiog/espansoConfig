@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T07:21:29Z",
+ "updated": "2026-09-23T07:52:47Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -753,9 +753,11 @@
   {
    "id": "2d-7-3",
    "title": "The instrument, Rust side",
-   "status": "queued",
+   "status": "done",
    "risk": "high",
-   "summary": "Formats probe.rs, adds a per-command counter and read-only file checks, and fixes the probe's unsafe paths; uncommitted."
+   "summary": "The instrument Rust side: probe.rs formatted, command parity test, dispatch and wake tallies, read-only witness, snapshot token, no-follow locks.",
+   "review": "docs/reviews/phase-2d-7-3.md",
+   "narrative": "docs/decisions/2d-7-3-notes.md"
   },
   {
    "id": "2d-7-4",

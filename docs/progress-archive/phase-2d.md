@@ -5193,3 +5193,16 @@ The orchestrator re-ran each gate after the worker, alone, with output to a file
 
 After the review fix (comments only): `npm run check` exit 0 (462, 0/0) and `npm test` exit 0 (3535). The instrument pair's diff is still `5 insertions(+), 1 deletion(-)`. 2d-6-11a's verification is in its notes.
 
+
+## Phase 2d-7-1's verification block — archived 2026-09-23 at 2d-7-3
+
+**`1323 / 462 / 3539 / 201`** with the instrument (+4 vitest cases over 2d-6-11b; no `.ts` module or component added, so the module count is unchanged). The orchestrator re-ran each gate after the worker, alone, with output to a file, then grepped:
+- `npm test`: exit 0, 3539 passed (72 files).
+- `npm run check`: exit 0, 462 files, 0/0.
+- `npm run build`: exit 0, 201 modules.
+- Bundle oracle: server-only markers absent, client-only markers present (2).
+- `cargo test --workspace -- --test-threads=1`: exit 0, 1323 passed, 0 failed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: exit 0.
+- `cargo fmt --check`: not re-run (no Rust changed; the known failure is only the uncommitted `probe.rs`).
+
+`git diff --stat src-tauri/src/main.rs src/main.ts` still `5 insertions(+), 1 deletion(-)`. The pre-fix failing run (2 failed / 3 passed) is quoted in the notes §4.1.
