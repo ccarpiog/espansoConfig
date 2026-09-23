@@ -133,9 +133,21 @@ export type ExternalDocumentStatus =
        * as a conflict on a revision the window does not show (`BrowserState`'s six
        * save wrappers, which no observation can mark for, since the backend
        * coalesces that reading). **It does not say which**, and a consumer that
-       * needs to know asks the registry rather than this value. A confirmed
-       * `adoptDiskVersion` install clears a mark nothing has written over since its
-       * conflict was registered.
+       * needs to know asks the registry rather than this value.
+       *
+       * **Provenance is a registry question, never a field of this value** —
+       * Phase 2d-7-1's ruling (`docs/decisions/2d-7-1-notes.md` §2). A clear asks
+       * the file's status-write count in `./workspace.svelte.ts` whether anything
+       * has written the status since the cause it answers was taken in, and clears
+       * only a mark nothing has written over since. Four clears ask it: a reread's
+       * installation (since the read began); a confirmed `adoptDiskVersion`
+       * install (since the conflict was registered);
+       * a `writtenHere` release, while the window holds the bytes the dropped
+       * reading names (since the barrier took the reading in); and an automatic
+       * read that ends under an uncertainty hold with its observation neither
+       * installed nor registered, after a projection replaced the one it arrived
+       * at (since that read's own mark). The count says whether a later cause
+       * wrote; it never says who wrote the mark it finds.
        */
       readonly kind: 'stale';
     }
@@ -1267,7 +1279,11 @@ function applyChange(
    * there would say *reconciled* about a window that cannot describe its own
    * membership. No arm here clears one at all any more — the clear moved to the
    * installation itself, in `rereadUnderGuard`, because this guard reached one of
-   * that helper's two callers.
+   * that helper's two callers. Since Phase 2d-7-1 the host clears the mark it
+   * wrote at the request when the read ends under an uncertainty hold with the
+   * projection replaced, and only while that mark is the last status written for
+   * the file — so a refusing arm here that wrote `stale` has moved the count, and
+   * that clear does not reach its mark.
    *
    * **Decision order and write ownership are two different questions, and treating
    * them as one is what Phase 2d-5-4's second review found.** The order above is

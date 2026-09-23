@@ -13115,15 +13115,22 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       state.dispose();
     }); // End of the "registered origin and its exit" case
 
-    it('installs nothing when the hold is established while the automatic read is out', async () => {
-      // **Measured, and it passes before and after this phase.** The read starts
-      // with no hold; an uncertain raw save settles while it is out. That failure
-      // re-adopts the file (`mayHaveWritten`), which replaces its projection, so
-      // `rereadUnderGuard`'s own projection capture refuses the answer before the
-      // host's hold recheck is ever asked. Nothing is installed over the hold —
-      // which is entry 15's property — but no origin is registered either: the
-      // file is left `stale`, held, with nothing to acknowledge. That dead end is
-      // `2d-6-9b-3-notes.md` §6 item 1, pinned here so a fix has to move it.
+    it('installs nothing when the hold is established while the automatic read is out, and leaves the file not stale', async () => {
+      // The read starts with no hold; an uncertain raw save settles while it is
+      // out. That failure re-adopts the file (`mayHaveWritten`), which replaces its
+      // projection, so `rereadUnderGuard`'s own projection capture refuses the
+      // answer before the host's hold recheck is ever asked. Nothing is installed
+      // over the hold — which is entry 15's property — and no origin is
+      // registered, because registering needs the generation the observation
+      // arrived at and the window has since been replaced.
+      //
+      // **Phase 2d-7-1's ruling** (`docs/decisions/2d-7-1-notes.md` §2): this
+      // used to leave the file `stale`, held, with nothing to acknowledge
+      // (`2d-6-9b-3-notes.md` §6 item 1). The mark this read's own arrival wrote
+      // is now cleared, because the window holds no snapshot that could back it —
+      // the observation was neither installed nor registered — and the hold it
+      // leaves standing is the true statement about the file. The file ends not
+      // `stale`, under the hold, exactly as a hold with nothing observed does.
       const held = deferred<CommandResult<DocumentView>>();
       const { state, commands, wake } = await overOneObservedChange(
         (scripted) => ({ ...scripted, reloadDocument: vi.fn(async () => held.promise) }),
@@ -13139,13 +13146,44 @@ describe('what a conflict does to this window, and what only a confirmed reload 
 
       expect(state.scopedMatches.map((match) => match.id.node)).not.toContain(77);
       expect(state.scopedMatches.map((match) => match.id.node)).toEqual(shown);
-      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      expect(state.externalDocumentStatus(2)).toBeNull();
       expect(state.writeOutcomeUncertain(2)).toBe(true);
       expect(state.standingConflictFor(2)).toBeNull();
       expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
       expect(invoked).not.toHaveBeenCalled();
       state.dispose();
     }); // End of the "hold established during the read" case
+
+    it('keeps the mark of a read the projection capture refused when no hold stands', async () => {
+      // **Where Phase 2d-7-1's ruling keeps the mark standing.** The same refusal
+      // as the case above — a committed raw save of this window's replaces the
+      // projection while the automatic read is out — but the write ended on a
+      // named revision, so no hold stands. The mark stays: the person's reread is
+      // its exit (the reread control is offered and not refused), and a
+      // conservative mark with an exit is the over-refusal cost ruling 19 accepts.
+      const held = deferred<CommandResult<DocumentView>>();
+      const { state, commands, wake } = await overOneObservedChange(
+        (scripted) => ({ ...scripted, reloadDocument: vi.fn(async () => held.promise) }),
+        { raws: [RAW_COMMITTED] }
+      );
+      await wake();
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      expect((await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED)).kind).toBe(
+        'sealed'
+      );
+      expect(state.writeOutcomeUncertain(2)).toBe(false);
+
+      held.resolve({ ok: true, value: rereadBaseDocument() });
+      await settleDrains();
+
+      expect(state.scopedMatches.map((match) => match.id.node)).not.toContain(77);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      expect(state.standingConflictFor(2)).toBeNull();
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "no hold keeps the mark" case
 
     it('refuses the installation and registers the observation when the hold is established during the read with the projection unchanged', async () => {
       // **The review's finding (`docs/reviews/phase-2d-6-9b-3.md`), re-derived.**
@@ -13249,6 +13287,209 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       state.dispose();
     }); // End of the "no hold" case
   }); // End of the "entry 15 on the automatic reread" suite
+
+  describe('a stale mark across a writtenHere release — Phase 2d-7-1', () => {
+    /*
+     * `docs/decisions/2d-7-1-notes.md` §2, the ruling on `stale` while a write
+     * surface is open, and `2d-6-11a-notes.md` §5 item 1, the defect it answers: a
+     * reading that arrives behind an open raw editor while its save is out is
+     * marked `stale` by the coordinator (`markStaleWhileOurs` in
+     * `./observationTransitions.ts`), held by the barrier, and then dropped as
+     * `writtenHere` when the save commits on exactly those bytes — and the mark
+     * used to survive the drop, although the window held the bytes the watcher
+     * read.
+     */
+
+    /** The revision the committed save ends on, and the one the reading names. */
+    const WRITTEN: ContentRevision = 'rev-disk';
+
+    /**
+     * The parse a re-read answers once the save has committed.
+     *
+     * @param revision - The revision the parse is of.
+     * @returns The projection.
+     */
+    function writtenProjection(revision: ContentRevision = WRITTEN): DocumentView {
+      return makeDocument({
+        id: 2,
+        relativePath: 'match/base.yml',
+        revision,
+        matches: [makeMatch({ node: 60, document: 2, revision, trigger: ':new', label: 'Written here' })]
+      });
+    } // End of function writtenProjection()
+
+    /** The committed raw save, ending on {@link WRITTEN}. */
+    const COMMITTED_ON_WRITTEN: RawSaveOutcome = {
+      ok: true,
+      value: { ...RAW_COMMITTED_VALUE, revision: WRITTEN },
+      reload: { kind: 'done' }
+    };
+
+    /**
+     * One `Changed` observation of `match/base.yml` naming a chosen disk revision.
+     *
+     * @param sequence - The sequence it was admitted under.
+     * @param diskRevision - The revision the watcher read.
+     * @returns The observation.
+     */
+    function changedAt(sequence: number, diskRevision: ContentRevision): ExternalObservation {
+      const observed = changedObservation(sequence, addressable(2, 'match/base.yml'));
+      if (!('Changed' in observed)) {
+        throw new Error('changedObservation answers a Changed observation');
+      }
+      return { Changed: { ...observed.Changed, disk_revision: diskRevision } };
+    } // End of function changedAt()
+
+    /**
+     * A started state over `match/base.yml` with a raw editor registered over it,
+     * whose transition hands what it is told to `observeExternalChange` exactly as
+     * `DetailPane.svelte`'s does — but only for the sequences `forwarded` names, so
+     * a case can build a reading the barrier never holds.
+     *
+     * @param commands - The boundary, whose drains are already scripted.
+     * @param forwarded - The sequences the transition forwards.
+     * @returns The state, what the surface was told, and the wake.
+     */
+    async function behindAnOpenRawEditor(
+      commands: BrowserCommands,
+      forwarded: readonly number[]
+    ): Promise<{
+      readonly state: BrowserState;
+      readonly told: number[];
+      readonly wake: (newest: number) => Promise<void>;
+    }> {
+      const events = testEvents();
+      const told: number[] = [];
+      const state = createBrowserState(commands, () => undefined, undefined, events.source);
+      state.start();
+      await settleDrains();
+      state.registerWriteSurface({ kind: 'rawEditor', target: { kind: 'document', document: 2 } }, (observation) => {
+        told.push(observation.sequence);
+        if (forwarded.includes(observation.sequence)) {
+          state.observeExternalChange(observation);
+        }
+      });
+      await state.open(null);
+      await settleDrains();
+      state.show({ kind: 'document', id: 2 });
+      return {
+        state,
+        told,
+        wake: async (newest: number) => {
+          events.wake(5, newest);
+          await settleDrains();
+          await settleDrains();
+        }
+      };
+    } // End of function behindAnOpenRawEditor()
+
+    it('clears the mark the held reading wrote when the release drops it as written here', async () => {
+      // **The fix's own case**, shown failing on the unfixed tree first. The
+      // reading's mark is the last status written for the file when the barrier
+      // takes it, nothing writes the status again before the release, and the
+      // window ends holding exactly the revision the reading names — so the window
+      // holds no snapshot newer than its projection, which is what `stale` says.
+      expectDrains([0, 0, 0]);
+      const held = heldRawSave(COMMITTED_ON_WRITTEN, WRITTEN, writtenProjection(), {
+        drains: [
+          reconciliationBatch(),
+          reconciliationBatch(),
+          reconciliationBatch({ newest_sequence: 1, observations: [changedAt(1, WRITTEN)] })
+        ]
+      });
+      const { state, told, wake } = await behindAnOpenRawEditor(held.commands, [1]);
+      const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      await wake(1);
+      expect(told).toEqual([1]);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      expect(state.retainedObservationFor(2)?.sequence).toBe(1);
+
+      held.release();
+      await sending;
+
+      expect(state.retainedObservationFor(2)).toBeNull();
+      expect(state.standingConflictFor(2)).toBeNull();
+      expect(state.scopedDocument?.revision).toBe(WRITTEN);
+      expect(state.externalDocumentStatus(2)).toBeNull();
+      expect(held.commands.reloadDocument).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "writtenHere clears its own mark" case
+
+    it('keeps the mark when the committed save could not be re-read, so the window does not hold the reading’s bytes', async () => {
+      // **Where the ruling keeps the mark: the window does not hold the bytes.** The
+      // save commits on the reading's revision, so the release is still
+      // `writtenHere`, but the re-read after the commit fails and the replaced
+      // projection is dropped rather than replaced. The reading names bytes this
+      // window does not show, and the mark says so.
+      expectDrains([0, 0, 0]);
+      const held = heldRawSave(COMMITTED_ON_WRITTEN, WRITTEN, writtenProjection(), {
+        drains: [
+          reconciliationBatch(),
+          reconciliationBatch(),
+          reconciliationBatch({ newest_sequence: 1, observations: [changedAt(1, WRITTEN)] })
+        ]
+      });
+      let rereadFails = false;
+      const commands: BrowserCommands = {
+        ...held.commands,
+        getDocument: vi.fn(async (id: DocumentId): Promise<CommandResult<DocumentView>> =>
+          rereadFails
+            ? { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } }
+            : held.commands.getDocument(id)
+        )
+      };
+      const { state, wake } = await behindAnOpenRawEditor(commands, [1]);
+      const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      await wake(1);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      rereadFails = true;
+
+      held.release();
+      await sending;
+
+      expect(state.retainedObservationFor(2)).toBeNull();
+      expect(state.views.find((view) => view.id === 2)?.revision).not.toBe(WRITTEN);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "re-read failed keeps the mark" case
+
+    it('keeps a mark written after the reading was held, which is another cause’s', async () => {
+      // **Where the ruling keeps the mark: provenance.** The reading at sequence 1
+      // is held; a later reading at sequence 2, of other bytes, reaches the
+      // coordinator, which marks the file again — and is never held, because this
+      // surface does not forward it. The file's status-write count has moved since
+      // the barrier took the first reading, so the mark standing at the release is
+      // not the one that reading wrote, and it stands: the window was told of a
+      // reading it never installed.
+      expectDrains([0, 0, 0, 1]);
+      const held = heldRawSave(COMMITTED_ON_WRITTEN, WRITTEN, writtenProjection(), {
+        drains: [
+          reconciliationBatch(),
+          reconciliationBatch(),
+          reconciliationBatch({ newest_sequence: 1, observations: [changedAt(1, WRITTEN)] }),
+          reconciliationBatch({ newest_sequence: 2, observations: [changedAt(2, 'rev-later')] })
+        ]
+      });
+      const { state, told, wake } = await behindAnOpenRawEditor(held.commands, [1]);
+      const sending = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      await wake(1);
+      await wake(2);
+      expect(told).toEqual([1, 2]);
+      expect(state.retainedObservationFor(2)?.sequence).toBe(1);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+
+      held.release();
+      await sending;
+
+      expect(state.retainedObservationFor(2)).toBeNull();
+      expect(state.scopedDocument?.revision).toBe(WRITTEN);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "a later mark stands" case
+  }); // End of the "stale mark across a writtenHere release" suite
 }); // End of the "deferred adoption" suite
 
 /**

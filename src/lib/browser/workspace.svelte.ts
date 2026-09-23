@@ -3031,6 +3031,18 @@ interface RetainedObservation {
    * generation they run at (the 2d-6 record's §3 entry 17).
    */
   readonly generation: number;
+  /**
+   * That file's status-write count when the barrier took this observation in —
+   * Phase 2d-7-1, the provenance of the `stale` ruling.
+   *
+   * **What a `writtenHere` release asks to decide whether the mark standing is
+   * this reading's**: an unmoved count means nothing has written the file's status
+   * since the barrier took this reading, so the mark standing is the one its
+   * arrival wrote or one written before it. A moved count means some later cause
+   * wrote it, and that mark stands. It does not say *who* wrote the mark; nothing
+   * does (`ExternalDocumentStatus`'s `stale` carries no cause).
+   */
+  readonly statusWrites: number;
 }
 
 /**
@@ -3662,7 +3674,10 @@ export function createBrowserState(
        *   when its re-adoption installed a parse (a raw save's
        *   `adoptTheReplacedDocument`, or `adoptTheDocumentOnDisk` whose
        *   `get_document` succeeded), `rereadUnderGuard`'s projection capture
-       *   refuses first and **nothing is registered**; when the re-adoption's
+       *   refuses first and **nothing is registered** — and since Phase 2d-7-1
+       *   the mark this read wrote is cleared once the read ends, while it is
+       *   still the last status written for the file (`clearAnUnbackedMark`
+       *   below; `docs/decisions/2d-7-1-notes.md` §2); when the re-adoption's
        *   `get_document` failed, `adoptTheDocumentOnDisk` returns before
        *   `installView`, the projection is unchanged, and this recheck refuses the
        *   install and registers the observation. `workspace.test.ts` holds both.
@@ -3696,17 +3711,26 @@ export function createBrowserState(
         owns: () => boolean,
         observation: ExternalConflictObservation | null
       ): void => {
-        if (owns()) {
+        const marked = owns();
+        if (marked) {
           noteDocumentStatus(document, { kind: 'stale' });
         }
         // The generation this observation arrived at, taken with the mark and
         // before the read: what a registration records (see `rememberTheConflict`).
         const arrival = projectionGenerationOf(document);
+        // The two captures Phase 2d-7-1's clear below is fenced by: the workspace
+        // this read belongs to, and the file's status-write count *including* the
+        // mark just written, so an unmoved count means that mark is still the last
+        // status written for the file.
+        const opened = openGeneration;
+        const markedAt = statusWriteOf(document);
+        let registered = false;
         /**
          * Registers the observation the hold refused, while it still owns the file.
          */
         const registerTheRefused = (): void => {
           if (observation !== null && owns()) {
+            registered = true;
             takeInObservation(document, observation, arrival);
           }
         };
@@ -3729,7 +3753,45 @@ export function createBrowserState(
           }
           return true;
         };
-        void rereadUnderGuard(document, guardAndHold);
+        /**
+         * Clears this read's own mark when the read ended under a hold with nothing
+         * to back it — Phase 2d-7-1's ruling on `2d-6-9b-3-notes.md` §6 item 1.
+         *
+         * Reached after the read has ended, whatever it answered. **Every condition
+         * is on this state's own data**, and together they name the dead end
+         * exactly: the same workspace; this read wrote the mark and it is still the
+         * last status written for the file; the mark is `stale`; the observation
+         * was not registered; the file is under a hold; and a projection is
+         * installed that replaced the one the observation arrived at. Then the
+         * observation was neither installed nor registered — registering it now
+         * would record a generation it never arrived at, which is what
+         * `adoptDiskVersion`'s generation check refuses — so the window holds no
+         * snapshot that could back the mark, and the hold stays as the statement
+         * about the file.
+         *
+         * **What it does not know, stated.** Whether the observation's bytes are
+         * newer than the projection that replaced them: revisions carry no order,
+         * and the re-adoption's read may have been sent before the observation
+         * arrived. The ruling clears without knowing, because under the hold the
+         * window already says it cannot attribute what is on disk, and a mark
+         * nothing can discharge says nothing the hold does not. **Without a hold the
+         * mark stands**: the person's reread is its exit.
+         */
+        const clearAnUnbackedMark = (): void => {
+          if (
+            marked &&
+            !registered &&
+            opened === openGeneration &&
+            statusWriteOf(document) === markedAt &&
+            externalStatuses.find((entry) => entry.document === document)?.status.kind === 'stale' &&
+            uncertainWrites.has(document) &&
+            projectionGenerationOf(document) !== arrival &&
+            viewOf(document) !== undefined
+          ) {
+            noteDocumentStatus(document, null);
+          }
+        }; // End of function clearAnUnbackedMark()
+        void rereadUnderGuard(document, guardAndHold).then(clearAnUnbackedMark);
       }, // End of the coordinator-facing rereadUnderGuard member
       addDocument,
       /**
@@ -4520,6 +4582,14 @@ export function createBrowserState(
    * **with the generation it was held at**, because that reading is the one that is
    * still being kept.
    *
+   * **The status-write count is captured with the arrival generation, and on the
+   * same rule** — Phase 2d-7-1. A reading that replaces what is held records the
+   * count as it stands now, which on the coordinator's path already includes the
+   * `stale` mark its own arrival wrote (`tellTheSurfaceAbout` marks before it
+   * calls the surface that hands the reading here); one that is coalesced away
+   * leaves the held record, count included, untouched, so a mark some other cause
+   * wrote meanwhile is not adopted by a reading that was dropped.
+   *
    * @param document - The file.
    * @param observation - The observation that arrived.
    * @param arrival - That file's projection generation at this arrival.
@@ -4535,10 +4605,54 @@ export function createBrowserState(
       document,
       held !== null && kept === held.observation
         ? held
-        : { observation: kept, generation: arrival }
+        : { observation: kept, generation: arrival, statusWrites: statusWriteOf(document) }
     );
     noticeHolds();
   } // End of function retainObservation()
+
+  /**
+   * Clears the `stale` mark a reading dropped as `writtenHere` leaves behind, when
+   * the window holds that reading's bytes — Phase 2d-7-1's ruling
+   * (`docs/decisions/2d-7-1-notes.md` §2), and `2d-6-11a-notes.md` §5 item 1.
+   *
+   * **Three conditions, each on this state's own data.**
+   * - The file's status is `stale`: an `unavailable` or a `removed` is an
+   *   observation's statement about the file that no write answers.
+   * - The status-write count is still the one captured when the barrier took the
+   *   reading in (`RetainedObservation.statusWrites`). That is the provenance: the
+   *   mark standing is the one the reading's arrival wrote, or one written before
+   *   it, and no later cause has written since. A mark written after it — a later
+   *   reading the barrier never held, a refused save of an overlapping write — is
+   *   that cause's and stands.
+   * - The installed projection is of the revision the write ended on, which is the
+   *   revision the reading names. A write whose re-read failed leaves the window
+   *   without those bytes, and then the mark is true and stands.
+   *
+   * **What it does not know, stated.** The count cannot say *who* wrote a mark
+   * older than the reading; such a mark is cleared too, because the window now
+   * holds the bytes of a reading that arrived after it. Revisions are hashes and
+   * carry no order, so "after" is arrival order in this window — the same inference
+   * {@link BrowserState.adoptDiskVersion}'s own clear makes.
+   *
+   * @param document - The file the write was aimed at.
+   * @param statusWrites - The status-write count captured with the held reading.
+   * @param revision - The revision the write ended on.
+   */
+  function clearTheWrittenReadingsMark(
+    document: DocumentId,
+    statusWrites: number,
+    revision: ContentRevision
+  ): void {
+    const status = externalStatuses.find((entry) => entry.document === document)?.status ?? null;
+    if (
+      status !== null &&
+      status.kind === 'stale' &&
+      statusWriteOf(document) === statusWrites &&
+      viewOf(document)?.revision === revision
+    ) {
+      noteDocumentStatus(document, null);
+    }
+  } // End of function clearTheWrittenReadingsMark()
 
   /**
    * Opens ruling 27's barrier for one file and hands back the one way to close it.
@@ -4657,6 +4771,15 @@ export function createBrowserState(
             // and nothing stands from it, on the same path.
             retainedObservations.delete(document);
             noticeHolds();
+            // **And its `stale` mark cleared where the window holds its bytes** —
+            // Phase 2d-7-1's ruling, before the delivery so that a session told
+            // `writtenHere` reads the settled status. `retained` is never `null`
+            // on this arm and the settlement is always `ended` (`releaseBarrier`
+            // answers `writtenHere` on nothing else); the two checks say so to
+            // the compiler rather than guard anything.
+            if (retained !== null && settlement.kind === 'ended') {
+              clearTheWrittenReadingsMark(document, retained.statusWrites, settlement.revision);
+            }
             deliver(document, writtenHereDelivery(release.observation));
             return;
           case 'arbitrate':
@@ -5231,11 +5354,15 @@ export function createBrowserState(
     // this line at all; an explicit reread reaches it and says only the narrow
     // thing.
     //
-    // **No arm that refuses clears anything**, and moving the clear here is what
-    // makes that structural rather than argued: there is one clear, it is after the
-    // installation, and a refusal returns before it. Both properties survive the
-    // fence below — the clear is still inside the installation block, and the
-    // condition can only ever *suppress* it, never move it to an arm that refused.
+    // **No arm of this helper that refuses clears anything**, and moving the clear
+    // here is what makes that structural rather than argued: there is one clear in
+    // this helper, it is after the installation, and a refusal returns before it.
+    // Both properties survive the fence below — the clear is still inside the
+    // installation block, and the condition can only ever *suppress* it, never
+    // move it to an arm that refused. **One clear outside this helper does follow a
+    // refusal** (Phase 2d-7-1): the coordinator-facing host member's
+    // `clearAnUnbackedMark`, after this helper has returned, only under an
+    // uncertainty hold and only for the mark that member itself wrote.
     //
     // **And it is fenced on the status rather than on the projection**, which the
     // header states at length: an `Unreadable` admitted while this read was out

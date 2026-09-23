@@ -2739,14 +2739,17 @@ describe('the pane as a delivery host for the raw editor and restore — Phase 2
       expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['retained', verdict]);
       if (verdict === 'writtenHere') {
         // **Not news**: nothing stands and the editor draws no external conflict.
-        // The file's `stale` mark is deliberately not asserted: it was written when
-        // the reading arrived behind the open editor, and nothing clears it on a
-        // `writtenHere` release, which Phase 2d-6-11a leaves open rather than pins.
+        // The file's `stale` mark, written when the reading arrived behind the
+        // open editor, is cleared by the release: the window holds the bytes the
+        // reading names (Phase 2d-7-1's ruling, `docs/decisions/2d-7-1-notes.md`).
         expect(pane.state.standingConflictFor(1)).toBeNull();
         expect(isDrawn(pane.target, '.panel.external')).toBe(false);
+        expect(pane.state.externalDocumentStatus(1)).toBeNull();
       } else {
         expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
         expect(isDrawn(pane.target, '.panel.external')).toBe(true);
+        // A reading of other bytes is news: its mark stands beside the conflict.
+        expect(pane.state.externalDocumentStatus(1)).toEqual({ kind: 'stale' });
       }
       expect(pane.commands.saveRawDocument).toHaveBeenCalledTimes(1);
       pane.stop();
