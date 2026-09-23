@@ -870,7 +870,8 @@
    "status": "done",
    "summary": "Deletes the window-reading instrument and harness per the manifest and re-derives every gate harness-free at 1323 / 461 / 3546 / 200.",
    "risk": "routine",
-   "review": "docs/reviews/phase-2d-8.md"
+   "review": "docs/reviews/phase-2d-8.md",
+   "commit": "522c9b1"
   },
   {
    "id": "2d",
