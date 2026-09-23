@@ -121,7 +121,8 @@ read it (reading §7).
 **Entry 23 / §5.8:** nothing was pre-credited. The open-surface refusal belongs to 2d-7-6-2.
 
 **Two of the cut's acceptance requirements are therefore NOT MET: retention (clause 2) and the locale
-switch (clause 5).** The step does not close G2 on them; §3a says what closing them needs.
+switch (clause 5).** The step does not close G2 on them; §3a says what closing them needs, and records
+the owner's ruling of 2026-09-23 that closes the step with both recorded unread.
 
 ### 3a. Disposition of the two unmet requirements
 
@@ -147,8 +148,28 @@ the frozen plans.
 - **An owner ruling** that records both as unread here and hands them on: the visual and locale
   judgements to 2d-7-9 (owner-present), and the unread rows to 2d-7-10's consolidation.
 
-**This is an owner decision.** An agent's message cannot make it. The orchestrator is stopping the
-driven run `BLOCKED` on it. This record makes neither choice.
+**This is an owner decision.** An agent's message cannot make it. The orchestrator stopped the
+driven run `BLOCKED` on it on 2026-09-23. The ruling follows.
+
+#### The owner's ruling — 2026-09-23
+
+The owner ruled option **(a)** in their own message, in the interactive session that relaunched the
+driver. Quoted verbatim, the whole message:
+
+> º1. a)
+> 2. The ruling is that clause 2 and 5 must be recorded unread and handed further down th eline. 2d-7-6-1 should be closed
+>
+>
+> Commit and push. Then, relaunch autoclaude
+
+**Effect.** Clauses 2 and 5 stand **NOT MET** by the frozen instrument and are **recorded unread**.
+What each needs is handed on, not worked around: the per-action no-write witness on all eight surfaces
+and the recovery form's retained field values (clause 2), and the locale switch on the authored-text
+and operation families and the restore pane (clause 5), go to **2d-7-9** for the owner-present
+reading and to **2d-7-10** for the unread-row inventory, together with 2d-7-5's unread rows of the
+same kind (`2d-7-5-notes.md` §9). **No instrument revision is authorized:** the frozen hashes and
+entry 6's single instrument review stand, and option (b) was not taken. 2d-7-6-1 is **closed** on
+this ruling; the next step is 2d-7-6-2 (G3), handoff in §8.
 
 ---
 
@@ -232,9 +253,10 @@ The rung is **`1330 / 462 / 3547 / 201`**, unchanged.
 
    Each needs a new or changed plan, which changes the frozen hashes, and entry 6 allows exactly one
    instrument review. Two of them (the per-action witness and the locale switch) make acceptance
-   clauses 2 and 5 **not met**, and they are the owner decision of §3a, on which the driven run stops
-   `BLOCKED`. The others are classed rows that the acceptance allows as unread. The same kind of
-   question stands open from 2d-7-5 §8 item 1.
+   clauses 2 and 5 **not met**, and they were the owner decision of §3a, on which the driven run
+   stopped `BLOCKED`. **Ruled 2026-09-23 (§3a): recorded unread and handed to 2d-7-9 and 2d-7-10; no
+   instrument revision.** The others are classed rows that the acceptance allows as unread. The same
+   kind of question stood open from 2d-7-5 §8 item 1 and is covered by the same ruling.
 2. **For 2d-7-6-2 (compare on the editor):** `external-editor` prints `--- comparison editor
    draft=drawn disk=absent`. It tests for the marker `beta changed on disk`, which among the landed
    fixtures only `target-changed-r1.yml` holds, while `launch-7.sh` stages the hard set, whose second
