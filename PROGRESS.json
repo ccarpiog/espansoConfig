@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T16:37:50Z",
+ "updated": "2026-09-23T16:38:42Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish external-change reconciliation for the espanso config editor, proving it in real-window readings before packaging.",
  "phases": [
@@ -841,7 +841,8 @@
    "risk": "routine",
    "summary": "G4 read and reviewed (ship): one row held, thirteen unread, the plan-less ones handed to 2d-7-9 and 2d-7-10 under the standing ruling (entry 37).",
    "review": "docs/reviews/phase-2d-7-8.md",
-   "narrative": "docs/decisions/2d-7-8-notes.md"
+   "narrative": "docs/decisions/2d-7-8-notes.md",
+   "commit": "2aa798a"
   },
   {
    "id": "2d-7-9",
