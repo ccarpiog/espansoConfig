@@ -474,7 +474,8 @@ function controlledForeground(): ControlledForeground {
   return {
     source: {
       /**
-       * Registers synchronously, as every real foreground source does.
+       * Registers synchronously, as the contract requires and the DOM source of
+       * `./domForeground.ts` does.
        *
        * @param onForeground - Where a signal goes.
        * @returns The unsubscribe.

@@ -60,14 +60,16 @@
  *   {@link ReconciliationCoordinator.reopenFromRetainedRequest} — which the
  *   window's two guarded request methods call after their own rechecks, and
  *   which no observation ever reaches.
- * - **It runs in the shipped window on three of its four triggers.** Since Phase
+ * - **It is wired in the shipped window on all four of its triggers.** Since Phase
  *   2d-5-7a `AppShell.svelte` builds its state over the real event source of
  *   `src/lib/ipc/events.ts`, calls {@link ReconciliationCoordinator.start} from
  *   `onMount` and returns {@link ReconciliationCoordinator.dispose} as the
  *   cleanup, so registration, a finished open and a current-epoch wake all drain
- *   there. The foreground trigger does not: the shell passes
- *   {@link INERT_FOREGROUND_EVENTS}, because no DOM `visibilitychange`/focus
- *   source exists yet, and that is an open item rather than a design.
+ *   there. Since Phase 2d-6-10 the shell also passes the DOM foreground source of
+ *   `./domForeground.ts` (`visibilitychange` to visible, window `focus`) in place
+ *   of {@link INERT_FOREGROUND_EVENTS}. That a dispatched event requests a drain
+ *   is tested; that WKWebView dispatches one on a real foregrounding is only as
+ *   true as a window reading has seen, and it is a fallback, not a wake.
  *   `createBrowserState`'s *defaults* stay the two inert sources declared below,
  *   so a state built without naming a source still registers nothing.
  *
@@ -434,9 +436,15 @@ export type ForegroundUnsubscribe = () => void;
  *
  * **Synchronous, unlike `subscribe` on the event source.** Ruling 16 requires
  * foreground listeners to be removed *synchronously* on disposal, and an
- * asynchronous registration cannot promise that. Every real implementation this
- * would wrap — `addEventListener`, Tauri's window `onFocusChanged` — registers
- * synchronously too, so nothing is being pretended here.
+ * asynchronous registration cannot promise that. DOM `addEventListener` and
+ * `removeEventListener` are synchronous, which is why the one production source
+ * (`./domForeground.ts`, Phase 2d-6-10) is built on them. **Tauri's window
+ * `onFocusChanged` is not a candidate**: it is `async` and awaits two separate
+ * `listen` calls before it hands back an unlisten (`@tauri-apps/api/window.js`),
+ * so it cannot return an unsubscribe from `subscribe` — this comment claimed the
+ * opposite until the 2d-6 consult's §5.8 found it false. Nothing in TypeScript
+ * stops a source from returning an unsubscribe that defers its real removal; the
+ * type forces only that one is returned.
  */
 export interface ForegroundSource {
   /**

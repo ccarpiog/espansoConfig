@@ -675,3 +675,161 @@ describe('the shell over an emptied workspace — Phase 2d-6-6b', () => {
     }
   ); // End of the "banners over the empty state" case
 }); // End of the describe over an emptied workspace
+
+/**
+ * Overrides what `document.visibilityState` reads, until {@link restoreVisibility}.
+ *
+ * An own property shadowing jsdom's prototype getter, so deleting it restores
+ * jsdom's own answer exactly.
+ *
+ * @param state - What the page should report.
+ */
+function setVisibility(state: DocumentVisibilityState): void {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+} // End of function setVisibility()
+
+/** Removes the override {@link setVisibility} installed, if any. */
+function restoreVisibility(): void {
+  Reflect.deleteProperty(document, 'visibilityState');
+} // End of function restoreVisibility()
+
+/**
+ * Answers the open with an empty workspace and every drain with an empty batch,
+ * so the drain gate opens and a foreground drain reaches the boundary by name.
+ *
+ * @returns Nothing; the answerer is installed on the file's script.
+ */
+function scriptOpenWorkspace(): void {
+  script.current = (command) => {
+    switch (command) {
+      case 'open_workspace':
+        return Promise.resolve(EMPTY_SUMMARY);
+      case 'list_documents':
+        return Promise.resolve([]);
+      case 'drain_external_changes':
+        return Promise.resolve(emptyBatch());
+      default:
+        return Promise.reject(new Error(`this case scripts no answer for ${command}`));
+    }
+  };
+} // End of function scriptOpenWorkspace()
+
+/**
+ * Mounts a shell whose open succeeds and settles its first drain.
+ *
+ * @returns The mounted shell, with the registration's and the open's one drain
+ *   already declared and issued.
+ */
+async function mountOpenShell(): Promise<MountedShell> {
+  scriptOpenWorkspace();
+  const shell = mountShell(false);
+  resolveRegistration(0);
+  expectedInvokes.push(['list_documents', {}], ['drain_external_changes', { afterSequence: 0 }]);
+  await settle();
+  await settle();
+  expect(invoked).toHaveBeenCalledTimes(3);
+  return shell;
+} // End of function mountOpenShell()
+
+describe('the foreground fallback — Phase 2d-6-10', () => {
+  afterEach(() => {
+    restoreVisibility();
+  });
+
+  it('requests a drain on a visibilitychange to visible, and none on one to hidden', async () => {
+    const shell = await mountOpenShell();
+
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await settle();
+    // Hidden asks for nothing: the call list is unchanged.
+    expect(invoked).toHaveBeenCalledTimes(3);
+
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
+    await settle();
+    expect(invoked).toHaveBeenCalledTimes(4);
+    shell.stop();
+  }); // End of the "visibilitychange" case
+
+  it('requests a drain on a window focus', async () => {
+    const shell = await mountOpenShell();
+    window.dispatchEvent(new Event('focus'));
+    expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
+    await settle();
+    expect(invoked).toHaveBeenCalledTimes(4);
+    shell.stop();
+  }); // End of the "focus" case
+
+  it('coalesces a visibilitychange and a focus dispatched in one turn into one drain', async () => {
+    // Both signals dispatched in the same synchronous turn. The adapter calls
+    // the coordinator for each; the coordinator's pump turns the requests into
+    // one physical drain. Signals the host delivers as separate tasks are not
+    // covered by this case and cost a follow-up drain; whether WKWebView
+    // delivers the pair in one task has not been read in a window.
+    const shell = await mountOpenShell();
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('focus'));
+    window.dispatchEvent(new Event('focus'));
+    expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
+    await settle();
+    await settle();
+    expect(invoked).toHaveBeenCalledTimes(4);
+    shell.stop();
+  }); // End of the "coalesce" case
+
+  it('reaches no boundary while the open has left the drain gate closed', async () => {
+    // The default script refuses the open, so the gate stays closed and a
+    // foreground signal is recorded but issues nothing — the file-wide call list
+    // holds only the open.
+    const shell = mountShell();
+    resolveRegistration(0);
+    await settle();
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('focus'));
+    await settle();
+    expect(invoked).toHaveBeenCalledTimes(1);
+    shell.stop();
+  }); // End of the "gate closed" case
+
+  it('adds one listener of each kind on mount and removes exactly those two on unmount', async () => {
+    const pageAdd = vi.spyOn(document, 'addEventListener');
+    const pageRemove = vi.spyOn(document, 'removeEventListener');
+    const viewAdd = vi.spyOn(window, 'addEventListener');
+    const viewRemove = vi.spyOn(window, 'removeEventListener');
+    try {
+      /**
+       * The listeners one spy saw for one event type.
+       *
+       * @param spy - An `addEventListener` or `removeEventListener` spy.
+       * @param type - The event type.
+       * @returns The listener arguments, in call order.
+       */
+      const of = (spy: { mock: { calls: unknown[][] } }, type: string): unknown[] =>
+        spy.mock.calls.filter((call) => call[0] === type).map((call) => call[1]);
+
+      const shell = mountShell();
+      resolveRegistration(0);
+      await settle();
+      const visibility = of(pageAdd, 'visibilitychange');
+      const focus = of(viewAdd, 'focus');
+      expect(visibility).toHaveLength(1);
+      expect(focus).toHaveLength(1);
+      expect(of(pageRemove, 'visibilitychange')).toHaveLength(0);
+      expect(of(viewRemove, 'focus')).toHaveLength(0);
+
+      shell.stop();
+      // Synchronously, on the unmount, and the very functions that were added.
+      expect(of(pageRemove, 'visibilitychange')).toEqual(visibility);
+      expect(of(viewRemove, 'focus')).toEqual(focus);
+    } finally {
+      pageAdd.mockRestore();
+      pageRemove.mockRestore();
+      viewAdd.mockRestore();
+      viewRemove.mockRestore();
+    }
+  }); // End of the "unmount removes both listeners" case
+}); // End of the describe over the foreground fallback

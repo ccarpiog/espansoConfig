@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { INERT_FOREGROUND_EVENTS } from '../browser/reconciliationCoordinator';
+  import { createDomForegroundSource } from '../browser/domForeground';
   import {
     decideShellComposition,
     workspaceBannersDrawnIn,
@@ -39,8 +39,8 @@
    * left to a default — Phase 2d-5-7a.
    *
    * The first three are the same values `createBrowserState` would default to;
-   * they are written out so that the fourth can be, and so that a reader sees
-   * the whole composition in one place. The fourth is the one that matters: it
+   * they are written out so that the fourth and fifth can be, and so that a
+   * reader sees the whole composition in one place. The fourth is the one that matters: it
    * is the first and only production import of `src/lib/ipc/events.ts`, which
    * is what makes Tauri's `listen` reachable from the shipped window and is why
    * `src-tauri/capabilities/default.json` grants `core:event:allow-listen` and
@@ -48,18 +48,21 @@
    * the inert source, on purpose: every suite that builds a state without naming
    * a source must keep registering nothing.
    *
-   * The fifth is deliberately the inert one. No production `ForegroundSource`
-   * exists yet — a DOM `visibilitychange`/focus source is a later phase's, and
-   * would be a module of its own — so in the shipped window the foreground and
-   * resume trigger never asks for a drain; registration, a finished open and a
-   * current-epoch wake are the three that do.
+   * The fifth is the foreground fallback — Phase 2d-6-10: the DOM source of
+   * `../browser/domForeground.ts` over this page's `document` and `window`, which
+   * asks for a drain on a `visibilitychange` that leaves the page visible and on
+   * a window `focus`. Building it registers nothing; `start()` below subscribes
+   * and `dispose()` removes both listeners synchronously. It needs no Tauri
+   * capability. A mounted test proves a dispatched event requests a drain; it
+   * cannot prove WKWebView dispatches one when the application really comes
+   * forward — that is the window reading's, and only as far as it saw.
    */
   const browser = createBrowserState(
     REAL_COMMANDS,
     reportIpcFailure,
     REAL_BACKUP_COMMANDS,
     REAL_RECONCILIATION_EVENTS,
-    INERT_FOREGROUND_EVENTS
+    createDomForegroundSource(document, window)
   );
 
   onMount(() => {
@@ -83,7 +86,7 @@
     void browser.open(null);
     // **The disposal is what makes `dispose()` a disposal rather than an unused
     // method.** Svelte runs the function `onMount` returns when this component
-    // is destroyed; the coordinator then removes the foreground listener
+    // is destroyed; the coordinator then removes the two foreground listeners
     // synchronously and calls the held unlisten exactly once — and a
     // registration still in flight at that moment is ended by the coordinator
     // when it resolves (ruling 16), which is nothing this host has to do.

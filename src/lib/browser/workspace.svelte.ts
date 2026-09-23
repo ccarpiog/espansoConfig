@@ -2762,8 +2762,9 @@ export interface BrowserState {
    * two `onMount`s must not end up with two subscriptions.
    *
    * **The one production caller is `AppShell.svelte`'s `onMount`** — Phase
-   * 2d-5-7a — which calls it before `open(null)` over the real event source and
-   * the inert foreground source, and returns {@link BrowserState.dispose} as its
+   * 2d-5-7a — which calls it before `open(null)` over the real event source and,
+   * since Phase 2d-6-10, the DOM foreground source of `./domForeground.ts`, and
+   * returns {@link BrowserState.dispose} as its
    * cleanup. Both injected sources still *default* to the inert ones in
    * `./reconciliationCoordinator.ts`, so a state built without naming a source
    * registers nothing. Nothing in TypeScript makes a host call this, or call
@@ -3119,8 +3120,8 @@ const ALWAYS_PERMITTED = (): boolean => true;
  *   naming a source keeps registering nothing.
  * @param foreground - Where a foreground or resume signal arrives — Phase
  *   2d-5-3. Defaults to the inert source, which registers a real handler that
- *   nothing ever calls — and `AppShell.svelte` passes that same inert source
- *   deliberately, because no DOM source exists yet. Its type names neither the
+ *   nothing ever calls; `AppShell.svelte` passes the DOM source of
+ *   `./domForeground.ts` explicitly (Phase 2d-6-10). Its type names neither the
  *   DOM nor Tauri, exactly as `ReconciliationEventSource` does not.
  * @returns Reactive state a component can read directly.
  */
