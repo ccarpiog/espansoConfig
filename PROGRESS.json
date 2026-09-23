@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-23T23:36:55Z",
+  "updated": "2026-09-23T23:37:07Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -962,7 +962,8 @@
       "risk": "high",
       "summary": "Draws the widened editor, textual option groups, switch preview and confirmation and the cursor action, with 21 new EN and ES strings.",
       "review": "docs/reviews/phase-3-5-2-1.md",
-      "narrative": "docs/decisions/3-5-2-1-notes.md"
+      "narrative": "docs/decisions/3-5-2-1-notes.md",
+      "commit": "adf1012"
     },
     {
       "id": "3-5-2-2",
