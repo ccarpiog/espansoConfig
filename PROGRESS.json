@@ -674,7 +674,8 @@
    "status": "done",
    "risk": "high",
    "summary": "Refuses the automatic reread of a file under an uncertainty hold and registers the refused observation so it can be acknowledged.",
-   "review": "docs/reviews/phase-2d-6-9b-3.md"
+   "review": "docs/reviews/phase-2d-6-9b-3.md",
+   "commit": "5ff784e"
   },
   {
    "id": "2d-6-9c",
