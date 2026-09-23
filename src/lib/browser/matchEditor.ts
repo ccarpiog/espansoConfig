@@ -2660,9 +2660,11 @@ export type EditorReapplyObstacle =
        * evidence, whichever origin it had (ruling 26; the record's §3 entry 22).
        *
        * Answered by the live standing-origin guard, asked last: the evidence was
-       * assembled, then the window said another origin stands. Rendered through
-       * `tSupersededEvidence`, which says the accepted evidence changed and never
-       * that the disk is newer.
+       * assembled, then the window said another origin stands. Its obstacle key
+       * resolves to `SUPERSEDED_EVIDENCE_KEY`, drawn by `MatchEditor.svelte`
+       * through `tEditorReapplyObstacle` (`tSupersededEvidence` itself has no
+       * caller); the sentence says the accepted evidence changed and never that
+       * the disk is newer.
        */
       readonly kind: 'supersededEvidence';
     }
@@ -3027,7 +3029,7 @@ function unaskedGuard(conflict: ConflictModel<MatchBuffers> | null): StandingOri
  * read through `subjectResolution` — the flexible tier, which is this surface's
  * by ruling 20, and read exactly once. A refused table or row resolves to manual
  * resolution with `tExternalEvidenceRefusal`'s sentence, superseded evidence
- * with `tSupersededEvidence`'s (entry 22). Nothing here is cast: a row is a row
+ * with the `SUPERSEDED_EVIDENCE_KEY` sentence (entry 22). Nothing here is cast: a row is a row
  * and a `ReapplyEvidence` is a `ReapplyEvidence`.
  *
  * @param evidence - What `enterReapply` found the conflict's origin to offer.

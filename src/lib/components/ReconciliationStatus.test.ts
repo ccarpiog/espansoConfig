@@ -1121,3 +1121,48 @@ describe('the region’s height against the panes below it — Phase 2d-6-9c', (
     expect(rule).toMatch(/flex-shrink:\s*0;/u);
   });
 }); // End of the region-height suite
+
+describe('the status controls and the row marks, as styled — Phase 2d-7-2', () => {
+  /**
+   * The body of one rule in a component's own stylesheet.
+   *
+   * A text scan over source: it sees that a rule is written down, not what a
+   * window paints (jsdom has no layout). 2d-7-9 confirms both fixes by eye.
+   *
+   * @param component - The file name under `src/lib/components/`.
+   * @param selector - The rule's selector, written exactly as the stylesheet writes it.
+   * @returns The declarations between the braces, or `''` when the rule is absent.
+   */
+  function ruleOf(component: string, selector: string): string {
+    const source = readFileSync(resolve(process.cwd(), 'src/lib/components', component), 'utf8');
+    const style = source.slice(source.indexOf('<style>'));
+    const start = style.search(new RegExp(`(^|\\n)\\s*${selector.replace(/[.[\]]/gu, '\\$&')}\\s*\\{`, 'u'));
+    if (start < 0) {
+      return '';
+    }
+    const open = style.indexOf('{', start);
+    return style.slice(open + 1, style.indexOf('}', open));
+  } // End of function ruleOf()
+
+  // 2d-6-9c's window reading drew a disabled status control with the colour and
+  // border of an enabled one; the refusal sentence was the only cue (its notes,
+  // section 6 item 1). Each of the three components now mutes a disabled button.
+  it.each(['ReconciliationStatus.svelte', 'FileReconciliationStatus.svelte', 'SnapshotAcknowledgement.svelte'])(
+    '%s draws a disabled control distinctly from an enabled one',
+    (component) => {
+      const enabled = ruleOf(component, 'button');
+      const disabled = ruleOf(component, 'button:disabled');
+      expect(enabled).toMatch(/color:\s*inherit;/u);
+      expect(disabled).toMatch(/color:\s*var\(--muted\);/u);
+    }
+  );
+
+  // The same reading drew `match/other.yml` beside the Spanish row mark as
+  // `match/other.y` / `ml` (section 6 item 2): the unshrinking mark squeezed the
+  // name, which breaks anywhere. The row now wraps, so a mark moves down instead.
+  it('lets a row mark move to its own line rather than break the file name', () => {
+    expect(ruleOf('Sidebar.svelte', '.row')).toMatch(/flex-wrap:\s*wrap;/u);
+    expect(ruleOf('Sidebar.svelte', '.mark')).toMatch(/flex:\s*0 0 auto;/u);
+    expect(ruleOf('Sidebar.svelte', '.name')).toMatch(/flex:\s*1 1 auto;/u);
+  });
+}); // End of the styled-controls suite

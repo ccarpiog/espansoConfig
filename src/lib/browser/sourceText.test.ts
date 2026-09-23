@@ -429,6 +429,16 @@ describe('the source of the component that renders these segments', () => {
     expect(source).toContain('overflow-x: auto;');
   });
 
+  it('keeps an invisible-character marker on one visual line', () => {
+    // The marker is prose, so its whitespace collapses, but a wrap between its
+    // words would break a file line in two (the 2d-6-8c notes, section 4 item 1).
+    // The marker's rule is sliced out so the assertion is about that rule alone.
+    const rule = source.slice(source.indexOf('.invisible {'));
+    const body = rule.slice(0, rule.indexOf('}'));
+    expect(body).toContain('white-space: nowrap;');
+    expect(body).not.toContain('white-space: normal;');
+  });
+
   it('opens the container with no whitespace of its own before the file’s text', () => {
     // `white-space: pre` preserves everything inside the container, so a newline
     // written here for legibility would be a newline the file does not have.

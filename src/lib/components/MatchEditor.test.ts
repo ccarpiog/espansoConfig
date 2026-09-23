@@ -627,10 +627,12 @@ function mountEditor(
  *
  * @param target - Where the component was mounted.
  * @param field - Which field.
+ * @param lang - The language the field's label is drawn in; English unless a case
+ *   runs in another.
  * @returns That field's block.
  */
-function blockOf(target: HTMLElement, field: EditableField): HTMLElement {
-  const label = DICTIONARIES.en[detailFieldKey(fieldLabelName(field))];
+function blockOf(target: HTMLElement, field: EditableField, lang: Locale = 'en'): HTMLElement {
+  const label = DICTIONARIES[lang][detailFieldKey(fieldLabelName(field))];
   for (const element of target.querySelectorAll('.field')) {
     if (
       element instanceof HTMLElement &&
@@ -651,13 +653,15 @@ function blockOf(target: HTMLElement, field: EditableField): HTMLElement {
  *
  * @param target - Where the component was mounted.
  * @param field - Which field.
+ * @param lang - The language the field's label is drawn in.
  * @returns The control, or `null`.
  */
 function boxFor(
   target: HTMLElement,
-  field: EditableField
+  field: EditableField,
+  lang: Locale = 'en'
 ): HTMLInputElement | HTMLTextAreaElement | null {
-  const box = blockOf(target, field).querySelector('input, textarea');
+  const box = blockOf(target, field, lang).querySelector('input, textarea');
   return box instanceof HTMLInputElement || box instanceof HTMLTextAreaElement ? box : null;
 } // End of function boxFor()
 
@@ -666,10 +670,15 @@ function boxFor(
  *
  * @param target - Where the component was mounted.
  * @param field - Which field.
+ * @param lang - The language the field's label is drawn in.
  * @returns The control.
  */
-function box(target: HTMLElement, field: EditableField): HTMLInputElement | HTMLTextAreaElement {
-  const found = boxFor(target, field);
+function box(
+  target: HTMLElement,
+  field: EditableField,
+  lang: Locale = 'en'
+): HTMLInputElement | HTMLTextAreaElement {
+  const found = boxFor(target, field, lang);
   if (found === null) {
     throw new Error(`this case is about a field that is drawn as a control: ${field}`);
   }
@@ -685,9 +694,10 @@ function box(target: HTMLElement, field: EditableField): HTMLInputElement | HTML
  * @param target - Where the component was mounted.
  * @param field - Which field.
  * @param text - The whole new value of the control.
+ * @param lang - The language the field's label is drawn in.
  */
-function type(target: HTMLElement, field: EditableField, text: string): void {
-  const control = box(target, field);
+function type(target: HTMLElement, field: EditableField, text: string, lang: Locale = 'en'): void {
+  const control = box(target, field, lang);
   control.value = text;
   control.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
@@ -1360,32 +1370,35 @@ describe('the mounted small editor', () => {
     editor.stop();
   }); // End of the "confirmed reload" case
 
-  it('closes on `alreadyThere`, and closes nothing on `refused`', async () => {
+  it.each(LOCALES)('closes on `alreadyThere`, and closes nothing on `refused` (%s)', async (lang) => {
     // **`alreadyThere` is a success**: the window already holds the bytes that
     // were asked for, and treating it as a failure is the stuck confirmation it
     // was added to prevent. `refused` is the only answer that means the window did
-    // not move, and it leaves the panel where it was.
+    // not move, and it leaves the panel where it was. Run once per locale (Phase
+    // 2d-7-2): the 2d-6-11a notes, section 5 item 4, left this loop EN-only.
+    locale.setOverride(lang);
     for (const [answer, closes] of [
       ['alreadyThere', 1],
       ['installed', 1],
       ['refused', 0]
     ] as const) {
       const editor = mountEditor([{ result: CONFLICTED }], projection(), undefined, answer);
-      type(editor.target, 'replace', 'c');
-      control(editor.target, 'browser.matchEditor.save').click();
+      type(editor.target, 'replace', 'c', lang);
+      pressIn(editor.target, lang, 'browser.matchEditor.save');
       await settle();
-      control(editor.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
+      pressIn(editor.target, lang, conflictChoiceKey('reloadDiskVersion', 'authoredText'));
       flushSync();
-      control(editor.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
+      pressIn(editor.target, lang, conflictChoiceKey('confirmReload', 'authoredText'));
       flushSync();
 
       expect(editor.adoptions, answer).toHaveLength(1);
       expect(editor.closed(), answer).toBe(closes);
       // A refused adoption leaves the conflict on screen rather than reporting a
       // reload that did not happen.
-      expect(says(editor.target, 'browser.saveOutcome.nothingWasWritten'), answer).toBe(
-        closes === 0
-      );
+      expect(
+        (editor.target.textContent ?? '').includes(translate(lang, 'browser.saveOutcome.nothingWasWritten')),
+        answer
+      ).toBe(closes === 0);
       editor.stop();
     } // End of the loop over the three adoption answers
   }); // End of the "three adoption answers" case
@@ -2125,6 +2138,21 @@ function labelledIn(scope: HTMLElement, lang: Locale, key: TranslationKey): HTML
   const label = translate(lang, key);
   return [...scope.querySelectorAll('button')].find((each) => each.textContent?.trim() === label) ?? null;
 } // End of function labelledIn()
+
+/**
+ * Presses the button labelled with one key in one language, insisting it is drawn.
+ *
+ * @param scope - Where to look.
+ * @param lang - The language the case runs in.
+ * @param key - The key holding the label.
+ */
+function pressIn(scope: HTMLElement, lang: Locale, key: TranslationKey): void {
+  const found = labelledIn(scope, lang, key);
+  if (found === null) {
+    throw new Error(`this case needs the control labelled ${translate(lang, key)}`);
+  }
+  found.click();
+} // End of function pressIn()
 
 /**
  * The external conflict's own panel, for the acknowledgement cases.

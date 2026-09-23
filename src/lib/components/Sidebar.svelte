@@ -210,8 +210,17 @@
     padding: 0;
   }
 
+  /* `flex-wrap: wrap` keeps a file name whole: when the name and its marks do
+     not fit on one line, a mark moves to the next line instead of squeezing the
+     name, which `overflow-wrap: anywhere` would then break mid-word (Phase
+     2d-6-9c's window reading drew `match/other.yml` beside the Spanish
+     "Ilegible al observarse" as `match/other.y` / `ml`). A line is collected at
+     the name's unbroken width, so the name breaks only when it alone is wider
+     than the row. The suites pin this rule, not the layout it produces; only a
+     window shows that. */
   .row {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     gap: 0.5rem;
     width: 100%;

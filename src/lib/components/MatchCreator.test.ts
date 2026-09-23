@@ -1158,9 +1158,12 @@ describe('the mounted new-snippet form', () => {
     form.stop();
   }); // End of the "confirmed reload" case
 
-  it('closes on `alreadyThere`, and closes nothing on `refused`', async () => {
+  it.each(LOCALES)('closes on `alreadyThere`, and closes nothing on `refused` (%s)', async (lang) => {
     // **`alreadyThere` is a success**: the window already holds the bytes that
     // were asked for. `refused` is the only answer that means it did not move.
+    // Run once per locale (Phase 2d-7-2): the 2d-6-11a notes, section 5 item 4,
+    // left this loop EN-only.
+    locale.setOverride(lang);
     for (const [answer, closes] of [
       ['alreadyThere', 1],
       ['installed', 1],
@@ -1168,20 +1171,21 @@ describe('the mounted new-snippet form', () => {
     ] as const) {
       const form = mountCreator([{ result: CONFLICTED }], null, undefined, answer);
       fillIn(form);
-      control(form.target, 'browser.matchCreation.create').click();
+      pressIn(form.target, lang, 'browser.matchCreation.create');
       await settle();
-      control(form.target, conflictChoiceKey('reloadDiskVersion', 'authoredText')).click();
+      pressIn(form.target, lang, conflictChoiceKey('reloadDiskVersion', 'authoredText'));
       flushSync();
-      control(form.target, conflictChoiceKey('confirmReload', 'authoredText')).click();
+      pressIn(form.target, lang, conflictChoiceKey('confirmReload', 'authoredText'));
       flushSync();
 
       expect(form.adoptions, answer).toHaveLength(1);
       expect(form.closed(), answer).toBe(closes);
       // A refused adoption leaves the conflict on screen rather than reporting a
       // reload that did not happen.
-      expect(says(form.target, 'browser.saveOutcome.nothingWasWritten'), answer).toBe(
-        closes === 0
-      );
+      expect(
+        (form.target.textContent ?? '').includes(translate(lang, 'browser.saveOutcome.nothingWasWritten')),
+        answer
+      ).toBe(closes === 0);
       form.stop();
     } // End of the loop over the three adoption answers
   }); // End of the "three adoption answers" case
@@ -1780,6 +1784,21 @@ function labelledIn(scope: HTMLElement, lang: Locale, key: TranslationKey): HTML
   const label = translate(lang, key);
   return [...scope.querySelectorAll('button')].find((each) => each.textContent?.trim() === label) ?? null;
 } // End of function labelledIn()
+
+/**
+ * Presses the button labelled with one key in one language, insisting it is drawn.
+ *
+ * @param scope - Where to look.
+ * @param lang - The language the case runs in.
+ * @param key - The key holding the label.
+ */
+function pressIn(scope: HTMLElement, lang: Locale, key: TranslationKey): void {
+  const found = labelledIn(scope, lang, key);
+  if (found === null) {
+    throw new Error(`this case needs the control labelled ${translate(lang, key)}`);
+  }
+  found.click();
+} // End of function pressIn()
 
 /**
  * The external conflict's own panel, for the acknowledgement cases.

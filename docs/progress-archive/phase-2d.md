@@ -5171,3 +5171,25 @@ failed. No Rust source changed. The instrument pair diff is still `5 insertions(
 ### Phase 2d-6-9a's verification
 
 **`1323 / 453 / 3218 / 194`** at 2d-6-9a, with the instrument in the tree. **Orchestrator re-ran after the fix round** (each alone, output to a file, grepped): `npm test` exit 0, 3218 passed (68 files); `npm run check` exit 0, 453 files, 0 errors, 0 warnings; `npm run build` exit 0, 194 modules; the server-only bundle markers absent. No Rust gate run: no Rust changed. The instrument pair diff is still `5 insertions(+), 1 deletion(-)`. The +4 files / +62 tests / +1 module are the new module, its node and jsdom suites and the accessor suite (worker confirmed per file against a pristine `git archive HEAD` copy). 8c's verification narrative is archived in [`phase-2d.md`](docs/progress-archive/phase-2d.md).
+
+## The 2d-7 design consult's and 2d-6-11b's verification blocks — archived 2026-09-23 at 2d-7-2
+
+#### The 2d-7 design consult's verification
+
+Documents only, so no code gate was re-run; the rung is unchanged at **`1323 / 462 / 3535 / 201`**. `git status --short --untracked-files=all` showed only the new `docs/` files, `PROGRESS.json` and the four instrument paths. `git diff --stat src-tauri/src/main.rs src/main.ts` still shows `5 insertions(+), 1 deletion(-)`. The record's worker re-confirmed that `cargo fmt --check` has 10 hunks, all in the uncommitted `probe.rs` (lines 844-966).
+
+#### Phase 2d-6-11b's verification
+
+**`1323 / 462 / 3535 / 201`** at 2d-6-11b with the instrument; **normalized `1323 / 461 / 3534 / 200`** (the instrument's +1 checked file, +1 `ipc-detail` row and +1 module were re-derived from a pristine `git archive HEAD` copy; the Rust share is 0). The comparisons against `1320 / 438 / 2254 / 186` and entry 42's two figures are in the notes §4.
+
+The orchestrator re-ran each gate after the worker, alone, with output to a file, then grepped:
+- `npm test`: exit 0, 3535 passed (72 files).
+- `npm run check`: exit 0, 462 files, 0/0.
+- `npm run build`: exit 0, 201 modules.
+- Bundle oracle: server-only markers absent, client-only markers present (2).
+- `cargo test --workspace -- --test-threads=1`: exit 0, 1323 passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: exit 0.
+- `cargo fmt --check`: **exit 1, only on `src-tauri/src/probe.rs`** (the uncommitted instrument; not committed, deliberately untouched).
+
+After the review fix (comments only): `npm run check` exit 0 (462, 0/0) and `npm test` exit 0 (3535). The instrument pair's diff is still `5 insertions(+), 1 deletion(-)`. 2d-6-11a's verification is in its notes.
+

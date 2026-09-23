@@ -532,75 +532,81 @@ describe('the mounted shell', () => {
 }); // End of the describe over the mounted shell
 
 describe('the shell over an emptied workspace — Phase 2d-6-6b', () => {
-  it('keeps the panes mounted while a surface is open, and gives way once it closes', async () => {
-    // **The 2d-6 record's §3 entry 31 and §5.2.** The empty state used to replace
-    // the panes the moment the last row went, unmounting `DetailPane` and every
-    // session in it. Here the only file is removed on disk while the new-snippet
-    // form is open: the row goes, the form stays, and only closing it lets the
-    // empty state draw.
-    const only = makeSummary({ id: 1, relativePath: 'match/a.yml' });
-    const view = makeDocument({ id: 1, relativePath: 'match/a.yml' });
-    let drained = 0;
-    script.current = (command) => {
-      switch (command) {
-        case 'open_workspace':
-          return Promise.resolve({ ...EMPTY_SUMMARY, documents: 1, match_files: 1 });
-        case 'list_documents':
-          return Promise.resolve([only]);
-        case 'get_document':
-          return Promise.resolve(view);
-        case 'drain_external_changes':
-          drained += 1;
-          return Promise.resolve(
-            drained === 1
-              ? emptyBatch()
-              : {
-                  epoch: 1,
-                  newest_sequence: 1,
-                  observations: [
-                    {
-                      Removed: {
-                        sequence: 1,
-                        document: { Addressable: { document: 1, relative_path: 'match/a.yml' } },
-                        previous_revision: null
+  it.each(['en', 'es'] as const)(
+    'keeps the panes mounted while a surface is open, and gives way once it closes, in %s',
+    async (lang) => {
+      // **The 2d-6 record's §3 entry 31 and §5.2.** The empty state used to replace
+      // the panes the moment the last row went, unmounting `DetailPane` and every
+      // session in it. Here the only file is removed on disk while the new-snippet
+      // form is open: the row goes, the form stays, and only closing it lets the
+      // empty state draw.
+      // Run once per locale (Phase 2d-7-2): the 2d-6-11a notes, section 5 item 4,
+      // left this case EN-only.
+      locale.setOverride(lang);
+      const only = makeSummary({ id: 1, relativePath: 'match/a.yml' });
+      const view = makeDocument({ id: 1, relativePath: 'match/a.yml' });
+      let drained = 0;
+      script.current = (command) => {
+        switch (command) {
+          case 'open_workspace':
+            return Promise.resolve({ ...EMPTY_SUMMARY, documents: 1, match_files: 1 });
+          case 'list_documents':
+            return Promise.resolve([only]);
+          case 'get_document':
+            return Promise.resolve(view);
+          case 'drain_external_changes':
+            drained += 1;
+            return Promise.resolve(
+              drained === 1
+                ? emptyBatch()
+                : {
+                    epoch: 1,
+                    newest_sequence: 1,
+                    observations: [
+                      {
+                        Removed: {
+                          sequence: 1,
+                          document: { Addressable: { document: 1, relative_path: 'match/a.yml' } },
+                          previous_revision: null
+                        }
                       }
-                    }
-                  ],
-                  discarded: 0
-                }
-          );
-        default:
-          return Promise.reject(new Error(`this case scripts no answer for ${command}`));
-      }
-    };
-    const shell = mountShell(false);
-    resolveRegistration(0);
-    await settle();
-    expectedInvokes.push(
-      ['list_documents', {}],
-      ['get_document', { id: 1 }],
-      ['drain_external_changes', { afterSequence: 0 }]
-    );
-    await settle();
-    control(shell.target, 'browser.matchCreation.open').click();
-    flushSync();
-    expect(shell.target.textContent).toContain(DICTIONARIES.en['browser.matchCreation.label']);
+                    ],
+                    discarded: 0
+                  }
+            );
+          default:
+            return Promise.reject(new Error(`this case scripts no answer for ${command}`));
+        }
+      };
+      const shell = mountShell(false);
+      resolveRegistration(0);
+      await settle();
+      expectedInvokes.push(
+        ['list_documents', {}],
+        ['get_document', { id: 1 }],
+        ['drain_external_changes', { afterSequence: 0 }]
+      );
+      await settle();
+      controlIn(shell.target, lang, 'browser.matchCreation.open').click();
+      flushSync();
+      expect(shell.target.textContent).toContain(DICTIONARIES[lang]['browser.matchCreation.label']);
 
-    registration(0).deliver({ event: READY, id: 1, payload: { workspace_epoch: 1, newest_sequence: 1 } });
-    expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
-    await settle();
-    await settle();
+      registration(0).deliver({ event: READY, id: 1, payload: { workspace_epoch: 1, newest_sequence: 1 } });
+      expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
+      await settle();
+      await settle();
 
-    // The last row is gone, and the form is still on screen.
-    expect(shell.target.textContent).not.toContain(DICTIONARIES.en['browser.status.empty.heading']);
-    expect(shell.target.textContent).toContain(DICTIONARIES.en['browser.matchCreation.label']);
+      // The last row is gone, and the form is still on screen.
+      expect(shell.target.textContent).not.toContain(DICTIONARIES[lang]['browser.status.empty.heading']);
+      expect(shell.target.textContent).toContain(DICTIONARIES[lang]['browser.matchCreation.label']);
 
-    control(shell.target, 'browser.matchCreation.close').click();
-    flushSync();
-    expect(shell.target.textContent).toContain(DICTIONARIES.en['browser.status.empty.heading']);
-    expect(shell.target.textContent).not.toContain(DICTIONARIES.en['browser.matchCreation.label']);
-    shell.stop();
-  }); // End of the "emptied workspace" case
+      controlIn(shell.target, lang, 'browser.matchCreation.close').click();
+      flushSync();
+      expect(shell.target.textContent).toContain(DICTIONARIES[lang]['browser.status.empty.heading']);
+      expect(shell.target.textContent).not.toContain(DICTIONARIES[lang]['browser.matchCreation.label']);
+      shell.stop();
+    }
+  ); // End of the "emptied workspace" case
 
   it.each(['en', 'es'] as const)(
     'draws the banners and their reload control over the empty state, and reloads on the press, in %s',

@@ -100,4 +100,10 @@
     background: var(--surface);
     color: inherit;
   }
+
+  /* A disabled control is drawn muted, as the editing surfaces draw theirs, so
+     the refusal sentence below it is not the only sign it cannot be pressed. */
+  button:disabled {
+    color: var(--muted);
+  }
 </style>

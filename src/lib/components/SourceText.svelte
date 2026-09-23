@@ -66,7 +66,12 @@
     border-radius: 4px;
     background: var(--surface);
     color: var(--muted);
-    /* The container preserves whitespace; this marker is prose and must not. */
-    white-space: normal;
+    /* The container preserves whitespace; this marker is prose and must not, so
+       its own spaces collapse. It must not wrap either: a break between the
+       marker's words would start the rest of the file line on a new visual line,
+       which is the false line break the container's rule exists to forbid. The
+       boundaries around the marker take the container's `pre`, which offers no
+       wrap opportunity, so with `nowrap` here nothing in a file line can wrap. */
+    white-space: nowrap;
   }
 </style>

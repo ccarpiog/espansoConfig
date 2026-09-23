@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T07:11:13Z",
+ "updated": "2026-09-23T07:21:29Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -744,9 +744,10 @@
   {
    "id": "2d-7-2",
    "title": "Presentation and comment fixes, ES mounted cases",
-   "status": "queued",
+   "status": "done",
    "risk": "routine",
-   "summary": "Fixes four small drawing and comment defects and adds Spanish versions of two English-only mounted tests."
+   "summary": "Greys disabled status buttons, keeps file names whole in rows, stops the invisible marker wrapping, fixes a false comment and adds Spanish mounted tests.",
+   "review": "docs/reviews/phase-2d-7-2.md"
   },
   {
    "id": "2d-7-3",
