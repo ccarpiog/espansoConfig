@@ -757,7 +757,8 @@
    "risk": "high",
    "summary": "The instrument Rust side: probe.rs formatted, command parity test, dispatch and wake tallies, read-only witness, snapshot token, no-follow locks.",
    "review": "docs/reviews/phase-2d-7-3.md",
-   "narrative": "docs/decisions/2d-7-3-notes.md"
+   "narrative": "docs/decisions/2d-7-3-notes.md",
+   "commit": "73ef08c"
   },
   {
    "id": "2d-7-4",
