@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T09:22:00Z",
+ "updated": "2026-09-23T09:38:22Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Build espansoConfig's external-change reconciliation and verify it in a real window with a reviewed test instrument, EN and ES.",
  "phases": [
@@ -790,9 +790,11 @@
   {
    "id": "2d-7-5",
    "title": "Reading: delivery, watcher and counters",
-   "status": "queued",
+   "status": "done",
    "risk": "high",
-   "summary": "Reads external-change delivery and the file watcher in a real window, EN and ES."
+   "summary": "Reads delivery, the watcher and the counters in a real window; emits equal deliveries, and rows the frozen instrument cannot reach are recorded unread.",
+   "review": "docs/reviews/phase-2d-7-5.md",
+   "narrative": "docs/decisions/2d-7-5-notes.md"
   },
   {
    "id": "2d-7-6",

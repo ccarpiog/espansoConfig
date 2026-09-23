@@ -5230,3 +5230,14 @@ After the review fix (comments only): `npm run check` exit 0 (462, 0/0) and `npm
 - `rg -n "save_document|replace_file_atomically|replace_locked_file|run_one_save|begin_commit|\.setup\(" src-tauri/src/probe.rs`: one hit, the safety doc comment at line 93 (`//!`), no code line.
 - `git diff --stat src-tauri/src/main.rs src/main.ts`: `5 insertions(+), 1 deletion(-)`.
 - Worker-run (no TS changed): `npm run check` exit 0 (0/0), `npm test` exit 0 (3547), `npm run build` exit 0 (201 modules); the parity test failing once (exit 101) with `read_backup_text` removed from the probe list, then restored (`cmp` equal).
+
+## Phase 2d-7-4-1's verification block — archived 2026-09-23 at 2d-7-5
+
+#### Phase 2d-7-4-1's verification
+
+**`1330 / 462 / 3547 / 201`**, unchanged (no tracked source changed). The worker ran every `CLAUDE.md` §4 gate with the instrument present, each exit 0: `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test --workspace -- --test-threads=1` (1330); `npm run check` (462, 0/0); `npm test` (3547); `npm run build` (201; server oracle absent, client oracle present). The orchestrator re-ran, alone:
+- `cargo fmt --check`: exit 0.
+- `cargo test --workspace -- --test-threads=1 > /private/tmp/2d7-4-1-orch-cargo.log`: exit 0, 26 `test result: ok` lines summing to 1330 passed.
+- `bash -n launch-7.sh`: exit 0, before and after the review fix.
+- `shasum -a 256` of the four instrument paths: equal to the phase-start hashes in notes §0; `launch-7.sh` `aac7c94a…` equals notes §5.
+- `git diff --stat src-tauri/src/main.rs src/main.ts`: `5 insertions(+), 1 deletion(-)`.
