@@ -665,7 +665,8 @@
    "risk": "high",
    "summary": "Each write panel draws the snapshot acknowledgement from its own conflict source, EN and ES; the doubly drawn held/uncertain sentences removed; rung 1323/457/3357/200.",
    "review": "docs/reviews/phase-2d-6-9b-2.md — fallback agent (Codex usage limit), ship-with-fixes, 0 blockers, 1 SHOULD-FIX, fixed",
-   "narrative": "docs/decisions/2d-6-9b-2-notes.md"
+   "narrative": "docs/decisions/2d-6-9b-2-notes.md",
+   "commit": "5b24da5"
   },
   {
    "id": "2d-6-9b-3",
