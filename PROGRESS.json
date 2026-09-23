@@ -586,7 +586,8 @@
    "risk": "high",
    "summary": "The delete, move and duplicate panels were read in a real window in English and Spanish, over a hard fixture too; 2d-6-7's acceptance is met.",
    "review": "docs/reviews/phase-2d-6-7c.md",
-   "narrative": "docs/decisions/2d-6-7c-notes.md"
+   "narrative": "docs/decisions/2d-6-7c-notes.md",
+   "commit": "41cf680"
   },
   {
    "id": "2d-6-8",
