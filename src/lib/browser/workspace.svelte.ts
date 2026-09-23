@@ -3629,20 +3629,90 @@ export function createBrowserState(
        * {@link ExternalDocumentStatus} is a code about this window's knowledge, not
        * about the engine's refusal. Nothing draws either today; 2d-6 does.
        *
+       * **Refused outright under an uncertainty hold, and the observation
+       * registered instead** — Phase 2d-6-9b-3, the orchestrator's ruling on the
+       * 2d-6 record's §3 entry 15 (*the hold blocks automatic rereading after its
+       * surface closes — per file, never dependent on a mounted panel*). Until this
+       * phase the hold was asked only by {@link BrowserState.requestFileReread}, and
+       * a drained observation with no surface over a held file was read and
+       * installed while `writeOutcomeUncertain` stayed `true`. Now:
+       * - **at the request**, after the `stale` mark, a held file sends no
+       *   `reload_document`: the refusal costs no command;
+       * - **at the installation**, after the caller's `guard` and in the same
+       *   synchronous block as `installView`, the hold is asked again (entry 32's
+       *   rule). Whether a hold established while the read is out reaches this
+       *   question depends on whether the settling write replaced the projection:
+       *   when its re-adoption installed a parse (a raw save's
+       *   `adoptTheReplacedDocument`, or `adoptTheDocumentOnDisk` whose
+       *   `get_document` succeeded), `rereadUnderGuard`'s projection capture
+       *   refuses first and **nothing is registered**; when the re-adoption's
+       *   `get_document` failed, `adoptTheDocumentOnDisk` returns before
+       *   `installView`, the projection is unchanged, and this recheck refuses the
+       *   install and registers the observation. `workspace.test.ts` holds both.
+       *
+       * **Either refusal registers the refused observation** through
+       * {@link takeInObservation} — the barrier, or `observeExternalChange`'s own
+       * arbitration at the generation the observation arrived at — so a `stale`
+       * file under the hold has an origin to acknowledge (the ruling's *keeps an
+       * exit*: acknowledge, then read again through `requestFileReread`). The
+       * arbitration still decides: an observation of the bytes the standing origin
+       * already carries coalesces into it (ruling 25) and registers nothing new.
+       * Registration is fenced by `owns`, asked again, so an observation a newer
+       * one has overtaken is not made to stand. **Nothing here forces
+       * `observation` to be the one this read answers**: it is a parameter, and
+       * `applyChange` in `./observationTransitions.ts` is the one caller.
+       *
+       * **The manual path is untouched**: `requestFileReread` and
+       * {@link BrowserState.rereadDocument} call the private helper directly and
+       * never pass through this member.
+       *
        * @param document - The file.
        * @param guard - Asked immediately before the installation.
        * @param owns - Asked immediately before the initial mark; `false` writes no
-       *   status at all.
+       *   status at all. Asked again before a refused observation is registered.
+       * @param observation - The observation this read answers; `null` registers
+       *   nothing when the hold refuses.
        */
       rereadUnderGuard: (
         document: DocumentId,
         guard: () => boolean,
-        owns: () => boolean
+        owns: () => boolean,
+        observation: ExternalConflictObservation | null
       ): void => {
         if (owns()) {
           noteDocumentStatus(document, { kind: 'stale' });
         }
-        void rereadUnderGuard(document, guard);
+        // The generation this observation arrived at, taken with the mark and
+        // before the read: what a registration records (see `rememberTheConflict`).
+        const arrival = projectionGenerationOf(document);
+        /**
+         * Registers the observation the hold refused, while it still owns the file.
+         */
+        const registerTheRefused = (): void => {
+          if (observation !== null && owns()) {
+            takeInObservation(document, observation, arrival);
+          }
+        };
+        if (uncertainWrites.has(document)) {
+          registerTheRefused();
+          return;
+        }
+        /**
+         * The caller's guard, then the hold asked again at the installation.
+         *
+         * @returns `true` when the answer may be installed.
+         */
+        const guardAndHold = (): boolean => {
+          if (!guard()) {
+            return false;
+          }
+          if (uncertainWrites.has(document)) {
+            registerTheRefused();
+            return false;
+          }
+          return true;
+        };
+        void rereadUnderGuard(document, guardAndHold);
       }, // End of the coordinator-facing rereadUnderGuard member
       addDocument,
       /**
@@ -4244,8 +4314,11 @@ export function createBrowserState(
    * its file — Phase 2d-6-1b, the 2d-6 record's §3 entries 2 and 4.
    *
    * **The one caller of {@link arbitrateHere}, and the one path every verdict
-   * travels**: the public `observeExternalChange`, the lease's settlement in
-   * {@link beginWrite} and the person's `retryRetainedObservation` all end here,
+   * travels**: the public `observeExternalChange`, the coordinator's automatic
+   * reread refused under an uncertainty hold (both through
+   * {@link takeInObservation}, the second since Phase 2d-6-9b-3), the lease's
+   * settlement in {@link beginWrite} and the person's `retryRetainedObservation`
+   * all end here,
    * so a session is told about a settlement on the same path it was told the
    * observation was held on, and no arbitration is decided and discarded. It adds
    * no rule of its own.
@@ -4265,6 +4338,44 @@ export function createBrowserState(
     deliver(document, delivery);
     return delivery;
   } // End of function arbitrateAndDeliver()
+
+  /**
+   * Takes one narrowed observation in: held behind a write in flight, or
+   * arbitrated and delivered — the body of {@link BrowserState.observeExternalChange},
+   * shared since Phase 2d-6-9b-3 with the coordinator's refused automatic reread.
+   *
+   * **One rule for both callers**, so an observation the hold kept from being
+   * installed is registered exactly as one a surface handed in would be: behind
+   * ruling 27's barrier when a write is out, and otherwise through
+   * {@link arbitrateAndDeliver}, where ruling 25's coalescing and the standing
+   * origin's sequence still decide whether it becomes the file's origin. It reads
+   * nothing of the observation's itself; the caller took `document` once.
+   *
+   * @param document - The file, taken once by the caller.
+   * @param observation - The narrowed observation.
+   * @param arrival - That file's projection generation when the observation
+   *   arrived.
+   * @returns The envelope that was delivered.
+   */
+  function takeInObservation(
+    document: DocumentId,
+    observation: ExternalConflictObservation,
+    arrival: number
+  ): ObservationDelivery {
+    if ((writesInFlight.get(document) ?? 0) > 0) {
+      // **Ruling 27's barrier.** A write this window started is still out, so what
+      // is on disk cannot be attributed yet: it is held and coalesced with
+      // whatever was already held, and nothing is applied until the write settles.
+      // **Held, and said so** (Phase 2d-6-1b): the receivers over the file get a
+      // `retained` envelope, so a session can say an observation is waiting, and
+      // the settlement that releases it publishes on the same path.
+      retainObservation(document, observation, arrival);
+      const held = retainedDelivery(observation);
+      deliver(document, held);
+      return held;
+    }
+    return arbitrateAndDeliver(document, observation, arrival);
+  } // End of function takeInObservation()
 
   /**
    * Hands one sealed envelope to every receiver registered over one file, in the
@@ -5535,19 +5646,9 @@ export function createBrowserState(
       // the generation a conflict arrived at, and for a retained observation that
       // is this one and not the one its release will run at (finding 1).
       const arrival = projectionGenerationOf(document);
-      if ((writesInFlight.get(document) ?? 0) > 0) {
-        // **Ruling 27's barrier.** A write this window started is still out, so what
-        // is on disk cannot be attributed yet: it is held and coalesced with
-        // whatever was already held, and nothing is applied until the write settles.
-        // **Held, and said so** (Phase 2d-6-1b): the receivers over the file get a
-        // `retained` envelope, so a session can say an observation is waiting, and
-        // the settlement that releases it publishes on the same path.
-        retainObservation(document, observation, arrival);
-        const held = retainedDelivery(observation);
-        deliver(document, held);
-        return held;
-      }
-      return arbitrateAndDeliver(document, observation, arrival);
+      // The barrier, or the arbitration: one private body since Phase 2d-6-9b-3,
+      // shared with the coordinator's refused automatic reread.
+      return takeInObservation(document, observation, arrival);
     }, // End of function observeExternalChange()
 
     registerObservationReceiver(

@@ -1201,13 +1201,16 @@ export function reconciliationControlKey(control: ReconciliationControl): Transl
  *
  * `projectionReplacedExits` says how long the acknowledgement stays disabled when
  * the standing origin is outlived. **Route-only, because the exits differ by
- * placement, measured on the code**: on a surface the next observation of the
- * file is registered as a fresh origin at the current generation and can be
- * acknowledged; on the route no surface receives it, the coordinator's automatic
- * reread installs it instead, and the outlived origin keeps standing — so there
- * the only exits are a later write of this window's that ends on a named revision
- * and `open()`. The refusal's own sentence is shared by both placements and so
- * names no exit.
+ * placement, measured on the code**: on the route there are three — a further
+ * observed change, which since Phase 2d-6-9b-3 the coordinator's automatic reread
+ * refuses under the hold and registers as a fresh origin at the current
+ * generation (until then it installed the change and the outlived origin kept
+ * standing); a later write of this window's that ends on a named revision; and
+ * `open()`. On a surface a later write is not an exit (`SurfaceControlNote`). The
+ * observation exit is an expectation and not a promise: nothing forces a further
+ * change to happen, and one whose bytes are the ones the outlived origin already
+ * carries coalesces into it (ruling 25) and changes nothing. The refusal's own
+ * sentence is shared by both placements and so names no exit.
  */
 export type RouteControlNote = 'projectionReplacedExits';
 

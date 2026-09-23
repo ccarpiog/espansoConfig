@@ -12976,6 +12976,279 @@ describe('what a conflict does to this window, and what only a confirmed reload 
       restore.off();
     }); // End of the "wait during a satisfied adoption carried" case
   }); // End of the "raw editor's and restore's external sessions" suite
+
+  describe('entry 15 on the coordinator’s automatic reread — Phase 2d-6-9b-3', () => {
+    /**
+     * A started state over `match/base.yml`, with the second snippet selected and
+     * the raw viewer showing, whose one wake drains a `Changed` observation of that
+     * file at sequence 1 — `startedWithOneWake`'s shape over a boundary the case
+     * builds, so a case can hold the reread open.
+     *
+     * Three drains are declared: the registration's, the open's and the wake's.
+     *
+     * @param build - Builds the boundary from the scripted one, which already
+     *   carries the three drains.
+     * @param script - The scripted answers, less the drains.
+     * @returns The state, its boundary, and the wake that delivers the batch.
+     */
+    async function overOneObservedChange(
+      build: (scripted: BrowserCommands) => BrowserCommands,
+      script: Script
+    ): Promise<{
+      readonly state: BrowserState;
+      readonly commands: BrowserCommands;
+      readonly wake: () => Promise<void>;
+    }> {
+      expectDrains([0, 0, 0]);
+      const events = testEvents();
+      const commands = build(
+        scriptedCommands({
+          ...script,
+          drains: [
+            reconciliationBatch(),
+            reconciliationBatch(),
+            reconciliationBatch({
+              newest_sequence: 1,
+              observations: [changedObservation(1, addressable(2, 'match/base.yml'))]
+            })
+          ]
+        })
+      );
+      const state = createBrowserState(commands, () => undefined, undefined, events.source);
+      state.start();
+      await settleDrains();
+      await state.open(null);
+      await settleDrains();
+      state.show({ kind: 'document', id: 2 });
+      await state.select(baseDocument().matches[1]!);
+      await state.showFileText(true);
+      return {
+        state,
+        commands,
+        wake: async () => {
+          events.wake(5, 1);
+          await settleDrains();
+          await settleDrains();
+        }
+      };
+    } // End of function overOneObservedChange()
+
+    /**
+     * Drives the one uncertain write that puts `match/base.yml` under the hold, with
+     * no surface registered.
+     *
+     * @param state - The window.
+     */
+    async function holdTheFile(state: BrowserState): Promise<void> {
+      expect(await state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED)).toEqual({
+        kind: 'failed',
+        mayHaveWritten: true
+      });
+      expect(state.writeOutcomeUncertain(2)).toBe(true);
+    } // End of function holdTheFile()
+
+    it('refuses the automatic reread under an uncertainty hold, sending no reload and installing nothing', async () => {
+      // **Entry 15, on the path 2d-6-9b-1 measured open** (`2d-6-9b-1-notes.md` §6
+      // item 1): with the hold standing and no surface over the file, a drained
+      // `Changed` observation used to issue `reload_document` and install the
+      // answer while `writeOutcomeUncertain` stayed `true`.
+      const { state, commands, wake } = await overOneObservedChange((scripted) => scripted, {
+        raws: [WRITE_MAY_HAVE_HAPPENED],
+        reload: { ok: true, value: rereadBaseDocument() }
+      });
+      await holdTheFile(state);
+      const shown = state.scopedMatches.map((match) => match.id.node);
+      await wake();
+
+      expect(commands.reloadDocument).not.toHaveBeenCalled();
+      expect(state.scopedMatches.map((match) => match.id.node)).toEqual(shown);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      expect(state.writeOutcomeUncertain(2)).toBe(true);
+      // The one raw save is the uncertain write that raised the hold; nothing
+      // else wrote.
+      expect(commands.saveRawDocument).toHaveBeenCalledTimes(1);
+      expect(commands.saveMatch).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "refused at the request" case
+
+    it('registers the refused observation as the file’s acknowledgeable origin, and acknowledging it opens the reread', async () => {
+      // **The ruling's second half: the `stale` file keeps an exit.** The refused
+      // observation stands for the file, an acknowledgement can be minted from it,
+      // and once spent the person's reread goes through and clears the mark. The
+      // manual request is refused under the hold exactly as before this phase.
+      const { state, commands, wake } = await overOneObservedChange((scripted) => scripted, {
+        raws: [WRITE_MAY_HAVE_HAPPENED],
+        reload: { ok: true, value: rereadBaseDocument() }
+      });
+      await holdTheFile(state);
+      expect(state.standingConflictFor(2)).toBeNull();
+      await wake();
+
+      const source = state.standingConflictFor(2);
+      expect(source?.kind).toBe('externalChange');
+      if (source?.kind !== 'externalChange') {
+        throw new Error('the refused observation was expected to stand for the file');
+      }
+      expect(source.observation.sequence).toBe(1);
+      expect(source.observation.diskRevision).toBe('rev-disk');
+      expect(state.uncertaintyAcknowledgementEligibility(2)).toEqual({ kind: 'eligible' });
+      expect(await state.requestFileReread(2)).toEqual({
+        kind: 'refused',
+        reason: 'uncertaintyUnresolved',
+        at: 'request'
+      });
+      expect(commands.reloadDocument).not.toHaveBeenCalled();
+
+      const token = state.uncertaintyAcknowledgementFor(source);
+      expect(token).not.toBeNull();
+      expect(state.acknowledgeWriteUncertainty(token!)).toEqual({ kind: 'acknowledged' });
+      expect(state.writeOutcomeUncertain(2)).toBe(false);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+
+      expect(await state.requestFileReread(2)).toEqual({ kind: 'completed' });
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      expect(commands.reloadDocument).toHaveBeenCalledWith(2);
+      expect(state.scopedMatches.map((match) => match.id.node)).toEqual([77]);
+      expect(state.externalDocumentStatus(2)).toBeNull();
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "registered origin and its exit" case
+
+    it('installs nothing when the hold is established while the automatic read is out', async () => {
+      // **Measured, and it passes before and after this phase.** The read starts
+      // with no hold; an uncertain raw save settles while it is out. That failure
+      // re-adopts the file (`mayHaveWritten`), which replaces its projection, so
+      // `rereadUnderGuard`'s own projection capture refuses the answer before the
+      // host's hold recheck is ever asked. Nothing is installed over the hold —
+      // which is entry 15's property — but no origin is registered either: the
+      // file is left `stale`, held, with nothing to acknowledge. That dead end is
+      // `2d-6-9b-3-notes.md` §6 item 1, pinned here so a fix has to move it.
+      const held = deferred<CommandResult<DocumentView>>();
+      const { state, commands, wake } = await overOneObservedChange(
+        (scripted) => ({ ...scripted, reloadDocument: vi.fn(async () => held.promise) }),
+        { raws: [WRITE_MAY_HAVE_HAPPENED] }
+      );
+      const shown = state.scopedMatches.map((match) => match.id.node);
+      await wake();
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      await holdTheFile(state);
+
+      held.resolve({ ok: true, value: rereadBaseDocument() });
+      await settleDrains();
+
+      expect(state.scopedMatches.map((match) => match.id.node)).not.toContain(77);
+      expect(state.scopedMatches.map((match) => match.id.node)).toEqual(shown);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      expect(state.writeOutcomeUncertain(2)).toBe(true);
+      expect(state.standingConflictFor(2)).toBeNull();
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "hold established during the read" case
+
+    it('refuses the installation and registers the observation when the hold is established during the read with the projection unchanged', async () => {
+      // **The review's finding (`docs/reviews/phase-2d-6-9b-3.md`), re-derived.**
+      // A may-have-written delete re-adopts the file through
+      // `adoptTheDocumentOnDisk`, which returns before `installView` when its
+      // `get_document` fails — so the projection is not replaced, the lease's
+      // `close()` still establishes the hold, and the automatic read answering
+      // afterwards passes `stillCurrent()` and reaches the host's installation-time
+      // hold recheck. That recheck refuses the install and registers the
+      // observation.
+      const held = deferred<CommandResult<DocumentView>>();
+      let adoptionFails = false;
+      const { state, commands, wake } = await overOneObservedChange(
+        (scripted) => ({
+          ...scripted,
+          reloadDocument: vi.fn(async () => held.promise),
+          getDocument: vi.fn(async (id: DocumentId): Promise<CommandResult<DocumentView>> =>
+            adoptionFails
+              ? { ok: false, failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } } }
+              : scripted.getDocument(id)
+          )
+        }),
+        { deletes: [WRITE_MAY_HAVE_HAPPENED] }
+      );
+      const shown = state.scopedMatches.map((match) => match.id.node);
+      await wake();
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      expect(state.standingConflictFor(2)).toBeNull();
+
+      adoptionFails = true;
+      expect(
+        (await state.deleteMatch(baseDocument().matches[0]!.id, OPEN_REVISION, NOTHING_ACKNOWLEDGED))
+          .kind
+      ).toBe('failed');
+      expect(state.writeOutcomeUncertain(2)).toBe(true);
+      expect(state.scopedMatches.map((match) => match.id.node)).toEqual(shown);
+
+      held.resolve({ ok: true, value: rereadBaseDocument() });
+      await settleDrains();
+
+      expect(state.scopedMatches.map((match) => match.id.node)).toEqual(shown);
+      expect(state.externalDocumentStatus(2)).toEqual({ kind: 'stale' });
+      const source = state.standingConflictFor(2);
+      expect(source?.kind === 'externalChange' ? source.observation.sequence : null).toBe(1);
+      expect(state.uncertaintyAcknowledgementEligibility(2)).toEqual({ kind: 'eligible' });
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      expect(invoked).not.toHaveBeenCalled();
+      state.dispose();
+    }); // End of the "installation-time refusal" case
+
+    it('lets a further observed change replace an outlived origin on the route, so the acknowledgement is offered again', async () => {
+      // **Why the route's exits note now names an observation.** 9b-1 measured that
+      // on the route the next observation was installed by the automatic reread
+      // and the outlived origin kept standing. Refused and registered now, a
+      // later observation of different bytes supersedes it at the current
+      // projection generation. The outlived origin is reached the 9a review's
+      // way: an observation held during a write that answers `may_have_written`,
+      // whose own re-adoption outlives it.
+      const gate = deferred<void>();
+      const { state, commands, wake } = await overOneObservedChange(
+        (scripted) => ({
+          ...scripted,
+          saveRawDocument: vi.fn(async (...args: Parameters<BrowserCommands['saveRawDocument']>) => {
+            await gate.promise;
+            return scripted.saveRawDocument(...args);
+          })
+        }),
+        { raws: [WRITE_MAY_HAVE_HAPPENED], reload: { ok: true, value: rereadBaseDocument() } }
+      );
+      const saving = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+      expect(state.observeExternalChange({ ...externalObservation(), sequence: 0 }).verdict.kind).toBe(
+        'retained'
+      );
+      gate.resolve();
+      await saving;
+      expect(state.writeOutcomeUncertain(2)).toBe(true);
+      expect(state.uncertaintyAcknowledgementEligibility(2)).toEqual({
+        kind: 'ineligible',
+        reason: 'projectionReplaced'
+      });
+
+      await wake();
+      expect(commands.reloadDocument).not.toHaveBeenCalled();
+      const source = state.standingConflictFor(2);
+      expect(source?.kind === 'externalChange' ? source.observation.sequence : null).toBe(1);
+      expect(state.uncertaintyAcknowledgementEligibility(2)).toEqual({ kind: 'eligible' });
+      state.dispose();
+    }); // End of the "outlived origin replaced" case
+
+    it('still rereads and installs on the automatic path when no hold stands', async () => {
+      // The clean path this phase must not narrow: the same observation, no
+      // uncertain write, one read and one installation, and nothing registered.
+      const { state, commands, wake } = await overOneObservedChange((scripted) => scripted, {
+        reload: { ok: true, value: rereadBaseDocument() }
+      });
+      await wake();
+      expect(commands.reloadDocument).toHaveBeenCalledTimes(1);
+      expect(state.scopedMatches.map((match) => match.id.node)).toEqual([77]);
+      expect(state.externalDocumentStatus(2)).toBeNull();
+      expect(state.standingConflictFor(2)).toBeNull();
+      state.dispose();
+    }); // End of the "no hold" case
+  }); // End of the "entry 15 on the automatic reread" suite
 }); // End of the "deferred adoption" suite
 
 /**

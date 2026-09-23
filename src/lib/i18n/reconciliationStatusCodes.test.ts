@@ -370,10 +370,10 @@ describe('the seven semantic bounds, as literal reviewed wording (entry 40)', ()
 
   it('pin the route’s unknown-outcome sentence: an unknown outcome, never a failure or a success', () => {
     expect(DICTIONARIES.en['browser.externalConflict.route.writeOutcomeUnknown']).toBe(
-      'The outcome of an earlier write to this file is unknown, and the panel it was made from has closed.'
+      'The outcome of an earlier write to this file is unknown, and the panel it was made from has closed. While this stands, a change observed on disk is not loaded into this window on its own.'
     );
     expect(DICTIONARIES.es['browser.externalConflict.route.writeOutcomeUnknown']).toBe(
-      'Se desconoce el resultado de una escritura anterior en este archivo, y el panel desde el que se hizo se ha cerrado.'
+      'Se desconoce el resultado de una escritura anterior en este archivo, y el panel desde el que se hizo se ha cerrado. Mientras siga así, un cambio observado en el disco no se carga en esta ventana por su cuenta.'
     );
   });
 
@@ -411,32 +411,40 @@ describe('the seven semantic bounds, as literal reviewed wording (entry 40)', ()
 }); // End of the "seven semantic bounds" suite
 
 describe('the route’s wording after Phase 2d-6-9b-1', () => {
-  it('pin the exits note: the two exits the route really has, and no observation among them', () => {
-    // Measured, not assumed: with no surface over the file, the coordinator's
-    // automatic reread installs a later observation instead of registering it as an
-    // origin, so on the route a new observation is not an exit.
+  it('pin the exits note: the three exits the route really has, a further observation first', () => {
+    // Measured, not assumed (Phase 2d-6-9b-3): with no surface over the file and
+    // the hold standing, the coordinator's automatic reread is refused and the
+    // observation is registered as an origin at the current projection
+    // generation, so on the route a further observed change is an exit — the
+    // "outlived origin replaced" case in `workspace.test.ts`. Until 9b-3 it was
+    // installed instead, and this note named no observation.
     expect(DICTIONARIES.en['browser.reconciliation.route.projectionReplacedExits']).toBe(
-      'Acknowledging stays unavailable here until a later write to this file from this window ends with a known outcome, or the workspace is reloaded.'
+      'Acknowledging stays unavailable here until a further change to this file is observed, a later write to this file from this window ends with a known outcome, or the workspace is reloaded.'
     );
     expect(DICTIONARIES.es['browser.reconciliation.route.projectionReplacedExits']).toBe(
-      'Aquí el reconocimiento seguirá sin estar disponible hasta que una escritura posterior en este archivo desde esta ventana termine con un resultado conocido o hasta que se recargue el espacio de trabajo.'
+      'Aquí el reconocimiento seguirá sin estar disponible hasta que se observe otro cambio en este archivo, una escritura posterior en este archivo desde esta ventana termine con un resultado conocido o se recargue el espacio de trabajo.'
     );
     for (const locale of LOCALES) {
       expect(
         DICTIONARIES[locale]['browser.reconciliation.route.projectionReplacedExits'].toLowerCase()
-      ).not.toMatch(/observ/);
+      ).toMatch(/observ/);
     }
   });
 
-  it('never claim on the route that the window stops reading the file on its own', () => {
-    // The 9a sentence said so and the automatic path does reread under an
-    // uncertainty hold (`2d-6-9b-1-notes.md`); the claim is gone from both locales.
-    expect(DICTIONARIES.en['browser.externalConflict.route.writeOutcomeUnknown']).not.toMatch(
-      /on its own|again/
+  it('say on the route that an observed change is not loaded on its own while the outcome is unknown', () => {
+    // 9b-1 removed this claim because it was false: the automatic path reread
+    // under an uncertainty hold. Phase 2d-6-9b-3 enforces entry 15 on that path,
+    // so the claim is true again and both locales make it — about loading an
+    // observed change, never about reading the file, since the raw viewer still
+    // reads its own text.
+    expect(DICTIONARIES.en['browser.externalConflict.route.writeOutcomeUnknown']).toMatch(
+      /not loaded into this window on its own/
     );
-    expect(DICTIONARIES.es['browser.externalConflict.route.writeOutcomeUnknown']).not.toMatch(
-      /por su cuenta|vuelve a leer/
+    expect(DICTIONARIES.es['browser.externalConflict.route.writeOutcomeUnknown']).toMatch(
+      /no se carga en esta ventana por su cuenta/
     );
+    expect(DICTIONARIES.en['browser.externalConflict.route.writeOutcomeUnknown']).not.toMatch(/read/);
+    expect(DICTIONARIES.es['browser.externalConflict.route.writeOutcomeUnknown']).not.toMatch(/leer/);
   });
 }); // End of the "route's wording" suite
 

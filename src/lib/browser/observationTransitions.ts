@@ -633,16 +633,32 @@ export interface ReconciliationWorkspace {
    * **Nothing in this type says `owns` really asks about ownership**: it is a
    * `() => boolean`, and a caller passing `() => true` would compile.
    *
+   * **The host refuses the read outright while the file is under an uncertainty
+   * hold, and registers `observation` instead** — Phase 2d-6-9b-3, the 2d-6
+   * record's §3 entry 15 enforced on this path (*the hold blocks automatic
+   * rereading after its surface closes*). The refusal is asked at the request, so
+   * it costs no command, and again after `guard` immediately before the
+   * installation. The refused observation goes through the window's own
+   * arbitration and becomes the file's standing origin where that arbitration
+   * says so, which is what leaves the `stale` file an exit: acknowledge that
+   * snapshot, then read the file again. That is why this member takes the
+   * observation at all. **Nothing in this type makes a host enforce it**; the one
+   * host is `BrowserState`, and `workspace.test.ts` holds it to it.
+   *
    * @param document - The file to read again.
    * @param guard - Asked immediately before the installation; `false` installs
    *   nothing.
    * @param owns - Asked immediately before the initial `stale` mark, in the same
-   *   synchronous block as it; `false` writes no status at all.
+   *   synchronous block as it; `false` writes no status at all. Asked again before
+   *   a refused observation is registered.
+   * @param observation - The narrowed observation this read answers, registered
+   *   when the hold refuses the read; `null` registers nothing.
    */
   rereadUnderGuard(
     document: DocumentId,
     guard: () => boolean,
-    owns: () => boolean
+    owns: () => boolean,
+    observation: ExternalConflictObservation | null
   ): void;
   /**
    * Inserts or replaces one sidebar row by identity.
@@ -817,7 +833,11 @@ export interface ObservationSession {
 export type ObservationOutcome =
   /** A row was inserted or replaced (ruling 30). */
   | 'added'
-  /** A guarded reread was started for a file no open surface may be about. */
+  /**
+   * A guarded reread was requested of the host for a file no open surface may be
+   * about. The host may refuse it under an uncertainty hold (Phase 2d-6-9b-3), so
+   * this names the arm and not a read that was sent.
+   */
   | 'reread'
   /** A write surface may be about the file, so it was told and nothing installed. */
   | 'conflicted'
@@ -1317,7 +1337,14 @@ function applyChange(
   // members and of `writeSurfaceGeneration()` above. It cannot be hoisted to this
   // module, because it belongs in the same synchronous block as the read it
   // describes; so `stillOurs` is handed over and asked there.
-  workspace.rereadUnderGuard(document, guard, stillOurs);
+  //
+  // **The narrowed observation goes with it** — Phase 2d-6-9b-3. The host refuses
+  // the read while the file is under an uncertainty hold and registers this
+  // observation as an origin instead, so it needs the value. It is narrowed here,
+  // as an argument, so that whatever an accessor on the wire content does runs
+  // before the host asks `stillOurs` and not between that question and the
+  // registration it permits.
+  workspace.rereadUnderGuard(document, guard, stillOurs, externalConflictObservationOf(route));
   return 'reread';
 } // End of function applyChange()
 

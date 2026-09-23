@@ -165,7 +165,11 @@ export interface SaveConflictSource {
  * here and nowhere else.
  */
 export interface ExternalChangeConflictSource {
-  /** The watcher observed the file changing while a surface was open over it. */
+  /**
+   * The watcher observed the file changing while a surface was open over it, or —
+   * since Phase 2d-6-9b-3 — while the file was under an uncertainty hold with no
+   * surface open, so the coordinator's automatic reread was refused.
+   */
   readonly kind: 'externalChange';
   /** The narrowed observation, exactly as this window narrowed it. */
   readonly observation: ExternalConflictObservation;

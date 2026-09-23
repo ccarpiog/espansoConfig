@@ -322,7 +322,11 @@ the items handed on to it by name; the acceptance above is checked in full when 
     sub-phase, scheduled after 9b-2 and before 9c so that the window reading reads the enforced
     behaviour. Its own acceptance: a model case shown failing first for the refused reread and
     for the registered origin; the route and acknowledgement drawn for it, EN and ES; and no
-    change to the manual `requestFileReread` path. Record: `2d-6-9b-3-notes.md`.
+    change to the manual `requestFileReread` path. Record: `2d-6-9b-3-notes.md`. **Implemented**
+    in the coordinator host's `rereadUnderGuard` member in `workspace.svelte.ts`: the hold refuses
+    the read at the request and again at the installation, and the refused observation goes
+    through the window's own arbitration (`takeInObservation`). One race is not covered and is
+    that record's §6 item 1.
 - **2d-6-9c — the narrow window reading with one hard fixture (ruling 38), and 2d-6-9's whole
   acceptance checked in one place**, starting from the harness and launch recipe of
   [`2d-6-8c-window-reading.md`](2d-6-8c-window-reading.md). Record: `2d-6-9c-notes.md`.

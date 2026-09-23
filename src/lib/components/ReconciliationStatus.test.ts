@@ -825,6 +825,85 @@ describe.each(LOCALES)('a write panel’s own acknowledgement inside the pane, i
   });
 }); // End of the per-locale panel-acknowledgement suite
 
+describe.each(LOCALES)('an automatic reread refused under the hold, and its exit, in %s — Phase 2d-6-9b-3', (lang) => {
+  beforeEach(() => {
+    locale.setOverride(lang);
+  });
+
+  it('draws the refused observation’s snapshot on the route, and the reread opens once it is acknowledged', async () => {
+    // Entry 15 on the coordinator's automatic path: with the hold standing and no
+    // surface over file 2, a drained change of it is not read; the file is marked
+    // `stale` and the observation stands as the origin the route acknowledges.
+    const transport = events();
+    const changed = {
+      Changed: {
+        sequence: 1,
+        document: { Addressable: { document: 2, relative_path: 'match/b.yml' } },
+        previous_revision: 'rev-a',
+        disk_revision: 'rev-c',
+        content: {
+          Projected: {
+            disk_text: DISK_TEXT,
+            disk: makeDocument({ id: 2, relativePath: 'match/b.yml', revision: 'rev-c' }),
+            findings: [],
+            correspondences: null
+          }
+        }
+      }
+    } as unknown as ExternalObservation;
+    const view = await mountAll(
+      {
+        saves: [Promise.resolve(WRITE_MAY_HAVE_HAPPENED)],
+        batches: [batch(0), batch(0), batch(1, [changed])]
+      },
+      transport
+    );
+    view.state.show({ kind: 'document', id: 2 });
+    await view.state.saveRawDocument(2, 'rev-a', 'matches: []\n', { accepted: [] });
+    transport.wake(1);
+    await settle();
+
+    // Refused: no read was sent, and the hold stands.
+    expect(view.commands.reloadDocument).not.toHaveBeenCalled();
+    expect(view.state.writeOutcomeUncertain(2)).toBe(true);
+    // The route: the unknown outcome, the refused observation's disk text, and an
+    // enabled acknowledgement minted from it.
+    const route = view.status.textContent ?? '';
+    expect(route).toContain(words(lang, 'browser.externalConflict.route.writeOutcomeUnknown'));
+    expect(route).toContain(words(lang, 'browser.reconciliation.route.snapshot'));
+    expect(route).toContain(':disk');
+    const acknowledge = button(view.status, lang, 'browser.externalConflict.action.acknowledgeSnapshot');
+    expect(acknowledge.disabled).toBe(false);
+    // The pane and the row: `stale`, and the reread held by the unknown outcome.
+    expect(view.sidebar.textContent).toContain(words(lang, 'browser.externalDocument.row.stale'));
+    expect(view.pane.textContent).toContain(words(lang, 'browser.externalDocument.stale'));
+    expect(button(view.pane, lang, 'browser.externalDocument.action.reread').disabled).toBe(true);
+    expect(view.pane.textContent).toContain(
+      words(lang, 'browser.reconciliation.refusal.uncertaintyUnresolved')
+    );
+    const before = callCounts(view.commands);
+
+    acknowledge.click();
+    await settle();
+    // The acknowledgement installs nothing and calls no command (entry 14).
+    expect(callCounts(view.commands)).toEqual(before);
+    expect(view.state.writeOutcomeUncertain(2)).toBe(false);
+    expect(view.status.textContent).not.toContain(
+      words(lang, 'browser.externalConflict.route.writeOutcomeUnknown')
+    );
+    const reread = button(view.pane, lang, 'browser.externalDocument.action.reread');
+    expect(reread.disabled).toBe(false);
+
+    reread.click();
+    await settle();
+    expect(view.commands.reloadDocument).toHaveBeenCalledTimes(1);
+    expect(view.commands.reloadDocument).toHaveBeenCalledWith(2);
+    expect(view.state.externalDocumentStatus(2)).toBeNull();
+    expect(view.pane.textContent).not.toContain(words(lang, 'browser.externalDocument.stale'));
+    expect(view.sidebar.textContent).not.toContain(words(lang, 'browser.externalDocument.row.stale'));
+  });
+}); // End of the per-locale refused-automatic-reread suite
+
 describe('a locale switch on a mounted status panel', () => {
   it('changes the words and nothing else: no command, no drain, the same facts', async () => {
     locale.setOverride('en');
