@@ -784,7 +784,8 @@
    "risk": "high",
    "summary": "Finishes probe.ts, runs the five shakedown controls, and passes the one instrument review after fixing its two blockers.",
    "review": "docs/reviews/phase-2d-7-4-2.md",
-   "narrative": "docs/decisions/2d-7-4-2-notes.md"
+   "narrative": "docs/decisions/2d-7-4-2-notes.md",
+   "commit": "3b4e5d3"
   },
   {
    "id": "2d-7-5",
