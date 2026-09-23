@@ -684,7 +684,8 @@
    "risk": "high",
    "summary": "Reads the reconciliation states and exits in a real window, EN and ES, fixes a layout squeeze, and checks 2d-6-9 whole.",
    "review": "docs/reviews/phase-2d-6-9c.md",
-   "narrative": "docs/decisions/2d-6-9c-notes.md"
+   "narrative": "docs/decisions/2d-6-9c-notes.md",
+   "commit": "5aff303"
   },
   {
    "id": "2d-6-10",
