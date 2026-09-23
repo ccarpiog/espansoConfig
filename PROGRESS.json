@@ -820,7 +820,8 @@
    "status": "blocked",
    "risk": "high",
    "summary": "G3 window reading done and reviewed; one acceptance clause is unmet, so an owner ruling is needed: record the missing choices unread, or revise the instrument.",
-   "review": "docs/reviews/phase-2d-7-6-2.md"
+   "review": "docs/reviews/phase-2d-7-6-2.md",
+   "commit": "ee4e149"
   },
   {
    "id": "2d-7-7",
