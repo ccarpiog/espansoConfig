@@ -15557,3 +15557,51 @@ harness-free closure; corrects the `main.rs` comment and deletes the harness und
 **Orchestrator's rulings standing from 1b's close**: (1) the `ReconciliationWorkspace` interface may be widened as entries require; (2) and (3) re-affirmed by 9a (notes).
 
 **Older open items**: archived verbatim in [`next-action-history.md`](docs/progress-archive/next-action-history.md); the live map is the split record's §7.
+
+
+## The 2d-6-11b → 2d-7 design-consult handoff — archived 2026-09-23 at 2d-7-design
+
+Every handed-on item below is mapped by [`2d-7-split-notes.md`](docs/decisions/2d-7-split-notes.md) §7 (taken into a 2d-7 step, deferred to 2d-8, or left for later).
+
+### Phase 2d-6-11b is complete and CLOSED, and with it 2d-6-11 and the whole of 2d-6. The next action is **the 2d-7 design consult**: 2d-7 goes to a design consult before any line of it is written, per the standing rule since 2b-2c.
+
+**Executable cold: the 2d-7 design consult.** 2d-7 is *the reviewed temporary instrument and the bilingual WKWebView reading*. Its scope is `docs/reviews/phase-2d-design.md` item 7 (line ~130): rebuild the harness only after its own review, add a Rust command counter and a frontend invoke/event spy, and read the long list of states in a real window, EN and ES. Follow the 2d-6 consult's shape exactly:
+1. A brief, `docs/decisions/2d-7-design-brief.md`, that states what 2d-6 left 2d-7:
+   - [`2d-6-window-readings-consolidated.md`](docs/decisions/2d-6-window-readings-consolidated.md) §5, the owed readings: the visible-window reading (ruling 38), the foreground reading (2d-6-10 notes §4), and 9c's unread states;
+   - R38's window half;
+   - the instrument's `cargo fmt` failure (2d-6-11b notes §6 item 6);
+   - the open items below.
+2. The consult itself, recorded as `docs/reviews/phase-2d-7-design.md`. **Codex is out of quota until 2026-09-26 19:14**, so either wait for it or consult an **opus** agent and record the provider; that choice is the orchestrator's.
+3. The record, `docs/decisions/2d-7-split-notes.md`: binding rulings and a citation audit.
+4. The record's own review.
+
+Risk **high**. No source is touched until the record closes.
+
+**Handed on by 11b** (notes §6):
+1. "Six surfaces" and similar undercounts outside entry 41's classes (the file list is in the notes).
+2. `matchEditor.ts:2664` still names `tSupersededEvidence` as a renderer (item 8).
+3. Refusal wording repeats in the session modules.
+4. Unused accessors, for a later deletion.
+5. The close and keep labels are near-synonyms in EN and ES (item 9, for 2d-7's bilingual reading).
+6. `cargo fmt --check` fails on the uncommitted `probe.rs` only; 2d-7 or 2d-8 closes that.
+7. No native-speaker review of the ES dictionary is scheduled (R35).
+
+**Handed on by 11a** (notes §5): (1) **a `stale` mark survives a `writtenHere` release** (`observationTransitions.ts` ~1203 marks, `workspace.svelte.ts` ~4634-4645 drops the reading without clearing it) — needs a ruling, joins 9b-3's item 1, a small corrective step in 9b-1's area; (3) the composition check does not see `node`-environment test files, transitive command reach through browser modules, or computed specifiers — stated in the code, not fixed; (4) `AppShell`'s last-document-removal case and the save-origin adoption loops in `MatchEditor`/`MatchCreator` are EN-only.
+
+**Handed on by 10** (notes §4): (1) **a visible-window foreground reading remains owed** — the screen was locked, so no real foregrounding, wake after the occlusion timer stop, or resume was seen, nor whether WKWebView delivers `focus` and `visibilitychange` in one task (two tasks cost a follow-up drain); joins 9c's item 7, 2d-7 the natural owner; (2) every window activation, including an in-app return from a native dialog, costs one drain — judged acceptable, not measured; (3) still no window-close mechanism (entry 33; the record's §7 item 10).
+
+**Handed on by 9c** (notes §6): (1) a disabled status control is drawn like an enabled one; (2) a long Spanish row mark breaks the file name mid-word; (3) unread in a window — the retry enabled, `noTransport`, `pathDrift.changed`, the outlived route acknowledgement and its note, the two surface notes, six of the eight panels' acknowledgement, empty-workspace retention; (4) `P9-06` stopped without a terminal line, cause unknown (same shape as 8c's `P8-09`); (7) **a visible-window reading remains owed** — 9c, like 8c, read a hidden window through WebKit snapshots, ran its own plans and extended the instrument, three departures from ruling 38; 2d-7 is the natural owner. The route region is now bounded at `45vh`, so the acknowledgement below a whole-snapshot route needs a scroll. The worker suggests `CLAUDE.md` §6 *Window readings* gain two facts (the probe's `pause` ~100 ms limit, the snapshot keep-alive against the occlusion stop) — not done.
+
+**Handed on by 9b-3** (notes §6): (1) a hold that begins while an automatic read is in flight **with a successful re-adoption** refuses the reread and registers nothing — the file is `stale` with nothing to acknowledge; pinned by a test, closing it needs a ruling; (2) a same-bytes observation merges into an outdated origin, so nothing new becomes acknowledgeable; (3) the automatic path refuses on the unknown outcome only, not on a held (retained) observation; (4) a stale sentence in the host's doc comment ("Nothing draws either today"); (5) the two changed ES sentences have had no bilingual review (R35).
+
+**Handed on by 9b-2** (notes §6): five refusal lines (mover, duplicator, restore, creation, recovery) still use the held-reading sentence as their reason, so with a held reading those panels repeat it once below the pane's block — refusal wording in five session modules, for 2d-6-11 or a small corrective step; `noticesBesideRefusal`, `tExternalConflictNotice` and `tExternalConflictAction` are now unused (comments say so) — for a later deletion; the `acknowledgeSnapshot` dead end is now shown, not closed.
+
+**Reviews: Codex is out of quota until 2026-09-26 19:14** (`REASON=usage-limit` at 9b-2); until then `autoclaude-review.sh` exits 2 and the fallback agent reviews.
+
+**Still open from 9a** (notes §5): **(d)** the ES strings of 9a, 9b-1 and 9b-2 have had no bilingual review (R35). 9b-1 notes §8.3 records one release-path sequence judged unreachable, recorded, not fixed.
+
+**Open items carried from 8c** ([`2d-6-8c-notes.md`](docs/decisions/2d-6-8c-notes.md) §4): (1) `SourceText.svelte`'s `.invisible { white-space: normal }` wrapping inside a file line (a false-guarantee comment, a candidate small corrective phase, not yet scheduled), (2) the first choice row below the fold, (3) a CRLF-only disk text named on neither conflict panel — unchanged. **2d-8's deletion list** is in [`next-action-history.md`](docs/progress-archive/next-action-history.md) under *"The 2d-6-8c → 2d-6-9 handoff"*.
+
+**Orchestrator's rulings standing from 1b's close**: (1) the `ReconciliationWorkspace` interface may be widened as entries require; (2) and (3) re-affirmed by 9a. The `stale` ruling of 9b-1 (its archived status row). The entry-15 ruling above.
+
+**Older open items**: archived verbatim in [`next-action-history.md`](docs/progress-archive/next-action-history.md); the live map is the split record's §7.
