@@ -50,7 +50,7 @@
  */
 
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveConflictSource, type ConflictSource } from '../browser/conflictSource';
 import { detailFieldKey } from '../browser/detail';
 import { startDraft, structuredDraftRules } from '../browser/draft';
@@ -93,9 +93,12 @@ import {
 import {
   conflictChoiceKey,
   describeEditSave,
+  reloadUnavailableKey,
+  type ConflictChoice,
   type ConflictModel,
   type DiskAdoptionOutcome
 } from '../browser/saveOutcome';
+import { describeSupersededEvidence } from '../i18n';
 import { arbitratedDelivery, type ObservationDelivery } from '../browser/observationDelivery';
 import type { SurfaceBinding } from '../browser/surfaceReceivers';
 import type { MatchSaveAnswer, ObservationReceiver } from '../browser/workspace.svelte';
@@ -117,9 +120,33 @@ import type {
 import RecoveryPanel from './RecoveryPanel.svelte';
 import { LOCALES } from '../i18n/locale';
 import type { Locale } from '../i18n/locale';
-import { externalConflictSource } from '../browser/conflictSource';
+import { externalConflictSource, standingConflictOf } from '../browser/conflictSource';
 import type { ExternalConflictObservation } from '../browser/conflictSource';
 import { reconciliationRefusalKey, type ReconciliationRefusal } from '../browser/reconciliationStatus';
+
+/**
+ * Records every call that reaches `@tauri-apps/api/core`'s `invoke` while this
+ * file's cases run — Phase 2d-6-11a. Every mount here is handed scripted ports, so
+ * no case should ever reach the boundary; the mock below rejects any call that
+ * does, and the file-level `afterEach` fails the case that made it. It catches a
+ * call reaching `invoke` in the cases this file runs and proves nothing about
+ * other files, other paths or code loaded dynamically outside this module graph.
+ */
+const { invoked } = vi.hoisted(() => ({ invoked: vi.fn() }));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: readonly unknown[]): Promise<never> => {
+    invoked(...args);
+    return Promise.reject(new Error('this suite invokes no command'));
+  }
+}));
+
+afterEach(() => {
+  // Read, then cleared, then asserted, so one offending case does not fail the next.
+  const calls = invoked.mock.calls.length;
+  invoked.mockClear();
+  expect(calls).toBe(0);
+});
 
 /** The revision the window is projecting when the conflict arrives. */
 const HELD: ContentRevision = 'a'.repeat(64);
@@ -332,6 +359,13 @@ interface Mounted {
    * exactly as the window's registration would, inside a flush.
    */
   readonly deliver: (delivery: ObservationDelivery) => void;
+  /**
+   * Records one origin as the one standing for a file, as the window's
+   * `BrowserState.standingConflictFor` would answer after its own arbitration —
+   * Phase 2d-6-11a. The stand-in registers a create conflict's origin by itself and
+   * nothing else, so an external conflict's reapply case says so explicitly.
+   */
+  readonly stand: (document: DocumentId, source: ConflictSource) => void;
   /** Tears the component down. */
   readonly stop: () => void;
 }
@@ -487,6 +521,9 @@ function mountPanel(options: {
     deliver: (delivery: ObservationDelivery): void => {
       receiver?.(delivery);
       flushSync();
+    },
+    stand: (document: DocumentId, source: ConflictSource): void => {
+      standing.set(document, source);
     },
     stop: () => {
       void unmount(component);
@@ -1144,6 +1181,58 @@ const ACKNOWLEDGE_SNAPSHOT: TranslationKey = 'browser.externalConflict.action.ac
 /** This panel's reload choice, whose presence says whether the reload is withheld. */
 const RELOAD_CHOICE = conflictChoiceKey('reloadDiskVersion', 'authoredText');
 
+/**
+ * Mounts the panel and brings it to the point where a conflict can be shown: a
+ * form open over a conflict whose own file may no longer be written into, with
+ * `match/other.yml` named as the destination. Moved to module level at Phase
+ * 2d-6-11a so the external-conflict matrix below can share it.
+ *
+ * @param lang - The language the case runs in.
+ * @param answers - What each successive create answers, in order.
+ * @param adoption - What the window answers when the panel asks it to adopt.
+ * @returns The mounted panel.
+ */
+async function opened(
+  lang: Locale,
+  answers: readonly ScriptedAnswer[] = [],
+  adoption?: DiskAdoptionOutcome
+): Promise<Mounted> {
+  // Opened in English, because this suite's `control` reads English labels;
+  // everything the cases assert is read in the case's own language.
+  locale.setOverride('en');
+  const mounted = mountPanel({
+    disk: diskFile({ topLevelKeys: [] }),
+    answers,
+    ...(adoption === undefined ? {} : { adoption })
+  });
+  openForm(mounted);
+  destination(mounted.target, 'match/other.yml')?.click();
+  flushSync();
+  locale.setOverride(lang);
+  flushSync();
+  return mounted;
+} // End of function opened()
+
+/**
+ * One observation of the destination file, `match/other.yml`.
+ *
+ * @param sequence - Where the window's watcher placed it.
+ * @param diskRevision - The revision it read the file at.
+ * @returns A fresh observation, so its source is its own.
+ */
+function seenChange(sequence = 9, diskRevision: ContentRevision = AFTER): ExternalConflictObservation {
+  return {
+    sequence,
+    document: 3,
+    previousRevision: OTHER,
+    diskRevision,
+    diskText: 'matches:\n  - trigger: y\n    replace: fromdisk\n',
+    disk: makeDocument({ id: 3, relativePath: 'match/other.yml', revision: diskRevision }),
+    findings: [],
+    correspondences: null
+  };
+} // End of function seenChange()
+
 describe('The recovery form acknowledges an unknown write outcome on its own panel, in English and Spanish — Phase 2d-6-9b-2', () => {
   // The pane draws the unknown-outcome sentence once, above this panel
   // (`FileReconciliationStatus.svelte`); this panel draws only the control, under
@@ -1151,43 +1240,6 @@ describe('The recovery form acknowledges an unknown write outcome on its own pan
   // through the port `DetailPane.svelte` hands it. The port is scripted here
   // (`scriptedAcknowledgement` in `../browser/fixtures.ts`); the window's own is
   // `ReconciliationStatus.test.ts`'s.
-
-  /**
-   * Mounts the panel and brings it to the point where a conflict can be shown.
-   *
-   * @param lang - The language the case runs in.
-   * @returns The mounted panel.
-   */
-  async function opened(lang: Locale): Promise<Mounted> {
-    // Opened in English, because this suite's `control` reads English labels;
-    // everything the cases assert is read in the case's own language.
-    locale.setOverride('en');
-    const mounted = mountPanel({ disk: diskFile({ topLevelKeys: [] }) });
-    openForm(mounted);
-    destination(mounted.target, 'match/other.yml')?.click();
-    flushSync();
-    locale.setOverride(lang);
-    flushSync();
-    return mounted;
-  } // End of function opened()
-
-  /**
-   * One observation of the panel's file.
-   *
-   * @returns A fresh observation, so its source is its own.
-   */
-  function seenChange(): ExternalConflictObservation {
-    return {
-      sequence: 9,
-      document: 3,
-      previousRevision: OTHER,
-      diskRevision: AFTER,
-      diskText: 'matches:\n  - trigger: y\n    replace: fromdisk\n',
-      disk: makeDocument({ id: 3, relativePath: 'match/other.yml', revision: AFTER }),
-      findings: [],
-      correspondences: null
-    };
-  } // End of function seenChange()
 
   it.each(LOCALES)('offers it under the disk snapshot, mints from the conflict it shows, and offers the reload again (%s)', async (lang) => {
     const mounted = await opened(lang);
@@ -1274,3 +1326,312 @@ describe('The recovery form acknowledges an unknown write outcome on its own pan
     mounted.stop();
   }); // End of the "nothing owed" case
 }); // End of the "own acknowledgement" suite
+
+/** A revision strictly later than the one the first observation read. */
+const LATER: ContentRevision = 'e'.repeat(64);
+
+/**
+ * The envelope a window seals for a first observation of the destination.
+ *
+ * @param seen - The observation.
+ * @returns The `raised` envelope, under no write uncertainty.
+ */
+function raisedBy(seen: ExternalConflictObservation): ObservationDelivery {
+  return arbitratedDelivery(null, seen, false);
+} // End of function raisedBy()
+
+/**
+ * The envelope a window seals for a later observation over one that stands.
+ *
+ * @param prior - The observation whose origin stands.
+ * @param seen - The later observation.
+ * @returns The `supersedes` envelope.
+ */
+function supersededBy(
+  prior: ExternalConflictObservation,
+  seen: ExternalConflictObservation
+): ObservationDelivery {
+  return arbitratedDelivery(standingConflictOf(externalConflictSource(prior)), seen, false);
+} // End of function supersededBy()
+
+/**
+ * This panel's label key for one conflict choice.
+ *
+ * @param choice - The choice.
+ * @returns The key its control is labelled with.
+ */
+function choiceKey(choice: ConflictChoice): TranslationKey {
+  return conflictChoiceKey(choice, RECOVERY_CONFLICT_CAPABILITIES.draftKind);
+} // End of function choiceKey()
+
+/**
+ * The button labelled with one key's rendering in one language, insisted upon.
+ *
+ * @param scope - Where to look.
+ * @param lang - The language the case runs in.
+ * @param key - The key holding the label.
+ * @returns The button.
+ */
+function controlIn(scope: HTMLElement, lang: Locale, key: TranslationKey): HTMLButtonElement {
+  const found = labelledIn(scope, lang, key);
+  if (found === null) {
+    throw new Error(`this case needs the control labelled ${translate(lang, key)}`);
+  }
+  return found;
+} // End of function controlIn()
+
+/**
+ * Whether one sentence, rendered in one language, is drawn anywhere in a scope.
+ *
+ * @param scope - Where to look.
+ * @param lang - The language the case runs in.
+ * @param key - The key holding the sentence.
+ * @returns `true` when the rendered text contains it.
+ */
+function saysIn(scope: HTMLElement, lang: Locale, key: TranslationKey): boolean {
+  return (scope.textContent ?? '').includes(translate(lang, key));
+} // End of function saysIn()
+
+/**
+ * Presses one conflict choice inside the external conflict's own panel. Pressed
+ * there rather than anywhere in the form, because in Spanish this form's close
+ * control and a *keep editing* choice may read alike.
+ *
+ * @param mounted - The mounted panel.
+ * @param lang - The language the case runs in.
+ * @param choice - The choice to press.
+ */
+function pressExternal(mounted: Mounted, lang: Locale, choice: ConflictChoice): void {
+  controlIn(externalConflictPanel(mounted.target), lang, choiceKey(choice)).click();
+  flushSync();
+} // End of function pressExternal()
+
+/**
+ * Whether one conflict choice is offered inside the external conflict's panel.
+ *
+ * @param mounted - The mounted panel.
+ * @param lang - The language the case runs in.
+ * @param choice - The choice.
+ * @returns `true` when its control is drawn there.
+ */
+function offersExternal(mounted: Mounted, lang: Locale, choice: ConflictChoice): boolean {
+  return labelledIn(externalConflictPanel(mounted.target), lang, choiceKey(choice)) !== null;
+} // End of function offersExternal()
+
+describe('the recovery form under an external conflict of its destination, in English and Spanish — Phase 2d-6-11a', () => {
+  // **The design consult's Q8 row for this panel** (`docs/reviews/phase-2d-6-design.md`),
+  // which until this phase was read off the screen only for the save-origin
+  // conflict. The conflict here is raised by a watcher observation of the file
+  // the form writes into, sealed by the real `arbitratedDelivery` and handed to
+  // the receiver the panel reported; the window's own registration is
+  // `DetailPane.test.ts`'s. The source conflict the form was opened from is a
+  // save conflict of `match/base.yml` and must stay distinct from it throughout.
+
+  it.each(LOCALES)('blocks creation, keeps what was typed, and keeps the source conflict apart from the destination one (%s)', async (lang) => {
+    const mounted = await opened(lang, [{ result: COMMITTED }]);
+    type(mounted.target, 'trigger', ':typed');
+    expect(controlIn(mounted.target, lang, 'browser.recovery.create').disabled).toBe(false);
+
+    const seen = seenChange();
+    mounted.deliver(raisedBy(seen));
+
+    const send = controlIn(mounted.target, lang, 'browser.recovery.create');
+    expect(send.disabled).toBe(true);
+    send.click();
+    await settle();
+    // Forced past the attribute: what refuses the send is the model, not the markup.
+    send.disabled = false;
+    send.click();
+    await settle();
+    expect(mounted.calls).toEqual([]);
+    expect(box(mounted.target, 'trigger').value).toBe(':typed');
+
+    const panel = externalConflictPanel(mounted.target);
+    const shown = panel.textContent ?? '';
+    expect(shown).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.affectedFile', { path: 'match/other.yml' })
+    );
+    expect(shown).not.toContain(
+      translate(lang, 'browser.externalConflict.affectedFile', { path: 'match/base.yml' })
+    );
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: AFTER })
+    );
+    for (const choice of ['keepEditing', 'keepMyDraft', 'reloadDiskVersion'] as const) {
+      expect(offersExternal(mounted, lang, choice)).toBe(true);
+    } // End of the loop over the three offered choices
+    // The source conflict is still the one it was, drawn beside the external panel
+    // and never inside it, and its origin is not the destination conflict's.
+    expect(saysIn(mounted.target, lang, sourceConflictStateKey('retained'))).toBe(true);
+    expect(shown).not.toContain(translate(lang, sourceConflictStateKey('retained')));
+    expect(externalConflictSource(seen)).not.toBe(mounted.source.source);
+    expect(mounted.adoptions).toEqual([]);
+    mounted.stop();
+  }); // End of the "blocks creation" case
+
+  it.each(LOCALES)('keeps the conflict through keep editing, and resets the reload step (%s)', async (lang) => {
+    const mounted = await opened(lang);
+    type(mounted.target, 'trigger', ':typed');
+    mounted.deliver(raisedBy(seenChange()));
+    pressExternal(mounted, lang, 'reloadDiskVersion');
+    expect(saysIn(mounted.target, lang, 'browser.recovery.reloadEndsRecovery')).toBe(true);
+    expect(offersExternal(mounted, lang, 'confirmReload')).toBe(true);
+
+    pressExternal(mounted, lang, 'keepEditing');
+
+    expect(saysIn(mounted.target, lang, 'browser.recovery.reloadEndsRecovery')).toBe(false);
+    expect(offersExternal(mounted, lang, 'confirmReload')).toBe(false);
+    expect(offersExternal(mounted, lang, 'reloadDiskVersion')).toBe(true);
+    expect(controlIn(mounted.target, lang, 'browser.recovery.create').disabled).toBe(true);
+    expect(box(mounted.target, 'trigger').value).toBe(':typed');
+    expect(saysIn(mounted.target, lang, sourceConflictStateKey('retained'))).toBe(true);
+    expect(mounted.adoptions).toEqual([]);
+    expect(mounted.calls).toEqual([]);
+    mounted.stop();
+  }); // End of the "keep editing" case
+
+  it.each(
+    LOCALES.flatMap((lang) =>
+      (['installed', 'alreadyThere', 'refused'] as const).map((adoption) => [lang, adoption] as const)
+    )
+  )('reloads in two steps, spends the destination conflict, and closes on what the window answers (%s, %s)', async (lang, adoption) => {
+    const mounted = await opened(lang, [], adoption);
+    type(mounted.target, 'trigger', ':typed');
+    const seen = seenChange();
+    mounted.deliver(raisedBy(seen));
+    pressExternal(mounted, lang, 'reloadDiskVersion');
+    expect(mounted.adoptions).toEqual([]);
+    pressExternal(mounted, lang, 'confirmReload');
+
+    expect(mounted.adoptions).toHaveLength(1);
+    expect(mounted.adoptions[0]!.source).toBe(externalConflictSource(seen));
+    expect(mounted.adoptions[0]!.source).not.toBe(mounted.source.source);
+    if (adoption === 'refused') {
+      // The window said no: the form stays open over the same conflict, says why
+      // the control went, and keeps what was typed.
+      expect(saysIn(mounted.target, lang, 'browser.recovery.closed')).toBe(false);
+      const panel = externalConflictPanel(mounted.target);
+      expect(saysIn(panel, lang, reloadUnavailableKey(RECOVERY_CONFLICT_CAPABILITIES.draftKind))).toBe(true);
+      expect(offersExternal(mounted, lang, 'reloadDiskVersion')).toBe(false);
+      expect(offersExternal(mounted, lang, 'confirmReload')).toBe(false);
+      expect(box(mounted.target, 'trigger').value).toBe(':typed');
+      expect(saysIn(mounted.target, lang, sourceConflictStateKey('retained'))).toBe(true);
+    } else {
+      // `alreadyThere` is a success that installed nothing, and it closes too.
+      expect(saysIn(mounted.target, lang, 'browser.recovery.closed')).toBe(true);
+      expect(saysIn(mounted.target, lang, recoveryRefusalKey('formClosed'))).toBe(true);
+      expect(mounted.target.querySelector('.panel.external')).toBeNull();
+      expect(saysIn(mounted.target, lang, sourceConflictStateKey('windowMoved'))).toBe(true);
+    }
+    expect(mounted.calls).toEqual([]);
+    mounted.stop();
+  }); // End of the "two-step reload" case
+
+  it.each(LOCALES)('rebases over the disk version through keep my draft, and sends against it only when asked (%s)', async (lang) => {
+    const mounted = await opened(lang, [{ result: COMMITTED }]);
+    type(mounted.target, 'trigger', ':typed');
+    const seen = seenChange();
+    mounted.deliver(raisedBy(seen));
+    // The window registers the observation's origin as standing for the file; the
+    // reapply's evidence check is that live answer. This observation carries no
+    // correspondence table, and a recovery create consults none.
+    mounted.stand(3, externalConflictSource(seen));
+
+    pressExternal(mounted, lang, 'keepMyDraft');
+
+    expect(mounted.adoptions.map((one) => one.source)).toEqual([externalConflictSource(seen)]);
+    const report = mounted.target.querySelector<HTMLElement>('.panel.reapply');
+    expect(report).not.toBeNull();
+    expect(saysIn(report!, lang, 'browser.reapply.reapplied')).toBe(true);
+    expect(mounted.target.querySelector('.panel.external')).toBeNull();
+    expect(box(mounted.target, 'trigger').value).toBe(':typed');
+    // The adoption spent may have moved the window, and the source line says so.
+    expect(saysIn(mounted.target, lang, sourceConflictStateKey('windowMoved'))).toBe(true);
+    expect(mounted.calls).toEqual([]);
+
+    controlIn(mounted.target, lang, 'browser.recovery.create').click();
+    await settle();
+    expect(mounted.calls).toHaveLength(1);
+    expect(mounted.calls[0]!.document).toBe(3);
+    expect(mounted.calls[0]!.baseRevision).toBe(AFTER);
+    expect(mounted.calls[0]!.newMatch.trigger).toBe(':typed');
+    mounted.stop();
+  }); // End of the "keep my draft rebases" case
+
+  it.each(LOCALES)('refuses keep my draft when the window names no standing origin, and keeps the conflict (%s)', async (lang) => {
+    const mounted = await opened(lang);
+    type(mounted.target, 'trigger', ':typed');
+    mounted.deliver(raisedBy(seenChange()));
+
+    pressExternal(mounted, lang, 'keepMyDraft');
+
+    const report = mounted.target.querySelector<HTMLElement>('.panel.reapply');
+    expect(report).not.toBeNull();
+    expect(saysIn(report!, lang, 'browser.reapply.manualResolution')).toBe(true);
+    expect(report!.textContent).toContain(describeSupersededEvidence(lang));
+    expect(mounted.target.querySelector('.panel.external')).not.toBeNull();
+    expect(mounted.adoptions).toEqual([]);
+    expect(box(mounted.target, 'trigger').value).toBe(':typed');
+    expect(controlIn(mounted.target, lang, 'browser.recovery.create').disabled).toBe(true);
+    mounted.stop();
+  }); // End of the "keep my draft refused" case
+
+  it.each(LOCALES)('withdraws the reload warning when a later reading supersedes the conflict (%s)', async (lang) => {
+    const mounted = await opened(lang);
+    type(mounted.target, 'trigger', ':typed');
+    const first = seenChange();
+    mounted.deliver(raisedBy(first));
+    pressExternal(mounted, lang, 'reloadDiskVersion');
+    expect(offersExternal(mounted, lang, 'confirmReload')).toBe(true);
+
+    mounted.deliver(supersededBy(first, seenChange(10, LATER)));
+
+    expect(offersExternal(mounted, lang, 'confirmReload')).toBe(false);
+    expect(offersExternal(mounted, lang, 'reloadDiskVersion')).toBe(true);
+    expect(saysIn(mounted.target, lang, 'browser.recovery.reloadEndsRecovery')).toBe(false);
+    const shown = externalConflictPanel(mounted.target).textContent ?? '';
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: LATER })
+    );
+    expect(shown).not.toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: AFTER })
+    );
+    expect(box(mounted.target, 'trigger').value).toBe(':typed');
+    expect(mounted.adoptions).toEqual([]);
+    expect(mounted.calls).toEqual([]);
+    mounted.stop();
+  }); // End of the "supersession" case
+
+  it.each(LOCALES)('reports a change to a form naming no destination, and keeps the destination choosable (%s)', (lang) => {
+    // The bilingual sibling of the English-only case in "where the new snippet goes".
+    locale.setOverride('en');
+    const mounted = mountPanel({ disk: diskFile({ topLevelKeys: [] }) });
+    openForm(mounted);
+    locale.setOverride(lang);
+    flushSync();
+    expect(saysIn(mounted.target, lang, recoveryRefusalKey('noDestination'))).toBe(true);
+
+    mounted.deliver(raisedBy(seenChange()));
+
+    expect(box(mounted.target, 'trigger').readOnly).toBe(true);
+    const shown = externalConflictPanel(mounted.target).textContent ?? '';
+    expect(shown).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(shown).toContain(translate(lang, 'browser.externalConflict.destinationRequired'));
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.affectedFile', { path: 'match/other.yml' })
+    );
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: AFTER })
+    );
+    const other = destination(mounted.target, 'match/other.yml');
+    expect(other?.disabled).toBe(false);
+    other?.click();
+    flushSync();
+    expect(saysIn(mounted.target, lang, 'browser.externalConflict.destinationRequired')).toBe(false);
+    expect(other?.getAttribute('aria-pressed')).toBe('true');
+    expect(mounted.calls).toEqual([]);
+    expect(mounted.adoptions).toEqual([]);
+    mounted.stop();
+  }); // End of the "destination change reported" case
+}); // End of the "external conflict of the destination" suite

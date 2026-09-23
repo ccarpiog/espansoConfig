@@ -739,6 +739,62 @@ describe.each(LOCALES)('the per-file states and their three controls, in %s', (l
     expect(callCounts(view.commands)).toEqual(before);
   });
 
+  it('spends one attempt for two presses in one turn and one re-entrant press, calling no command', async () => {
+    // Row 7(e), mounted: the retry control is bounded to one attempt however
+    // often it is pressed before the drawing catches up. The second press lands
+    // in the same turn, before any flush removes the control; the third lands
+    // re-entrantly, from inside the first attempt's arbitration, through a getter
+    // on the held observation that the retry reads again.
+    const view = await mountAll();
+    let fired = false;
+    let reenter = false;
+    let retry: HTMLButtonElement | null = null;
+    const held = observationOfB(6);
+    Object.defineProperty(held, 'diskRevision', {
+      get: () => {
+        if (!fired) {
+          fired = true;
+          view.state.rememberExternalConflict(observationOfB(4));
+        } else if (reenter) {
+          reenter = false;
+          // Dispatched rather than `click()`ed: `click()` on an element whose own
+          // click is still in progress does nothing (the DOM's click-in-progress
+          // flag), so it would press nothing re-entrantly.
+          retry?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        }
+        return 'rev-c';
+      } // End of the getter that retains the observation, then presses re-entrantly
+    });
+    expect(view.state.observeExternalChange(held).verdict.kind).toBe('retained');
+    flushSync();
+    retry = button(view.status, lang, 'browser.externalConflict.action.retry');
+    expect(retry.disabled).toBe(false);
+    const before = callCounts(view.commands);
+    const attempts = vi.spyOn(view.state, 'retryRetainedObservation');
+
+    reenter = true;
+    retry.click();
+    retry.click();
+    // The re-entrant press happened: the getter was read inside the first attempt.
+    expect(reenter).toBe(false);
+    expect(attempts).toHaveBeenCalledTimes(3);
+    // One attempt: the outer press arbitrated, and both others found nothing held.
+    const kinds = attempts.mock.results.map((result) =>
+      result.type === 'return' ? (result.value as { kind: string }).kind : result.type
+    );
+    expect(kinds.filter((kind) => kind === 'attempted')).toHaveLength(1);
+    expect(kinds.filter((kind) => kind === 'nothingRetained')).toHaveLength(2);
+    flushSync();
+    expect(buttonIn(view.status, lang, 'browser.externalConflict.action.retry')).toBeNull();
+
+    await settle();
+    expect(view.state.retainedObservationFor(2)).toBeNull();
+    expect(view.status.textContent).not.toContain(
+      words(lang, 'browser.externalConflict.observationRetained')
+    );
+    expect(callCounts(view.commands)).toEqual(before);
+  }); // End of the "bounded retry" case
+
   it('draws a held observation on the surface placement in the pane header, and not on the route', async () => {
     let answer: (value: RawSaveOutcome) => void = () => undefined;
     const pending = new Promise<RawSaveOutcome>((resolve) => {
@@ -941,6 +997,101 @@ describe('a locale switch on a mounted status panel', () => {
     expect(view.state.standingConflictFor(2)).toBe(standingBefore);
     expect(decideWorkspaceReconciliation(workspaceFactsOf(view.state)).states).toEqual([]);
   });
+
+  it.each([
+    ['en', 'es'],
+    ['es', 'en']
+  ] as const)(
+    'changes a stale file’s row and header words from %s to %s and nothing else',
+    async (from, to) => {
+      // Row 9(d): the sentence the refused save's `stale` draws in the sidebar row
+      // and in the pane header, switched on the mounted drawings (setup as the
+      // per-file suite's first case).
+      locale.setOverride(from);
+      const view = await mountAll({ saves: [Promise.resolve(conflictOnB())] });
+      view.state.show({ kind: 'document', id: 2 });
+      await view.state.showFileText(true);
+      await view.state.saveRawDocument(2, 'rev-a', 'matches: []\n', { accepted: [] });
+      await settle();
+      const workspaceBefore = workspaceFactsOf(view.state);
+      const fileBefore = fileFactsOf(view.state, 2 as DocumentId);
+      const selectionBefore = view.state.selection;
+      const standingBefore = view.state.standingConflictFor(2);
+      const calls = callCounts(view.commands);
+      expect(view.sidebar.textContent).toContain(words(from, 'browser.externalDocument.row.stale'));
+      expect(view.pane.textContent).toContain(words(from, 'browser.externalDocument.stale'));
+
+      locale.setOverride(to);
+      flushSync();
+
+      expect(view.sidebar.textContent).toContain(words(to, 'browser.externalDocument.row.stale'));
+      expect(view.sidebar.textContent).not.toContain(words(from, 'browser.externalDocument.row.stale'));
+      expect(view.pane.textContent).toContain(words(to, 'browser.externalDocument.stale'));
+      expect(view.pane.textContent).not.toContain(words(from, 'browser.externalDocument.stale'));
+      expect(buttonIn(view.pane, to, 'browser.externalDocument.action.reread')).not.toBeNull();
+      // Nothing moved but the words.
+      await settle();
+      expect(callCounts(view.commands)).toEqual(calls);
+      expect(workspaceFactsOf(view.state)).toEqual(workspaceBefore);
+      expect(fileFactsOf(view.state, 2 as DocumentId)).toEqual(fileBefore);
+      expect(view.state.selection).toBe(selectionBefore);
+      expect(view.state.standingConflictFor(2)).toBe(standingBefore);
+    }
+  ); // End of the "stale row and header switch" case
+
+  it.each([
+    ['en', 'es'],
+    ['es', 'en']
+  ] as const)(
+    'changes an unavailable file’s row, header and reason words from %s to %s and nothing else',
+    async (from, to) => {
+      // Row 9(d): the unreadable observation's `unavailable`, with its reason,
+      // switched on the mounted drawings (setup as the per-file suite's
+      // unreadable case).
+      locale.setOverride(from);
+      const transport = events();
+      const unreadable = {
+        Unreadable: {
+          sequence: 1,
+          document: { Addressable: { document: 1, relative_path: 'match/a.yml' } },
+          reason: { PermissionDenied: {} }
+        }
+      } as unknown as ExternalObservation;
+      const view = await mountAll({ batches: [batch(0), batch(0), batch(1, [unreadable])] }, transport);
+      view.state.show({ kind: 'document', id: 1 });
+      await view.state.showFileText(true);
+      transport.wake(1);
+      await settle();
+      expect(view.state.externalDocumentStatus(1)?.kind).toBe('unavailable');
+      const workspaceBefore = workspaceFactsOf(view.state);
+      const fileBefore = fileFactsOf(view.state, 1 as DocumentId);
+      const selectionBefore = view.state.selection;
+      const standingBefore = view.state.standingConflictFor(1);
+      const calls = callCounts(view.commands);
+      expect(view.sidebar.textContent).toContain(words(from, 'browser.externalDocument.row.unavailable'));
+      expect(view.pane.textContent).toContain(words(from, 'browser.externalDocument.unavailable'));
+      expect(view.pane.textContent).toContain(words(from, 'code.unreadableReason.permissionDenied'));
+
+      locale.setOverride(to);
+      flushSync();
+
+      expect(view.sidebar.textContent).toContain(words(to, 'browser.externalDocument.row.unavailable'));
+      expect(view.sidebar.textContent).not.toContain(
+        words(from, 'browser.externalDocument.row.unavailable')
+      );
+      expect(view.pane.textContent).toContain(words(to, 'browser.externalDocument.unavailable'));
+      expect(view.pane.textContent).not.toContain(words(from, 'browser.externalDocument.unavailable'));
+      expect(view.pane.textContent).toContain(words(to, 'code.unreadableReason.permissionDenied'));
+      expect(view.pane.textContent).not.toContain(words(from, 'code.unreadableReason.permissionDenied'));
+      // Nothing moved but the words.
+      await settle();
+      expect(callCounts(view.commands)).toEqual(calls);
+      expect(workspaceFactsOf(view.state)).toEqual(workspaceBefore);
+      expect(fileFactsOf(view.state, 1 as DocumentId)).toEqual(fileBefore);
+      expect(view.state.selection).toBe(selectionBefore);
+      expect(view.state.standingConflictFor(1)).toBe(standingBefore);
+    }
+  ); // End of the "unavailable row, header and reason switch" case
 }); // End of the locale-switch suite
 
 describe('the region’s height against the panes below it — Phase 2d-6-9c', () => {

@@ -351,6 +351,21 @@ architectural check fails on an unguarded synthetic fixture; no new window claim
 planned** — a defect found here is fixed in its owning step. **Bound by** entries 36, 37, 41, 42.
 **Depends on** every earlier step.
 
+**The orchestrator's cut of 2d-6-11 (2026-09-23), in two halves.** The step is too broad for one
+phase, so it runs as two; neither changes a ruling above, and the acceptance is the block's, divided.
+
+- **2d-6-11a — the matrix, the drain scripts and the inventory check.** The Q8 cross-surface mounted
+  matrix (entry 34) completed row by row; `DetailPane`'s reconciliation-starting cases held to finite
+  drain scripts with exact counts and arguments (entry 36; `invoked` stays exact zero,
+  `AppShell.test.ts`'s per-case list untouched); the scoped import and guard inventory check (entry
+  37), pinned to fail on an unguarded synthetic fixture. Production comments that diff falsifies are
+  corrected in it (entry 41); the broad sweep is not. Record: `2d-6-11a-notes.md`.
+- **2d-6-11b — fixtures, the sweep and the baselines.** The reviewed bilingual EN/ES fixtures
+  (entries 35, 40), the factual production-comment sweep over entry 41's eight classes, and all four
+  baselines re-measured with the instrument and normalized (entry 42), compared against the
+  pre-instrument `1320 / 438 / 2254 / 186`; the earlier narrow readings consolidated without being
+  called the 2d-7 matrix. It closes 2d-6-11.
+
 ---
 
 ## 3. The binding rulings
@@ -951,6 +966,10 @@ correctness. A citation that resolves proves the consult read the line it named,
 built on it is sound; nothing does until 2d-6-1 puts the first ruling through a compiler. Nothing in
 Vitest prevents the new sidebar suite being created without its invoke guard; entry 37's check is what
 would notice, and it does not exist yet either.
+
+*Correction (2d-6-11a):* the check now exists — `scripts/lint/composition-guards.test.ts`. The
+sidebar/status suite was created as `ReconciliationStatus.test.ts` with its guard, and the jsdom
+inventory now counts thirteen files, not eleven.
 
 ---
 

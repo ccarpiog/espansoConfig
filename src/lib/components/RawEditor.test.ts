@@ -35,7 +35,7 @@
  */
 
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sealWholeDocumentSave } from '../browser/invalidation';
 import type { RawSaveAnswer } from '../browser/workspace.svelte';
 import type { RawSaveReload } from '../ipc/commands';
@@ -86,6 +86,30 @@ import {
 import { codePointLabel } from '../browser/sourceText';
 import { LOCALES, type Locale } from '../i18n/locale';
 import { reconciliationRefusalKey, type ReconciliationRefusal } from '../browser/reconciliationStatus';
+
+/**
+ * Records every call that reaches `@tauri-apps/api/core`'s `invoke` while this
+ * file's cases run — Phase 2d-6-11a. Every mount here is handed scripted ports, so
+ * no case should ever reach the boundary; the mock below rejects any call that
+ * does, and the file-level `afterEach` fails the case that made it. It catches a
+ * call reaching `invoke` in the cases this file runs and proves nothing about
+ * other files, other paths or code loaded dynamically outside this module graph.
+ */
+const { invoked } = vi.hoisted(() => ({ invoked: vi.fn() }));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: readonly unknown[]): Promise<never> => {
+    invoked(...args);
+    return Promise.reject(new Error('this suite invokes no command'));
+  }
+}));
+
+afterEach(() => {
+  // Read, then cleared, then asserted, so one offending case does not fail the next.
+  const calls = invoked.mock.calls.length;
+  invoked.mockClear();
+  expect(calls).toBe(0);
+});
 
 /** The revision the text was read at. */
 const BASE: ContentRevision = 'a'.repeat(64);

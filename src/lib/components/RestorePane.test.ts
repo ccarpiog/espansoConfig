@@ -136,8 +136,10 @@ import { reconciliationRefusalKey, type ReconciliationRefusal } from '../browser
  * wrapper in `workspace.svelte.ts` that reaches a binding it imports at module
  * level — rather than the surface it was injected with — runs down to this spy.
  * The `afterEach` below holds it to zero in every case. That closes the route
- * **in this file**: nothing in Vitest prevents a future test file from importing
- * `$lib/ipc/commands` with no spy at all.
+ * **in this file**. Since Phase 2d-6-11a `scripts/lint/composition-guards.test.ts`
+ * fails when a test file opting into a DOM environment is not inventoried with a
+ * guard its text carries; a `node`-environment test file importing
+ * `$lib/ipc/commands` with no spy at all is still outside that check.
  */
 const { invoked } = vi.hoisted(() => ({ invoked: vi.fn() }));
 

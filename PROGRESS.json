@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T05:29:00Z",
+ "updated": "2026-09-23T05:52:14Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -628,8 +628,8 @@
   {
    "id": "2d-6-9",
    "title": "Reconciliation status and explicit exits",
-   "status": "in_progress",
-   "summary": "Draws watcher degradation, removal and unreadable states and the explicit exits; cut into 9a, 9b and 9c."
+   "status": "done",
+   "summary": "The reconciliation status as values, drawn in the shell and panels, and read in a real window; closed at 2d-6-9c."
   },
   {
    "id": "2d-6-9a",
@@ -699,8 +699,23 @@
   {
    "id": "2d-6-11",
    "title": "Complete composition evidence and baseline accounting",
+   "status": "in_progress",
+   "summary": "Composition evidence and baseline accounting in two halves: 11a done; 11b (fixtures, comment sweep, baselines) next."
+  },
+  {
+   "id": "2d-6-11a",
+   "title": "Cross-surface matrix, finite drain scripts and the import and guard inventory check",
+   "status": "done",
+   "risk": "high",
+   "summary": "Adds the composition guards check, exact DetailPane drain scripts and the completed cross-surface matrix; reviewed ship-with-fixes, fixed.",
+   "review": "docs/reviews/phase-2d-6-11a.md"
+  },
+  {
+   "id": "2d-6-11b",
+   "title": "Bilingual fixtures, production-comment sweep and baselines",
    "status": "queued",
-   "summary": "Mounts the full composition for the evidence matrix, sweeps prose debts and re-derives the gate baseline with and without the instrument."
+   "risk": "high",
+   "summary": "Reviewed bilingual fixtures, the factual comment sweep and all four baselines measured with and without the instrument."
   },
   {
    "id": "2d-7",
@@ -719,7 +734,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 through 2d-6-7 and 2d-6-8a done, 2d-6-8b next); 2d-7 and 2d-8 follow."
+   "summary": "Steps 1 to 5 are closed; 2d-6 is in progress (2d-6-1 through 2d-6-10 and 2d-6-11a done, 2d-6-11b next); 2d-7 and 2d-8 follow."
   },
   {
    "id": "3",

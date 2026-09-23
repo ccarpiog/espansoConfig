@@ -40,7 +40,7 @@ import {
   type DiskAdoptionOutcome
 } from '../browser/saveOutcome';
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveConflictSource, type ConflictSource } from '../browser/conflictSource';
 import {
   makeDocument,
@@ -79,9 +79,33 @@ import MatchCreator from './MatchCreator.svelte';
 import { LOCALES } from '../i18n/locale';
 import type { Locale } from '../i18n/locale';
 import { translate } from '../i18n/dictionaries';
-import { externalConflictSource } from '../browser/conflictSource';
+import { externalConflictSource, standingConflictOf } from '../browser/conflictSource';
 import type { ExternalConflictObservation } from '../browser/conflictSource';
 import { reconciliationRefusalKey, type ReconciliationRefusal } from '../browser/reconciliationStatus';
+
+/**
+ * Records every call that reaches `@tauri-apps/api/core`'s `invoke` while this
+ * file's cases run — Phase 2d-6-11a. Every mount here is handed scripted ports, so
+ * no case should ever reach the boundary; the mock below rejects any call that
+ * does, and the file-level `afterEach` fails the case that made it. It catches a
+ * call reaching `invoke` in the cases this file runs and proves nothing about
+ * other files, other paths or code loaded dynamically outside this module graph.
+ */
+const { invoked } = vi.hoisted(() => ({ invoked: vi.fn() }));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: readonly unknown[]): Promise<never> => {
+    invoked(...args);
+    return Promise.reject(new Error('this suite invokes no command'));
+  }
+}));
+
+afterEach(() => {
+  // Read, then cleared, then asserted, so one offending case does not fail the next.
+  const calls = invoked.mock.calls.length;
+  invoked.mockClear();
+  expect(calls).toBe(0);
+});
 
 /** The revision the writable file is projected at. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -314,7 +338,9 @@ interface Mounted {
   readonly reproject: (views: readonly DocumentView[]) => void;
   /**
    * Hands one envelope to the receiver the form reported — Phase 2d-6-6c-1 —
-   * as the window's registration would, inside a flush.
+   * as the window's registration would, inside a flush. Since Phase 2d-6-11a a
+   * replacing verdict also becomes what the stand-in for `standingConflictFor`
+   * answers for the file, as the window registers the origin it delivered.
    */
   readonly deliver: (delivery: ObservationDelivery) => void;
   /** Tears the component down. */
@@ -442,6 +468,10 @@ function mountCreator(
       views = next;
     },
     deliver: (delivery: ObservationDelivery): void => {
+      const verdict = delivery.verdict;
+      if (verdict.kind === 'raised' || verdict.kind === 'raisedWithoutReload' || verdict.kind === 'supersedes') {
+        standing.set(delivery.observation.document, verdict.source);
+      }
       receiver?.(delivery);
       flushSync();
     },
@@ -1898,3 +1928,398 @@ describe('The new-snippet form acknowledges an unknown write outcome on its own 
     mounted.stop();
   }); // End of the "nothing owed" case
 }); // End of the "own acknowledgement" suite
+
+describe('the new-snippet form under an external conflict, in English and Spanish — Phase 2d-6-11a', () => {
+  // **The design consult's Q8 row for this surface** (`docs/reviews/phase-2d-6-design.md`,
+  // "Each surface's mounted suite"): an external conflict cannot submit, every offered
+  // choice invokes its intended transition, a supersession withdraws the reload
+  // warning, and the three answers of `adoptDiskVersion` have their surface effects.
+  // The conflict is delivered through the receiver the form reported, in envelopes
+  // the real `arbitratedDelivery` sealed; the window's own registration and
+  // arbitration are `DetailPane.test.ts`'s. Every sentence is pinned to its
+  // dictionary value in the case's locale, which protects which code is drawn
+  // where, never the quality of a translation.
+
+  /** The revision a first observation of the destination read. */
+  const SEEN: ContentRevision = 'd'.repeat(64);
+
+  /** The revision a later observation of the destination read. */
+  const SEEN_LATER: ContentRevision = 'e'.repeat(64);
+
+  /** The snippet the window holds, which the form places the new one after. */
+  const HELD: MatchId = { document: 2, revision: BASE, node: 11 };
+
+  /** The *Keep editing* choice on this surface, whose draft is authored text. */
+  const KEEP_EDITING = conflictChoiceKey('keepEditing', 'authoredText');
+
+  /** The *Copy my text* choice. */
+  const COPY_DRAFT = conflictChoiceKey('copyDraft', 'authoredText');
+
+  /** The *Keep my draft* choice, which is the reapply. */
+  const KEEP_MY_DRAFT = conflictChoiceKey('keepMyDraft', 'authoredText');
+
+  /** The reload's second step. */
+  const CONFIRM_RELOAD = conflictChoiceKey('confirmReload', 'authoredText');
+
+  /** The reload warning this surface draws at the second step. */
+  const RELOAD_WARNING: TranslationKey = 'browser.matchCreation.reloadSeedsNoForm';
+
+  /**
+   * The held snippet as a disk read at one revision projects it.
+   *
+   * @param revision - The revision the disk read.
+   * @returns The disk-side snippet.
+   */
+  function twinAt(revision: ContentRevision): ReturnType<typeof makeMatch> {
+    return makeMatch({ node: 31, document: 2, revision, trigger: ':date' });
+  } // End of function twinAt()
+
+  /**
+   * One observation of the form's destination.
+   *
+   * A fresh object every call: the memo in `../browser/conflictSource.ts` and a
+   * session's wait are both keyed on identity.
+   *
+   * @param sequence - The sequence it was admitted under.
+   * @param revision - The revision it read.
+   * @param withTwin - Whether it carries a correspondence naming the held
+   *   snippet's twin, so an `after` placement can be rebuilt over it.
+   * @returns The observation.
+   */
+  function observed(
+    sequence: number,
+    revision: ContentRevision = SEEN,
+    withTwin = false
+  ): ExternalConflictObservation {
+    const twin = twinAt(revision);
+    return {
+      sequence,
+      document: 2,
+      previousRevision: BASE,
+      diskRevision: revision,
+      diskText: DISK_TEXT,
+      disk: makeDocument({
+        id: 2,
+        relativePath: 'match/base.yml',
+        revision,
+        matches: [makeMatch({ node: 30, document: 2, revision, trigger: ':sig' }), twin]
+      }),
+      findings: [],
+      correspondences: withTwin
+        ? {
+            base_revision: BASE,
+            disk_revision: revision,
+            entries: [
+              {
+                base: HELD,
+                exact: { Identified: { target: twin } },
+                editor: { Identified: { target: twin } }
+              }
+            ]
+          }
+        : null
+    };
+  } // End of function observed()
+
+  /**
+   * The envelope a window seals for a first observation of the destination.
+   *
+   * @param seen - The observation.
+   * @returns The `raised` envelope.
+   */
+  function raisedBy(seen: ExternalConflictObservation): ObservationDelivery {
+    return arbitratedDelivery(null, seen, false);
+  } // End of function raisedBy()
+
+  /**
+   * The envelope a window seals for a later observation over one that stands.
+   *
+   * @param prior - The observation whose origin stands.
+   * @param seen - The later observation.
+   * @returns The `supersedes` envelope.
+   */
+  function supersededBy(
+    prior: ExternalConflictObservation,
+    seen: ExternalConflictObservation
+  ): ObservationDelivery {
+    return arbitratedDelivery(standingConflictOf(externalConflictSource(prior)), seen, false);
+  } // End of function supersededBy()
+
+  /**
+   * Mounts the form in one language, filled in over the writable file, before any
+   * conflict.
+   *
+   * @param lang - The language the case runs in.
+   * @param adoption - What the window answers when asked to adopt.
+   * @param held - The snippet the window holds; `null` places the new one at the end.
+   * @returns The mounted form, able to create.
+   */
+  function opened(
+    lang: Locale,
+    adoption: DiskAdoptionOutcome = 'installed',
+    held: MatchId | null = null
+  ): Mounted {
+    locale.setOverride(lang);
+    const form = mountCreator([{ result: COMMITTED }], held, undefined, adoption);
+    fillIn(form);
+    return form;
+  } // End of function opened()
+
+  /**
+   * Presses the choice labelled with one key's rendering, inside the external panel.
+   *
+   * @param form - The mounted form.
+   * @param lang - The language the case runs in.
+   * @param key - The key holding the choice's label.
+   */
+  function choose(form: Mounted, lang: Locale, key: TranslationKey): void {
+    const found = labelledIn(externalConflictPanel(form.target), lang, key);
+    if (found === null) {
+      throw new Error(`this case needs the choice labelled ${translate(lang, key)}`);
+    }
+    found.click();
+    flushSync();
+  } // End of function choose()
+
+  /**
+   * Whether the external panel offers the choice labelled with one key's rendering.
+   *
+   * @param form - The mounted form.
+   * @param lang - The language the case runs in.
+   * @param key - The key holding the choice's label.
+   * @returns `true` when it does.
+   */
+  function offers(form: Mounted, lang: Locale, key: TranslationKey): boolean {
+    return labelledIn(externalConflictPanel(form.target), lang, key) !== null;
+  } // End of function offers()
+
+  /**
+   * The external panel's text, or `null` when none is drawn.
+   *
+   * @param form - The mounted form.
+   * @returns The panel's text.
+   */
+  function externalText(form: Mounted): string | null {
+    return form.target.querySelector('.panel.external')?.textContent ?? null;
+  } // End of function externalText()
+
+  /**
+   * The form's create control, in the case's language.
+   *
+   * @param form - The mounted form.
+   * @param lang - The language the case runs in.
+   * @returns The control, or `null` when it is not drawn.
+   */
+  function createIn(form: Mounted, lang: Locale): HTMLButtonElement | null {
+    return labelledIn(form.target, lang, 'browser.matchCreation.create');
+  } // End of function createIn()
+
+  it.each(LOCALES)('refuses to send a form under an external conflict, and draws its origin and choices (%s)', async (lang) => {
+    const form = opened(lang);
+    expect(createIn(form, lang)?.disabled).toBe(false);
+
+    form.deliver(raisedBy(observed(5)));
+
+    // **Direct submission is refused**: the control is drawn disabled, the boxes are
+    // held read-only, and a click forced past the disabled control sends nothing.
+    const create = createIn(form, lang);
+    expect(create).not.toBeNull();
+    expect(create?.disabled).toBe(true);
+    expect(box(form.target, 'trigger').readOnly).toBe(true);
+    expect(box(form.target, 'replace').value).toBe('a body');
+    create?.click();
+    await settle();
+    expect(form.calls).toEqual([]);
+    const shown = externalText(form) ?? '';
+    expect(shown).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(shown).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    expect(shown).toContain(translate(lang, 'browser.externalConflict.revisionObserved', { revision: SEEN }));
+    expect(shown).toContain(DISK_TEXT_MARKER);
+    for (const key of [KEEP_EDITING, COPY_DRAFT, KEEP_MY_DRAFT, RELOAD_CHOICE]) {
+      expect(offers(form, lang, key)).toBe(true);
+    } // End of the loop over the four first-step choices
+    expect(offers(form, lang, CONFIRM_RELOAD)).toBe(false);
+    expect(form.adoptions).toEqual([]);
+    expect(form.closed()).toBe(0);
+    form.stop();
+  }); // End of the "cannot submit" case
+
+  it.each(LOCALES)('keeps the conflict through Keep editing, and resets the reload step (%s)', (lang) => {
+    const form = opened(lang);
+    form.deliver(raisedBy(observed(5)));
+    choose(form, lang, RELOAD_CHOICE);
+    expect(externalText(form)).toContain(translate(lang, RELOAD_WARNING));
+    expect(offers(form, lang, CONFIRM_RELOAD)).toBe(true);
+
+    choose(form, lang, KEEP_EDITING);
+
+    // The warning is gone and the first step is back; the conflict stands, so the
+    // form stays read-only and nothing can be sent.
+    expect(externalText(form)).not.toBeNull();
+    expect(externalText(form)).not.toContain(translate(lang, RELOAD_WARNING));
+    expect(offers(form, lang, RELOAD_CHOICE)).toBe(true);
+    expect(offers(form, lang, CONFIRM_RELOAD)).toBe(false);
+    expect(createIn(form, lang)?.disabled).toBe(true);
+    expect(box(form.target, 'trigger').readOnly).toBe(true);
+    expect(form.calls).toEqual([]);
+    expect(form.adoptions).toEqual([]);
+    expect(form.closed()).toBe(0);
+    form.stop();
+  }); // End of the "keep editing" case
+
+  it.each(LOCALES)('copies the retained draft through Copy my text, and keeps the conflict (%s)', async (lang) => {
+    const original = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    const copied = recordTheSelectionCopied();
+    try {
+      const form = opened(lang);
+      form.deliver(raisedBy(observed(5)));
+
+      choose(form, lang, COPY_DRAFT);
+      await settle();
+
+      expect(copied.selections).toHaveLength(1);
+      expect(copied.selections[0]).toContain(':new');
+      expect(copied.selections[0]).toContain('a body');
+      expect(form.target.textContent).toContain(translate(lang, 'browser.saveOutcome.draftCopied'));
+      expect(form.target.textContent).not.toContain(
+        translate(lang, 'browser.saveOutcome.draftCopyFailed')
+      );
+      // A copy resolves nothing: the conflict and its restriction stand.
+      expect(externalText(form)).not.toBeNull();
+      expect(createIn(form, lang)?.disabled).toBe(true);
+      expect(form.calls).toEqual([]);
+      expect(form.adoptions).toEqual([]);
+      form.stop();
+    } finally {
+      if (original === undefined) {
+        Reflect.deleteProperty(document, 'execCommand');
+      } else {
+        Object.defineProperty(document, 'execCommand', original);
+      }
+    }
+  }); // End of the "copy" case
+
+  it.each(LOCALES)('re-points an end placement at the disk version through Keep my draft, which needs no row (%s)', async (lang) => {
+    // A creation brings its own snippet, so an `end` placement consults no row of
+    // the table (`rebuiltPlacement` in `../browser/matchCreation.ts`): the reapply
+    // proceeds with the observation carrying no correspondence at all.
+    const form = opened(lang);
+    const seen = observed(5);
+    form.deliver(raisedBy(seen));
+
+    choose(form, lang, KEEP_MY_DRAFT);
+
+    expect(form.adoptions.map((one) => one.source)).toEqual([externalConflictSource(seen)]);
+    expect(form.target.textContent).toContain(translate(lang, 'browser.reapply.reapplied'));
+    expect(externalText(form)).toBeNull();
+    expect(box(form.target, 'trigger').value).toBe(':new');
+    expect(box(form.target, 'trigger').readOnly).toBe(false);
+    expect(form.calls).toEqual([]);
+
+    createIn(form, lang)?.click();
+    await settle();
+    expect(form.calls).toHaveLength(1);
+    expect(form.calls[0]?.baseRevision).toBe(SEEN);
+    expect(form.calls[0]?.position).toEqual({ End: {} });
+    form.stop();
+  }); // End of the "end placement reapplied" case
+
+  it.each(LOCALES)('rebuilds an after placement over the anchor’s twin when the evidence names it (%s)', async (lang) => {
+    const form = opened(lang, 'installed', HELD);
+    expect(positions(form.target).value).toBe(`after:2:${BASE}:11`);
+    const seen = observed(5, SEEN, true);
+    form.deliver(raisedBy(seen));
+
+    choose(form, lang, KEEP_MY_DRAFT);
+
+    expect(form.adoptions.map((one) => one.source)).toEqual([externalConflictSource(seen)]);
+    expect(form.target.textContent).toContain(translate(lang, 'browser.reapply.reapplied'));
+    expect(externalText(form)).toBeNull();
+    expect(form.calls).toEqual([]);
+
+    createIn(form, lang)?.click();
+    await settle();
+    // What goes out is placed after the twin, against the version the reapply adopted.
+    expect(form.calls).toHaveLength(1);
+    expect(form.calls[0]?.baseRevision).toBe(SEEN);
+    expect(form.calls[0]?.position).toEqual({ After: { anchor: twinAt(SEEN).id } });
+    form.stop();
+  }); // End of the "after placement reapplied" case
+
+  it.each(LOCALES)('refuses Keep my draft for an after placement without evidence, says why, and keeps the conflict (%s)', (lang) => {
+    const form = opened(lang, 'installed', HELD);
+    form.deliver(raisedBy(observed(5)));
+
+    choose(form, lang, KEEP_MY_DRAFT);
+
+    const shown = form.target.textContent ?? '';
+    expect(shown).toContain(translate(lang, 'browser.reapply.manualResolution'));
+    expect(shown).toContain(translate(lang, 'browser.reapply.externalEvidence.noCorrespondence'));
+    expect(externalText(form)).not.toBeNull();
+    expect(createIn(form, lang)?.disabled).toBe(true);
+    expect(box(form.target, 'trigger').value).toBe(':new');
+    expect(form.adoptions).toEqual([]);
+    expect(form.calls).toEqual([]);
+    form.stop();
+  }); // End of the "reapply refused" case
+
+  it.each(LOCALES)('withdraws the reload warning when a later reading supersedes the conflict (%s)', (lang) => {
+    const form = opened(lang);
+    const first = observed(5);
+    form.deliver(raisedBy(first));
+    choose(form, lang, RELOAD_CHOICE);
+    expect(offers(form, lang, CONFIRM_RELOAD)).toBe(true);
+
+    form.deliver(supersededBy(first, observed(6, SEEN_LATER)));
+
+    // The confirmation collected for the first conflict is not spendable against
+    // this one, and its warning does not stay on screen.
+    expect(offers(form, lang, CONFIRM_RELOAD)).toBe(false);
+    expect(offers(form, lang, RELOAD_CHOICE)).toBe(true);
+    const shown = externalText(form) ?? '';
+    expect(shown).not.toContain(translate(lang, RELOAD_WARNING));
+    expect(shown).toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: SEEN_LATER })
+    );
+    expect(shown).not.toContain(
+      translate(lang, 'browser.externalConflict.revisionObserved', { revision: SEEN })
+    );
+    expect(form.adoptions).toEqual([]);
+    expect(form.calls).toEqual([]);
+    form.stop();
+  }); // End of the "supersession" case
+
+  it.each(
+    LOCALES.flatMap((lang) =>
+      (['installed', 'alreadyThere', 'refused'] as const).map((adoption) => [lang, adoption] as const)
+    )
+  )('reloads in two steps and closes on what the window answers (%s, %s)', (lang, adoption) => {
+    const form = opened(lang, adoption);
+    const seen = observed(5);
+    form.deliver(raisedBy(seen));
+    choose(form, lang, RELOAD_CHOICE);
+    expect(externalText(form)).toContain(translate(lang, RELOAD_WARNING));
+    expect(form.adoptions).toEqual([]);
+
+    choose(form, lang, CONFIRM_RELOAD);
+
+    // One adoption, of this observation's conflict and no other.
+    expect(form.adoptions).toHaveLength(1);
+    expect(form.adoptions[0]?.source).toBe(externalConflictSource(seen));
+    if (adoption === 'refused') {
+      // Nothing closes over a window that did not move, and the control that has
+      // just gone is replaced by the reason.
+      expect(form.closed()).toBe(0);
+      const shown = externalText(form) ?? '';
+      expect(shown).toContain(translate(lang, reloadUnavailableKey('authoredText')));
+      expect(shown).not.toContain(translate(lang, RELOAD_WARNING));
+      expect(offers(form, lang, RELOAD_CHOICE)).toBe(false);
+      expect(offers(form, lang, CONFIRM_RELOAD)).toBe(false);
+      expect(offers(form, lang, KEEP_EDITING)).toBe(true);
+    } else {
+      expect(form.closed()).toBe(1);
+    }
+    expect(form.calls).toEqual([]);
+    form.stop();
+  }); // End of the "two-step reload" case
+}); // End of the "new-snippet form under an external conflict" suite

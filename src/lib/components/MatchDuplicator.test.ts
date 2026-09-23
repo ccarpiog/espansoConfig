@@ -117,6 +117,30 @@ import MatchDuplicator from './MatchDuplicator.svelte';
 import type { SurfaceBinding } from '../browser/surfaceReceivers';
 import { reconciliationRefusalKey, type ReconciliationRefusal } from '../browser/reconciliationStatus';
 
+/**
+ * Records every call that reaches `@tauri-apps/api/core`'s `invoke` while this
+ * file's cases run — Phase 2d-6-11a. Every mount here is handed scripted ports, so
+ * no case should ever reach the boundary; the mock below rejects any call that
+ * does, and the file-level `afterEach` fails the case that made it. It catches a
+ * call reaching `invoke` in the cases this file runs and proves nothing about
+ * other files, other paths or code loaded dynamically outside this module graph.
+ */
+const { invoked } = vi.hoisted(() => ({ invoked: vi.fn() }));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: readonly unknown[]): Promise<never> => {
+    invoked(...args);
+    return Promise.reject(new Error('this suite invokes no command'));
+  }
+}));
+
+afterEach(() => {
+  // Read, then cleared, then asserted, so one offending case does not fail the next.
+  const calls = invoked.mock.calls.length;
+  invoked.mockClear();
+  expect(calls).toBe(0);
+});
+
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
 

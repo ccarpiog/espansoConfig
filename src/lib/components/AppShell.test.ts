@@ -833,3 +833,165 @@ describe('the foreground fallback — Phase 2d-6-10', () => {
     }
   }); // End of the "unmount removes both listeners" case
 }); // End of the describe over the foreground fallback
+
+/**
+ * The button whose label is one locale's rendering of one key.
+ *
+ * {@link control} reads the English dictionary only; the lost-history cases run
+ * in both locales and press their controls by the words that locale draws.
+ *
+ * @param target - Where the shell was mounted.
+ * @param lang - The locale whose dictionary holds the label.
+ * @param key - The key holding the button's label.
+ * @returns The button.
+ */
+function controlIn(target: HTMLElement, lang: 'en' | 'es', key: TranslationKey): HTMLButtonElement {
+  const label = DICTIONARIES[lang][key];
+  const found = [...target.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent?.trim() === label
+  );
+  if (found === undefined) {
+    throw new Error(`this case needs the control labelled ${label}`);
+  }
+  return found;
+} // End of function controlIn()
+
+/**
+ * Answers a one-file workspace whose second drain reports lost history.
+ *
+ * The first drain is the open's, and empty. The second — the one a wake asks
+ * for — carries `discarded: 1` for the adopted epoch, which is a strict rise from
+ * zero and so the coordinator's lost-history block. Every drain after it answers
+ * an empty batch for epoch 2, as the watcher of a reopened workspace would, so a
+ * recovery that reopens is not blocked again by the same count.
+ *
+ * @returns Nothing; the answerer is installed on the file's script.
+ */
+function scriptLostHistory(): void {
+  const only = makeSummary({ id: 1, relativePath: 'match/a.yml' });
+  const view = makeDocument({ id: 1, relativePath: 'match/a.yml' });
+  let drained = 0;
+  script.current = (command) => {
+    switch (command) {
+      case 'open_workspace':
+        return Promise.resolve({ ...EMPTY_SUMMARY, documents: 1, match_files: 1 });
+      case 'list_documents':
+        return Promise.resolve([only]);
+      case 'get_document':
+        return Promise.resolve(view);
+      case 'drain_external_changes':
+        drained += 1;
+        if (drained === 1) {
+          return Promise.resolve(emptyBatch());
+        }
+        return Promise.resolve(
+          drained === 2
+            ? { epoch: 1, newest_sequence: 1, observations: [], discarded: 1 }
+            : { epoch: 2, newest_sequence: 0, observations: [], discarded: 0 }
+        );
+      default:
+        return Promise.reject(new Error(`this case scripts no answer for ${command}`));
+    } // End of the switch over the command
+  }; // End of the lost-history answerer
+} // End of function scriptLostHistory()
+
+describe('the lost-history recovery through the composition — Phase 2d-6-11a', () => {
+  it.each(['en', 'es'] as const)(
+    'draws lost history held by an open surface, and reloads the workspace on the press once it closes, in %s',
+    async (lang) => {
+      // The design consult's "both workspace reload requests" row: the membership
+      // reload is pressed above; this is the other, `requestLostHistoryRecovery`,
+      // reached through the shell's own `ReconciliationStatus`. The new-snippet
+      // form is a write surface, and an open one is what keeps the coordinator
+      // from recovering by itself, so the banner and its control are drawn.
+      locale.setOverride(lang);
+      scriptLostHistory();
+      const shell = mountShell(false);
+      resolveRegistration(0);
+      expectedInvokes.push(
+        ['list_documents', {}],
+        ['get_document', { id: 1 }],
+        ['drain_external_changes', { afterSequence: 0 }]
+      );
+      await settle();
+      await settle();
+      controlIn(shell.target, lang, 'browser.matchCreation.open').click();
+      flushSync();
+
+      registration(0).deliver({ event: READY, id: 1, payload: { workspace_epoch: 1, newest_sequence: 1 } });
+      expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
+      await settle();
+      await settle();
+      expect(invoked).toHaveBeenCalledTimes(5);
+      expect(shell.target.textContent).toContain(DICTIONARIES[lang]['browser.reconciliation.lostHistory']);
+      expect(
+        controlIn(shell.target, lang, 'browser.reconciliation.action.lostHistoryRecovery').disabled
+      ).toBe(true);
+
+      // Closing the form permits the recovery and does not trigger it.
+      controlIn(shell.target, lang, 'browser.matchCreation.close').click();
+      flushSync();
+      await settle();
+      expect(invoked).toHaveBeenCalledTimes(5);
+      const recover = controlIn(shell.target, lang, 'browser.reconciliation.action.lostHistoryRecovery');
+      expect(recover.disabled).toBe(false);
+
+      recover.click();
+      expectedInvokes.push(
+        ['open_workspace', { root: null }],
+        ['list_documents', {}],
+        ['get_document', { id: 1 }],
+        ['drain_external_changes', { afterSequence: 0 }]
+      );
+      await settle();
+      await settle();
+      expect(shell.target.textContent).not.toContain(
+        DICTIONARIES[lang]['browser.reconciliation.lostHistory']
+      );
+      expect(
+        [...shell.target.querySelectorAll('button')].some(
+          (candidate) =>
+            candidate.textContent?.trim() ===
+            DICTIONARIES[lang]['browser.reconciliation.action.lostHistoryRecovery']
+        )
+      ).toBe(false);
+      shell.stop();
+    }
+  ); // End of the "lost history held by a surface" case
+
+  it('recovers by itself when no surface is open, drawing no banner and offering no control', async () => {
+    // `recoverFromLostHistory` in `../browser/reconciliationCoordinator.ts`: with
+    // the write-surface registry empty, the batch that reports the loss is
+    // refused whole and the retained open is rerun in the same drain.
+    scriptLostHistory();
+    const shell = mountShell(false);
+    resolveRegistration(0);
+    expectedInvokes.push(
+      ['list_documents', {}],
+      ['get_document', { id: 1 }],
+      ['drain_external_changes', { afterSequence: 0 }]
+    );
+    await settle();
+    await settle();
+
+    registration(0).deliver({ event: READY, id: 1, payload: { workspace_epoch: 1, newest_sequence: 1 } });
+    expectedInvokes.push(
+      ['drain_external_changes', { afterSequence: 0 }],
+      ['open_workspace', { root: null }],
+      ['list_documents', {}],
+      ['get_document', { id: 1 }],
+      ['drain_external_changes', { afterSequence: 0 }]
+    );
+    await settle();
+    await settle();
+    expect(shell.target.textContent).not.toContain(DICTIONARIES.en['browser.reconciliation.lostHistory']);
+    expect(
+      [...shell.target.querySelectorAll('button')].some(
+        (candidate) =>
+          candidate.textContent?.trim() ===
+          DICTIONARIES.en['browser.reconciliation.action.lostHistoryRecovery']
+      )
+    ).toBe(false);
+    shell.stop();
+  }); // End of the "automatic recovery" case
+}); // End of the describe over the lost-history recovery

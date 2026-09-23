@@ -216,6 +216,32 @@ const COMMITTED: SaveResult = {
   moved: null
 };
 
+/**
+ * A raw save of `match/a.yml` that failed after its rename may have happened —
+ * the shape `mayHaveWritten` in `../ipc/errors` answers `true` for (Phase
+ * 2d-6-11a, after `ReconciliationStatus.test.ts`'s fixture).
+ */
+const RAW_WRITE_MAY_HAVE_HAPPENED = {
+  ok: false,
+  failure: {
+    kind: 'command',
+    error: {
+      code: 'saveFailed',
+      error: {
+        Write: {
+          Io: {
+            step: 'SyncDirectory',
+            path: '/tmp/espanso/match/a.yml',
+            kind: 'Interrupted',
+            raw_os_error: 4
+          }
+        }
+      },
+      may_have_written: true
+    }
+  }
+} as unknown as RawSaveOutcome;
+
 /** One whole-file replacement this file's scripted boundary was asked for. */
 interface RecordedRawSave {
   /** The file it would write. */
@@ -229,33 +255,37 @@ interface RecordedRawSave {
 }
 
 /**
- * How many times any surface built by {@link scriptedCommands} has been drained.
+ * The `afterSequence` argument of every drain any surface built by
+ * {@link scriptedCommands} was asked for, in call order — Phase 2d-6-11a.
  *
  * Module level rather than per-surface because the assertion is about the file:
- * **no case in it may drain through the injected surface**. That bound is the
- * whole claim, and the other route is live here rather than hypothetical: these
- * cases mount over a **real** `BrowserState`, and `workspace.svelte.ts` holds a
- * module-level `drainExternalChanges` binding that increments nothing in this
- * count. *No component imports the wrapper* is true and is narrower than what
- * this file executes, so it is not the bound. The other route is the hoisted
- * `invoke` spy's: since Phase 2d-5-6 the `afterEach` below holds `invoked` to zero
- * in every case, so a drain taking that route is caught file-wide and by command
- * name, where before it was caught only in the cases that asserted `invoked`
- * themselves. The `afterEach` reads and resets this count beside it.
+ * **a case drains through the injected surface exactly as it declares, and no
+ * other way**. The other route is live here rather than hypothetical: these cases
+ * mount over a **real** `BrowserState`, and `workspace.svelte.ts` holds a
+ * module-level `drainExternalChanges` binding that records nothing here. *No
+ * component imports the wrapper* is true and is narrower than what this file
+ * executes, so it is not the bound. That route is the hoisted `invoke` spy's:
+ * since Phase 2d-5-6 the `afterEach` below holds `invoked` to zero in every case,
+ * so a drain taking it is caught file-wide and by command name. The `afterEach`
+ * reads and resets this list beside it.
  */
-let drains = 0;
+const drainArguments: number[] = [];
 
 /**
- * How many drains the running case scripted and expects — Phase 2d-6-6b, the
- * 2d-6 record's §3 entry 36.
+ * The exact, ordered `afterSequence` arguments the running case expects its
+ * drains to be asked with — Phase 2d-6-11a, replacing 2d-6-6b's count (the 2d-6
+ * record's ruling 36).
  *
- * **Zero unless a case says otherwise**, which is every case before 2d-6-6b: those
- * start no reconciliation. A delivery case starts the coordinator over a finite
- * queue of batches ({@link PaneScript.batches}) and sets this to the exact number
- * of drains it expects — never a relaxed allowance. The `afterEach` compares and
- * resets it.
+ * **Empty unless a case says otherwise**, which is every case that starts no
+ * reconciliation: for those the `afterEach` asserts exactly zero drains. A
+ * delivery case starts the coordinator over a finite queue of batches
+ * ({@link PaneScript.batches}) and assigns the whole list it expects — the
+ * registration's drain, the open's, then one per wake after the newest sequence
+ * the previous batch reported. The `afterEach` compares the recorded list with
+ * `toEqual`, which fixes the count and every argument; there is no relaxed
+ * allowance. It resets this to empty.
  */
-let expectedDrains = 0;
+let expectedDrainArguments: readonly number[] = [];
 
 /**
  * What a case scripts beyond the two files — Phase 2d-6-6b.
@@ -290,6 +320,12 @@ interface PaneScript {
    * {@link FILE_TEXT} for `match/a.yml` as every earlier case did (Phase 2d-6-8b).
    */
   readonly documentText?: (id: DocumentId) => string | undefined;
+  /**
+   * A gate the stocked raw-save commit awaits before it writes anything, so a
+   * case can hold a committing save in flight (Phase 2d-6-11a). Absent, the
+   * stocked commit runs straight through, as it did for every earlier case.
+   */
+  readonly rawSaveGate?: Promise<void>;
 }
 
 /**
@@ -376,6 +412,9 @@ function scriptedCommands(
         if (saves === null) {
           return refusal;
         }
+        if (script.rawSaveGate !== undefined) {
+          await script.rawSaveGate;
+        }
         saves.push({ document, baseRevision, text, acknowledgement });
         // The real command re-projects before it answers, and the state's own
         // closure is what installs it, so the map has to move first.
@@ -394,18 +433,21 @@ function scriptedCommands(
     ),
     // Phase 2d-4b puts the drain on this surface; nothing this pane draws calls
     // it through the surface. The refusal is the answer no caller could proceed
-    // on, and `drains` is what makes such a call *visible* — a `vi.fn` records a
-    // call and asserts nothing about it, so a fire-and-forget drain that ignored
-    // this answer would pass every case here. The `afterEach` below is the
-    // assertion, bounded as the count's own doc comment states.
+    // on, and `drainArguments` is what makes such a call *visible* — a `vi.fn`
+    // records a call and asserts nothing about it, so a fire-and-forget drain that
+    // ignored this answer would pass every case here. The `afterEach` below is the
+    // assertion, bounded as the list's own doc comment states.
     //
     // **Since Phase 2d-6-6b a case may script batches** (entry 36): the queue is
-    // finite, a drain past its end refuses, and the case states how many drains it
-    // expects in {@link expectedDrains}.
-    drainExternalChanges: vi.fn(async (): Promise<CommandResult<ReconciliationBatch>> => {
-      drains += 1;
-      return batches.shift() ?? refusal;
-    })
+    // finite and a drain past its end refuses. Since Phase 2d-6-11a every drain's
+    // `afterSequence` is recorded, and the case states the exact ordered list it
+    // expects in {@link expectedDrainArguments}.
+    drainExternalChanges: vi.fn(
+      async (afterSequence: number): Promise<CommandResult<ReconciliationBatch>> => {
+        drainArguments.push(afterSequence);
+        return batches.shift() ?? refusal;
+      }
+    )
   };
 } // End of function scriptedCommands()
 
@@ -694,18 +736,18 @@ afterEach(() => {
   // every case after it. The route first (ruling 34): a wrapper that reached the
   // real `invoke` is reported here by command name, and zero is the number in
   // every case because even an intended drain must use the injected boundary.
-  const drained = drains;
-  const expected = expectedDrains;
-  drains = 0;
-  expectedDrains = 0;
+  const drained = [...drainArguments];
+  const expected = expectedDrainArguments;
+  drainArguments.length = 0;
+  expectedDrainArguments = [];
   expect(invoked).not.toHaveBeenCalled();
-  // Then the drain budget (ruling 35; entry 36), an exact count per case: zero for
-  // every case that starts no reconciliation, and for the delivery cases of Phase
-  // 2d-6-6b the number of drains their finite script answers — never a larger
-  // allowance. This is the assertion `scriptedCommands()`'s refusal cannot make on
-  // its own.
-  expect(drained).toBe(expected);
-}); // End of the afterEach that closes the route and the drain budget
+  // Then the drains themselves (ruling 35; entry 36), as an exact ordered list of
+  // `afterSequence` arguments per case (Phase 2d-6-11a): empty — zero drains — for
+  // every case that starts no reconciliation, and for a delivery case the list it
+  // declared, which fixes both how many drains ran and where each resumed. This is
+  // the assertion `scriptedCommands()`'s refusal cannot make on its own.
+  expect(drained).toEqual(expected);
+}); // End of the afterEach that closes the route and the drain arguments
 
 describe('the mounted detail pane', () => {
   it('keeps the small editor naming the file it is writing when the selection moves', async () => {
@@ -1822,12 +1864,40 @@ async function settleWake(): Promise<void> {
   await settle();
 } // End of function settleWake()
 
+/** How many times each of the three read commands has been called — Phase 2d-6-11a. */
+interface ReadCounts {
+  /** `get_document`. */
+  readonly getDocument: number;
+  /** `reload_document`. */
+  readonly reloadDocument: number;
+  /** `document_text`. */
+  readonly documentText: number;
+}
+
+/**
+ * The call counts of the three commands that could reload or re-read a file.
+ *
+ * Taken before and after a wake, two equal readings say no read of any file ran
+ * across it — which is what "no automatic reload" means at this boundary.
+ *
+ * @param pane - The mounted pane.
+ * @returns The three counts.
+ */
+function readCounts(pane: Mounted): ReadCounts {
+  return {
+    getDocument: vi.mocked(pane.commands.getDocument).mock.calls.length,
+    reloadDocument: vi.mocked(pane.commands.reloadDocument).mock.calls.length,
+    documentText: vi.mocked(pane.commands.documentText).mock.calls.length
+  };
+} // End of function readCounts()
+
 describe('the pane as a delivery host — Phase 2d-6-6b', () => {
   // **Through the real registry and the real coordinator boundary** (the 2d-6
   // record's §3 entry 34): every case below opens its surfaces through the pane's
   // controls, starts the reconciliation lifecycle over a finite scripted queue of
-  // drains (entry 36, counted exactly in `expectedDrains`), and wakes the window —
-  // so the observation is admitted by the coordinator, routed by
+  // drains (entry 36, their arguments declared exactly in
+  // `expectedDrainArguments`), and wakes the window — so the observation is
+  // admitted by the coordinator, routed by
   // `targetingSurfaceFor`, handed to the transition this pane registered, and
   // arbitrated once by `BrowserState.observeExternalChange`. What these cases
   // assert is what 6b wires — the session's state as its controls show it, a
@@ -1835,7 +1905,7 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
   // draw, which the Phase 2d-6-6c-1 suite at the end of this file reads.
 
   it.each(LOCALES)('a pristine editor conflicts, and refuses to submit (%s)', async (lang) => {
-    expectedDrains = 3;
+    expectedDrainArguments = [0, 0, 0];
     const events = paneEvents();
     const pane = await mountPane(
       false,
@@ -1874,7 +1944,7 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
   ] as const)(
     'an unknown-target creator is delivered about every eligible file, and blocked by a change to %i',
     async (affected, path) => {
-      expectedDrains = 3;
+      expectedDrainArguments = [0, 0, 0];
       const events = paneEvents();
       const pane = await mountPane(
         false,
@@ -1898,6 +1968,19 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
         [affected, 'raised']
       ]);
       expect(creatorTrigger(pane.target).readOnly).toBe(true);
+      // **The delivery chose nothing** (Phase 2d-6-11a): before any destination is
+      // pressed the registration is still over no file, every eligible file is
+      // still registered, no destination is marked chosen, and the send refuses.
+      expect(registered(pane.state)).toEqual([
+        { kind: 'matchCreator', target: { kind: 'unknown' } }
+      ]);
+      expect(log.live()).toEqual([1, 3]);
+      expect(
+        [...pane.target.querySelectorAll('.creator .destinations button')].map((one) =>
+          one.getAttribute('aria-pressed')
+        )
+      ).toEqual(['false', 'false', 'false']);
+      expect(control(pane.target, 'browser.matchCreation.create').disabled).toBe(true);
       // **The destination stays choosable** (`canChooseDestination`, 2d-6-3's
       // carry-over): naming a file is the one way forward entry 21 leaves open.
       const destination = destinationIn(pane.target, '.creator', path);
@@ -1918,7 +2001,7 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
   ); // End of the "unknown-target creator" case
 
   it('protects a recovery destination B while the host editor stays over A', async () => {
-    expectedDrains = 3;
+    expectedDrainArguments = [0, 0, 0];
     const events = paneEvents();
     const pane = await mountPane(
       false,
@@ -1964,7 +2047,7 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
   }); // End of the "recovery over B" case
 
   it('gives a host and its recovery form over one file one decision', async () => {
-    expectedDrains = 3;
+    expectedDrainArguments = [0, 0, 0];
     const events = paneEvents();
     const pane = await mountPane(
       false,
@@ -1981,10 +2064,16 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
       { kind: 'matchEditor', target: { kind: 'document', document: 1 } },
       { kind: 'recovery', target: { kind: 'document', document: 1 } }
     ]);
+    const reads = readCounts(pane);
 
     events.wake(5, 5);
     await settleWake();
 
+    // **Nothing reloaded and nothing installed** (Phase 2d-6-11a): no read
+    // command ran across the wake, and the window still holds file 1 at the
+    // revision it opened over.
+    expect(readCounts(pane)).toEqual(reads);
+    expect(pane.state.views.find((view) => view.id === 1)?.revision).toBe('a'.repeat(64));
     // **Two recipients, one envelope** (entry 2): never `raised` for one and
     // `coalesced` for the other.
     expect(log.delivered).toHaveLength(2);
@@ -1999,7 +2088,7 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
   }); // End of the "one decision" case
 
   it('never hands a reopened editor what its previous instance was told', async () => {
-    expectedDrains = 4;
+    expectedDrainArguments = [0, 0, 0, 5];
     const events = paneEvents();
     const pane = await mountPane(
       false,
@@ -2041,7 +2130,7 @@ describe('the pane as a delivery host — Phase 2d-6-6b', () => {
   }); // End of the "reopened editor" case
 
   it('lands a settlement after the save it settles, in the order it was decided', async () => {
-    expectedDrains = 3;
+    expectedDrainArguments = [0, 0, 0];
     const events = paneEvents();
     let answer: ((value: CommandResult<SaveResult>) => void) | null = null;
     const pane = await mountPane(
@@ -2254,8 +2343,8 @@ const OPERATIONS: Record<OperationKind, OperationWalk> = {
 describe('the pane as a delivery host for the operation panels — Phase 2d-6-7a', () => {
   // **Through the real registry and the real coordinator boundary**, as the
   // Phase 2d-6-6b suite above: each case opens its panel through the pane's own
-  // control, starts the lifecycle over a finite drain queue counted exactly, and
-  // wakes the window. What these cases assert is what 2d-6-7a wires — the
+  // control, starts the lifecycle over a finite drain queue whose arguments are
+  // declared exactly, and wakes the window. What these cases assert is what 2d-6-7a wires — the
   // registration, the envelope, the send withdrawn. The sentences the panels
   // draw about the conflict are read by the suite after this one (Phase 2d-6-7b)
   // and by each panel's own suite.
@@ -2263,7 +2352,7 @@ describe('the pane as a delivery host for the operation panels — Phase 2d-6-7a
   it.each(['matchDeleter', 'matchMover', 'matchDuplicator'] as const)(
     'an open %s is delivered its file’s change, and its send is withdrawn',
     async (kind) => {
-      expectedDrains = 3;
+      expectedDrainArguments = [0, 0, 0];
       const events = paneEvents();
       const pane = await mountPane(
         false,
@@ -2308,7 +2397,7 @@ describe('the pane as a delivery host for the operation panels — Phase 2d-6-7a
   it.each(['matchDeleter', 'matchMover', 'matchDuplicator'] as const)(
     'never hands a reopened %s what its previous instance was told',
     async (kind) => {
-      expectedDrains = 4;
+      expectedDrainArguments = [0, 0, 0, 5];
       const events = paneEvents();
       const pane = await mountPane(
         false,
@@ -2357,7 +2446,7 @@ describe('the pane as a delivery host for the operation panels — Phase 2d-6-7a
   ); // End of the "reopened operation panel" case
 
   it('lands a settlement after the deletion it settles, in the order it was decided', async () => {
-    expectedDrains = 3;
+    expectedDrainArguments = [0, 0, 0];
     const events = paneEvents();
     let answer: ((value: CommandResult<SaveResult>) => void) | null = null;
     const pane = await mountPane(
@@ -2407,8 +2496,9 @@ describe('the pane as a delivery host for the operation panels — Phase 2d-6-7a
 describe('the pane as a delivery host for the raw editor and restore — Phase 2d-6-8a', () => {
   // **Through the real registry and the real coordinator boundary**, as the two
   // suites above: each case opens its surface through the pane's own control,
-  // starts the lifecycle over a finite drain queue counted exactly, and wakes the
-  // window, so the observation is admitted by the real coordinator, routed to the
+  // starts the lifecycle over a finite drain queue whose arguments are declared
+  // exactly, and wakes the window, so the observation is admitted by the real
+  // coordinator, routed to the
   // pane's transition, arbitrated once by `observeExternalChange`, and delivered
   // through the roster's registration. What these cases assert is what 2d-6-8a
   // wires — the registration, the envelope, the send withdrawn. What the two
@@ -2489,7 +2579,7 @@ describe('the pane as a delivery host for the raw editor and restore — Phase 2
   it.each(['rawEditor', 'restore'] as const)(
     'an open %s is delivered its file’s change, and its send is withdrawn',
     async (kind) => {
-      expectedDrains = 3;
+      expectedDrainArguments = [0, 0, 0];
       const events = paneEvents();
       const pane = await mountPane(
         true,
@@ -2524,7 +2614,7 @@ describe('the pane as a delivery host for the raw editor and restore — Phase 2
   it.each(['rawEditor', 'restore'] as const)(
     'never hands a reopened %s what its previous instance was told',
     async (kind) => {
-      expectedDrains = 4;
+      expectedDrainArguments = [0, 0, 0, 5];
       const events = paneEvents();
       const pane = await mountPane(
         true,
@@ -2565,7 +2655,7 @@ describe('the pane as a delivery host for the raw editor and restore — Phase 2
   ); // End of the "reopened raw or restore" case
 
   it('lands a settlement after the raw save it settles, in the order it was decided', async () => {
-    expectedDrains = 3;
+    expectedDrainArguments = [0, 0, 0];
     const events = paneEvents();
     let answer: ((value: RawSaveOutcome) => void) | null = null;
     const pane = await mountPane(
@@ -2605,6 +2695,103 @@ describe('the pane as a delivery host for the raw editor and restore — Phase 2
     expect(pane.commands.saveRawDocument).toHaveBeenCalledTimes(1);
     pane.stop();
   }); // End of the "raw save settlement lands in order" case
+
+  it.each([
+    ['equal to the committed revision, is dropped as written here', RESTORED_REVISION, 'writtenHere'],
+    ['of a different revision, raises the conflict once the save settles', 'c'.repeat(64), 'raised']
+  ] as const)(
+    'a reading held behind a committed raw save, %s',
+    async (_title, revision, verdict) => {
+      // **Row 7 (b) and (c), through a real coordinator** (Phase 2d-6-11a): the
+      // stocked commit is held open at its gate, the wake lands while it is in
+      // flight, and the release decides on the revision the commit ended on.
+      expectedDrainArguments = [0, 0, 0];
+      const events = paneEvents();
+      let open: (() => void) | null = null;
+      const rawSaveGate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      const pane = await mountPane(
+        true,
+        {
+          rawSaveGate,
+          batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml', revision)])]
+        },
+        events.source
+      );
+      const log = watchDeliveries(pane.state);
+      await LAST.rawEditor.arm(pane);
+      control(pane.target, 'browser.rawEditor.save').click();
+      await settle();
+      expect(pane.commands.saveRawDocument).toHaveBeenCalledTimes(1);
+
+      events.wake(5, 5);
+      await settleWake();
+      expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['retained']);
+
+      const release = open as (() => void) | null;
+      release?.();
+      await settleWake();
+
+      // The commit went through and ended on RESTORED_REVISION either way.
+      expect(pane.saves).toHaveLength(1);
+      expect(pane.state.views.find((view) => view.id === 1)?.revision).toBe(RESTORED_REVISION);
+      expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['retained', verdict]);
+      if (verdict === 'writtenHere') {
+        // **Not news**: nothing stands and the editor draws no external conflict.
+        // The file's `stale` mark is deliberately not asserted: it was written when
+        // the reading arrived behind the open editor, and nothing clears it on a
+        // `writtenHere` release, which Phase 2d-6-11a leaves open rather than pins.
+        expect(pane.state.standingConflictFor(1)).toBeNull();
+        expect(isDrawn(pane.target, '.panel.external')).toBe(false);
+      } else {
+        expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+        expect(isDrawn(pane.target, '.panel.external')).toBe(true);
+      }
+      expect(pane.commands.saveRawDocument).toHaveBeenCalledTimes(1);
+      pane.stop();
+    }
+  ); // End of the "held reading behind a committed raw save" case
+
+  it('settles a reading held behind a raw save that may have written as a conflict without reload', async () => {
+    // **Row 7 (d)** (Phase 2d-6-11a): the save fails in the shape `mayHaveWritten`
+    // answers `true` for, so the settlement is `uncertain` and the held reading is
+    // arbitrated under it — raised, with no automatic reload allowed from it.
+    expectedDrainArguments = [0, 0, 0];
+    const events = paneEvents();
+    let answer: ((value: RawSaveOutcome) => void) | null = null;
+    const pane = await mountPane(
+      false,
+      {
+        saveRawDocument: () =>
+          new Promise<RawSaveOutcome>((resolve) => {
+            answer = resolve;
+          }),
+        batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])]
+      },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    await LAST.rawEditor.arm(pane);
+    control(pane.target, 'browser.rawEditor.save').click();
+    await settle();
+    events.wake(5, 5);
+    await settleWake();
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['retained']);
+
+    const settleSave = answer as ((value: RawSaveOutcome) => void) | null;
+    settleSave?.(RAW_WRITE_MAY_HAVE_HAPPENED);
+    await settleWake();
+
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual([
+      'retained',
+      'raisedWithoutReload'
+    ]);
+    expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+    expect(LAST.rawEditor.mayStillSend(pane.target)).toBe(false);
+    expect(pane.commands.saveRawDocument).toHaveBeenCalledTimes(1);
+    pane.stop();
+  }); // End of the "raw save that may have written" case
 }); // End of the "delivery host for the raw editor and restore" suite
 
 describe('the operation panels’ drawn sentences through the pane, in English and Spanish — Phase 2d-6-7b', () => {
@@ -2612,14 +2799,15 @@ describe('the operation panels’ drawn sentences through the pane, in English a
   // so the sentences each panel's own suite reads through its reported receiver
   // are shown to be what a real delivery produces too (the 2d-6 record's §3
   // entries 34 and 35). Opened by the pane's controls in the case's locale, a
-  // finite drain queue counted exactly, a wake admitted by the coordinator.
+  // finite drain queue whose arguments are declared exactly, a wake admitted by
+  // the coordinator.
 
   it.each(
     (['matchDeleter', 'matchMover', 'matchDuplicator'] as const).flatMap((kind) =>
       LOCALES.map((lang) => [kind, lang] as const)
     )
   )('an open %s draws the external origin, its revision and the comparison, and refuses to send (%s)', async (kind, lang) => {
-    expectedDrains = 3;
+    expectedDrainArguments = [0, 0, 0];
     const events = paneEvents();
     const pane = await mountPane(
       false,
@@ -2772,8 +2960,9 @@ describe('the conflict panels’ drawn sentences, in English and Spanish — Pha
   // **2d-6-6's acceptance, read off the screen.** The same six scenarios as the
   // delivery suite above, each through the real registry and the real coordinator
   // boundary — opened by the pane's controls in the case's own locale, a finite
-  // scripted drain queue counted exactly, a wake admitted by the coordinator — and
-  // each asserting the **sentences** the three authored panels draw, in both
+  // scripted drain queue whose arguments are declared exactly, a wake admitted by
+  // the coordinator — and each asserting the **sentences** the three authored
+  // panels draw, in both
   // locales (the 2d-6 record's §3 entries 34 and 35). What a sentence is pinned
   // to is its dictionary value in that locale: this protects that the panel draws
   // the right code in the right place, never that a translation is good.
@@ -2781,7 +2970,7 @@ describe('the conflict panels’ drawn sentences, in English and Spanish — Pha
   it.each(LOCALES)(
     'a pristine editor draws the external origin, evidence, comparison, copy and recovery (%s)',
     async (lang) => {
-      expectedDrains = 3;
+      expectedDrainArguments = [0, 0, 0];
       const events = paneEvents();
       const pane = await mountPane(
         false,
@@ -2860,7 +3049,7 @@ describe('the conflict panels’ drawn sentences, in English and Spanish — Pha
   ] as const)(
     'an unknown-target creator names the affected file and its one way forward (%s, file %i)',
     async (lang, affected, path) => {
-      expectedDrains = 3;
+      expectedDrainArguments = [0, 0, 0];
       const events = paneEvents();
       const pane = await mountPane(
         false,
@@ -2910,7 +3099,7 @@ describe('the conflict panels’ drawn sentences, in English and Spanish — Pha
   it.each(LOCALES)(
     'recovery over B draws B’s external conflict while its host still draws its save conflict over A (%s)',
     async (lang) => {
-      expectedDrains = 3;
+      expectedDrainArguments = [0, 0, 0];
       const events = paneEvents();
       const pane = await mountPane(
         false,
@@ -2959,7 +3148,7 @@ describe('the conflict panels’ drawn sentences, in English and Spanish — Pha
   it.each(LOCALES)(
     'a host and its recovery form over one file draw the one decision alike (%s)',
     async (lang) => {
-      expectedDrains = 3;
+      expectedDrainArguments = [0, 0, 0];
       const events = paneEvents();
       const pane = await mountPane(
         false,
@@ -2996,7 +3185,7 @@ describe('the conflict panels’ drawn sentences, in English and Spanish — Pha
   it.each(LOCALES)(
     'a reopened editor draws nothing of what its previous instance was told (%s)',
     async (lang) => {
-      expectedDrains = 4;
+      expectedDrainArguments = [0, 0, 0, 5];
       const events = paneEvents();
       const pane = await mountPane(
         false,
@@ -3047,7 +3236,7 @@ describe('the conflict panels’ drawn sentences, in English and Spanish — Pha
   it.each(LOCALES)(
     'a settlement lands after the save it settles, and both are drawn (%s)',
     async (lang) => {
-      expectedDrains = 3;
+      expectedDrainArguments = [0, 0, 0];
       const events = paneEvents();
       let answer: ((value: CommandResult<SaveResult>) => void) | null = null;
       const pane = await mountPane(
@@ -3105,7 +3294,8 @@ describe('the raw editor’s and restore’s drawn sentences through the pane, i
   // so the sentences `RawEditor.test.ts` and `RestorePane.test.ts` read through a
   // reported receiver are shown to be what a real delivery produces too (the
   // 2d-6 record's §3 entries 34 and 35). Opened by the pane's own controls, a
-  // finite drain queue counted exactly, a wake admitted by the coordinator.
+  // finite drain queue whose arguments are declared exactly, a wake admitted by
+  // the coordinator.
 
   /**
    * Opens one of the two surfaces and arms its send: the raw editor's box
@@ -3135,7 +3325,7 @@ describe('the raw editor’s and restore’s drawn sentences through the pane, i
   it.each(
     (['rawEditor', 'restore'] as const).flatMap((kind) => LOCALES.map((lang) => [kind, lang] as const))
   )('an open %s draws the external origin, its revision and the comparison, and refuses to send (%s)', async (kind, lang) => {
-    expectedDrains = 3;
+    expectedDrainArguments = [0, 0, 0];
     const events = paneEvents();
     const pane = await mountPane(
       true,
@@ -3186,7 +3376,7 @@ describe('the raw editor’s and restore’s drawn sentences through the pane, i
     // surface, so the same kind of change to its file raises its conflict and
     // installs nothing, while a change to a file no surface is over is still
     // reread through the guarded path beside it.
-    expectedDrains = 5;
+    expectedDrainArguments = [0, 0, 0, 5, 6];
     const events = paneEvents();
     const FIRST = 'matches:\n  - trigger: ":a"\n    replace: firstchange\n';
     const SECOND = 'matches:\n  - trigger: ":a"\n    replace: secondchange\n';
@@ -3292,3 +3482,290 @@ describe('the raw editor’s and restore’s drawn sentences through the pane, i
     pane.stop();
   }); // End of the "viewer refreshes, editor conflicts" case
 }); // End of the "raw editor’s and restore’s drawn sentences" suite
+
+describe('the delivery matrix’s remaining rows through the pane — Phase 2d-6-11a', () => {
+  // **The gaps an audit of the suites above found**, each through the real
+  // registry and the real coordinator boundary, over a finite drain queue whose
+  // arguments are declared exactly: a pristine raw editor and restore, drafted
+  // values surviving a delivery, and a closed creator's and recovery form's
+  // delivery not following a reopened one.
+
+  it.each(
+    (['rawEditor', 'restore'] as const).flatMap((kind) => LOCALES.map((lang) => [kind, lang] as const))
+  )('a pristine %s conflicts on its file’s change, and nothing is reloaded (%s)', async (kind, lang) => {
+    expectedDrainArguments = [0, 0, 0];
+    const events = paneEvents();
+    const pane = await mountPane(
+      false,
+      { batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml')])] },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    // Opened and left alone: nothing typed into the raw editor, nothing listed or
+    // read in restore.
+    await WALKS[kind].open(pane);
+    flushSync();
+    locale.setOverride(lang);
+    flushSync();
+    expect(registered(pane.state)).toEqual([WALKS[kind].expected]);
+    expect(log.live()).toEqual([1]);
+    expect(isDrawn(pane.target, '.panel.external')).toBe(false);
+    const reads = readCounts(pane);
+
+    events.wake(5, 5);
+    await settleWake();
+
+    // **Pristine, and told all the same** (R36).
+    expect(log.delivered.map((one) => [one.document, one.delivery.verdict.kind])).toEqual([
+      [1, 'raised']
+    ]);
+    expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+    expect(drawn(pane.target, '.panel.external')).toContain(
+      translate(lang, 'browser.conflictOrigin.changedWhileOpen')
+    );
+    if (kind === 'rawEditor') {
+      expect(box(pane.target, 'textarea').readOnly).toBe(true);
+      expect(controlIn(pane.target, lang, 'browser.rawEditor.save').disabled).toBe(true);
+    }
+    // **No automatic reload**: no read ran across the wake and the window still
+    // holds file 1 at the revision it opened over.
+    expect(readCounts(pane)).toEqual(reads);
+    expect(pane.state.views.find((view) => view.id === 1)?.revision).toBe('a'.repeat(64));
+    expect(pane.commands.saveRawDocument).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "pristine raw or restore" case
+
+  /** A surface a sentinel draft is set in, and how that draft is read back. */
+  interface DraftWalk {
+    /** What the commands answer beyond the defaults. */
+    readonly script: PaneScript;
+    /** The drained reading, about `match/a.yml`. */
+    readonly revision: ContentRevision;
+    /** The verdict each registration over `match/a.yml` is handed, in order. */
+    readonly verdicts: readonly string[];
+    /**
+     * Opens the surface through the pane's controls and sets the sentinel.
+     *
+     * @param pane - The mounted pane.
+     */
+    readonly draft: (pane: Mounted) => Promise<void>;
+    /**
+     * Whether the sentinel is still what the control holds.
+     *
+     * @param target - Where the pane was mounted.
+     * @returns `true` while it is.
+     */
+    readonly holdsSentinel: (target: HTMLElement) => boolean;
+  }
+
+  /** The sentinel every text draft below is set to. */
+  const SENTINEL = 'sentinel-draft-11a';
+
+  /**
+   * Types a value into one box, as a person would.
+   *
+   * @param target - Where the pane was mounted.
+   * @param selector - The box's selector.
+   */
+  function typeSentinel(target: HTMLElement, selector: string): void {
+    const found = box(target, selector);
+    found.value = SENTINEL;
+    found.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  } // End of function typeSentinel()
+
+  const DRAFTS: Record<'matchEditor' | 'matchCreator' | 'matchMover' | 'recovery', DraftWalk> = {
+    matchEditor: {
+      script: {},
+      revision: 'c'.repeat(64),
+      verdicts: ['raised'],
+      draft: async (pane) => {
+        await WALKS.matchEditor.open(pane);
+        flushSync();
+        typeSentinel(pane.target, '.matchEditor textarea');
+      },
+      holdsSentinel: (target) => box(target, '.matchEditor textarea').value === SENTINEL
+    },
+    matchCreator: {
+      script: {},
+      revision: 'c'.repeat(64),
+      verdicts: ['raised'],
+      draft: async (pane) => {
+        await WALKS.matchCreator.open(pane);
+        flushSync();
+        typeSentinel(pane.target, '.creator input.text');
+      },
+      holdsSentinel: (target) => creatorTrigger(target).value === SENTINEL
+    },
+    // The mover's draft is its position choice, which is a pressed button.
+    matchMover: {
+      script: { views: [documentAWithTwo(), documentB()] },
+      revision: 'c'.repeat(64),
+      verdicts: ['raised'],
+      draft: async (pane) => {
+        await WALKS.matchMover.open(pane);
+        flushSync();
+        control(pane.target, 'browser.matchMove.position.end').click();
+        flushSync();
+      },
+      holdsSentinel: (target) =>
+        control(target, 'browser.matchMove.position.end').getAttribute('aria-pressed') === 'true'
+    },
+    // A reading of a revision other than the save conflict's, so it supersedes.
+    recovery: {
+      script: { saveMatch: conflictedSave },
+      revision: 'd'.repeat(64),
+      // The host editor and the form, one envelope each (entry 2).
+      verdicts: ['supersedes', 'supersedes'],
+      draft: async (pane) => {
+        await WALKS.recovery.open(pane);
+        flushSync();
+        typeSentinel(pane.target, '.recovery input.text');
+      },
+      holdsSentinel: (target) => box(target, '.recovery input.text').value === SENTINEL
+    }
+  };
+
+  it.each(['matchEditor', 'matchCreator', 'matchMover', 'recovery'] as const)(
+    'a drafted %s keeps its draft through a delivery, and nothing is reloaded',
+    async (kind) => {
+      expectedDrainArguments = [0, 0, 0];
+      const walk = DRAFTS[kind];
+      const events = paneEvents();
+      const pane = await mountPane(
+        false,
+        {
+          ...walk.script,
+          batches: [batch(0), batch(0), batch(5, [changed(5, 1, 'match/a.yml', walk.revision)])]
+        },
+        events.source
+      );
+      const log = watchDeliveries(pane.state);
+      await walk.draft(pane);
+      expect(walk.holdsSentinel(pane.target)).toBe(true);
+      const reads = readCounts(pane);
+
+      events.wake(5, 5);
+      await settleWake();
+
+      expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(walk.verdicts);
+      expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+      // **The draft is where the person left it.**
+      expect(walk.holdsSentinel(pane.target)).toBe(true);
+      expect(readCounts(pane)).toEqual(reads);
+      expect(pane.state.views.find((view) => view.id === 1)?.revision).toBe('a'.repeat(64));
+      pane.stop();
+    }
+  ); // End of the "drafted values survive" case
+
+  it('never hands a reopened creator what its previous instance was told', async () => {
+    expectedDrainArguments = [0, 0, 0, 5];
+    const events = paneEvents();
+    const pane = await mountPane(
+      false,
+      {
+        batches: [
+          batch(0),
+          batch(0),
+          batch(5, [changed(5, 1, 'match/a.yml')]),
+          batch(6, [changed(6, 1, 'match/a.yml', 'd'.repeat(64))])
+        ]
+      },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    control(pane.target, 'browser.matchCreation.open').click();
+    flushSync();
+    events.wake(5, 5);
+    await settleWake();
+    expect(creatorTrigger(pane.target).readOnly).toBe(true);
+
+    control(pane.target, 'browser.matchCreation.close').click();
+    flushSync();
+    if (maybeControl(pane.target, 'browser.matchCreation.discard') !== null) {
+      control(pane.target, 'browser.matchCreation.discard').click();
+      flushSync();
+    }
+    expect(log.live()).toEqual([]);
+    expect(registered(pane.state)).toEqual([]);
+    control(pane.target, 'browser.matchCreation.open').click();
+    flushSync();
+    // **A fresh session**: the old instance's delivery did not follow it.
+    expect(creatorTrigger(pane.target).readOnly).toBe(false);
+    expect(log.live()).toEqual([1]);
+
+    events.wake(5, 6);
+    await settleWake();
+    // The first registration was told once and never again; only the second —
+    // the reopened form's — was told of the later reading.
+    expect(log.delivered.map((one) => one.registration)).toEqual([0, 1]);
+    expect(creatorTrigger(pane.target).readOnly).toBe(true);
+    expect(pane.commands.createMatch).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "reopened creator" case
+
+  it('never hands a reopened recovery form what its previous instance was told', async () => {
+    expectedDrainArguments = [0, 0, 0, 5];
+    const events = paneEvents();
+    const pane = await mountPane(
+      false,
+      {
+        ...THREE_FILES,
+        saveMatch: conflictedSave,
+        batches: [
+          batch(0),
+          batch(0),
+          batch(5, [changed(5, 3, 'match/c.yml')]),
+          batch(6, [changed(6, 3, 'match/c.yml', 'e'.repeat(64))])
+        ]
+      },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    await editorInSaveConflict(pane);
+    openRecoveryForm(pane);
+    destinationIn(pane.target, '.recovery', 'match/c.yml').click();
+    flushSync();
+    events.wake(5, 5);
+    await settleWake();
+    expect(box(pane.target, '.recovery input.text').readOnly).toBe(true);
+    // Registrations are counted in the order made: the host editor over `a` (0),
+    // the form over `a` (1), then over `c` once `c` was chosen (2).
+    expect(log.delivered.map((one) => [one.registration, one.document])).toEqual([[2, 3]]);
+
+    control(pane.target, 'browser.recovery.close').click();
+    flushSync();
+    if (maybeControl(pane.target, 'browser.recovery.discard') !== null) {
+      control(pane.target, 'browser.recovery.discard').click();
+      flushSync();
+    }
+    expect(log.live()).toEqual([1]);
+    expect(registered(pane.state)).toEqual([
+      { kind: 'matchEditor', target: { kind: 'document', document: 1 } }
+    ]);
+    // **Reachable again from the host**, which still offers recovery.
+    control(pane.target, recoveryChoiceKey('createFromSupportedFields')).click();
+    flushSync();
+    destinationIn(pane.target, '.recovery', 'match/c.yml').click();
+    flushSync();
+    expect(registered(pane.state)).toEqual([
+      { kind: 'matchEditor', target: { kind: 'document', document: 1 } },
+      { kind: 'recovery', target: { kind: 'document', document: 3 } }
+    ]);
+    // **A fresh session**: the old instance's delivery did not follow it.
+    expect(box(pane.target, '.recovery input.text').readOnly).toBe(false);
+    expect(log.live()).toEqual([1, 3]);
+
+    events.wake(5, 6);
+    await settleWake();
+    // The closed form's registration (2) was told once and never again; only the
+    // reopened form's registration over `c` (4) was told of the later reading.
+    expect(log.delivered.map((one) => [one.registration, one.document])).toEqual([
+      [2, 3],
+      [4, 3]
+    ]);
+    expect(box(pane.target, '.recovery input.text').readOnly).toBe(true);
+    expect(pane.commands.createMatch).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the "reopened recovery form" case
+}); // End of the "delivery matrix’s remaining rows" suite
