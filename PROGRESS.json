@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T16:38:42Z",
+ "updated": "2026-09-23T18:08:03Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish external-change reconciliation for the espanso config editor, proving it in real-window readings before packaging.",
  "phases": [
@@ -847,16 +847,18 @@
   {
    "id": "2d-7-9",
    "title": "Owner-present visible session",
-   "status": "blocked",
+   "status": "done",
    "risk": "high",
-   "summary": "Blocked on the owner: needs the owner present at an unlocked screen, or the owner's ruling that its items are recorded unread; never selected by a driven run."
+   "summary": "G5 read with the owner present and reviewed (ship-with-fixes, fixed): three rows read, one in part, three unread under entry 37.",
+   "review": "docs/reviews/phase-2d-7-9.md",
+   "narrative": "docs/decisions/2d-7-9-notes.md"
   },
   {
    "id": "2d-7-10",
    "title": "Consolidation",
    "status": "queued",
    "risk": "routine",
-   "summary": "Writes the 2d-7 matrix, the ES sentence inventory, the 2d-8 deletion manifest and the rebaselines."
+   "summary": "Writes the 2d-7 matrix, the ES sentence inventory, the 2d-8 deletion manifest and the rebaselines; may now run driven, 2d-7-9 having closed."
   },
   {
    "id": "2d-8",
@@ -869,7 +871,7 @@
    "title": "Live reconciliation of external changes",
    "status": "in_progress",
    "risk": "high",
-   "summary": "Steps 1 to 6 and 2d-7-1 to 2d-7-8 are closed; 2d-7-9 needs the owner present, then 2d-7-10 and 2d-8."
+   "summary": "Steps 1 to 6 and 2d-7-1 to 2d-7-9 are closed; 2d-7-10 is next and may run driven, then 2d-8."
   },
   {
    "id": "3",
