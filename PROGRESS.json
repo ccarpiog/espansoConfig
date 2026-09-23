@@ -728,7 +728,8 @@
    "risk": "high",
    "summary": "Cuts 2d-7 into ten steps with 36 binding rulings, from an Opus-agent consult; the record is reviewed and fixed.",
    "review": "docs/reviews/phase-2d-7-design-record-review.md",
-   "narrative": "docs/decisions/2d-7-split-notes.md"
+   "narrative": "docs/decisions/2d-7-split-notes.md",
+   "commit": "5b9f4d8"
   },
   {
    "id": "2d-7-1",
