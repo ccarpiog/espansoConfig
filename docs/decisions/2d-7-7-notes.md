@@ -62,7 +62,8 @@ Quoted verbatim from `2d-7-split-notes.md` §2 *2d-7-7*, nothing added.
    the two CRLF-bearing fixtures exact except that each CRLF is drawn as one break, which is
    `SourceText`'s documented rule and which the DOM cannot distinguish. `verbatim-9c` agrees independently
    on the 17 it has a mode for. The limit is stated in the reading, not hidden.
-3. **"Each fixture has its panel or refresh line and `writes=0`."** **NOT MET — BLOCKED.**
+3. **"Each fixture has its panel or refresh line and `writes=0`."** **NOT MET — BLOCKED, then recorded
+   unread on the owner's standing ruling of 2026-09-23 (§3b).**
    - *Panel or refresh line:* **none, for all fifteen.** No external change could be made with the frozen
      instrument (§2). The clause has no "or named unread" alternative in the record.
    - *`writes=0`:* every launch prints `writes=0` on its whole-launch span, with `rust-writes=0` at both
@@ -96,6 +97,24 @@ it. What would close it:
 - **(c) Owner ruling on a narrower reading**, e.g. accept the viewer half plus a refresh over the probe's
   whole-file replacement (`external-raw --conflict`). The worker advises against it: that refresh draws the
   hard fixture, not the fixture under test (§2).
+
+### 3b. The owner's ruling — 2026-09-23
+
+The orchestrator stopped the driven run `BLOCKED` on §3a. The owner then gave a **standing ruling** for
+the rest of 2d-7, in their own message in the interactive session that relaunched the driver, recorded
+as `2d-7-split-notes.md` §3 entry 37. Quoted verbatim, the whole message:
+
+> For the rest of 2d-7, any row the frozen instrument cannot read is recorded unread and hadnded to 2d-7-9 and 2d-7-10.
+
+**Effect here: option (a).** Clause 3's panel/refresh half stands **NOT MET** by the frozen instrument
+and is **recorded unread for all fifteen fixtures**; the viewer half, the four hashes and the ES reads
+are read and met (clauses 1, 2 and 4). The missing plan capability is the one §3a (b) names: fifteen
+successor fixtures and a plan that writes one by name, then reads the refresh and the panel. It is
+handed to **2d-7-10** (the unread-row inventory) and to **2d-7-9** (the owner-present session, where a
+real external edit of a fixture can be drawn on a panel if the owner wants it seen). Option (c) is not
+taken. **No instrument revision is authorized:** the frozen hashes and entry 6's single instrument
+review stand. 2d-7-7 is **closed** on this ruling; the next step is 2d-7-8, which applies entry 37 as
+it goes.
 
 ---
 
@@ -144,7 +163,8 @@ records: the four instrument paths and `PROGRESS.json` (the orchestrator's, unto
 
 ## 7. Open items for later steps
 
-1. **The panel/refresh half of R38 for all fifteen** (§3a) — for the owner's ruling now.
+1. **The panel/refresh half of R38 for all fifteen** (§3a) — **ruled 2026-09-23 (§3b, record entry 37):
+   recorded unread, handed to 2d-7-10 and 2d-7-9; no instrument revision.**
 2. **The ending of each line break is not observable in the viewer's DOM** (reading §3); a claim about
    CRLF-versus-LF per break would need a different witness (for example the bytes a reseed or a
    successor drew, or a `document_text` answer printed whole). For 2d-7-10.

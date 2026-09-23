@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T16:11:50Z",
+ "updated": "2026-09-23T16:15:22Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish external-change reconciliation for the espanso config editor, proving it in real-window readings before packaging.",
  "phases": [
@@ -827,9 +827,9 @@
   {
    "id": "2d-7-7",
    "title": "Reading: the fifteen byte-exact fixtures (R38)",
-   "status": "blocked",
+   "status": "done",
    "risk": "routine",
-   "summary": "Read and reviewed (ship); the panel-or-refresh clause cannot be met with the frozen instrument and needs an owner ruling.",
+   "summary": "R38 read and reviewed (ship); the panel/refresh half unmet with the frozen instrument, recorded unread for all fifteen under the owner's standing ruling of 2026-09-23 (entry 37).",
    "review": "docs/reviews/phase-2d-7-7.md",
    "narrative": "docs/decisions/2d-7-7-notes.md",
    "commit": "384f4a4"

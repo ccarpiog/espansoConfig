@@ -835,6 +835,31 @@ is `phase-2d-7-design.md`.
     - The stale anchors in `phase-2d-design.md:130` and in `PROGRESS.md`'s 11a paragraph are recorded
       in §5.6 and §5.7 and edited by nobody. They are records; the current locations are given here.
 
+37. **The owner's standing ruling for the rest of 2d-7: a row the frozen instrument cannot read is
+    recorded unread and handed to 2d-7-9 and 2d-7-10** [owner, 2026-09-23]. Added on 2026-09-23,
+    after three driven readings in a row (2d-7-6-1, 2d-7-6-2, 2d-7-7) each stopped `BLOCKED` on an
+    acceptance clause the frozen instrument has no plan for, and the owner ruled "unread and close"
+    on each. The owner's message, in their own words and verbatim:
+
+    > For the rest of 2d-7, any row the frozen instrument cannot read is recorded unread and hadnded to 2d-7-9 and 2d-7-10.
+
+    - **Scope:** the driven steps still open when this entry was added — 2d-7-7's close and 2d-7-8 —
+      and 2d-7-10's consolidation, which inventories what they hand on. It reaches back to nothing
+      already closed and forward to nothing outside 2d-7.
+    - **Effect on a driven reading:** a row, or an acceptance clause, that the frozen instrument
+      (entries 1-8) cannot read is **recorded unread in the step's notes, with the missing plan
+      capability named**, and handed to **2d-7-9** (the owner-present session, entry 21, for what a
+      visible session or a real gesture can read) and to **2d-7-10** (the unread-row inventory). The
+      step then **closes**. It does not stop `BLOCKED` for a ruling the owner has already given, and
+      the clause does not gain an "or named unread" alternative in this record's §2 text: it stays
+      worded as it is, is marked NOT MET, and is recorded unread under this entry.
+    - **What it does not change:** entry 6 (the single instrument review) and the frozen hashes
+      stand; this entry authorizes no instrument revision. Entry 21 stands: 2d-7-9 is still never
+      selected by a driven run. A row the instrument *can* read is still read, and a missing plan is
+      still never added silently (2d-7-5 §9). S5 and entries 15-19, 22, 23 and 34 bind as before.
+    - **Where it is applied:** 2d-7-7 closed on it (`2d-7-7-notes.md` §3b), the panel/refresh half
+      of R38 recorded unread for all fifteen fixtures. 2d-7-8 and 2d-7-10 apply it as they go.
+
 ---
 
 ## 4. Citation audit
