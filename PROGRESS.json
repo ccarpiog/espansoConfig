@@ -1,8 +1,8 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T19:15:46Z",
+ "updated": "2026-09-23T19:41:55Z",
  "plan": "IMPLEMENTATION_PLAN.md",
- "goal": "Finish external-change reconciliation for the espanso config editor, proving it in real-window readings before packaging.",
+ "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
  "phases": [
   {
    "id": "0",
@@ -881,10 +881,108 @@
    "summary": "Steps 1 to 6 and 2d-7-1 to 2d-7-9 are closed; 2d-7-10 is next and may run driven, then 2d-8."
   },
   {
+   "id": "3-design",
+   "title": "Phase 3 design consult",
+   "status": "done",
+   "risk": "high",
+   "summary": "Phase 3 put to a Codex design consult and split into fifteen bounded steps, 3-1 to 3-15; records only.",
+   "review": "docs/reviews/phase-3-design-record.md"
+  },
+  {
    "id": "3",
    "title": "Complete match editing",
    "status": "queued",
-   "summary": "Not started."
+   "summary": "Complete match editing, split by the design consult into steps 3-1 to 3-15."
+  },
+  {
+   "id": "3-1",
+   "title": "Compositional mapping edits and scalar form substitution",
+   "status": "queued",
+   "summary": "Queued: Compositional mapping edits and scalar form substitution."
+  },
+  {
+   "id": "3-2",
+   "title": "Sequence projection and block scalar-list edits",
+   "status": "queued",
+   "summary": "Queued: Sequence projection and block scalar-list edits."
+  },
+  {
+   "id": "3-3",
+   "title": "Flow scalar-list cardinality",
+   "status": "queued",
+   "summary": "Queued: Flow scalar-list cardinality."
+  },
+  {
+   "id": "3-4",
+   "title": "Bounded creation for the wider editor",
+   "status": "queued",
+   "summary": "Queued: Bounded creation for the wider editor."
+  },
+  {
+   "id": "3-5",
+   "title": "Scalar content and options editor, and the cursor action",
+   "status": "queued",
+   "summary": "Queued: Scalar content and options editor, and the cursor action."
+  },
+  {
+   "id": "3-6",
+   "title": "Multiple and regex trigger controls, and search_terms",
+   "status": "queued",
+   "summary": "Queued: Multiple and regex trigger controls, and search_terms."
+  },
+  {
+   "id": "3-7",
+   "title": "The local raw-item core edit",
+   "status": "queued",
+   "summary": "Queued: The local raw-item core edit."
+  },
+  {
+   "id": "3-8",
+   "title": "The local raw UI, and CF-55",
+   "status": "queued",
+   "summary": "Queued: The local raw UI, and CF-55."
+  },
+  {
+   "id": "3-9",
+   "title": "File-scope inspector",
+   "status": "queued",
+   "summary": "Queued: File-scope inspector."
+  },
+  {
+   "id": "3-10",
+   "title": "Per-file bulk coordinator",
+   "status": "queued",
+   "summary": "Queued: Per-file bulk coordinator."
+  },
+  {
+   "id": "3-11",
+   "title": "Bulk selection and inspector",
+   "status": "queued",
+   "summary": "Queued: Bulk selection and inspector."
+  },
+  {
+   "id": "3-12",
+   "title": "The application sidecar store",
+   "status": "queued",
+   "summary": "Queued: The application sidecar store."
+  },
+  {
+   "id": "3-13",
+   "title": "Display names and visible creation defaults",
+   "status": "queued",
+   "summary": "Queued: Display names and visible creation defaults."
+  },
+  {
+   "id": "3-14",
+   "title": "Delete-conflict wording and action placement",
+   "status": "queued",
+   "summary": "Queued: Delete-conflict wording and action placement."
+  },
+  {
+   "id": "3-15",
+   "title": "Cross-layer preservation and Phase 3 closure",
+   "status": "queued",
+   "summary": "Queued: Cross-layer preservation and Phase 3 closure."
   },
   {
    "id": "4",
