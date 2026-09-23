@@ -693,7 +693,8 @@
    "status": "done",
    "summary": "Replaces the inert foreground source with a DOM visibilitychange-plus-focus source in AppShell; a real foregrounding is still unread.",
    "risk": "routine",
-   "review": "docs/reviews/phase-2d-6-10.md"
+   "review": "docs/reviews/phase-2d-6-10.md",
+   "commit": "ca4f633"
   },
   {
    "id": "2d-6-11",
