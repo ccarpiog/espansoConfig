@@ -774,7 +774,8 @@
    "risk": "high",
    "summary": "Builds launch-7.sh with per-launch bundle ids, window-only captures, lock preflight, writers and a SHA-checked fixture import, plus the input tool.",
    "review": "docs/reviews/phase-2d-7-4-1.md",
-   "narrative": "docs/decisions/2d-7-4-1-notes.md"
+   "narrative": "docs/decisions/2d-7-4-1-notes.md",
+   "commit": "268a87f"
   },
   {
    "id": "2d-7-4-2",
