@@ -232,6 +232,21 @@ carries records only.**
 **Risk `high`**. **Driven:** yes. The shakedowns need no visible window, and a locked screen is
 recorded as such. **Depends on** 2d-7-3. **Bound by** entries 2–7, 14–16, 19, 20, 34.
 
+#### Addendum 2026-09-23 — the orchestrator's cut
+
+2d-7-4 is cut before it starts, at the one boundary the cutting rule above permits:
+- **`2d-7-4-1`**: `launch-7.sh` and its writers and fixture import under the harness root, and the
+  synthesized-input tool under `tools/` (built, not exercised on a real window). It does not touch
+  `src/probe.ts` or `src-tauri/src/probe.rs`. Its review is its own and **not** the instrument
+  review; a finding about the probe files becomes an open item for `2d-7-4-2`.
+- **`2d-7-4-2`**: everything else in 2d-7-4 (the `/private/tmp/2d7-4-probe.ts.orig` copy, the page
+  side, the five shakedowns, the entry-7 checklist, the hashes, the reviewed-set copy and the
+  baselines). **Its review is the instrument review**, over the whole instrument including
+  `2d-7-4-1`'s harness.
+
+Reason: the whole step is a page-side rewrite, a harness, a native input tool, five shakedown launches
+and the one instrument review, which is more than one worker finishes coherently.
+
 ### 2d-7-5 — G1: delivery, watcher and counters
 
 **Records only.** The instrument is frozen. The step prints its four hashes, and **refuses to read**

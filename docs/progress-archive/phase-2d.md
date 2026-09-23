@@ -5206,3 +5206,14 @@ After the review fix (comments only): `npm run check` exit 0 (462, 0/0) and `npm
 - `cargo fmt --check`: not re-run (no Rust changed; the known failure is only the uncommitted `probe.rs`).
 
 `git diff --stat src-tauri/src/main.rs src/main.ts` still `5 insertions(+), 1 deletion(-)`. The pre-fix failing run (2 failed / 3 passed) is quoted in the notes §4.1.
+
+## Phase 2d-7-2's verification block — archived 2026-09-23 at 2d-7-4-1
+
+**`1323 / 462 / 3547 / 201`** with the instrument (+8 vitest cases over 2d-7-1; no `.ts` module or component added, so the module count is unchanged). The orchestrator re-ran each gate after the worker, alone, with output to a file, then grepped:
+- `npm test`: exit 0, 3547 passed (72 files).
+- `npm run check`: exit 0, 462 files, 0/0.
+- `npm run build`: exit 0, 201 modules.
+- Bundle oracle: server-only markers absent, client-only markers present (2).
+- Rust: not re-run (no Rust changed; rung's Rust figure carried from 2d-7-1).
+
+`git diff --stat src-tauri/src/main.rs src/main.ts` still `5 insertions(+), 1 deletion(-)`. `rg -n tSupersededEvidence src/lib/browser/matchEditor.ts` shows one line, stating the accessor has no caller.
