@@ -5157,3 +5157,8 @@ failed. No Rust source changed. The instrument pair diff is still `5 insertions(
 ### (archived) Phase 2d-6-8a's verification
 
 **`1323 / 449 / 3083 / 193`** at 2d-6-8a (vitest +26: 20 in the phase, 6 in the fix round; no module added). Worker, each gate alone with output in a file, after the fix round: `npm run check` 449 files, 0 errors, 0 warnings; `npm test` 3083 passed; `npm run build` 193 modules; `cargo test --workspace -- --test-threads=1` 1323 passed, 0 failed; clippy `-D warnings` and `cargo fmt --check` exit 0. **Orchestrator re-ran after the fix round**: `npm test` exit 0, 3083 passed (65 files); `npm run check` exit 0, 449 files, 0 errors, 0 warnings; `npm run build` exit 0, 193 modules, server-only markers absent, client-only present (2). The instrument pair diff is still `5 insertions(+), 1 deletion(-)`.
+
+
+### (archived) Phase 2d-6-8b's verification
+
+**`1323 / 449 / 3156 / 193`** at 2d-6-8b (vitest +73; no module added; no Rust changed). Worker, each gate alone with output in a file: `npm run check` 449 files, 0 errors, 0 warnings; `npm test` 3156 passed; `npm run build` 193 modules; `cargo test --workspace -- --test-threads=1` 1323 passed; clippy `-D warnings` and `cargo fmt --check` exit 0. **Orchestrator re-ran**: `npm test` exit 0, 3156 passed (65 files); `npm run check` exit 0, 449 files, 0 errors, 0 warnings; `npm run build` exit 0, 193 modules, server-only markers absent, client-only present (2). The review fix touched the record only, so no gate was re-run after it. The instrument pair diff is still `5 insertions(+), 1 deletion(-)`.

@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T02:11:59Z",
+ "updated": "2026-09-23T02:46:15Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish the espansoConfig editing app per IMPLEMENTATION_PLAN.md §12, phase by phase with a review gate on every one.",
  "phases": [
@@ -592,8 +592,8 @@
   {
    "id": "2d-6-8",
    "title": "Raw and restore rendering",
-   "status": "in_progress",
-   "summary": "Cut into 8a (owed model fixes and receiver registration), 8b (the two panels rendering) and 8c (window reading); 8a and 8b are done, 8c next."
+   "status": "done",
+   "summary": "Cut into 8a (owed model fixes and receiver registration), 8b (the two panels rendering) and 8c (window reading); all three are done."
   },
   {
    "id": "2d-6-8a",
@@ -618,9 +618,11 @@
   {
    "id": "2d-6-8c",
    "title": "Raw and restore window reading",
-   "status": "queued",
+   "status": "done",
    "risk": "high",
-   "summary": "Reads the raw and restore surfaces in a real window over a hard fixture, EN and ES, and checks 2d-6-8 whole."
+   "summary": "Read the raw editor and restore pane in a real window over the hard fixture, EN and ES, and checked 2d-6-8 whole; no defect found.",
+   "review": "docs/reviews/phase-2d-6-8c.md",
+   "narrative": "docs/decisions/2d-6-8c-notes.md"
   },
   {
    "id": "2d-6-9",
