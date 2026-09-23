@@ -861,7 +861,8 @@
    "risk": "routine",
    "summary": "Wrote the 2d-7 matrix, the ES sentence inventory, the 2d-8 deletion manifest and the carried-forward list; reviewed ship-with-fixes, fixed.",
    "review": "docs/reviews/2d-7-10.md",
-   "narrative": "docs/decisions/2d-7-10-notes.md"
+   "narrative": "docs/decisions/2d-7-10-notes.md",
+   "commit": "5a0baee"
   },
   {
    "id": "2d-8",
