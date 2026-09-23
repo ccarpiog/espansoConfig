@@ -811,7 +811,8 @@
    "risk": "high",
    "summary": "Reading done and reviewed, but two acceptance clauses are unmet because the frozen instrument lacks the plans; needs an owner ruling.",
    "review": "docs/reviews/phase-2d-7-6-1.md",
-   "narrative": "docs/decisions/2d-7-6-1-notes.md"
+   "narrative": "docs/decisions/2d-7-6-1-notes.md",
+   "commit": "ad90ba9"
   },
   {
    "id": "2d-7-6-2",
