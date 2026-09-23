@@ -176,13 +176,22 @@ impl VariableView {
                         projector.skip_shape(&mut scan, key_node, &key, value_node);
                     }
                 }
-                "depends_on" => projector.scalar_sequence_field(
-                    &mut scan,
-                    key_node,
-                    &key,
-                    value_node,
-                    &mut view.depends_on,
-                ),
+                "depends_on" => {
+                    // Presence metadata is carried for `triggers`,
+                    // `search_terms` and `imports` only (Phase 3-2); `depends_on`
+                    // is outside every editing surface, so its answer is
+                    // computed and deliberately not kept.
+                    let mut not_carried = crate::model::SequencePresence::default();
+                    projector.scalar_sequence_field(
+                        &mut scan,
+                        key_node,
+                        &key,
+                        value_node,
+                        None,
+                        &mut view.depends_on,
+                        &mut not_carried,
+                    );
+                }
                 "inject_vars" => projector.scalar_field(
                     &mut scan,
                     key_node,

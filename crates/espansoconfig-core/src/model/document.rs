@@ -21,7 +21,7 @@ use crate::discovery::FileKind;
 use crate::model::project::{child_path, Projector};
 use crate::model::{
     mapping_entries, ConfigProfileView, Diagnostic, DiagnosticCode, IdentityError, MappingCoverage,
-    MatchId, MatchView, ScalarView, UnknownEntry, ValueView, VariableView,
+    MatchId, MatchView, ScalarView, SequencePresence, UnknownEntry, ValueView, VariableView,
 };
 use crate::patch::DocumentPath;
 use crate::syntax::{
@@ -145,6 +145,14 @@ pub struct DocumentView {
     /// entry the schema says is a path but the file writes as a collection is
     /// elided **in place**, never dropped, so positions never shift.
     pub imports: Vec<ValueView>,
+    /// Whether `imports` is written at all, and in what shape (Phase 3-2).
+    ///
+    /// [`DocumentView::imports`] is empty both for a file with no `imports` key
+    /// and for `imports: []`; this is what tells the two apart. A profile, a
+    /// document that did not parse and a root that is not a mapping all answer
+    /// [`SequencePresence::Absent`], because none of them is walked as a match
+    /// file.
+    pub imports_presence: SequencePresence,
     /// The profile projection, for a document whose shape is
     /// [`DocumentShape::ConfigProfile`].
     pub profile: Option<ConfigProfileView>,
@@ -450,6 +458,7 @@ impl DocumentView {
             matches: Vec::new(),
             global_vars: Vec::new(),
             imports: Vec::new(),
+            imports_presence: SequencePresence::default(),
             profile: None,
             unknown_entries: Vec::new(),
             coverage: Vec::new(),
@@ -579,7 +588,9 @@ fn project_match_file(
                     key_node,
                     &key,
                     value_node,
+                    child_path(path, &key),
                     &mut view.imports,
+                    &mut view.imports_presence,
                 );
             }
             _ => projector.skip_entry(scan, key_node, &key, value_node, &MATCH_FILE_KEYS),

@@ -9,11 +9,12 @@
 //! is how a field quietly stops being recorded.
 
 use crate::model::{
-    mapping_entries, Diagnostic, DiagnosticCode, MappingCoverage, MappingScan, ScalarView,
-    UnknownEntry, UnknownReason, ValueKind, ValueView, MAX_VALUE_DEPTH,
+    mapping_entries, Diagnostic, DiagnosticCode, FieldLocation, MappingCoverage, MappingScan,
+    ScalarView, SequencePresence, UnknownEntry, UnknownReason, ValueKind, ValueView,
+    MAX_VALUE_DEPTH,
 };
 use crate::patch::DocumentPath;
-use crate::syntax::{ByteSpan, NodeId, NodeKind, SyntaxIndex, TriviaIndex};
+use crate::syntax::{ByteSpan, CollectionStyle, NodeId, NodeKind, SyntaxIndex, TriviaIndex};
 
 /// The accumulator threaded through one document's projection.
 pub(crate) struct Projector<'a> {
@@ -321,19 +322,56 @@ impl<'a> Projector<'a> {
         }
     } // End of function scalar_field()
 
-    /// Models one entry whose value must be a sequence of scalars, into `slot`.
+    /// Models one entry whose value must be a sequence of scalars, into `slot`,
+    /// and records whether and how the key is written, into `presence`.
+    ///
+    /// `presence` is written on **both** branches, so a list the schema expects
+    /// but the file writes as a scalar is [`SequencePresence::UnsupportedShape`]
+    /// rather than indistinguishable from an absent key (Phase 3-2). `path` is
+    /// the path that names the value, when the containing mapping has one.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn scalar_sequence_field(
         &mut self,
         scan: &mut MappingScan,
         key_node: NodeId,
         key: &str,
         value_node: NodeId,
+        path: Option<DocumentPath>,
         slot: &mut Vec<ValueView>,
+        presence: &mut SequencePresence,
     ) {
-        if self.kind_of(value_node) == ValueKind::Sequence {
+        let span_of = |node: NodeId| {
+            self.index
+                .node(node)
+                .map(|found| found.span)
+                .unwrap_or_default()
+        };
+        let location = FieldLocation {
+            key_node,
+            key_span: span_of(key_node),
+            value_node,
+            value_span: span_of(value_node),
+            path,
+        };
+        let found = self.kind_of(value_node);
+        if found == ValueKind::Sequence {
             *slot = self.scalar_sequence(value_node, key);
+            let flow = self
+                .index
+                .node(value_node)
+                .is_some_and(|node| node.collection_style == Some(CollectionStyle::Flow));
+            *presence = if slot.is_empty() {
+                SequencePresence::Empty { location }
+            } else {
+                SequencePresence::Items {
+                    location,
+                    flow,
+                    count: slot.len(),
+                }
+            };
             scan.model(key_node, key);
         } else {
+            *presence = SequencePresence::UnsupportedShape { location, found };
             self.skip_shape(scan, key_node, key, value_node);
         }
     } // End of function scalar_sequence_field()

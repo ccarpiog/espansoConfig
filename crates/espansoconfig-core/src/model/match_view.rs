@@ -29,8 +29,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::project::{child_index, child_path, Projector};
 use crate::model::{
-    DiagnosticCode, FieldView, MappingScan, ScalarView, UnknownEntry, ValueView, VariableKind,
-    VariableView,
+    DiagnosticCode, FieldView, MappingScan, ScalarView, SequencePresence, UnknownEntry, ValueView,
+    VariableKind, VariableView,
 };
 use crate::patch::DocumentPath;
 use crate::syntax::{ByteSpan, HazardKind, NodeId};
@@ -175,6 +175,12 @@ pub struct TriggerSpec {
     /// collection is elided **in place**, never dropped, so an item's position
     /// in this vector is always its position in the file.
     pub triggers: Vec<ValueView>,
+    /// Whether `triggers` is written at all, and in what shape (Phase 3-2).
+    ///
+    /// [`TriggerSpec::triggers`] is empty both for an absent key and for
+    /// `triggers: []`; this is what tells the two apart, with the entry's
+    /// location read off the syntax index.
+    pub triggers_presence: SequencePresence,
     /// `regex`, as source text.
     pub regex: Option<ScalarView>,
     /// Whether the three fields form a shape espanso accepts.
@@ -412,6 +418,11 @@ pub struct MatchView {
     /// Same rule as [`TriggerSpec::triggers`]: a non-scalar entry is elided in
     /// place rather than dropped, so positions never shift.
     pub search_terms: Vec<ValueView>,
+    /// Whether `search_terms` is written at all, and in what shape (Phase 3-2).
+    ///
+    /// Same reason as [`TriggerSpec::triggers_presence`]: an empty
+    /// [`MatchView::search_terms`] is either an absent key or `search_terms: []`.
+    pub search_terms_presence: SequencePresence,
     /// The word-boundary, case and injection options.
     pub options: MatchOptions,
     /// `vars`.
@@ -504,7 +515,9 @@ impl MatchView {
                     key_node,
                     &key,
                     value_node,
+                    child_path(&path, &key),
                     &mut view.trigger.triggers,
+                    &mut view.trigger.triggers_presence,
                 ),
                 "regex" => projector.scalar_field(
                     &mut scan,
@@ -559,7 +572,9 @@ impl MatchView {
                     key_node,
                     &key,
                     value_node,
+                    child_path(&path, &key),
                     &mut view.search_terms,
+                    &mut view.search_terms_presence,
                 ),
                 "word" => projector.scalar_field(
                     &mut scan,
@@ -697,6 +712,7 @@ impl MatchView {
             label: None,
             comment: None,
             search_terms: Vec::new(),
+            search_terms_presence: SequencePresence::default(),
             options: MatchOptions::default(),
             vars: Vec::new(),
             form_fields: Vec::new(),

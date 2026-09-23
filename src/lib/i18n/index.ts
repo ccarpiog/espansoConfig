@@ -181,6 +181,7 @@ import type {
   SaveResult,
   SaveVerdict,
   ScalarStyle,
+  SequencePresence,
   SyntaxError,
   TargetDifference,
   TriggerKind,
@@ -243,6 +244,7 @@ import {
   describeSaveResult,
   describeSaveVerdict,
   describeScalarStyle,
+  describeSequencePresence,
   describeSyntaxError,
   describeTargetDifference,
   describeTriggerKind,
@@ -331,6 +333,7 @@ export {
   describeSaveResult,
   describeSaveVerdict,
   describeScalarStyle,
+  describeSequencePresence,
   describeSyntaxError,
   describeTargetDifference,
   describeTriggerKind,
@@ -368,6 +371,7 @@ export {
   saveResultKey,
   saveVerdictKey,
   scalarStyleKey,
+  sequencePresenceKey,
   syntaxErrorKey,
   targetDifferenceKey,
   triggerKindKey,
@@ -448,6 +452,16 @@ export function tDiagnostic(code: DiagnosticCode): string {
 export function tUnknownReason(reason: UnknownReason): string {
   return describeUnknownReason(locale.current, reason);
 } // End of function tUnknownReason()
+
+/**
+ * Renders a list's presence in the current language (Phase 3-2).
+ *
+ * @param presence - A list's presence as it crossed the boundary.
+ * @returns The translated noun phrase.
+ */
+export function tSequencePresence(presence: SequencePresence): string {
+  return describeSequencePresence(locale.current, presence);
+} // End of function tSequencePresence()
 
 /**
  * Renders a snippet-list badge label in the current language.

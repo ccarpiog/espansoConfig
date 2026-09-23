@@ -109,8 +109,9 @@
 //!   or never touched — produces no edit and therefore no byte. The surface is
 //!   closed to the part of a match espanso's schema fixes as a string, and the
 //!   batch may never change a sequence's cardinality or synthesize a collection
-//!   node; two public guards read the derived batch back and refuse it if it
-//!   does. It writes nothing and has **no caller**: no `#[tauri::command]`
+//!   node — except, since Phase 3-2, the scalar items and the presence of the
+//!   two lists `triggers` and `search_terms`; two public guards read the derived
+//!   batch back and refuse it if it does otherwise. It writes nothing and has **no caller**: no `#[tauri::command]`
 //!   reaches it, exactly as [`persist::save`] had none at 2a.
 //!
 //! - **2c-4b-1** — [`reconcile`]: the **evidence** half of *Keep my draft*. A

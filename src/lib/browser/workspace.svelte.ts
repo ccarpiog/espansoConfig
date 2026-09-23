@@ -564,8 +564,9 @@ function ownedIdentityOf(id: MatchId | null): MatchId | null {
  *
  * **It copies one level, and `id` one level further.** Every field is read here,
  * once, and written into a plain own-property object; the *values* of those
- * fields — `trigger`, `content`, `options`, and the arrays `search_terms`,
- * `vars`, `form_fields`, `badges` and `unknown_entries` along with their
+ * fields — `trigger`, `content`, `options`, `search_terms_presence`, and the
+ * arrays `search_terms`, `vars`, `form_fields`, `badges` and `unknown_entries`
+ * along with their
  * elements — are still the command's own objects, and a getter or a proxy trap
  * on one of those runs whenever something reads it. **`id` is the one
  * exception**, through {@link ownedMatchIdOf}, because it is the only one of
@@ -586,6 +587,7 @@ function ownedMatchOf(match: MatchView): MatchView {
     label: match.label,
     comment: match.comment,
     search_terms: match.search_terms,
+    search_terms_presence: match.search_terms_presence,
     options: match.options,
     vars: match.vars,
     form_fields: match.form_fields,
@@ -701,6 +703,7 @@ function ownedProjectionOf(view: DocumentView): DocumentView {
     matches,
     global_vars: view.global_vars,
     imports: view.imports,
+    imports_presence: view.imports_presence,
     profile: view.profile,
     unknown_entries: view.unknown_entries,
     coverage: view.coverage,

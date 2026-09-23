@@ -27,15 +27,17 @@
 //!   [`crate::draft::plan_match_edits`] and could not be here.
 //!
 //! What they do establish is worth having and is exactly this: **every edit of
-//! the batch names something inside one match's closed scalar surface, and no
-//! edit of the batch depends on another edit of the batch.**
+//! the batch names something inside one match's closed surface, and no edit of
+//! the batch depends on another edit of the batch.** Since Phase 3-2 that
+//! surface includes the cardinality and the presence of two lists, `triggers`
+//! and `search_terms`, and nothing else's.
 
 use crate::draft::error::DraftError;
 use crate::draft::match_draft::{
     FieldSubstitution, MatchField, SequenceField, VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
     VARS_KEY,
 };
-use crate::patch::{DocumentEdit, DocumentPath, PathSegment};
+use crate::patch::{DocumentEdit, DocumentPath, EntryValue, ItemPlacement, PathSegment};
 
 /// The keys one **nested** mapping a batch reaches into is known to hold.
 ///
@@ -75,8 +77,11 @@ impl NestedKeys {
 /// **The invariant, stated in code:** a drafted batch may modify or remove
 /// existing addressable nodes, may insert scalar-valued mapping entries into
 /// the match's own mapping and may rename one of that mapping's scalar-valued
-/// keys to another form of the same family, and it may **never change a
-/// sequence's cardinality** and **never synthesize a collection node**.
+/// keys to another form of the same family. Since Phase 3-2 it may also change
+/// the cardinality of `triggers` and `search_terms` — and of **no other
+/// sequence** — by scalar items, add or remove either as a whole list of
+/// scalars, and switch a scalar trigger form to or from a `triggers` list. It
+/// may **never synthesize any other collection node**.
 ///
 /// Each clause is checked as a shape rather than as an intention:
 ///
@@ -97,10 +102,18 @@ impl NestedKeys {
 ///   own mapping to **another form of the same family**
 ///   ([`FieldSubstitution::between`]): `trigger`↔`regex`, or one content key to
 ///   another. Its optional new value is a `String`, as an insertion's is;
-/// - a removal may name one of four shapes, listed in
-///   [`names_a_surface_field`]: the three that end in a key segment, plus the
-///   match's own schema-known scalar keys. A path ending in an index is a
-///   sequence element, and deleting one is a cardinality change.
+/// - a removal may name one of five shapes, listed in
+///   [`names_a_surface_field`]: the three that end in a key segment, the
+///   match's own schema-known scalar keys, and — since Phase 3-2 — the match's
+///   two lists as whole fields;
+/// - a list-valued insertion ([`EntryValue::ScalarList`] in a group) may only
+///   name `triggers` or `search_terms` on the match's own mapping;
+/// - a scalar-item insertion and an item removal may only name
+///   `<match>.triggers` / `<match>.search_terms` and an item of one of those.
+///   `vars`, `depends_on`, a `params` list, `form_fields` options and `matches`
+///   itself are refused here, whatever the engine could do to them;
+/// - a shape switch may only turn `trigger` or `regex` into a `triggers` list,
+///   or a `triggers` list into `trigger` or `regex`.
 ///
 /// **Nothing deeper than those shapes passes.** A path one segment longer than
 /// the deepest legal one fails, and
@@ -124,25 +137,27 @@ pub fn check_closed_surface(
             }
             DocumentEdit::InsertFields(group) => {
                 group.mapping() == mapping
-                    && group
-                        .entries()
-                        .iter()
-                        .all(|(key, _)| MatchField::from_key(key).is_some())
+                    && group.entries().iter().all(|(key, value)| match value {
+                        EntryValue::Scalar(_) => MatchField::from_key(key).is_some(),
+                        EntryValue::ScalarList(_) => SequenceField::from_key(key).is_some(),
+                    })
             }
             DocumentEdit::SubstituteKey(substitution) => {
                 names_a_substitution(mapping, substitution.field(), substitution.key())
             }
-            // A sequence-item insert, remove or duplicate is a **cardinality
-            // change to a sequence**, which is exactly what a closed surface
-            // excludes: the draft diff describes one match's own scalar fields,
-            // and adding, deleting or copying an item of `triggers`, `vars` or
-            // `matches` is a different operation with a different primitive
-            // behind it. Refused as outside the surface rather than by a name
-            // of its own, because that is what it is — the surface has no shape
-            // for it at all.
-            DocumentEdit::InsertItem(_)
-            | DocumentEdit::RemoveItem(_)
-            | DocumentEdit::DuplicateItem(_) => false,
+            DocumentEdit::InsertScalarItems(insert) => {
+                names_a_surface_list(mapping, insert.sequence())
+            }
+            DocumentEdit::RemoveItem(removal) => names_a_surface_list_item(mapping, removal.item()),
+            DocumentEdit::SwitchShape(switch) => {
+                names_a_trigger_switch(mapping, switch.field(), switch.key(), switch.value())
+            }
+            // A mapping-item insert and a duplicate are cardinality changes to a
+            // sequence of **mappings** — `matches`, `vars` — which is a
+            // different operation with a different primitive behind it.
+            // Refused as outside the surface rather than by a name of its own,
+            // because that is what it is: the surface has no shape for them.
+            DocumentEdit::InsertItem(_) | DocumentEdit::DuplicateItem(_) => false,
         };
         if !within {
             return Err(DraftError::OutsideTheClosedSurface { edit: position });
@@ -186,7 +201,11 @@ pub fn check_closed_surface(
 /// 7. two insertion **edits** sharing one anchor. Several entries after one
 ///    anchor are legal as one [`crate::patch::FieldInsertGroup`], which states
 ///    their order (Phase 3-1); two separate edits state none;
-/// 8. a substitution to a key the original mapping already holds.
+/// 8. a substitution or a shape switch to a key the original mapping already
+///    holds;
+/// 9. an item insertion landing exactly where the same batch removes an item of
+///    the same list (Phase 3-2) — the two replacements would share a start, and
+///    nothing in the batch says which comes first.
 pub fn check_batch_independence(
     mapping: &DocumentPath,
     original_keys: &[String],
@@ -198,6 +217,7 @@ pub fn check_batch_independence(
     check_every_named_key_is_unique(mapping, original_keys, nested, edits)?;
     check_every_anchor_survives(mapping, original_keys, edits)?;
     check_no_substitution_duplicates_a_key(original_keys, edits)?;
+    check_no_insertion_lands_on_a_removal(edits)?;
     Ok(())
 } // End of function check_batch_independence()
 
@@ -264,6 +284,11 @@ fn check_no_removal_contains_another_edit(edits: &[DocumentEdit]) -> Result<(), 
             // so an edit of the renamed entry's value, a removal of it or a
             // second substitution of it is a second answer about the same entry.
             DocumentEdit::SubstituteKey(substitution) => Some((position, substitution.field())),
+            // A shape switch replaces the whole value, so every edit inside it is
+            // a second answer too; and an item removal deletes the item's whole
+            // subtree (Phase 3-2).
+            DocumentEdit::SwitchShape(switch) => Some((position, switch.field())),
+            DocumentEdit::RemoveItem(removal) => Some((position, removal.item())),
             _ => None,
         })
         .collect();
@@ -273,6 +298,9 @@ fn check_no_removal_contains_another_edit(edits: &[DocumentEdit]) -> Result<(), 
                 DocumentEdit::Scalar(scalar) => scalar.path(),
                 DocumentEdit::RemoveField(nested) => nested.field(),
                 DocumentEdit::SubstituteKey(nested) => nested.field(),
+                DocumentEdit::SwitchShape(nested) => nested.field(),
+                DocumentEdit::RemoveItem(nested) => nested.item(),
+                DocumentEdit::InsertScalarItems(nested) => nested.sequence(),
                 _ => continue,
             };
             if position != *removal && contains(field, other) {
@@ -329,13 +357,18 @@ fn check_every_named_key_is_unique(
                 .sibling()
                 .map(|key| (group.mapping().clone(), key.to_owned())),
             DocumentEdit::SubstituteKey(substitution) => named_key_in_parent(substitution.field()),
-            // None of the four names a key in a parent mapping: a move, a
-            // duplicate and the two sequence-item primitives address a
+            DocumentEdit::SwitchShape(switch) => named_key_in_parent(switch.field()),
+            // An item edit names the **list's** key in the match mapping: the
+            // path through a repeated `triggers:` is ambiguous whatever position
+            // follows it.
+            DocumentEdit::InsertScalarItems(insert) => named_key_in_parent(insert.sequence()),
+            DocumentEdit::RemoveItem(removal) => named_key_in_parent(removal.item()),
+            // None of the three names a key in a parent mapping that the surface
+            // admits: a move, a duplicate and a mapping-item insertion address a
             // **position**, and `check_closed_surface` has already refused all
-            // four.
+            // three.
             DocumentEdit::MoveItem(_)
             | DocumentEdit::InsertItem(_)
-            | DocumentEdit::RemoveItem(_)
             | DocumentEdit::DuplicateItem(_) => None,
         };
         let Some((parent, key)) = named else {
@@ -380,9 +413,10 @@ fn check_every_named_key_is_unique(
 /// separate insertion edits after one anchor state no order between them and are
 /// still [`DraftError::SharedInsertionAnchor`].
 ///
-/// A key a [`crate::patch::KeySubstitution`] renames counts as **removed** for
-/// an anchor (the key the anchor names is gone after the batch), and the key it
-/// renames *to* counts as **inserted** (it is not in the original).
+/// A key a [`crate::patch::KeySubstitution`] or a [`crate::patch::ShapeSwitch`]
+/// renames counts as **removed** for an anchor (the key the anchor names is gone
+/// after the batch), and the key it renames *to* counts as **inserted** (it is
+/// not in the original).
 fn check_every_anchor_survives(
     mapping: &DocumentPath,
     original_keys: &[String],
@@ -399,6 +433,10 @@ fn check_every_anchor_survives(
             DocumentEdit::SubstituteKey(substitution) => {
                 inserted.push(substitution.key());
                 removed.extend(key_in(mapping, substitution.field()));
+            }
+            DocumentEdit::SwitchShape(switch) => {
+                inserted.push(switch.key());
+                removed.extend(key_in(mapping, switch.field()));
             }
             DocumentEdit::RemoveField(removal) => removed.extend(key_in(mapping, removal.field())),
             _ => {}
@@ -452,17 +490,105 @@ fn check_no_substitution_duplicates_a_key(
     edits: &[DocumentEdit],
 ) -> Result<(), DraftError> {
     for edit in edits {
-        let DocumentEdit::SubstituteKey(substitution) = edit else {
-            continue;
+        let key = match edit {
+            DocumentEdit::SubstituteKey(substitution) => substitution.key(),
+            DocumentEdit::SwitchShape(switch) => switch.key(),
+            _ => continue,
         };
-        if let Some(field) = MatchField::from_key(substitution.key()) {
-            if occurrences(original_keys, substitution.key()) > 0 {
-                return Err(DraftError::SubstitutionTargetPresent { field });
-            }
+        if occurrences(original_keys, key) == 0 {
+            continue;
         }
-    } // End of the loop over the batch's substitutions
+        if let Some(field) = MatchField::from_key(key) {
+            return Err(DraftError::SubstitutionTargetPresent { field });
+        }
+        if let Some(field) = SequenceField::from_key(key) {
+            return Err(DraftError::SequenceFieldPresent { field });
+        }
+    } // End of the loop over the batch's substitutions and switches
     Ok(())
 } // End of function check_no_substitution_duplicates_a_key()
+
+/// Check 9: no item insertion lands exactly where the same batch removes an item
+/// of the same list (Phase 3-2).
+///
+/// Read off the placement alone, because this module reads no document: an
+/// insertion [`ItemPlacement::Front`] lands where item 0 begins, and one
+/// [`ItemPlacement::After`] `k` lands where item `k + 1` begins. A removal of
+/// that item starts at the same byte, so the two replacements share a start and
+/// neither order is stated. [`ItemPlacement::End`] lands after every item and
+/// can meet no removal's start.
+fn check_no_insertion_lands_on_a_removal(edits: &[DocumentEdit]) -> Result<(), DraftError> {
+    for edit in edits {
+        let DocumentEdit::InsertScalarItems(insert) = edit else {
+            continue;
+        };
+        let landing = match insert.placement() {
+            ItemPlacement::Front => Some(0),
+            ItemPlacement::After(index) => index.checked_add(1),
+            ItemPlacement::End => None,
+        };
+        let Some(landing) = landing else {
+            continue;
+        };
+        let lands_on_a_removal = edits.iter().any(|other| match other {
+            DocumentEdit::RemoveItem(removal) => {
+                removal.item().segments().split_last()
+                    == Some((&PathSegment::Index(landing), insert.sequence().segments()))
+                    && removal.item().document_index() == insert.sequence().document_index()
+            }
+            _ => false,
+        });
+        if lands_on_a_removal {
+            let field = insert
+                .sequence()
+                .segments()
+                .last()
+                .and_then(PathSegment::as_key)
+                .and_then(SequenceField::from_key)
+                .unwrap_or(SequenceField::Triggers);
+            return Err(DraftError::SequenceIntentsConflict { field });
+        }
+    } // End of the loop over the batch's item insertions
+    Ok(())
+} // End of function check_no_insertion_lands_on_a_removal()
+
+/// Whether `path` names one of the match's two lists itself:
+/// `<match>.<triggers|search_terms>`.
+fn names_a_surface_list(mapping: &DocumentPath, path: &DocumentPath) -> bool {
+    matches!(suffix(mapping, path), Some([PathSegment::Key(key)])
+        if SequenceField::from_key(key).is_some())
+}
+
+/// Whether `path` names one item of the match's two lists:
+/// `<match>.<triggers|search_terms>[i]`.
+fn names_a_surface_list_item(mapping: &DocumentPath, path: &DocumentPath) -> bool {
+    matches!(suffix(mapping, path), Some([PathSegment::Key(key), PathSegment::Index(_)])
+        if SequenceField::from_key(key).is_some())
+}
+
+/// Whether a shape switch turns a scalar trigger form of `mapping` itself into a
+/// `triggers` list, or a `triggers` list into a scalar trigger form.
+fn names_a_trigger_switch(
+    mapping: &DocumentPath,
+    path: &DocumentPath,
+    key: &str,
+    value: &EntryValue,
+) -> bool {
+    let Some([PathSegment::Key(old)]) = suffix(mapping, path) else {
+        return false;
+    };
+    let is_trigger_form = |key: &str| {
+        matches!(
+            MatchField::from_key(key),
+            Some(MatchField::Trigger | MatchField::Regex)
+        )
+    };
+    let is_triggers = |key: &str| SequenceField::from_key(key) == Some(SequenceField::Triggers);
+    match value {
+        EntryValue::ScalarList(_) => is_trigger_form(old) && is_triggers(key),
+        EntryValue::Scalar(_) => is_triggers(old) && is_trigger_form(key),
+    }
+} // End of function names_a_trigger_switch()
 
 /// Whether a substitution renames a schema-known scalar key of `mapping` itself
 /// to another form of the same family.
@@ -558,17 +684,21 @@ fn names_a_surface_scalar(mapping: &DocumentPath, path: &DocumentPath) -> bool {
 
 /// Whether `path` names a **mapping entry** the closed surface may remove.
 ///
-/// The four shapes that end in a key segment: a schema-known scalar field of the
-/// match, a variable's schema-known scalar, one entry of a variable's `params`,
-/// and one option of one form field. A path ending in an index names a sequence
-/// element instead, and deleting one of those is a cardinality change this
-/// engine never makes.
+/// The shapes that end in a key segment: a schema-known scalar field of the
+/// match, one of its two lists as a whole field (Phase 3-2), a variable's
+/// schema-known scalar, one entry of a variable's `params`, and one option of one
+/// form field. A path ending in an index names a sequence element instead, and a
+/// [`crate::patch::FieldRemoval`] of one is refused here; an item of the two
+/// lists is removed by a [`crate::patch::RemoveItem`], which
+/// [`check_closed_surface`] judges on its own.
 fn names_a_surface_field(mapping: &DocumentPath, path: &DocumentPath) -> bool {
     let Some(tail) = suffix(mapping, path) else {
         return false;
     };
     match tail {
-        [PathSegment::Key(key)] => MatchField::from_key(key).is_some(),
+        [PathSegment::Key(key)] => {
+            MatchField::from_key(key).is_some() || SequenceField::from_key(key).is_some()
+        }
         [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(field)] => {
             vars == VARS_KEY && VariableField::from_key(field).is_some()
         }
@@ -579,7 +709,7 @@ fn names_a_surface_field(mapping: &DocumentPath, path: &DocumentPath) -> bool {
             vars == VARS_KEY && params == PARAMS_KEY
         }
         _ => false,
-    } // End of the match over the four shapes a removable entry takes
+    } // End of the match over the five shapes a removable entry takes
 } // End of function names_a_surface_field()
 
 /// The mapping an edit names a key **inside**, and that key.

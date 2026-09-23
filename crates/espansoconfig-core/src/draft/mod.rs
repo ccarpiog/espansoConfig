@@ -41,16 +41,23 @@
 //! **This engine may modify or remove existing addressable nodes, may insert
 //! scalar-valued mapping entries into the match's own mapping, and may rename a
 //! scalar-valued key of that mapping to another key of the same schema family.
-//! It may never change a sequence's cardinality and never synthesize a
-//! collection node.**
+//! Since Phase 3-2 it may also change the cardinality of exactly two lists —
+//! `triggers` and `search_terms` — by scalar items, add or remove either list as
+//! a whole field of scalars, and switch between a scalar trigger form and a block
+//! `triggers` list. It may never change any other sequence's cardinality and
+//! never synthesize a collection other than a flat list of scalars under one of
+//! those two keys.**
 //!
 //! It is stated three times, and the third statement is over the derived batch
 //! rather than over the draft:
 //!
 //! - in [`MatchDraft`], which carries `String`s, so a destination that *needs* a
-//!   collection cannot be expressed at all;
+//!   collection cannot be expressed at all — and in [`SequenceIntent`] and
+//!   [`TriggerSwitch`], which name a list only by [`SequenceField`] and an item
+//!   only as a `String`;
 //! - in [`plan_match_edits`], which refuses an element `triggers` does not have
-//!   and refuses to take one away;
+//!   and refuses an [`ItemDraft`] that takes one away (a removal is a
+//!   [`SequenceIntent`] instead);
 //! - in [`check_closed_surface`], which reads the derived batch back and refuses
 //!   any edit that names something else. It reads paths, not nodes, and it
 //!   shares the planner's vocabulary for what a surface key is — see
@@ -84,6 +91,15 @@
 //! [`plan_match_edits_with_substitutions`], so the first entry of a compact
 //! `- trigger: …` item can change form without its `-` moving.
 //!
+//! # Lists and the trigger switch, since Phase 3-2
+//!
+//! [`plan_match_edits_with`] takes a [`MatchStructure`]: the 3-1 substitutions,
+//! [`SequenceIntent`]s that add or remove items of `triggers`/`search_terms` or
+//! the whole field, and one [`TriggerSwitch`] between `trigger`/`regex` and a
+//! block `triggers` list. Removing the last item of a list is refused; removing
+//! the whole field is its own explicit intent. A flow list's items are not
+//! edited here (3-3).
+//!
 //! # The match that does not exist yet, since Phase 2b-2c-2
 //!
 //! [`NewMatch`] is what a match is **born** holding, and it is a second type
@@ -112,6 +128,7 @@ mod field;
 mod match_draft;
 mod new_match;
 mod plan;
+mod sequence;
 
 pub use audit::{check_batch_independence, check_closed_surface, NestedKeys};
 pub use error::DraftError;
@@ -121,4 +138,5 @@ pub use match_draft::{
     MatchField, SequenceField, TriggerForm, VariableDraft, VariableField,
 };
 pub use new_match::NewMatch;
-pub use plan::{plan_match_edits, plan_match_edits_with_substitutions};
+pub use plan::{plan_match_edits, plan_match_edits_with, plan_match_edits_with_substitutions};
+pub use sequence::{MatchStructure, ScalarItems, SequenceIntent, TriggerSwitch};

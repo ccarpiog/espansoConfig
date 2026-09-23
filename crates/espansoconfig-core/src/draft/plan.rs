@@ -7,10 +7,13 @@ use crate::draft::match_draft::{
     DraftTarget, EntryDraft, FieldSubstitution, ItemDraft, MatchDraft, MatchField, SequenceField,
     VariableDraft, VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
 };
-use crate::model::{FieldView, MatchView, ScalarView, UnknownReason, ValueKind, ValueView};
+use crate::draft::sequence::{MatchStructure, SequenceIntent, TriggerSwitch};
+use crate::model::{
+    FieldView, MatchView, ScalarView, SequencePresence, UnknownReason, ValueKind, ValueView,
+};
 use crate::patch::{
-    DocumentEdit, DocumentPath, FieldInsert, FieldInsertGroup, FieldRemoval, KeySubstitution,
-    ScalarEdit,
+    DocumentEdit, DocumentPath, EntryValue, FieldInsert, FieldInsertGroup, FieldRemoval,
+    ItemPlacement, KeySubstitution, RemoveItem, ScalarEdit, ScalarItemInsert, ShapeSwitch,
 };
 
 /// Derives the batch a draft asks for, or refuses it by name.
@@ -157,6 +160,58 @@ pub fn plan_match_edits_with_substitutions(
     draft: &MatchDraft,
     substitutions: &[FieldSubstitution],
 ) -> Result<Vec<DocumentEdit>, DraftError> {
+    let structure = MatchStructure {
+        substitutions: substitutions.to_vec(),
+        ..MatchStructure::default()
+    };
+    plan_match_edits_with(view, draft, &structure)
+} // End of function plan_match_edits_with_substitutions()
+
+/// [`plan_match_edits_with_substitutions`], plus the **list intents** and the
+/// **trigger switch** of Phase 3-2.
+///
+/// A [`MatchStructure`] carries three kinds of intent beside the draft: the 3-1
+/// substitutions, [`SequenceIntent`]s about `triggers` and `search_terms`, and at
+/// most one [`TriggerSwitch`]. Every rule of [`plan_match_edits`] applies
+/// unchanged and in the same order; a default structure derives exactly the batch
+/// [`plan_match_edits`] derives.
+///
+/// # What each list intent becomes
+///
+/// | Intent | Edit |
+/// |---|---|
+/// | [`SequenceIntent::InsertItems`] | one [`ScalarItemInsert`] into the existing block list |
+/// | [`SequenceIntent::RemoveItem`] | one [`RemoveItem`], which takes the item's own comments with it |
+/// | [`SequenceIntent::InsertField`] | a list entry of the one insertion group ([`EntryValue::ScalarList`]) |
+/// | [`SequenceIntent::RemoveField`] | one [`FieldRemoval`] of the whole field |
+/// | [`TriggerSwitch`] | one [`ShapeSwitch`] |
+///
+/// # What is refused, and in which order
+///
+/// First, **at intent level and before any diffing**, anything two intents say
+/// about one list ([`DraftError::SequenceIntentsConflict`]), and a switch whose
+/// scalar key or whose list carries another intent
+/// ([`DraftError::SubstitutionConflictsWithField`],
+/// [`DraftError::SequenceIntentsConflict`]). Then, per intent, the list's
+/// presence: an absent list ([`DraftError::SequenceFieldAbsent`]), a present one
+/// being added ([`DraftError::SequenceFieldPresent`]), a value that is not a list
+/// ([`DraftError::SequenceHasAnUnsupportedShape`]) and a flow list whose items
+/// would change ([`DraftError::SequenceIsAFlowList`]); then the items: an index
+/// the list does not have ([`DraftError::SequenceItemDoesNotExist`]), an item
+/// that is not a scalar ([`DraftError::NotAScalar`], because removing it would
+/// discard structure the list editor never showed), every item removed
+/// ([`DraftError::SequenceWouldBeEmpty`]) and a switch that would drop items
+/// ([`DraftError::SwitchWouldDiscardItems`]).
+///
+/// # Errors
+///
+/// See [`DraftError`]. Every refusal discards the whole batch.
+pub fn plan_match_edits_with(
+    view: &MatchView,
+    draft: &MatchDraft,
+    structure: &MatchStructure,
+) -> Result<Vec<DocumentEdit>, DraftError> {
+    let substitutions = structure.substitutions.as_slice();
     let path = view.path.as_ref().ok_or(DraftError::MatchHasNoPath {})?;
     if let Some(repeated) = view
         .unknown_entries
@@ -178,16 +233,23 @@ pub fn plan_match_edits_with_substitutions(
     check_no_index_is_drafted_twice(draft)?;
     check_no_entry_drafts_two_shapes(draft)?;
     check_substitutions_are_coherent(draft, substitutions)?;
+    check_structure_is_coherent(view, draft, structure)?;
 
     let entries = visible_entries(view);
     let mut edits: Vec<DocumentEdit> = Vec::new();
-    let mut insertions: Vec<(MatchField, String)> = Vec::new();
+    let mut insertions: Vec<(Inserted, EntryValue)> = Vec::new();
     let mut nested: Vec<NestedKeys> = Vec::new();
+    let switched = structure
+        .switch
+        .as_ref()
+        .map(|switch| switch.form().field());
     for field in MatchField::ALL {
         let substituted = substitutions
             .iter()
             .any(|substitution| substitution.from() == field || substitution.to() == field);
-        if substituted {
+        // The switch's scalar key is planned by `plan_switch`, once, as one edit;
+        // `check_structure_is_coherent` has already refused a draft intent on it.
+        if substituted || switched == Some(field) {
             // Both keys of a substitution are planned by `plan_substitution`,
             // once, as one edit: the source is renamed, and the destination's
             // drafted value is that renamed entry's new value.
@@ -201,14 +263,337 @@ pub fn plan_match_edits_with_substitutions(
     for sequence in SequenceField::ALL {
         plan_sequence(view, draft, path, sequence, &mut edits)?;
     } // End of the loop over the schema-known string sequences
+    for intent in &structure.sequences {
+        plan_sequence_intent(view, path, intent, &mut edits, &mut insertions)?;
+    } // End of the loop over the drafted list intents
+    check_no_list_is_emptied(view, &structure.sequences)?;
+    if let Some(switch) = &structure.switch {
+        plan_switch(view, path, switch, &mut edits)?;
+    }
     plan_vars(view, draft, &mut edits, &mut nested)?;
     plan_form_fields(view, draft, path, &mut edits, &mut nested)?;
-    plan_insertions(path, &entries, insertions, substitutions, &mut edits)?;
+    plan_insertions(path, &entries, insertions, structure, &mut edits)?;
 
     check_closed_surface(path, &edits)?;
     check_batch_independence(path, &original_keys(&entries), &nested, &edits)?;
     Ok(edits)
-} // End of function plan_match_edits_with_substitutions()
+} // End of function plan_match_edits_with()
+
+/// What one entry of the insertion group is, by name.
+///
+/// The group's entries are keyed by a schema-known name and nothing else: a
+/// scalar field of the match, or one of its two lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Inserted {
+    /// A schema-known scalar field.
+    Field(MatchField),
+    /// A schema-known list.
+    Sequence(SequenceField),
+}
+
+impl Inserted {
+    /// The espanso key the entry is written under.
+    fn key(self) -> &'static str {
+        match self {
+            Inserted::Field(field) => field.key(),
+            Inserted::Sequence(sequence) => sequence.key(),
+        }
+    }
+
+    /// The refusal when no anchor survives the batch.
+    fn no_anchor(self) -> DraftError {
+        match self {
+            Inserted::Field(field) => DraftError::NoInsertionAnchor { field },
+            Inserted::Sequence(field) => DraftError::NoSequenceInsertionAnchor { field },
+        }
+    }
+} // End of impl Inserted
+
+/// Refuses list intents and a trigger switch that contradict each other or
+/// another intent of the draft (Phase 3-2).
+///
+/// **Intent level, and before any diffing**, for
+/// [`check_no_index_is_drafted_twice`]'s reason. It reads the view for one fact
+/// only — each list's current item count — so that two insertions landing at
+/// one place are recognised however they were spelled (`After(last)` and `End`
+/// are the same place).
+///
+/// The rules, each a [`DraftError::SequenceIntentsConflict`] naming the list:
+///
+/// 1. adding or removing a whole field is the only intent about that field —
+///    no other list intent and no [`ItemDraft`] beside it;
+/// 2. one item is removed at most once, and a removed item is not also
+///    rewritten by an [`ItemDraft`];
+/// 3. two insertions into one list do not land at one place;
+/// 4. an insertion does not land exactly where the same batch removes an item —
+///    the insertion point and the removal's first byte would coincide, and the
+///    engine refuses two replacements that share a start;
+/// 5. a trigger switch is the only intent about `triggers`, and its scalar key
+///    carries no other intent ([`DraftError::SubstitutionConflictsWithField`]).
+fn check_structure_is_coherent(
+    view: &MatchView,
+    draft: &MatchDraft,
+    structure: &MatchStructure,
+) -> Result<(), DraftError> {
+    let intents = &structure.sequences;
+    let drafts_items = |field: SequenceField| {
+        draft
+            .items(field)
+            .iter()
+            .any(|item| !item.value.is_unchanged())
+    };
+    for (position, intent) in intents.iter().enumerate() {
+        let field = intent.field();
+        let conflict = DraftError::SequenceIntentsConflict { field };
+        let others = intents
+            .iter()
+            .enumerate()
+            .filter(|(other, candidate)| *other != position && candidate.field() == field);
+        if intent.is_whole_field() && (others.clone().next().is_some() || drafts_items(field)) {
+            return Err(conflict);
+        }
+        let before = &intents[..position];
+        match intent {
+            SequenceIntent::RemoveItem { index, .. } => {
+                let removed_twice = before.iter().any(|earlier| {
+                    matches!(earlier, SequenceIntent::RemoveItem { field: held, index: at }
+                        if *held == field && at == index)
+                });
+                let rewritten = draft
+                    .items(field)
+                    .iter()
+                    .any(|item| item.index == *index && !item.value.is_unchanged());
+                if removed_twice || rewritten {
+                    return Err(conflict);
+                }
+            }
+            SequenceIntent::InsertItems { at, .. } => {
+                let length = items_of(view, field).len();
+                let landing = at.items_above(length);
+                let shares_a_landing = before.iter().any(|earlier| {
+                    matches!(earlier, SequenceIntent::InsertItems { field: held, at: other, .. }
+                        if *held == field && other.items_above(length) == landing)
+                });
+                let lands_on_a_removal = landing.is_some_and(|landing| {
+                    intents.iter().any(|other| {
+                        matches!(other, SequenceIntent::RemoveItem { field: held, index }
+                            if *held == field && *index == landing)
+                    })
+                });
+                if shares_a_landing || lands_on_a_removal {
+                    return Err(conflict);
+                }
+            }
+            SequenceIntent::InsertField { .. } | SequenceIntent::RemoveField { .. } => {}
+        } // End of the match over what this intent does
+    } // End of the loop over the drafted list intents
+
+    if let Some(switch) = &structure.switch {
+        let form = switch.form().field();
+        let renamed = structure
+            .substitutions
+            .iter()
+            .any(|substitution| substitution.from() == form || substitution.to() == form);
+        if !draft.field(form).is_unchanged() || renamed {
+            return Err(DraftError::SubstitutionConflictsWithField { field: form });
+        }
+        let lists = SequenceField::Triggers;
+        if intents.iter().any(|intent| intent.field() == lists) || drafts_items(lists) {
+            return Err(DraftError::SequenceIntentsConflict { field: lists });
+        }
+    }
+    Ok(())
+} // End of function check_structure_is_coherent()
+
+/// Refuses a batch whose removals would take every item of a list away.
+///
+/// **Removing the last item is explicit** (ruling 6): a list with nothing left
+/// would have to become `[]` or a bare, null `key:`, and neither is "remove an
+/// item". [`SequenceIntent::RemoveField`] is the intent that means *no list*.
+/// Stated over the intents, after each has been resolved against the view, so
+/// every index counted is one the list has; insertions do not rescue it, because
+/// a list whose every original item goes is a rewrite of the list rather than
+/// an edit of it.
+fn check_no_list_is_emptied(
+    view: &MatchView,
+    intents: &[SequenceIntent],
+) -> Result<(), DraftError> {
+    for field in SequenceField::ALL {
+        let removals = intents
+            .iter()
+            .filter(|intent| {
+                matches!(intent, SequenceIntent::RemoveItem { field: held, .. } if *held == field)
+            })
+            .count();
+        let length = items_of(view, field).len();
+        if removals > 0 && removals >= length {
+            return Err(DraftError::SequenceWouldBeEmpty { field });
+        }
+    } // End of the loop over the two lists
+    Ok(())
+} // End of function check_no_list_is_emptied()
+
+/// Refuses an intent about the items of a list that is not an existing block
+/// list.
+///
+/// The three answers, in order: the list is not there
+/// ([`DraftError::SequenceFieldAbsent`]), its value is not a list
+/// ([`DraftError::SequenceHasAnUnsupportedShape`]), or it is a flow list whose
+/// delimiters this step does not edit ([`DraftError::SequenceIsAFlowList`]).
+fn require_block_list(presence: &SequencePresence, field: SequenceField) -> Result<(), DraftError> {
+    match presence {
+        SequencePresence::Absent {} => Err(DraftError::SequenceFieldAbsent { field }),
+        SequencePresence::UnsupportedShape { found, .. } => {
+            Err(DraftError::SequenceHasAnUnsupportedShape {
+                field,
+                found: *found,
+            })
+        }
+        SequencePresence::Empty { .. } | SequencePresence::Items { flow: true, .. } => {
+            Err(DraftError::SequenceIsAFlowList { field })
+        }
+        SequencePresence::Items { flow: false, .. } => Ok(()),
+    }
+} // End of function require_block_list()
+
+/// Refuses a list whose items include one this editor never showed as text.
+///
+/// An item the projection elided is a collection written where the schema says
+/// a string goes; deleting it with the list would discard structure nobody saw.
+fn require_scalar_items(items: &[ValueView], field: SequenceField) -> Result<(), DraftError> {
+    match items.iter().position(|item| item.as_scalar().is_none()) {
+        Some(index) => Err(DraftError::NotAScalar {
+            target: DraftTarget::Item { field, index },
+        }),
+        None => Ok(()),
+    }
+} // End of function require_scalar_items()
+
+/// Plans one list intent, appending to `edits` or, for a new field, to
+/// `insertions`.
+fn plan_sequence_intent(
+    view: &MatchView,
+    path: &DocumentPath,
+    intent: &SequenceIntent,
+    edits: &mut Vec<DocumentEdit>,
+    insertions: &mut Vec<(Inserted, EntryValue)>,
+) -> Result<(), DraftError> {
+    let field = intent.field();
+    let presence = presence_of(view, field);
+    let items = items_of(view, field);
+    let list = path.clone().with_key(field.key());
+    match intent {
+        SequenceIntent::InsertField { items: new, .. } => {
+            if presence.is_present() {
+                return Err(DraftError::SequenceFieldPresent { field });
+            }
+            insertions.push((
+                Inserted::Sequence(field),
+                EntryValue::ScalarList(new.clone()),
+            ));
+        }
+        SequenceIntent::RemoveField { .. } => match presence {
+            SequencePresence::Absent {} => {}
+            SequencePresence::UnsupportedShape { found, .. } => {
+                return Err(DraftError::SequenceHasAnUnsupportedShape {
+                    field,
+                    found: *found,
+                })
+            }
+            SequencePresence::Empty { .. } | SequencePresence::Items { .. } => {
+                require_scalar_items(items, field)?;
+                edits.push(FieldRemoval::new(list).into());
+            }
+        },
+        SequenceIntent::InsertItems { at, items: new, .. } => {
+            require_block_list(presence, field)?;
+            if let ItemPlacement::After(index) = at {
+                if *index >= items.len() {
+                    return Err(DraftError::SequenceItemDoesNotExist {
+                        field,
+                        index: *index,
+                        length: items.len(),
+                    });
+                }
+            }
+            let insert = ScalarItemInsert::new(list, *at, new.to_vec())
+                .ok_or(DraftError::SequenceIntentsConflict { field })?;
+            edits.push(insert.into());
+        }
+        SequenceIntent::RemoveItem { index, .. } => {
+            require_block_list(presence, field)?;
+            let item = items
+                .get(*index)
+                .ok_or(DraftError::SequenceItemDoesNotExist {
+                    field,
+                    index: *index,
+                    length: items.len(),
+                })?;
+            if item.as_scalar().is_none() {
+                return Err(DraftError::NotAScalar {
+                    target: DraftTarget::Item {
+                        field,
+                        index: *index,
+                    },
+                });
+            }
+            edits.push(RemoveItem::new(list.with_index(*index)).into());
+        }
+    } // End of the match over what the intent asks for
+    Ok(())
+} // End of function plan_sequence_intent()
+
+/// Plans the trigger switch as one [`ShapeSwitch`].
+fn plan_switch(
+    view: &MatchView,
+    path: &DocumentPath,
+    switch: &TriggerSwitch,
+    edits: &mut Vec<DocumentEdit>,
+) -> Result<(), DraftError> {
+    let lists = SequenceField::Triggers;
+    match switch {
+        TriggerSwitch::ToList { from, items } => {
+            let field = from.field();
+            if scalar_of(view, field).is_none() {
+                if let Some(found) = unmodelled_shape(view, field) {
+                    return Err(DraftError::FieldHasAnUnmodelledShape { field, found });
+                }
+                return Err(DraftError::SubstitutionSourceAbsent { field });
+            }
+            if presence_of(view, lists).is_present() {
+                return Err(DraftError::SequenceFieldPresent { field: lists });
+            }
+            let switch = ShapeSwitch::new(
+                path.clone().with_key(field.key()),
+                lists.key(),
+                EntryValue::ScalarList(items.to_vec()),
+            );
+            edits.push(switch.into());
+        }
+        TriggerSwitch::FromList { to, value } => {
+            require_block_list(presence_of(view, lists), lists)?;
+            let items = items_of(view, lists);
+            if items.len() > 1 {
+                return Err(DraftError::SwitchWouldDiscardItems {
+                    field: lists,
+                    items: items.len(),
+                });
+            }
+            require_scalar_items(items, lists)?;
+            let field = to.field();
+            if scalar_of(view, field).is_some() || unmodelled_shape(view, field).is_some() {
+                return Err(DraftError::SubstitutionTargetPresent { field });
+            }
+            let switch = ShapeSwitch::new(
+                path.clone().with_key(lists.key()),
+                field.key(),
+                EntryValue::Scalar(value.clone()),
+            );
+            edits.push(switch.into());
+        }
+    } // End of the match over the two directions
+    Ok(())
+} // End of function plan_switch()
 
 /// Refuses substitutions that contradict each other or another intent of the
 /// draft.
@@ -296,24 +681,41 @@ fn plan_substitution(
 fn plan_insertions(
     path: &DocumentPath,
     entries: &[VisibleEntry],
-    insertions: Vec<(MatchField, String)>,
-    substitutions: &[FieldSubstitution],
+    insertions: Vec<(Inserted, EntryValue)>,
+    structure: &MatchStructure,
     edits: &mut Vec<DocumentEdit>,
 ) -> Result<(), DraftError> {
     let Some(first) = insertions.first().map(|(field, _)| *field) else {
         return Ok(());
     };
+    let substitutions = structure.substitutions.as_slice();
     let removed = |key: &str| {
         edits.iter().any(|edit| match edit {
             DocumentEdit::RemoveField(removal) => removal.field() == &path.clone().with_key(key),
             _ => false,
         })
     };
+    // A list whose items the batch changes is not an anchor either: an
+    // insertion after its last item and an insertion after the whole entry are
+    // the same offset, and a removal of its last item ends there (Phase 3-2).
+    let items_change = |key: &str| {
+        structure.sequences.iter().any(|intent| {
+            matches!(
+                intent,
+                SequenceIntent::InsertItems { .. } | SequenceIntent::RemoveItem { .. }
+            ) && intent.field().key() == key
+        })
+    };
+    let switched = |key: &str| match &structure.switch {
+        Some(TriggerSwitch::ToList { from, .. }) => from.field().key() == key,
+        Some(TriggerSwitch::FromList { .. }) => SequenceField::Triggers.key() == key,
+        None => false,
+    };
     let leaves_alone = |key: &str| {
         let renamed = substitutions
             .iter()
             .any(|substitution| substitution.from().key() == key);
-        !removed(key) && !renamed
+        !removed(key) && !renamed && !switched(key) && !items_change(key)
     };
     // A renamed successor does not matter: a substitution rewrites a key token,
     // which never starts at the beginning of a line in a match mapping.
@@ -330,18 +732,22 @@ fn plan_insertions(
         .filter_map(|(position, entry)| Some((position, entry.key.as_deref()?)))
         .find(|(position, key)| leaves_alone(key) && successor_stays(*position))
         .map(|(_, key)| key.to_owned())
-        .ok_or(DraftError::NoInsertionAnchor { field: first })?;
-    let mut fields: Vec<(String, String)> = insertions
+        .ok_or(first.no_anchor())?;
+    let mut fields: Vec<(String, EntryValue)> = insertions
         .into_iter()
         .map(|(field, value)| (field.key().to_owned(), value))
         .collect();
-    let edit: DocumentEdit = if fields.len() == 1 {
-        let (key, value) = fields.remove(0);
-        FieldInsert::after(path.clone(), anchor, key, value).into()
-    } else {
-        FieldInsertGroup::after(path.clone(), anchor, fields)
-            .expect("two or more entries make a non-empty group")
-            .into()
+    // One scalar field stays a `FieldInsert`, exactly as before Phase 3-1; a
+    // list, or two entries or more, is one group.
+    let edit: DocumentEdit = match fields.as_slice() {
+        [(_, EntryValue::Scalar(_))] => {
+            let (key, value) = fields.remove(0);
+            let value = value.as_scalar().unwrap_or_default().to_owned();
+            FieldInsert::after(path.clone(), anchor, key, value).into()
+        }
+        _ => FieldInsertGroup::typed(path.clone(), Some(anchor), fields)
+            .ok_or(first.no_anchor())?
+            .into(),
     };
     edits.push(edit);
     Ok(())
@@ -531,7 +937,7 @@ fn plan_field(
     path: &DocumentPath,
     field: MatchField,
     edits: &mut Vec<DocumentEdit>,
-    insertions: &mut Vec<(MatchField, String)>,
+    insertions: &mut Vec<(Inserted, EntryValue)>,
 ) -> Result<(), DraftError> {
     let drafted = draft.field(field);
     if drafted.is_unchanged() {
@@ -562,7 +968,9 @@ fn plan_field(
         (DraftField::Remove, Some(_)) => {
             edits.push(FieldRemoval::new(path.clone().with_key(field.key())).into());
         }
-        (DraftField::Set(value), None) => insertions.push((field, value.clone())),
+        (DraftField::Set(value), None) => {
+            insertions.push((Inserted::Field(field), EntryValue::Scalar(value.clone())))
+        }
         (DraftField::Set(value), Some(scalar)) => {
             let target = DraftTarget::Field(field);
             if let Some(edit) =
@@ -1051,19 +1459,15 @@ struct VisibleEntry {
 /// safely because a mapping's entries are disjoint and sequential, so both
 /// offsets fall inside the same entry's own extent.
 ///
-/// # A sequence is seen only through its first element
+/// # A list is seen through its own key (Phase 3-2)
 ///
-/// `triggers: []` is a present, addressable entry that contributes **nothing**
-/// here, because a sequence's only offset in [`crate::model::MatchView`] is its
-/// first element's and an empty sequence has none. A match whose entries are all
-/// empty sequences therefore gives an insertion no anchor and is refused with
-/// [`DraftError::NoInsertionAnchor`] — a real limit, pinned by
-/// `an_empty_sequence_is_invisible_as_an_insertion_anchor` rather than assumed.
-///
-/// It is not fixable here. An empty `Vec<ValueView>` cannot say whether the key
-/// was absent or present and empty, so the span this function would need is one
-/// the read model does not carry; `docs/decisions/2b-2b-1-notes.md` addresses
-/// that hole to [`crate::model::MatchView`]'s owner.
+/// A list contributes its **key span**, read from the presence metadata the
+/// projection carries ([`crate::model::SequencePresence`]). Until Phase 3-2 a
+/// list was seen only through its first element, so `triggers: []` — present,
+/// addressable, and with no element — contributed nothing, and a match whose
+/// entries were all empty lists gave an insertion no anchor. That limit is
+/// lifted: `an_empty_sequence_is_visible_as_an_insertion_anchor` in
+/// `tests/draft_plan.rs` anchors a new entry on `triggers: []`.
 fn visible_entries(view: &MatchView) -> Vec<VisibleEntry> {
     let mut entries: Vec<VisibleEntry> = Vec::new();
     for field in MatchField::ALL {
@@ -1075,10 +1479,15 @@ fn visible_entries(view: &MatchView) -> Vec<VisibleEntry> {
         }
     } // End of the loop over the schema-known scalar fields
     for sequence in SequenceField::ALL {
-        if let Some(first) = items_of(view, sequence).first() {
+        // The entry's own key span, from the presence metadata — so `[]` is
+        // visible too (Phase 3-2). A list written with a shape that is not a
+        // list is an unknown entry and is seen below, once.
+        if let SequencePresence::Empty { location } | SequencePresence::Items { location, .. } =
+            presence_of(view, sequence)
+        {
             entries.push(VisibleEntry {
                 key: Some(sequence.key().to_owned()),
-                at: first.span().start,
+                at: location.key_span.start,
             });
         }
     } // End of the loop over the schema-known string sequences
@@ -1133,6 +1542,14 @@ fn items_of(view: &MatchView, sequence: SequenceField) -> &[ValueView] {
     match sequence {
         SequenceField::Triggers => &view.trigger.triggers,
         SequenceField::SearchTerms => &view.search_terms,
+    }
+}
+
+/// Whether one string sequence is written, and in what shape (Phase 3-2).
+fn presence_of(view: &MatchView, sequence: SequenceField) -> &SequencePresence {
+    match sequence {
+        SequenceField::Triggers => &view.trigger.triggers_presence,
+        SequenceField::SearchTerms => &view.search_terms_presence,
     }
 }
 

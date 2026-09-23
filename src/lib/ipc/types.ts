@@ -420,12 +420,58 @@ export interface MatchId {
   readonly node: NodeId;
 }
 
+/**
+ * Where one modelled mapping entry sits in the source, read off the syntax index
+ * in Rust (Phase 3-2).
+ *
+ * The spans count **bytes**; a JavaScript string index counts UTF-16 code units,
+ * so `text.slice(span.start, span.end)` is wrong for any document holding a
+ * non-ASCII character before the span. They are carried for Rust's own later use
+ * and never sliced here.
+ */
+export interface FieldLocation {
+  /** The key node. */
+  readonly key_node: NodeId;
+  /** The key's byte span. */
+  readonly key_span: ByteSpan;
+  /** The value node. */
+  readonly value_node: NodeId;
+  /** The value's byte span. */
+  readonly value_span: ByteSpan;
+  /** The path that names the value, or `null` when the mapping has none. */
+  readonly path: DocumentPath | null;
+}
+
+/** The names of {@link SequencePresence}'s four states. */
+export type SequencePresenceName = 'Absent' | 'Empty' | 'Items' | 'UnsupportedShape';
+
+/**
+ * Whether a schema-known list — `triggers`, `search_terms`, a document's
+ * `imports` — is written at all, and in what shape (Phase 3-2).
+ *
+ * The item array alone cannot tell an absent key from `key: []`; this can. Every
+ * state crosses as a one-key object, `Absent` included.
+ */
+export type SequencePresence =
+  | { readonly Absent: Record<string, never> }
+  | { readonly Empty: { readonly location: FieldLocation } }
+  | {
+      readonly Items: {
+        readonly location: FieldLocation;
+        readonly flow: boolean;
+        readonly count: number;
+      };
+    }
+  | { readonly UnsupportedShape: { readonly location: FieldLocation; readonly found: ValueKind } };
+
 /** A match's trigger side. All three fields are carried, never collapsed. */
 export interface TriggerSpec {
   /** `trigger`, as source text. */
   readonly trigger: ScalarView | null;
   /** `triggers`, one item per source entry, in source order. */
   readonly triggers: readonly ValueView[];
+  /** Whether `triggers` is written at all, and in what shape (Phase 3-2). */
+  readonly triggers_presence: SequencePresence;
   /** `regex`, as source text. */
   readonly regex: ScalarView | null;
   /** Whether the three fields form a shape espanso accepts. */
@@ -527,6 +573,8 @@ export interface MatchView {
   readonly comment: ScalarView | null;
   /** `search_terms`, one item per source entry, in source order. */
   readonly search_terms: readonly ValueView[];
+  /** Whether `search_terms` is written at all, and in what shape (Phase 3-2). */
+  readonly search_terms_presence: SequencePresence;
   /** The word-boundary, case and injection options. */
   readonly options: MatchOptions;
   /** `vars`. */
@@ -605,6 +653,12 @@ export interface DocumentView {
   readonly global_vars: readonly VariableView[];
   /** `imports`, one item per source entry, in source order. */
   readonly imports: readonly ValueView[];
+  /**
+   * Whether `imports` is written at all, and in what shape (Phase 3-2). A
+   * profile, an unparsed document and a root that is not a mapping answer
+   * `Absent`.
+   */
+  readonly imports_presence: SequencePresence;
   /** The profile projection, for a document whose shape is a config profile. */
   readonly profile: ConfigProfileView | null;
   /** Top-level entries this projection did not model, never discarded. */
@@ -917,7 +971,8 @@ export type VerificationFailureName =
   | 'DuplicatedBytesWereRewritten'
   | 'DuplicateNotInPlace'
   | 'ConstructChangedOutsideTheDuplicate'
-  | 'EntriesNotInTheIntendedOrder';
+  | 'EntriesNotInTheIntendedOrder'
+  | 'ItemNotInserted';
 
 /**
  * Why a candidate document was rejected after being reparsed.
@@ -998,7 +1053,8 @@ export type VerificationFailure =
         readonly node: NodeId;
       };
     }
-  | { readonly EntriesNotInTheIntendedOrder: { readonly edit: number; readonly entry: number } };
+  | { readonly EntriesNotInTheIntendedOrder: { readonly edit: number; readonly entry: number } }
+  | { readonly ItemNotInserted: { readonly edit: number; readonly item: number } };
 
 /** The name of every {@link EditError} variant. */
 export type EditErrorName =
@@ -1042,6 +1098,7 @@ export type EditErrorName =
   | 'DuplicateWouldExtendAKeptBlock'
   | 'DuplicateWouldExtendABlockScalar'
   | 'KeyNotSubstitutable'
+  | 'ShapeSwitchUnsupported'
   | 'Verification';
 
 /** Why a change was not applied to a document's bytes. */
@@ -1179,6 +1236,7 @@ export type EditError =
       };
     }
   | { readonly KeyNotSubstitutable: { readonly edit: number; readonly node: NodeId } }
+  | { readonly ShapeSwitchUnsupported: { readonly edit: number; readonly node: NodeId } }
   | { readonly Verification: VerificationFailure };
 
 /** The name of every {@link FindingCode} variant. */
@@ -2597,7 +2655,15 @@ export type DraftErrorName =
   | 'AmbiguousNestedKey'
   | 'SubstitutionSourceAbsent'
   | 'SubstitutionTargetPresent'
-  | 'SubstitutionConflictsWithField';
+  | 'SubstitutionConflictsWithField'
+  | 'SequenceIntentsConflict'
+  | 'SequenceFieldAbsent'
+  | 'SequenceFieldPresent'
+  | 'SequenceHasAnUnsupportedShape'
+  | 'SequenceIsAFlowList'
+  | 'SequenceWouldBeEmpty'
+  | 'SwitchWouldDiscardItems'
+  | 'NoSequenceInsertionAnchor';
 
 /**
  * Why a draft could not be turned into an edit batch.
@@ -2706,7 +2772,20 @@ export type DraftError =
   | { readonly AmbiguousNestedKey: { readonly edit: number } }
   | { readonly SubstitutionSourceAbsent: { readonly field: MatchField } }
   | { readonly SubstitutionTargetPresent: { readonly field: MatchField } }
-  | { readonly SubstitutionConflictsWithField: { readonly field: MatchField } };
+  | { readonly SubstitutionConflictsWithField: { readonly field: MatchField } }
+  | { readonly SequenceIntentsConflict: { readonly field: SequenceField } }
+  | { readonly SequenceFieldAbsent: { readonly field: SequenceField } }
+  | { readonly SequenceFieldPresent: { readonly field: SequenceField } }
+  | {
+      readonly SequenceHasAnUnsupportedShape: {
+        readonly field: SequenceField;
+        readonly found: ValueKind;
+      };
+    }
+  | { readonly SequenceIsAFlowList: { readonly field: SequenceField } }
+  | { readonly SequenceWouldBeEmpty: { readonly field: SequenceField } }
+  | { readonly SwitchWouldDiscardItems: { readonly field: SequenceField; readonly items: number } }
+  | { readonly NoSequenceInsertionAnchor: { readonly field: SequenceField } };
 
 // ---------------------------------------------------------------------------
 // The external-change reconciliation wire — Phase 2d-4b

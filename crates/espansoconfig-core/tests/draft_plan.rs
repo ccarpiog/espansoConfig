@@ -367,39 +367,43 @@ fn an_insertion_with_no_original_sibling_to_anchor_on_is_refused() {
     );
 } // End of function an_insertion_with_no_original_sibling_to_anchor_on_is_refused()
 
-/// **A limit, pinned rather than assumed.** An empty but present sequence is
-/// invisible as an insertion anchor.
+/// **A limit lifted at Phase 3-2, pinned in its new form.** An empty but
+/// present sequence is visible as an insertion anchor.
 ///
-/// `triggers: []` is an original, decoded, addressable sibling, and a new key
-/// could be written after it. The planner cannot see it: a sequence's only
-/// offset in `MatchView` is its first element's, and an empty sequence has none,
-/// so the match reads as having no visible entry at all.
-///
-/// The fix is not in this module. An empty `Vec<ValueView>` cannot distinguish
-/// *absent* from *present but empty* — the same ambiguity `search_terms` has —
-/// and resolving it means giving `MatchView` the sequence entry's own span,
-/// which is a change to the read model. This test states what today does, so
-/// the day it changes is a day a test moves.
+/// `triggers: []` is an original, decoded, addressable sibling. Until Phase 3-2
+/// the planner could not see it — a sequence's only offset in `MatchView` was
+/// its first element's, and an empty sequence has none — so this draft was
+/// refused with `NoInsertionAnchor`. The read model now carries the entry's own
+/// location (`TriggerSpec::triggers_presence`), so the new key is written after
+/// `triggers: []`, and nothing else moves.
 #[test]
-fn an_empty_sequence_is_invisible_as_an_insertion_anchor() {
-    let view = one_match("matches:\n  - triggers: []\n");
+fn an_empty_sequence_is_visible_as_an_insertion_anchor() {
+    let source = "matches:\n  - triggers: []\n";
+    let view = one_match(source);
     assert!(
         view.safely_editable && view.blocking_hazard.is_none(),
-        "the gate admits the match, so the refusal below is the planner's"
+        "the gate admits the match"
     );
     assert!(
         view.trigger.triggers.is_empty(),
-        "an empty sequence projects as no elements, which is the ambiguity itself"
+        "an empty sequence projects as no elements"
+    );
+    assert!(
+        view.trigger.triggers_presence.is_present(),
+        "and its presence says it is there"
     );
     let draft = MatchDraft::new().with(MatchField::Label, "a label");
+    let edits = plan_match_edits(&view, &draft).expect("the insertion now has an anchor");
+    let [DocumentEdit::InsertField(insert)] = edits.as_slice() else {
+        panic!("one insertion: {edits:?}");
+    };
+    assert_eq!(insert.sibling(), Some("triggers"));
+    let patched = apply_edits(source, &edits).expect("the insertion applies");
     assert_eq!(
-        plan_match_edits(&view, &draft),
-        Err(DraftError::NoInsertionAnchor {
-            field: MatchField::Label,
-        }),
-        "an insertion that ought to work is refused, and this is why"
+        patched.text(),
+        "matches:\n  - triggers: []\n    label: a label\n"
     );
-} // End of function an_empty_sequence_is_invisible_as_an_insertion_anchor()
+} // End of function an_empty_sequence_is_visible_as_an_insertion_anchor()
 
 /// A `Remove` of a field that is already absent derives no edit: the desired
 /// state is the actual state.

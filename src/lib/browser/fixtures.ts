@@ -56,6 +56,7 @@ import type {
   ReapplyResolution,
   ScalarStyle,
   ScalarView,
+  SequencePresence,
   TriggerKind,
   TriggerSpec,
   UnknownEntry,
@@ -119,6 +120,32 @@ export function styledScalar(
 export function scalarItem(text: string): ValueView {
   return { Scalar: scalar(text) };
 } // End of function scalarItem()
+
+/**
+ * The presence a fixture list reports (Phase 3-2).
+ *
+ * A fixture that names no items, or an empty list, reports `Absent`: the
+ * fixtures predate the distinction, and every one of them that leaves a list
+ * out means *the file does not write it*. A fixture list with items reports a
+ * block list of that many items at a zero location — no fixture slices by it,
+ * and a test that needs a real location projects a document in Rust instead.
+ *
+ * @param items - The fixture's items, if it named any.
+ * @returns The presence a projection of such a list would carry.
+ */
+export function fixturePresence(items: readonly string[] | undefined): SequencePresence {
+  if (items === undefined || items.length === 0) {
+    return { Absent: {} };
+  }
+  const span = { start: 0, end: 0 };
+  return {
+    Items: {
+      location: { key_node: 0, key_span: span, value_node: 0, value_span: span, path: null },
+      flow: false,
+      count: items.length
+    }
+  };
+} // End of function fixturePresence()
 
 /**
  * One entry of a shallowly projected mapping.
@@ -435,6 +462,7 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
   const trigger: TriggerSpec = {
     trigger: optionalScalar(overrides.trigger),
     triggers: (overrides.triggers ?? []).map(scalarItem),
+    triggers_presence: fixturePresence(overrides.triggers),
     regex: optionalScalar(overrides.regex),
     kind: overrides.triggerKind ?? 'Single'
   };
@@ -525,6 +553,7 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
     label,
     comment,
     search_terms: searchTerms.map(scalarItem),
+    search_terms_presence: fixturePresence(searchTerms),
     options: {
       word: optionalScalar(optionTexts.word),
       left_word: optionalScalar(optionTexts.left_word),
@@ -637,6 +666,7 @@ export function makeDocument(overrides: DocumentOverrides = {}): DocumentView {
     matches: overrides.matches ?? [],
     global_vars: [],
     imports: [],
+    imports_presence: { Absent: {} },
     profile: null,
     unknown_entries: [],
     coverage: [],

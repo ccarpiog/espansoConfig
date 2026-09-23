@@ -132,6 +132,8 @@ import type {
   SaveResultName,
   SaveVerdict,
   ScalarStyle,
+  SequencePresence,
+  SequencePresenceName,
   SyntaxError,
   SyntaxErrorName,
   TargetDifference,
@@ -298,6 +300,17 @@ export function fileKindKey(kind: FileKind): TranslationKey {
 export function triggerKindKey(kind: TriggerKind): TranslationKey {
   return `code.triggerKind.${uncapitalize(kind)}`;
 } // End of function triggerKindKey()
+
+/**
+ * The dictionary key for whether a list field is written, and in what shape
+ * (Phase 3-2).
+ *
+ * @param name - The variant name of a `SequencePresence`.
+ * @returns The key holding that state's noun phrase.
+ */
+export function sequencePresenceKey(name: SequencePresenceName): TranslationKey {
+  return `code.sequencePresence.${uncapitalize(name)}`;
+} // End of function sequencePresenceKey()
 
 /**
  * The dictionary key for which content form a match uses.
@@ -608,6 +621,21 @@ export function describeFileKind(locale: Locale, kind: FileKind): string {
 export function describeTriggerKind(locale: Locale, kind: TriggerKind): string {
   return translate(locale, triggerKindKey(kind));
 } // End of function describeTriggerKind()
+
+/**
+ * The noun phrase one list's presence reads as (Phase 3-2).
+ *
+ * The phrase names the **state** only — absent, empty, with items, written as
+ * something else — and never the location or the count the value carries: a
+ * screen that wants those says so in its own sentence.
+ *
+ * @param locale - The dictionary to read from.
+ * @param presence - A list's presence as it crossed the boundary.
+ * @returns The translated noun phrase.
+ */
+export function describeSequencePresence(locale: Locale, presence: SequencePresence): string {
+  return translate(locale, sequencePresenceKey(wireVariantName<SequencePresenceName>(presence)));
+} // End of function describeSequencePresence()
 
 /**
  * The noun phrase one content form reads as.
@@ -1800,6 +1828,7 @@ export const CODE_NAMESPACE_KEY_BUILDERS = {
   saveResult: saveResultKey,
   saveVerdict: saveVerdictKey,
   scalarStyle: scalarStyleKey,
+  sequencePresence: sequencePresenceKey,
   syntaxError: syntaxErrorKey,
   targetDifference: targetDifferenceKey,
   triggerKind: triggerKindKey,

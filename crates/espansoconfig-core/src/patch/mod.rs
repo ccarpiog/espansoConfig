@@ -54,11 +54,11 @@
 //! **[`ItemMove`]'s lift half with no landing**, sharing the envelope derivation
 //! and the source-gap join as code rather than as an agreement, so a deletion can
 //! never take a different set of bytes from the ones a relocation takes.
-//! [`InsertItem`] is the one narrow exception to "no generic primitive may
+//! [`InsertItem`] was the first narrow exception to "no generic primitive may
 //! synthesize a collection": exactly one new flat block-mapping item with scalar
 //! fields, spelled by the existing codec, at a sequence-item boundary — plus the
 //! promotion of a bare `matches:` into its first item, without which that key
-//! could never be targeted as a sequence at all.
+//! could never be targeted as a sequence at all. Phase 3-2 adds the second, below.
 //!
 //! **2b-2c-2 — [`ItemPlacement`], the insertion's third destination.** An
 //! insertion could go after a named item or after the last one, and had no
@@ -87,16 +87,32 @@
 //! moving. Both are verified through the same mapping fold as an insertion and a
 //! removal, which gains one property: every key of the changed mapping is where
 //! the batch intended it ([`VerificationFailure::EntriesNotInTheIntendedOrder`]).
+//!
+//! **3-2 — [`ScalarItemInsert`], [`ShapeSwitch`] and list-valued entries, the
+//! scalar list's own edits.** One or more scalar items are written at one
+//! sequence-item boundary of an existing block sequence, landing exactly where an
+//! [`InsertItem`] would ([`RemoveItem`] already removes a scalar item). A
+//! [`FieldInsertGroup`] entry may be an [`EntryValue::ScalarList`] — a new block
+//! list of scalars, or `[]` — which is the second narrow exception to "no generic
+//! primitive may synthesize a collection": a flat list of scalars and nothing
+//! deeper. A [`ShapeSwitch`] renames an entry and turns its single-line scalar
+//! into a block list of scalars, or a block list of scalars into a single-line
+//! scalar, in place. Verification gains one property,
+//! [`VerificationFailure::ItemNotInserted`], and one mechanism: every path an
+//! expectation is re-resolved by is first carried through the batch's own item
+//! position map ([`item_positions`]), so an edit of an item a removal shifted is
+//! looked for where it now is.
 
 pub mod edit;
 pub mod path;
 
 pub use edit::{
     apply_edits, apply_scalar_edit, apply_scalar_edits, duplicate_item, insert_field, insert_item,
-    insertion_landings, move_item, remove_field, remove_item, DocumentEdit, DuplicateItem,
-    DuplicateSeam, EditError, FieldInsert, FieldInsertGroup, FieldRemoval, InsertItem, ItemMove,
-    ItemPlacement, KeySubstitution, MoveSeam, PatchedDocument, PresentationNote, RemoveItem,
-    Replacement, ScalarEdit, VerificationFailure,
+    insertion_landings, item_positions, move_item, remove_field, remove_item, DocumentEdit,
+    DuplicateItem, DuplicateSeam, EditError, EntryValue, FieldInsert, FieldInsertGroup,
+    FieldRemoval, InsertItem, ItemMove, ItemPlacement, KeySubstitution, MoveSeam, PatchedDocument,
+    PresentationNote, RemoveItem, Replacement, ScalarEdit, ScalarItemInsert, ShapeSwitch,
+    VerificationFailure,
 };
 pub use path::{
     path_to, resolve, resolve_full, resolve_key, AddressError, DocumentPath, PathError,

@@ -122,6 +122,119 @@ pub enum ValueView {
     },
 }
 
+/// Where one modelled mapping entry sits in the source, derived in Rust.
+///
+/// Every number here is read off the syntax index by the projection, never
+/// composed by a caller: a frontend that holds the document text and a
+/// [`ByteSpan`] cannot cut the same slice (a span counts bytes, a JavaScript
+/// string index counts UTF-16 code units), so the spans are carried for Rust's
+/// own later use and for display positions, not for slicing on the far side.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FieldLocation {
+    /// The key node.
+    pub key_node: NodeId,
+    /// The key's byte span.
+    pub key_span: ByteSpan,
+    /// The value node.
+    pub value_node: NodeId,
+    /// The value's byte span. For a block sequence this is the hull of its
+    /// items; for `[]` it is the two brackets.
+    pub value_span: ByteSpan,
+    /// The path that names the value, or `None` when the containing mapping has
+    /// no path.
+    pub path: Option<crate::patch::DocumentPath>,
+}
+
+/// Whether a schema-known **list** field is there, and in what shape (Phase
+/// 3-2).
+///
+/// A `Vec<ValueView>` alone cannot tell `triggers:` absent from `triggers: []`:
+/// both project as no items. This is the distinction, stated once for every
+/// list the projection models by name — a match's `triggers` and
+/// `search_terms`, and a document's `imports`.
+///
+/// **Four states, spelled as four variants**, each a struct variant so it
+/// crosses the wire as a one-key object:
+///
+/// | Variant | The file writes |
+/// |---|---|
+/// | [`SequencePresence::Absent`] | no such key |
+/// | [`SequencePresence::Empty`] | the key with a sequence of no items (`[]`) |
+/// | [`SequencePresence::Items`] | the key with a sequence of one item or more |
+/// | [`SequencePresence::UnsupportedShape`] | the key with something that is not a sequence — a scalar, `~`, an empty value, a mapping or an alias |
+///
+/// A key written **twice** is described by its first occurrence, which is the
+/// one the projection models; the repeat is an
+/// [`crate::model::UnknownEntry`] with [`crate::model::UnknownReason::RepeatedKey`],
+/// exactly as for any other modelled key.
+///
+/// `Absent` is an empty **struct** variant rather than a unit variant so that it
+/// too crosses as a one-key object (`{"Absent": {}}`), for the reason
+/// [`crate::draft::DraftError::MatchHasNoPath`] gives.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum SequencePresence {
+    /// The mapping holds no such key.
+    Absent {},
+    /// The key is there and its value is a sequence with no items.
+    ///
+    /// Always a flow sequence: an empty block sequence has no YAML spelling.
+    Empty {
+        /// Where the entry sits.
+        location: FieldLocation,
+    },
+    /// The key is there and its value is a sequence with at least one item.
+    Items {
+        /// Where the entry sits.
+        location: FieldLocation,
+        /// Whether the sequence is bracket-delimited (`[a, b]`) rather than a
+        /// block of `-` lines.
+        flow: bool,
+        /// How many items the sequence holds, scalar or not.
+        count: usize,
+    },
+    /// The key is there and its value is not a sequence.
+    UnsupportedShape {
+        /// Where the entry sits.
+        location: FieldLocation,
+        /// What the value actually is.
+        found: ValueKind,
+    },
+}
+
+impl Default for SequencePresence {
+    /// A key the walk never met is absent.
+    fn default() -> SequencePresence {
+        SequencePresence::Absent {}
+    }
+}
+
+impl SequencePresence {
+    /// Whether the key is written in the mapping at all.
+    pub fn is_present(&self) -> bool {
+        !matches!(self, SequencePresence::Absent {})
+    }
+
+    /// Where the entry sits, or `None` when it is absent.
+    pub fn location(&self) -> Option<&FieldLocation> {
+        match self {
+            SequencePresence::Absent {} => None,
+            SequencePresence::Empty { location }
+            | SequencePresence::Items { location, .. }
+            | SequencePresence::UnsupportedShape { location, .. } => Some(location),
+        }
+    }
+
+    /// Whether the value is a bracket-delimited sequence. `[]` is one; an
+    /// absent key and a non-sequence value are not.
+    pub fn is_flow(&self) -> bool {
+        match self {
+            SequencePresence::Empty { .. } => true,
+            SequencePresence::Items { flow, .. } => *flow,
+            SequencePresence::Absent {} | SequencePresence::UnsupportedShape { .. } => false,
+        }
+    }
+} // End of impl SequencePresence
+
 /// How a [`ValueView::project`] call ended, beyond the value itself.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ValueProjection {

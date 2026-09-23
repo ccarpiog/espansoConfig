@@ -75,7 +75,15 @@ const DRAFT_ERROR_NAMES = [
   'AmbiguousNestedKey',
   'SubstitutionSourceAbsent',
   'SubstitutionTargetPresent',
-  'SubstitutionConflictsWithField'
+  'SubstitutionConflictsWithField',
+  'SequenceIntentsConflict',
+  'SequenceFieldAbsent',
+  'SequenceFieldPresent',
+  'SequenceHasAnUnsupportedShape',
+  'SequenceIsAFlowList',
+  'SequenceWouldBeEmpty',
+  'SwitchWouldDiscardItems',
+  'NoSequenceInsertionAnchor'
 ] as const satisfies readonly DraftErrorName[];
 
 /**
@@ -123,7 +131,15 @@ const DRAFT_ERRORS: readonly DraftError[] = [
   { AmbiguousNestedKey: { edit: 0 } },
   { SubstitutionSourceAbsent: { field: 'trigger' } },
   { SubstitutionTargetPresent: { field: 'markdown' } },
-  { SubstitutionConflictsWithField: { field: 'regex' } }
+  { SubstitutionConflictsWithField: { field: 'regex' } },
+  { SequenceIntentsConflict: { field: 'triggers' } },
+  { SequenceFieldAbsent: { field: 'search_terms' } },
+  { SequenceFieldPresent: { field: 'triggers' } },
+  { SequenceHasAnUnsupportedShape: { field: 'search_terms', found: 'Scalar' } },
+  { SequenceIsAFlowList: { field: 'triggers' } },
+  { SequenceWouldBeEmpty: { field: 'search_terms' } },
+  { SwitchWouldDiscardItems: { field: 'triggers', items: 3 } },
+  { NoSequenceInsertionAnchor: { field: 'search_terms' } }
 ];
 
 // `never` exactly when the table above names every member of the union, and the
@@ -152,8 +168,8 @@ describe('the draft refusal samples', () => {
     expect(DRAFT_ERRORS.map(nameOf)).toEqual([...DRAFT_ERROR_NAMES]);
   });
 
-  it('hold the thirty-five variants Phase 3-1 measured', () => {
-    expect(DRAFT_ERROR_NAMES.length).toBe(35);
+  it('hold the forty-three variants Phase 3-2 measured', () => {
+    expect(DRAFT_ERROR_NAMES.length).toBe(43);
   });
 }); // End of the "draft refusal samples" suite
 

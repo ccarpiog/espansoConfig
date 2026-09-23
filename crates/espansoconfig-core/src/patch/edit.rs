@@ -234,9 +234,10 @@
 //! `tests/patch_item.rs` compares the two outputs so the claim is checked rather
 //! than asserted.
 //!
-//! **[`InsertItem`] is the one narrow exception to "no generic primitive may
+//! **[`InsertItem`] was the first narrow exception to "no generic primitive may
 //! synthesize a collection"**, stated as an exception rather than by weakening the
-//! rule: exactly one new flat block-mapping sequence item with scalar fields, at a
+//! rule (the second, since Phase 3-2, is a [`FieldInsertGroup`] or
+//! [`ShapeSwitch`] entry holding a flat [`EntryValue::ScalarList`]): exactly one new flat block-mapping sequence item with scalar fields, at a
 //! sequence-item boundary, every value spelled by [`crate::emit::choose_scalar`].
 //! It also promotes a bare `matches:` — an implicit null, and a zero-width scalar
 //! to the substrate (`PROGRESS.md`, R7) — into its first item, without which that
@@ -510,6 +511,16 @@ impl FieldRemoval {
 /// A group is never empty: [`FieldInsertGroup::new`] and
 /// [`FieldInsertGroup::after`] return `None` for an empty entry list, so the
 /// type has no spelling of "insert nothing".
+///
+/// # A list-valued entry (Phase 3-2)
+///
+/// An entry may also be a **list of scalars** ([`EntryValue::ScalarList`]): the
+/// typed insertion of a `triggers` or `search_terms` field. A non-empty list is
+/// written in **block style** — the key alone on its line, then one `- item`
+/// line per item at a column read off the document ([`indentation_step`]) — and
+/// an empty one as `key: []`, the one spelling an empty sequence has (ruling 5
+/// of `docs/decisions/3-split-notes.md`). Every item is a scalar rendered by
+/// [`crate::emit::choose_scalar`]; there is no spelling of a nested collection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldInsertGroup {
     /// The mapping to add the entries to.
@@ -517,32 +528,39 @@ pub struct FieldInsertGroup {
     /// The existing entry to write the group after, by decoded key. `None`
     /// means the mapping's last entry.
     after: Option<String>,
-    /// The new entries, as decoded `(key, value)` strings, in the order they are
+    /// The new entries, as decoded keys and typed values, in the order they are
     /// written.
-    entries: Vec<(String, String)>,
+    entries: Vec<(String, EntryValue)>,
 }
 
 impl FieldInsertGroup {
-    /// Builds a group appended after the mapping's last entry, or `None` when
-    /// `entries` is empty.
+    /// Builds a group of scalar entries appended after the mapping's last
+    /// entry, or `None` when `entries` is empty.
     pub fn new(mapping: DocumentPath, entries: Vec<(String, String)>) -> Option<FieldInsertGroup> {
-        (!entries.is_empty()).then_some(FieldInsertGroup {
-            mapping,
-            after: None,
-            entries,
-        })
+        FieldInsertGroup::typed(mapping, None, scalars(entries))
     }
 
-    /// Builds a group written after the entry whose decoded key is `sibling`,
-    /// or `None` when `entries` is empty.
+    /// Builds a group of scalar entries written after the entry whose decoded
+    /// key is `sibling`, or `None` when `entries` is empty.
     pub fn after(
         mapping: DocumentPath,
         sibling: impl Into<String>,
         entries: Vec<(String, String)>,
     ) -> Option<FieldInsertGroup> {
+        FieldInsertGroup::typed(mapping, Some(sibling.into()), scalars(entries))
+    }
+
+    /// Builds a group whose entries may be scalars or lists of scalars, written
+    /// after `sibling` (or after the mapping's last entry when it is `None`), or
+    /// `None` when `entries` is empty.
+    pub fn typed(
+        mapping: DocumentPath,
+        sibling: Option<String>,
+        entries: Vec<(String, EntryValue)>,
+    ) -> Option<FieldInsertGroup> {
         (!entries.is_empty()).then_some(FieldInsertGroup {
             mapping,
-            after: Some(sibling.into()),
+            after: sibling,
             entries,
         })
     }
@@ -558,10 +576,204 @@ impl FieldInsertGroup {
     }
 
     /// The new entries, in the order they are written. Never empty.
-    pub fn entries(&self) -> &[(String, String)] {
+    pub fn entries(&self) -> &[(String, EntryValue)] {
         &self.entries
     }
 } // End of impl FieldInsertGroup
+
+/// Wraps every value of a list of scalar entries as an [`EntryValue::Scalar`].
+fn scalars(entries: Vec<(String, String)>) -> Vec<(String, EntryValue)> {
+    entries
+        .into_iter()
+        .map(|(key, value)| (key, EntryValue::Scalar(value)))
+        .collect()
+}
+
+/// The value a new or re-shaped mapping entry is given (Phase 3-2).
+///
+/// **Closed at two shapes**, and the second is as far as it goes: a scalar, or a
+/// flat list of scalars. Nothing here can spell a mapping, a nested list or a
+/// caller-written YAML fragment, so a request that needs one cannot be made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryValue {
+    /// One scalar, as a decoded string.
+    Scalar(String),
+    /// A list of scalars, each a decoded string, in order. Empty is `[]`.
+    ScalarList(Vec<String>),
+}
+
+impl EntryValue {
+    /// The scalar this value is, or `None` for a list.
+    pub fn as_scalar(&self) -> Option<&str> {
+        match self {
+            EntryValue::Scalar(value) => Some(value),
+            EntryValue::ScalarList(_) => None,
+        }
+    }
+
+    /// The items this value holds, or `None` for a scalar.
+    pub fn as_list(&self) -> Option<&[String]> {
+        match self {
+            EntryValue::Scalar(_) => None,
+            EntryValue::ScalarList(items) => Some(items),
+        }
+    }
+} // End of impl EntryValue
+
+/// One requested change: add one or more **scalar items** to an existing block
+/// sequence, in a stated order, at one place (Phase 3-2).
+///
+/// # Why this is not [`InsertItem`]
+///
+/// [`InsertItem`]'s licence is exactly one flat **mapping** item. A `triggers`
+/// or `search_terms` item is a scalar, so it needs its own, narrower licence:
+/// **one or more scalar items, each spelled by [`crate::emit::choose_scalar`],
+/// at one sequence-item boundary of an existing block sequence.** No item can
+/// be a collection, because an item is a `String`.
+///
+/// Several items at one place are **one** edit for [`FieldInsertGroup`]'s
+/// reason: two zero-width replacements at one offset state no order, and
+/// [`apply_edits`] refuses them. The group states it.
+///
+/// # Where the items go, and where their column comes from
+///
+/// Exactly where [`InsertItem`] would put an item with the same
+/// [`ItemPlacement`] — the same derivation, shared as code
+/// ([`block_sequence_landing`]) — so an item's leading comment block stays with
+/// that item and the new items never adopt it. The `-` column is the column the
+/// sequence's own items use ([`sequence_marker_column`]), never a default.
+///
+/// # What is refused
+///
+/// A flow sequence (`[a, b]`, and `[]`) is
+/// [`EditError::FlowSequenceInsertionUnsupported`]: converting presentation is a
+/// change nobody asked for, and a flow list's own insertion is a later step's.
+/// A target that is not a sequence at all — an absent value written `key:` among
+/// them — is [`EditError::NotASequence`]: a list *field* is added with
+/// [`FieldInsertGroup`] and [`EntryValue::ScalarList`] instead.
+///
+/// # Its verified expectation
+///
+/// The sequence's own fold: every original item not removed keeps its subtree
+/// digest at the position the batch intends, and each new position holds a
+/// **scalar** decoding — twice, by the substrate and by [`crate::emit::decode`] —
+/// to the requested value ([`VerificationFailure::ItemNotInserted`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScalarItemInsert {
+    /// The block sequence the items join.
+    sequence: DocumentPath,
+    /// Where in that sequence they are written.
+    at: ItemPlacement,
+    /// The new items, as decoded strings, in the order they are written.
+    values: Vec<String>,
+}
+
+impl ScalarItemInsert {
+    /// Builds an insertion of `values` at `placement`, or `None` when `values`
+    /// is empty — the type has no spelling of "insert nothing".
+    pub fn new(
+        sequence: DocumentPath,
+        placement: ItemPlacement,
+        values: Vec<String>,
+    ) -> Option<ScalarItemInsert> {
+        (!values.is_empty()).then_some(ScalarItemInsert {
+            sequence,
+            at: placement,
+            values,
+        })
+    }
+
+    /// The sequence the items join.
+    pub fn sequence(&self) -> &DocumentPath {
+        &self.sequence
+    }
+
+    /// Where in that sequence they are written.
+    pub fn placement(&self) -> ItemPlacement {
+        self.at
+    }
+
+    /// The new items, in the order they are written. Never empty.
+    pub fn values(&self) -> &[String] {
+        &self.values
+    }
+} // End of impl ScalarItemInsert
+
+/// One requested change: switch one mapping entry between a **scalar** and a
+/// **block list of scalars**, renaming its key in the same step (Phase 3-2).
+///
+/// The trigger switch `trigger`↔`triggers` (and `regex`↔`triggers`) is its one
+/// caller. It is a [`KeySubstitution`] whose value changes shape as well as
+/// key, and it is a separate edit because a substitution is scalar-to-scalar by
+/// contract.
+///
+/// # What it writes
+///
+/// - **scalar → list.** `key: value` becomes `newkey:` and the items follow on
+///   their own lines, in block style, at a column read off the document
+///   ([`indentation_step`]). The key token, the colon, the gap and the old value
+///   are the one replacement; anything after the value on its line — an inline
+///   comment — stays on the key's line, byte for byte. An empty list is written
+///   `newkey: []` in place.
+/// - **list → scalar.** `key:` followed by block items becomes `newkey: value`;
+///   whatever followed the colon on the key's line stays after the new value.
+///   The items' own lines are deleted as a [`RemoveItem`] deletes one — the
+///   ownership hull widened to whole lines, with the **file's** comments and the
+///   blank runs beside them kept — so each item's owned comments go with it and
+///   a comment the file owns stays.
+///
+/// # What is refused
+///
+/// [`EditError::ShapeSwitchUnsupported`] for every shape this edit does not
+/// reshape: a value that is neither a single-line non-block scalar nor a
+/// non-empty **block** sequence of scalars; a switch that asks for the shape the
+/// value already has; a new scalar that spans lines or would be written as a
+/// block; a key that is not followed directly by its colon; and, for scalar →
+/// list, a gap between colon and value holding anything but spaces (a tag, an
+/// anchor). Everything [`KeySubstitution`] refuses about the key and the mapping
+/// is refused the same way.
+///
+/// # Its verified expectation
+///
+/// The mapping fold, as for a substitution: the old key gone, the new key at the
+/// same position holding exactly the requested value — for a list, a sequence
+/// of exactly those scalars in order, block style (flow for `[]`) — and every
+/// other entry unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShapeSwitch {
+    /// The value node of the entry being switched, by its **original** key.
+    field: DocumentPath,
+    /// The new key, as a decoded string.
+    key: String,
+    /// The new value, whose shape is the other of the two.
+    value: EntryValue,
+}
+
+impl ShapeSwitch {
+    /// Builds a switch of the entry `field` names to `key: value`.
+    pub fn new(field: DocumentPath, key: impl Into<String>, value: EntryValue) -> ShapeSwitch {
+        ShapeSwitch {
+            field,
+            key: key.into(),
+            value,
+        }
+    }
+
+    /// The value node of the entry being switched, by its original key.
+    pub fn field(&self) -> &DocumentPath {
+        &self.field
+    }
+
+    /// The new key.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// The new value.
+    pub fn value(&self) -> &EntryValue {
+        &self.value
+    }
+} // End of impl ShapeSwitch
 
 /// One requested change: **rename** one mapping entry's key in place, keeping
 /// its value's bytes — or replacing that value with a new scalar.
@@ -744,6 +956,9 @@ impl ItemMove {
 /// > No generic primitive may synthesize a collection. `InsertItem` may
 /// > synthesize exactly one new flat block-mapping sequence item with scalar
 /// > fields, at a sequence-item boundary.
+///
+/// (Phase 3-2 states a second exception the same way: an
+/// [`EntryValue::ScalarList`] is a flat list of scalars, and nothing deeper.)
 ///
 /// That sentence is the whole licence, and every word of it is load-bearing.
 /// **One** item, so a caller cannot ask for a list. A **flat block mapping**, so
@@ -1121,6 +1336,10 @@ pub enum DocumentEdit {
     RemoveItem(RemoveItem),
     /// Insert a byte-exact copy of one item immediately after its source.
     DuplicateItem(DuplicateItem),
+    /// Add one or more scalar items to a block sequence, at one place.
+    InsertScalarItems(ScalarItemInsert),
+    /// Switch one entry between a scalar and a block list, renaming its key.
+    SwitchShape(ShapeSwitch),
 }
 
 impl From<ScalarEdit> for DocumentEdit {
@@ -1174,6 +1393,18 @@ impl From<RemoveItem> for DocumentEdit {
 impl From<DuplicateItem> for DocumentEdit {
     fn from(edit: DuplicateItem) -> DocumentEdit {
         DocumentEdit::DuplicateItem(edit)
+    }
+}
+
+impl From<ScalarItemInsert> for DocumentEdit {
+    fn from(edit: ScalarItemInsert) -> DocumentEdit {
+        DocumentEdit::InsertScalarItems(edit)
+    }
+}
+
+impl From<ShapeSwitch> for DocumentEdit {
+    fn from(edit: ShapeSwitch) -> DocumentEdit {
+        DocumentEdit::SwitchShape(edit)
     }
 }
 
@@ -2074,6 +2305,24 @@ pub enum EditError {
         /// The key node.
         node: NodeId,
     },
+    /// A [`ShapeSwitch`] named an entry, or asked for a value, whose shape it
+    /// does not reshape (Phase 3-2).
+    ///
+    /// One refusal for every shape outside the switch's narrow licence, because
+    /// each is the same answer — *this entry cannot be switched in place* — and
+    /// none has a smaller edit that would do instead: a value that is neither a
+    /// single-line non-block scalar nor a non-empty **block** sequence of scalars
+    /// (a flow list, a block scalar, an empty value, a mapping, an alias, a list
+    /// holding a collection); a switch asking for the shape the value already
+    /// has; a new scalar that spans lines or would be written as a block; a key
+    /// not followed directly by its colon; and a gap between the colon and a
+    /// scalar value holding anything but spaces. `node` is the value node.
+    ShapeSwitchUnsupported {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The value node of the entry.
+        node: NodeId,
+    },
     /// The candidate document failed verification and was discarded.
     Verification(VerificationFailure),
 }
@@ -2682,6 +2931,22 @@ pub enum VerificationFailure {
         /// one, zero-based in source order.
         entry: usize,
     },
+    /// A list position the batch meant to hold a new scalar item — or a list
+    /// value the batch meant to write — does not hold exactly that (Phase 3-2).
+    ///
+    /// Reported for a [`ScalarItemInsert`]'s item that reparsed as something
+    /// other than a scalar decoding to the requested value, and for an
+    /// [`EntryValue::ScalarList`] written by a [`FieldInsertGroup`] or a
+    /// [`ShapeSwitch`] whose sequence does not hold exactly the requested items,
+    /// in order, in the intended style. Identified by position, never by text.
+    ItemNotInserted {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The position in the candidate sequence that does not hold what was
+        /// intended, zero-based. For a list value whose item count is wrong it
+        /// is the shorter of the two counts.
+        item: usize,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -2912,6 +3177,11 @@ impl fmt::Display for EditError {
                 "edit {edit}: the key at node {} is not a single-line scalar this edit can re-spell",
                 node.get()
             ),
+            EditError::ShapeSwitchUnsupported { edit, node } => write!(
+                formatter,
+                "edit {edit}: the entry whose value is node {} cannot be switched in place",
+                node.get()
+            ),
             EditError::Verification(failure) => write!(formatter, "{failure}"),
         }
     } // End of function fmt() for EditError
@@ -3089,6 +3359,10 @@ impl fmt::Display for VerificationFailure {
                 formatter,
                 "edit {edit}: mapping position {entry} does not hold the key the batch intended \
                  there"
+            ),
+            VerificationFailure::ItemNotInserted { edit, item } => write!(
+                formatter,
+                "edit {edit}: list position {item} does not hold the item the batch intended there"
             ),
         }
     } // End of function fmt() for VerificationFailure
@@ -3332,6 +3606,12 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
             DocumentEdit::RemoveItem(removal) => {
                 plan_item_removal(source, &index, &trivia, position, removal)?
             }
+            DocumentEdit::InsertScalarItems(insert) => {
+                plan_scalar_item_insertion(source, &index, &trivia, position, insert)?
+            }
+            DocumentEdit::SwitchShape(switch) => {
+                plan_shape_switch(source, &index, &trivia, position, switch)?
+            }
             DocumentEdit::MoveItem(relocation) => {
                 // A move is verified against the original document plus one
                 // permutation, and nothing else in the batch is modelled by that
@@ -3414,8 +3694,28 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
     // before the field claims are folded, because folding consumes them.
     let mut touched = rewritten.clone();
     touched.extend(expectations.iter().map(|claim| claim.mapping_id));
-    let expectations = fold_expectations(&index, expectations, &rewritten)?;
-    let sequences = fold_item_expectations(&index, sequences, &touched)?;
+    // The nodes a **kept mapping entry** may legitimately differ at: every node a
+    // scalar edit rewrites, and every sequence an item edit in the same batch
+    // changes (a promotion's zero-width scalar included). Without the second, a
+    // list append beside a new sibling field made the mapping's sibling check
+    // digest the list and refuse a disjoint batch (the Phase 3-2 review's
+    // finding). Exempting the list here drops only that digest: its key and
+    // position are still compared, and the list's own item expectation, folded
+    // below from `sequences`, still checks every kept and new item.
+    let mut changed = rewritten.clone();
+    changed.extend(sequences.iter().map(|claim| claim.sequence_id));
+    let mut expectations = fold_expectations(&index, expectations, &changed)?;
+    let mut sequences = fold_item_expectations(&index, sequences, &touched)?;
+    // Every path an expectation is re-resolved by is an **original** path. An
+    // item insertion or removal in the same batch shifts the positions below
+    // it, so each path is carried through the batch's own position map before
+    // the candidate is asked for it (Phase 3-2).
+    for expectation in &mut expectations {
+        expectation.mapping = candidate_path(&index, edits, &expectation.mapping);
+    }
+    for expectation in &mut sequences {
+        expectation.sequence = candidate_path(&index, edits, &expectation.sequence);
+    }
 
     let candidate = splice(source, &replacements);
     verify(
@@ -3780,12 +4080,12 @@ struct PendingField {
     removed: Option<NodeId>,
     /// The keys and values an insertion must produce, in the order it writes
     /// them: one for a [`FieldInsert`], several for a [`FieldInsertGroup`].
-    inserted: Vec<(String, String)>,
+    inserted: Vec<(String, EntryValue)>,
     /// The index, in `entries`, of the entry an insertion is anchored after.
     anchor: Option<usize>,
-    /// A substitution: the value node of the renamed entry, its new key, and the
-    /// value that entry must decode to afterwards.
-    renamed: Option<(NodeId, String, String)>,
+    /// A substitution or a shape switch: the value node of the renamed entry,
+    /// its new key, and the value that entry must hold afterwards.
+    renamed: Option<(NodeId, String, EntryValue)>,
 }
 
 /// What [`verify`] must find in the candidate for one changed mapping.
@@ -3798,16 +4098,17 @@ struct FieldExpectation {
     edit: usize,
     /// The mapping. Re-resolved against the candidate by its own path.
     mapping: DocumentPath,
-    /// Every key an insertion must find, with the value it must decode to.
-    inserted: Vec<(String, String)>,
+    /// Every key an insertion must find, with the value it must hold.
+    inserted: Vec<(String, EntryValue)>,
     /// Every key a removal must not find.
     removed: Vec<String>,
     /// Every entry no structural edit named, as (decoded key, subtree digest),
     /// in source order.
     ///
     /// The digest is `None` for an entry a **scalar** edit in the same batch
-    /// rewrites: its value legitimately changes, and that edit's own
-    /// verification is what checks it. The key and its position are still
+    /// rewrites, or whose value holds a sequence an **item** edit in the same
+    /// batch changes (Phase 3-2): its value legitimately changes, and that
+    /// edit's own verification is what checks it. The key and its position are still
     /// compared, so a batch can never reorder or lose such an entry unnoticed.
     siblings: Vec<(String, Option<String>)>,
     /// How many entries the mapping must hold afterwards.
@@ -4038,7 +4339,10 @@ fn plan_insertion(
     position: usize,
     edit: &FieldInsert,
 ) -> Result<PlannedEdit, EditError> {
-    let entries = [(edit.key().to_owned(), edit.value().to_owned())];
+    let entries = [(
+        edit.key().to_owned(),
+        EntryValue::Scalar(edit.value().to_owned()),
+    )];
     let group = InsertionRequest {
         mapping: edit.mapping(),
         sibling: edit.sibling(),
@@ -4056,7 +4360,7 @@ struct InsertionRequest<'edit> {
     /// The anchor's decoded key, or `None` for the mapping's last entry.
     sibling: Option<&'edit str>,
     /// The entries, in the order they are written. Never empty.
-    entries: &'edit [(String, String)],
+    entries: &'edit [(String, EntryValue)],
 }
 
 /// Plans an ordered group of new entries after one anchor, or refuses it.
@@ -4127,32 +4431,45 @@ fn plan_insertion_group(
     // mapping outright — but the context is still built through the same walk
     // D2k uses, so the two answers cannot drift apart.
     let context = ScalarContext::block(indent, line_ending);
-    let mut text = String::new();
+    // A list entry's items sit one indentation step further in than its key,
+    // and the step is the document's own ([`indentation_step`]); it is only
+    // asked for when the group holds a list with items to place.
+    let holds_items = request
+        .entries
+        .iter()
+        .any(|(_, value)| value.as_list().is_some_and(|items| !items.is_empty()));
+    let marker = if holds_items {
+        indent + indentation_step(source, index, trivia, mapping.id, mapping.id)
+    } else {
+        indent
+    };
+    let pad = " ".repeat(indent);
+    let mut lines: Vec<String> = Vec::new();
     for (key, value) in request.entries {
-        let key = choose_scalar(key, context.as_key());
-        let value = choose_scalar(value, context);
-        let mut entry = format!("{}: {}", key.render(), value.render());
-        if at_end_of_file {
-            // Nothing terminates the previous line, so the break goes in front
-            // and the file keeps not ending in one. A previous entry of the
-            // group that already ends in a break (a literal block's own trailing
-            // break) needs no second one.
-            if !text.ends_with(['\n', '\r']) {
-                text.push_str(line_ending.as_str());
+        let key = choose_scalar(key, context.as_key()).render();
+        match value {
+            EntryValue::Scalar(value) => {
+                lines.push(format!(
+                    "{pad}{key}: {}",
+                    choose_scalar(value, context).render()
+                ));
             }
-            text.push_str(&" ".repeat(indent));
-            text.push_str(&entry);
-        } else {
-            // A literal block's rendering already ends with the value's own
-            // trailing breaks; only a value that ends without one needs the line
-            // terminated.
-            if !entry.ends_with(['\n', '\r']) {
-                entry.push_str(line_ending.as_str());
+            // The one spelling an empty sequence has (ruling 5).
+            EntryValue::ScalarList(items) if items.is_empty() => {
+                lines.push(format!("{pad}{key}: []"));
             }
-            text.push_str(&" ".repeat(indent));
-            text.push_str(&entry);
+            // A new non-empty list is block style (ruling 5).
+            EntryValue::ScalarList(items) => {
+                lines.push(format!("{pad}{key}:"));
+                lines.extend(
+                    items
+                        .iter()
+                        .map(|item| render_scalar_item(item, marker, line_ending)),
+                );
+            }
         }
     } // End of the loop that renders every entry of the group, in order
+    let text = join_rendered_lines(&lines, line_ending, at_end_of_file);
 
     let expectation = PendingField {
         edit: position,
@@ -4233,29 +4550,7 @@ fn plan_substitution(
         });
     }
 
-    let key_node = index.node(key).ok_or(EditError::MalformedSpan {
-        edit: position,
-        at: ByteSpan::default(),
-    })?;
-    let key_scalar = key_node
-        .scalar
-        .as_ref()
-        .filter(|scalar| !scalar.presentation.style.is_block())
-        .filter(|_| !key_node.is_zero_width())
-        .filter(|_| {
-            !key_node
-                .span
-                .slice(source)
-                .unwrap_or("\n")
-                .contains(['\n', '\r'])
-        })
-        .filter(|scalar| {
-            decode(source, &scalar.presentation).ok().as_deref() == Some(scalar.value.as_str())
-        })
-        .ok_or(EditError::KeyNotSubstitutable {
-            edit: position,
-            node: key,
-        })?;
+    let (key_node, key_scalar) = substitutable_key(source, index, position, key)?;
     let value_node = index.node(resolved.value).ok_or(EditError::MalformedSpan {
         edit: position,
         at: ByteSpan::default(),
@@ -4306,7 +4601,11 @@ fn plan_substitution(
         removed: None,
         inserted: Vec::new(),
         anchor: None,
-        renamed: Some((resolved.value, edit.key().to_owned(), decoded)),
+        renamed: Some((
+            resolved.value,
+            edit.key().to_owned(),
+            EntryValue::Scalar(decoded),
+        )),
     };
     Ok(PlannedEdit {
         replacements,
@@ -4322,6 +4621,268 @@ fn plan_substitution(
         rewritten,
     })
 } // End of function plan_substitution()
+
+/// The key node of an entry whose key token an edit may re-spell, and its
+/// scalar.
+///
+/// The key must be a **single-line, decoded scalar that is not a block scalar
+/// and owns bytes**, because [`KeySubstitution`] and [`ShapeSwitch`] replace
+/// exactly the key's token and nothing around it. Written once for both.
+///
+/// # Errors
+///
+/// [`EditError::KeyNotSubstitutable`], and [`EditError::MalformedSpan`] for a key
+/// the index does not know.
+fn substitutable_key<'index>(
+    source: &str,
+    index: &'index SyntaxIndex,
+    position: usize,
+    key: NodeId,
+) -> Result<(&'index Node, &'index crate::syntax::ScalarNode), EditError> {
+    let key_node = index.node(key).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: ByteSpan::default(),
+    })?;
+    let key_scalar = key_node
+        .scalar
+        .as_ref()
+        .filter(|scalar| !scalar.presentation.style.is_block())
+        .filter(|_| !key_node.is_zero_width())
+        .filter(|_| {
+            !key_node
+                .span
+                .slice(source)
+                .unwrap_or("\n")
+                .contains(['\n', '\r'])
+        })
+        .filter(|scalar| {
+            decode(source, &scalar.presentation).ok().as_deref() == Some(scalar.value.as_str())
+        })
+        .ok_or(EditError::KeyNotSubstitutable {
+            edit: position,
+            node: key,
+        })?;
+    Ok((key_node, key_scalar))
+} // End of function substitutable_key()
+
+/// Plans a [`ShapeSwitch`], or refuses it.
+///
+/// The order of the checks is the contract, as for [`plan_substitution`]:
+/// address the entry, **ask the gate** through [`editable_mapping`] (which also
+/// refuses a flow mapping), establish that the new key is free and the old key
+/// re-spellable, establish that the value is one of the two shapes this edit
+/// reshapes, and only then render.
+///
+/// # Scalar → list
+///
+/// One replacement from the start of the key token to the end of the old value
+/// writes `newkey:` (or `newkey: []`), so whatever followed the value on its
+/// line — an inline comment — stays where it is. The items are one zero-width
+/// replacement just past that line's break, at the key's column plus the
+/// document's own indentation step ([`indentation_step`]).
+///
+/// # List → scalar
+///
+/// One replacement over the key token **and its colon** writes
+/// `newkey: value`, so whatever followed the colon stays on the line after the
+/// new value. The items' lines go as a [`RemoveItem`]'s do: the hull of the
+/// items' ownership extents through [`removal_envelope`], so each item's own
+/// comments go with it and a comment the file owns stays, and the join the
+/// deletion opens is refused if a block scalar could swallow it.
+fn plan_shape_switch(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    edit: &ShapeSwitch,
+) -> Result<PlannedEdit, EditError> {
+    let resolved = resolve_full(index, edit.field()).map_err(|error| EditError::Unresolvable {
+        edit: position,
+        error,
+    })?;
+    let Some(key) = resolved.key else {
+        return Err(EditError::NotAMapping {
+            edit: position,
+            node: resolved.value,
+            kind: index
+                .node(resolved.value)
+                .map_or(NodeKind::Document, |node| node.kind),
+        });
+    };
+    let mapping_path = parent_path(edit.field()).ok_or(EditError::NotAMapping {
+        edit: position,
+        node: resolved.value,
+        kind: NodeKind::Document,
+    })?;
+    let (mapping, entries) = editable_mapping(index, trivia, position, &mapping_path)?;
+    if entries
+        .iter()
+        .any(|entry| decoded_value(index, entry.key) == Some(edit.key()))
+    {
+        return Err(EditError::KeyAlreadyPresent {
+            edit: position,
+            mapping: mapping.id,
+        });
+    }
+    let (key_node, key_scalar) = substitutable_key(source, index, position, key)?;
+    let value_node = index.node(resolved.value).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: ByteSpan::default(),
+    })?;
+    let unsupported = EditError::ShapeSwitchUnsupported {
+        edit: position,
+        node: value_node.id,
+    };
+
+    let body_offset = index.preamble().body_offset;
+    let column = column_of(source, key_node.span.start, body_offset);
+    let line_ending = line_ending_after(source, key_node.span.end)
+        .or_else(|| line_ending_before(source, key_node.span.start))
+        .unwrap_or(index.preamble().line_ending);
+    let key_text = preserve_scalar(
+        edit.key(),
+        &key_scalar.presentation,
+        ScalarContext::block(column, line_ending).as_key(),
+    )
+    .render();
+
+    let mut replacements = Vec::new();
+    let mut permitted = Vec::new();
+    let mut guards = Vec::new();
+    match (value_node.scalar.as_ref(), edit.value()) {
+        (Some(old), EntryValue::ScalarList(items)) => {
+            let single_line = value_node
+                .span
+                .slice(source)
+                .is_some_and(|text| !text.contains(['\n', '\r']));
+            if old.presentation.style.is_block() || value_node.is_zero_width() || !single_line {
+                return Err(unsupported);
+            }
+            // Only the colon and spaces may sit between key and value: a tag or
+            // an anchor there would be deleted with the value.
+            let gap = source
+                .get(key_node.span.end..value_node.span.start)
+                .ok_or(unsupported.clone())?;
+            let spaces_only = gap.strip_prefix(':').is_some_and(|rest| {
+                rest.chars()
+                    .all(|character| matches!(character, ' ' | '\t'))
+            });
+            if !spaces_only {
+                return Err(unsupported);
+            }
+            let head = ByteSpan::new(key_node.span.start, value_node.span.end);
+            let text = if items.is_empty() {
+                format!("{key_text}: []")
+            } else {
+                format!("{key_text}:")
+            };
+            replacements.push(Replacement { span: head, text });
+            permitted.push(head);
+            if !items.is_empty() {
+                let (point, at_end_of_file) = insertion_point(
+                    source,
+                    entry_extent(index, trivia, key, value_node.id),
+                    position,
+                )?;
+                let ending =
+                    line_ending_before(source, point).ok_or(EditError::NoObservableLineEnding {
+                        edit: position,
+                        at: point,
+                    })?;
+                let marker = column + indentation_step(source, index, trivia, mapping.id, key);
+                let lines: Vec<String> = items
+                    .iter()
+                    .map(|item| render_scalar_item(item, marker, ending))
+                    .collect();
+                replacements.push(Replacement {
+                    span: ByteSpan::new(point, point),
+                    text: join_rendered_lines(&lines, ending, at_end_of_file),
+                });
+                permitted.push(ByteSpan::new(point, point));
+                guards.push(StructuralGuard::Insertion { at: point });
+            }
+        }
+        (None, EntryValue::Scalar(value)) => {
+            let block_list = value_node.kind == NodeKind::Sequence
+                && value_node.collection_style == Some(CollectionStyle::Block)
+                && !is_inside_a_flow_collection(index, value_node)
+                && !value_node.children.is_empty()
+                && value_node.children.iter().all(|child| {
+                    index
+                        .node(*child)
+                        .is_some_and(|item| item.kind == NodeKind::Scalar)
+                });
+            if !block_list || value.contains(['\n', '\r']) {
+                return Err(unsupported);
+            }
+            let plan = choose_scalar(value, ScalarContext::block(column, line_ending));
+            if plan.style().is_block() || source.as_bytes().get(key_node.span.end) != Some(&b':') {
+                return Err(unsupported);
+            }
+            let head = ByteSpan::new(key_node.span.start, key_node.span.end + 1);
+            replacements.push(Replacement {
+                span: head,
+                text: format!("{key_text}: {}", plan.render()),
+            });
+            permitted.push(head);
+
+            let (Some(first), Some(last)) =
+                (value_node.children.first(), value_node.children.last())
+            else {
+                return Err(unsupported);
+            };
+            let hull = ByteSpan::new(
+                trivia.subtree_extent(index, *first).start,
+                trivia.subtree_extent(index, *last).end,
+            );
+            let envelope = removal_envelope(source, index, trivia, position, hull)?;
+            if let Some(block) =
+                block_the_source_close_would_feed(source, index, &envelope, body_offset)
+            {
+                return Err(EditError::RemovalWouldExtendABlockScalar {
+                    edit: position,
+                    block,
+                });
+            }
+            replacements.extend(envelope.runs.iter().map(|run| Replacement {
+                span: *run,
+                text: String::new(),
+            }));
+            permitted.extend(envelope.runs.iter().copied());
+            // The removal's own guard, with the sequence as both halves of the
+            // entry: the runs must touch nothing outside it, cover every one of
+            // its tokens, and lie inside what it owns.
+            guards.push(StructuralGuard::Removal {
+                runs: envelope.runs,
+                entry: (value_node.id, value_node.id),
+                kind: EnvelopeKind::RemovesTheEntry,
+            });
+        }
+        _ => return Err(unsupported),
+    } // End of the match over the two shapes a switch reshapes
+
+    let expectation = PendingField {
+        edit: position,
+        mapping: mapping_path,
+        mapping_id: mapping.id,
+        entries,
+        removed: None,
+        inserted: Vec::new(),
+        anchor: None,
+        renamed: Some((resolved.value, edit.key().to_owned(), edit.value().clone())),
+    };
+    Ok(PlannedEdit {
+        replacements,
+        permitted,
+        note: None,
+        expectation: Some(expectation),
+        items: None,
+        moved: None,
+        duplicated: None,
+        guards,
+        rewritten: None,
+    })
+} // End of function plan_shape_switch()
 
 /// Plans a removal, or refuses it.
 ///
@@ -4577,7 +5138,19 @@ struct PendingItem {
     /// [`ItemPlacement::items_above`] turns the three placements into it, and a
     /// promotion gives 0 without asking, because the sequence it creates has no
     /// items yet.
-    inserted: Option<(usize, Vec<(String, String)>)>,
+    ///
+    /// One or more items: an [`InsertItem`] writes one mapping item, a
+    /// [`ScalarItemInsert`] one or more scalar items in a stated order.
+    inserted: Option<(usize, Vec<NewItem>)>,
+}
+
+/// One item an insertion writes, as `verify` must find it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NewItem {
+    /// A flat mapping holding exactly these decoded key/value pairs, in order.
+    Mapping(Vec<(String, String)>),
+    /// A scalar decoding to exactly this string (Phase 3-2).
+    Scalar(String),
 }
 
 /// Where one position of a changed sequence came from.
@@ -4707,17 +5280,24 @@ pub fn insertion_landings(
     sequence: &DocumentPath,
     items_in_candidate: usize,
 ) -> Vec<(usize, usize)> {
-    let insertions: Vec<(usize, ItemPlacement)> = edits
+    // Every item written into `sequence`, an entry for each item: a
+    // `ScalarItemInsert` of several values contributes several entries with one
+    // placement, in its own order, because that is how the fold replays it. Only
+    // an `InsertItem`'s landing is reported; the others move it.
+    let insertions: Vec<(usize, ItemPlacement, bool)> = edits
         .iter()
         .enumerate()
-        .filter_map(|(position, edit)| match edit {
+        .flat_map(|(position, edit)| match edit {
             DocumentEdit::InsertItem(insert) if insert.sequence() == sequence => {
-                Some((position, insert.placement()))
+                vec![(position, insert.placement(), true)]
             }
-            _ => None,
+            DocumentEdit::InsertScalarItems(insert) if insert.sequence() == sequence => {
+                vec![(position, insert.placement(), false); insert.values().len()]
+            }
+            _ => Vec::new(),
         })
         .collect();
-    if insertions.is_empty() {
+    if !insertions.iter().any(|(_, _, reported)| *reported) {
         return Vec::new();
     }
     let removals: Vec<usize> = edits
@@ -4735,7 +5315,7 @@ pub fn insertion_landings(
     };
     let anchors: Option<Vec<usize>> = insertions
         .iter()
-        .map(|(_, placement)| placement.items_above(before))
+        .map(|(_, placement, _)| placement.items_above(before))
         .collect();
     let Some(anchors) = anchors else {
         return Vec::new();
@@ -4744,11 +5324,102 @@ pub fn insertion_landings(
         .into_iter()
         .enumerate()
         .filter_map(|(landed, origin)| match origin {
-            SlotOrigin::Inserted(which) => Some((insertions[which].0, landed)),
+            SlotOrigin::Inserted(which) => {
+                let (position, _, reported) = insertions[which];
+                reported.then_some((position, landed))
+            }
             SlotOrigin::Kept(_) => None,
         })
         .collect()
 } // End of function insertion_landings()
+
+/// Where each **original** item of `sequence` ends up once `edits` is applied
+/// (Phase 3-2).
+///
+/// An entry for each original item, by its original index: `Some(i)` is the index
+/// it holds in the candidate, and `None` means the batch removes it. `items` is
+/// the sequence's item count **in the original document**.
+///
+/// It is the same replay [`fold_item_expectations`] turns into what `verify`
+/// checks — every kept item's subtree digest at exactly this position — so the
+/// map a caller reads and the property the engine enforces are one arithmetic.
+/// The insertions it reads are [`InsertItem`]s and [`ScalarItemInsert`]s (one
+/// position per value), and the removals are [`RemoveItem`]s; a move and a
+/// duplicate are each alone in their batch and are not modelled here.
+///
+/// `None` overall when an insertion's placement names no count of items above it
+/// ([`ItemPlacement::items_above`] answering `None`). Like
+/// [`insertion_landings`] it is pure arithmetic over the request and never reads
+/// a document, so an index the sequence does not have gets an answer rather
+/// than a refusal.
+pub fn item_positions(
+    edits: &[DocumentEdit],
+    sequence: &DocumentPath,
+    items: usize,
+) -> Option<Vec<Option<usize>>> {
+    let mut anchors: Vec<usize> = Vec::new();
+    let mut removals: Vec<usize> = Vec::new();
+    for edit in edits {
+        match edit {
+            DocumentEdit::InsertItem(insert) if insert.sequence() == sequence => {
+                anchors.push(insert.placement().items_above(items)?);
+            }
+            DocumentEdit::InsertScalarItems(insert) if insert.sequence() == sequence => {
+                let above = insert.placement().items_above(items)?;
+                anchors.extend(std::iter::repeat_n(above, insert.values().len()));
+            }
+            DocumentEdit::RemoveItem(removal) => {
+                removals.extend(index_within(removal.item(), sequence));
+            }
+            _ => {}
+        }
+    } // End of the loop over the batch's edits
+    let mut positions = vec![None; items];
+    for (landed, origin) in replay_item_positions(items, &anchors, &removals)
+        .into_iter()
+        .enumerate()
+    {
+        if let SlotOrigin::Kept(at) = origin {
+            positions[at] = Some(landed);
+        }
+    } // End of the loop over the replayed positions
+    Some(positions)
+} // End of function item_positions()
+
+/// The path that names, in the candidate, what `path` names in the original.
+///
+/// Every index segment whose sequence the batch inserts into or removes from is
+/// carried through [`item_positions`] — the same replay the fold enforces — so a
+/// scalar edit of item 1 in a batch that also removes item 0 is looked for at
+/// index 0 of the candidate, where it now is. A segment whose item the batch
+/// removes, or whose sequence the original does not resolve, is left as it
+/// was: the lookup that follows then fails, and a failure there is a refusal,
+/// never a guess.
+fn candidate_path(
+    original: &SyntaxIndex,
+    edits: &[DocumentEdit],
+    path: &DocumentPath,
+) -> DocumentPath {
+    let segments = path.segments();
+    let mut carried = Vec::with_capacity(segments.len());
+    for (at, segment) in segments.iter().enumerate() {
+        if let PathSegment::Index(index) = segment {
+            let sequence = DocumentPath::new(path.document_index(), segments[..at].to_vec());
+            let landed = resolve(original, &sequence)
+                .ok()
+                .and_then(|id| original.node(id))
+                .filter(|node| node.kind == NodeKind::Sequence)
+                .and_then(|node| item_positions(edits, &sequence, node.children.len()))
+                .and_then(|positions| positions.get(*index).copied().flatten());
+            if let Some(landed) = landed {
+                carried.push(PathSegment::Index(landed));
+                continue;
+            }
+        }
+        carried.push(segment.clone());
+    } // End of the loop over the path's segments
+    DocumentPath::new(path.document_index(), carried)
+} // End of function candidate_path()
 
 /// The index `item` holds in `sequence`, when it is a direct item of it.
 ///
@@ -4773,9 +5444,8 @@ enum ItemSlot {
     /// rewrites something inside it, exactly as [`FieldExpectation::siblings`]
     /// records a sibling a scalar edit touches.
     Kept(Option<String>),
-    /// The item an insertion writes: a flat mapping holding exactly these decoded
-    /// key/value pairs, in this order.
-    Inserted(Vec<(String, String)>),
+    /// The item an insertion writes.
+    Inserted(NewItem),
 }
 
 /// What [`verify`] must find in the candidate for one changed sequence.
@@ -4855,25 +5525,22 @@ fn fold_item_expectations(
         // `insertion_landings` so that the expectation `verify` checks and the
         // address the save transaction reports cannot disagree about where the
         // splice puts things.
-        let inserting: Vec<&PendingItem> = claims
+        // Every new item, flattened in claim order and, within one claim, in the
+        // order the claim writes them: several scalar items of one
+        // `ScalarItemInsert` share one `before` count, and the replay keeps
+        // insertions with equal counts in the order they are handed in.
+        let inserting: Vec<(usize, &NewItem)> = claims
             .iter()
-            .copied()
-            .filter(|claim| claim.inserted.is_some())
+            .filter_map(|claim| claim.inserted.as_ref())
+            .flat_map(|(before, new)| new.iter().map(move |item| (*before, item)))
             .collect();
-        let anchors: Vec<usize> = inserting
-            .iter()
-            .filter_map(|claim| claim.inserted.as_ref().map(|(before, _)| *before))
-            .collect();
+        let anchors: Vec<usize> = inserting.iter().map(|(before, _)| *before).collect();
         let removals: Vec<usize> = claims.iter().filter_map(|claim| claim.removed).collect();
         let mut slots = Vec::new();
         for origin in replay_item_positions(items.len(), &anchors, &removals) {
             match origin {
                 SlotOrigin::Inserted(which) => {
-                    let (_, fields) = inserting[which]
-                        .inserted
-                        .as_ref()
-                        .expect("`inserting` holds only claims that insert");
-                    slots.push(ItemSlot::Inserted(fields.clone()));
+                    slots.push(ItemSlot::Inserted(inserting[which].1.clone()));
                 }
                 SlotOrigin::Kept(at) => {
                     let item = items[at];
@@ -5836,66 +6503,13 @@ fn plan_item_insertion(
     let body_offset = index.preamble().body_offset;
     let (marker, point, at_end_of_file, items) = match target.kind {
         NodeKind::Sequence => {
-            if target.collection_style == Some(CollectionStyle::Flow)
-                || is_inside_a_flow_collection(index, target)
-            {
-                return Err(EditError::FlowSequenceInsertionUnsupported {
-                    edit: position,
-                    sequence: target.id,
-                });
-            }
-            let marker = sequence_marker_column(source, index, trivia, position, target)?;
-            let no_items = EditError::NotASequence {
-                edit: position,
-                node: target.id,
-                kind: target.kind,
-            };
-            let anchor = match edit.placement() {
-                ItemPlacement::Front => *target.children.first().ok_or(no_items)?,
-                ItemPlacement::End => *target.children.last().ok_or(no_items)?,
-                ItemPlacement::After(at) => *target.children.get(at).ok_or({
-                    EditError::NoSuchDestinationItem {
-                        edit: position,
-                        sequence: target.id,
-                        items: target.children.len(),
-                    }
-                })?,
-            };
-            let extent = trivia.subtree_extent(index, anchor);
-            // The front lands at the start of the first item's own **hull**, the
-            // offset `plan_move` derives for its own front destination and by the
-            // same call — so a leading comment block belonging to that item stays
-            // above the arrival rather than being adopted by it. A hull start is a
-            // line start by construction, so it is never the unterminated end of
-            // the document.
-            let (point, at_end_of_file) = match edit.placement() {
-                ItemPlacement::Front => {
-                    (removal_span(source, index, position, extent)?.start, false)
-                }
-                ItemPlacement::After(_) | ItemPlacement::End => {
-                    insertion_point(source, extent, position)?
-                }
-            };
-            // Unreachable, and written as a refusal rather than an `expect`
-            // anyway: the anchor resolution above required `at < children.len()`
-            // for every `After`, so the successor is a `usize` by the time this
-            // line runs. `After(usize::MAX)` is nevertheless
-            // `NoSuchDestinationItem` and not a new variant — it names a
-            // destination item the sequence does not have, which is the sentence
-            // that variant already carries, so no refusal and no dictionary
-            // string is invented for a batch no caller can build.
-            let before = edit.placement().items_above(target.children.len()).ok_or(
-                EditError::NoSuchDestinationItem {
-                    edit: position,
-                    sequence: target.id,
-                    items: target.children.len(),
-                },
-            )?;
+            let landing =
+                block_sequence_landing(source, index, trivia, position, target, edit.placement())?;
             (
-                marker,
-                point,
-                at_end_of_file,
-                (before, target.children.clone()),
+                landing.marker,
+                landing.point,
+                landing.at_end_of_file,
+                (landing.before, target.children.clone()),
             )
         }
         NodeKind::Scalar if target.is_zero_width() => {
@@ -5954,7 +6568,7 @@ fn plan_item_insertion(
             sequence_id: target.id,
             items: items.1,
             removed: None,
-            inserted: Some((items.0, edit.fields().to_vec())),
+            inserted: Some((items.0, vec![NewItem::Mapping(edit.fields().to_vec())])),
         }),
         moved: None,
         duplicated: None,
@@ -5962,6 +6576,191 @@ fn plan_item_insertion(
         rewritten: None,
     })
 } // End of function plan_item_insertion()
+
+/// Where new items land in an existing **block** sequence, for one placement.
+///
+/// **The one derivation, shared by [`plan_item_insertion`] and
+/// [`plan_scalar_item_insertion`]**, so a mapping item and a scalar item asked
+/// for at the same [`ItemPlacement`] land at the same offset and the same
+/// column. It was [`plan_item_insertion`]'s own code until Phase 3-2 needed a
+/// second caller, and it moved rather than being copied.
+///
+/// # Errors
+///
+/// [`EditError::FlowSequenceInsertionUnsupported`] for a bracket-delimited
+/// sequence or one inside a flow collection; [`EditError::NotASequence`] for a
+/// block sequence with no items (which no document can spell);
+/// [`EditError::NoSuchDestinationItem`]; everything
+/// [`sequence_marker_column`], [`removal_span`] and [`insertion_point`] refuse.
+fn block_sequence_landing(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    target: &Node,
+    placement: ItemPlacement,
+) -> Result<SequenceLanding, EditError> {
+    if target.collection_style == Some(CollectionStyle::Flow)
+        || is_inside_a_flow_collection(index, target)
+    {
+        return Err(EditError::FlowSequenceInsertionUnsupported {
+            edit: position,
+            sequence: target.id,
+        });
+    }
+    let marker = sequence_marker_column(source, index, trivia, position, target)?;
+    let no_items = EditError::NotASequence {
+        edit: position,
+        node: target.id,
+        kind: target.kind,
+    };
+    let anchor = match placement {
+        ItemPlacement::Front => *target.children.first().ok_or(no_items)?,
+        ItemPlacement::End => *target.children.last().ok_or(no_items)?,
+        ItemPlacement::After(at) => {
+            *target
+                .children
+                .get(at)
+                .ok_or(EditError::NoSuchDestinationItem {
+                    edit: position,
+                    sequence: target.id,
+                    items: target.children.len(),
+                })?
+        }
+    };
+    let extent = trivia.subtree_extent(index, anchor);
+    // The front lands at the start of the first item's own **hull**, the
+    // offset `plan_move` derives for its own front destination and by the
+    // same call — so a leading comment block belonging to that item stays
+    // above the arrival rather than being adopted by it. A hull start is a
+    // line start by construction, so it is never the unterminated end of
+    // the document.
+    let (point, at_end_of_file) = match placement {
+        ItemPlacement::Front => (removal_span(source, index, position, extent)?.start, false),
+        ItemPlacement::After(_) | ItemPlacement::End => insertion_point(source, extent, position)?,
+    };
+    // Unreachable, and written as a refusal rather than an `expect`
+    // anyway: the anchor resolution above required `at < children.len()`
+    // for every `After`, so the successor is a `usize` by the time this
+    // line runs. `After(usize::MAX)` is nevertheless
+    // `NoSuchDestinationItem` and not a new variant — it names a
+    // destination item the sequence does not have, which is the sentence
+    // that variant already carries, so no refusal and no dictionary
+    // string is invented for a batch no caller can build.
+    let before =
+        placement
+            .items_above(target.children.len())
+            .ok_or(EditError::NoSuchDestinationItem {
+                edit: position,
+                sequence: target.id,
+                items: target.children.len(),
+            })?;
+    Ok(SequenceLanding {
+        marker,
+        point,
+        at_end_of_file,
+        before,
+    })
+} // End of function block_sequence_landing()
+
+/// What [`block_sequence_landing`] derives.
+struct SequenceLanding {
+    /// The column every item's `-` sits at.
+    marker: usize,
+    /// The offset the new items are spliced at.
+    point: usize,
+    /// Whether that offset is the unterminated end of the document.
+    at_end_of_file: bool,
+    /// How many original items sit above the new ones.
+    before: usize,
+}
+
+/// Plans a [`ScalarItemInsert`], or refuses it.
+///
+/// The order of the checks is [`plan_item_insertion`]'s: address the target,
+/// **ask the gate**, establish that the shape is one this edit understands — an
+/// existing block sequence, and nothing else: no promotion, because a list
+/// *field* is added by a [`FieldInsertGroup`] — and only then render. The items
+/// are written as **one** replacement at the landing, in the order given, so no
+/// two replacements of the batch share an offset and nothing but the request
+/// decides the order.
+fn plan_scalar_item_insertion(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    position: usize,
+    edit: &ScalarItemInsert,
+) -> Result<PlannedEdit, EditError> {
+    let resolved =
+        resolve_full(index, edit.sequence()).map_err(|error| EditError::Unresolvable {
+            edit: position,
+            error,
+        })?;
+    let target = index.node(resolved.value).ok_or(EditError::MalformedSpan {
+        edit: position,
+        at: ByteSpan::default(),
+    })?;
+    // The gate, before the shape is examined and before a byte is read.
+    if let Some(hazard) = trivia.disqualifying_hazard(index, resolved.value) {
+        return Err(EditError::Refused {
+            edit: position,
+            node: resolved.value,
+            hazard: hazard.kind,
+            at: hazard.span,
+        });
+    }
+    if target.kind != NodeKind::Sequence {
+        return Err(EditError::NotASequence {
+            edit: position,
+            node: target.id,
+            kind: target.kind,
+        });
+    }
+    let landing =
+        block_sequence_landing(source, index, trivia, position, target, edit.placement())?;
+    // Copied from the document, never chosen, exactly as for `InsertItem`.
+    let line_ending =
+        line_ending_before(source, landing.point).ok_or(EditError::NoObservableLineEnding {
+            edit: position,
+            at: landing.point,
+        })?;
+    let lines: Vec<String> = edit
+        .values()
+        .iter()
+        .map(|value| render_scalar_item(value, landing.marker, line_ending))
+        .collect();
+    let text = join_rendered_lines(&lines, line_ending, landing.at_end_of_file);
+
+    Ok(PlannedEdit {
+        replacements: vec![Replacement {
+            span: ByteSpan::new(landing.point, landing.point),
+            text,
+        }],
+        // The landing, and nothing else — derived from the anchor item's
+        // ownership extent and the line it ends.
+        permitted: vec![ByteSpan::new(landing.point, landing.point)],
+        note: None,
+        expectation: None,
+        items: Some(PendingItem {
+            edit: position,
+            sequence: edit.sequence().clone(),
+            sequence_id: target.id,
+            items: target.children.clone(),
+            removed: None,
+            inserted: Some((
+                landing.before,
+                edit.values()
+                    .iter()
+                    .map(|value| NewItem::Scalar(value.clone()))
+                    .collect(),
+            )),
+        }),
+        moved: None,
+        duplicated: None,
+        guards: vec![StructuralGuard::Insertion { at: landing.point }],
+        rewritten: None,
+    })
+} // End of function plan_scalar_item_insertion()
 
 /// Checks the fields a new item is to be born with.
 ///
@@ -6256,6 +7055,47 @@ fn render_item(
     } // End of the loop that writes one line per requested field
     text
 } // End of function render_item()
+
+/// Renders one new scalar item of a block sequence, without its line ending.
+///
+/// The `- ` marker sits at `marker`, and the value is spelled by
+/// [`crate::emit::choose_scalar`] in a context whose parent indent is the
+/// marker's column, so a multi-line value becomes a `|` block two columns
+/// further in and a value that is not plain-safe is quoted.
+fn render_scalar_item(value: &str, marker: usize, line_ending: LineEnding) -> String {
+    let context = ScalarContext::block(marker, line_ending);
+    format!(
+        "{}- {}",
+        " ".repeat(marker),
+        choose_scalar(value, context).render()
+    )
+} // End of function render_scalar_item()
+
+/// Joins rendered lines into the text one insertion writes.
+///
+/// Every line is terminated with `line_ending` unless it already ends in a break
+/// (a literal block's rendering carries its own). `at_end_of_file` inverts where
+/// the break goes, exactly as for [`render_item`]: in **front** of each line, so
+/// a document with no final newline keeps not having one.
+fn join_rendered_lines(lines: &[String], line_ending: LineEnding, at_end_of_file: bool) -> String {
+    let mut text = String::new();
+    for line in lines {
+        if at_end_of_file {
+            // Nothing terminates the previous line, so the break goes in front.
+            // A previous line that already ends in a break needs no second one.
+            if !text.ends_with(['\n', '\r']) {
+                text.push_str(line_ending.as_str());
+            }
+            text.push_str(line);
+        } else {
+            text.push_str(line);
+            if !line.ends_with(['\n', '\r']) {
+                text.push_str(line_ending.as_str());
+            }
+        }
+    } // End of the loop over the rendered lines
+    text
+} // End of function join_rendered_lines()
 
 /// The block scalar the moved item ends with, when relocating it would change
 /// that block's value.
@@ -7012,7 +7852,7 @@ fn pending_field(
     mapping: &Node,
     entries: &[Entry],
     omit: Option<NodeId>,
-    inserted: Option<(String, String)>,
+    inserted: Option<(String, EntryValue)>,
 ) -> PendingField {
     PendingField {
         edit: position,
@@ -7781,7 +8621,8 @@ fn verify(
         let DocumentEdit::Scalar(edit) = edit else {
             continue;
         };
-        let id = resolve(&index, edit.path()).map_err(|error| VerificationFailure::TargetLost {
+        let path = candidate_path(original, edits, edit.path());
+        let id = resolve(&index, &path).map_err(|error| VerificationFailure::TargetLost {
             edit: position,
             error,
         })?;
@@ -7879,31 +8720,16 @@ fn verify_field(
             .iter()
             .find(|(wanted, _)| wanted == key)
         {
-            {
-                // Checked with our decoder as well as the substrate's, exactly as
-                // a scalar edit is: a disagreement means one of the two is wrong
-                // about bytes we just wrote.
-                let value = index
-                    .node(entry.value)
-                    .and_then(|node| node.scalar.as_ref())
-                    .ok_or(VerificationFailure::FieldNotInserted {
-                        edit,
-                        key_len: wanted_key.len(),
-                    })?;
-                let ours = decode(candidate, &value.presentation)
-                    .map_err(|error| VerificationFailure::Undecodable { edit, error })?;
-                if ours != value.value {
-                    return Err(VerificationFailure::DecoderDisagreement { edit });
-                }
-                if &value.value != wanted_value {
-                    return Err(VerificationFailure::FieldNotInserted {
-                        edit,
-                        key_len: wanted_key.len(),
-                    });
-                }
-                inserted_seen += 1;
-                continue;
-            }
+            verify_entry_value(
+                candidate,
+                index,
+                edit,
+                wanted_key.len(),
+                entry.value,
+                wanted_value,
+            )?;
+            inserted_seen += 1;
+            continue;
         }
         siblings.push((key.to_owned(), entry.value));
     } // End of the loop over the candidate mapping's entries
@@ -7959,6 +8785,104 @@ fn verify_field(
     } // End of the loop that compares every position with the key intended there
     Ok(())
 } // End of function verify_field()
+
+/// Checks that one candidate value node holds exactly what an inserted, renamed
+/// or switched entry was meant to hold.
+///
+/// A scalar is decoded twice — by the substrate and by [`crate::emit::decode`] —
+/// exactly as a scalar edit is, because a disagreement means one of the two is
+/// wrong about bytes this edit just wrote. A list (Phase 3-2) must be a sequence
+/// of exactly the requested items, each a scalar decoded twice the same way, in
+/// order, and written in the style the engine writes: **flow** for `[]`, which
+/// has no block spelling, and **block** for everything else (ruling 5).
+///
+/// # Errors
+///
+/// [`VerificationFailure::FieldNotInserted`] for a wrong scalar or a value of the
+/// wrong kind, [`VerificationFailure::ItemNotInserted`] for a wrong list,
+/// [`VerificationFailure::Undecodable`] and
+/// [`VerificationFailure::DecoderDisagreement`].
+fn verify_entry_value(
+    candidate: &str,
+    index: &SyntaxIndex,
+    edit: usize,
+    key_len: usize,
+    value: NodeId,
+    wanted: &EntryValue,
+) -> Result<(), VerificationFailure> {
+    let missing = VerificationFailure::FieldNotInserted { edit, key_len };
+    let node = index.node(value).ok_or(missing.clone())?;
+    match wanted {
+        EntryValue::Scalar(wanted) => {
+            let scalar = node.scalar.as_ref().ok_or(missing.clone())?;
+            let ours = decode(candidate, &scalar.presentation)
+                .map_err(|error| VerificationFailure::Undecodable { edit, error })?;
+            if ours != scalar.value {
+                return Err(VerificationFailure::DecoderDisagreement { edit });
+            }
+            if &scalar.value != wanted {
+                return Err(missing);
+            }
+        }
+        EntryValue::ScalarList(items) => {
+            if node.kind != NodeKind::Sequence {
+                return Err(missing);
+            }
+            let style = if items.is_empty() {
+                CollectionStyle::Flow
+            } else {
+                CollectionStyle::Block
+            };
+            if node.collection_style != Some(style) || node.children.len() != items.len() {
+                return Err(VerificationFailure::ItemNotInserted {
+                    edit,
+                    item: node.children.len().min(items.len()),
+                });
+            }
+            for (position, (child, wanted)) in node.children.iter().zip(items).enumerate() {
+                verify_scalar_item(candidate, index, edit, position, *child, wanted)?;
+            } // End of the loop over the list's items
+        }
+    } // End of the match over the shape the entry was meant to hold
+    Ok(())
+} // End of function verify_entry_value()
+
+/// Checks that one candidate sequence item is a scalar decoding — twice — to
+/// `wanted`.
+///
+/// # Errors
+///
+/// [`VerificationFailure::ItemNotInserted`] carrying the item's position,
+/// [`VerificationFailure::Undecodable`] and
+/// [`VerificationFailure::DecoderDisagreement`].
+fn verify_scalar_item(
+    candidate: &str,
+    index: &SyntaxIndex,
+    edit: usize,
+    position: usize,
+    item: NodeId,
+    wanted: &str,
+) -> Result<(), VerificationFailure> {
+    let scalar = index
+        .node(item)
+        .and_then(|node| node.scalar.as_ref())
+        .ok_or(VerificationFailure::ItemNotInserted {
+            edit,
+            item: position,
+        })?;
+    let ours = decode(candidate, &scalar.presentation)
+        .map_err(|error| VerificationFailure::Undecodable { edit, error })?;
+    if ours != scalar.value {
+        return Err(VerificationFailure::DecoderDisagreement { edit });
+    }
+    if scalar.value != wanted {
+        return Err(VerificationFailure::ItemNotInserted {
+            edit,
+            item: position,
+        });
+    }
+    Ok(())
+} // End of function verify_scalar_item()
 
 /// Checks one sequence-item edit against the reparsed candidate.
 ///
@@ -8017,8 +8941,11 @@ fn verify_items(
                 })
             }
             ItemSlot::Kept(_) => {}
-            ItemSlot::Inserted(fields) => {
+            ItemSlot::Inserted(NewItem::Mapping(fields)) => {
                 verify_inserted_item(candidate, index, edit, *item, fields)?
+            }
+            ItemSlot::Inserted(NewItem::Scalar(value)) => {
+                verify_scalar_item(candidate, index, edit, position, *item, value)?
             }
         }
     } // End of the loop that compares every position with what was intended for it
@@ -11559,8 +12486,8 @@ mod structural_tests {
                 entries: entries.clone(),
                 removed: None,
                 inserted: vec![
-                    ("x".to_owned(), "8".to_owned()),
-                    ("y".to_owned(), "9".to_owned()),
+                    ("x".to_owned(), EntryValue::Scalar("8".to_owned())),
+                    ("y".to_owned(), EntryValue::Scalar("9".to_owned())),
                 ],
                 anchor: Some(0),
                 renamed: None,
@@ -11573,7 +12500,11 @@ mod structural_tests {
                 removed: None,
                 inserted: Vec::new(),
                 anchor: None,
-                renamed: Some((entries[2].value, "d".to_owned(), "3".to_owned())),
+                renamed: Some((
+                    entries[2].value,
+                    "d".to_owned(),
+                    EntryValue::Scalar("3".to_owned()),
+                )),
             },
         ];
         let folded = fold_expectations(&index, claims, &[]).expect("the claims fold");
@@ -11613,6 +12544,75 @@ mod structural_tests {
         let parsed = SyntaxIndex::parse(kept).expect("parses");
         assert!(verify_field(kept, &parsed, expectation).is_err());
     } // End of function verification_rejects_a_group_or_a_rename_out_of_place()
+
+    #[test]
+    fn verification_rejects_a_list_item_or_a_list_value_that_is_not_the_one_asked_for() {
+        // Phase 3-2's item property, driven directly: an inserted scalar item
+        // and a written list value are each checked position by position, and
+        // a list is checked for its style as well as its items.
+        let slots = ItemExpectation {
+            edit: 0,
+            sequence: DocumentPath::root(0).with_key("l"),
+            slots: vec![
+                ItemSlot::Kept(None),
+                ItemSlot::Inserted(NewItem::Scalar("x".to_owned())),
+            ],
+        };
+        let honest = "l:\n  - a\n  - x\n";
+        let parsed = SyntaxIndex::parse(honest).expect("parses");
+        assert_eq!(verify_items(honest, &parsed, &slots), Ok(()));
+        let wrong = "l:\n  - a\n  - y\n";
+        let parsed = SyntaxIndex::parse(wrong).expect("parses");
+        assert_eq!(
+            verify_items(wrong, &parsed, &slots),
+            Err(VerificationFailure::ItemNotInserted { edit: 0, item: 1 })
+        );
+        let nested = "l:\n  - a\n  - [x]\n";
+        let parsed = SyntaxIndex::parse(nested).expect("parses");
+        assert_eq!(
+            verify_items(nested, &parsed, &slots),
+            Err(VerificationFailure::ItemNotInserted { edit: 0, item: 1 })
+        );
+
+        let wanted = EntryValue::ScalarList(vec!["a".to_owned(), "b".to_owned()]);
+        let value_of = |text: &str| {
+            let index = SyntaxIndex::parse(text).expect("parses");
+            let id = resolve(&index, &DocumentPath::root(0).with_key("l")).expect("resolves");
+            (index, id)
+        };
+        let (index, id) = value_of("l:\n  - a\n  - b\n");
+        assert_eq!(
+            verify_entry_value("l:\n  - a\n  - b\n", &index, 0, 1, id, &wanted),
+            Ok(())
+        );
+        // The right items in flow style are not the block list the engine writes.
+        let (index, id) = value_of("l: [a, b]\n");
+        assert_eq!(
+            verify_entry_value("l: [a, b]\n", &index, 0, 1, id, &wanted),
+            Err(VerificationFailure::ItemNotInserted { edit: 0, item: 2 })
+        );
+        // One item short.
+        let (index, id) = value_of("l:\n  - a\n");
+        assert_eq!(
+            verify_entry_value("l:\n  - a\n", &index, 0, 1, id, &wanted),
+            Err(VerificationFailure::ItemNotInserted { edit: 0, item: 1 })
+        );
+        // `[]` must be flow; a scalar is not a list.
+        let empty = EntryValue::ScalarList(Vec::new());
+        let (index, id) = value_of("l: []\n");
+        assert_eq!(
+            verify_entry_value("l: []\n", &index, 0, 1, id, &empty),
+            Ok(())
+        );
+        let (index, id) = value_of("l: x\n");
+        assert_eq!(
+            verify_entry_value("l: x\n", &index, 0, 1, id, &empty),
+            Err(VerificationFailure::FieldNotInserted {
+                edit: 0,
+                key_len: 1
+            })
+        );
+    } // End of function verification_rejects_a_list_item_or_a_list_value_that_is_not_the_one_asked_for()
 
     #[test]
     fn the_subtree_digest_tells_shapes_apart() {

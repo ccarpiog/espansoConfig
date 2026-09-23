@@ -45,6 +45,7 @@ import {
   describeLineEnding,
   describeMatchBadge,
   describeScalarStyle,
+  describeSequencePresence,
   describeTriggerKind,
   describeUnknownReason,
   describeUnreadableReason,
@@ -755,6 +756,30 @@ describe('the descriptions', () => {
     );
   }); // End of the "every unknown reason" case
 
+  it.each(LOCALES)('render every list presence in %s, each differently', (locale) => {
+    // Phase 3-2: absent and present-empty are two states a screen must be able
+    // to tell apart (3-9 draws them for `imports`), so their phrases differ, and
+    // none names a Rust identifier or a location operand.
+    const location = {
+      key_node: 1,
+      key_span: { start: 0, end: 8 },
+      value_node: 2,
+      value_span: { start: 10, end: 12 },
+      path: null
+    };
+    const rendered = [
+      describeSequencePresence(locale, { Absent: {} }),
+      describeSequencePresence(locale, { Empty: { location } }),
+      describeSequencePresence(locale, { Items: { location, flow: false, count: 2 } }),
+      describeSequencePresence(locale, { UnsupportedShape: { location, found: 'Scalar' } })
+    ];
+    expect(new Set(rendered).size).toBe(4);
+    for (const text of rendered) {
+      expect(text.trim(), locale).not.toBe('');
+      expect(text, locale).not.toMatch(/\{[A-Za-z]|Absent|UnsupportedShape|Scalar/);
+    }
+  }); // End of the "every list presence" case
+
   it.each(LOCALES)('render every value kind in %s, never as a Rust identifier', (locale) => {
     // The detail pane names one for a node the projection stopped at, which is
     // the difference between "this app stopped reading here: a list" and an
@@ -1043,6 +1068,7 @@ const CODE_NAMESPACE_SAMPLES: {
   saveResult: 'saved',
   saveVerdict: 'Proceed',
   scalarStyle: SCALAR_STYLES[0],
+  sequencePresence: 'Empty',
   syntaxError: 'Parse',
   targetDifference: 'Retargeted',
   triggerKind: TRIGGER_KINDS[0],

@@ -321,8 +321,10 @@ fn content_form(field: MatchField) -> Option<ContentForm> {
 
 /// One schema-known **sequence of strings** a match may hold.
 ///
-/// A draft may edit an existing element of either. It may never add one or take
-/// one away — see [`crate::draft::DraftError`].
+/// A [`MatchDraft`] may edit an existing element of either. Adding one, taking
+/// one away, or adding or removing the whole list is a
+/// [`crate::draft::SequenceIntent`] instead (Phase 3-2), and those two lists are
+/// the only ones any intent can name.
 ///
 /// It serializes as its espanso key, for [`MatchField`]'s reason and pinned by
 /// `every_sequence_field_serializes_as_its_espanso_key`.

@@ -38,7 +38,7 @@ pub enum DraftError {
     /// invented, because the alternative is a path that names something else.
     ///
     /// **The empty braces are load-bearing.** Written as a unit variant this
-    /// would be the one variant of thirty-five that `serde` writes as a bare
+    /// would be the one variant of forty-three that `serde` writes as a bare
     /// JSON string rather than as a one-key object, and the frontend's
     /// `COMMAND_ERROR_OPERANDS` table in `src/lib/ipc/errors.ts` can pin exactly
     /// one shape for the `error` operand of `CommandError::DraftRefused`. A
@@ -46,8 +46,8 @@ pub enum DraftError {
     /// *unexpected* failure, losing its typed code and rendering a generic
     /// sentence instead of `code.draftError.matchHasNoPath`. As an empty struct
     /// variant it writes `{"MatchHasNoPath": {}}`, so "a `DraftError` is always
-    /// an object" is true by construction rather than true of thirty-four cases
-    /// out of thirty-five. `every_draft_error_variant_crosses_as_an_object` in
+    /// an object" is true by construction rather than true of forty-two cases
+    /// out of forty-three. `every_draft_error_variant_crosses_as_an_object` in
     /// `src-tauri/src/wire_contract.rs` fails the build if a unit variant is
     /// ever added here.
     MatchHasNoPath {},
@@ -157,10 +157,10 @@ pub enum DraftError {
     },
     /// The draft names an element the sequence does not have.
     ///
-    /// **A cardinality change.** Adding an element to `triggers` or
-    /// `search_terms` needs a sequence-item insertion, and
-    /// [`crate::patch::DocumentEdit`] has no such variant; forcing one into
-    /// existence here is 2b-2c's problem, not this phase's.
+    /// An [`crate::draft::ItemDraft`] rewrites an element that is there; adding
+    /// one is a [`crate::draft::SequenceIntent::InsertItems`] (Phase 3-2), a
+    /// different intent. The same refusal answers a list intent whose index —
+    /// an item to remove, an item to insert after — the list does not have.
     SequenceItemDoesNotExist {
         /// Which sequence.
         field: SequenceField,
@@ -169,11 +169,16 @@ pub enum DraftError {
         /// How many elements the sequence has.
         length: usize,
     },
-    /// The draft asks for an element of a sequence to be taken away.
+    /// The draft asks, through an [`crate::draft::ItemDraft`], for an element
+    /// of a sequence to be taken away.
     ///
-    /// **A cardinality change**, refused for the same reason as
-    /// [`DraftError::SequenceItemDoesNotExist`]: a sequence item's removal is
-    /// not one of the four primitives.
+    /// **Still refused on this path.** Since Phase 3-2 an item of `triggers` or
+    /// `search_terms` can be removed, but only as a
+    /// [`crate::draft::SequenceIntent::RemoveItem`] passed to
+    /// [`crate::draft::plan_match_edits_with`]; `ItemDraft::value` keeps meaning
+    /// *rewrite this element*, and its `Remove` stays a refusal so that the wire
+    /// shape of [`crate::draft::MatchDraft`] does not change meaning before a UI
+    /// step decides it.
     SequenceItemRemoval {
         /// Which sequence.
         field: SequenceField,
@@ -289,7 +294,9 @@ pub enum DraftError {
     /// The guard that states ruling 3's invariant: this engine may modify or
     /// remove existing addressable nodes and may insert **scalar-valued**
     /// mapping entries, and it may never change a sequence's cardinality or
-    /// synthesize a collection node.
+    /// synthesize a collection node — except the scalar items and the presence
+    /// of `triggers` and `search_terms`, which Phase 3-2 admits and nothing
+    /// else's.
     OutsideTheClosedSurface {
         /// Position of the edit in the batch.
         edit: usize,
@@ -538,6 +545,100 @@ pub enum DraftError {
         /// The key both intents name.
         field: MatchField,
     },
+    /// Two intents about one list of the match say two things about it (Phase
+    /// 3-2).
+    ///
+    /// Refused **at intent level, before any diffing**, for
+    /// [`DraftError::SequenceItemDraftedTwice`]'s reason. The shapes it covers:
+    /// adding or removing the whole field beside any other intent about that
+    /// field; one item removed twice, or removed and rewritten; two insertions
+    /// landing at one place; an insertion landing exactly where the same batch
+    /// removes an item (the two would share a byte offset and nothing would say
+    /// which comes first); and a trigger switch beside any other intent about
+    /// `triggers`.
+    SequenceIntentsConflict {
+        /// The list both intents name.
+        field: SequenceField,
+    },
+    /// An intent about the items of a list names a list the match does not
+    /// hold (Phase 3-2).
+    ///
+    /// Adding an item to an absent list is not a smaller version of adding the
+    /// list: the caller asks for the whole field with its items instead, which
+    /// is a different intent with a different edit behind it. A switch from
+    /// `triggers` to a scalar form reaches this when `triggers` is absent.
+    SequenceFieldAbsent {
+        /// The list the intent named.
+        field: SequenceField,
+    },
+    /// An intent to add a whole list names a key the match already holds
+    /// (Phase 3-2).
+    ///
+    /// Present means **written at all**: `triggers: []` and `triggers: x` are
+    /// both present, and adding a second `triggers` would make every path
+    /// through the mapping ambiguous. A switch to `triggers` reaches this when
+    /// the match already holds it.
+    SequenceFieldPresent {
+        /// The list the intent named.
+        field: SequenceField,
+    },
+    /// The match writes the list's key with a value that is not a sequence
+    /// (Phase 3-2).
+    ///
+    /// `triggers: x`, `triggers:` with nothing after it, a mapping or an alias:
+    /// the projection could not model it as a list, so no item of it can be
+    /// addressed, and removing it would discard a value the list editor never
+    /// displayed.
+    SequenceHasAnUnsupportedShape {
+        /// The list the intent named.
+        field: SequenceField,
+        /// What its value actually is.
+        found: ValueKind,
+    },
+    /// The intent would change the items of a bracket-delimited list (Phase
+    /// 3-2).
+    ///
+    /// `[a, b]` and `[]` are flow lists, and adding or removing one of their
+    /// items needs delimiter-aware editing that keeps the flow presentation —
+    /// a later step's (3-3), which is why this is refused rather than converted:
+    /// `[a, b]` never silently becomes a block list. Removing the whole field is
+    /// not refused, because it touches no delimiter.
+    SequenceIsAFlowList {
+        /// The list the intent named.
+        field: SequenceField,
+    },
+    /// The intents would remove every item of a list (Phase 3-2).
+    ///
+    /// **Removing the last item is explicit, never a side effect.** A list with
+    /// no items left would have to become `[]` (a new presentation nobody asked
+    /// for) or a bare `key:` (YAML null — a stranded value). Neither is "remove
+    /// an item", so the intent is refused, and the caller that means *no list*
+    /// asks for the whole field to be removed instead.
+    SequenceWouldBeEmpty {
+        /// The list the intent named.
+        field: SequenceField,
+    },
+    /// A switch from a list to a single scalar would discard items (Phase 3-2).
+    ///
+    /// Converting `triggers` to `trigger` or `regex` keeps **one** value, so a
+    /// list holding more than one item would lose the others. That is never
+    /// done silently: the caller removes the other items first, as their own
+    /// explicit intent.
+    SwitchWouldDiscardItems {
+        /// The list being switched from.
+        field: SequenceField,
+        /// How many items it holds.
+        items: usize,
+    },
+    /// A new list has no original entry to be written after (Phase 3-2).
+    ///
+    /// [`DraftError::NoInsertionAnchor`]'s counterpart for a list field: every
+    /// insertion is written after an existing entry the projection lets the
+    /// planner name, and a match whose entries are all unnameable gives it none.
+    NoSequenceInsertionAnchor {
+        /// The list that was to be inserted.
+        field: SequenceField,
+    },
 }
 
 impl fmt::Display for DraftError {
@@ -650,6 +751,34 @@ impl fmt::Display for DraftError {
                     "{} carries a substitution and another intent",
                     field.key()
                 )
+            }
+            DraftError::SequenceIntentsConflict { field } => {
+                write!(formatter, "two intents about {} conflict", field.key())
+            }
+            DraftError::SequenceFieldAbsent { field } => {
+                write!(formatter, "the match holds no {}", field.key())
+            }
+            DraftError::SequenceFieldPresent { field } => {
+                write!(formatter, "the match already holds {}", field.key())
+            }
+            DraftError::SequenceHasAnUnsupportedShape { field, found } => {
+                write!(formatter, "{} holds a {found:?}", field.key())
+            }
+            DraftError::SequenceIsAFlowList { field } => {
+                write!(formatter, "{} is a flow list", field.key())
+            }
+            DraftError::SequenceWouldBeEmpty { field } => {
+                write!(formatter, "{} would be left with no items", field.key())
+            }
+            DraftError::SwitchWouldDiscardItems { field, items } => {
+                write!(
+                    formatter,
+                    "switching {} would discard {items} items",
+                    field.key()
+                )
+            }
+            DraftError::NoSequenceInsertionAnchor { field } => {
+                write!(formatter, "no insertion anchor for {}", field.key())
             }
         } // End of the match over every refusal
     } // End of function fmt() for DraftError

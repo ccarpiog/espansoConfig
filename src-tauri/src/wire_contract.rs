@@ -30,7 +30,7 @@
 //!   names *and* JSON kinds.
 //! - **That every `DraftError` variant crosses as an object**, read out of the
 //!   core's own declaration rather than out of a sample list. The operand table
-//!   pins one shape per code, and a unit variant among the thirty-five would make
+//!   pins one shape per code, and a unit variant among the forty-three would make
 //!   that shape false for exactly one refusal.
 //! - **The registered command list**, parsed independently out of
 //!   `generate_handler!` and compared with the union of `COMMAND_NAMES` and
@@ -66,7 +66,8 @@ use espansoconfig_core::emit::DecodeError;
 use espansoconfig_core::emit::NotReencodable;
 use espansoconfig_core::model::{
     ContentKind, Diagnostic, DiagnosticCode, DocumentContext, DocumentShape, DocumentView,
-    MatchBadge, MatchId, TriggerKind, UnknownReason, ValueKind, ValueView, VariableKind,
+    MatchBadge, MatchId, SequencePresence, TriggerKind, UnknownReason, ValueKind, ValueView,
+    VariableKind,
 };
 use espansoconfig_core::patch::{
     DocumentPath, DuplicateSeam, EditError, MoveSeam, PathError, PathSegment, PresentationNote,
@@ -876,6 +877,15 @@ fn samples() -> Vec<(&'static str, Value)> {
         ),
         ("MatchId", json_of(&first.id)),
         ("TriggerSpec", json_of(&first.trigger)),
+        (
+            "FieldLocation",
+            json_of(
+                first
+                    .search_terms_presence
+                    .location()
+                    .expect("the first match writes `search_terms`"),
+            ),
+        ),
         ("ContentSpec", json_of(&first.content)),
         ("MatchOptions", json_of(&first.options)),
         ("VariableView", json_of(variable)),
@@ -1027,9 +1037,47 @@ fn unknown_reason_samples() -> Vec<UnknownReason> {
     ]
 }
 
+/// One value of every [`SequencePresence`] state, each read off a projection
+/// rather than built, so the location inside it is one a document produced.
+fn sequence_presence_samples() -> Vec<SequencePresence> {
+    let view = project(
+        "match/lists.yml",
+        concat!(
+            "matches:\n",
+            "  - trigger: ':a'\n",
+            "    replace: x\n",
+            "    search_terms: []\n",
+            "  - triggers:\n",
+            "      - ':b'\n",
+            "    replace: y\n",
+            "    search_terms: not a list\n",
+        ),
+    );
+    let (first, second) = (&view.matches[0], &view.matches[1]);
+    let samples = vec![
+        first.trigger.triggers_presence.clone(),
+        first.search_terms_presence.clone(),
+        second.trigger.triggers_presence.clone(),
+        second.search_terms_presence.clone(),
+    ];
+    assert!(
+        matches!(
+            samples.as_slice(),
+            [
+                SequencePresence::Absent {},
+                SequencePresence::Empty { .. },
+                SequencePresence::Items { .. },
+                SequencePresence::UnsupportedShape { .. },
+            ]
+        ),
+        "the presence fixture stopped producing one sample of each state: {samples:?}"
+    );
+    samples
+} // End of function sequence_presence_samples()
+
 /// Every externally tagged variant that carries operands, with its union.
 ///
-/// The two enumerations whose payloads are object types. `ValueView` is
+/// The three enumerations whose payloads are object types. `ValueView` is
 /// deliberately absent: its payloads are named interfaces, which `samples()`
 /// already checks one by one.
 fn tagged_samples() -> Vec<(&'static str, Value)> {
@@ -1041,6 +1089,11 @@ fn tagged_samples() -> Vec<(&'static str, Value)> {
         unknown_reason_samples()
             .iter()
             .map(|reason| ("UnknownReason", json_of(reason))),
+    );
+    samples.extend(
+        sequence_presence_samples()
+            .iter()
+            .map(|presence| ("SequencePresence", json_of(presence))),
     );
     samples
 } // End of function tagged_samples()
@@ -1158,6 +1211,10 @@ fn every_union_declares_exactly_the_rust_variants() {
             "UnknownReasonName",
             variant_names(&unknown_reason_samples()),
         ),
+        (
+            "SequencePresenceName",
+            variant_names(&sequence_presence_samples()),
+        ),
     ];
 
     for (name, rust) in unions {
@@ -1195,8 +1252,11 @@ fn every_tagged_variant_declares_exactly_the_operands_serde_writes() {
         );
         checked += 1;
     } // End of the loop over the tagged samples
+      // Fourteen until Phase 3-2, whose four `SequencePresence` states are four
+      // more — `Absent`'s empty payload among them, read as a checked zero-field
+      // payload.
     assert_eq!(
-        checked, 14,
+        checked, 18,
         "the tagged-variant sample list stopped covering every variant that carries operands"
     );
 } // End of function every_tagged_variant_declares_exactly_the_operands_serde_writes()
@@ -1274,7 +1334,7 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
 /// one shape can ever be pinned for `draftRefused.error`, no matter how many
 /// variants `DraftError` has. `serde`'s externally tagged representation writes a
 /// unit variant as a bare string and everything else as a one-key object, so a
-/// single unit variant among the thirty-five would make the pinned `'object'`
+/// single unit variant among the forty-three would make the pinned `'object'`
 /// false for that one refusal: `isCommandError` would reject it, and the user
 /// would read the generic fallback instead of the sentence
 /// `code.draftError.matchHasNoPath` that exists for it in both dictionaries.
@@ -1290,13 +1350,13 @@ fn every_draft_error_variant_crosses_as_an_object() {
     let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of("DraftError");
     assert_eq!(
         declared.len(),
-        35,
-        "DraftError declares 35 refusals since Phase 3-1: {declared:?}"
+        43,
+        "DraftError declares 43 refusals since Phase 3-2: {declared:?}"
     );
     assert!(
         bare.is_empty(),
         "a unit variant crosses as a bare string, which COMMAND_ERROR_OPERANDS cannot \
-         declare beside the thirty-four objects; give it empty braces: {bare:?}"
+         declare beside the forty-two objects; give it empty braces: {bare:?}"
     );
 
     // The `serde` behaviour the assertion above stands on, observed rather than
@@ -1348,7 +1408,7 @@ fn every_draft_error_variant_crosses_as_an_object() {
 /// bottom rather than taken on trust.
 #[test]
 fn every_edit_error_variant_crosses_as_an_object() {
-    for (name, count) in [("EditError", 41), ("SaveError", 10)] {
+    for (name, count) in [("EditError", 42), ("SaveError", 10)] {
         let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of(name);
         assert_eq!(
             declared.len(),
@@ -2238,6 +2298,7 @@ fn verification_failure_samples() -> Vec<VerificationFailure> {
             node: a_node(),
         },
         VerificationFailure::EntriesNotInTheIntendedOrder { edit: 0, entry: 1 },
+        VerificationFailure::ItemNotInserted { edit: 0, item: 1 },
     ]
 } // End of function verification_failure_samples()
 
@@ -2388,6 +2449,10 @@ fn edit_error_samples() -> Vec<EditError> {
             seam: DuplicateSeam::CopiedRunsJoin,
         },
         EditError::KeyNotSubstitutable {
+            edit: 0,
+            node: a_node(),
+        },
+        EditError::ShapeSwitchUnsupported {
             edit: 0,
             node: a_node(),
         },
@@ -2750,7 +2815,7 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 208,
+        variants, 210,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
          eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals, \
          Phase 2b-2c-2's fix round made PresentationNote a two-variant union, \
@@ -2764,7 +2829,8 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
          ReapplyPlacement's three, and Phase 2c-4c-1 added the creation's own \
          FindingCode::NewMatchRepeatsLiteralTrigger, and Phase 3-1 added \
          EditError::KeyNotSubstitutable and \
-         VerificationFailure::EntriesNotInTheIntendedOrder; \
+         VerificationFailure::EntriesNotInTheIntendedOrder, and Phase 3-2 added \
+         EditError::ShapeSwitchUnsupported and VerificationFailure::ItemNotInserted; \
          this list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
@@ -2956,7 +3022,7 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (125, 12, 71),
+        (127, 12, 71),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
          and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
@@ -2972,7 +3038,8 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
          three, of which one is empty and two carry payloads, and Phase 2c-4c-1 \
          added the creation's own NewMatchRepeatsLiteralTrigger as one more \
          struct variant, and Phase 3-1's KeyNotSubstitutable and \
-         EntriesNotInTheIntendedOrder are two more; \
+         EntriesNotInTheIntendedOrder are two more, and so are Phase 3-2's \
+         ShapeSwitchUnsupported and ItemNotInserted; \
          a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
@@ -3251,7 +3318,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 208,
+        checked, 210,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()
