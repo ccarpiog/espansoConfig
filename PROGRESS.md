@@ -273,7 +273,7 @@ all of it is in `git log`._
 | **3-1 — compositional mapping edits and scalar substitution (core), reviewed (`ship`, Codex, 0 findings) and closed** | `9513c5c` | ✅ pushed; tree clean |
 | **3-2 — sequence projection and block scalar-list edits (core), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed** | `8ec005b` | ✅ pushed; tree clean |
 | **3-3 — flow scalar-list cardinality (core), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 2 SHOULD-FIX, both fixed) and closed** | `3cb0098` | ✅ pushed, `8ec005b..3cb0098  main -> main`; tree clean |
-| **3-4 — bounded creation for the wider editor (core, command, wire), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed** | _the phase commit; its SHA is recorded in the commit after it_ | _pending_ |
+| **3-4 — bounded creation for the wider editor (core, command, wire), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed** | `3e593f0` (this SHA record is the commit after it) | ✅ pushed, `9a12917..3e593f0  main -> main`; tree clean |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed
