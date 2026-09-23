@@ -106,9 +106,10 @@ export type ObservationDetail =
 /**
  * What this window can truthfully say about a file it did **not** reload.
  *
- * **A code, never a sentence** (`CLAUDE.md` section 2), and nothing renders one
- * today. 2d-6 draws these and owes their dictionary keys; naming one on a screen
- * before then would be this step claiming a state it has no words for.
+ * **A code, never a sentence** (`CLAUDE.md` section 2), and no component renders
+ * one yet. The sentences exist since Phase 2d-6-9a, reached through
+ * `describeReconciliationFileState` in `src/lib/i18n/codes.ts` over the decisions
+ * of `./reconciliationStatus.ts`; 2d-6-9b draws them.
  *
  * Every arm is a statement about *this window's knowledge*, never about the file:
  * `stale` says this window did not install what the watcher saw, `unavailable`

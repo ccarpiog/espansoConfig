@@ -159,10 +159,12 @@ export interface ReconciliationCursor {
  * What this session can truthfully say about being watched — the typed state
  * ruling 9 asks for.
  *
- * **2d-6 draws it and owes its dictionary keys.** This step names the state and
- * adds **no** i18n key for it, because `2d-5-split-notes.md` section 6 item 6
- * puts the EN/ES entries and the `src/lib/i18n/codes.ts` accessor on the step
- * that first *names it to a person*, and nothing here is on a screen.
+ * **Its words are 2d-6-9a's, and nothing here names it to a person.** Phase
+ * 2d-6-9a discharged `2d-5-split-notes.md` section 6 item 6: `notWatched` is drawn
+ * as the `notWatched` banner decided by `decideWorkspaceReconciliation` in
+ * `./reconciliationStatus.ts`, with its EN/ES sentence reached through
+ * `describeReconciliationWorkspaceState` in `src/lib/i18n/codes.ts`; `notObserved`
+ * is deliberately drawn as nothing. No component draws either until 2d-6-9b.
  */
 export type ReconciliationWatchState =
   | {

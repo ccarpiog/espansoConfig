@@ -1103,6 +1103,36 @@ export type UncertaintyAcknowledgementRefusal =
    */
   | 'holdMoved';
 
+/**
+ * Why no acknowledgement can be minted for one file right now — Phase 2d-6-9a's
+ * review, finding 2.
+ *
+ * The mint's own guards, in the spend's order, as codes. `noHold` and
+ * `noStandingOrigin` mean there is nothing to acknowledge at all; `writeInFlight`
+ * and `projectionReplaced` mean there is, and the press would be refused.
+ */
+export type UncertaintyAcknowledgementIneligibility =
+  | 'writeInFlight'
+  | 'noHold'
+  | 'noStandingOrigin'
+  | 'projectionReplaced';
+
+/**
+ * Whether an acknowledgement of one file's hold could be minted against its
+ * standing origin right now — Phase 2d-6-9a's review, finding 2.
+ */
+export type UncertaintyAcknowledgementEligibility =
+  | {
+      /** `uncertaintyAcknowledgementFor(standingConflictFor(document))` would mint. */
+      readonly kind: 'eligible';
+    }
+  | {
+      /** It would answer `null`. */
+      readonly kind: 'ineligible';
+      /** The first guard that refuses. */
+      readonly reason: UncertaintyAcknowledgementIneligibility;
+    };
+
 /** What became of one acknowledgement. */
 export type UncertaintyAcknowledgementOutcome =
   | {
@@ -1127,9 +1157,9 @@ export type UncertaintyAcknowledgementOutcome =
  * developer string crosses out of the model. `noTransport` is the inert default
  * source refusing — a state built with no wake transport, which every test state
  * is — and `rejected` is everything else, a transport that exists and refused.
- * Neither is a message: the EN/ES sentences for a failed registration are
- * 2d-6-9's, and a `switch` over these two with a `never` terminus is how it
- * selects one.
+ * Neither is a message: the EN/ES sentence for each is Phase 2d-6-9a's, selected
+ * by the `switch` with a `never` terminus in `workspaceReconciliationStateKey`
+ * (`./reconciliationStatus.ts`).
  */
 export type RegistrationFailureReason = 'noTransport' | 'rejected';
 
@@ -1783,6 +1813,25 @@ export interface BrowserState {
   acknowledgeWriteUncertainty(
     acknowledgement: UncertaintyAcknowledgement
   ): UncertaintyAcknowledgementOutcome;
+  /**
+   * Whether an acknowledgement of one file's hold could be minted against the
+   * origin standing for it, answered without minting — Phase 2d-6-9a's review,
+   * finding 2.
+   *
+   * **The mint's own guards, through the one function the mint asks**, so a
+   * control enabled from this answer and the token a press mints cannot disagree
+   * about the four facts it covers: a write in flight, no hold, no standing
+   * origin, and a projection replaced since that origin arrived. **It mints
+   * nothing, writes nothing and calls no command.** What it cannot predict is the
+   * spend's refusals about a token (`spent`, `holdMoved` after a later hold), nor
+   * that its answer is still current at the press: a snapshot, rechecked by
+   * {@link uncertaintyAcknowledgementFor} and {@link acknowledgeWriteUncertainty}.
+   * Reading it subscribes a derivation to the hold tables.
+   *
+   * @param document - The file.
+   * @returns `eligible`, or the first guard that refuses.
+   */
+  uncertaintyAcknowledgementEligibility(document: DocumentId): UncertaintyAcknowledgementEligibility;
   /**
    * The three per-file facts an automatic reread of one file is decided on —
    * Phase 2d-6-1b, the 2d-6 record's §3 entries 15 and 32.
@@ -2720,10 +2769,10 @@ export interface BrowserState {
   /**
    * What this window can say about one file it did not reload — Phase 2d-5-4.
    *
-   * **A code, and nothing renders it.** 2d-6 draws these states and owes their
-   * EN/ES entries and their accessor in `src/lib/i18n/codes.ts`; this step names
-   * none of them to a person, which is
-   * `docs/decisions/2d-5-split-notes.md` section 6 item 6's rule.
+   * **A code, and no component renders it yet.** Its words exist since Phase
+   * 2d-6-9a — `decideFileReconciliation` in `./reconciliationStatus.ts` decides
+   * where each arm is drawn, and `describeReconciliationFileState` in
+   * `src/lib/i18n/codes.ts` holds the EN/ES sentences — and 2d-6-9b draws them.
    *
    * **A `removed` status outlives the row it is about**, deliberately: a write
    * surface over a removed file is preserved rather than closed, so the state that
@@ -3347,6 +3396,28 @@ export function createBrowserState(
   // increment, and `workspace.test.ts` holds the selection to the same object
   // across every announcement.
   let reconciliationRevision = $state(0);
+  // **The per-file hold tables, counted into a signal** — Phase 2d-6-9a's review,
+  // finding 1. The barrier (`writesInFlight`), the held observations, the
+  // uncertain set, the standing origins and the projection generations are plain
+  // `Map`s and `Set`s, deliberately — they are guard tables read inside
+  // synchronous check-and-spend blocks — and nothing about a plain table
+  // invalidates a `$derived` or an `$effect` that read it. So every mutation of
+  // them is followed by {@link noticeHolds}, and every reader that answers from
+  // them reads this number first. **A count, never a copy**, for
+  // `reconciliationRevision`'s reason.
+  //
+  // **What it forces and what it cannot, in one sentence.** It forces that a
+  // reactive reader of `writeInFlight`, `retainedObservationFor`,
+  // `writeOutcomeUncertain`, `standingConflictFor`, `automaticReloadGuardFor` or
+  // `uncertaintyAcknowledgementEligibility` re-runs after every mutation site that
+  // calls `noticeHolds()` — fifteen today; it cannot force a sixteenth site to
+  // call it, and `reconciliationStatus.svelte.test.ts` observes the sites a
+  // status panel depends on through a real effect.
+  let holdRevision = $state(0);
+  // The plain counter the signal is assigned from, so that bumping it never
+  // *reads* the signal: a bump from inside an effect that also read it would
+  // otherwise make that effect depend on its own write.
+  let holdCount = 0;
   // **What this window can say about a file it did not reload** — Phase 2d-5-4.
   // One entry per document at most, replaced rather than appended, and `$state`
   // because 2d-6 draws these: a `Map` in `$state` is not reactive without Svelte's
@@ -3787,6 +3858,15 @@ export function createBrowserState(
   } // End of function noticeWriteSurfaces()
 
   /**
+   * Announces that a per-file hold table moved — Phase 2d-6-9a's review, finding
+   * 1. See `holdRevision`.
+   */
+  function noticeHolds(): void {
+    holdCount += 1;
+    holdRevision = holdCount;
+  } // End of function noticeHolds()
+
+  /**
    * One registry lease, wrapped so that using it moves the mirror.
    *
    * **The lease is the other half of the door.** Two of the three operations that
@@ -3868,6 +3948,7 @@ export function createBrowserState(
    */
   function invalidateProjectionOf(document: DocumentId): void {
     projectionGenerations.set(document, projectionGenerationOf(document) + 1);
+    noticeHolds();
   } // End of function invalidateProjectionOf()
 
   /**
@@ -3934,6 +4015,7 @@ export function createBrowserState(
     // re-registering an outlived origin cannot make it standing again: that is the
     // same defect first-registration-wins exists for, one map along.
     standingConflicts.set(document, source);
+    noticeHolds();
   } // End of function rememberTheConflict()
 
   /**
@@ -3946,6 +4028,43 @@ export function createBrowserState(
   function standingConflictFor(document: DocumentId): ConflictSource | null {
     return standingConflicts.get(document) ?? null;
   } // End of function standingConflictFor()
+
+  /**
+   * The first mint guard that refuses an acknowledgement of one file's hold
+   * against one origin, or `null` — Phase 2d-6-9a's review, finding 2.
+   *
+   * **The one predicate the mint and the eligibility reader share**, in the
+   * spend's order: a write in flight, no hold, an origin that is not the standing
+   * one (or none), an origin whose arrival generation the projection has moved
+   * past. It reads only this state's own tables — a `WeakMap` lookup by identity,
+   * `Map`s, a `Set` and a counter — and writes nothing. What it cannot answer is
+   * the spend's `unknown`, `spent`, `workspaceReplaced` and `holdMoved`: those
+   * are facts about one minted token, and no token exists here.
+   *
+   * @param document - The file.
+   * @param source - The origin a person would acknowledge, or `null` when none
+   *   stands.
+   * @returns The refusal, or `null` when a token may be minted.
+   */
+  function acknowledgementMintRefusal(
+    document: DocumentId,
+    source: ConflictSource | null
+  ): UncertaintyAcknowledgementIneligibility | null {
+    if ((writesInFlight.get(document) ?? 0) > 0) {
+      return 'writeInFlight';
+    }
+    if (!uncertainWrites.has(document)) {
+      return 'noHold';
+    }
+    if (source === null || standingConflicts.get(document) !== source) {
+      return 'noStandingOrigin';
+    }
+    const origin = conflictOrigins.get(source);
+    if (origin === undefined || origin.generation !== projectionGenerationOf(document)) {
+      return 'projectionReplaced';
+    }
+    return null;
+  } // End of function acknowledgementMintRefusal()
 
   /**
    * Arbitrates one observation against what stands, and registers what wins.
@@ -4221,6 +4340,7 @@ export function createBrowserState(
         ? held
         : { observation: kept, generation: arrival }
     );
+    noticeHolds();
   } // End of function retainObservation()
 
   /**
@@ -4268,6 +4388,7 @@ export function createBrowserState(
    */
   function beginWrite(document: DocumentId): WriteLease {
     writesInFlight.set(document, (writesInFlight.get(document) ?? 0) + 1);
+    noticeHolds();
     let settled = false;
     // What this write has established so far, or `null` while it has established
     // nothing. Overwritten rather than merged: a later reading of one write's own
@@ -4302,17 +4423,21 @@ export function createBrowserState(
         if (settlement.kind === 'uncertain') {
           uncertainWrites.add(document);
           uncertaintyGenerations.set(document, (uncertaintyGenerations.get(document) ?? 0) + 1);
+          noticeHolds();
         } else if (settlement.kind === 'ended') {
           uncertainWrites.delete(document);
+          noticeHolds();
         }
         const held = (writesInFlight.get(document) ?? 1) - 1;
         if (held > 0) {
           // Another write of this file is still out, so the barrier stays closed
           // and what it holds is left for that one's settlement to release.
           writesInFlight.set(document, held);
+          noticeHolds();
           return;
         }
         writesInFlight.delete(document);
+        noticeHolds();
         const retained = retainedObservations.get(document) ?? null;
         // The window the held observation arrived at, or — when nothing is held and
         // the arms below reach no arbitration — this one.
@@ -4334,10 +4459,12 @@ export function createBrowserState(
             // the sessions that were told `retained` are told the check happened
             // and nothing stands from it, on the same path.
             retainedObservations.delete(document);
+            noticeHolds();
             deliver(document, writtenHereDelivery(release.observation));
             return;
           case 'arbitrate':
             retainedObservations.delete(document);
+            noticeHolds();
             // **Arbitrated at the generation it arrived at, not at this one.** A
             // committing write replaced this file's projection before this release
             // ran — the wrappers close after their own adoption, deliberately — so
@@ -5397,6 +5524,7 @@ export function createBrowserState(
       // the observation again at this same arrival generation, which is the
       // *askable again* the record's entry 16 requires and not a second attempt.
       retainedObservations.delete(document);
+      noticeHolds();
       let delivery: ObservationDelivery;
       try {
         delivery = arbitrateAndDeliver(document, observation, arrival);
@@ -5418,6 +5546,7 @@ export function createBrowserState(
         // reaches the caller, and a completed arbitration never reaches this arm.
         if (!retainedObservations.has(document)) {
           retainedObservations.set(document, record);
+          noticeHolds();
         }
         throw raw;
       }
@@ -5433,15 +5562,13 @@ export function createBrowserState(
         return null;
       }
       const document = origin.document;
-      if (
-        (writesInFlight.get(document) ?? 0) > 0 ||
-        !uncertainWrites.has(document) ||
-        standingConflicts.get(document) !== source ||
-        origin.generation !== projectionGenerationOf(document)
-      ) {
+      if (acknowledgementMintRefusal(document, source) !== null) {
         // Every refusal `acknowledgeWriteUncertainty` would give at once, asked
         // here so that nothing is minted for a press that could not succeed. The
-        // spend asks them all again: this is a courtesy, not the guard.
+        // spend asks them all again: this is a courtesy, not the guard. The same
+        // function answers `uncertaintyAcknowledgementEligibility`, so the reader a
+        // control is enabled from and this mint cannot disagree (Phase 2d-6-9a's
+        // review, finding 2).
         return null;
       }
       const acknowledgement = Object.freeze({}) as UncertaintyAcknowledgement;
@@ -5503,6 +5630,7 @@ export function createBrowserState(
       // than making another.
       spentAcknowledgements.add(acknowledgement);
       uncertainWrites.delete(document);
+      noticeHolds();
       return { kind: 'acknowledged' };
     }, // End of function acknowledgeWriteUncertainty()
 
@@ -5524,6 +5652,11 @@ export function createBrowserState(
       // invisible to the answer it ran inside. A field this predicate starts
       // reading that ingress does not copy reopens exactly that, with nothing
       // failing but `workspace.test.ts`'s key-getter case.
+      // **Both signals first** (Phase 2d-6-9a's review, finding 1), so a reactive
+      // caller re-runs when a hold table or the registry moves; a coordinator-side
+      // caller reads two numbers and nothing else changes for it.
+      void holdRevision;
+      void surfaceGeneration;
       const uncertaintyUnresolved = uncertainWrites.has(document);
       const observationRetained = retainedObservations.has(document);
       const surfaceOpen =
@@ -5536,22 +5669,35 @@ export function createBrowserState(
     }, // End of function automaticReloadGuardFor()
 
     standingConflictFor(document: DocumentId): ConflictSource | null {
+      void holdRevision;
       return standingConflictFor(document);
     },
 
     writeInFlight(document: DocumentId): boolean {
+      void holdRevision;
       return (writesInFlight.get(document) ?? 0) > 0;
     },
 
     retainedObservationFor(document: DocumentId): ExternalConflictObservation | null {
+      void holdRevision;
       // The generation the barrier keeps beside it is this module's bookkeeping and
       // no reader's business: what a caller can ask is *which reading is held*.
       return retainedObservations.get(document)?.observation ?? null;
     },
 
     writeOutcomeUncertain(document: DocumentId): boolean {
+      void holdRevision;
       return uncertainWrites.has(document);
     },
+
+    uncertaintyAcknowledgementEligibility(document: DocumentId): UncertaintyAcknowledgementEligibility {
+      void holdRevision;
+      const source = standingConflicts.get(document) ?? null;
+      const refusal = acknowledgementMintRefusal(document, source);
+      return refusal === null
+        ? Object.freeze({ kind: 'eligible' as const })
+        : Object.freeze({ kind: 'ineligible' as const, reason: refusal });
+    }, // End of function uncertaintyAcknowledgementEligibility()
 
     async open(root: string | null): Promise<void> {
       const generation = ++openGeneration;
@@ -5587,6 +5733,7 @@ export function createBrowserState(
       // cannot un-cancel anything: the bump above has already invalidated every
       // lookup that could have read one.
       projectionGenerations.clear();
+      noticeHolds();
       // **And what this state had arbitrated about the workspace being closed** —
       // Phase 2d-5-5b. A standing conflict names bytes of a file *that* workspace
       // held, a retained observation is a reading admitted under an epoch that is
@@ -5609,6 +5756,7 @@ export function createBrowserState(
       standingConflicts.clear();
       retainedObservations.clear();
       uncertainWrites.clear();
+      noticeHolds();
 
       // *Everything* the previous workspace decided goes, not only the parts
       // that obviously belong to a file: a sidebar filter naming document 3 and

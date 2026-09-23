@@ -274,6 +274,37 @@ The sidebar/status suite is a new jsdom file and declares its invoke guard (entr
 renderers only for typed status and acknowledgement presentation. **Bound by** entries 13-18, 26-32,
 34-36, 38-40. **Depends on** 2d-6-1, 2d-6-6, 2d-6-7, 2d-6-8.
 
+#### The orchestrator's cut of 2d-6-9, taken 2026-09-23
+
+Ten drawn states, five controls, a new dictionary namespace with its accessors, at least three
+components plus the eight write renderers, a new jsdom suite and a window reading are too much for
+one coherent phase, so 2d-6-9 runs as three sub-phases in dependency order, following the 2d-6-7 and
+2d-6-8 precedent, each owing the gate set and its own review. **The union is 2d-6-9 exactly**, plus
+the items handed on to it by name; the acceptance above is checked in full when 2d-6-9c closes.
+
+- **2d-6-9a — the presentation decisions as values, and their words.** A `src/lib/browser/` module
+  deciding, from coordinator and workspace state, which of the ten states is drawn for the workspace
+  and for each file, and which of the five controls is offered and whether it is enabled — decisions
+  as values, no component. The EN/ES keys and the typed `describe*` accessors (with their reactive
+  wrappers) for every state and control, discharging 2d-5 record §6 item 6. Model tests for every
+  decision, including empty-workspace retention. Also decided and recorded, by name: orchestrator
+  rulings (2) and (3) standing since 2d-6-1b (the acknowledgement operand stays `ConflictSource`; the
+  `projectionReplaced` refusal at an outlived arrival generation), and `2d-6-8c-notes.md` §4 item 4
+  (a save refused under the lock after another writer changed the file, with no drain delivering the
+  watcher's reading) — diagnosed from the code, ruled deliberate or a defect, and a defect pinned by
+  a case shown failing first. **No component changes.** Record: `2d-6-9a-notes.md`.
+- **2d-6-9b — the rendering and the controls.** `AppShell.svelte`, `Sidebar.svelte` and
+  `DetailPane.svelte` draw the 9a decisions and wire the five controls; the eight write renderers
+  gain only typed status and acknowledgement presentation, including `acknowledgeSnapshot` /
+  `acknowledgeRestoreSnapshot`, drawn by nothing so far (`2d-6-8b-notes.md` §4 item 6). The new
+  sidebar/status jsdom suite declares its invoke guard (entry 37); bilingual mounted state changes
+  and controls, a locale switch on a mounted status panel with no unrelated mutation, and
+  empty-workspace retention mounted. If measurement shows this is too big for one worker, it is cut
+  again here before any code is written. Record: `2d-6-9b-notes.md`.
+- **2d-6-9c — the narrow window reading with one hard fixture (ruling 38), and 2d-6-9's whole
+  acceptance checked in one place**, starting from the harness and launch recipe of
+  [`2d-6-8c-window-reading.md`](2d-6-8c-window-reading.md). Record: `2d-6-9c-notes.md`.
+
 ### 2d-6-10 — foreground fallback
 
 **Delivers** the synchronous DOM `ForegroundSource` replacing `INERT_FOREGROUND_EVENTS` in

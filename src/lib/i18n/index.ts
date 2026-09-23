@@ -116,6 +116,13 @@ import type {
   ExternalConflictAction,
   ExternalConflictNotice
 } from '../browser/observationDelivery';
+import type {
+  FileReconciliationState,
+  FileStatePlacement,
+  ReconciliationControl,
+  ReconciliationRefusal,
+  WorkspaceReconciliationState
+} from '../browser/reconciliationStatus';
 import {
   conflictChoiceKey,
   conflictOperationKey,
@@ -223,6 +230,10 @@ import {
   describeReapplyPlacement,
   describeReapplyRefusal,
   describeReapplyResolution,
+  describeReconciliationControl,
+  describeReconciliationFileState,
+  describeReconciliationRefusal,
+  describeReconciliationWorkspaceState,
   describeRotationOutcome,
   describeSaveError,
   describeSaveResult,
@@ -305,6 +316,10 @@ export {
   describeReapplyPlacement,
   describeReapplyRefusal,
   describeReapplyResolution,
+  describeReconciliationControl,
+  describeReconciliationFileState,
+  describeReconciliationRefusal,
+  describeReconciliationWorkspaceState,
   describeRotationOutcome,
   describeSaveError,
   describeSaveResult,
@@ -2231,3 +2246,58 @@ export function tAddedContent(content: AddedContent): string {
 export function tChangedContent(content: ChangedContent): string {
   return describeChangedContent(locale.current, content);
 } // End of function tChangedContent()
+
+/**
+ * Renders one workspace reconciliation banner in the current language — Phase
+ * 2d-6-9a.
+ *
+ * The reactive wrapper over `describeReconciliationWorkspaceState` in `./codes`.
+ * Nothing draws a banner yet; 2d-6-9b draws the decisions of
+ * `decideWorkspaceReconciliation` in `../browser/reconciliationStatus.ts`.
+ *
+ * @param state - The banner.
+ * @returns The translated sentence.
+ */
+export function tReconciliationWorkspaceState(state: WorkspaceReconciliationState): string {
+  return describeReconciliationWorkspaceState(locale.current, state);
+} // End of function tReconciliationWorkspaceState()
+
+/**
+ * Renders one per-file reconciliation state at one placement in the current
+ * language — Phase 2d-6-9a. The reactive wrapper over
+ * `describeReconciliationFileState` in `./codes`; nothing draws one yet (2d-6-9b).
+ *
+ * @param state - The state.
+ * @param placement - Where it is drawn.
+ * @returns The translated sentence.
+ */
+export function tReconciliationFileState(
+  state: FileReconciliationState,
+  placement: FileStatePlacement
+): string {
+  return describeReconciliationFileState(locale.current, state, placement);
+} // End of function tReconciliationFileState()
+
+/**
+ * Renders one reconciliation control's label in the current language — Phase
+ * 2d-6-9a. The reactive wrapper over `describeReconciliationControl` in
+ * `./codes`; nothing draws one yet (2d-6-9b).
+ *
+ * @param control - The control.
+ * @returns The translated label.
+ */
+export function tReconciliationControl(control: ReconciliationControl): string {
+  return describeReconciliationControl(locale.current, control);
+} // End of function tReconciliationControl()
+
+/**
+ * Renders why a reconciliation control is disabled, or why its press was refused,
+ * in the current language — Phase 2d-6-9a. The reactive wrapper over
+ * `describeReconciliationRefusal` in `./codes`; nothing draws one yet (2d-6-9b).
+ *
+ * @param refusal - Why.
+ * @returns The translated sentence.
+ */
+export function tReconciliationRefusal(refusal: ReconciliationRefusal): string {
+  return describeReconciliationRefusal(locale.current, refusal);
+} // End of function tReconciliationRefusal()

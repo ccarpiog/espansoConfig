@@ -61,7 +61,8 @@
  *
  * The last section of this file holds `describe*` accessors over **frontend
  * state** — codes the browser model raises and no Rust enum owns, under
- * `browser.externalConflict.*`. The 2d-6 design consult's Q9 (the record's §3
+ * `browser.externalConflict.*` and, since Phase 2d-6-9a, `browser.reconciliation.*`
+ * and `browser.externalDocument.*`. The 2d-6 design consult's Q9 (the record's §3
  * entry 39) puts new ones here with reactive `t*` wrappers in `./index.ts`, and
  * leaves the older browser-model accessors in `./index.ts` where they are. Their
  * key functions stay beside the types they switch over, in `../browser/`, so a
@@ -162,6 +163,17 @@ import {
   type ExternalConflictNotice
 } from '../browser/observationDelivery';
 import { conflictMessageKey, type ConflictMessage } from '../browser/saveOutcome';
+import {
+  fileReconciliationStateKey,
+  reconciliationControlKey,
+  reconciliationRefusalKey,
+  workspaceReconciliationStateKey,
+  type FileReconciliationState,
+  type FileStatePlacement,
+  type ReconciliationControl,
+  type ReconciliationRefusal,
+  type WorkspaceReconciliationState
+} from '../browser/reconciliationStatus';
 import { DICTIONARIES, translate, type TranslationKey, type TranslationParams } from './dictionaries';
 import type { Locale } from './locale';
 
@@ -1874,3 +1886,83 @@ export function describeExternalConflictAction(
 ): string {
   return translate(locale, externalConflictActionKey(action));
 } // End of function describeExternalConflictAction()
+
+// ---------------------------------------------------------------------------
+// The reconciliation-status sentences — Phase 2d-6-9a
+// ---------------------------------------------------------------------------
+//
+// Frontend state again, under `browser.reconciliation.*`,
+// `browser.externalDocument.*` and `browser.externalConflict.*` (the 2d-6 record's
+// §3 entry 39), and the first accessors that name a coordinator state to a person —
+// which discharges `2d-5-split-notes.md` §6 item 6, the `not watched` state's keys.
+// The key functions live beside the types in `../browser/reconciliationStatus.ts`;
+// `reconciliationStatusCodes.test.ts` calls every one of these in both locales,
+// because the Rust contract sees none of them.
+
+/**
+ * The sentence one workspace banner reads as, in one language.
+ *
+ * A `pathDrift` banner takes its display path as `{path}`, and that path is the
+ * only operand any of these sentences takes — never a command argument, never a
+ * raw subscription error (entry 39).
+ *
+ * @param locale - The dictionary to read from.
+ * @param state - The banner.
+ * @returns The translated sentence.
+ */
+export function describeReconciliationWorkspaceState(
+  locale: Locale,
+  state: WorkspaceReconciliationState
+): string {
+  const key = workspaceReconciliationStateKey(state);
+  return state.kind === 'pathDrift'
+    ? translate(locale, key, { path: state.relativePath })
+    : translate(locale, key);
+} // End of function describeReconciliationWorkspaceState()
+
+/**
+ * The sentence one per-file state reads as at one placement, in one language.
+ *
+ * An `unavailable` state's reason is not in this sentence; it is drawn beside it
+ * through `describeUnreadableReason`, the wire code's own accessor.
+ *
+ * @param locale - The dictionary to read from.
+ * @param state - The state.
+ * @param placement - Where it is drawn.
+ * @returns The translated sentence.
+ */
+export function describeReconciliationFileState(
+  locale: Locale,
+  state: FileReconciliationState,
+  placement: FileStatePlacement
+): string {
+  return translate(locale, fileReconciliationStateKey(state, placement));
+} // End of function describeReconciliationFileState()
+
+/**
+ * The label one reconciliation control reads as, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param control - The control.
+ * @returns The translated label.
+ */
+export function describeReconciliationControl(
+  locale: Locale,
+  control: ReconciliationControl
+): string {
+  return translate(locale, reconciliationControlKey(control));
+} // End of function describeReconciliationControl()
+
+/**
+ * The sentence one disabled control or refused press reads as, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param refusal - Why.
+ * @returns The translated sentence.
+ */
+export function describeReconciliationRefusal(
+  locale: Locale,
+  refusal: ReconciliationRefusal
+): string {
+  return translate(locale, reconciliationRefusalKey(refusal));
+} // End of function describeReconciliationRefusal()

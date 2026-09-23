@@ -346,6 +346,42 @@ describe('the semantic bounds of entry 40, as absences', () => {
     'browser.externalConflict.revisionObserved',
     'browser.externalConflict.affectedFile',
     'browser.externalConflict.destinationRequired',
+    // Phase 2d-6-9a: the route's unknown-outcome sentence and the retry's label,
+    // then every sentence and label of the two namespaces that step added — the
+    // first to name a coordinator state to a person, so the first that could
+    // promise automatic processing or claim a deletion.
+    'browser.externalConflict.route.writeOutcomeUnknown',
+    'browser.externalConflict.action.retry',
+    'browser.externalDocument.stale',
+    'browser.externalDocument.unavailable',
+    'browser.externalDocument.removed',
+    'browser.externalDocument.pathDrift.changed',
+    'browser.externalDocument.pathDrift.removed',
+    'browser.externalDocument.pathDrift.unreadable',
+    'browser.externalDocument.action.reread',
+    'browser.reconciliation.notWatched',
+    'browser.reconciliation.registrationFailed.noTransport',
+    'browser.reconciliation.registrationFailed.rejected',
+    'browser.reconciliation.lostHistory',
+    'browser.reconciliation.membershipReloadWanted',
+    'browser.reconciliation.action.membershipReload',
+    'browser.reconciliation.action.lostHistoryRecovery',
+    'browser.reconciliation.refusal.disposed',
+    'browser.reconciliation.refusal.workspaceNotReady',
+    'browser.reconciliation.refusal.writeInFlight',
+    'browser.reconciliation.refusal.surfaceOpen',
+    'browser.reconciliation.refusal.notBlocked',
+    'browser.reconciliation.refusal.notAddressable',
+    'browser.reconciliation.refusal.blockedByLostHistory',
+    'browser.reconciliation.refusal.uncertaintyUnresolved',
+    'browser.reconciliation.refusal.observationRetained',
+    'browser.reconciliation.refusal.nothingRetained',
+    'browser.reconciliation.refusal.unknown',
+    'browser.reconciliation.refusal.spent',
+    'browser.reconciliation.refusal.workspaceReplaced',
+    'browser.reconciliation.refusal.superseded',
+    'browser.reconciliation.refusal.projectionReplaced',
+    'browser.reconciliation.refusal.holdMoved',
     'browser.conflictOrigin.changedWhileOpen',
     'browser.reapply.externalEvidence.noCorrespondence',
     'browser.reapply.externalEvidence.baseRevisionMoved',
@@ -516,7 +552,7 @@ describe('the semantic bounds of entry 40, as absences', () => {
     for (const key of namespace) {
       expect(BOUNDED_KEYS, key).toContain(key);
     } // End of the loop over every key of the namespace
-    expect(namespace).toHaveLength(7);
+    expect(namespace).toHaveLength(9);
   });
 
   it('never makes a claim the consult forbids, in either locale', () => {
