@@ -909,8 +909,8 @@ describe('the create', () => {
     // The two mandatory fields come from the boxes and the optional ones from the
     // transfer; a key nobody authored is **absent** rather than empty.
     expect(panel.calls[0]!.newMatch).toEqual({
-      trigger: ':sig2',
-      replace: 'Regards',
+      trigger: { Single: ':sig2' },
+      content: { Replace: 'Regards' },
       label: 'A name'
     });
     expect(panel.calls[0]!.baseRevision).toBe(DISK);
@@ -1555,7 +1555,7 @@ describe('the recovery form under an external conflict of its destination, in En
     expect(mounted.calls).toHaveLength(1);
     expect(mounted.calls[0]!.document).toBe(3);
     expect(mounted.calls[0]!.baseRevision).toBe(AFTER);
-    expect(mounted.calls[0]!.newMatch.trigger).toBe(':typed');
+    expect(mounted.calls[0]!.newMatch.trigger).toEqual({ Single: ':typed' });
     mounted.stop();
   }); // End of the "keep my draft rebases" case
 

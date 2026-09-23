@@ -623,6 +623,37 @@ describe('the carriage return', () => {
     expect(creationRefusal(forced)).toBe('carriageReturn');
     expect(beginCreate(forced, () => forced)).toBeNull();
   });
+
+  it('checks the captured payload, not a second read of getter-backed buffers', () => {
+    // A candidate whose `trigger` getter answers a `\r` on exactly one read, the
+    // k-th, and clean text on every other. Whichever read that is — eligibility,
+    // the capture or a re-check — a create that starts must send no `\r`. Before
+    // the 3-4 review fix the gate reread the buffers, so the k that hit the
+    // capture started a create carrying `\r` and this case failed.
+    let refusedAtTheCapture = false;
+    for (let k = 1; k <= 12; k += 1) {
+      let reads = 0;
+      const buffers = {
+        get trigger(): string {
+          reads += 1;
+          return reads === k ? ':n\rew' : ':new';
+        },
+        replace: 'a body'
+      };
+      const base = ready();
+      const session: MatchCreationSession = {
+        ...base,
+        draft: { ...base.draft, value: buffers }
+      };
+      const started = beginCreate(session, () => session);
+      if (started === null) {
+        refusedAtTheCapture = true;
+        continue;
+      }
+      expect(JSON.stringify(started.newMatch)).not.toContain('\\r');
+    } // End of the loop over which read answers the carriage return
+    expect(refusedAtTheCapture).toBe(true);
+  });
 }); // End of the "carriage return" suite
 
 describe('starting a create', () => {
@@ -630,7 +661,10 @@ describe('starting a create', () => {
     const started = ((onHand) => beginCreate(onHand, () => onHand))(ready());
     expect(started).not.toBeNull();
     expect(started!.document).toBe(2);
-    expect(started!.newMatch).toEqual({ trigger: ':new', replace: 'a body' });
+    expect(started!.newMatch).toEqual({
+      trigger: { Single: ':new' },
+      content: { Replace: 'a body' }
+    });
     expect(started!.position).toEqual({ End: {} });
     expect(newMatchOf(started!.submission.candidate)).toEqual(started!.newMatch);
     expect(started!.session.phase).toBe('saving');

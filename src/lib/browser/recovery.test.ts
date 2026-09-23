@@ -108,6 +108,7 @@ import {
   recoveryDestinationsOf,
   recoveryReapplyObstacleKey,
   recoveryRefusal,
+  textsOfNewMatch,
   recoveryRefusalKey,
   recoveryRouteOf,
   recoveryIsAnswerable,
@@ -871,7 +872,12 @@ describe('what a retained draft becomes in the new snippet', () => {
     );
     const transfer = transferOfMatchDraft(baseline, buffers);
     const newMatch = newMatchOfRecovery(transfer, { trigger: ':sig', replace: 'Regards' });
-    expect(newMatch).toEqual({ trigger: ':sig', replace: 'Regards', label: '', word: 'true' });
+    expect(newMatch).toEqual({
+      trigger: { Single: ':sig' },
+      content: { Replace: 'Regards' },
+      label: '',
+      word: 'true'
+    });
     // The absent keys are **absent**, not present and undefined: `serde` reads a
     // missing key as `None` and would read an explicit `null` the same way, but a
     // property that exists at all is what `exactOptionalPropertyTypes` is about.
@@ -879,11 +885,29 @@ describe('what a retained draft becomes in the new snippet', () => {
     expect('right_word' in newMatch).toBe(false);
   }); // End of the "None is not Some(empty)" case
 
+  it('reads every text a new snippet would write, inside the typed alternatives too', () => {
+    const texts = textsOfNewMatch({
+      trigger: { Multiple: [':a', 'b\r'] },
+      content: { Markdown: 'body' },
+      label: 'L',
+      search_terms: ['t1', 't2'],
+      word: null
+    });
+    expect([...texts].sort()).toEqual([':a', 'L', 'b\r', 'body', 't1', 't2']);
+    // The carriage-return gate reads the alternative's payload, not only the
+    // top-level strings a pre-3-4 payload held.
+    expect(
+      textsOfNewMatch({ trigger: { Single: 'x\r' }, content: { Replace: 'y' } }).some((text) =>
+        text.includes('\r')
+      )
+    ).toBe(true);
+  });
+
   it('takes the two mandatory values from the controls and never from the transfer', () => {
     const transfer = transferOfCreationDraft({ trigger: ':new', replace: 'A body' });
     expect(newMatchOfRecovery(transfer, { trigger: ':typed', replace: 'Typed' })).toEqual({
-      trigger: ':typed',
-      replace: 'Typed'
+      trigger: { Single: ':typed' },
+      content: { Replace: 'Typed' }
     });
   });
 }); // End of the "transfer" suite
@@ -1058,8 +1082,8 @@ describe('sending the recovery create', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]![0]).toBe(2);
     expect(calls[0]![1]).toEqual({
-      trigger: ':sig',
-      replace: 'Regards',
+      trigger: { Single: ':sig' },
+      content: { Replace: 'Regards' },
       label: 'A name'
     });
     expect(calls[0]![3]).toBe(DISK);
@@ -1418,6 +1442,8 @@ const NOT_A_FORM_TRANSITION: readonly string[] = [
   'transferOfMatchDraft',
   'transferOfCreationDraft',
   'newMatchOfRecovery',
+  // Phase 3-4: a `NewMatch` in, its texts out; it takes no form.
+  'textsOfNewMatch',
   'conflictDraftKindOf',
   'recoveryRouteOf',
   'fieldsNotCarried',
@@ -1801,7 +1827,7 @@ describe('what the form refuses to send', () => {
     });
     const typed = editRecoveryField(session, 'trigger', ':chosen');
     expect(recoveryRefusal(typed)).toBeNull();
-    expect(beginRecoveryCreate(typed, () => typed)?.newMatch.trigger).toBe(':chosen');
+    expect(beginRecoveryCreate(typed, () => typed)?.newMatch.trigger).toEqual({ Single: ':chosen' });
   }); // End of the "blank rather than invented" case
 
   it('refuses a carriage return at the control and again at the wire', () => {

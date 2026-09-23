@@ -277,9 +277,9 @@ export interface BrowserCommands {
    * Writes one new snippet into a file's snippet list, and saves the file.
    *
    * @param document - The file to write into, by the identity this window holds.
-   * @param newMatch - What the new snippet says: a trigger and a body, both
-   *   required, plus any of the four optional schema-known fields it is born
-   *   holding.
+   * @param newMatch - What the new snippet says: a typed trigger and a typed
+   *   body, both required, plus any of the twelve optional schema-known fields
+   *   it is born holding.
    * @param position - Where it goes in the list; the `After` arm names the
    *   snippet it follows **by identity**.
    * @param baseRevision - The revision the caller believes the file holds, and

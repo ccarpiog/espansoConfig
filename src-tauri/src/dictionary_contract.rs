@@ -564,6 +564,21 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          built from beyond a `MatchId`",
     ),
     (
+        "NewTrigger",
+        "a protocol tag, not a code, exactly as `NewMatchPosition` is: `Single`, \
+         `Multiple` and `Regex` travel *into* `create_match` as which trigger key \
+         a new snippet is born with, and are never rendered. What a screen puts \
+         beside the value is the espanso key it becomes (`trigger`, `triggers`, \
+         `regex`), spelled the same in every language",
+    ),
+    (
+        "NewContent",
+        "a protocol tag, not a code, for `NewTrigger`'s reason: `Replace`, \
+         `Markdown`, `Html`, `ImagePath` and `Form` say which content key a new \
+         snippet is born with, travel only into `create_match`, and are never \
+         rendered; a screen shows the espanso key itself",
+    ),
+    (
         "ObservedDocument",
         "an address, not a code, exactly as `PathSegment` is: it says which \
          file an external observation is about, and all three arms are rendered \

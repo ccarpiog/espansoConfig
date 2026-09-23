@@ -5294,3 +5294,32 @@ After the review fix (comments only): `npm run check` exit 0 (462, 0/0) and `npm
 - `/private/tmp/2d7-7-cargo.log`: 26 `test result: ok` lines, no result line with a non-zero `failed`.
 - The review found nothing to fix; no gate re-run was owed.
 - The standing-ruling commit of 2026-09-23 touched records only (the record, the notes, this checkpoint pair, the archive); no gate re-run was owed.
+
+
+## The verification blocks of 2d-7-8, 2d-7-9, 2d-7-10 and 2d-8 — archived verbatim 2026-09-23 at Phase 3-4
+
+### Phase 2d-8's verification
+
+**`1323 / 461 / 3546 / 200`, harness-free**, exactly the rung 2d-7-10 predicted (`1330 / 462 / 3547 / 201` minus the instrument's `7 / 1 / 1 / 1`). Worker, each exit 0: `cargo build --workspace`; `cargo test --workspace -- --test-threads=1 > /private/tmp/2d8-cargo.log 2>&1` (1323 passed, 0 failed); clippy `-D warnings`; `cargo fmt --check`; `npm run check`; `npm test`; `npm run build` (200 modules; server-only oracle absent, client-only present); `cargo tree -p espansoconfig-core | rg tauri` empty. The orchestrator re-ran, after the worker: `npm test` exit 0, 3546 passed (72 files); `npm run check` 461 files 0/0; `/private/tmp/2d8-cargo.log` 26 `test result: ok` lines, no failure line; `ls` of `probe.rs` and `probe.ts` → absent; `git status --short --untracked-files=all` → only the phase's paths. The review found nothing; no re-run owed. Detail: [`2d-8-notes.md`](docs/decisions/2d-8-notes.md).
+
+### Phase 2d-7-10's verification
+
+**`1330 / 462 / 3547 / 201`** with the instrument, unchanged (records only). Orchestrator re-ran: `cargo test --workspace -- --test-threads=1` → 26 `test result: ok` lines, no failure (log `/private/tmp/2d7-10-orch-cargo.txt`); `npm test` → 3547 passed (72 files); `npm run check` → 462 files, 0 errors, 0 warnings. Worker, each exit 0: clippy `-D warnings`, `cargo fmt --check`, `npm run build` (201 modules; server-only oracle absent, client-only 2); pristine `git archive` of `c5fed6b` → `1323 / 461 / 3546 / 200`, the instrument's share `7 / 1 / 1 / 1`; hash check `summary ok=18 diff=0`; hook diff `5 insertions(+), 1 deletion(-)`. Detail: [`2d-7-10-notes.md`](docs/decisions/2d-7-10-notes.md) §8.
+
+### Phase 2d-7-8's verification
+
+**`1330 / 462 / 3547 / 201`**, unchanged (no tracked source changed). The worker ran every `CLAUDE.md` §4 gate with the instrument present, each exit 0: `cargo fmt --check`; clippy `-D warnings`; `cargo test --workspace -- --test-threads=1 > /private/tmp/2d7-8-cargo.log` (1330 passed, 0 failed); `npm run check` (462, 0/0); `npm test` (3547); `npm run build` (201; server oracle absent, client oracle 2). Instrument hashes 18/18 equal the frozen set at 17:19:02 and 17:27:29. The orchestrator re-ran, alone, after the worker:
+- `/private/tmp/2d7-6-1-hashcheck.sh` at 17:29:53: `summary ok=18 diff=0`, binary `53d84fb2…`.
+- `git diff --stat src-tauri/src/main.rs src/main.ts`: `5 insertions(+), 1 deletion(-)`.
+- `npm test`: exit 0, 3547 passed.
+- `/private/tmp/2d7-8-cargo.log`: 26 `test result: ok` lines, no failures.
+- The review found nothing to fix; no gate re-run was owed.
+
+### Phase 2d-7-9's verification
+
+**`1330 / 462 / 3547 / 201`**, unchanged (no tracked source changed). The worker ran every `CLAUDE.md` §4 gate with the instrument present, each exit 0: `cargo fmt --check`; clippy `-D warnings` (`/private/tmp/2d7-9-clippy.log`); `cargo test --workspace -- --test-threads=1 > /private/tmp/2d7-9-cargo.log 2>&1` (26 `test result: ok` lines, 1330 passed, no non-zero `failed`); `npm run check` (462, 0/0); `npm test` (72 files, 3547); `npm run build` (201; server oracle absent, client oracle 2). Instrument hashes 18/18 equal the frozen set before the session (18:17:21, the orchestrator's), after the last launch, before the records (18:51:26) and after the gates ([`2d-7-9-notes.md`](docs/decisions/2d-7-9-notes.md) §1, §5). The orchestrator re-ran, alone, after the worker:
+- `/private/tmp/2d7-6-1-hashcheck.sh`: `summary ok=18 diff=0`.
+- `git diff --stat src-tauri/src/main.rs src/main.ts`: `5 insertions(+), 1 deletion(-)`.
+- `npm test`: exit 0, `Tests 3547 passed (3547)`, `Test Files 72 passed (72)`.
+- `/private/tmp/2d7-9-cargo.log`: 26 `test result: ok` lines, 1330 passed, no result line with a non-zero `failed`.
+- The review's one fix touched the two records only; no gate re-run was owed.

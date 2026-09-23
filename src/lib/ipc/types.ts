@@ -2516,38 +2516,68 @@ export interface MatchDraft {
 }
 
 // ---------------------------------------------------------------------------
-// The creation surface — Phase 2b-2c-2
+// The creation surface — Phase 2b-2c-2, widened at Phase 3-4
 // ---------------------------------------------------------------------------
+
+/**
+ * How a new snippet is triggered: exactly one of espanso's three trigger keys.
+ *
+ * Mirrors Rust's `NewTrigger` (Phase 3-4). Each arm is a one-key object whose
+ * tag is a protocol tag, never shown to anyone: `Single` becomes `trigger:`,
+ * `Multiple` becomes a `triggers:` list in the order given, and `Regex` becomes
+ * `regex:`. A `Multiple` list holds **at least one** alias — the tuple type says
+ * so here, and Rust refuses an empty array while reading the command's
+ * arguments — because a `triggers: []` snippet cannot fire.
+ */
+export type NewTrigger =
+  | { readonly Single: string }
+  | { readonly Multiple: readonly [string, ...string[]] }
+  | { readonly Regex: string };
+
+/**
+ * What a new snippet expands to: exactly one of espanso's five content keys.
+ *
+ * Mirrors Rust's `NewContent` (Phase 3-4). The tag names the key — `Replace`
+ * is `replace:`, `ImagePath` is `image_path:` — and the value is logical text.
+ * `Form` is the shorthand form's layout text only; creation writes no
+ * `form_fields`.
+ */
+export type NewContent =
+  | { readonly Replace: string }
+  | { readonly Markdown: string }
+  | { readonly Html: string }
+  | { readonly ImagePath: string }
+  | { readonly Form: string };
 
 /**
  * What a snippet that does not exist yet is born holding.
  *
- * **Closed at six keys: two required and four optional.** It is not a
- * {@link MatchDraft}: a draft can express twenty-two fields and four lists, and
- * creation writes exactly one flat mapping of scalars, so accepting a draft
- * would advertise a structure `createMatch` cannot produce and the caller would
- * learn that from a refusal rather than from the type. It is not a list of
- * key/value pairs either — the keys a save writes are fixed by espanso's schema,
- * never composed by a caller.
+ * **Closed: one trigger alternative, one content alternative, and twelve
+ * optional schema-known fields** (Phase 3-4; Phase 2c-4c-1 had widened it from
+ * two keys to six). It is not a {@link MatchDraft}: a draft can express `vars`
+ * and `form_fields`, and creation writes exactly one flat mapping of scalars and
+ * scalar lists, so accepting a draft would advertise a structure `createMatch`
+ * cannot produce and the caller would learn that from a refusal rather than from
+ * the type. It is not a list of key/value pairs either — the keys a save writes
+ * are fixed by espanso's schema, never composed by a caller. Rust reads it with
+ * `deny_unknown_fields`, so a property this interface does not declare is
+ * refused rather than dropped.
  *
- * **Phase 2c-4c-1 widened it from two keys to six.** The four it added are
- * exactly the four `matchEditor.ts` drafts beside `trigger` and `replace`, so
- * that a creation can carry what an editing session was holding rather than
- * silently dropping four of its six fields.
- *
- * **`replace` is required**, on the ground that a trigger with no body is not a
- * usable espanso snippet and this application should not create one. A later
- * save can still change it, and can add another schema-known field beside it.
+ * **The trigger and the content are required**, on the ground that a trigger
+ * with no body is not a usable espanso snippet and this application should not
+ * create one. A later save can still change either, and can add another
+ * schema-known field beside them.
  *
  * **An omitted optional field is a key the new snippet is not born holding at
- * all; an empty string is that key written with an empty value.** The two are
- * different requests, and this type carries the caller's decision rather than
- * inferring it from a blank control — the distinction `MatchBaseline` and
- * `MatchBuffers` exist to keep apart when *editing* a snippet.
+ * all; an empty string is that key written with an empty value** (and an empty
+ * `search_terms` array is `search_terms: []`). The two are different requests,
+ * and this type carries the caller's decision rather than inferring it from a
+ * blank control — the distinction `MatchBaseline` and `MatchBuffers` exist to
+ * keep apart when *editing* a snippet.
  *
- * The three word-boundary keys are **text, not booleans**, for the reason their
- * controls are: deciding that `word: on` means boolean true is a claim about how
- * espanso reads a plain scalar, and D2u forbids this application making one.
+ * The options are **text, not booleans**, for the reason their controls are:
+ * deciding that `word: on` means boolean true is a claim about how espanso reads
+ * a plain scalar, and D2u forbids this application making one.
  *
  * Every value is **logical text**, not YAML. How each is spelled — plain,
  * quoted, or a `|` block — is Rust's decision, made by the same encoder every
@@ -2555,18 +2585,34 @@ export interface MatchDraft {
  * line break or a leading `*` is written correctly rather than injected.
  */
 export interface NewMatch {
-  /** The literal text that fires the snippet — espanso's `trigger`. */
-  readonly trigger: string;
-  /** What the snippet expands to — espanso's `replace`. */
-  readonly replace: string;
+  /** Which trigger key the new snippet is born with, and its value. */
+  readonly trigger: NewTrigger;
+  /** Which content key the new snippet is born with, and its value. */
+  readonly content: NewContent;
   /** `label`, when the new snippet is born holding one. */
   readonly label?: string | null;
-  /** `word`, as source text, when the new snippet is born holding it. */
+  /** `comment`, when the new snippet is born holding one. */
+  readonly comment?: string | null;
+  /** `search_terms`, in order, when the new snippet is born holding the list. */
+  readonly search_terms?: readonly string[] | null;
+  /** `word`, as source text. */
   readonly word?: string | null;
-  /** `left_word`, as source text, when the new snippet is born holding it. */
+  /** `left_word`, as source text. */
   readonly left_word?: string | null;
-  /** `right_word`, as source text, when the new snippet is born holding it. */
+  /** `right_word`, as source text. */
   readonly right_word?: string | null;
+  /** `propagate_case`, as source text. */
+  readonly propagate_case?: string | null;
+  /** `uppercase_style`, as source text. */
+  readonly uppercase_style?: string | null;
+  /** `force_mode`, as source text. */
+  readonly force_mode?: string | null;
+  /** `force_clipboard`, as source text. */
+  readonly force_clipboard?: string | null;
+  /** `paragraph`, as source text. */
+  readonly paragraph?: string | null;
+  /** `anchor`, as source text — the espanso key, not YAML `&anchor` syntax. */
+  readonly anchor?: string | null;
 }
 
 /**

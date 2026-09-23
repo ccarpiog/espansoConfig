@@ -604,14 +604,15 @@ fn save_match_is_reachable_and_its_draft_deserializes_from_the_wire() {
 /// 1. **Both are registered and a capability set naming no application command
 ///    does not block them.**
 /// 2. **`NewMatch` deserializes off the wire.** The payload here names the two
-///    **required** keys and none of the four optional ones — the type carries two
-///    required and four optional schema-known scalar fields since Phase 2c-4c-1 —
-///    so this also pins that the four omitted keys default to absent rather than
-///    to empty, which the written bytes below assert. An object missing one of the
-///    two required keys is refused *inside Tauri's command macro*, which is why a
-///    caller sends both or sends nothing. The six-field payload is measured at
-///    `commands.rs`'s
-///    `an_ordinary_creation_carries_six_fields_and_reports_a_repeated_trigger`.
+///    **required** typed alternatives — `{"trigger": {"Single": …}, "content":
+///    {"Replace": …}}`, the shape since Phase 3-4 — and none of the twelve
+///    optional fields, so this also pins that the omitted keys default to absent
+///    rather than to empty, which the written bytes below assert. An object
+///    missing one of the two required keys, or still in the pre-3-4 flat shape
+///    (`"replace"` beside a string `"trigger"`), is refused *inside Tauri's
+///    command macro*, which is why a caller sends both or sends nothing. The wide
+///    payloads are measured at `commands.rs`'s
+///    `a_wide_creation_reaches_the_disk_in_crlf_and_without_a_final_newline`.
 /// 3. **`NewMatchPosition` crosses as a one-key object for every arm**, including
 ///    the two that carry nothing. `{"End":{}}` is the shape a Rust struct variant
 ///    with empty braces produces; a unit variant would have wanted the bare string
@@ -634,7 +635,10 @@ fn create_and_delete_match_are_reachable_and_their_arguments_deserialize() {
         "create_match",
         json!({
             "document": document_id,
-            "newMatch": { "trigger": ":new", "replace": "a new snippet" },
+            "newMatch": {
+                "trigger": { "Single": ":new" },
+                "content": { "Replace": "a new snippet" },
+            },
             // The operand-less arm, as the object a struct variant writes.
             "position": { "End": {} },
             "baseRevision": view["revision"],
@@ -672,21 +676,28 @@ fn create_and_delete_match_are_reachable_and_their_arguments_deserialize() {
     assert_eq!(found["trigger"]["trigger"]["text"], ":new");
 
     // A missing half of the snippet is refused at the boundary rather than
-    // written as a trigger with no body.
+    // written as a trigger with no body, and so are the pre-3-4 flat shape and
+    // an empty `triggers` list.
     let refreshed =
         invoke(&webview, "get_document", json!({ "id": document_id })).expect("the document reads");
-    invoke(
-        &webview,
-        "create_match",
-        json!({
-            "document": document_id,
-            "newMatch": { "trigger": ":half" },
-            "position": { "Front": {} },
-            "baseRevision": refreshed["revision"],
-            "acknowledgement": { "accepted": [] },
-        }),
-    )
-    .expect_err("a trigger with no body is not a snippet this application creates");
+    for refused in [
+        json!({ "trigger": { "Single": ":half" } }),
+        json!({ "trigger": ":flat", "replace": "the pre-3-4 shape" }),
+        json!({ "trigger": { "Multiple": [] }, "content": { "Replace": "x" } }),
+    ] {
+        invoke(
+            &webview,
+            "create_match",
+            json!({
+                "document": document_id,
+                "newMatch": refused,
+                "position": { "Front": {} },
+                "baseRevision": refreshed["revision"],
+                "acknowledgement": { "accepted": [] },
+            }),
+        )
+        .expect_err("not a snippet this application creates");
+    } // End of the loop over the payloads refused at the boundary
 
     // Then the deletion, which answers with no identity at all.
     let deleted = invoke(

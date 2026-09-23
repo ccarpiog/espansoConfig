@@ -671,7 +671,7 @@ export type FieldTransfer =
        *
        * **`carried('')` is a key with an empty value and is not the same request
        * as omitting the key**, which is step 1's contract restated on this side:
-       * `NewMatch::fields()` writes `label: ''` for the first and no `label` line
+       * `NewMatch::entries()` writes `label: ''` for the first and no `label` line
        * at all for the second.
        */
       readonly kind: 'carried';
@@ -734,15 +734,17 @@ export function transferOfField(baseline: FieldBaseline, buffer: FieldBuffer): F
 /**
  * What a match editor's retained draft becomes in the new snippet.
  *
- * All six fields, in {@link EDITABLE_FIELDS} order — which is also the order
- * `NewMatch::fields()` writes them in, and the two agree without either being
+ * All six fields, in {@link EDITABLE_FIELDS} order — which is also the relative
+ * order `NewMatch::entries()` writes them in, and the two agree without either being
  * derived from the other: Rust writes its order out literally so that a reorder
  * here could not silently reorder written bytes (2c-4c-1's D3).
  *
  * **The sixteen other scalar fields and the four collections are not transferred
- * at all.** They are not in `NewMatch`, and this editor never drafted them: what
- * it sends for them is *leave this alone*, which is a statement about an existing
- * snippet and means nothing for one that does not exist yet.
+ * at all.** Some of them are in `NewMatch` since Phase 3-4 (`comment`, the other
+ * options, `search_terms`), but this editor never drafted them: what it sends for
+ * them is *leave this alone*, which is a statement about an existing snippet and
+ * means nothing for one that does not exist yet. Carrying them is a later step's
+ * (3-5), together with a control for each.
  *
  * @param baseline - What the file held when the editing session was seeded.
  * @param buffers - The draft the conflict retained.
@@ -835,8 +837,8 @@ export function newMatchOfRecovery(
   const leftWord = carriedText(transfer.left_word);
   const rightWord = carriedText(transfer.right_word);
   return {
-    trigger: buffers.trigger,
-    replace: buffers.replace,
+    trigger: { Single: buffers.trigger },
+    content: { Replace: buffers.replace },
     ...(label === null ? {} : { label }),
     ...(word === null ? {} : { word }),
     ...(leftWord === null ? {} : { left_word: leftWord }),
@@ -1845,6 +1847,39 @@ export interface StartedRecoveryCreate {
 }
 
 /**
+ * Every text a {@link NewMatch} would write, keys excluded.
+ *
+ * The payloads of the two typed alternatives, every optional text and every
+ * `search_terms` item. It reads the value's own properties rather than a list
+ * of names, so a text field added to `NewMatch` later is read here too; what it
+ * cannot see is a value nested deeper than one object or one array, which the
+ * type does not have.
+ *
+ * @param newMatch - The value `create_match` would be sent.
+ * @returns Every string it carries, in no particular order.
+ */
+export function textsOfNewMatch(newMatch: NewMatch): string[] {
+  const texts: string[] = [];
+  /**
+   * Collects `value` when it is a string, and the strings directly inside it
+   * when it is an array or an object.
+   *
+   * @param value - One property's value.
+   */
+  const collect = (value: unknown): void => {
+    if (typeof value === 'string') {
+      texts.push(value);
+    } else if (Array.isArray(value)) {
+      texts.push(...value.filter((item): item is string => typeof item === 'string'));
+    } else if (value !== null && typeof value === 'object') {
+      Object.values(value).forEach(collect);
+    }
+  }; // End of function collect()
+  Object.values(newMatch).forEach(collect);
+  return texts;
+} // End of function textsOfNewMatch()
+
+/**
  * Starts a recovery create of the form as it stands.
  *
  * The wire values are built from **the submission's own candidate** rather than
@@ -1890,7 +1925,7 @@ export function beginRecoveryCreate(
   }
   const submission = submissionOf(session.draft);
   const newMatch = newMatchOfRecovery(session.transfer, submission.candidate);
-  if (Object.values(newMatch).some((value) => typeof value === 'string' && value.includes('\r'))) {
+  if (textsOfNewMatch(newMatch).some((value) => value.includes('\r'))) {
     return null;
   }
   const started: StartedRecoveryCreate = {

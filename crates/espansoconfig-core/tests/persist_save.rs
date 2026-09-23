@@ -51,7 +51,7 @@ mod common;
 
 use common::corpus_root;
 use espansoconfig_core::discovery::FileKind;
-use espansoconfig_core::draft::NewMatch;
+use espansoconfig_core::draft::{NewContent, NewMatch, NewTrigger};
 use espansoconfig_core::model::DocumentContext;
 use espansoconfig_core::patch::{
     apply_scalar_edit, path_to, DocumentEdit, DocumentPath, DuplicateItem, EditError, InsertItem,
@@ -1076,7 +1076,7 @@ fn a_duplicate_of_a_triggerless_match_is_refused_for_the_model_error_alone() {
 ///
 /// It **reconstructs** the lowering `create_one_match` performs in
 /// `src-tauri/src/commands.rs` — exactly one `InsertItem` carrying
-/// `NewMatch::fields()` and nothing else — and reconstructing is not crossing.
+/// `NewMatch::entries()` and nothing else — and reconstructing is not crossing.
 /// What every test below measures is what the save transaction does with such a
 /// batch, which is this file's subject; **it is not evidence about
 /// `create_match`**, because a change to that command's own lowering could not
@@ -1084,23 +1084,19 @@ fn a_duplicate_of_a_triggerless_match_is_refused_for_the_model_error_alone() {
 /// is `an_ordinary_creation_carries_six_fields_and_reports_a_repeated_trigger` in
 /// `src-tauri/src/commands.rs` (the 2c-4c-1 review's finding 2).
 fn creation(new_match: &NewMatch, placement: ItemPlacement) -> DocumentEdit {
-    DocumentEdit::InsertItem(InsertItem::at(
+    DocumentEdit::InsertItem(InsertItem::typed(
         DocumentPath::parse("matches").expect("the test's own path parses"),
         placement,
-        new_match.fields(),
+        new_match.entries(),
     ))
 } // End of function creation()
 
 /// A `NewMatch` holding only the two mandatory fields.
 fn new_match(trigger: &str, replace: &str) -> NewMatch {
-    NewMatch {
-        trigger: trigger.to_owned(),
-        replace: replace.to_owned(),
-        label: None,
-        word: None,
-        left_word: None,
-        right_word: None,
-    }
+    NewMatch::new(
+        NewTrigger::Single(trigger.to_owned()),
+        NewContent::Replace(replace.to_owned()),
+    )
 } // End of function new_match()
 
 /// An ordinary creation whose trigger repeats one already in the list is
@@ -1782,14 +1778,10 @@ fn a_creation_acknowledgement_does_not_transfer_across_a_same_length_rewrite() {
 fn a_six_field_creation_writes_all_six_keys_and_still_reports_the_repetition() {
     let (_directory, target) = fixture(CLEAN);
     let before = revision_on_disk(&target);
-    let recovered = NewMatch {
-        trigger: ":one".to_owned(),
-        replace: "a recovered body".to_owned(),
-        label: Some("a recovered label".to_owned()),
-        word: Some("true".to_owned()),
-        left_word: Some("false".to_owned()),
-        right_word: None,
-    };
+    let mut recovered = new_match(":one", "a recovered body");
+    recovered.label = Some("a recovered label".to_owned());
+    recovered.word = Some("true".to_owned());
+    recovered.left_word = Some("false".to_owned());
     let edits = [creation(&recovered, ItemPlacement::End)];
 
     let refused = save(&target, before, &edits, &Acknowledgement::none())

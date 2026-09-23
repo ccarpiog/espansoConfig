@@ -806,7 +806,7 @@ describe('the mounted new-snippet form', () => {
     expect(form.calls).toHaveLength(1);
     const sent = form.calls[0]!;
     expect(sent.document).toBe(2);
-    expect(sent.newMatch).toEqual({ trigger: ':new', replace: 'a body' });
+    expect(sent.newMatch).toEqual({ trigger: { Single: ':new' }, content: { Replace: 'a body' } });
     // **An identity and never an ordinal**, which is the half of Q4 a model test
     // cannot make a claim about: what the control produced is the anchor the model
     // minted, all three of its fields.
@@ -1696,7 +1696,10 @@ describe('the creation form’s recovery', () => {
     expect(form.calls[1]?.baseRevision).toBe(AFTER);
     // The two authored fields and no key nobody authored: an absent optional writes
     // no key, which is a different request from sending it empty.
-    expect(form.calls[1]?.newMatch).toEqual({ trigger: ':new', replace: 'a body' });
+    expect(form.calls[1]?.newMatch).toEqual({
+      trigger: { Single: ':new' },
+      content: { Replace: 'a body' }
+    });
     expect(form.adoptions).toEqual([]);
     expect(says(form.target, sourceConflictStateKey('spent'))).toBe(true);
     form.stop();

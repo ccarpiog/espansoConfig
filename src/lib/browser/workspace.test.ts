@@ -5313,7 +5313,7 @@ describe("replacing a file's whole text", () => {
 }); // End of the "replacing a file's whole text" suite
 
 /** What a new snippet says, on the wire. */
-const NEW_MATCH: NewMatch = { trigger: ':new', replace: 'a new body' };
+const NEW_MATCH: NewMatch = { trigger: { Single: ':new' }, content: { Replace: 'a new body' } };
 
 /** The bottom of the destination file's list. */
 const AT_END: NewMatchPosition = { End: {} };
@@ -6285,7 +6285,11 @@ describe('recovering a draft no reapply could resolve', () => {
 
     const call = vi.mocked(commands.createMatch).mock.calls[0]!;
     expect(call[0]).toBe(2);
-    expect(call[1]).toEqual({ trigger: ':sig', replace: 'a body', label: 'Signature' });
+    expect(call[1]).toEqual({
+      trigger: { Single: ':sig' },
+      content: { Replace: 'a body' },
+      label: 'Signature'
+    });
     expect(call[2]).toEqual({ End: {} });
     // The **disk** revision the conflict carried, not the `rev-a` this window is
     // still projecting: recovery drafts against the observation that refused the

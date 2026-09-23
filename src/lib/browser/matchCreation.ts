@@ -1354,17 +1354,32 @@ export type CreationRefusal =
  * plain, quoted, or a `|` block — is Rust's decision, made by the same encoder
  * every other value this application writes goes through.
  *
- * **This form authors two of {@link NewMatch}'s six fields, and that is a fact
- * about the form rather than about the type**: the four optional schema-known
- * fields are omitted here, which asks Rust to write no key for any of them. It is
- * not the same request as sending them empty.
+ * **This form authors a single `trigger` and a `replace` body, and that is a
+ * fact about the form rather than about the type**: {@link NewMatch} also offers
+ * a `triggers` list, a `regex`, four other content keys and twelve optional
+ * schema-known fields (Phase 3-4), and every optional one is omitted here, which
+ * asks Rust to write no key for any of them. It is not the same request as
+ * sending them empty.
  *
  * @param buffers - What the controls hold.
  * @returns The value `create_match` takes.
  */
 export function newMatchOf(buffers: CreationBuffers): NewMatch {
-  return { trigger: buffers.trigger, replace: buffers.replace };
+  return { trigger: { Single: buffers.trigger }, content: { Replace: buffers.replace } };
 } // End of function newMatchOf()
+
+/**
+ * The texts of a new snippet's two typed alternatives, as captured in the value.
+ *
+ * Reads the payloads of `trigger` and `content` — whatever arm each is — and
+ * nothing else, which is everything {@link newMatchOf} puts in a `NewMatch`.
+ *
+ * @param newMatch - The value `create_match` would be sent.
+ * @returns Every alias or text the two alternatives carry.
+ */
+function capturedTexts(newMatch: NewMatch): string[] {
+  return [...Object.values(newMatch.trigger), ...Object.values(newMatch.content)].flat();
+} // End of function capturedTexts()
 
 /**
  * Why the form cannot be submitted, or `null` when it can.
@@ -1543,7 +1558,11 @@ export function beginCreate(
   }
   const submission = submissionOf(session.draft);
   const newMatch = newMatchOf(submission.candidate);
-  if (newMatch.trigger.includes('\r') || newMatch.replace.includes('\r')) {
+  // The gate reads the strings **captured in `newMatch`**, never the buffers
+  // again: a getter-backed candidate could answer clean text here and a `\r` to
+  // the capture above, and a check and a spend separated by a property read are
+  // not atomic (`CLAUDE.md` §6).
+  if (capturedTexts(newMatch).some((text) => text.includes('\r'))) {
     return null;
   }
   const started: StartedCreation = {

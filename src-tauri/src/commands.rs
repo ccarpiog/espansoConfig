@@ -2262,10 +2262,10 @@ fn create_one_match(
     let landed = placement
         .items_above(view.matches.len())
         .map(|index| sequence.clone().with_index(index));
-    let edits = [DocumentEdit::InsertItem(InsertItem::at(
+    let edits = [DocumentEdit::InsertItem(InsertItem::typed(
         sequence,
         placement,
-        new_match.fields(),
+        new_match.entries(),
     ))];
     run_one_save(
         workspace,
@@ -3179,16 +3179,20 @@ pub fn save_match(
 ///   target could write to the wrong file. This is the one mutating command whose
 ///   target is a document rather than a match, because the match it acts on does
 ///   not exist yet.
-/// - `new_match` — a closed [`NewMatch`]: **two required and four optional
-///   schema-known scalar fields**, `trigger` and `replace` mandatory and `label`,
-///   `word`, `left_word` and `right_word` written only when they are present. An
-///   absent optional field is a key the new snippet is not born holding, which is
-///   a different request from one written with an empty value. Not a
-///   [`MatchDraft`]: a draft can express twenty-two fields and four collections,
-///   and creation synthesizes exactly one flat mapping of scalars, so taking one
-///   would advertise a structure this command cannot spell. Not a list of
-///   key/value pairs either — `docs/decisions/2b-2b-2-notes.md` decision D1
-///   forbids this engine emitting a key no schema fixes.
+/// - `new_match` — a closed [`NewMatch`] (Phase 3-4): **one typed trigger
+///   alternative** (`trigger`, a non-empty `triggers` list or `regex`), **one
+///   typed content alternative** (`replace`, `markdown`, `html`, `image_path` or
+///   `form`), and twelve optional schema-known fields — `label`, `comment`, the
+///   `search_terms` list and the nine match options — each written only when it
+///   is present. An absent optional field is a key the new snippet is not born
+///   holding, which is a different request from one written with an empty value.
+///   Not a [`MatchDraft`]: a draft can express `vars` and `form_fields`, and
+///   creation synthesizes exactly one flat mapping of scalars and scalar lists,
+///   so taking one would advertise a structure this command cannot spell. Not a
+///   list of key/value pairs either — `docs/decisions/2b-2b-2-notes.md` decision
+///   D1 forbids this engine emitting a key no schema fixes. The struct is
+///   `deny_unknown_fields` on the wire, so a misspelled property is refused
+///   while the arguments are read, before anything is attempted.
 /// - `position` — [`NewMatchPosition`], three-valued, naming its anchor by
 ///   **identity**. An index would be a position in a parse the caller may no
 ///   longer hold, which is the mistake `move_match` avoids the same way.
@@ -3506,7 +3510,9 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Instant;
 
-    use espansoconfig_core::draft::{DraftField, ItemDraft, MatchDraft, NewMatch};
+    use espansoconfig_core::draft::{
+        DraftField, ItemDraft, MatchDraft, NewContent, NewMatch, NewTrigger, TriggerList,
+    };
     use espansoconfig_core::model::{DocumentView, MatchId};
     use espansoconfig_core::patch::PresentationNote;
     use espansoconfig_core::persist::{Acknowledgement, SaveVerdict};
@@ -3755,14 +3761,10 @@ mod tests {
             session
                 .create_match(
                     id,
-                    &NewMatch {
-                        trigger: ":one".to_owned(),
-                        replace: "first".to_owned(),
-                        label: None,
-                        word: None,
-                        left_word: None,
-                        right_word: None,
-                    },
+                    &NewMatch::new(
+                        NewTrigger::Single(":one".to_owned()),
+                        NewContent::Replace("first".to_owned()),
+                    ),
                     &NewMatchPosition::End {},
                     ContentRevision::of_bytes(b""),
                     &Acknowledgement::none(),
@@ -5965,14 +5967,10 @@ mod tests {
 
     /// The snippet these tests create, hand-authored and neutral.
     fn new_snippet() -> NewMatch {
-        NewMatch {
-            trigger: ":new".to_owned(),
-            replace: "a new snippet".to_owned(),
-            label: None,
-            word: None,
-            left_word: None,
-            right_word: None,
-        }
+        NewMatch::new(
+            NewTrigger::Single(":new".to_owned()),
+            NewContent::Replace("a new snippet".to_owned()),
+        )
     }
 
     /// A creation lands at the end, writes exactly the expected file, and names
@@ -6599,8 +6597,8 @@ mod tests {
     ///
     /// **The evidence `create_match` itself owes.** `tests/persist_save.rs`
     /// establishes what the save transaction does with a hand-built
-    /// `InsertItem`, but it builds that insertion from `NewMatch::fields()`
-    /// itself, so it cannot see `create_one_match`'s lowering at all: a mutation
+    /// `InsertItem`, but it builds that insertion by hand, so it cannot see
+    /// `create_one_match`'s lowering at all: a mutation
     /// that dropped the four optional fields on the way in, or that reached the
     /// transaction by some route the new risk producer does not run on, would
     /// leave every one of those tests green. This one starts at
@@ -6627,14 +6625,14 @@ mod tests {
         // The six-field shape a recovery will send, and the shape today's creator
         // form cannot: `:one` is the trigger the file's first snippet already
         // writes.
-        let recovered = NewMatch {
-            trigger: ":one".to_owned(),
-            replace: "a recovered body".to_owned(),
-            label: Some("a recovered label".to_owned()),
-            word: Some("true".to_owned()),
-            left_word: Some("false".to_owned()),
-            right_word: Some("on".to_owned()),
-        };
+        let mut recovered = NewMatch::new(
+            NewTrigger::Single(":one".to_owned()),
+            NewContent::Replace("a recovered body".to_owned()),
+        );
+        recovered.label = Some("a recovered label".to_owned());
+        recovered.word = Some("true".to_owned());
+        recovered.left_word = Some("false".to_owned());
+        recovered.right_word = Some("on".to_owned());
 
         let refusal = session
             .create_match(
@@ -6723,14 +6721,10 @@ mod tests {
             id,
             before,
         } = opened_on(TWO_SNIPPETS);
-        let suspicious = NewMatch {
-            trigger: ":greet".to_owned(),
-            replace: "hello {{nobody}}".to_owned(),
-            label: None,
-            word: None,
-            left_word: None,
-            right_word: None,
-        };
+        let suspicious = NewMatch::new(
+            NewTrigger::Single(":greet".to_owned()),
+            NewContent::Replace("hello {{nobody}}".to_owned()),
+        );
 
         let refusal = session
             .create_match(
@@ -6769,6 +6763,178 @@ mod tests {
             [":one", ":two", ":greet"]
         );
     } // End of function a_suspicion_refuses_a_creation_until_the_findings_come_back()
+
+    // -----------------------------------------------------------------------
+    // create_match — Phase 3-4, the wider creation surface
+    // -----------------------------------------------------------------------
+
+    /// A multiple-trigger, markdown creation carrying `search_terms` and every
+    /// option, through `run_one_save`, into a CRLF file and into a file with no
+    /// final newline.
+    ///
+    /// **The command path's own evidence** for Phase 3-4: the whole file on disk
+    /// is stated as a literal, so every byte of the two snippets that were
+    /// already there, every line ending and the missing final newline are
+    /// checked; the answered identity resolves to the created snippet; and the
+    /// refreshed projection holds both lists in the order they were sent.
+    #[test]
+    fn a_wide_creation_reaches_the_disk_in_crlf_and_without_a_final_newline() {
+        let mut wide = NewMatch::new(
+            NewTrigger::Multiple(
+                TriggerList::new(vec![":wz".to_owned(), ":wa".to_owned()]).expect("non-empty"),
+            ),
+            NewContent::Markdown("**wide**".to_owned()),
+        );
+        wide.comment = Some(String::new());
+        wide.search_terms = Some(vec!["zed".to_owned(), "alpha".to_owned()]);
+        wide.propagate_case = Some("true".to_owned());
+        wide.uppercase_style = Some("uppercase".to_owned());
+        wide.force_mode = Some("keys".to_owned());
+        wide.paragraph = Some("off".to_owned());
+        let item = concat!(
+            "  - triggers:\n",
+            "      - ':wz'\n",
+            "      - ':wa'\n",
+            "    markdown: '**wide**'\n",
+            "    comment: ''\n",
+            "    search_terms:\n",
+            "      - zed\n",
+            "      - alpha\n",
+            "    propagate_case: 'true'\n",
+            "    uppercase_style: uppercase\n",
+            "    force_mode: keys\n",
+            "    paragraph: 'off'\n",
+        );
+        let crlf = |text: &str| text.replace('\n', "\r\n");
+        let cases = [
+            (crlf(TWO_SNIPPETS), crlf(&format!("{TWO_SNIPPETS}{item}"))),
+            (
+                TWO_SNIPPETS.trim_end_matches('\n').to_owned(),
+                format!("{TWO_SNIPPETS}{}", item.trim_end_matches('\n')),
+            ),
+        ];
+        for (source, expected) in cases {
+            let Opened {
+                dir,
+                session,
+                id,
+                before,
+            } = opened_on(&source);
+            let (_, moved) = expect_saved(
+                session
+                    .create_match(
+                        id,
+                        &wide,
+                        &NewMatchPosition::End {},
+                        before.revision,
+                        &Acknowledgement::none(),
+                    )
+                    .expect("the creation is legal"),
+                "creation",
+            );
+            assert_eq!(base_bytes(&dir), expected, "the whole file, byte for byte");
+
+            let after = session.document(id).expect("it reads");
+            assert_eq!(after.matches.len(), 3, "exactly one snippet was added");
+            let created = &after.matches[2];
+            assert_eq!(moved, Some(created.id), "the answer names the new snippet");
+            let texts = |values: &[espansoconfig_core::model::ValueView]| -> Vec<String> {
+                values
+                    .iter()
+                    .map(|value| match value {
+                        espansoconfig_core::model::ValueView::Scalar(scalar) => scalar.text.clone(),
+                        other => panic!("a scalar item, found {other:?}"),
+                    })
+                    .collect()
+            };
+            assert_eq!(texts(&created.trigger.triggers), [":wz", ":wa"]);
+            assert_eq!(texts(&created.search_terms), ["zed", "alpha"]);
+            assert_eq!(
+                created.comment.as_ref().map(|scalar| scalar.text.as_str()),
+                Some(""),
+                "an empty comment is present and empty"
+            );
+            assert!(created.label.is_none(), "an absent label is absent");
+        } // End of the loop over the CRLF and no-final-newline files
+    } // End of function a_wide_creation_reaches_the_disk_in_crlf_and_without_a_final_newline()
+
+    /// A creation whose `triggers` repeats a literal an existing snippet holds is
+    /// a suspicion, and a regex that does not compile is an editor-model error no
+    /// acknowledgement passes; both write nothing.
+    #[test]
+    fn a_wide_creation_meets_the_saves_own_findings() {
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
+
+        let repeating = NewMatch::new(
+            NewTrigger::Multiple(
+                TriggerList::new(vec![":fresh".to_owned(), ":two".to_owned()]).expect("non-empty"),
+            ),
+            NewContent::Replace("body".to_owned()),
+        );
+        match session
+            .create_match(
+                id,
+                &repeating,
+                &NewMatchPosition::End {},
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("a refusal is an outcome")
+        {
+            SaveResult::Refused { verdict, findings } => {
+                assert_eq!(verdict, SaveVerdict::RefusedForUnacknowledgedSuspicions);
+                assert!(findings.iter().any(|finding| matches!(
+                    finding.code,
+                    FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+                )));
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert_eq!(base_bytes(&dir), TWO_SNIPPETS, "a refusal writes nothing");
+
+        let broken = NewMatch::new(
+            NewTrigger::Regex("(unclosed".to_owned()),
+            NewContent::Html("<p>x</p>".to_owned()),
+        );
+        let findings = match session
+            .create_match(
+                id,
+                &broken,
+                &NewMatchPosition::Front {},
+                before.revision,
+                &Acknowledgement::none(),
+            )
+            .expect("a refusal is an outcome")
+        {
+            SaveResult::Refused { verdict, findings } => {
+                assert_eq!(verdict, SaveVerdict::RefusedForEditorModelErrors);
+                findings
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert!(findings
+            .iter()
+            .any(|finding| matches!(finding.code, FindingCode::RegexDoesNotCompile { .. })));
+        let again = session
+            .create_match(
+                id,
+                &broken,
+                &NewMatchPosition::Front {},
+                before.revision,
+                &Acknowledgement::of(&findings),
+            )
+            .expect("a refusal is an outcome");
+        assert!(
+            matches!(again, SaveResult::Refused { .. }),
+            "an editor-model error is not acknowledgeable: {again:?}"
+        );
+        assert_eq!(base_bytes(&dir), TWO_SNIPPETS, "a refusal writes nothing");
+    } // End of function a_wide_creation_meets_the_saves_own_findings()
 
     // -----------------------------------------------------------------------
     // duplicate_match — Phase 2c-3c-2

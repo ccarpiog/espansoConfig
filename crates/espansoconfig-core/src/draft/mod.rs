@@ -106,13 +106,17 @@
 //! [`NewMatch`] is what a match is **born** holding, and it is a second type
 //! rather than a mode of [`MatchDraft`] because the two answer different
 //! questions: a draft's `Unchanged` means *leave these bytes alone*, which a
-//! match with no bytes cannot mean. It is closed at **two required and four
-//! optional schema-known scalar fields** — Phase 2c-4c-1 widened it from the two
-//! it was born with — every key spelled from [`MatchField`] so the schema fixes
-//! them, and it derives no batch of its own: [`crate::patch::InsertItem`] is the
-//! primitive, and this only says what goes in it. An optional field that is
-//! absent is a key the new item is not born holding at all, which is not the
-//! same request as one written with an empty value.
+//! match with no bytes cannot mean. It is closed at **one trigger alternative,
+//! one content alternative and twelve optional schema-known fields** (Phase
+//! 3-4; Phase 2c-4c-1 had widened it from two fields to six): a [`NewTrigger`]
+//! (`trigger`, a non-empty `triggers` list or `regex`), a [`NewContent`] (one of
+//! the five content keys), `label`, `comment`, the `search_terms` list and the
+//! nine match options. Every key is spelled from [`MatchField`] or
+//! [`SequenceField`] so the schema fixes them, and it derives no batch of its
+//! own: [`crate::patch::InsertItem`] is the primitive, and this only says what
+//! goes in it. An optional field that is absent is a key the new item is not
+//! born holding at all, which is not the same request as one written with an
+//! empty value.
 //!
 //! # What this module never does
 //!
@@ -138,6 +142,6 @@ pub use match_draft::{
     ContentForm, DraftTarget, EntryDraft, FieldSubstitution, FormFieldDraft, ItemDraft, MatchDraft,
     MatchField, SequenceField, TriggerForm, VariableDraft, VariableField,
 };
-pub use new_match::NewMatch;
+pub use new_match::{NewContent, NewMatch, NewTrigger, TriggerList};
 pub use plan::{plan_match_edits, plan_match_edits_with, plan_match_edits_with_substitutions};
 pub use sequence::{MatchStructure, ScalarItems, SequenceIntent, TriggerSwitch};

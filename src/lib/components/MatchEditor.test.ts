@@ -2025,7 +2025,10 @@ describe('the small editor’s recovery', () => {
     // this window has of that file.
     expect(editor.creates[0]!.baseRevision).toBe(AFTER);
     // The editor's own draft — the trigger it holds and the body that was typed.
-    expect(editor.creates[0]!.newMatch).toEqual({ trigger: ':a', replace: 'c' });
+    expect(editor.creates[0]!.newMatch).toEqual({
+      trigger: { Single: ':a' },
+      content: { Replace: 'c' }
+    });
     // No second `save_match`, and the editor's own conflict was never adopted.
     expect(editor.calls).toHaveLength(1);
     expect(editor.adoptions).toEqual([]);

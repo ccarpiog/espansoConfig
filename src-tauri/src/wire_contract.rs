@@ -61,7 +61,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use espansoconfig_core::discovery::FileKind;
-use espansoconfig_core::draft::{DraftError, NewMatch};
+use espansoconfig_core::draft::{DraftError, NewContent, NewMatch, NewTrigger, TriggerList};
 use espansoconfig_core::emit::DecodeError;
 use espansoconfig_core::emit::NotReencodable;
 use espansoconfig_core::model::{
@@ -2871,17 +2871,32 @@ fn every_save_transaction_struct_declares_exactly_the_properties_serde_writes() 
     }
 } // End of function every_save_transaction_struct_declares_exactly_the_properties_serde_writes()
 
-/// The six-field creation payload, with every optional key present.
+/// The creation payload, with every optional key present (Phase 3-4).
 fn a_new_match() -> NewMatch {
     NewMatch {
-        trigger: ":new".to_owned(),
-        replace: "a new snippet".to_owned(),
+        trigger: NewTrigger::Multiple(
+            TriggerList::new(vec![":new".to_owned(), ":alias".to_owned()]).expect("non-empty"),
+        ),
+        content: NewContent::Replace("a new snippet".to_owned()),
         label: Some("a label".to_owned()),
+        comment: Some("a comment".to_owned()),
+        search_terms: Some(vec!["one".to_owned(), "two".to_owned()]),
         word: Some("true".to_owned()),
         left_word: Some("false".to_owned()),
         right_word: Some("on".to_owned()),
+        propagate_case: Some("yes".to_owned()),
+        uppercase_style: Some("capitalize".to_owned()),
+        force_mode: Some("clipboard".to_owned()),
+        force_clipboard: Some("true".to_owned()),
+        paragraph: Some("false".to_owned()),
+        anchor: Some("an anchor".to_owned()),
     }
 } // End of function a_new_match()
+
+/// The TypeScript type each **required** creation property must be declared
+/// with: the two typed alternatives, mirrored by name.
+const REQUIRED_CREATION_TYPES: [(&str, &str); 2] =
+    [("trigger", "NewTrigger"), ("content", "NewContent")];
 
 /// `NewMatch`'s TypeScript interface declares exactly the properties `serde`
 /// reads, with the same required-versus-optional behaviour.
@@ -2889,27 +2904,30 @@ fn a_new_match() -> NewMatch {
 /// **The one wire value that travels *into* a writing command with a shape of
 /// its own**, and the reason it needs its own check: every other test in this
 /// module compares what `serde` **writes**, and `serde` reading is not that
-/// question's mirror. An unknown JSON property is *ignored* on the way in, so a
+/// question's mirror. Since Phase 3-4 the struct is `deny_unknown_fields`, so a
 /// typo in one TypeScript key — `rightWord` where the field is `right_word` —
-/// compiles, type-checks, sends a property no field claims, defaults the Rust
-/// field to `None`, and drops that key from the snippet the save writes. Nothing
-/// in `svelte-check` and nothing in `cargo test` could see it before this.
+/// is refused by the command rather than silently dropped; this test is what
+/// keeps the typo out of the TypeScript declaration in the first place, so the
+/// refusal is never met at run time.
 ///
-/// Four claims, and **all six properties contribute to the count**, so a check
-/// that stopped exercising one is a failure rather than a smaller pass:
+/// Five claims, and **all fourteen properties contribute to the count**, so a
+/// check that stopped exercising one is a failure rather than a smaller pass:
 ///
 /// 1. the names match — the serialize side writes every field, so its keys are
 ///    the Rust property list;
 /// 2. a property TypeScript declares **required** is one `serde` refuses to
-///    default, both when the key is omitted and when it is `null`;
+///    default, both when the key is omitted and when it is `null`, and its
+///    declared type is the named alternative union ([`REQUIRED_CREATION_TYPES`]);
 /// 3. a property TypeScript declares `?:` is one `serde` accepts omitted **and**
 ///    accepts as `null`, reading both as absent;
 /// 4. an optional property's declared type admits `null`, which is the second
-///    spelling of absent this wire really sends.
+///    spelling of absent this wire really sends;
+/// 5. a property no field declares is refused.
 ///
-/// What it does **not** check is the type text of a required property beyond its
-/// being `string`: this harness resolves no TypeScript types, and that limit is
-/// the module's own (see its header).
+/// What it does **not** check is the type text of an optional property beyond
+/// its admitting `null`: this harness resolves no TypeScript types, and that
+/// limit is the module's own (see its header). The two alternative unions are
+/// checked by [`the_creation_alternatives_declare_exactly_the_rust_variants`].
 #[test]
 fn the_creation_payload_declares_exactly_the_properties_serde_reads() {
     let source = read_without_comments("src/lib/ipc/types.ts");
@@ -2951,7 +2969,7 @@ fn the_creation_payload_declares_exactly_the_properties_serde_reads() {
             assert_eq!(
                 json_of(&nulled)[name],
                 Value::Null,
-                "a null `{name}` must read as absent, never as an empty string"
+                "a null `{name}` must read as absent, never as an empty value"
             );
             assert!(
                 declared_type.contains("null"),
@@ -2967,19 +2985,143 @@ fn the_creation_payload_declares_exactly_the_properties_serde_reads() {
                 nulled.is_err(),
                 "`{name}` is declared required, so a null must be refused"
             );
+            let expected = REQUIRED_CREATION_TYPES
+                .iter()
+                .find_map(|(property, union)| (property == name).then_some(*union))
+                .unwrap_or_else(|| panic!("`{name}` is required and names no alternative"));
             assert_eq!(
-                declared_type, "string",
-                "a required creation property carries logical text and nothing else"
+                declared_type, expected,
+                "a required creation property is one of the two typed alternatives"
             );
         }
         checked += 1;
     } // End of the loop over the creation payload's declared properties
     assert_eq!(
-        checked, 6,
-        "Phase 2b-2c-2 put two properties on this payload and Phase 2c-4c-1 added \
-         four optional ones; a property that stopped being exercised is a hole"
+        checked, 14,
+        "Phase 3-4 put two typed alternatives and twelve optional properties on this \
+         payload; a property that stopped being exercised is a hole"
+    );
+
+    let mut unknown = object.clone();
+    unknown.insert("rightWord".to_owned(), Value::String("on".to_owned()));
+    assert!(
+        serde_json::from_value::<NewMatch>(Value::Object(unknown)).is_err(),
+        "a property no field declares is refused, never ignored"
     );
 } // End of function the_creation_payload_declares_exactly_the_properties_serde_reads()
+
+/// The one-key-object tags a `{ readonly Tag: … }` union declares, each with its
+/// payload's type text.
+///
+/// Read at brace depth one only, so a tag is a member of the union and never a
+/// property of a nested payload.
+fn object_union_tags(source: &str, name: &str) -> BTreeMap<String, String> {
+    let body = union_body(source, name);
+    let mut tags = BTreeMap::new();
+    let mut depth = 0usize;
+    let mut member_start = None;
+    for (offset, character) in body.char_indices() {
+        match character {
+            '{' => {
+                depth += 1;
+                if depth == 1 {
+                    member_start = Some(offset + 1);
+                }
+            }
+            '}' => {
+                if depth == 1 {
+                    let start = member_start.take().expect("an opened member");
+                    let member = body[start..offset].trim();
+                    let (tag, optional) = property_declaration(member)
+                        .unwrap_or_else(|| panic!("{name}: `{member}` declares no tag"));
+                    assert!(!optional, "{name}: a tag is never optional");
+                    let colon = member.find(':').expect("a tag has a colon");
+                    tags.insert(
+                        tag,
+                        member[colon + 1..].trim().trim_end_matches(';').to_owned(),
+                    );
+                }
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+    } // End of the walk over the union's declaration text
+    tags
+} // End of function object_union_tags()
+
+/// `NewTrigger` and `NewContent` declare exactly the variants `serde` reads and
+/// writes, each with the payload type it really carries.
+///
+/// Every variant is built here, so adding one in Rust without extending this
+/// list fails to compile — the `match` below has no wildcard arm — and adding one
+/// in TypeScript alone fails the name comparison.
+#[test]
+fn the_creation_alternatives_declare_exactly_the_rust_variants() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let triggers = [
+        NewTrigger::Single(":a".to_owned()),
+        NewTrigger::Multiple(TriggerList::new(vec![":a".to_owned()]).expect("non-empty")),
+        NewTrigger::Regex(":a".to_owned()),
+    ];
+    let contents = [
+        NewContent::Replace("x".to_owned()),
+        NewContent::Markdown("x".to_owned()),
+        NewContent::Html("x".to_owned()),
+        NewContent::ImagePath("x".to_owned()),
+        NewContent::Form("x".to_owned()),
+    ];
+    let mut checked = 0usize;
+    for trigger in &triggers {
+        let payload = match trigger {
+            NewTrigger::Single(_) | NewTrigger::Regex(_) => "string",
+            NewTrigger::Multiple(_) => "readonly [string, ...string[]]",
+        };
+        let json = json_of(trigger);
+        let tag = variant_name(&json);
+        assert_eq!(
+            object_union_tags(&source, "NewTrigger")
+                .get(&tag)
+                .map(String::as_str),
+            Some(payload),
+            "NewTrigger.{tag}"
+        );
+        assert_eq!(
+            serde_json::from_value::<NewTrigger>(json).expect("reads back"),
+            *trigger
+        );
+        checked += 1;
+    } // End of the loop over the trigger alternatives
+    for content in &contents {
+        let json = json_of(content);
+        let tag = variant_name(&json);
+        assert!(json[&tag].is_string(), "NewContent.{tag} carries text");
+        assert_eq!(
+            object_union_tags(&source, "NewContent")
+                .get(&tag)
+                .map(String::as_str),
+            Some("string"),
+            "NewContent.{tag}"
+        );
+        checked += 1;
+    } // End of the loop over the content alternatives
+    assert_same_names(
+        "type NewTrigger",
+        &variant_names(&triggers),
+        &object_union_tags(&source, "NewTrigger")
+            .keys()
+            .cloned()
+            .collect(),
+    );
+    assert_same_names(
+        "type NewContent",
+        &variant_names(&contents),
+        &object_union_tags(&source, "NewContent")
+            .keys()
+            .cloned()
+            .collect(),
+    );
+    assert_eq!(checked, 8, "three trigger and five content alternatives");
+} // End of function the_creation_alternatives_declare_exactly_the_rust_variants()
 
 /// Every tagged save-transaction variant's operands are the keys `serde` writes.
 ///

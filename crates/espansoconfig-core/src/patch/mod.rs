@@ -58,7 +58,8 @@
 //! synthesize a collection": exactly one new flat block-mapping item with scalar
 //! fields, spelled by the existing codec, at a sequence-item boundary — plus the
 //! promotion of a bare `matches:` into its first item, without which that key
-//! could never be targeted as a sequence at all. Phase 3-2 adds the second, below.
+//! could never be targeted as a sequence at all. Phase 3-2 adds the second, below,
+//! and Phase 3-4 lets a field of the new item be a flat list of scalars.
 //!
 //! **2b-2c-2 — [`ItemPlacement`], the insertion's third destination.** An
 //! insertion could go after a named item or after the last one, and had no

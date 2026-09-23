@@ -5,60 +5,182 @@
 //! says what a *new* one is born holding, and it is a different type because it
 //! answers a different question. A draft's `Unchanged` means "leave the bytes
 //! alone", which is meaningless for a match that has no bytes.
+//!
+//! **Phase 3-4 widened it** from six scalar fields to the whole Phase 3 creation
+//! surface: a typed trigger alternative ([`NewTrigger`]), a typed content
+//! alternative ([`NewContent`]), `label`, `comment`, the nine match options and
+//! the `search_terms` list. `docs/decisions/3-4-notes.md` records which fields
+//! and why.
 
 use serde::{Deserialize, Serialize};
 
-use crate::draft::MatchField;
+use crate::draft::{MatchField, SequenceField};
+use crate::patch::EntryValue;
+
+/// How a new match is triggered: exactly one of espanso's three trigger forms.
+///
+/// **One of three, and never none or two.** A match holding two trigger forms is
+/// [`crate::validate::FindingCode::MatchHasSeveralTriggerForms`] and one holding
+/// none is [`crate::validate::FindingCode::MatchHasNoTriggerField`]; this enum
+/// has no spelling of either, so a creation cannot ask for one.
+///
+/// On the wire it is externally tagged, like every enum this crate sends:
+/// `{"Single": ":hi"}`, `{"Multiple": [":hi", ":hello"]}`, `{"Regex": "..."}`.
+/// The variant names are protocol tags and are never shown to anyone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NewTrigger {
+    /// `trigger:` — one literal abbreviation, as decoded text.
+    Single(String),
+    /// `triggers:` — several literal aliases, in the order they are written.
+    Multiple(TriggerList),
+    /// `regex:` — a regular expression, as decoded text. Whether it compiles is
+    /// the save's own validation (`RegexDoesNotCompile`), not this type's.
+    Regex(String),
+}
+
+impl NewTrigger {
+    /// The key this form is written under and the value written there.
+    fn entry(&self) -> (&'static str, EntryValue) {
+        match self {
+            NewTrigger::Single(text) => {
+                (MatchField::Trigger.key(), EntryValue::Scalar(text.clone()))
+            }
+            NewTrigger::Multiple(list) => (
+                SequenceField::Triggers.key(),
+                EntryValue::ScalarList(list.items().to_vec()),
+            ),
+            NewTrigger::Regex(text) => (MatchField::Regex.key(), EntryValue::Scalar(text.clone())),
+        }
+    } // End of function entry() for NewTrigger
+} // End of impl NewTrigger
+
+/// A `triggers` list that holds **at least one** alias.
+///
+/// # Why empty is not expressible
+///
+/// `triggers: []` projects as a `Multiple` trigger form with nothing that can
+/// fire, and the save's validation raises no finding for it — so a refusal
+/// could only come from here. It is the same decision that makes the content
+/// alternative mandatory: this application does not create a snippet that
+/// cannot be used. The type is what enforces it: the only constructor is
+/// [`TriggerList::new`], which answers `None` for an empty vector, and the wire
+/// form goes through the same constructor (`serde(try_from)`), so an empty
+/// array is refused while the command's arguments are being read and before any
+/// file is opened.
+///
+/// Duplicated aliases are **not** refused here: the list is written exactly as
+/// given, in order. That repetition inside one new match is not detected is a
+/// recorded limit (`docs/decisions/3-4-notes.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<String>", into = "Vec<String>")]
+pub struct TriggerList(Vec<String>);
+
+impl TriggerList {
+    /// The list, or `None` when `items` is empty.
+    pub fn new(items: Vec<String>) -> Option<TriggerList> {
+        (!items.is_empty()).then_some(TriggerList(items))
+    }
+
+    /// The aliases, in the order they are written. Never empty.
+    pub fn items(&self) -> &[String] {
+        &self.0
+    }
+} // End of impl TriggerList
+
+impl TryFrom<Vec<String>> for TriggerList {
+    type Error = &'static str;
+
+    /// The wire's door into [`TriggerList::new`], refusing an empty array.
+    fn try_from(items: Vec<String>) -> Result<TriggerList, Self::Error> {
+        TriggerList::new(items).ok_or("a triggers list holds at least one alias")
+    }
+}
+
+impl From<TriggerList> for Vec<String> {
+    /// The aliases, for the wire.
+    fn from(list: TriggerList) -> Vec<String> {
+        list.0
+    }
+}
+
+/// What a new match expands to: exactly one of espanso's five content forms.
+///
+/// The five are the ones [`crate::draft::ContentForm`] names and a
+/// [`crate::draft::FieldSubstitution`] can switch between. `form` is carried as
+/// its **layout text** only (ruling 9 of `docs/decisions/3-split-notes.md`):
+/// creation writes no `form_fields`, because `form_fields` stays read-only until
+/// Phase 4 and would be a nested mapping this type cannot spell.
+///
+/// On the wire it is externally tagged: `{"Replace": "..."}`,
+/// `{"ImagePath": "..."}`. The variant names are protocol tags.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NewContent {
+    /// `replace:` — plain text.
+    Replace(String),
+    /// `markdown:` — Markdown text.
+    Markdown(String),
+    /// `html:` — HTML text.
+    Html(String),
+    /// `image_path:` — a path, as text. Nothing checks that it names a file.
+    ImagePath(String),
+    /// `form:` — the shorthand form's layout text.
+    Form(String),
+}
+
+impl NewContent {
+    /// The key this form is written under and the text written there.
+    fn entry(&self) -> (&'static str, &str) {
+        match self {
+            NewContent::Replace(text) => (MatchField::Replace.key(), text),
+            NewContent::Markdown(text) => (MatchField::Markdown.key(), text),
+            NewContent::Html(text) => (MatchField::Html.key(), text),
+            NewContent::ImagePath(text) => (MatchField::ImagePath.key(), text),
+            NewContent::Form(text) => (MatchField::Form.key(), text),
+        }
+    } // End of function entry() for NewContent
+} // End of impl NewContent
 
 /// The content of a match to be created.
 ///
-/// # Closed, two mandatory fields and four optional ones
+/// # Closed: one trigger form, one content form, and fixed optional keys
 ///
-/// Six keys, every one of them fixed by espanso's schema and spelled by
-/// [`MatchField::key`](crate::draft::MatchField::key) rather than written out
-/// here, so the strings this crate emits as keys have one source.
-///
-/// **Phase 2c-4c-1 widened it from two to six**, and the four it added are
-/// exactly the four the small editor already drafts beside `trigger` and
-/// `replace` (`src/lib/browser/matchEditor.ts`'s `EditableField`): `label`,
-/// `word`, `left_word` and `right_word`. The reason they are here is that a
-/// recovery creation has to be able to carry what an editing session was holding
-/// when its save met a conflict, and a creation that could carry only two of the
-/// six would silently drop the other four. Widening the value is the whole of
-/// that change: no new [`crate::patch::DocumentEdit`] variant, no second writer.
+/// Every key this type can cause to be written is fixed by espanso's schema and
+/// spelled by [`MatchField::key`] or [`SequenceField::key`] rather than written
+/// out here, so the strings this crate emits as keys have one source. **Neither a
+/// projection, a comment, an arbitrary key/value list, a nested collection nor
+/// YAML source may enter this type**: there is no field any of them could arrive
+/// through. Every value is a `String` or a list of `String`s, and on the wire the
+/// struct is `deny_unknown_fields`, so a misspelled or invented property is
+/// refused rather than silently dropped.
 ///
 /// A [`MatchDraft`](crate::draft::MatchDraft) is deliberately **not** accepted in
-/// its place: it can express twenty-two fields, four of them collections, and
-/// [`crate::patch::InsertItem`] synthesizes exactly one **flat** block mapping
-/// with scalar fields. Taking a draft would advertise a structure creation cannot
+/// its place: it can express `vars` and `form_fields`, which creation cannot
 /// spell, and the caller would find that out from a refusal rather than from the
-/// type. A raw list of key/value pairs is refused for a different reason and by a
-/// rule that predates this type: `docs/decisions/2b-2b-2-notes.md` decision D1
-/// forbids this engine emitting a key string that no schema fixes. **Neither a
-/// projection, a comment, an arbitrary key/value list nor YAML source may enter
-/// this type**, and the six `String`s are what enforces that: there is no field
-/// any of them could arrive through.
+/// type. A raw list of key/value pairs is refused by a rule that predates this
+/// type: `docs/decisions/2b-2b-2-notes.md` decision D1 forbids this engine
+/// emitting a key string that no schema fixes.
 ///
-/// **`replace` is mandatory.** A trigger with no body is not a usable espanso
-/// match, and this application should not create one. Nothing prevents a *later*
-/// save from adding another schema-known scalar key to the match's own mapping —
-/// that is the one insertion 2b-2b-2's D1 does permit — so this is a decision
-/// about what is worth creating rather than a limit of the engine.
+/// **The trigger and the content are mandatory.** A trigger with no body, or a
+/// body nothing fires, is not a usable espanso match, and this application
+/// should not create one. A *later* save can still add or switch any
+/// schema-known field.
 ///
-/// **The four added fields are optional, and `None` is not `Some(String::new())`.**
-/// An absent field is a key the new item is not born holding at all; a present
-/// empty one is `label: ''` written into the file. [`crate::draft::MatchDraft`]'s own
-/// `Unchanged`/`Set` distinction is the same one, learned in Phase 2c-2: a buffer
-/// left blank cannot tell those two cases apart, so the caller decides and this
-/// type carries the decision rather than inferring it.
+/// **Every optional field is optional, and `None` is not `Some(String::new())`**
+/// (nor `Some(vec![])` for `search_terms`). An absent field is a key the new item
+/// is not born holding at all; a present empty one is `label: ''` — or
+/// `search_terms: []` — written into the file. A buffer left blank cannot tell
+/// those two cases apart, so the caller decides and this type carries the
+/// decision rather than inferring it.
 ///
-/// # The three word-boundary fields are text, not booleans
+/// # The options are text, not booleans
 ///
-/// `word`, `left_word` and `right_word` are `Option<String>` for the reason a
-/// word-boundary *control* may not be a checkbox: deciding that `word: on` means
-/// boolean true is a claim about how espanso's YAML resolver reads a plain
+/// `word`, `propagate_case`, `force_clipboard` and the rest are `Option<String>`
+/// for the reason their controls may not be checkboxes: deciding that `word: on`
+/// means boolean true is a claim about how espanso's YAML resolver reads a plain
 /// scalar, and D2u forbids this application making one. What is written is the
-/// text the caller supplied, spelled by the encoder like every other value.
+/// text the caller supplied, spelled by the encoder like every other value — so
+/// a value such as `on` or `yes` is quoted rather than left as a plain scalar a
+/// YAML 1.1 reader could take for a boolean.
 ///
 /// # It carries decoded text, never YAML
 ///
@@ -67,236 +189,364 @@ use crate::draft::MatchField;
 /// every other value this crate writes, so a value holding a `#`, a line break or
 /// a leading `*` is written correctly rather than injected.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NewMatch {
-    /// The literal text that fires the snippet — espanso's `trigger`.
-    pub trigger: String,
-    /// What the snippet expands to — espanso's `replace`.
-    pub replace: String,
+    /// Which trigger form the match is born with, and its value.
+    pub trigger: NewTrigger,
+    /// Which content form the match is born with, and its value.
+    pub content: NewContent,
     /// `label`, when the new item is born holding one.
     ///
     /// `None` means the key is not written at all; `Some(String::new())` means
-    /// an empty `label` is.
+    /// an empty `label` is. The same holds for every optional field below.
     #[serde(default)]
     pub label: Option<String>,
-    /// `word`, as source text, when the new item is born holding it.
+    /// `comment`, when the new item is born holding one.
+    #[serde(default)]
+    pub comment: Option<String>,
+    /// `search_terms`, in order, when the new item is born holding the list.
+    ///
+    /// `Some(vec![])` writes `search_terms: []`; `None` writes no key.
+    #[serde(default)]
+    pub search_terms: Option<Vec<String>>,
+    /// `word`, as source text.
     #[serde(default)]
     pub word: Option<String>,
-    /// `left_word`, as source text, when the new item is born holding it.
+    /// `left_word`, as source text.
     #[serde(default)]
     pub left_word: Option<String>,
-    /// `right_word`, as source text, when the new item is born holding it.
+    /// `right_word`, as source text.
     #[serde(default)]
     pub right_word: Option<String>,
+    /// `propagate_case`, as source text.
+    #[serde(default)]
+    pub propagate_case: Option<String>,
+    /// `uppercase_style`, as source text.
+    #[serde(default)]
+    pub uppercase_style: Option<String>,
+    /// `force_mode`, as source text.
+    #[serde(default)]
+    pub force_mode: Option<String>,
+    /// `force_clipboard`, as source text.
+    #[serde(default)]
+    pub force_clipboard: Option<String>,
+    /// `paragraph`, as source text.
+    #[serde(default)]
+    pub paragraph: Option<String>,
+    /// `anchor`, as source text — the espanso key, not YAML `&anchor` syntax.
+    #[serde(default)]
+    pub anchor: Option<String>,
 }
 
 impl NewMatch {
-    /// The fields the new item is born holding, in write order.
+    /// A new match with only its trigger and content, every optional field
+    /// absent.
+    pub fn new(trigger: NewTrigger, content: NewContent) -> NewMatch {
+        NewMatch {
+            trigger,
+            content,
+            label: None,
+            comment: None,
+            search_terms: None,
+            word: None,
+            left_word: None,
+            right_word: None,
+            propagate_case: None,
+            uppercase_style: None,
+            force_mode: None,
+            force_clipboard: None,
+            paragraph: None,
+            anchor: None,
+        }
+    } // End of function new()
+
+    /// The entries the new item is born holding, in write order.
     ///
     /// # One documented order, and only the present fields
     ///
-    /// `trigger`, `replace`, `label`, `word`, `left_word`, `right_word` — the
-    /// order espanso's own documentation writes them in, which is also the
-    /// relative order [`MatchField::ALL`](crate::draft::MatchField::ALL) lists
-    /// them in and the order `EDITABLE_FIELDS` draws them in on screen. It is the
-    /// order the bytes come out in: [`crate::patch::InsertItem`] renders one line
-    /// per pair, so this vector *is* the item's key order in the file.
+    /// The trigger form (`trigger`, `triggers` or `regex`), the content form
+    /// (`replace`, `markdown`, `html`, `image_path` or `form`), then `label`,
+    /// `comment`, `search_terms`, and the nine options in
+    /// [`MatchField::ALL`](crate::draft::MatchField::ALL)'s relative order:
+    /// `word`, `left_word`, `right_word`, `propagate_case`, `uppercase_style`,
+    /// `force_mode`, `force_clipboard`, `paragraph`, `anchor`. It is the order the
+    /// bytes come out in: [`crate::patch::InsertItem`] renders the entries in
+    /// this order, so this vector *is* the item's key order in the file.
     ///
-    /// **A field that is `None` is not emitted**, and that is the whole of what
-    /// "optional" means here — there is no placeholder line, no empty value and
-    /// no key with nothing after it. A field that is `Some("")` **is** emitted,
-    /// with whatever the encoder spells an empty string as.
-    ///
-    /// Only these six keys can ever appear, because these six fields are the
-    /// only ones this type has.
-    pub fn fields(&self) -> Vec<(String, String)> {
-        let mut fields = vec![
-            (MatchField::Trigger.key().to_owned(), self.trigger.clone()),
-            (MatchField::Replace.key().to_owned(), self.replace.clone()),
+    /// **A field that is `None` is not emitted** — there is no placeholder line,
+    /// no empty value and no key with nothing after it. A field that is
+    /// `Some("")` **is** emitted, with whatever the encoder spells an empty
+    /// string as, and `search_terms: Some(vec![])` is emitted as `[]`.
+    pub fn entries(&self) -> Vec<(String, EntryValue)> {
+        let (trigger_key, trigger_value) = self.trigger.entry();
+        let (content_key, content_text) = self.content.entry();
+        let mut entries = vec![
+            (trigger_key.to_owned(), trigger_value),
+            (
+                content_key.to_owned(),
+                EntryValue::Scalar(content_text.to_owned()),
+            ),
         ];
-        // The four optional keys, in the one order documented above. Written as
-        // a table rather than four `if let`s so that the order is a value this
-        // function reads rather than a shape spread over four statements.
-        let optional = [
-            (MatchField::Label, &self.label),
+        let mut push_scalar = |field: MatchField, value: &Option<String>| {
+            if let Some(text) = value {
+                entries.push((field.key().to_owned(), EntryValue::Scalar(text.clone())));
+            }
+        };
+        push_scalar(MatchField::Label, &self.label);
+        push_scalar(MatchField::Comment, &self.comment);
+        if let Some(terms) = &self.search_terms {
+            entries.push((
+                SequenceField::SearchTerms.key().to_owned(),
+                EntryValue::ScalarList(terms.clone()),
+            ));
+        }
+        // The nine options, in the one order documented above. Written as a
+        // table so that the order is a value this function reads rather than a
+        // shape spread over nine statements.
+        let options = [
             (MatchField::Word, &self.word),
             (MatchField::LeftWord, &self.left_word),
             (MatchField::RightWord, &self.right_word),
+            (MatchField::PropagateCase, &self.propagate_case),
+            (MatchField::UppercaseStyle, &self.uppercase_style),
+            (MatchField::ForceMode, &self.force_mode),
+            (MatchField::ForceClipboard, &self.force_clipboard),
+            (MatchField::Paragraph, &self.paragraph),
+            (MatchField::Anchor, &self.anchor),
         ];
-        for (field, value) in optional {
+        for (field, value) in options {
             if let Some(text) = value {
-                fields.push((field.key().to_owned(), text.clone()));
+                entries.push((field.key().to_owned(), EntryValue::Scalar(text.clone())));
             }
-        } // End of the loop over the four optional schema-known fields
-        fields
-    } // End of function fields()
+        } // End of the loop over the nine optional match options
+        entries
+    } // End of function entries()
 } // End of impl NewMatch
 
 #[cfg(test)]
 mod tests {
-    use super::NewMatch;
+    use super::{NewContent, NewMatch, NewTrigger, TriggerList};
+    use crate::patch::EntryValue;
 
-    /// The bare minimum: with the four optional fields absent, exactly the two
-    /// mandatory keys are written, and they are the schema's own — taken from
-    /// `MatchField` rather than typed.
+    /// Every optional scalar field's key, in write order, paired with a setter.
+    type Setter = fn(&mut NewMatch, Option<String>);
+
+    /// The eleven optional scalar fields, in write order.
+    fn optional_scalars() -> Vec<(&'static str, Setter)> {
+        vec![
+            ("label", |m, v| m.label = v),
+            ("comment", |m, v| m.comment = v),
+            ("word", |m, v| m.word = v),
+            ("left_word", |m, v| m.left_word = v),
+            ("right_word", |m, v| m.right_word = v),
+            ("propagate_case", |m, v| m.propagate_case = v),
+            ("uppercase_style", |m, v| m.uppercase_style = v),
+            ("force_mode", |m, v| m.force_mode = v),
+            ("force_clipboard", |m, v| m.force_clipboard = v),
+            ("paragraph", |m, v| m.paragraph = v),
+            ("anchor", |m, v| m.anchor = v),
+        ]
+    } // End of function optional_scalars()
+
+    /// A match with only a single trigger and a `replace` body.
+    fn bare() -> NewMatch {
+        NewMatch::new(
+            NewTrigger::Single(":one".to_owned()),
+            NewContent::Replace("first".to_owned()),
+        )
+    }
+
+    /// The keys of a match's entries, in order.
+    fn keys(new_match: &NewMatch) -> Vec<String> {
+        new_match
+            .entries()
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect()
+    }
+
+    /// With every optional field absent, exactly the two mandatory entries are
+    /// written, and their keys are the schema's own.
     #[test]
-    fn a_new_match_is_exactly_the_two_schema_keys_in_order() {
-        let fields = bare(":one", "first").fields();
+    fn a_bare_new_match_is_its_trigger_and_its_content() {
         assert_eq!(
-            fields,
+            bare().entries(),
             vec![
-                ("trigger".to_owned(), ":one".to_owned()),
-                ("replace".to_owned(), "first".to_owned()),
+                ("trigger".to_owned(), EntryValue::Scalar(":one".to_owned())),
+                ("replace".to_owned(), EntryValue::Scalar("first".to_owned())),
             ]
         );
-    } // End of function a_new_match_is_exactly_the_two_schema_keys_in_order()
+    } // End of function a_bare_new_match_is_its_trigger_and_its_content()
 
-    /// A match with all six fields writes all six, in the one documented order.
+    /// Each trigger alternative is written under its own key, and a multiple
+    /// trigger is a list in the order given.
     #[test]
-    fn all_six_present_fields_are_written_in_the_documented_order() {
-        let whole = NewMatch {
-            trigger: ":one".to_owned(),
-            replace: "first".to_owned(),
-            label: Some("a label".to_owned()),
-            word: Some("true".to_owned()),
-            left_word: Some("false".to_owned()),
-            right_word: Some("on".to_owned()),
-        };
-        let keys: Vec<String> = whole.fields().into_iter().map(|(key, _)| key).collect();
+    fn each_trigger_alternative_names_its_own_key() {
+        let cases = [
+            (
+                NewTrigger::Single(":a".to_owned()),
+                "trigger",
+                EntryValue::Scalar(":a".to_owned()),
+            ),
+            (
+                NewTrigger::Multiple(
+                    TriggerList::new(vec![":b".to_owned(), ":a".to_owned()]).expect("non-empty"),
+                ),
+                "triggers",
+                EntryValue::ScalarList(vec![":b".to_owned(), ":a".to_owned()]),
+            ),
+            (
+                NewTrigger::Regex(":d(\\d)".to_owned()),
+                "regex",
+                EntryValue::Scalar(":d(\\d)".to_owned()),
+            ),
+        ];
+        for (trigger, key, value) in cases {
+            let made = NewMatch::new(trigger, NewContent::Replace("x".to_owned()));
+            assert_eq!(made.entries()[0], (key.to_owned(), value));
+        } // End of the loop over the three trigger alternatives
+    } // End of function each_trigger_alternative_names_its_own_key()
+
+    /// Each content alternative is written under its own key.
+    #[test]
+    fn each_content_alternative_names_its_own_key() {
+        let cases = [
+            (NewContent::Replace("t".to_owned()), "replace"),
+            (NewContent::Markdown("t".to_owned()), "markdown"),
+            (NewContent::Html("t".to_owned()), "html"),
+            (NewContent::ImagePath("t".to_owned()), "image_path"),
+            (NewContent::Form("t".to_owned()), "form"),
+        ];
+        for (content, key) in cases {
+            let made = NewMatch::new(NewTrigger::Single(":a".to_owned()), content);
+            assert_eq!(
+                made.entries()[1],
+                (key.to_owned(), EntryValue::Scalar("t".to_owned()))
+            );
+        } // End of the loop over the five content alternatives
+    } // End of function each_content_alternative_names_its_own_key()
+
+    /// With every field present, every key is written once, in the documented
+    /// order.
+    #[test]
+    fn every_present_field_is_written_in_the_documented_order() {
+        let mut whole = bare();
+        for (_, set) in optional_scalars() {
+            set(&mut whole, Some("v".to_owned()));
+        }
+        whole.search_terms = Some(vec!["b".to_owned(), "a".to_owned()]);
         assert_eq!(
-            keys,
+            keys(&whole),
             vec![
                 "trigger",
                 "replace",
                 "label",
+                "comment",
+                "search_terms",
                 "word",
                 "left_word",
-                "right_word"
-            ],
-            "the write order is the documented one, and it is the file's key order"
+                "right_word",
+                "propagate_case",
+                "uppercase_style",
+                "force_mode",
+                "force_clipboard",
+                "paragraph",
+                "anchor",
+            ]
         );
+        let terms = whole
+            .entries()
+            .into_iter()
+            .find(|(key, _)| key == "search_terms")
+            .map(|(_, value)| value);
         assert_eq!(
-            whole.fields(),
-            vec![
-                ("trigger".to_owned(), ":one".to_owned()),
-                ("replace".to_owned(), "first".to_owned()),
-                ("label".to_owned(), "a label".to_owned()),
-                ("word".to_owned(), "true".to_owned()),
-                ("left_word".to_owned(), "false".to_owned()),
-                ("right_word".to_owned(), "on".to_owned()),
-            ],
-            "every value travels as the text the caller supplied"
+            terms,
+            Some(EntryValue::ScalarList(vec!["b".to_owned(), "a".to_owned()])),
+            "list order survives"
         );
-    } // End of function all_six_present_fields_are_written_in_the_documented_order()
+    } // End of function every_present_field_is_written_in_the_documented_order()
 
-    /// An absent optional field is **omitted**, and the fields around it keep
-    /// their order. Each of the four is dropped on its own, so a hole cannot be
-    /// hidden by its neighbours.
+    /// For every optional field, `None` writes no key and `Some("")` writes the
+    /// key with an empty value — and only that key changes.
     #[test]
-    fn an_absent_optional_field_is_omitted_and_the_order_survives() {
-        let all_four = ["label", "word", "left_word", "right_word"];
-        for dropped in all_four {
-            let mut candidate = NewMatch {
-                trigger: ":one".to_owned(),
-                replace: "first".to_owned(),
-                label: Some("a label".to_owned()),
-                word: Some("true".to_owned()),
-                left_word: Some("false".to_owned()),
-                right_word: Some("on".to_owned()),
-            };
-            match dropped {
-                "label" => candidate.label = None,
-                "word" => candidate.word = None,
-                "left_word" => candidate.left_word = None,
-                _ => candidate.right_word = None,
-            }
-            let keys: Vec<String> = candidate.fields().into_iter().map(|(key, _)| key).collect();
-            let expected: Vec<String> = ["trigger", "replace"]
-                .into_iter()
-                .chain(all_four.into_iter().filter(|key| *key != dropped))
-                .map(str::to_owned)
-                .collect();
+    fn none_and_empty_differ_for_every_optional_field() {
+        for (key, set) in optional_scalars() {
+            let mut absent = bare();
+            set(&mut absent, None);
+            assert!(!keys(&absent).iter().any(|k| k == key), "{key}: absent");
+
+            let mut empty = bare();
+            set(&mut empty, Some(String::new()));
             assert_eq!(
-                keys, expected,
-                "dropping {dropped} must drop only {dropped}"
+                empty.entries().last(),
+                Some(&(key.to_owned(), EntryValue::Scalar(String::new()))),
+                "{key}: an empty value is still a key"
             );
-        } // End of the loop over the four optional fields, each dropped alone
-    } // End of function an_absent_optional_field_is_omitted_and_the_order_survives()
+            assert_eq!(empty.entries().len(), 3, "{key}: only that key is added");
+        } // End of the loop over the eleven optional scalar fields
 
-    /// `None` and `Some("")` are two different requests, and `fields()` writes
-    /// them as two different items: no key at all, or the key with an empty
-    /// value.
-    #[test]
-    fn an_absent_field_and_an_empty_one_are_not_the_same_request() {
-        let absent = bare(":one", "first");
-        assert!(
-            !absent.fields().iter().any(|(key, _)| key == "label"),
-            "an absent label is not written at all"
-        );
-
-        let mut empty = bare(":one", "first");
-        empty.label = Some(String::new());
+        let mut empty_terms = bare();
+        empty_terms.search_terms = Some(Vec::new());
         assert_eq!(
-            empty.fields().last(),
-            Some(&("label".to_owned(), String::new())),
-            "an empty label is written, with an empty value"
+            empty_terms.entries().last(),
+            Some(&(
+                "search_terms".to_owned(),
+                EntryValue::ScalarList(Vec::new())
+            ))
         );
-    } // End of function an_absent_field_and_an_empty_one_are_not_the_same_request()
+        assert!(!keys(&bare()).iter().any(|k| k == "search_terms"));
+    } // End of function none_and_empty_differ_for_every_optional_field()
 
-    /// It deserializes from the object a frontend sends: the two mandatory keys
-    /// are required, and the four optional ones default to absent — so a payload
-    /// written before Phase 2c-4c-1 still means what it meant.
+    /// An empty `triggers` list cannot be built, in Rust or off the wire.
     #[test]
-    fn both_fields_are_mandatory_on_the_wire() {
-        let whole: NewMatch =
-            serde_json::from_str(r#"{"trigger":":one","replace":"first"}"#).expect("a whole match");
-        assert_eq!(whole.trigger, ":one");
-        assert_eq!(whole.replace, "first");
-        assert_eq!(
-            whole,
-            bare(":one", "first"),
-            "the four omitted keys are None"
+    fn an_empty_trigger_list_is_not_expressible() {
+        assert_eq!(TriggerList::new(Vec::new()), None);
+        let refused = serde_json::from_str::<NewMatch>(
+            r#"{"trigger":{"Multiple":[]},"content":{"Replace":"x"}}"#,
         );
-        assert!(
-            serde_json::from_str::<NewMatch>(r#"{"trigger":":one"}"#).is_err(),
-            "a trigger with no body is not a usable espanso match"
-        );
-        assert!(
-            serde_json::from_str::<NewMatch>(r#"{"replace":"first"}"#).is_err(),
-            "a body with no trigger cannot fire"
-        );
-    } // End of function both_fields_are_mandatory_on_the_wire()
+        assert!(refused.is_err(), "an empty triggers array is refused");
+    } // End of function an_empty_trigger_list_is_not_expressible()
 
-    /// The four optional keys cross the wire when they are sent, and `null` is
-    /// read as absent rather than as an empty string.
+    /// The wire form: both alternatives are required, every optional field
+    /// defaults to absent when omitted or null, and an unknown property — an
+    /// author-chosen key, or the pre-3-4 flat `replace` — is refused.
     #[test]
-    fn the_four_optional_keys_cross_the_wire() {
-        let sent: NewMatch = serde_json::from_str(
-            r#"{"trigger":":one","replace":"first","label":"a label","word":"true",
-                "left_word":"","right_word":null}"#,
+    fn the_wire_form_is_closed() {
+        let minimal: NewMatch =
+            serde_json::from_str(r#"{"trigger":{"Single":":one"},"content":{"Replace":"first"}}"#)
+                .expect("a minimal match");
+        assert_eq!(minimal, bare());
+
+        let nulled: NewMatch = serde_json::from_str(
+            r#"{"trigger":{"Single":":one"},"content":{"Replace":"first"},
+                "label":null,"search_terms":null,"word":""}"#,
         )
-        .expect("a widened match");
-        assert_eq!(sent.label.as_deref(), Some("a label"));
-        assert_eq!(sent.word.as_deref(), Some("true"));
-        assert_eq!(
-            sent.left_word.as_deref(),
-            Some(""),
-            "an explicitly empty left_word is a request to write one"
-        );
-        assert_eq!(
-            sent.right_word, None,
-            "a null right_word is absent, not empty"
-        );
-    } // End of function the_four_optional_keys_cross_the_wire()
+        .expect("nulls are absent");
+        assert_eq!(nulled.label, None);
+        assert_eq!(nulled.search_terms, None);
+        assert_eq!(nulled.word.as_deref(), Some(""));
 
-    /// A match with only the two mandatory fields set.
-    fn bare(trigger: &str, replace: &str) -> NewMatch {
-        NewMatch {
-            trigger: trigger.to_owned(),
-            replace: replace.to_owned(),
-            label: None,
-            word: None,
-            left_word: None,
-            right_word: None,
-        }
-    } // End of function bare()
+        for refused in [
+            r#"{"trigger":{"Single":":one"}}"#,
+            r#"{"content":{"Replace":"first"}}"#,
+            r#"{"trigger":":one","replace":"first"}"#,
+            r#"{"trigger":{"Single":":one"},"content":{"Replace":"x"},"vars":[]}"#,
+            r#"{"trigger":{"Single":":one"},"content":{"Replace":"x"},"rightWord":"on"}"#,
+            r#"{"trigger":{"Other":":one"},"content":{"Replace":"x"}}"#,
+            r#"{"trigger":{"Single":":one"},"content":{"Vars":"x"}}"#,
+            r#"{"trigger":{"Single":{"a":1}},"content":{"Replace":"x"}}"#,
+            r#"{"trigger":{"Multiple":[["nested"]]},"content":{"Replace":"x"}}"#,
+            r#"{"trigger":{"Single":":one"},"content":{"Replace":"x"},"search_terms":[{"a":1}]}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<NewMatch>(refused).is_err(),
+                "must be refused: {refused}"
+            );
+        } // End of the loop over the refused payloads
+
+        let round_trip: NewMatch =
+            serde_json::from_value(serde_json::to_value(bare()).expect("serializes"))
+                .expect("reads back");
+        assert_eq!(round_trip, bare());
+    } // End of function the_wire_form_is_closed()
 }

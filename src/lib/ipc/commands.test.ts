@@ -108,7 +108,10 @@ const ENTRY_ID: BackupEntryId = { batch: BATCH_ID, relative_path: 'match/base.ym
  * this application creates, and an omitted optional field is a key the new
  * snippet is not born holding rather than one written empty.
  */
-const NEW_MATCH: NewMatch = { trigger: ':new', replace: 'a new snippet' };
+const NEW_MATCH: NewMatch = {
+  trigger: { Single: ':new' },
+  content: { Replace: 'a new snippet' }
+};
 
 /**
  * A draft that changes nothing, written out in full.

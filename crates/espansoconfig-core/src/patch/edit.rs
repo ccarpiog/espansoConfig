@@ -239,6 +239,8 @@
 //! rule (the second, since Phase 3-2, is a [`FieldInsertGroup`] or
 //! [`ShapeSwitch`] entry holding a flat [`EntryValue::ScalarList`]): exactly one new flat block-mapping sequence item with scalar fields, at a
 //! sequence-item boundary, every value spelled by [`crate::emit::choose_scalar`].
+//! Since Phase 3-4 a field of that item may itself be a flat
+//! [`EntryValue::ScalarList`] (`triggers`, `search_terms`), and nothing deeper.
 //! It also promotes a bare `matches:` — an implicit null, and a zero-width scalar
 //! to the substrate (`PROGRESS.md`, R7) — into its first item, without which that
 //! key could never be targeted as a sequence at all. The marker column comes from
@@ -979,13 +981,17 @@ impl ItemMove {
 /// > fields, at a sequence-item boundary.
 ///
 /// (Phase 3-2 states a second exception the same way: an
-/// [`EntryValue::ScalarList`] is a flat list of scalars, and nothing deeper.)
+/// [`EntryValue::ScalarList`] is a flat list of scalars, and nothing deeper.
+/// **Phase 3-4 lets a new item's field be one**, for `triggers` and
+/// `search_terms`: a field's value is an [`EntryValue`], so it is a scalar or a
+/// flat list of scalars and never anything deeper.)
 ///
 /// That sentence is the whole licence, and every word of it is load-bearing.
-/// **One** item, so a caller cannot ask for a list. A **flat block mapping**, so
-/// nesting is impossible by construction — [`InsertItem::fields`] is a list of
-/// `(key, value)` pairs of decoded strings and there is no shape in which a value
-/// can be a collection. **Scalar** fields, every one of them spelled by
+/// **One** item, so a caller cannot ask for a list of items. A **flat block
+/// mapping**, so nesting beyond one list of scalars is impossible by construction
+/// — [`InsertItem::fields`] is a list of `(key, value)` pairs whose value is an
+/// [`EntryValue`], and no [`EntryValue`] can hold a mapping or a nested list.
+/// **Scalar** fields and list items, every one of them spelled by
 /// [`crate::emit::choose_scalar`], the codec every other edit in this module
 /// uses; there is deliberately no second speller here, because a second speller
 /// is a second answer to "how is this value written". And **at a sequence-item
@@ -1056,8 +1062,8 @@ pub struct InsertItem {
     sequence: DocumentPath,
     /// Where in that sequence the item is written.
     at: ItemPlacement,
-    /// The new item's fields, as decoded key/value pairs, in write order.
-    fields: Vec<(String, String)>,
+    /// The new item's fields, as decoded keys and typed values, in write order.
+    fields: Vec<(String, EntryValue)>,
 }
 
 /// Where a new sequence item is written.
@@ -1139,12 +1145,25 @@ impl InsertItem {
         placement: ItemPlacement,
         fields: Vec<(String, String)>,
     ) -> InsertItem {
+        InsertItem::typed(sequence, placement, scalars(fields))
+    } // End of function at()
+
+    /// Builds an insertion whose fields may be scalars or flat lists of scalars
+    /// (Phase 3-4), written at `placement`.
+    ///
+    /// A list-valued field is written in block style when it has items and as
+    /// `key: []` when it has none, exactly as [`FieldInsertGroup`] writes one.
+    pub fn typed(
+        sequence: DocumentPath,
+        placement: ItemPlacement,
+        fields: Vec<(String, EntryValue)>,
+    ) -> InsertItem {
         InsertItem {
             sequence,
             at: placement,
             fields,
         }
-    } // End of function at()
+    } // End of function typed()
 
     /// Builds an insertion that appends the item after the sequence's last item.
     pub fn new(sequence: DocumentPath, fields: Vec<(String, String)>) -> InsertItem {
@@ -1179,8 +1198,8 @@ impl InsertItem {
         self.at
     }
 
-    /// The new item's fields, as decoded key/value pairs, in write order.
-    pub fn fields(&self) -> &[(String, String)] {
+    /// The new item's fields, as decoded keys and typed values, in write order.
+    pub fn fields(&self) -> &[(String, EntryValue)] {
         &self.fields
     }
 } // End of impl InsertItem
@@ -5275,8 +5294,9 @@ struct PendingItem {
 /// One item an insertion writes, as `verify` must find it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NewItem {
-    /// A flat mapping holding exactly these decoded key/value pairs, in order.
-    Mapping(Vec<(String, String)>),
+    /// A flat mapping holding exactly these decoded keys and typed values, in
+    /// order. A value is a scalar or, since Phase 3-4, a flat list of scalars.
+    Mapping(Vec<(String, EntryValue)>),
     /// A scalar decoding to exactly this string (Phase 3-2).
     Scalar(String),
 }
@@ -6685,7 +6705,29 @@ fn plan_item_insertion(
             edit: position,
             at: point,
         })?;
-    let text = render_item(edit.fields(), marker, line_ending, at_end_of_file);
+    // A list-valued field's items sit one indentation step further in than the
+    // item's keys, and the step is the document's own dominant one
+    // ([`observed_steps`] over every mapping), falling back to the renderer's
+    // two columns only when the document shows none. It is only asked for when
+    // the item holds a list with items to place. `target.id` is passed as the
+    // excluded key because no key is being promoted here; it is a sequence or
+    // an implicit-null value, never a mapping key, so it excludes nothing.
+    let holds_items = edit
+        .fields()
+        .iter()
+        .any(|(_, value)| value.as_list().is_some_and(|items| !items.is_empty()));
+    let list_step = if holds_items {
+        dominant(&observed_steps(source, index, trivia, None, target.id)).unwrap_or(2)
+    } else {
+        0
+    };
+    let text = render_item(
+        edit.fields(),
+        marker,
+        list_step,
+        line_ending,
+        at_end_of_file,
+    );
 
     Ok(PlannedEdit {
         replacements: vec![Replacement {
@@ -6915,7 +6957,10 @@ fn plan_scalar_item_insertion(
 ///
 /// The three variants above, each carrying a **position** in the field list and
 /// never a key (`CLAUDE.md` section 1).
-fn check_inserted_fields(position: usize, fields: &[(String, String)]) -> Result<(), EditError> {
+fn check_inserted_fields(
+    position: usize,
+    fields: &[(String, EntryValue)],
+) -> Result<(), EditError> {
     if fields.is_empty() {
         return Err(EditError::InsertedItemHasNoFields { edit: position });
     }
@@ -7167,35 +7212,58 @@ fn block_child_column(
 /// a context whose parent indent is the item's own key column, so a multi-line
 /// value becomes a `|` block indented two columns inside that.
 ///
+/// A list-valued field (Phase 3-4) is its key alone on its line, then one
+/// `- item` line per item at `list_step` columns past the item's key column; an
+/// empty list is `key: []`. Both spellings are [`FieldInsertGroup`]'s, for
+/// ruling 5 of `docs/decisions/3-split-notes.md`, and each list item is spelled
+/// by [`render_scalar_item`], the same call a [`ScalarItemInsert`] makes.
+///
 /// `at_end_of_file` inverts where the line ending goes: the break is written in
 /// **front** of the item and the last line is left unterminated, so a document
-/// with no final newline keeps not having one. A last field whose value is a block
+/// with no final newline keeps not having one. A last line whose value is a block
 /// scalar terminates itself, and its own trailing break is never taken away —
-/// removing one would silently shorten the user's value.
+/// removing one would silently shorten the user's value. Both halves are
+/// [`join_rendered_lines`]'s, which every multi-line insertion shares.
 fn render_item(
-    fields: &[(String, String)],
+    fields: &[(String, EntryValue)],
     marker: usize,
+    list_step: usize,
     line_ending: LineEnding,
     at_end_of_file: bool,
 ) -> String {
-    let context = ScalarContext::block(marker + 2, line_ending);
-    let mut text = String::new();
-    if at_end_of_file {
-        text.push_str(line_ending.as_str());
-    }
+    let key_column = marker + 2;
+    let context = ScalarContext::block(key_column, line_ending);
+    let mut lines: Vec<String> = Vec::new();
     for (at, (key, value)) in fields.iter().enumerate() {
-        let key = choose_scalar(key, context.as_key());
-        let value = choose_scalar(value, context);
-        let entry = format!("{}: {}", key.render(), value.render());
-        text.push_str(&" ".repeat(marker));
-        text.push_str(if at == 0 { "- " } else { "  " });
-        text.push_str(&entry);
-        let last = at + 1 == fields.len();
-        if !entry.ends_with(['\n', '\r']) && !(last && at_end_of_file) {
-            text.push_str(line_ending.as_str());
+        let key = choose_scalar(key, context.as_key()).render();
+        let lead = format!(
+            "{}{}",
+            " ".repeat(marker),
+            if at == 0 { "- " } else { "  " }
+        );
+        match value {
+            EntryValue::Scalar(value) => {
+                lines.push(format!(
+                    "{lead}{key}: {}",
+                    choose_scalar(value, context).render()
+                ));
+            }
+            // The one spelling an empty sequence has (ruling 5).
+            EntryValue::ScalarList(items) if items.is_empty() => {
+                lines.push(format!("{lead}{key}: []"));
+            }
+            // A new non-empty list is block style (ruling 5).
+            EntryValue::ScalarList(items) => {
+                lines.push(format!("{lead}{key}:"));
+                lines.extend(
+                    items
+                        .iter()
+                        .map(|item| render_scalar_item(item, key_column + list_step, line_ending)),
+                );
+            }
         }
-    } // End of the loop that writes one line per requested field
-    text
+    } // End of the loop that renders every requested field, in order
+    join_rendered_lines(&lines, line_ending, at_end_of_file)
 } // End of function render_item()
 
 /// Renders one new scalar item of a block sequence, without its line ending.
@@ -9111,20 +9179,23 @@ fn verify_items(
 /// tell which. That is [`verify_field`]'s rule, applied to a whole item.
 ///
 /// The **flatness** claim is made by the shape of the comparison rather than
-/// asserted separately: a value that reparsed as a collection has no
-/// `Node::scalar`, so it fails as a missing field.
+/// asserted separately: every value is checked by [`verify_entry_value`], so a
+/// scalar that reparsed as a collection has no `Node::scalar` and fails as a
+/// missing field, and a list must reparse as a sequence of exactly the requested
+/// scalars, in order, in the style it was written in (block, or `[]` when empty).
 ///
 /// # Errors
 ///
 /// [`VerificationFailure::FieldNotInserted`], carrying the length of a key and
-/// never its text (`CLAUDE.md` section 1);
-/// [`VerificationFailure::Undecodable`]; [`VerificationFailure::DecoderDisagreement`].
+/// never its text (`CLAUDE.md` section 1); [`VerificationFailure::ItemNotInserted`]
+/// for a wrong list; [`VerificationFailure::Undecodable`];
+/// [`VerificationFailure::DecoderDisagreement`].
 fn verify_inserted_item(
     candidate: &str,
     index: &SyntaxIndex,
     edit: usize,
     item: NodeId,
-    fields: &[(String, String)],
+    fields: &[(String, EntryValue)],
 ) -> Result<(), VerificationFailure> {
     let first = fields.first().map_or(0, |(key, _)| key.len());
     let mapping = index
@@ -9149,18 +9220,7 @@ fn verify_inserted_item(
         if decoded_value(index, entry.key) != Some(key.as_str()) {
             return Err(missing);
         }
-        let scalar = index
-            .node(entry.value)
-            .and_then(|node| node.scalar.as_ref())
-            .ok_or(missing.clone())?;
-        let ours = decode(candidate, &scalar.presentation)
-            .map_err(|error| VerificationFailure::Undecodable { edit, error })?;
-        if ours != scalar.value {
-            return Err(VerificationFailure::DecoderDisagreement { edit });
-        }
-        if &scalar.value != value {
-            return Err(missing);
-        }
+        verify_entry_value(candidate, index, edit, key.len(), entry.value, value)?;
     } // End of the loop over the fields the insertion asked for
     Ok(())
 } // End of function verify_inserted_item()

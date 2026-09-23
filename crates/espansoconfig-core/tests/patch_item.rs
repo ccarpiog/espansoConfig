@@ -977,7 +977,7 @@ fn insertion_landings_names_the_index_each_new_item_took() {
             };
             assert_eq!(
                 items.get(landed).copied(),
-                Some(insertion.fields()[0].1.as_str()),
+                insertion.fields()[0].1.as_scalar(),
                 "{what}: the item at index {landed} must be the one edit {position} wrote"
             );
         } // End of the loop that checks each answered landing against the bytes
