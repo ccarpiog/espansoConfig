@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "updated": "2026-09-23T18:09:48Z",
+ "updated": "2026-09-23T19:06:01Z",
  "plan": "IMPLEMENTATION_PLAN.md",
  "goal": "Finish external-change reconciliation for the espanso config editor, proving it in real-window readings before packaging.",
  "phases": [
@@ -857,9 +857,11 @@
   {
    "id": "2d-7-10",
    "title": "Consolidation",
-   "status": "queued",
+   "status": "done",
    "risk": "routine",
-   "summary": "Writes the 2d-7 matrix, the ES sentence inventory, the 2d-8 deletion manifest and the rebaselines; may now run driven, 2d-7-9 having closed."
+   "summary": "Wrote the 2d-7 matrix, the ES sentence inventory, the 2d-8 deletion manifest and the carried-forward list; reviewed ship-with-fixes, fixed.",
+   "review": "docs/reviews/2d-7-10.md",
+   "narrative": "docs/decisions/2d-7-10-notes.md"
   },
   {
    "id": "2d-8",

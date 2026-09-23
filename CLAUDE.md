@@ -149,7 +149,7 @@ the phase records under `docs/decisions/` hold the details.
 
 **Writing files**
 
-- `espansoconfig_core::persist::save_document` (`crates/espansoconfig-core/src/persist/write.rs`) is
+- `espansoconfig_core::persist::save_document` (`crates/espansoconfig-core/src/persist/save.rs`) is
   the **only** entry point that may write a user's file. Never call `replace_file_atomically` or
   `replace_locked_file` from a command or from inside the transaction: **the lock is not reentrant, so
   the process hangs silently and forever.** Forcing a write into existence anywhere else bypasses the

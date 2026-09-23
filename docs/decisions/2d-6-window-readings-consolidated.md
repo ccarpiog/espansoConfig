@@ -196,7 +196,7 @@ record does not assign one.
 | No window-close path runs `dispose()`; the foreground listeners also go with the page | 5-7b WR §4.5, §10 item 1; 10 N §4 item 3; `2d-6-split-notes.md` §6 item 7 | none named (split notes §7 item 10 stays open) |
 | Every window activation costs one drain; judged acceptable, not measured | 10 N §4 item 2 | none named |
 | The instrument (`src/probe.ts`, `src-tauri/src/probe.rs`, the hook lines) and both harness trees: `/private/tmp/espansoconfig-harness-2d-5-7b/` (it had already gone by 6c-2, per 6c-2 WR §1) and `/private/tmp/espansoconfig-harness-2d-6-6c-2/`, with every script, fixture and launch added by 7c, 8c, 9c and 10 | 5-7b WR §9; 6c-2 N §5 item 6; 7c N §4 item 8; 8c N §4 item 8; 9c WR §2; 10 N §5 | **2d-8** |
-| The pre-edit copies `/private/tmp/9c-probe.ts.orig`, `/private/tmp/9c-probe.rs.orig` and `/private/tmp/10-probe.ts.orig` | 9c WR §1; 10 WR §1 | no record names a deleter |
+| The eight probe-related pre-edit copies: `/private/tmp/6c2-probe.rs.orig`, `/private/tmp/6c2-probe.ts.orig`, `/private/tmp/7c-probe-block.ts`, `/private/tmp/espansoconfig-8c-probe.ts.before`, `/private/tmp/espansoconfig-8c-section.ts`, `/private/tmp/9c-probe.rs.orig`, `/private/tmp/9c-probe.ts.orig` and `/private/tmp/10-probe.ts.orig` | 9c WR §1; 10 WR §1; `phase-2d-7-design.md` Q12; `2d-7-split-notes.md` §3 entry 32, §5.14 | **2d-8** (`2d-7-10-notes.md` §4 shows each with `ls`) |
 
 **Closed since it was recorded:** 8c N §4 item 4 (no drain after a save refused under the lock) was
 diagnosed as deliberate backend coalescing, not a defect, in `2d-6-9a-notes.md` §3.3.
