@@ -802,7 +802,8 @@ export function tDuplicationRecovery(choice: DuplicationRecovery): string {
  * Renders why this application will not prepare or confirm a replacement of one
  * file's whole text right now.
  *
- * **One accessor for all seven arms, including the six competing surfaces.**
+ * **One accessor for all nine arms of `RestoreRefusal`, including the seven
+ * competing surfaces its `writeSurfaceOpen` arm can name.**
  * `restoreRefusalKey` in `../browser/restore` delegates its `writeSurfaceOpen`
  * arm to `openWriteSurfaceKey`, so *which* surface is open is decided in one
  * place; a second accessor over `CompetingWriteSurfaceKind` would have no caller
@@ -1155,10 +1156,14 @@ export function tOccurrenceCount(count: number): string {
 // key itself — the key builders in `./codes` are where a key is built, and their
 // return types make a missing dictionary entry a compile error there.
 //
-// **Nothing calls them yet.** No command answers with a save error until Phase
-// 2b-2, and 1b-1 shipped the whole i18n layer with no caller for exactly this
-// reason: a boundary that arrives with the code it describes cannot be half
-// built.
+// **Five of them are called from components; the rest have no production
+// caller.** `tSaveVerdict`, `tFindingCode`, `tEditError`, `tSaveError` and
+// `tPresentationNote` are drawn by the write panels (`MatchEditor.svelte`,
+// `MatchCreator.svelte`, `RecoveryPanel.svelte`, the three operation panels,
+// `RawEditor.svelte` and `RestorePane.svelte` — `tEditError` and `tSaveError` by
+// all but `RawEditor.svelte`). The other accessors here were shipped with the
+// codes they describe, as 1b-1 shipped the whole i18n layer, because a boundary
+// that arrives with the code it describes cannot be half built.
 
 /**
  * Renders what kind of YAML construct a node is, in the current language.
@@ -1577,11 +1582,15 @@ export function tExternalEvidenceRefusal(reason: ExternalEvidenceRefusal): strin
  * 2d-6 record's §3 entry 24): the accepted sequence orders observations, and it
  * establishes nothing about disk chronology relative to a locked save read.
  *
- * **Nothing draws it yet**, exactly as nothing draws the five above: ruling 26 is
- * Phase 2d-5-5b's and the panel that shows one of these is 2d-6-6's; since Phase
- * 2d-6-2 the match editor's `supersededEvidence` obstacle resolves to it through
- * {@link describeEditorReapplyObstacle}. A code with no string is worse than a code
- * with no caller, which is why it exists now.
+ * **Its key is drawn; this accessor is not called.** The `supersededEvidence`
+ * obstacle of each of the six reapplying surfaces — the match editor, the
+ * new-snippet form, the recovery form, the deleter, the mover and the duplicator —
+ * resolves to `SUPERSEDED_EVIDENCE_KEY` through that surface's own
+ * `describe*ReapplyObstacle` accessor (the editor's is
+ * {@link describeEditorReapplyObstacle}), and each surface's component draws the
+ * obstacle through its `t*ReapplyObstacle` wrapper. Nothing in production calls
+ * {@link describeSupersededEvidence} or {@link tSupersededEvidence}; they are kept
+ * as the key's own accessor pair.
  *
  * @param locale - The dictionary to read from.
  * @returns The translated sentence.

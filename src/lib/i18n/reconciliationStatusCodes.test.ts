@@ -18,9 +18,11 @@
  * languages, and the word scans pin them as *absences* (a sentence without
  * "deleted" cannot claim a deletion). **A literal fixture protects approved wording
  * and nothing else**: it cannot fail when the wording is wrong or — for the
- * Spanish — not Spanish. The Spanish was written by the implementer and has had no
- * bilingual review; the expectation pins that draft so a reviewer's correction is a
- * deliberate edit to two files rather than a silent one to one.
+ * Spanish — not Spanish. The Spanish was written by the implementer; Phase 2d-6-11b
+ * read it against the English and the bounds (`2d-6-11b-notes.md` §2, a review by
+ * the implementing agent, not a native speaker's) and corrected one sentence, and
+ * `bilingualFixtures.test.ts` pins the reviewed wording through the accessors. A
+ * correction is still a deliberate edit to the dictionary and the pins together.
  *
  * Per `1b-2a-notes.md` section 14, a `describe`/`it` callback whose sibling
  * argument is already its description carries no JSDoc of its own; ordinary
@@ -382,7 +384,7 @@ describe('the seven semantic bounds, as literal reviewed wording (entry 40)', ()
       'This panel’s evidence has been superseded by another accepted reading.'
     );
     expect(DICTIONARIES.es['browser.reconciliation.refusal.superseded']).toBe(
-      'Las pruebas de este panel han quedado sustituidas por otra lectura aceptada.'
+      'La evidencia de este panel ha quedado sustituida por otra lectura aceptada.'
     );
   });
 

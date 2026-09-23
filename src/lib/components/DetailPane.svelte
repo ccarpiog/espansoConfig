@@ -1063,7 +1063,8 @@
    * Every snippet this window has a match editor open over.
    *
    * A list of at most one today, because this pane holds one small-editor
-   * session and {@link busy} keeps the write surfaces mutually exclusive. It is
+   * session and {@link busy} keeps the seven top-level write surfaces mutually
+   * exclusive (a recovery form may be open beside one, and holds no editor). It is
    * a list rather than a nullable identity because the question the model asks
    * is plural — *any* draft in the file — and a second concurrent editor would
    * then be a value added here rather than a rule rewritten in two places.
@@ -1098,7 +1099,7 @@
    *
    * **Today it always answers `false` while a duplicate panel is open**, exactly
    * as {@link unsavedDraftFor} always answers `null` while a move panel is: the
-   * write surfaces are mutually exclusive through {@link busy}, so a file with an
+   * seven top-level write surfaces are mutually exclusive through {@link busy}, so a file with an
    * open editor is not offered a duplicate in the first place — the same
    * conservative refusal reached one step earlier. The wiring is here so the
    * model's own arm becomes live the first moment that stops being true, and

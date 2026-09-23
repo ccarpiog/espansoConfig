@@ -2440,7 +2440,9 @@ export type MoveReapplyObstacle =
       /**
        * Another accepted reading of the file has superseded the conflict's
        * evidence, whichever origin it had (entry 22). Answered by the live
-       * standing-origin guard, asked last; rendered through `tSupersededEvidence`.
+       * standing-origin guard, asked last; its obstacle key resolves to
+       * `SUPERSEDED_EVIDENCE_KEY`, drawn by the component through this surface's
+       * reapply-obstacle wrapper (`tSupersededEvidence` itself has no caller).
        */
       readonly kind: 'supersededEvidence';
     }

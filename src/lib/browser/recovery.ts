@@ -2882,7 +2882,9 @@ export type RecoveryReapplyObstacle =
       /**
        * Another accepted reading of the file has superseded the conflict's
        * evidence, whichever origin it had (entry 22). Answered by the live
-       * standing-origin guard, asked last; rendered through `tSupersededEvidence`.
+       * standing-origin guard, asked last; its obstacle key resolves to
+       * `SUPERSEDED_EVIDENCE_KEY`, drawn by the component through this surface's
+       * reapply-obstacle wrapper (`tSupersededEvidence` itself has no caller).
        *
        * **The only external-evidence arm this form has.** A recovery create goes
        * at the end of the list and names no anchor, so the observation's
@@ -3047,7 +3049,10 @@ export function reapplyRecoveryToDiskVersion(
   // an adoption could be reached. `notAttempted` is the arm for it: its sentence is
   // about the ordinary reason there is nothing to attempt, and a form the person
   // has left behind is a second reason with the same consequence — nothing was
-  // asked of the window. Nothing draws this yet, so no sentence is on a screen.
+  // asked of the window. `RecoveryPanel.svelte` draws whatever outcome its
+  // `keepMyDraft` receives through `tReapplyOutcome`, this arm included; whether a
+  // closed form still offers *Keep my draft* is `conflictChoicesFor`'s answer over
+  // this form's view, not this function's.
   if (session.closed) {
     return { kind: 'notAttempted' };
   }

@@ -1526,11 +1526,12 @@ function controlIn(target: HTMLElement, lang: Locale, key: TranslationKey): HTML
  * The external conflict's own panel, insisted upon.
  *
  * **Conflict choices are pressed inside it and never found on the whole panel**:
- * in Spanish the header's close control and the operation's *keep editing* choice
- * read identically (*Dejarlo como está*), so a search of the whole panel finds the
- * close control first. That is a wording defect recorded in
- * `docs/decisions/2d-6-7b-notes.md` §4, not something this suite may paper over by
- * pressing whichever comes first.
+ * until Phase 2d-6-11b the header's close control and the operation's *keep
+ * editing* choice read identically in Spanish (*Dejarlo como está*,
+ * `docs/decisions/2d-6-7b-notes.md` §4 item 1), so a search of the whole panel found
+ * the close control first. The labels now differ (`bilingualFixtures.test.ts` pins
+ * that), and pressing inside the panel still keeps a later collision from being
+ * papered over by pressing whichever comes first.
  *
  * @param target - Where the component was mounted.
  * @returns The panel.

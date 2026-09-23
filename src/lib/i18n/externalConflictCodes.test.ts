@@ -19,10 +19,11 @@
  * of entry 24. **A literal fixture protects approved wording and nothing else**:
  * it fails when the wording drifts, and it cannot fail when the wording is wrong,
  * ungrammatical or — for the Spanish — not Spanish. The Spanish here was written by
- * the implementer and has not had a bilingual review; the expectation pins that
- * draft so a reviewer's correction is a deliberate edit to two files rather than a
- * silent one to one. Nothing automatable in this repository establishes
- * translation quality, and this file does not claim to.
+ * the implementer; Phase 2d-6-11b read it against the English and the bounds
+ * (`2d-6-11b-notes.md` §2, a review by the implementing agent, not a native
+ * speaker's) and changed none of these sentences. A correction is a deliberate
+ * edit to the dictionary and the pins together. Nothing automatable in this
+ * repository establishes translation quality, and this file does not claim to.
  *
  * The word scans further down pin the seven semantic bounds of entry 40 as
  * *absences* — a sentence that does not contain "newer" cannot claim the disk is
@@ -201,8 +202,9 @@ describe('the external-conflict accessors', () => {
 describe('the reviewed wording, pinned literally', () => {
   // **What these pin and what they cannot** — the header says it once and the
   // cases say it again: approved wording, never meaning, never translation
-  // quality. The Spanish is the implementer's draft, unreviewed by a bilingual
-  // reader; a correction is a deliberate edit here and in `es.json` together.
+  // quality. The Spanish is the implementer's draft, read against the English in
+  // 2d-6-11b's prose review (not a native speaker's); a correction is a deliberate
+  // edit here and in `es.json` together.
 
   it('pins the retained sentence (entry 13) in both languages', () => {
     const key = externalConflictNoticeKey({ kind: 'observationRetained' });
@@ -303,8 +305,8 @@ describe('the reviewed wording, pinned literally', () => {
     // 10): no *expected*, no *found*, nothing called *afterwards*. The affected
     // file is a display operand (entry 39). The destination-less form's line names
     // the one way forward and withholds nothing it has not said is withheld
-    // (entry 21). The Spanish is the implementer's draft, pinned so a bilingual
-    // review's correction is a deliberate two-file edit (entry 40).
+    // (entry 21). The Spanish is the implementer's draft, read in 2d-6-11b's prose
+    // review and pinned so a correction is a deliberate two-file edit (entry 40).
     const revision = { revision: 'c'.repeat(64) };
     expect(translate('en', 'browser.externalConflict.revisionObserved', revision)).toBe(
       `The version read from disk when this change was observed is ${'c'.repeat(64)}.`

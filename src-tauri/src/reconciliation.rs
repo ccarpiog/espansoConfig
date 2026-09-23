@@ -1120,10 +1120,11 @@ impl ReconciliationQueue {
     /// **That coordinator runs in the shipped window since Phase 2d-5-7a**,
     /// started by `src/lib/components/AppShell.svelte`: it drains after its
     /// listener registers, after an open reaches ready and on a wake naming the
-    /// current epoch. Its foreground and resume trigger is wired to an inert
-    /// source there until a later phase builds a DOM one, so a wake dropped
-    /// while the window is in the background is recovered by the next open or
-    /// the next delivered wake, not by coming forward. Nothing on this side can
+    /// current epoch. Since Phase 2d-6-10 its foreground trigger is the DOM
+    /// source of `src/lib/browser/domForeground.ts` (`visibilitychange` to
+    /// visible, window `focus`), so a dispatched event of either kind also
+    /// requests a drain; that WKWebView dispatches one when the application
+    /// really comes forward is not established by any test. Nothing on this side can
     /// establish that the listener exists; `crate::events::wake_emitter` says
     /// the same.
     pub fn wake(&self, wake: ReconciliationWake) {

@@ -2604,9 +2604,9 @@ export function planMatchReapply(
  * Why a reapply of this editor's draft could not be carried out.
  *
  * **A code, never a sentence**, the rule every model in this directory follows.
- * There is no key function for these yet and that is 2c-4b-2's boundary: nothing
- * draws them, so 2c-4b-3 adds the accessors together with the panel that renders
- * them.
+ * {@link editorReapplyObstacleKey} maps it to a key, `describeEditorReapplyObstacle`
+ * in `../i18n` renders it (both since 2c-4b-3), and `MatchEditor.svelte` draws it
+ * beside a reapply outcome through `tEditorReapplyObstacle`.
  */
 export type EditorReapplyObstacle =
   | SharedReapplyObstacle

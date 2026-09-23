@@ -54,11 +54,12 @@ pub const RECONCILIATION_READY: &str = "workspace://reconciliation-ready";
 /// by `src/lib/components/AppShell.svelte`: it drains after its listener
 /// registers, after an open reaches ready and on a wake naming the current
 /// epoch, so a wake dropped here costs at most the wait until the next of those.
-/// The foreground and resume trigger is wired to an inert source there until a
-/// later phase builds a DOM one, so a wake dropped while the window is in the
-/// background is recovered by the next open or the next delivered wake, not by
-/// coming forward. `crate::reconciliation::ReconciliationQueue::wake` carries the
-/// same statement beside the same decision.
+/// Since Phase 2d-6-10 its foreground trigger is the DOM source of
+/// `src/lib/browser/domForeground.ts` (`visibilitychange` to visible, window
+/// `focus`), so a dispatched event of either kind also requests a drain; that
+/// WKWebView dispatches one when the application really comes forward is not
+/// established by any test. `crate::reconciliation::ReconciliationQueue::wake`
+/// carries the same statement beside the same decision.
 ///
 /// What this function cannot establish is that any webview is listening; nothing
 /// in Tauri reports that, and no sentence anywhere in this application may claim

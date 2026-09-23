@@ -358,10 +358,14 @@ export interface BrowserCommands {
    * be able to drive a changed file, an addition, a removal, a lost entry and a
    * stale epoch, and watch what a coordinator does about each.
    *
-   * **Nothing in this file calls it, and that is deliberate.** Phase 2d-4b puts
-   * the drain on this surface and stops; the watermark, the epoch comparison,
-   * the `discarded` response and the decision of *when* a drain fires are all
-   * Phase 2d-5's, and `BrowserState` gains no reconciliation state here.
+   * **This file calls it in exactly one place**: the `drain` callback that
+   * {@link createBrowserState} hands to `createReconciliationCoordinator`
+   * (Phase 2d-5-3), which forwards the coordinator's watermark and nothing else.
+   * The watermark, the epoch comparison, the `discarded` response and the
+   * decision of *when* a drain fires all belong to the coordinator in
+   * `./reconciliationCoordinator.ts`, not to this interface; nothing in
+   * TypeScript stops another module holding a `BrowserCommands` from calling it
+   * directly.
    *
    * @param afterSequence - The highest sequence the caller has already accepted,
    *   or `0` for everything. Required, because the only honest source for it is
@@ -1568,12 +1572,13 @@ export interface BrowserState {
    *
    * **The seventh registration door, and it is the same door** — Phase 2d-5-5a.
    * The six writing wrappers above register a refused save's origin as the conflict
-   * arrives; nothing registers a watcher observation, because until 2d-5-5b nothing
-   * routes one to a surface. This method is what that routing will call, and it is
-   * declared here rather than left for that step because without it an
-   * external-origin conflict could never be adopted at all: `adoptDiskVersion`
-   * looks the origin up in this state's own map, and an origin no `BrowserState`
-   * ever registered installs nothing.
+   * arrives. **The routing that arrived later does not call this method**: an
+   * arbitrated observation's origin is registered by the private `arbitrateHere`
+   * through `rememberTheConflict` directly, at the generation the observation
+   * arrived at, and this method has no production caller — only suites reach it.
+   * It stays the public door for a caller that holds a narrowed observation:
+   * `adoptDiskVersion` looks the origin up in this state's own map, and an origin
+   * no `BrowserState` ever registered installs nothing.
    *
    * **It registers and installs nothing else** — the snippet list, the selection
    * and the viewer are untouched, exactly as a save conflict's registration leaves
@@ -2612,12 +2617,16 @@ export interface BrowserState {
    * inert once displaced, and a target that can be reported in place.
    *
    * **`DetailPane.svelte` is the one production caller** — Phase 2d-5-2b. It
-   * registers all seven kinds from a single exhaustive assembly, re-targets the
-   * new-snippet form through the lease when `MatchCreator.svelte` reports the file
-   * the person chose, and returns every lease when it is unmounted. Nothing on any
-   * screen changed because of it: the transitions those seven register are no-ops,
-   * and the only reader of the live set is the restore's own pre-send gate, which
-   * used to be handed the same list by the same component.
+   * registers all eight kinds (the recovery form since Phase 2d-6-6b) from a
+   * single exhaustive assembly, re-targets the new-snippet form through the lease
+   * when `MatchCreator.svelte` reports the file the person chose, and returns every
+   * lease when it is unmounted. The transition it registers is its `transitionOf`,
+   * which hands the observation to {@link BrowserState.observeExternalChange} while
+   * a receiver of that kind is bound and does nothing when none is (since
+   * 2d-6-6b). The live set is read by the restore's pre-send gate, by the
+   * reconciliation coordinator and observation routing through the registry, and
+   * by the status readers in `./reconciliationStatus.ts` and `DetailPane.svelte`'s
+   * header files through {@link BrowserState.openWriteSurfaces}.
    *
    * **What it cannot force, in the same sentence as what it does.** It forces that
    * a stale instance of one kind can neither remove nor re-target a newer one —
@@ -2788,10 +2797,11 @@ export interface BrowserState {
   /**
    * What this window can say about one file it did not reload — Phase 2d-5-4.
    *
-   * **A code, and no component renders it yet.** Its words exist since Phase
-   * 2d-6-9a — `decideFileReconciliation` in `./reconciliationStatus.ts` decides
-   * where each arm is drawn, and `describeReconciliationFileState` in
-   * `src/lib/i18n/codes.ts` holds the EN/ES sentences — and 2d-6-9b draws them.
+   * **A code; no component renders the code itself.** Its words exist since
+   * Phase 2d-6-9a — `decideFileReconciliation` in `./reconciliationStatus.ts`
+   * decides where each arm is drawn, and `describeReconciliationFileState` in
+   * `src/lib/i18n/codes.ts` holds the EN/ES sentences — and since 2d-6-9b
+   * `FileReconciliationStatus.svelte` and `Sidebar.svelte` draw them.
    *
    * **A `removed` status outlives the row it is about**, deliberately: a write
    * surface over a removed file is preserved rather than closed, so the state that
@@ -3309,8 +3319,9 @@ export function createBrowserState(
   // `writeSurfaces` below gives: a component owns its registration and removes it
   // through the function it was handed. **In production, since Phase 2d-6-6b**,
   // `DetailPane.svelte` registers the editor's, the new-snippet form's and the
-  // recovery form's receivers here, and since Phase 2d-6-7a the deleter's, the
-  // mover's and the duplicator's; the raw editor and restore register none yet.
+  // recovery form's receivers here, since Phase 2d-6-7a the deleter's, the
+  // mover's and the duplicator's, and since Phase 2d-6-8a the raw editor's and
+  // restore's — every kind, through the roster in `./surfaceReceivers.ts`.
   const observationReceivers = new Map<DocumentId, Set<ReceiverRegistration>>();
   // **The delivery queue** — Phase 2d-6-1b's review, finding 2. A publication made
   // from inside a delivery (a receiver that calls `observeExternalChange` or the
@@ -3451,9 +3462,10 @@ export function createBrowserState(
   // own wrapper, and a configuration is tens of files, so a scanned array is the
   // same argument `viewOf` makes one screen up.
   //
-  // **Nothing renders it today and no dictionary key exists for any of its arms.**
-  // `docs/decisions/2d-5-split-notes.md` section 6 item 6 puts the EN/ES entries on
-  // the step that first names such a state to a person, and this step does not.
+  // **Drawn since Phase 2d-6-9b, never directly.** `externalDocumentStatus()` is
+  // read by `./reconciliationStatus.ts`, whose decisions `FileReconciliationStatus.svelte`
+  // and `Sidebar.svelte` draw through the EN/ES keys 2d-6-9a added
+  // (`describeReconciliationFileState` in `src/lib/i18n/codes.ts`).
   let externalStatuses = $state<readonly ExternalDocumentStatusEntry[]>([]);
   // **How many times each file's status has been written** — Phase 2d-5-4's second
   // review. Not `$state`: nothing draws it and nothing derives from it. It exists
@@ -3628,7 +3640,11 @@ export function createBrowserState(
        * **What it does not claim.** It does not retry, and it does not say *why* the
        * read failed — `report` is what carries the failure itself, and
        * {@link ExternalDocumentStatus} is a code about this window's knowledge, not
-       * about the engine's refusal. Nothing draws either today; 2d-6 does.
+       * about the engine's refusal. The failure reaches no screen: `AppShell.svelte`
+       * passes `reportIpcFailure` (`src/lib/ipc/errors.ts`) as `report`, which
+       * writes to the developer console. The `stale` mark is drawn since Phase
+       * 2d-6-9b, through `./reconciliationStatus.ts`, by
+       * `FileReconciliationStatus.svelte` and `Sidebar.svelte`.
        *
        * **Refused outright under an uncertainty hold, and the observation
        * registered instead** — Phase 2d-6-9b-3, the orchestrator's ruling on the

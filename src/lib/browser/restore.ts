@@ -749,12 +749,12 @@ export function targetingSurfaceFor(
  * **A code, never a sentence** (`CLAUDE.md` section 2). {@link restoreRefusalKey}
  * maps it to a dictionary key; a component never builds the key.
  *
- * **There is no reactive `t*` accessor for these yet, and that is 2c-5-3's
- * boundary.** Nothing draws them, so 2c-5-4 adds the accessor in `../i18n` together
- * with the panel that renders it — `deletionReapplyObstacleKey`'s precedent at
- * 2c-4b-2, and the reason is mechanical as well as tidy: `../i18n/index.ts` is
- * reachable from the application entry, so importing this module there would put a
- * model nothing draws into the production bundle.
+ * **Drawn since 2c-5-4**: `tRestoreRefusal` in `../i18n` is the reactive accessor,
+ * and `RestorePane.svelte` renders the view's refusal through it. The accessor
+ * arrived with that panel rather than with this type (2c-5-3), because
+ * `../i18n/index.ts` is reachable from the application entry and importing this
+ * module there before a panel drew it would have put an undrawn model into the
+ * production bundle.
  */
 export type RestoreRefusal =
   | {

@@ -35,8 +35,9 @@
  *
  * ## What this module does **not** ship, said plainly
  *
- * **A transition stored here is called, and since Phase 2d-6-6b three kinds'
- * transitions do something.** `./observationTransitions.ts` reads one through
+ * **A transition stored here is called, and since Phase 2d-6-8a every kind's
+ * transition does something while that kind's receiver is bound** (three kinds
+ * since 2d-6-6b, six since 2d-6-7a). `./observationTransitions.ts` reads one through
  * {@link WriteSurfaceRegistry.transitionFor} and invokes it when an observation
  * names a file an open surface may be about (since Phase 2d-5-4).
  * `src/lib/components/DetailPane.svelte` registers all eight kinds from one

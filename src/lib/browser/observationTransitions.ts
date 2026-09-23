@@ -49,12 +49,13 @@
  *   owns the window.** Every member is a function this module calls and none of
  *   them answers whether it did anything; a host whose `removeDocument` does
  *   nothing produces the same outcome value as one that removes the file.
- * - **No user-facing string is produced here and none is owed yet.**
- *   {@link ExternalDocumentStatus} and {@link ExternalPathDrift} are codes, and
- *   `docs/decisions/2d-5-split-notes.md` section 6 item 6 puts the EN/ES entries
- *   and the `src/lib/i18n/codes.ts` accessor on the step that first names such a
- *   state *to a person* — 2d-6, which draws them. Nothing on a screen reads either
- *   type today.
+ * - **No user-facing string is produced here.**
+ *   {@link ExternalDocumentStatus} and {@link ExternalPathDrift} are codes. Since
+ *   Phase 2d-6-9b both reach a screen, but not from this module:
+ *   `./reconciliationStatus.ts` reads them through the window's readers and
+ *   decides banners and file states, and `ReconciliationStatus.svelte`,
+ *   `FileReconciliationStatus.svelte` and `Sidebar.svelte` draw those decisions
+ *   through the accessors in `src/lib/i18n/codes.ts`.
  */
 
 import type {
@@ -107,9 +108,10 @@ export type ObservationDetail =
  * What this window can truthfully say about a file it did **not** reload.
  *
  * **A code, never a sentence** (`CLAUDE.md` section 2), and no component renders
- * one yet. The sentences exist since Phase 2d-6-9a, reached through
+ * the code itself. The sentences exist since Phase 2d-6-9a, reached through
  * `describeReconciliationFileState` in `src/lib/i18n/codes.ts` over the decisions
- * of `./reconciliationStatus.ts`; 2d-6-9b draws them.
+ * of `./reconciliationStatus.ts`, and since 2d-6-9b `FileReconciliationStatus.svelte`
+ * and `Sidebar.svelte` draw them.
  *
  * Every arm is a statement about *this window's knowledge*, never about the file:
  * `stale` says this window did not install what the watcher saw, `unavailable`

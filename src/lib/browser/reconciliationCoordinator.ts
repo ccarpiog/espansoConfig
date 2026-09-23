@@ -51,8 +51,11 @@
  * - **It generalizes no conflict.** A write surface is told about a change through
  *   the transition the registry holds for it, and what a surface *does* with one —
  *   the six conflict registrations, the reapply evidence, the same-revision
- *   coalescing and the in-flight-write barrier — is **2d-5-5's**. Every registered
- *   transition is a no-op today.
+ *   coalescing and the in-flight-write barrier — is **2d-5-5's**. The transition
+ *   registered in production is `transitionOf` in
+ *   `src/lib/components/DetailPane.svelte` (since Phase 2d-6-6b, every kind since
+ *   2d-6-8a): it hands the observation to `BrowserState.observeExternalChange`
+ *   while a receiver of that kind is bound, and does nothing when none is.
  * - **It performs no membership reload of its own.**
  *   {@link ReconciliationCoordinator.membershipReloadWanted} is a request the
  *   `Named` and `Unnamed` arms raise and **nothing here acts on it**; a
@@ -529,7 +532,12 @@ export const INERT_FOREGROUND_EVENTS: ForegroundSource = {
  * The coordinator, as a value.
  *
  * Every accessor below exists because a model test has to be able to read what
- * happened without mounting anything; none of them is rendered today.
+ * happened without mounting anything. **Four reach a screen indirectly since Phase
+ * 2d-6-9**: {@link ReconciliationCoordinator.block}, `registration`, `watchState`
+ * and `membershipReloadWanted` are forwarded by `BrowserState` readers in
+ * `./workspace.svelte.ts`, whose answers `./reconciliationStatus.ts` turns into the
+ * decisions `ReconciliationStatus.svelte` draws. No component reads this value
+ * itself, and the other accessors are read by the window's own logic or by suites.
  */
 export interface ReconciliationCoordinator {
   /**

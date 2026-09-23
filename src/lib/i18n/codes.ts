@@ -1228,8 +1228,11 @@ export function describeSaveResult(locale: Locale, result: SaveResult): string {
 // The correspondence evidence a conflict carries — Phase 2c-4b-1
 // ---------------------------------------------------------------------------
 //
-// Three enums with **no renderer yet**: 2c-4b-3 is what draws them. They have
-// strings anyway, because a code with no string is worse than a code with no
+// Three enums, **one of them drawn**: since 2c-4b-3 a `ReapplyRefusal` sentence is
+// drawn under the reapply obstacle that carried it (`obstacleWithRefusal` in
+// `./index.ts`); `ReapplyResolution` and `ReapplyPlacement` still have no renderer
+// (`tReapplyResolution` and `tReapplyPlacement` have no production caller). They
+// have strings anyway, because a code with no string is worse than a code with no
 // caller — the rule that put `ScalarStyle` and `LineEnding` here at 1b-2b.
 //
 // `ReapplyResolution` and `ReapplyPlacement` are the two slots of one
@@ -1364,10 +1367,12 @@ export function describeDraftError(locale: Locale, error: DraftError): string {
 // The read-only backup catalogue — Phase 2c-5-2
 // ---------------------------------------------------------------------------
 //
-// Six enums, and **no renderer yet**: 2c-5-4 is what draws them. They have
-// strings anyway, because a code with no string is worse than a code with no
-// caller — the rule that put `ScalarStyle` and `LineEnding` here at 1b-2b and
-// the correspondence evidence above at 2c-4b-1.
+// Six enums, **five of them drawn since 2c-5-4**: `RestorePane.svelte` renders
+// `BackupRootState`, `BatchSkipped`, `EntrySkipped`, `BackupTarget` and
+// `BackupReadError` through their `t*` accessors; `tBackupReadStep` has no
+// production caller. They have strings anyway, because a code with no string is
+// worse than a code with no caller — the rule that put `ScalarStyle` and
+// `LineEnding` here at 1b-2b and the correspondence evidence above at 2c-4b-1.
 //
 // Every sentence below is bounded by what the catalogue actually establishes.
 // None of them says a backup is authentic, verified, untampered or made by this

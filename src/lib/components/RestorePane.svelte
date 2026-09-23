@@ -1390,7 +1390,7 @@
   /* The pane's own action row, with the sentence that says why the control is
      disabled. Sticky at the bottom for `MatchDuplicator.svelte`'s reason, and
      more sharply here: a catalogue, a candidate and a second whole document sit
-     above it, so this is the longest of the seven write surfaces and its primary
+     above it, so this is the longest of the pane's seven top-level write surfaces and its primary
      control would otherwise be far below the fold. `.restore` is a flex item that
      shrinks to the pane's height with its content overflowing, so its content box
      bottom *is* the bottom of what the pane shows.

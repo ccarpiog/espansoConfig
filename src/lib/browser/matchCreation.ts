@@ -2165,9 +2165,10 @@ export function acknowledgeSnapshot(
 /**
  * Why a reapply of this form could not be carried out.
  *
- * **A code, never a sentence.** There is no key function for these yet, and that is
- * 2c-4b-2's boundary: nothing draws them, so 2c-4b-3 adds the accessors together
- * with the panel that renders them.
+ * **A code, never a sentence.** `creationReapplyObstacleKey` maps it to a key,
+ * `describeCreationReapplyObstacle` in `../i18n` renders it (both since 2c-4b-3),
+ * and `MatchCreator.svelte` draws it beside a reapply outcome through
+ * `tCreationReapplyObstacle`.
  */
 export type CreationReapplyObstacle =
   | SharedReapplyObstacle
@@ -2256,7 +2257,9 @@ export type CreationReapplyObstacle =
       /**
        * Another accepted reading of the file has superseded the conflict's
        * evidence, whichever origin it had (entry 22). Answered by the live
-       * standing-origin guard, asked last; rendered through `tSupersededEvidence`.
+       * standing-origin guard, asked last; its obstacle key resolves to
+       * `SUPERSEDED_EVIDENCE_KEY`, drawn by the component through this surface's
+       * reapply-obstacle wrapper (`tSupersededEvidence` itself has no caller).
        */
       readonly kind: 'supersededEvidence';
     }
