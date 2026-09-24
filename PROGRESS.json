@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T14:25:22Z",
+  "updated": "2026-09-24T14:25:57Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1127,7 +1127,8 @@
       "risk": "high",
       "summary": "Reads the bulk selection UI in a window in English and Spanish, including a real partial success.",
       "review": "ship-with-fixes (Codex), 0 blockers + 2 should-fix, fixed",
-      "narrative": "docs/decisions/3-11-3-notes.md"
+      "narrative": "docs/decisions/3-11-3-notes.md",
+      "commit": "0b4279f"
     },
     {
       "id": "3-12",
