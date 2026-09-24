@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T12:49:31Z",
+  "updated": "2026-09-24T12:50:02Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1090,7 +1090,8 @@
       "status": "done",
       "summary": "One backend command saves the seven bulk options across files, one save per file, stopping at the first failure and reporting every file.",
       "risk": "high",
-      "review": "docs/reviews/phase-3-10.md"
+      "review": "docs/reviews/phase-3-10.md",
+      "commit": "35d4624"
     },
     {
       "id": "3-11",
