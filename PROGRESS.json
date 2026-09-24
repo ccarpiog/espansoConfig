@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T10:33:48Z",
+  "updated": "2026-09-24T11:06:27Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1025,9 +1025,9 @@
     {
       "id": "3-8",
       "title": "The local raw UI, and CF-55",
-      "status": "in_progress",
+      "status": "done",
       "risk": "high",
-      "summary": "Cut into 3-8-1 (model), 3-8-2 (components) and 3-8-3 (window half); 3-8-1 and 3-8-2 are done, 3-8-3 is next."
+      "summary": "Cut into 3-8-1 (model), 3-8-2 (components) and 3-8-3 (window half); all three are done and the step is closed."
     },
     {
       "id": "3-8-1",
@@ -1051,9 +1051,11 @@
     {
       "id": "3-8-3",
       "title": "Local raw UI: the window half",
-      "status": "queued",
+      "status": "done",
       "risk": "high",
-      "summary": "EN and ES window reading of the local raw editor and CF-55's held-save controls; closes step 3-8."
+      "summary": "Window reading of the local raw editor in EN and ES, CF-55 included; ship, 0 findings; step 3-8 closed.",
+      "review": "docs/reviews/phase-3-8-3.md",
+      "narrative": "docs/decisions/3-8-3-notes.md"
     },
     {
       "id": "3-9",
