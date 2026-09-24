@@ -1045,7 +1045,8 @@
       "risk": "high",
       "summary": "Raw-snippet editor in the detail pane, CF-55's disabled Undo/Redo on both raw surfaces, EN+ES wording; reviewed and fixed.",
       "review": "docs/reviews/phase-3-8-2.md",
-      "narrative": "docs/decisions/3-8-2-notes.md"
+      "narrative": "docs/decisions/3-8-2-notes.md",
+      "commit": "4c42c89"
     },
     {
       "id": "3-8-3",

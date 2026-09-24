@@ -277,7 +277,7 @@ all of it is in `git log`._
 | _**2d-7-8** — one row, `ship` (Codex), rung unchanged_ | `2aa798a` (SHA record `64abc77`; the owner's option-(a) record `abd49ce`) | ✅ pushed; **archived 2026-09-23 at 2d-7-9** to [`status-table.md`](docs/progress-archive/status-table.md) |
 | **3-7 — the local raw-item core edit (core, command, wire), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed** | `340f389` (this SHA record is the commit after it) | ✅ pushed, `5c7d64d..340f389  main -> main`; tree clean |
 | **3-8-1 — the local raw UI: the model and the coordination, reviewed (`ship-with-fixes`, Codex, 2 BLOCKERS + 1 SHOULD-FIX, all fixed) and closed; 3-8 cut into 3-8-1/2/3** | `eabb219` (this SHA record is the commit after it) | ✅ pushed, `1beef00..eabb219  main -> main`; tree clean |
-| **3-8-2 — the local raw UI: the components and the i18n, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 2 SHOULD-FIX, both fixed) and closed** | _pending — recorded by the commit after it_ | _pending_ |
+| **3-8-2 — the local raw UI: the components and the i18n, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 2 SHOULD-FIX, both fixed) and closed** | `4c42c89` (this SHA record is the commit after it) | ✅ pushed, `e8c2622..4c42c89  main -> main`; tree clean |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed
