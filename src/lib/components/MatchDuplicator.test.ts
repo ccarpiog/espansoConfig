@@ -1261,6 +1261,8 @@ describe('a duplicate panel over the real workspace state', () => {
       duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => {
         return { ok: false, failure: STALE_IDENTITY };
       }),
+      matchItemText: vi.fn(async () => refusal),
+      saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       saveRawDocument: vi.fn(async () => refusal),
       drainExternalChanges: vi.fn(async () => refusal)
     };

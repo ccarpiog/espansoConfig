@@ -45,6 +45,7 @@ import type {
   NewMatch,
   NewMatchPosition,
   ObservedDocument,
+  OwnedItemText,
   ReapplyResolution,
   ReconciliationBatch,
   SaveResult,
@@ -434,6 +435,10 @@ interface Script {
    * carries the acknowledgement built from it.
    */
   readonly duplicates?: readonly CommandResult<SaveResult>[];
+  /** What `match_item_text` answers, in order (Phase 3-8-1). */
+  readonly itemTexts?: readonly CommandResult<OwnedItemText>[];
+  /** What `save_match_item_text` answers, in order (Phase 3-8-1). */
+  readonly itemSaves?: readonly CommandResult<SaveResult>[];
   /**
    * What `save_raw_document` answers, in order.
    *
@@ -597,12 +602,12 @@ function createBrowserState(
 } // End of function createBrowserState()
 
 /**
- * The six members of a surface whose call opens ruling 27's barrier.
+ * The seven members of a surface whose call opens ruling 27's barrier.
  *
- * Each of the six wrappers in `workspace.svelte.ts` opens the barrier on exactly
+ * Each of the seven wrappers in `workspace.svelte.ts` opens the barrier on exactly
  * the file identity it then hands its command — `match.document`, `id.document`
  * or `document` — so the first argument of every recorded call names a file a
- * lease was opened for. Nothing in TypeScript keeps a seventh writer, or a
+ * lease was opened for. Nothing in TypeScript keeps an eighth writer, or a
  * wrapper that opened the barrier on some other identity, in step with this
  * list; it is read against the module by hand.
  */
@@ -612,7 +617,8 @@ const BARRIERED_MEMBERS = [
   'createMatch',
   'deleteMatch',
   'duplicateMatch',
-  'saveRawDocument'
+  'saveRawDocument',
+  'saveMatchItemText'
 ] as const;
 
 /**
@@ -647,7 +653,7 @@ function filesWrittenThrough(commands: BrowserCommands): ReadonlySet<DocumentId>
         written.add(first.document);
       }
     } // End of the loop over one stub's recorded calls
-  } // End of the loop over the six barriered members
+  } // End of the loop over the seven barriered members
   return written;
 } // End of function filesWrittenThrough()
 
@@ -700,6 +706,8 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
   let creates = 0;
   let deletes = 0;
   let duplicates = 0;
+  let itemTexts = 0;
+  let itemSaves = 0;
   let raws = 0;
   let drained = 0;
   drainsPending += script.drains?.length ?? 0;
@@ -772,6 +780,20 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     }),
     duplicateMatch: vi.fn(async () => {
       const answer: CommandResult<SaveResult> = script.duplicates?.[duplicates++] ?? {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+      };
+      return answer;
+    }),
+    matchItemText: vi.fn(async () => {
+      const answer: CommandResult<OwnedItemText> = script.itemTexts?.[itemTexts++] ?? {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+      };
+      return answer;
+    }),
+    saveMatchItemText: vi.fn(async () => {
+      const answer: CommandResult<SaveResult> = script.itemSaves?.[itemSaves++] ?? {
         ok: false,
         failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
       };
@@ -4793,6 +4815,147 @@ describe('saving one snippet’s fields', () => {
     expect(commands.getDocument).toHaveBeenCalledTimes(3);
   });
 }); // End of the "saving one snippet's fields" suite
+
+describe('the local raw editor’s read and write (Phase 3-8-1)', () => {
+  /** One snippet’s owned text, as `match_item_text` answers it. */
+  const OWNED_TEXT: OwnedItemText = {
+    text: '  - trigger: ":a"\n    replace: "é 😀"\n',
+    first_line: 2,
+    line_count: 2
+  };
+
+  it('answers the read unchanged, and reports a refusal as well as answering it', async () => {
+    const refused: CommandResult<OwnedItemText> = {
+      ok: false,
+      failure: {
+        kind: 'command',
+        error: {
+          code: 'itemTextRefused',
+          error: { ItemRangeNotContiguous: { edit: 0, hole: { start: 1, end: 4 } } }
+        }
+      }
+    };
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({ itemTexts: [{ ok: true, value: OWNED_TEXT }, refused] });
+    const state = createBrowserState(commands, (failure) => reported.push(failure));
+    await state.open(null);
+    const id = baseDocument().matches[0]!.id;
+
+    expect(await state.matchItemText(id)).toEqual({ ok: true, value: OWNED_TEXT });
+    expect(await state.matchItemText(id)).toBe(refused);
+    expect(reported).toEqual([refused.ok ? null : refused.failure]);
+    expect(vi.mocked(commands.matchItemText).mock.calls).toEqual([[id], [id]]);
+  }); // End of the "read" case
+
+  it('sends the identity, the base revision, the exact text and the acknowledgement', async () => {
+    const unchanged: CommandResult<SaveResult> = {
+      ok: true,
+      value: { outcome: 'saved', revision: 'rev-a', committed: false, notes: [], backup_taken: false, moved: null }
+    };
+    const commands = scriptedCommands({ itemSaves: [unchanged] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    const id = baseDocument().matches[0]!.id;
+
+    await state.saveMatchItemText(id, 'rev-a', OWNED_TEXT.text, NOTHING_ACKNOWLEDGED);
+
+    expect(vi.mocked(commands.saveMatchItemText).mock.calls).toEqual([
+      [id, 'rev-a', OWNED_TEXT.text, NOTHING_ACKNOWLEDGED]
+    ]);
+    expect(state.writeInFlight(2)).toBe(false);
+    // Nothing was written and the revision did not move, so nothing was re-read.
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+  }); // End of the "arguments" case
+
+  it('retires the old identity on a commit: the selection follows `moved`', async () => {
+    const edited = movedDocument();
+    const committed: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: edited.matches[1]!.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, itemSaves: [committed] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+
+    documents.set(2, { ok: true, value: edited });
+    const answer = await state.saveMatchItemText(
+      baseDocument().matches[0]!.id,
+      'rev-a',
+      OWNED_TEXT.text,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'done' } });
+    // The identity the save was sent with names nothing the window holds now.
+    expect(state.selected?.id).toEqual(edited.matches[1]!.id);
+    expect(state.selected?.id.revision).not.toBe(baseDocument().matches[0]!.id.revision);
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([30, 31]);
+    expect(state.writeInFlight(2)).toBe(false);
+  }); // End of the "commit" case
+
+  it('answers a send that may have written as such, and re-reads the file', async () => {
+    const commands = scriptedCommands({ itemSaves: [WRITE_MAY_HAVE_HAPPENED] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const answer = await state.saveMatchItemText(
+      baseDocument().matches[0]!.id,
+      'rev-a',
+      OWNED_TEXT.text,
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(answer).toEqual({
+      kind: 'failed',
+      mayHaveWritten: true,
+      failure: WRITE_MAY_HAVE_HAPPENED.ok ? null : WRITE_MAY_HAVE_HAPPENED.failure
+    });
+    expect(commands.getDocument).toHaveBeenCalledTimes(4);
+    expect(state.writeOutcomeUncertain(2)).toBe(true);
+  }); // End of the "may have written" case
+
+  it('answers an engine refusal as a failure that wrote nothing, carrying the core’s refusal', async () => {
+    const engine: CommandResult<SaveResult> = {
+      ok: false,
+      failure: {
+        kind: 'command',
+        error: {
+          code: 'saveFailed',
+          error: { Patch: { ItemTextEscapesItsIndentation: { edit: 0, line: 1 } } },
+          may_have_written: false
+        }
+      }
+    };
+    const commands = scriptedCommands({ itemSaves: [engine] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const answer = await state.saveMatchItemText(
+      baseDocument().matches[0]!.id,
+      'rev-a',
+      'x: y\n',
+      NOTHING_ACKNOWLEDGED
+    );
+
+    expect(answer).toEqual({ kind: 'failed', mayHaveWritten: false, failure: engine.ok ? null : engine.failure });
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+    expect(state.writeOutcomeUncertain(2)).toBe(false);
+  }); // End of the "engine refusal" case
+}); // End of the "local raw editor's read and write" suite
 
 /**
  * What `match/base.yml` projects to after its whole text was replaced.

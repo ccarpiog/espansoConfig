@@ -550,6 +550,8 @@ async function mountRestore(
     createMatch: async (): Promise<CommandResult<SaveResult>> => refusal,
     deleteMatch: async (): Promise<CommandResult<SaveResult>> => refusal,
     duplicateMatch: async (): Promise<CommandResult<SaveResult>> => refusal,
+    matchItemText: async () => refusal,
+    saveMatchItemText: async (): Promise<CommandResult<SaveResult>> => refusal,
     saveRawDocument: async (
       document: DocumentId,
       baseRevision: ContentRevision,

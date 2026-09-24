@@ -34,7 +34,7 @@ import type {
   RefusedResult,
   SaveResult
 } from '../ipc/types';
-import { isDirty, startDraft, textDraftRules } from './draft';
+import { canRedo, canUndo, isDirty, startDraft, textDraftRules } from './draft';
 import { makeConflict, makeDocument, makeMatch } from './fixtures';
 import {
   openWholeDocumentSave,
@@ -49,7 +49,9 @@ import {
   applySave,
   askToReload,
   beginSave,
+  canRedoEdit,
   canSave,
+  canUndoEdit,
   conflictOf,
   confirmReload,
   editText,
@@ -467,6 +469,48 @@ describe('the draft the editor holds', () => {
     expect(undoEdit(waiting)).toBe(waiting);
     expect(redoEdit(waiting)).toBe(waiting);
   }); // End of the "read-only while saving" case
+
+  it('neither enables nor applies Undo or Redo under one held save (CF-55, ruling 13)', () => {
+    // A session with a step to undo *and* a step to redo, so the history alone
+    // would enable both controls — which is exactly what the view used to answer.
+    const both = undoEdit(editText(editText(fresh(), EDITED), 'third\n'));
+    expect(canUndo(both.draft) && canRedo(both.draft)).toBe(true);
+    const started = beginSave(both, () => both);
+    if (started === null) {
+      throw new Error('this case needs a save in flight');
+    }
+    const held = started.session;
+    // The history still has both steps; the controls are off anyway.
+    expect(canUndo(held.draft) && canRedo(held.draft)).toBe(true);
+    expect(canUndoEdit(held)).toBe(false);
+    expect(canRedoEdit(held)).toBe(false);
+    expect(rawEditorView(held).canUndo).toBe(false);
+    expect(rawEditorView(held).canRedo).toBe(false);
+    // And neither transition mutates it.
+    expect(undoEdit(held)).toBe(held);
+    expect(redoEdit(held)).toBe(held);
+  }); // End of the "CF-55 under a held save" case
+
+  it('enables Undo and Redo exactly when the transitions would change the session', () => {
+    const edited = editText(fresh(), EDITED);
+    const undone = undoEdit(editText(edited, 'third\n'));
+    const started = beginSave(undone, () => undone);
+    const states: readonly RawEditorSession[] = [
+      fresh(),
+      edited,
+      undone,
+      started === null ? fresh() : started.session,
+      inConflict(),
+      roundTrip(edited, refusal()).session,
+      roundTrip(edited, saved()).session
+    ];
+    for (const state of states) {
+      expect(canUndoEdit(state)).toBe(undoEdit(state) !== state);
+      expect(canRedoEdit(state)).toBe(redoEdit(state) !== state);
+      expect(rawEditorView(state).canUndo).toBe(canUndoEdit(state));
+      expect(rawEditorView(state).canRedo).toBe(canRedoEdit(state));
+    } // End of the loop over the states built
+  }); // End of the "predicate agrees with transition" case
 
   it('refuses every change while a conflict is showing, and gives the box back on keep editing', () => {
     const stuck = inConflict();

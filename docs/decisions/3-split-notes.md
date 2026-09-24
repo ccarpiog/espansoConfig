@@ -306,6 +306,35 @@ workspace invalidation and reconciliation, the detail integration and i18n.
 
 **Risk `high`. Driven:** implementation yes; the window half per ruling 30. **Depends on** 3-7.
 
+**Addendum, 2026-09-24 — cut into three pieces before starting.** The step touches a new browser
+model, `rawEditor.ts`, workspace invalidation and reconciliation, the components and i18n, as 3-5 and
+3-6 did, so the orchestrator cut it along their shape:
+
+- **3-8-1 — the model and the coordination.** Everything below the components: a new browser
+  raw-snippet model in `src/lib/browser/` (load through `match_item_text`, draft, send through
+  `save_match_item_text`, with the text cut in Rust and no JavaScript byte slicing), the `\r` refusal
+  at load, at edit and at send, the typed IPC wrappers for the two 3-7 commands and
+  `CommandError::ItemTextRefused` (with `ItemRangeNotContiguous` surfaced as a model value that
+  offers the whole-document editor), retention under conflict, invalidation after a committed save
+  (the old identities are stale) and an uncertain write that keeps the text and needs reconciliation,
+  and **CF-55's model half on both raw surfaces**: under one held save *Undo* and *Redo* are neither
+  enabled nor mutating, in `rawEditor.ts` and in the new model. Any dictionary keys and accessors
+  those values need, EN and ES. A model test per acceptance clause. **No window half** — it draws
+  nothing new.
+- **3-8-2 — the components and the i18n.** A new raw-snippet component and `RawEditor.svelte` drawing
+  3-8-1's values, the detail integration, the wording for the range, its whole-document fallback and
+  the trailing-blank-line refusal (`3-7-notes.md` §5), CF-55's disabled controls on both surfaces
+  with a mounted test; the dictionary keys EN and ES. Its record says: *"No window reading was
+  performed or claimed."*
+- **3-8-3 — the window half.** EN and ES through the picker, covering a contiguous snippet, a
+  disjoint-ownership refusal and a `\r` refusal, with the held-save controls and *Stop editing* read
+  in the same launch as their DOM state (CF-55's unread half, §4.2), per ruling 30 and §4.1, with a
+  minimal uncommitted instrument inside its own single review. It needs a visible, unlocked screen,
+  and it closes step 3-8.
+
+Each piece is one phase with one worker and one review. The acceptance list above is the union of the
+three.
+
 ### 3-9 — File-scope inspector
 
 **Delivers** an ordered display of imports, the absent/empty/unsupported states, and an accurate

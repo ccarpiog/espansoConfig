@@ -120,6 +120,7 @@ import {
   rawEditorRefusalKey,
   type RawEditorRefusal
 } from '../browser/rawEditor';
+import { rawSnippetRefusalKey, type RawSnippetRefusal } from '../browser/rawSnippet';
 import {
   rawSaveChoiceKey,
   rawSaveMessageKey,
@@ -677,6 +678,23 @@ export function tRawEditorRefusal(refusal: RawEditorRefusal): string {
 export function tRawEditorDiskRefusal(refusal: RawEditorRefusal): string {
   return translate(locale.current, rawEditorDiskRefusalKey(refusal));
 } // End of function tRawEditorDiskRefusal()
+
+/**
+ * Renders why the local raw editor will not open one snippet's text — Phase
+ * 3-8-1.
+ *
+ * The sentence only: a `notEditable` refusal's `EditError` and an `unreadable`
+ * one's `IpcFailure` are drawn beside it through `tEditError` and `tIpcFailure`,
+ * and a `rangeNotContiguous` one's fallback is `fallbackOf` in
+ * `../browser/rawSnippet.ts`, drawn as a control rather than read out of this
+ * sentence.
+ *
+ * @param refusal - Why the editor will not open, from `openRawSnippet`.
+ * @returns The translated sentence.
+ */
+export function tRawSnippetRefusal(refusal: RawSnippetRefusal): string {
+  return translate(locale.current, rawSnippetRefusalKey(refusal));
+} // End of function tRawSnippetRefusal()
 
 /**
  * Renders why one field of a snippet is shown rather than edited.

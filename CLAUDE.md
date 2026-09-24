@@ -186,8 +186,9 @@ the phase records under `docs/decisions/` hold the details.
 - `documentStart` in `src/lib/browser/rawDocument.ts` has exactly one caller; it is the only producer
   of a `bom` segment, and a slice must never pass it.
 - **A `<textarea>` value has every line break normalized to LF, and an `<input type="text">` deletes a
-  carriage return outright** (measured in the shipped WKWebView). The raw editor therefore refuses any
-  text containing `\r` rather than reconstructing one — `file-comments-and-mixed-endings.yml` has two
+  carriage return outright** (measured in the shipped WKWebView). Both raw editors (`rawEditor.ts`, the
+  whole file; `rawSnippet.ts`, one snippet's owned text) therefore refuse any text containing `\r`, at
+  load, at edit and at send, rather than reconstructing one — `file-comments-and-mixed-endings.yml` has two
   CRLF lines among bare-LF ones, so re-applying a dominant convention would reformat untouched lines.
   A projected value holding a real `\r` is read-only and is drawn through `SourceText`, never into a
   box; the refusal is enforced at eligibility, at `editField` and at `beginSave`, the last because

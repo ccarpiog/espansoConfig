@@ -398,6 +398,8 @@ function scriptedCommands(
         script.deleteMatch === undefined ? refusal : script.deleteMatch()
     ),
     duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+    matchItemText: vi.fn(async () => refusal),
+    saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     saveRawDocument: vi.fn(
       async (
         document: DocumentId,

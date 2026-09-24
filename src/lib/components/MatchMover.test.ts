@@ -1362,6 +1362,8 @@ describe('a move panel over the real workspace state', () => {
       createMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       deleteMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+      matchItemText: vi.fn(async () => refusal),
+      saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       saveRawDocument: vi.fn(async () => refusal),
       drainExternalChanges: vi.fn(async () => refusal)
     };
@@ -1465,6 +1467,8 @@ describe('a move panel over the real workspace state', () => {
       createMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       deleteMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+      matchItemText: vi.fn(async () => refusal),
+      saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       saveRawDocument: vi.fn(async () => refusal),
       drainExternalChanges: vi.fn(async () => refusal)
     };

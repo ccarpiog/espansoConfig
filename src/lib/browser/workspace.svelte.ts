@@ -52,11 +52,13 @@ import {
   listBackupBatches,
   listBackupEntries,
   listDocuments,
+  matchItemText,
   moveMatch,
   openWorkspace,
   readBackupText,
   reloadDocument,
   saveMatch,
+  saveMatchItemText,
   saveRawDocument
 } from '../ipc/commands';
 import type {
@@ -92,6 +94,7 @@ import type {
   MatchView,
   NewMatch,
   NewMatchPosition,
+  OwnedItemText,
   ReconciliationBatch,
   SaveResult,
   ScalarView,
@@ -181,8 +184,9 @@ import {
  * The six read-only commands of `../ipc/commands`, with the same signatures, and
  * — since Phase 2b-2a — the ones that write. {@link BrowserCommands.moveMatch},
  * {@link BrowserCommands.saveMatch}, {@link BrowserCommands.createMatch},
- * {@link BrowserCommands.deleteMatch}, {@link BrowserCommands.saveRawDocument}
- * and {@link BrowserCommands.duplicateMatch} are the six members that can change
+ * {@link BrowserCommands.deleteMatch}, {@link BrowserCommands.saveRawDocument},
+ * {@link BrowserCommands.duplicateMatch} and (since Phase 3-8-1)
+ * {@link BrowserCommands.saveMatchItemText} are the seven members that can change
  * a file on disk, and they are here for the same reason the others are: a test
  * that cannot run Tauri still has to be able to drive a refusal, a conflict and
  * a commit and watch what this state does about each.
@@ -350,6 +354,36 @@ export interface BrowserCommands {
     reload: ReloadAfterRawSave
   ): Promise<RawSaveOutcome>;
   /**
+   * Reads one snippet's owned physical-line range as text, cut in Rust — Phase
+   * 3-8-1, over the 3-7 command.
+   *
+   * Writes nothing. The text is sliced in Rust because a byte span is not a
+   * JavaScript string index; nothing on this side cuts it out of a document's
+   * text.
+   *
+   * @param id - The snippet, by identity.
+   * @returns The range's text and its display lines, or a failure —
+   *   `itemTextRefused` carrying the core's `EditError` among them.
+   */
+  matchItemText(id: MatchId): Promise<CommandResult<OwnedItemText>>;
+  /**
+   * Replaces one snippet's owned range with exact text, and saves the file —
+   * Phase 3-8-1, over the 3-7 command.
+   *
+   * @param id - The snippet, by identity.
+   * @param baseRevision - The revision the text was read against.
+   * @param text - The exact text the range is to hold.
+   * @param acknowledgement - The suspicions already shown to a person.
+   * @returns How the save ended, or a failure. `saved.moved` is the edited
+   *   snippet's identity in the new revision.
+   */
+  saveMatchItemText(
+    id: MatchId,
+    baseRevision: ContentRevision,
+    text: string,
+    acknowledgement: Acknowledgement
+  ): Promise<CommandResult<SaveResult>>;
+  /**
    * Hands back everything this session observed on disk above `afterSequence`.
    *
    * **The one member that is neither a read of the projection nor a write.** It
@@ -389,6 +423,8 @@ export const REAL_COMMANDS: BrowserCommands = {
   deleteMatch,
   duplicateMatch,
   saveRawDocument,
+  matchItemText,
+  saveMatchItemText,
   drainExternalChanges
 };
 
@@ -1573,8 +1609,8 @@ export interface BrowserState {
   /**
    * Registers one **external** observation as a conflict this window produced.
    *
-   * **The seventh registration door, and it is the same door** — Phase 2d-5-5a.
-   * The six writing wrappers above register a refused save's origin as the conflict
+   * **The eighth registration door, and it is the same door** — Phase 2d-5-5a.
+   * The seven writing wrappers above register a refused save's origin as the conflict
    * arrives. **The routing that arrived later does not call this method**: an
    * arbitrated observation's origin is registered by the private `arbitrateHere`
    * through `rememberTheConflict` directly, at the generation the observation
@@ -1646,7 +1682,7 @@ export interface BrowserState {
    * the pane registers.
    *
    * **It registers, and it installs nothing.** A verdict that names a new origin
-   * goes through the same private registration the six save wrappers use, at the
+   * goes through the same private registration the seven save wrappers use, at the
    * generation the observation arrived at, and {@link adoptDiskVersion} stays the
    * only confirmed-install door. Nothing here replaces a projection, moves the
    * selection, reads a file, mints reload consent or calls any command — **no save
@@ -2031,11 +2067,11 @@ export interface BrowserState {
   /**
    * Moves one snippet inside the list it is in, and saves the file.
    *
-   * **The first of the six entry points on this state that change a file**; the
+   * **The first of the seven entry points on this state that change a file**; the
    * others are {@link BrowserState.saveMatch},
    * {@link BrowserState.createMatch}, {@link BrowserState.deleteMatch},
-   * {@link BrowserState.saveRawDocument} and
-   * {@link BrowserState.duplicateMatch}. Everything else here reads.
+   * {@link BrowserState.saveRawDocument}, {@link BrowserState.duplicateMatch} and
+   * {@link BrowserState.saveMatchItemText}. Everything else here reads.
    *
    * **The wrapper is the enforcement**, exactly as it is for
    * {@link BrowserState.saveMatch}: a committed move makes every `MatchId` this
@@ -2444,6 +2480,61 @@ export interface BrowserState {
     acknowledgement: Acknowledgement
   ): Promise<RawSaveAnswer>;
   /**
+   * Reads one snippet's owned text for the local raw editor — Phase 3-8-1.
+   *
+   * **A read this state performs and does not remember**, in the shape of
+   * {@link BrowserState.listBackupBatches}: the failure is reported on the
+   * developer channel and answered to the caller, so `openRawSnippet` in
+   * `./rawSnippet.ts` can turn an `itemTextRefused` into a value a screen draws —
+   * `ItemRangeNotContiguous` into the whole-document editor's offer. The text is
+   * cut in Rust; nothing here slices a document's text by a byte span.
+   *
+   * It is on this state rather than imported from `../ipc/commands` by a component
+   * because no `.svelte` file in this repository imports that module, which is a
+   * fact about the code as written rather than a guarantee any type gives.
+   *
+   * @param id - The snippet, by identity. A stale one is refused by the command
+   *   as `identityStaleRevision`.
+   * @returns Whatever `match_item_text` answered, unchanged.
+   */
+  matchItemText(id: MatchId): Promise<CommandResult<OwnedItemText>>;
+  /**
+   * Replaces one snippet's owned range with exact text, and saves the file —
+   * Phase 3-8-1, the seventh entry point on this state that changes a file.
+   *
+   * **{@link BrowserState.saveMatch}'s wrapper, over a different command**, and
+   * the one body both run: ruling 27's barrier opens before the command and closes
+   * in a `finally`; a failure that may have written re-reads the file; a commit
+   * forgets the viewer's text and adopts the file through `adoptAfterTheCommit`,
+   * which re-points a held selection of this snippet to `saved.moved` — every
+   * `MatchId` held for the file is stale after a commit — and answers an exception
+   * after the commit as a `failed` adoption beside the `saved` outcome, never as an
+   * error (`PROGRESS.md` D2); a conflict installs nothing and records its origin.
+   * An engine refusal (a text that does not parse, holds two snippets, escapes
+   * the snippet's indentation, …) arrives as the `failed` arm carrying
+   * `saveFailed` with the core's `EditError`, and `mayHaveWritten` answers `false`
+   * for it.
+   *
+   * **The base revision is the caller's and is forwarded unchanged**, for
+   * `saveMatch`'s reason. What no type forces is that it is the one the text was
+   * read at; `baseRevisionOf` in `./rawSnippet.ts` is what a caller passes.
+   *
+   * @param id - The snippet, by the identity the text was read with.
+   * @param baseRevision - The revision the text was read at. Sent unchanged.
+   * @param text - The exact text the range is to hold.
+   * @param acknowledgement - The suspicions already shown to a person; pass
+   *   `{ accepted: [] }` on a first attempt.
+   * @returns How the save ended together with the adoption's own fate; a refusal
+   *   this state made before any command ran; or a command failure that says
+   *   whether the file may already have been written and why it rejected.
+   */
+  saveMatchItemText(
+    id: MatchId,
+    baseRevision: ContentRevision,
+    text: string,
+    acknowledgement: Acknowledgement
+  ): Promise<MatchSaveAnswer>;
+  /**
    * Lists the recognised backup batches.
    *
    * **A read this state performs and does not remember.** Nothing here caches a
@@ -2508,7 +2599,7 @@ export interface BrowserState {
   /**
    * Sends one confirmed restore, and takes its answer.
    *
-   * **Restore is a content path on the sixth writer and not a seventh.** This
+   * **Restore is a content path on the sixth writer and not a writer of its own.** This
    * method issues no command of its own: it hands `sendRestore` in `./restore.ts`
    * a sender that is {@link BrowserState.saveRawDocument}, so the lock, the
    * revision check, the reparse, the validation verdict, the acknowledgement, the
@@ -4161,7 +4252,7 @@ export function createBrowserState(
    * second gets its own entry, as it always has.
    *
    * **The generation is the one the conflict *arrived* at, and a caller that omits
-   * it says "now".** All six save wrappers do omit it, and that is honest for them:
+   * it says "now".** All seven save wrappers do omit it, and that is honest for them:
    * a refusal is registered in the same synchronous block the answer arrived in.
    * A **retained** observation is the one case where the two differ — it arrived
    * while a write was in flight and is registered after that write settled, with a
@@ -4206,7 +4297,7 @@ export function createBrowserState(
    * came from an observation or from a save refused as a conflict. The refused
    * save's own reading is coalesced by the backend as a duplicate
    * (`docs/decisions/2d-6-9a-notes.md` §3.3), so no observation will ever mark the
-   * file for it, and this arm is the only place that can. The six save wrappers
+   * file for it, and this arm is the only place that can. The seven save wrappers
    * call this and nothing else on their conflict arm.
    *
    * **What it marks over, and what it leaves alone.** It writes only over no status
@@ -4488,7 +4579,7 @@ export function createBrowserState(
    *
    * **Nothing escapes {@link handOut}.** Each receiver call is isolated, and so is
    * the reporting of what it threw, because this runs from the write lease's
-   * `close()` inside the six wrappers' `finally` — a throw escaping from here
+   * `close()` inside the seven wrappers' `finally` — a throw escaping from here
    * would replace a settled write's answer with a session's exception, and a
    * committed write is never afterwards reported as an error.
    *
@@ -4666,7 +4757,7 @@ export function createBrowserState(
    *
    * **Two methods, and the split is this phase's review, finding 3.** `expect`
    * records what the write has established without releasing anything; `close`
-   * releases, and is what the six wrappers call from a `finally`. The barrier is
+   * releases, and is what the seven wrappers call from a `finally`. The barrier is
    * therefore closed on **every** exit a wrapper has, including an exception — a
    * rejected command, a reporter that threw, a re-read that threw — where the
    * previous shape left the file barriered for the life of the session and its
@@ -4808,9 +4899,9 @@ export function createBrowserState(
   } // End of function beginWrite()
 
   /**
-   * What one of the six writing wrappers' answers settled as (ruling 27).
+   * What one of the seven writing wrappers' answers settled as (ruling 27).
    *
-   * **One mapping for all six**, so a wrapper cannot invent a fourth reading of its
+   * **One mapping for all seven**, so a wrapper cannot invent a fourth reading of its
    * own outcome. `saved` names the revision the transaction ended on whether or not
    * it committed — `committed: false` is a documented success and the file holds
    * that revision either way — and both `refused` and `conflict` wrote nothing.
@@ -5523,9 +5614,138 @@ export function createBrowserState(
     }
   } // End of function applyRepair()
 
+  /**
+   * Saves one snippet in place through one command, and adopts what a commit
+   * produced — the body {@link BrowserState.saveMatch} and, since Phase 3-8-1,
+   * {@link BrowserState.saveMatchItemText} share.
+   *
+   * **One body, so the two writers cannot drift**: both edit one snippet whose
+   * identity `saved.moved` answers in the new revision, and every rule here — the
+   * `notAttempted` refusal without a projection, ruling 27's barrier, the re-read
+   * after a failure that may have written, `adoptAfterTheCommit`'s "a commit is
+   * never reported as an error", and the conflict that installs nothing — is one
+   * rule for both. What differs is the command and its arguments, which the
+   * caller's `send` closes over; what no type forces is that `send` calls a
+   * command about `id` at all.
+   *
+   * @param id - The snippet the save is about, by identity.
+   * @param send - Issues the command, with the caller's arguments unchanged.
+   * @returns How the save ended together with the adoption's own fate; a refusal
+   *   made before any command ran; or a command failure.
+   */
+  async function saveOneSnippetInPlace(
+    id: MatchId,
+    send: () => Promise<CommandResult<SaveResult>>
+  ): Promise<MatchSaveAnswer> {
+    const view = views.find((held) => held.id === id.document);
+    if (view === undefined) {
+      // Nothing on this state describes that document, so there is no base
+      // revision to send. The same refusal a move makes, for the same reason: a
+      // base that is not the parse the caller was drafting against turns an edit
+      // into an edit of whatever now occupies those spans. Nothing was sent, so
+      // nothing can have been written — and there is no rejection to hand on,
+      // because no command ran. Its own arm, so the type says both rather than
+      // a comment claiming it.
+      return { kind: 'notAttempted' };
+    }
+    // **Ruling 27's barrier opens here and closes in the `finally` below.**
+    // While it is open, a watcher observation of this file is held rather than
+    // applied, because what is on disk cannot be attributed to a writer until
+    // this promise settles. See `beginWrite`.
+    const write = beginWrite(id.document);
+    try {
+      // **The caller's command, carrying the caller's base revision unchanged**,
+      // and never `view.revision`: see `BrowserState.saveMatch`'s JSDoc. Reading
+      // the projection here rebases a draft the window has moved on from, and
+      // turns the conflict that should stop it into a commit. The `view` lookup
+      // above stays, because without a projection this state can neither adopt
+      // what a commit produces nor tell whether its own projection went out of
+      // date.
+      const answer = await send();
+      if (!answer.ok) {
+        // A save that failed is not a workspace that failed, so the window keeps
+        // showing the configuration it was showing — but `mayHaveWritten` is the
+        // only thing that says whether it is still showing this *file* correctly. A
+        // failure at or after the rename means the file may already hold the edited
+        // snippet, and a window that went on drawing the pre-save projection and the
+        // pre-save text would be describing bytes that are no longer there.
+        //
+        // **The answer carries it**, which is the 2c-2 review's first finding: a
+        // bare `null` here is indistinguishable from `noWorkspaceOpen`, and a screen
+        // that renders both as *nothing was written* states the opposite of what the
+        // disk may hold.
+        const written = mayHaveWritten(answer.failure);
+        // **What this failure establishes, recorded before anything is done about
+        // it**: `uncertain` when the write may have written, nothing-written
+        // otherwise. It is the `finally` below that releases the barrier, so a
+        // reporter or a re-read that throws still closes it on this settlement.
+        write.expect(settlementOfFailure(written));
+        report(answer.failure);
+        if (written) {
+          forgetFileText();
+          await adoptTheDocumentOnDisk(id.document, null, null);
+          await readFileText();
+        }
+        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
+      }
+
+      // **What the transaction established, recorded before the adoption below**,
+      // and released by the `finally` after it (ruling 27): a commit completes its
+      // own projection invalidation first, so an observation released then is
+      // arbitrated against the window the commit left rather than the one it found.
+      // Recording it here rather than beside that release is what keeps an
+      // exception in between from settling a known outcome as `uncertain`.
+      write.expect(settlementOfOutcome(answer.value));
+
+      let adoption: InvalidationStatus = { kind: 'notOwed' };
+      if (answer.value.outcome === 'saved') {
+        // **A `Saved` does not mean the bytes changed.** `committed: false` is a
+        // documented success — a draft whose every field already held the value it
+        // asked for derives no edit — so what makes this screen out of date is one
+        // of two facts: the file was rewritten, or the revision the transaction
+        // ended on is not the one this state was projecting, which is a file some
+        // other program changed under the lock's two reads.
+        const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
+        if (outOfDate) {
+          forgetFileText();
+          // **Nothing thrown after the commit may turn it into an error** — Phase
+          // 2d-6-6c-2, the shape 2d-6-6c-1's review fixed in `createMatch`, and
+          // since Phase 2d-6-7a the one policy `adoptAfterTheCommit` holds for
+          // every match-level wrapper: an exception out of the adoption or the
+          // re-read, and one out of classifying it, travels back as the
+          // adoption's failure beside the `saved` outcome (`PROGRESS.md` D2).
+          //
+          // **The adoption the consult's Q6 asks for**, performed here so that a
+          // caller cannot obtain this result without it. `moved` is the snippet's
+          // identity in the new revision, and the selection follows it — but only
+          // when the selection is still the snippet that was saved, which is the
+          // review's fourth finding: a person who clicked another snippet while
+          // the save was in flight must not be dragged back to this one.
+          // Every read of the result that feeds the adoption runs inside the thunk, so
+          // the helper's catch covers a getter that throws (Phase 2d-6-7a's review).
+          const result = answer.value;
+          adoption = await adoptAfterTheCommit(id.document, () =>
+            adoptTheDocumentOnDisk(id.document, id, result.moved)
+          );
+        }
+      } else if (answer.value.outcome === 'conflict') {
+        // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
+        // says why, and the rule is one rule for all seven writing wrappers. What is
+        // written down is which projection the conflict describes.
+        rememberTheSaveConflict(id.document, saveConflictSource(answer.value));
+      }
+      return { kind: 'answered', result: answer.value, adoption };
+    } finally {
+      // **Ruling 27's barrier closes here, on every exit this wrapper has** —
+      // including an exception: `close` releases it on whatever the answer above
+      // established, or on `uncertain` when nothing did. See `beginWrite`.
+      write.close();
+    }
+  } // End of function saveOneSnippetInPlace()
+
   // **Named rather than returned anonymously, since 2c-5-4a.** `restoreDocument`
   // has to hand `sendRestore` the sixth writer itself — restore is a content path
-  // on `saveRawDocument` and not a seventh command — and a name is what lets one
+  // on `saveRawDocument` and not a command of its own — and a name is what lets one
   // method of this object call another instead of the alternative, which is a
   // second copy of the seal, the conflict registration and the invalidation. None
   // of these methods reads `this`, so the reference is a plain closure lookup.
@@ -6555,115 +6775,27 @@ export function createBrowserState(
       baseRevision: ContentRevision,
       acknowledgement: Acknowledgement
     ): Promise<MatchSaveAnswer> {
-      const view = views.find((held) => held.id === id.document);
-      if (view === undefined) {
-        // Nothing on this state describes that document, so there is no base
-        // revision to send. The same refusal a move makes, for the same reason: a
-        // base that is not the parse the caller was drafting against turns an edit
-        // into an edit of whatever now occupies those spans. Nothing was sent, so
-        // nothing can have been written — and there is no rejection to hand on,
-        // because no command ran. Its own arm, so the type says both rather than
-        // a comment claiming it.
-        return { kind: 'notAttempted' };
-      }
-      // **Ruling 27's barrier opens here and closes in the `finally` below.**
-      // While it is open, a watcher observation of this file is held rather than
-      // applied, because what is on disk cannot be attributed to a writer until
-      // this promise settles. See `beginWrite`.
-      const write = beginWrite(id.document);
-      try {
-        const answer = await commands.saveMatch(
-          id,
-          draft,
-          // **The caller's, unchanged**, and never `view.revision`: see this method's
-          // JSDoc. Reading the projection here rebases a draft the window has moved
-          // on from, and turns the conflict that should stop it into a commit. The
-          // `view` lookup above stays, because without a projection this state can
-          // neither adopt what a commit produces nor tell whether its own projection
-          // went out of date.
-          baseRevision,
-          acknowledgement
-        );
-        if (!answer.ok) {
-          // A save that failed is not a workspace that failed, so the window keeps
-          // showing the configuration it was showing — but `mayHaveWritten` is the
-          // only thing that says whether it is still showing this *file* correctly. A
-          // failure at or after the rename means the file may already hold the edited
-          // snippet, and a window that went on drawing the pre-save projection and the
-          // pre-save text would be describing bytes that are no longer there.
-          //
-          // **The answer carries it**, which is the 2c-2 review's first finding: a
-          // bare `null` here is indistinguishable from `noWorkspaceOpen`, and a screen
-          // that renders both as *nothing was written* states the opposite of what the
-          // disk may hold.
-          const written = mayHaveWritten(answer.failure);
-          // **What this failure establishes, recorded before anything is done about
-          // it**: `uncertain` when the write may have written, nothing-written
-          // otherwise. It is the `finally` below that releases the barrier, so a
-          // reporter or a re-read that throws still closes it on this settlement.
-          write.expect(settlementOfFailure(written));
-          report(answer.failure);
-          if (written) {
-            forgetFileText();
-            await adoptTheDocumentOnDisk(id.document, null, null);
-            await readFileText();
-          }
-          return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
-        }
+      return saveOneSnippetInPlace(id, () =>
+        commands.saveMatch(id, draft, baseRevision, acknowledgement)
+      );
+    },
 
-        // **What the transaction established, recorded before the adoption below**,
-        // and released by the `finally` after it (ruling 27): a commit completes its
-        // own projection invalidation first, so an observation released then is
-        // arbitrated against the window the commit left rather than the one it found.
-        // Recording it here rather than beside that release is what keeps an
-        // exception in between from settling a known outcome as `uncertain`.
-        write.expect(settlementOfOutcome(answer.value));
+    async matchItemText(id: MatchId): Promise<CommandResult<OwnedItemText>> {
+      return reportedRead(await commands.matchItemText(id));
+    },
 
-        let adoption: InvalidationStatus = { kind: 'notOwed' };
-        if (answer.value.outcome === 'saved') {
-          // **A `Saved` does not mean the bytes changed.** `committed: false` is a
-          // documented success — a draft whose every field already held the value it
-          // asked for derives no edit — so what makes this screen out of date is one
-          // of two facts: the file was rewritten, or the revision the transaction
-          // ended on is not the one this state was projecting, which is a file some
-          // other program changed under the lock's two reads.
-          const outOfDate = answer.value.committed || answer.value.revision !== view.revision;
-          if (outOfDate) {
-            forgetFileText();
-            // **Nothing thrown after the commit may turn it into an error** — Phase
-            // 2d-6-6c-2, the shape 2d-6-6c-1's review fixed in `createMatch`, and
-            // since Phase 2d-6-7a the one policy `adoptAfterTheCommit` holds for
-            // every match-level wrapper: an exception out of the adoption or the
-            // re-read, and one out of classifying it, travels back as the
-            // adoption's failure beside the `saved` outcome (`PROGRESS.md` D2).
-            //
-            // **The adoption the consult's Q6 asks for**, performed here so that a
-            // caller cannot obtain this result without it. `moved` is the snippet's
-            // identity in the new revision, and the selection follows it — but only
-            // when the selection is still the snippet that was saved, which is the
-            // review's fourth finding: a person who clicked another snippet while
-            // the save was in flight must not be dragged back to this one.
-            // Every read of the result that feeds the adoption runs inside the thunk, so
-            // the helper's catch covers a getter that throws (Phase 2d-6-7a's review).
-            const result = answer.value;
-            adoption = await adoptAfterTheCommit(id.document, () =>
-              adoptTheDocumentOnDisk(id.document, id, result.moved)
-            );
-          }
-        } else if (answer.value.outcome === 'conflict') {
-          // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
-          // says why, and the rule is one rule for all six writing wrappers. What is
-          // written down is which projection the conflict describes.
-          rememberTheSaveConflict(id.document, saveConflictSource(answer.value));
-        }
-        return { kind: 'answered', result: answer.value, adoption };
-      } finally {
-        // **Ruling 27's barrier closes here, on every exit this wrapper has** —
-        // including an exception: `close` releases it on whatever the answer above
-        // established, or on `uncertain` when nothing did. See `beginWrite`.
-        write.close();
-      }
-    }, // End of function saveMatch()
+    async saveMatchItemText(
+      id: MatchId,
+      baseRevision: ContentRevision,
+      text: string,
+      acknowledgement: Acknowledgement
+    ): Promise<MatchSaveAnswer> {
+      // The text travels exactly as given: Rust re-derives the range under the
+      // write lock and writes these bytes into it, or refuses.
+      return saveOneSnippetInPlace(id, () =>
+        commands.saveMatchItemText(id, baseRevision, text, acknowledgement)
+      );
+    },
 
     async createMatch(
       document: DocumentId,
@@ -6760,7 +6892,7 @@ export function createBrowserState(
           }
         } else if (answer.value.outcome === 'conflict') {
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
-          // says why, and the rule is one rule for all six writing wrappers. What is
+          // says why, and the rule is one rule for all seven writing wrappers. What is
           // written down is which projection the conflict describes.
           rememberTheSaveConflict(document, saveConflictSource(answer.value));
         }
@@ -6844,7 +6976,7 @@ export function createBrowserState(
           }
         } else if (answer.value.outcome === 'conflict') {
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
-          // says why, and the rule is one rule for all six writing wrappers. What is
+          // says why, and the rule is one rule for all seven writing wrappers. What is
           // written down is which projection the conflict describes.
           rememberTheSaveConflict(id.document, saveConflictSource(answer.value));
         }
@@ -6990,7 +7122,7 @@ export function createBrowserState(
           }
         } else if (answer.value.outcome === 'conflict') {
           // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
-          // says why, and the rule is one rule for all six writing wrappers. What is
+          // says why, and the rule is one rule for all seven writing wrappers. What is
           // written down is which projection the conflict describes.
           rememberTheSaveConflict(match.document, saveConflictSource(answer.value));
         }

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T09:34:40Z",
+  "updated": "2026-09-24T10:03:09Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1025,8 +1025,31 @@
     {
       "id": "3-8",
       "title": "The local raw UI, and CF-55",
+      "status": "in_progress",
+      "risk": "high",
+      "summary": "Cut into 3-8-1 (model), 3-8-2 (components) and 3-8-3 (window half); 3-8-1 is done, 3-8-2 is next."
+    },
+    {
+      "id": "3-8-1",
+      "title": "Local raw UI: the model and the coordination",
+      "status": "done",
+      "risk": "high",
+      "summary": "Browser raw-snippet model with IPC, the \\r refusal, retention, reconciliation and CF-55's model half; reviewed and fixed.",
+      "review": "docs/reviews/phase-3-8-1.md"
+    },
+    {
+      "id": "3-8-2",
+      "title": "Local raw UI: the components and the i18n",
       "status": "queued",
-      "summary": "Queued: The local raw UI, and CF-55."
+      "risk": "high",
+      "summary": "Raw-snippet component and RawEditor drawing 3-8-1's values, wording and CF-55's disabled controls."
+    },
+    {
+      "id": "3-8-3",
+      "title": "Local raw UI: the window half",
+      "status": "queued",
+      "risk": "high",
+      "summary": "EN and ES window reading of the local raw editor and CF-55's held-save controls; closes step 3-8."
     },
     {
       "id": "3-9",

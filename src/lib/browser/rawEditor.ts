@@ -729,14 +729,44 @@ export function editText(session: RawEditorSession, next: string): RawEditorSess
 } // End of function editText()
 
 /**
+ * Whether *Undo* would do anything — CF-55's model half (ruling 13, Phase 3-8-1).
+ *
+ * **The predicate the control is enabled from, and it agrees with the transition
+ * by construction**: it is {@link isEditable} and the draft's own `canUndo`, the
+ * two checks {@link undoEdit} makes before it changes anything. Until 3-8-1
+ * {@link RawEditorView.canUndo} was derived from the history alone, so *Undo*
+ * stood enabled under a held save while the transition refused it — an affordance
+ * mismatch, not a mid-save mutation. `rawEditor.test.ts` pins
+ * `canUndoEdit(s) === (undoEdit(s) !== s)` over the states it builds; nothing in
+ * TypeScript forces `RawEditor.svelte` to disable the control from it, which is
+ * 3-8-2's.
+ *
+ * @param session - The session to ask about.
+ * @returns `true` when {@link undoEdit} would change the session.
+ */
+export function canUndoEdit(session: RawEditorSession): boolean {
+  return isEditable(session) && canUndo(session.draft);
+} // End of function canUndoEdit()
+
+/**
+ * Whether *Redo* would do anything — {@link canUndoEdit}'s twin.
+ *
+ * @param session - The session to ask about.
+ * @returns `true` when {@link redoEdit} would change the session.
+ */
+export function canRedoEdit(session: RawEditorSession): boolean {
+  return isEditable(session) && canRedo(session.draft);
+} // End of function canRedoEdit()
+
+/**
  * Goes back one step.
  *
  * @param session - The session to undo.
- * @returns The session one step back, or the same session when there is nothing to
- *   undo or the editor is not accepting changes.
+ * @returns The session one step back, or the same session when
+ *   {@link canUndoEdit} answers `false`.
  */
 export function undoEdit(session: RawEditorSession): RawEditorSession {
-  if (!isEditable(session)) {
+  if (!canUndoEdit(session)) {
     return session;
   }
   const draft = undoDraft(session.draft);
@@ -747,11 +777,11 @@ export function undoEdit(session: RawEditorSession): RawEditorSession {
  * Goes forward one step, undoing an undo.
  *
  * @param session - The session to redo.
- * @returns The session one step forward, or the same session when there is nothing
- *   to redo or the editor is not accepting changes.
+ * @returns The session one step forward, or the same session when
+ *   {@link canRedoEdit} answers `false`.
  */
 export function redoEdit(session: RawEditorSession): RawEditorSession {
-  if (!isEditable(session)) {
+  if (!canRedoEdit(session)) {
     return session;
   }
   const draft = redoDraft(session.draft);
@@ -1681,9 +1711,12 @@ export interface RawEditorView {
   readonly text: RoundTripText;
   /** Whether the draft differs from what it was started from. Derived. */
   readonly dirty: boolean;
-  /** Whether there is a step to go back to. Derived. */
+  /**
+   * Whether *Undo* is enabled: {@link canUndoEdit}, so `false` under a held save
+   * and under a conflict, where the transition refuses (CF-55, ruling 13).
+   */
   readonly canUndo: boolean;
-  /** Whether there is an undone step to go forward to. Derived. */
+  /** Whether *Redo* is enabled: {@link canRedoEdit}, for the same reason. */
   readonly canRedo: boolean;
   /** Whether a save is in flight. */
   readonly saving: boolean;
@@ -1860,8 +1893,8 @@ export function rawEditorView(session: RawEditorSession): RawEditorView {
   return {
     text: session.draft.value,
     dirty: isDirty(session.draft),
-    canUndo: canUndo(session.draft),
-    canRedo: canRedo(session.draft),
+    canUndo: canUndoEdit(session),
+    canRedo: canRedoEdit(session),
     saving: session.phase === 'saving',
     editable: isEditable(session),
     canSave: canSave(session),
