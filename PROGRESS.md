@@ -279,7 +279,7 @@ all of it is in `git log`._
 | _**3-11-3** and **3-12** — two git-state rows_ | `0b4279f`, `710a484` | ✅ both pushed; **archived verbatim 2026-09-24 at 3-13-2** to [`status-table.md`](docs/progress-archive/status-table.md) |
 | **3-13-1 — display names and creation defaults: the model and the coordination, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 3 SHOULD-FIX, all fixed) and closed** | `3a0a950` (this SHA record is the commit after it) | ✅ pushed, `a15e709..3a0a950  main -> main`; tree clean after it |
 | **3-13-2 — display names and creation defaults: the components and the i18n, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed** | `e0d7f67` (this SHA record is the commit after it) | ✅ pushed, `820cea3..e0d7f67  main -> main`; tree clean after it |
-| **Owner ruling (2026-09-24, `3-split-notes.md` §4.8): driven runs set aside 3-13-3 and 3-14, and run 3-15** — records only | _filled in by the SHA record after it_ | _pending_ |
+| **Owner ruling (2026-09-24, `3-split-notes.md` §4.8): driven runs set aside 3-13-3 and 3-14, and run 3-15** — records only | `6c2891c` (this SHA record is the commit after it; the app-icon commit `12f2df0` went out in the same push) | ✅ pushed, `1c7d0ba..6c2891c  main -> main`; tree clean after it |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed
