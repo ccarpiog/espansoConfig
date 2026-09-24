@@ -10,6 +10,7 @@
   import type { BrowserState } from '../browser/workspace.svelte';
   import type { DocumentId } from '../ipc/types';
   import { autoLoadOf } from '../browser/fileScope';
+  import { fileLabelOf } from '../browser/preferences';
   import {
     t,
     tIpcFailure,
@@ -21,7 +22,12 @@
   /*
    * The first pane of plan section 8.1: an "All" entry, then files, profiles
    * and packages. Section 8.4 is why the rows are files and why each shows its
-   * path rather than an invented display name — "never hide the file boundary".
+   * path — "never hide the file boundary". **A display name the person gave a
+   * file (Phase 3-13-2, ruling 28) is drawn beside the path, never instead of
+   * it**: `fileLabelOf` in `../browser/preferences.ts` answers the path in both
+   * of its arms, and this row draws the path in both. The name is user data and
+   * is never translated. The rows come in the preferences' `sortOrder` rank
+   * order, which `BrowserState.sidebar` applies; nothing here sorts.
    *
    * Nothing here parses a path or a file name. `disabled` is espanso's own
    * "the default include glob skips this file", and `read_only` is what makes a
@@ -118,6 +124,7 @@
       <ul class="rows">
         {#each rows as row (row.document.id)}
           {@const autoLoad = autoLoadOf(row.document)}
+          {@const label = fileLabelOf(browser.preferences, row.document)}
           <li>
             <button
               type="button"
@@ -130,7 +137,14 @@
                 : undefined}
               onclick={() => browser.show({ kind: 'document', id: row.document.id })}
             >
-              <span class="name">{row.document.relative_path}</span>
+              {#if label.kind === 'displayName'}
+                <span class="name">
+                  <span class="displayName">{label.name}</span>
+                  <span class="path">{label.path}</span>
+                </span>
+              {:else}
+                <span class="name">{label.path}</span>
+              {/if}
               {#if autoLoad.kind !== 'default'}
                 <span class="mark" title={tAutoLoadNote(autoLoad.kind, 'explanation')}>
                   {tAutoLoadNote(autoLoad.kind, 'mark')}
@@ -261,6 +275,21 @@
   .name {
     flex: 1 1 auto;
     overflow-wrap: anywhere;
+  }
+
+  /* A display name above the real path, which stays on screen in a smaller,
+     muted face: the name is how the person knows the file, the path is what the
+     file is (plan section 8.4). `white-space: pre-wrap` keeps the name's own spaces,
+     which are stored as written. */
+  .displayName {
+    display: block;
+    white-space: pre-wrap;
+  }
+
+  .path {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--muted);
   }
 
   .count {

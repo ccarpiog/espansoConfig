@@ -1575,6 +1575,7 @@
       reportRecovery={bindReceiver('recovery')}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
       close={stopCreating}
+      defaults={() => browser.creationDefaults()}
     />
   {:else if restoring !== null}
     {@const open = restoring}

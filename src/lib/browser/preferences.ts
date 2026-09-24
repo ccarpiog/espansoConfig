@@ -6,7 +6,9 @@
  * window — display names, ordering and the seven per-file new-snippet defaults —
  * and the requests that change it. `./workspace.svelte.ts` holds the one live
  * {@link WorkspacePreferences}; `./matchCreation.ts` seeds a creation draft from a
- * {@link CreationDefaults} snapshot taken from it. 3-13-2 draws them.
+ * {@link CreationDefaults} snapshot taken from it. Since 3-13-2, `Sidebar.svelte`,
+ * `MatchCreator.svelte` and `FilePreferences.svelte` draw them (through
+ * `./preferencesControl.ts` for the last two).
  *
  * ## Display names (ruling 28, 3-12 notes §6 item 2)
  *

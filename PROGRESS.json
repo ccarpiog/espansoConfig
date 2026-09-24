@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T15:48:09Z",
+  "updated": "2026-09-24T16:15:00Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1160,9 +1160,10 @@
     {
       "id": "3-13-2",
       "title": "Display names and defaults: the components and the i18n",
-      "status": "queued",
+      "status": "done",
       "risk": "high",
-      "summary": "Sidebar, creator and a preferences control draw display names and seeded defaults, EN and ES."
+      "summary": "Sidebar draws display names beside the real path in rank order; the creator draws seeded defaults; a preferences control edits them.",
+      "review": "docs/reviews/phase-3-13-2.md"
     },
     {
       "id": "3-13-3",

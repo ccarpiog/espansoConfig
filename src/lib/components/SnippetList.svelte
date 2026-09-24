@@ -4,6 +4,8 @@
   import { badgesOf, labelText, matchKey, triggerLabel } from '../browser/labels';
   import type { BrowserState } from '../browser/workspace.svelte';
   import { t, tDiagnostic, tHazard, tMatchBadge, tOccurrenceCount, tTriggerKind } from '../i18n';
+  import FilePreferences from './FilePreferences.svelte';
+  import { preferencesTargetOf } from '../browser/preferencesControl';
   import FileScope from './FileScope.svelte';
 
   /*
@@ -41,6 +43,10 @@
    * a file's imports and its "not loaded automatically" explanation are about
    * the file, and a `_` file holding only `imports` has no snippet to select.
    * It is drawn only when one file is in scope; the "All" scope is no file.
+   * **The file's preferences control sits under it for the same reason** (Phase
+   * 3-13-2): a display name and new-snippet defaults are about the one file
+   * selected, and the control starts collapsed. It is mounted from the selected
+   * file's listed summary rather than its projection, so a re-read does not end it.
    *
    * **Selecting several** (Phase 3-11-2). A *Select several* toggle puts the
    * list into a mode in which a row press adds that snippet to the bulk
@@ -56,6 +62,9 @@
    */
 
   const { browser }: { browser: BrowserState } = $props();
+
+  /** The file the preferences control is about, from the selection and the listed files. */
+  const preferencesTarget = $derived(preferencesTargetOf(browser.selection, browser.documents));
 
   // In the script rather than an `{@const}` in the markup, because Svelte 5
   // allows `{@const}` only as the immediate child of a block and this one is
@@ -158,6 +167,16 @@
 
   {#if browser.scopedDocument !== null}
     <FileScope document={browser.scopedDocument} />
+  {/if}
+  <!-- Mounted from the selected file's **listed summary**, not its projection
+       (Phase 3-13-2's review): a whole-file save retires the projection before
+       re-reading it, and a control under the guard above lost its unsaved draft
+       in that gap. Keyed by the file, so a draft of one file's preferences never
+       survives into another's. -->
+  {#if preferencesTarget !== null}
+    {#key preferencesTarget.id}
+      <FilePreferences {browser} document={preferencesTarget} />
+    {/key}
   {/if}
 
   {#if browser.visibleMatches.length === 0}

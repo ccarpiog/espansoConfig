@@ -65,6 +65,7 @@ import { locale } from '../stores/locale.svelte';
 import type { IpcFailure } from '../ipc/errors';
 import type {
   Acknowledgement,
+  BulkOption,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -76,6 +77,12 @@ import type {
   SaveResult
 } from '../ipc/types';
 import MatchCreator from './MatchCreator.svelte';
+import {
+  NO_CREATION_DEFAULTS,
+  NO_FILE_DEFAULTS,
+  type CreationDefaults,
+  type FileDefaults
+} from '../browser/preferences';
 import { LOCALES } from '../i18n/locale';
 import type { Locale } from '../i18n/locale';
 import { translate } from '../i18n/dictionaries';
@@ -337,6 +344,11 @@ interface Mounted {
   /** Replaces what the projections reader answers, as a re-read would. */
   readonly reproject: (views: readonly DocumentView[]) => void;
   /**
+   * Replaces what the defaults reader answers, as a later preference save would
+   * — Phase 3-13-2. An open form must not see it; the next one must.
+   */
+  readonly redefault: (next: CreationDefaults) => void;
+  /**
    * Hands one envelope to the receiver the form reported — Phase 2d-6-6c-1 —
    * as the window's registration would, inside a flush. Since Phase 2d-6-11a a
    * replacing verdict also becomes what the stand-in for `standingConflictFor`
@@ -360,6 +372,8 @@ interface Mounted {
  * @param documents - Every file the window lists. Defaults to the six fixtures.
  * @param adoption - What the window answers when the form asks it to adopt the
  *   disk observation. All three values are real production answers.
+ * @param defaults - What the defaults reader answers at mount — Phase 3-13-2.
+ *   Defaults to no defaults at all, the absent-sidecar state.
  * @returns The mounted form.
  */
 function mountCreator(
@@ -372,9 +386,11 @@ function mountCreator(
     summaryOf(packageFile()),
     UNREADABLE
   ],
-  adoption: DiskAdoptionOutcome = 'installed'
+  adoption: DiskAdoptionOutcome = 'installed',
+  defaults: CreationDefaults = NO_CREATION_DEFAULTS
 ): Mounted {
   const remaining = [...answers];
+  let currentDefaults = defaults;
   const calls: RecordedCreate[] = [];
   const adoptions: ConflictModel<CreationBuffers>[] = [];
   const reports: (DocumentId | null)[] = [];
@@ -398,6 +414,7 @@ function mountCreator(
       documents: (): readonly DocumentSummary[] => documents,
       projections: (): readonly DocumentView[] => views,
       held: (): MatchId | null => held,
+      defaults: (): CreationDefaults => currentDefaults,
       clock: (): number => 0,
       create: (
         into: DocumentId,
@@ -466,6 +483,9 @@ function mountCreator(
     closed: () => closes,
     reproject: (next: readonly DocumentView[]) => {
       views = next;
+    },
+    redefault: (next: CreationDefaults) => {
+      currentDefaults = next;
     },
     deliver: (delivery: ObservationDelivery): void => {
       const verdict = delivery.verdict;
@@ -2345,3 +2365,314 @@ describe('the new-snippet form under an external conflict, in English and Spanis
     form.stop();
   }); // End of the "two-step reload" case
 }); // End of the "new-snippet form under an external conflict" suite
+
+describe('the seeded defaults, drawn — Phase 3-13-2', () => {
+  /** The keep-my-draft control's label on this surface. */
+  const KEEP_MY_DRAFT = conflictChoiceKey('keepMyDraft', 'authoredText');
+
+  /** The label of the control that offers recovery. */
+  const CREATE_FROM_FIELDS = recoveryChoiceKey('createFromSupportedFields');
+
+  /**
+   * One file's defaults, every option absent except the ones given.
+   *
+   * @param set - The options that have a default.
+   * @returns The record.
+   */
+  function defaultsOf(set: Partial<Record<BulkOption, string>>): FileDefaults {
+    return { ...NO_FILE_DEFAULTS, ...set };
+  } // End of function defaultsOf()
+
+  /** `match/base.yml` (document 2) with three defaults, one of them empty. */
+  const BASE_DEFAULTS: CreationDefaults = new Map([
+    [2, defaultsOf({ word: 'true', force_mode: 'clipboard', uppercase_style: '' })]
+  ]);
+
+  /**
+   * The row one option is drawn in.
+   *
+   * @param target - Where the component was mounted.
+   * @param option - The option.
+   * @returns Its row.
+   */
+  function optionRow(target: HTMLElement, option: BulkOption): HTMLElement {
+    const found = target.querySelector(`li.option[data-option="${option}"]`);
+    if (!(found instanceof HTMLElement)) {
+      throw new Error(`this form draws no row for ${option}`);
+    }
+    return found;
+  } // End of function optionRow()
+
+  /**
+   * The box one option is drawn in, or `null` when it has none.
+   *
+   * @param target - Where the component was mounted.
+   * @param option - The option.
+   * @returns The box, or `null`.
+   */
+  function optionBox(target: HTMLElement, option: BulkOption): HTMLInputElement | null {
+    const found = optionRow(target, option).querySelector('input');
+    return found instanceof HTMLInputElement ? found : null;
+  } // End of function optionBox()
+
+  /**
+   * Presses the button labelled by one key inside one option's row.
+   *
+   * @param target - Where the component was mounted.
+   * @param option - The option.
+   * @param key - The key holding the button's label.
+   */
+  function pressIn(target: HTMLElement, option: BulkOption, key: TranslationKey): void {
+    const found = [...optionRow(target, option).querySelectorAll('button')].find(
+      (candidate) => candidate.textContent?.trim() === DICTIONARIES.en[key]
+    );
+    if (found === undefined) {
+      throw new Error(`the ${option} row draws no control labelled ${DICTIONARIES.en[key]}`);
+    }
+    found.click();
+    flushSync();
+  } // End of function pressIn()
+
+  /**
+   * Types into one option's box the way a person does.
+   *
+   * @param target - Where the component was mounted.
+   * @param option - The option.
+   * @param text - The box's whole new value.
+   */
+  function typeOption(target: HTMLElement, option: BulkOption, text: string): void {
+    const found = optionBox(target, option);
+    if (found === null) {
+      throw new Error(`the ${option} row draws no box`);
+    }
+    found.value = text;
+    found.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  } // End of function typeOption()
+
+  it('draws every seeded default before Add, marked as seeded, and sends exactly those', async () => {
+    const form = mountCreator([{ result: COMMITTED }], null, undefined, 'installed', BASE_DEFAULTS);
+    fillIn(form);
+
+    expect(optionBox(form.target, 'word')?.value).toBe('true');
+    expect(optionBox(form.target, 'force_mode')?.value).toBe('clipboard');
+    expect(optionBox(form.target, 'uppercase_style')?.value).toBe('');
+    for (const option of ['word', 'force_mode', 'uppercase_style'] as const) {
+      expect(optionRow(form.target, option).textContent).toContain(
+        DICTIONARIES.en['browser.matchCreation.optionSeeded']
+      );
+    }
+    for (const option of ['left_word', 'right_word', 'propagate_case', 'force_clipboard'] as const) {
+      expect(optionBox(form.target, option)).toBeNull();
+      expect(optionRow(form.target, option).textContent).toContain(
+        DICTIONARIES.en['browser.matchCreation.optionAbsent']
+      );
+    }
+    expect(says(form.target, 'browser.matchCreation.optionsHeading')).toBe(true);
+    expect(form.target.textContent).toContain(
+      translate('en', 'browser.matchCreation.seededFrom', { path: 'match/base.yml' })
+    );
+    // Textual controls, never a checkbox (D2u).
+    expect(form.target.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    expect(form.calls[0]?.newMatch).toEqual({
+      trigger: { Single: ':new' },
+      content: { Replace: 'a body' },
+      word: 'true',
+      force_mode: 'clipboard',
+      uppercase_style: ''
+    });
+    form.stop();
+  }); // End of the "draws every seeded default" case
+
+  it('suppresses the key of a removed default, and only that key', async () => {
+    const form = mountCreator([{ result: COMMITTED }], null, undefined, 'installed', BASE_DEFAULTS);
+    fillIn(form);
+    pressIn(form.target, 'force_mode', 'browser.matchCreation.optionRemove');
+    expect(optionBox(form.target, 'force_mode')).toBeNull();
+    expect(optionRow(form.target, 'force_mode').textContent).toContain(
+      DICTIONARIES.en['browser.matchCreation.optionAbsent']
+    );
+
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    expect(form.calls[0]?.newMatch).toEqual({
+      trigger: { Single: ':new' },
+      content: { Replace: 'a body' },
+      word: 'true',
+      uppercase_style: ''
+    });
+    expect(form.calls[0]?.newMatch).not.toHaveProperty('force_mode');
+    form.stop();
+  }); // End of the "removed default" case
+
+  it('keeps empty apart from absent: an empty value is said and sent, an absent one is not', async () => {
+    const form = mountCreator([{ result: COMMITTED }], null, undefined, 'installed', BASE_DEFAULTS);
+    fillIn(form);
+    expect(optionRow(form.target, 'uppercase_style').textContent).toContain(
+      DICTIONARIES.en['browser.matchCreation.optionEmpty']
+    );
+    expect(optionRow(form.target, 'left_word').textContent).not.toContain(
+      DICTIONARIES.en['browser.matchCreation.optionEmpty']
+    );
+    // An option the person adds and leaves empty is sent empty too.
+    pressIn(form.target, 'left_word', 'browser.matchCreation.optionAdd');
+    expect(optionBox(form.target, 'left_word')?.value).toBe('');
+    // A seeded default emptied by typing stays present, with an empty value.
+    typeOption(form.target, 'word', '');
+
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    expect(form.calls[0]?.newMatch).toEqual({
+      trigger: { Single: ':new' },
+      content: { Replace: 'a body' },
+      word: '',
+      left_word: '',
+      uppercase_style: '',
+      force_mode: 'clipboard'
+    });
+    expect(form.calls[0]?.newMatch).not.toHaveProperty('right_word');
+    form.stop();
+  }); // End of the "empty apart from absent" case
+
+  it('puts a suggestion into an option as its exact text', async () => {
+    const form = mountCreator([{ result: COMMITTED }], null, undefined, 'installed', BASE_DEFAULTS);
+    fillIn(form);
+    const suggestion = [...optionRow(form.target, 'uppercase_style').querySelectorAll('button.source')];
+    expect(suggestion.length).toBeGreaterThan(0);
+    const first = suggestion[0] as HTMLButtonElement;
+    const text = first.textContent?.trim() ?? '';
+    first.click();
+    flushSync();
+    expect(text).toBe('uppercase');
+    expect(optionBox(form.target, 'uppercase_style')?.value).toBe(text);
+    form.stop();
+  }); // End of the "suggestion" case
+
+  it('does not touch an open draft when the preferences change, and the next form sees them', async () => {
+    const form = mountCreator([{ result: COMMITTED }], null, undefined, 'installed', BASE_DEFAULTS);
+    fillIn(form);
+    form.redefault(new Map([[2, defaultsOf({ word: 'false', right_word: 'true' })]]));
+    // A later choice of destination in the same form seeds from the snapshot too.
+    destination(form.target, 'match/other.yml').click();
+    flushSync();
+    destination(form.target, 'match/base.yml').click();
+    flushSync();
+    expect(optionBox(form.target, 'word')?.value).toBe('true');
+    expect(optionBox(form.target, 'right_word')).toBeNull();
+
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    expect(form.calls[0]?.newMatch.word).toBe('true');
+    expect(form.calls[0]?.newMatch).not.toHaveProperty('right_word');
+
+    control(form.target, 'browser.matchCreation.addAnother').click();
+    flushSync();
+    destination(form.target, 'match/base.yml').click();
+    flushSync();
+    expect(optionBox(form.target, 'word')?.value).toBe('false');
+    expect(optionBox(form.target, 'right_word')?.value).toBe('true');
+    form.stop();
+  }); // End of the "later preference change" case
+
+  it('never replaces a value already in the draft, and says so', async () => {
+    const form = mountCreator([{ result: COMMITTED }], null, undefined, 'installed', BASE_DEFAULTS);
+    // Typed before any file is chosen, so the seeding meets a held value.
+    pressIn(form.target, 'word', 'browser.matchCreation.optionAdd');
+    typeOption(form.target, 'word', 'mine');
+    fillIn(form);
+    expect(optionBox(form.target, 'word')?.value).toBe('mine');
+    expect(optionRow(form.target, 'word').textContent).not.toContain(
+      DICTIONARIES.en['browser.matchCreation.optionSeeded']
+    );
+    expect(form.target.textContent).toContain(
+      translate('en', 'browser.matchCreation.defaultKept', {
+        option: translate('en', 'browser.detail.field.word')
+      })
+    );
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    expect(form.calls[0]?.newMatch.word).toBe('mine');
+    form.stop();
+  }); // End of the "never replaces a value" case
+
+  it('recovers exactly the options the draft held, never the file’s defaults again', async () => {
+    const form = mountCreator(
+      [{ result: CONFLICTED }, { result: COMMITTED }],
+      null,
+      undefined,
+      'installed',
+      BASE_DEFAULTS
+    );
+    fillIn(form);
+    pressIn(form.target, 'word', 'browser.matchCreation.optionRemove');
+    typeOption(form.target, 'force_mode', 'keys');
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    control(form.target, KEEP_MY_DRAFT).click();
+    flushSync();
+    control(form.target, CREATE_FROM_FIELDS).click();
+    flushSync();
+    control(form.target, 'browser.recovery.create').click();
+    await settle();
+
+    expect(form.calls).toHaveLength(2);
+    expect(form.calls[1]?.newMatch).toEqual({
+      trigger: { Single: ':new' },
+      content: { Replace: 'a body' },
+      force_mode: 'keys',
+      uppercase_style: ''
+    });
+    expect(form.calls[1]?.newMatch).not.toHaveProperty('word');
+    form.stop();
+  }); // End of the "recovers exactly the options" case
+
+  it('draws a default holding a line feed read-only, and names one withheld for a carriage return', () => {
+    const form = mountCreator(
+      [],
+      null,
+      undefined,
+      'installed',
+      new Map([[2, defaultsOf({ word: 'a\nb', left_word: 'x\ry' })]])
+    );
+    fillIn(form);
+    expect(optionBox(form.target, 'word')).toBeNull();
+    expect(optionRow(form.target, 'word').textContent).toContain(
+      DICTIONARIES.en['browser.matchCreation.optionShown']
+    );
+    expect(optionBox(form.target, 'left_word')).toBeNull();
+    expect(says(form.target, 'browser.sidecar.defaultRefusal.carriageReturn')).toBe(true);
+    form.stop();
+  }); // End of the "line feed read-only" case
+
+  it('creates with no option key at all when there are no defaults — the absent sidecar', async () => {
+    const form = mountCreator([{ result: COMMITTED }]);
+    fillIn(form);
+    for (const option of ['word', 'left_word', 'force_clipboard'] as const) {
+      expect(optionBox(form.target, option)).toBeNull();
+    }
+    expect(says(form.target, 'browser.matchCreation.optionSeeded')).toBe(false);
+    control(form.target, 'browser.matchCreation.create').click();
+    await settle();
+    expect(form.calls[0]?.newMatch).toEqual({
+      trigger: { Single: ':new' },
+      content: { Replace: 'a body' }
+    });
+    form.stop();
+  }); // End of the "no defaults" case
+
+  it.each(LOCALES)('draws the options and the seeding notice in %s', (lang: Locale) => {
+    locale.setOverride(lang);
+    const form = mountCreator([], null, undefined, 'installed', BASE_DEFAULTS);
+    fillIn(form);
+    const text = form.target.textContent ?? '';
+    expect(text).toContain(translate(lang, 'browser.matchCreation.optionsHeading'));
+    expect(text).toContain(translate(lang, 'browser.matchCreation.seededFrom', { path: 'match/base.yml' }));
+    expect(text).toContain(translate(lang, 'browser.matchCreation.optionSeeded'));
+    expect(text).toContain(translate(lang, 'browser.matchCreation.lineEndings.options'));
+    form.stop();
+    locale.setOverride(null);
+  });
+}); // End of the "seeded defaults, drawn" suite

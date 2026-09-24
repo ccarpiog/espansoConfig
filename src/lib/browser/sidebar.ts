@@ -10,8 +10,10 @@
  * > **never hide the file boundary**.
  *
  * So this module never merges two documents, never invents a group, and never
- * reorders: the order is the one `list_documents` returned, which the core
- * sorts by path.
+ * reorders: the order is the one it is handed. `BrowserState.sidebar` hands it
+ * the order `list_documents` returned (which the core sorts by path) put through
+ * the person's `sortOrder` ranks by `orderedDocuments` in `./preferences.ts`
+ * (Phase 3-13-2).
  *
  * ## Where each fact comes from
  *
@@ -76,9 +78,9 @@ export interface SidebarModel {
    * is not. It is on {@link SidebarRow.unreadable} instead.
    */
   readonly pending: number;
-  /** `match/` files espanso loads, in path order. */
+  /** `match/` files espanso loads, in the order handed in. */
   readonly files: readonly SidebarRow[];
-  /** `config/` profiles, in path order. */
+  /** `config/` profiles, in the order handed in. */
   readonly profiles: readonly SidebarRow[];
   /** Files from the Hub, which the editor may never write. */
   readonly packages: readonly SidebarRow[];

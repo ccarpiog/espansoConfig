@@ -16,6 +16,7 @@
     confirmDiskReload,
     createCouldNotBeSent,
     editCreationField,
+    editCreationOption,
     focusCreationField,
     keepDrafting,
     matchCreationView,
@@ -23,13 +24,16 @@
     reapplyToDiskVersion,
     redoCreation,
     reloadTheDiskVersion,
+    removeCreationOption,
     startMatchCreation,
     type CreationReapplyAttempt,
     type PlacementOption,
     undoCreation
   } from '../browser/matchCreation';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
-  import type { CreationBuffers } from '../browser/matchCreation';
+  import type { CreationBuffers, CreationTypingField } from '../browser/matchCreation';
+  import type { CreationDefaults } from '../browser/preferences';
+  import { preferenceTextControlOf, seedingNoticeOf } from '../browser/preferencesControl';
   import {
     conflictOriginMessage,
     conflictRevisionsOf,
@@ -66,6 +70,7 @@
     tConflictOriginMessage,
     tCreationReapplyObstacle,
     tCreationRefusal,
+    tDefaultRefusal,
     tDestinationRefusal,
     tDetailField,
     tDraftCopy,
@@ -86,6 +91,7 @@
   } from '../i18n';
   import type {
     Acknowledgement,
+    BulkOption,
     ContentRevision,
     DocumentId,
     DocumentSummary,
@@ -191,6 +197,22 @@
    * choosing one is its only way forward (`view.destinationRequired`, the 2d-6
    * record's §3 entry 21) — which is also why the destination buttons are gated on
    * `view.canChooseDestination` rather than on `view.editable`.
+   *
+   * **The seven options, and the file's defaults seeded into them, are on screen
+   * before *Add this snippet*** — Phase 3-13-2, ruling 28. `view.options` is the
+   * draft's own value, so what a create sends is exactly what this list draws: a
+   * present option is a box (or, when its text holds a line break an `<input>`
+   * would delete, a read-only rendering through `SourceText` —
+   * `preferenceTextControlOf` in `../browser/preferencesControl.ts` decides which),
+   * an absent one says the key will not be written and offers to add it, and an
+   * empty one says it will be written with no value. *Remove* is
+   * `removeCreationOption`, so a removed default's key is not sent. They are
+   * textual controls, never checkboxes: a checkbox would decide that `word: on`
+   * means true (D2u). The snapshot of defaults is `defaults()`, read when a form
+   * starts (here and at *Add another*) and never again, so a preference saved
+   * while this form is open reaches only the next form. **Nothing in TypeScript
+   * forces a host to hand the window's live defaults**; `DetailPane.svelte` hands
+   * `BrowserState.creationDefaults`.
    */
 
   const {
@@ -205,6 +227,7 @@
     reportRecovery,
     standingConflictFor,
     close,
+    defaults,
     clock = () => Date.now()
   }: {
     /**
@@ -305,6 +328,14 @@
     /** Leaves the form. */
     close: () => void;
     /**
+     * Every file's new-snippet defaults as the window holds them now —
+     * `BrowserState.creationDefaults`, Phase 3-13-2. Read once when a form starts
+     * and kept by the form as its snapshot. **Required**, so a host cannot forget
+     * it; nothing forces a host to hand the window's answer rather than an empty
+     * map, which is the legal *no preferences* state and seeds nothing.
+     */
+    defaults: () => CreationDefaults;
+    /**
      * Where the typing group's boundary readings come from.
      *
      * **The model has no default and this does**, which is the difference between
@@ -323,8 +354,13 @@
   // point, and a form that re-derived itself from its props would be discarded —
   // draft and all — every time the workspace re-read anything.
   // svelte-ignore state_referenced_locally
-  let session = $state.raw(startMatchCreation(documents(), projections(), held(), clock));
+  let session = $state.raw(
+    startMatchCreation(documents(), projections(), held(), clock, defaults())
+  );
   const view = $derived(matchCreationView(session));
+
+  /** What the form says about the defaults it seeded, or `null`. */
+  const seeding = $derived(seedingNoticeOf(view));
 
   /*
    * **The receiver, reported when this form starts and withdrawn when it is
@@ -641,9 +677,40 @@
    *
    * @param field - The field that now has it.
    */
-  function onFocus(field: 'trigger' | 'replace'): void {
+  function onFocus(field: CreationTypingField): void {
     session = focusCreationField(session, field);
   } // End of function onFocus()
+
+  /**
+   * Records whatever one option's box now holds — `''` included, which keeps the
+   * key with an empty value.
+   *
+   * @param option - Which option.
+   * @param text - The box's whole value.
+   */
+  function onOption(option: BulkOption, text: string): void {
+    session = editCreationOption(session, option, text);
+  } // End of function onOption()
+
+  /**
+   * Puts one suggested spelling into an option, as a step of its own: the focus
+   * is released first, so the press does not join a typing run.
+   *
+   * @param option - Which option.
+   * @param suggestion - The exact suggested text.
+   */
+  function onSuggestion(option: BulkOption, suggestion: string): void {
+    session = editCreationOption(focusCreationField(session, null), option, suggestion);
+  } // End of function onSuggestion()
+
+  /**
+   * Takes one option out of the draft, so the snippet is born without the key.
+   *
+   * @param option - Which option.
+   */
+  function onRemoveOption(option: BulkOption): void {
+    session = removeCreationOption(session, option);
+  } // End of function onRemoveOption()
 
   /** Records that no field has the focus, which ends the open typing run. */
   function onBlur(): void {
@@ -675,7 +742,7 @@
    * the snippet that was drafted is in the file.
    */
   function addAnother(): void {
-    session = startMatchCreation(documents(), projections(), held(), clock);
+    session = startMatchCreation(documents(), projections(), held(), clock, defaults());
   } // End of function addAnother()
 
   /**
@@ -1115,6 +1182,96 @@
     <p class="kind">{t('browser.matchCreation.lineEndings.replace')}</p>
   </div>
 
+  <!-- The seven options, every one drawn, with the file's defaults already in
+       the draft (Phase 3-13-2). What is here is what a create sends. -->
+  <div class="field optionList">
+    <p class="name">{t('browser.matchCreation.optionsHeading')}</p>
+    {#if seeding !== null}
+      {#if seeding.seeded.length > 0}
+        <p class="kind seeded">{t('browser.matchCreation.seededFrom', { path: seeding.from })}</p>
+      {/if}
+      {#each seeding.kept as label (label)}
+        <p class="kind">{t('browser.matchCreation.defaultKept', { option: tDetailField(label) })}</p>
+      {/each}
+      {#each seeding.withheld as withheld (withheld.label)}
+        <p class="kind">
+          <span class="marker">{tDetailField(withheld.label)}</span>
+          {tDefaultRefusal(withheld.reason)}
+        </p>
+      {/each}
+    {/if}
+    <ul class="options">
+      {#each view.options as option (option.option)}
+        {@const control = preferenceTextControlOf(option.value)}
+        <li class="option" data-option={option.option}>
+          <p class="optionName">
+            <span>{tDetailField(option.label)}</span>
+            <span class="source">{option.option}</span>
+            {#if option.seeded}
+              <span class="marker warn">{t('browser.matchCreation.optionSeeded')}</span>
+            {/if}
+          </p>
+          {#if control === 'absent'}
+            <p class="kind">{t('browser.matchCreation.optionAbsent')}</p>
+          {:else if control === 'box'}
+            <input
+              class="text"
+              type="text"
+              spellcheck="false"
+              aria-label={t('browser.matchCreation.optionValueLabel', {
+                option: tDetailField(option.label)
+              })}
+              readonly={!view.editable}
+              value={option.value}
+              oninput={(event) => onOption(option.option, event.currentTarget.value)}
+              onfocus={() => onFocus(option.option)}
+              onblur={() => onBlur()}
+            />
+          {:else}
+            <!-- A line break an `<input>` would delete: shown, never boxed. -->
+            <SourceText text={option.value ?? ''} />
+            <p class="kind">{t('browser.matchCreation.optionShown')}</p>
+          {/if}
+          {#if option.value === ''}
+            <p class="kind">{t('browser.matchCreation.optionEmpty')}</p>
+          {/if}
+          <p class="choices">
+            {#if option.value === null}
+              <button
+                type="button"
+                disabled={!view.editable}
+                onclick={() => onOption(option.option, '')}
+              >
+                {t('browser.matchCreation.optionAdd')}
+              </button>
+            {:else}
+              <button
+                type="button"
+                class="remove"
+                disabled={!view.editable}
+                onclick={() => onRemoveOption(option.option)}
+              >
+                {t('browser.matchCreation.optionRemove')}
+              </button>
+            {/if}
+            {#each option.suggestions as suggestion (suggestion)}
+              <button
+                type="button"
+                class="source"
+                disabled={!view.editable}
+                onclick={() => onSuggestion(option.option, suggestion)}
+              >
+                {suggestion}
+              </button>
+            {/each}
+          </p>
+        </li>
+      {/each}
+    </ul>
+    <!-- The option boxes are `<input>`s, so they share the trigger box's fact. -->
+    <p class="kind">{t('browser.matchCreation.lineEndings.options')}</p>
+  </div>
+
   <!-- The create control and the sentence that says why it is disabled are one
        block, because they are one statement: a control pinned to the bottom of
        the pane with its reason left above the fold would be a control that has
@@ -1395,6 +1552,35 @@
     gap: 0.25rem;
     max-height: 12rem;
     overflow-y: auto;
+  }
+
+  /* The seven options: one row each, never a checkbox (D2u). */
+  .options {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+
+  .option {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .optionName {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.375rem;
+    margin: 0;
+    font-size: 0.8125rem;
+  }
+
+  .source {
+    font-family: var(--font-mono);
   }
 
   .choice {

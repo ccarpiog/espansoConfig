@@ -152,6 +152,7 @@ import type { RepairAttribution, SelectionNotice } from './notices';
 import {
   creationDefaultsOf,
   NO_PREFERENCES,
+  orderedDocuments,
   preferenceSaveReportOf,
   preferencesOf,
   preferencesReadFailed,
@@ -1500,7 +1501,15 @@ export interface BrowserState {
    * caller casting the readonly away.
    */
   readonly views: readonly DocumentView[];
-  /** The three sidebar groups and the "All" total. */
+  /**
+   * The three sidebar groups and the "All" total.
+   *
+   * **In the preferences' order** since Phase 3-13-2: the documents are handed to
+   * `buildSidebar` through `orderedDocuments` in `./preferences.ts` (ranked files
+   * first, ascending, ties and unranked files in workspace order), so each group
+   * keeps that relative order. Until the first preference read answers, and with
+   * no usable sidecar, it is the workspace's own order.
+   */
   readonly sidebar: SidebarModel;
   /** Which sidebar entry is selected. */
   readonly selection: SidebarSelection;
@@ -6244,7 +6253,7 @@ export function createBrowserState(
         }
       } // End of the loop over the projected documents
       const unreadable = new Set<DocumentId>(loadFailures.map((entry) => entry.document));
-      return buildSidebar(documents, counts, unreadable);
+      return buildSidebar(orderedDocuments(documents, preferences), counts, unreadable);
     },
     get selection(): SidebarSelection {
       return selection;
