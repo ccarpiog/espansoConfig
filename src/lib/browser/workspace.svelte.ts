@@ -134,7 +134,14 @@ import {
   type InvalidationStatus,
   type SealedWholeDocumentSave
 } from './invalidation';
-import { bulkFileEffect, type BulkApplyAnswer, type BulkFileEffect } from './bulkEdit';
+import {
+  bulkFileEffect,
+  EMPTY_BULK_SELECTION,
+  toggleInBulkSelection,
+  type BulkApplyAnswer,
+  type BulkFileEffect,
+  type BulkSelection
+} from './bulkEdit';
 import type { RepairAttribution, SelectionNotice } from './notices';
 import { authorizeDiskAdoption } from './saveOutcome';
 import type { ConflictModel, DiskAdoptionOutcome, ReloadConfirmation } from './saveOutcome';
@@ -1462,6 +1469,28 @@ export interface BrowserState {
   /** What to tell the user about the selection, or `null`. */
   readonly notice: SelectionNotice | null;
   /**
+   * Whether the snippet list is selecting several snippets for a bulk option
+   * edit — Phase 3-11-2. While it is, the detail pane draws the bulk inspector
+   * in place of one snippet, and a row press adds or removes that snippet.
+   */
+  readonly bulkSelecting: boolean;
+  /**
+   * The snippets selected for a bulk option edit, in the order they were
+   * selected. **Identities, never re-resolved**: after a file is re-read, the
+   * identities selected from its earlier parse stay here, stale, and
+   * `bulkSelectionFreshness` in `./bulkEdit.ts` is what says so.
+   */
+  readonly bulkSelection: BulkSelection;
+  /**
+   * Whether a bulk apply this state started is still out (Phase 3-11-2 review
+   * fix 1). While it is, {@link BrowserState.setBulkSelecting},
+   * {@link BrowserState.toggleBulkSelection} and
+   * {@link BrowserState.replaceBulkSelection} change nothing, so the inspector
+   * stays mounted and `DetailPane`'s `busy` keeps every other writer closed
+   * until the apply settles. Both panes draw their controls disabled from it.
+   */
+  readonly bulkApplyPending: boolean;
+  /**
    * The file the raw viewer would show, or `null` when there is none.
    *
    * `rawTarget`'s answer, which is the sidebar's file when the sidebar names
@@ -2030,6 +2059,31 @@ export interface BrowserState {
   clearSelection(): void;
   /** Dismisses the notice without touching the selection. */
   dismissNotice(): void;
+  /**
+   * Starts or stops selecting several snippets. Stopping empties the bulk
+   * selection; neither touches the single selection. **Refused — nothing
+   * changes — while {@link BrowserState.bulkApplyPending}.** Whether starting is allowed
+   * is `bulkSelectingAvailability` in `./bulkEdit.ts`, which the list asks
+   * before it offers the control — nothing here refuses it.
+   *
+   * @param on - Whether the list should be selecting several.
+   */
+  setBulkSelecting(on: boolean): void;
+  /**
+   * Adds one snippet to the bulk selection, or takes it out when it is in it.
+   * Does nothing while not selecting several, or while a bulk apply is pending.
+   *
+   * @param id - The snippet, by the identity its row was drawn from.
+   */
+  toggleBulkSelection(id: MatchId): void;
+  /**
+   * Replaces the bulk selection whole — the inspector's *keep only what was not
+   * written*, and its *clear*. The identities are copied. Does nothing while a
+   * bulk apply is pending.
+   *
+   * @param next - The new selection.
+   */
+  replaceBulkSelection(next: BulkSelection): void;
   /**
    * Shows or hides the raw viewer, reading the file's text when it is shown.
    *
@@ -3330,6 +3384,13 @@ export function createBrowserState(
   let query = $state('');
   let selected = $state<SelectedMatch | null>(null);
   let notice = $state<SelectionNotice | null>(null);
+  // The bulk option edit's selection (Phase 3-11-2). Raw: the values are frozen
+  // arrays of frozen identities, replaced whole, never mutated.
+  let bulkSelecting = $state(false);
+  let bulkSelection = $state.raw<BulkSelection>(EMPTY_BULK_SELECTION);
+  // How many `applyBulkOptions` calls are out (review fix 1). While any is, the
+  // bulk selection session may not end and its selection may not change.
+  let bulkAppliesInFlight = $state(0);
   let fileTextShown = $state(false);
   // What `document_text` answered, and which file it answered about. The two
   // are kept apart so that an answer can never be drawn under the wrong file
@@ -5844,6 +5905,110 @@ export function createBrowserState(
   // method of this object call another instead of the alternative, which is a
   // second copy of the seal, the conflict registration and the invalidation. None
   // of these methods reads `this`, so the reference is a plain closure lookup.
+  /**
+   * The body of `BrowserState.applyBulkOptions`, run while {@link bulkAppliesInFlight}
+   * counts it — Phase 3-11-2 review fix 1. Its behaviour is exactly 3-11-1's.
+   *
+   * @param request - What to send, unchanged.
+   * @returns What `applyBulkOptions` answers.
+   */
+  async function runBulkApply(request: BulkOptionsRequest): Promise<BulkApplyAnswer> {
+    // **The applied files, copied before anything else is read or awaited.** The
+    // request is the caller's object; reading `files` again after an await would
+    // be a check and a spend separated by a property read.
+    const applied: DocumentId[] = [];
+    for (const file of request.files) {
+      if (!applied.includes(file.document)) {
+        applied.push(file.document);
+      }
+    }
+    if (applied.some((document) => !views.some((held) => held.id === document))) {
+      // Nothing on this state describes one of the files, so nothing here could
+      // adopt what a commit produced there. Nothing was sent.
+      return { kind: 'notAttempted' };
+    }
+    // **Ruling 27's barrier opens on every applied file here and closes on each
+    // in the `finally` below**, each on what its own outcome established.
+    const leases = new Map<DocumentId, WriteLease>();
+    for (const document of applied) {
+      leases.set(document, beginWrite(document));
+    }
+    try {
+      const answer = await commands.applyBulkOptions(request);
+      if (!answer.ok) {
+        // The command rejected as a whole — a malformed request, no workspace —
+        // before any file was read. `mayHaveWritten` answers for it all the same,
+        // because it is the only thing that may say so.
+        const written = mayHaveWritten(answer.failure);
+        for (const lease of leases.values()) {
+          lease.expect(settlementOfFailure(written));
+        }
+        report(answer.failure);
+        if (written) {
+          forgetFileText();
+          for (const document of applied) {
+            await adoptTheDocumentOnDisk(document, null, null);
+          }
+          await readFileText();
+        }
+        return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
+      } // End of the arm for a command that rejected
+
+      // **Every settlement recorded before any adoption**, so an exception in an
+      // adoption cannot leave a known outcome to be closed as `uncertain`.
+      const result = answer.value;
+      const effects: { readonly document: DocumentId; readonly effect: BulkFileEffect }[] = [];
+      for (const one of result.files) {
+        const lease = leases.get(one.document);
+        if (lease === undefined) {
+          // An excluded file: no lease was opened, and nothing touched it.
+          continue;
+        }
+        const effect = bulkFileEffect(one);
+        lease.expect(settlementOfBulkEffect(effect));
+        effects.push({ document: one.document, effect });
+      } // End of the loop recording each file's settlement
+
+      // **Every committed file retired before the first await** (Phase 3-11-1's
+      // review): the answer establishes all of the commits at once, so no
+      // projection or identity of any of them may stay live while another one is
+      // being re-read. What each file's selection was is kept for its re-read.
+      const retired = new Map<DocumentId, SelectedMatch | null>();
+      for (const { document, effect } of effects) {
+        if (effect.kind === 'committed') {
+          retired.set(document, forgetTheReplacedDocument(document));
+        }
+      }
+      if (retired.size > 0) {
+        forgetFileText();
+      }
+      // The intent the re-reads may restore a selection for: taken after every
+      // forgetting above, so only a selection the person expresses from here on
+      // moves it and stops the restoration.
+      const intent = selectGeneration;
+
+      const adoptions: { readonly document: DocumentId; readonly adoption: InvalidationStatus }[] =
+        [];
+      for (const { document, effect } of effects) {
+        const adoption =
+          effect.kind === 'committed'
+            ? await adoptAfterTheCommit(document, () =>
+                rereadRetiredDocument(document, retired.get(document) ?? null, intent)
+              )
+            : await adoptAfterTheBulkFile(document, effect);
+        if (adoption !== null) {
+          adoptions.push({ document, adoption });
+        }
+      } // End of the loop adopting each written or possibly written file
+      return { kind: 'answered', result, adoptions };
+    } finally {
+      // **Ruling 27's barrier closes here, on every file and on every exit.**
+      for (const lease of leases.values()) {
+        lease.close();
+      }
+    }
+  } // End of function runBulkApply()
+
   const state: BrowserState = {
     get status(): BrowserStatus {
       return status;
@@ -5895,6 +6060,15 @@ export function createBrowserState(
     },
     get selected(): SelectedMatch | null {
       return selected;
+    },
+    get bulkSelecting(): boolean {
+      return bulkSelecting;
+    },
+    get bulkSelection(): BulkSelection {
+      return bulkSelection;
+    },
+    get bulkApplyPending(): boolean {
+      return bulkAppliesInFlight > 0;
     },
     get selectedMatch(): MatchView | null {
       const held = selected;
@@ -6429,6 +6603,9 @@ export function createBrowserState(
       query = '';
       selected = null;
       notice = null;
+      // A bulk selection names identities of the workspace being closed.
+      bulkSelecting = false;
+      bulkSelection = EMPTY_BULK_SELECTION;
       // **What the watcher told this window about the workspace being closed goes
       // too** — Phase 2d-5-4. A status says what the watcher reported about a file
       // while *that* workspace was open, and a path drift is a statement about
@@ -6686,6 +6863,31 @@ export function createBrowserState(
       notice = null;
     },
 
+    setBulkSelecting(on: boolean): void {
+      if (bulkAppliesInFlight > 0) {
+        return;
+      }
+      bulkSelecting = on;
+      if (!on) {
+        bulkSelection = EMPTY_BULK_SELECTION;
+      }
+    },
+
+    toggleBulkSelection(id: MatchId): void {
+      if (bulkSelecting && bulkAppliesInFlight === 0) {
+        bulkSelection = toggleInBulkSelection(bulkSelection, id);
+      }
+    },
+
+    replaceBulkSelection(next: BulkSelection): void {
+      if (bulkAppliesInFlight > 0) {
+        return;
+      }
+      bulkSelection = Object.freeze(
+        next.map((id) => Object.freeze({ document: id.document, revision: id.revision, node: id.node }))
+      );
+    },
+
     async showFileText(on: boolean): Promise<void> {
       fileTextShown = on;
       if (!on) {
@@ -6897,99 +7099,13 @@ export function createBrowserState(
     },
 
     async applyBulkOptions(request: BulkOptionsRequest): Promise<BulkApplyAnswer> {
-      // **The applied files, copied before anything else is read or awaited.** The
-      // request is the caller's object; reading `files` again after an await would
-      // be a check and a spend separated by a property read.
-      const applied: DocumentId[] = [];
-      for (const file of request.files) {
-        if (!applied.includes(file.document)) {
-          applied.push(file.document);
-        }
-      }
-      if (applied.some((document) => !views.some((held) => held.id === document))) {
-        // Nothing on this state describes one of the files, so nothing here could
-        // adopt what a commit produced there. Nothing was sent.
-        return { kind: 'notAttempted' };
-      }
-      // **Ruling 27's barrier opens on every applied file here and closes on each
-      // in the `finally` below**, each on what its own outcome established.
-      const leases = new Map<DocumentId, WriteLease>();
-      for (const document of applied) {
-        leases.set(document, beginWrite(document));
-      }
+      // Counted from before the first read to after the last adoption, so the
+      // bulk selection session cannot end while a write it started is out.
+      bulkAppliesInFlight += 1;
       try {
-        const answer = await commands.applyBulkOptions(request);
-        if (!answer.ok) {
-          // The command rejected as a whole — a malformed request, no workspace —
-          // before any file was read. `mayHaveWritten` answers for it all the same,
-          // because it is the only thing that may say so.
-          const written = mayHaveWritten(answer.failure);
-          for (const lease of leases.values()) {
-            lease.expect(settlementOfFailure(written));
-          }
-          report(answer.failure);
-          if (written) {
-            forgetFileText();
-            for (const document of applied) {
-              await adoptTheDocumentOnDisk(document, null, null);
-            }
-            await readFileText();
-          }
-          return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
-        } // End of the arm for a command that rejected
-
-        // **Every settlement recorded before any adoption**, so an exception in an
-        // adoption cannot leave a known outcome to be closed as `uncertain`.
-        const result = answer.value;
-        const effects: { readonly document: DocumentId; readonly effect: BulkFileEffect }[] = [];
-        for (const one of result.files) {
-          const lease = leases.get(one.document);
-          if (lease === undefined) {
-            // An excluded file: no lease was opened, and nothing touched it.
-            continue;
-          }
-          const effect = bulkFileEffect(one);
-          lease.expect(settlementOfBulkEffect(effect));
-          effects.push({ document: one.document, effect });
-        } // End of the loop recording each file's settlement
-
-        // **Every committed file retired before the first await** (Phase 3-11-1's
-        // review): the answer establishes all of the commits at once, so no
-        // projection or identity of any of them may stay live while another one is
-        // being re-read. What each file's selection was is kept for its re-read.
-        const retired = new Map<DocumentId, SelectedMatch | null>();
-        for (const { document, effect } of effects) {
-          if (effect.kind === 'committed') {
-            retired.set(document, forgetTheReplacedDocument(document));
-          }
-        }
-        if (retired.size > 0) {
-          forgetFileText();
-        }
-        // The intent the re-reads may restore a selection for: taken after every
-        // forgetting above, so only a selection the person expresses from here on
-        // moves it and stops the restoration.
-        const intent = selectGeneration;
-
-        const adoptions: { readonly document: DocumentId; readonly adoption: InvalidationStatus }[] =
-          [];
-        for (const { document, effect } of effects) {
-          const adoption =
-            effect.kind === 'committed'
-              ? await adoptAfterTheCommit(document, () =>
-                  rereadRetiredDocument(document, retired.get(document) ?? null, intent)
-                )
-              : await adoptAfterTheBulkFile(document, effect);
-          if (adoption !== null) {
-            adoptions.push({ document, adoption });
-          }
-        } // End of the loop adopting each written or possibly written file
-        return { kind: 'answered', result, adoptions };
+        return await runBulkApply(request);
       } finally {
-        // **Ruling 27's barrier closes here, on every file and on every exit.**
-        for (const lease of leases.values()) {
-          lease.close();
-        }
+        bulkAppliesInFlight -= 1;
       }
     }, // End of function applyBulkOptions()
 

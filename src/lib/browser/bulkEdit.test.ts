@@ -38,6 +38,9 @@ import type {
   OptionSpelling
 } from '../ipc/types';
 import {
+  describeBulkCount
+} from '../i18n/codes';
+import {
   BULK_OPTIONS,
   EMPTY_BULK_DRAFT,
   EMPTY_BULK_SELECTION,
@@ -65,6 +68,25 @@ import {
   summarizeOption,
   toggleInBulkSelection,
   undoBulkDraft,
+  bulkConsentRecorded,
+  bulkConsentReviewStatus,
+  bulkCountKey,
+  bulkExclusionRows,
+  bulkFileLines,
+  bulkNarrowingOffered,
+  bulkOptionField,
+  bulkOutcomeCounts,
+  bulkPlanCounts,
+  bulkSelectingAvailability,
+  bulkSuggestionsFor,
+  chooseBulkIntent,
+  failedSpellingReads,
+  grantsAfterBulkAnswer,
+  remainingBulkSelection,
+  spellingReadsWanted,
+  typeBulkIntentText,
+  withoutFailedReads,
+  type BulkCountName,
   type BulkApplyInputs,
   type BulkBlocker,
   type BulkConsentGrant,
@@ -758,3 +780,264 @@ describe('the accessors, in both languages', () => {
     }
   });
 }); // End of the "accessors" suite
+
+describe('what the inspector draws (Phase 3-11-2)', () => {
+  it('refuses to start selecting several while any write surface is open', () => {
+    expect(bulkSelectingAvailability([])).toBe('available');
+    expect(
+      bulkSelectingAvailability([{ kind: 'matchEditor', target: { kind: 'document', document: 2 } }])
+    ).toBe('surfaceOpen');
+    expect(bulkSelectingAvailability([{ kind: 'matchCreator', target: { kind: 'unknown' } }])).toBe(
+      'surfaceOpen'
+    );
+  });
+
+  it('asks for each unread snippet once, and never retries a failed read by itself', () => {
+    const selection = selectionOf(idOf(2, 0), idOf(2, 1), idOf(3, 0));
+    const failed: SpellingRead = {
+      kind: 'failed',
+      failure: { kind: 'unrecognized', value: 'boom' } as never
+    };
+    const reads = new Map<string, SpellingRead>([
+      [matchKeyOf(idOf(2, 0)), { kind: 'read', spellings: spellings() }],
+      [matchKeyOf(idOf(2, 1)), failed]
+    ]);
+    expect(spellingReadsWanted(selection, reads, new Set())).toEqual([idOf(3, 0)]);
+    expect(spellingReadsWanted(selection, reads, new Set([matchKeyOf(idOf(3, 0))]))).toEqual([]);
+    expect(failedSpellingReads(selection, reads)).toBe(1);
+    const again = withoutFailedReads(reads);
+    expect(again.has(matchKeyOf(idOf(2, 1)))).toBe(false);
+    expect(again.has(matchKeyOf(idOf(2, 0)))).toBe(true);
+    expect(spellingReadsWanted(selection, again, new Set())).toEqual([idOf(2, 1), idOf(3, 0)]);
+  });
+
+  it('labels each option with the detail pane’s own field and offers the editor’s suggestions', () => {
+    expect(BULK_OPTIONS.map(bulkOptionField)).toEqual([
+      'word',
+      'leftWord',
+      'rightWord',
+      'propagateCase',
+      'uppercaseStyle',
+      'forceMode',
+      'forceClipboard'
+    ]);
+    expect(bulkSuggestionsFor('force_mode')).toEqual(['clipboard', 'keys']);
+    expect(bulkSuggestionsFor('word')).toEqual([]);
+  });
+
+  it('maps an intent control’s three choices onto the draft, each one undoable step', () => {
+    const set = chooseBulkIntent(EMPTY_BULK_DRAFT, 'word', 'set');
+    expect(set.intents.word).toEqual({ Set: '' });
+    const typed = typeBulkIntentText(set, 'word', 'true');
+    const removed = chooseBulkIntent(typed, 'word', 'remove');
+    expect(removed.intents.word).toBe('Remove');
+    const back = chooseBulkIntent(removed, 'word', 'untouched');
+    expect(back.intents.word).toBeUndefined();
+    expect(bulkChangesOf(back.intents)).toEqual([]);
+    // `set` over a set option keeps its text and adds no step.
+    expect(chooseBulkIntent(typed, 'word', 'set')).toBe(typed);
+    expect(undoBulkDraft(undoBulkDraft(back)).intents.word).toEqual({ Set: 'true' });
+  });
+
+  it('keeps a run of typing into one box as one step, and starts a new run after another edit', () => {
+    let draft = chooseBulkIntent(EMPTY_BULK_DRAFT, 'force_mode', 'set');
+    draft = typeBulkIntentText(draft, 'force_mode', 'c');
+    draft = typeBulkIntentText(draft, 'force_mode', 'cl');
+    draft = typeBulkIntentText(draft, 'force_mode', 'clipboard');
+    expect(draft.past).toHaveLength(2);
+    expect(undoBulkDraft(draft).intents.force_mode).toEqual({ Set: '' });
+    draft = chooseBulkIntent(draft, 'word', 'remove');
+    draft = typeBulkIntentText(draft, 'force_mode', 'keys');
+    expect(draft.past).toHaveLength(4);
+    expect(undoBulkDraft(draft).intents.force_mode).toEqual({ Set: 'clipboard' });
+    expect(typeBulkIntentText(draft, 'paragraph' as BulkOption, 'x')).toBe(draft);
+  });
+
+  it('names every excluded snippet with its trigger view and its file, and counts the plan', () => {
+    const readOnly = views();
+    const first = readOnly[0];
+    if (first === undefined) {
+      throw new Error('fixture');
+    }
+    readOnly[0] = {
+      ...first,
+      matches: first.matches.map((match, index) =>
+        index === 1 ? { ...match, safely_editable: false } : match
+      )
+    };
+    const plan = planBulkApply(selectionOf(idOf(2, 0), idOf(2, 1), idOf(3, 0)), readOnly, []);
+    const rows = bulkExclusionRows(plan, readOnly);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.reason).toBe('readOnly');
+    expect(rows[0]?.file).toBe('match/base.yml');
+    expect(rows[0]?.view?.id).toEqual(idOf(2, 1));
+    expect(bulkExclusionRows(plan, [])[0]).toMatchObject({ view: null, file: null });
+    expect(bulkPlanCounts(plan)).toEqual({ files: 2, snippets: 2 });
+  });
+
+  it('keeps execution counts and exclusion counts in two lists, zero lines left out', () => {
+    const plan = planBulkApply(selectionOf(idOf(2, 0), idOf(3, 0)), views(), [idOf(3, 0)]);
+    const summary = summarizeBulkResult(
+      resultOf(true, [
+        { document: 2, outcome: 'saved', revision: 'rev-b', backup_taken: true, notes: [] },
+        { document: 3, outcome: 'excludedBeforeApply' }
+      ]),
+      plan
+    );
+    const counts = bulkOutcomeCounts(summary);
+    expect(counts.execution).toEqual([{ name: 'saved', count: 1 }]);
+    expect(counts.exclusions).toEqual([
+      { name: 'excludedFiles', count: 1 },
+      { name: 'excludedSnippets', count: 1 }
+    ]);
+  });
+
+  it('lists each file with its name, its command error and a re-read that failed, never as a save failure', () => {
+    const failure = { kind: 'unrecognized', value: 'x' } as never;
+    const result = resultOf(true, [
+      { document: 2, outcome: 'saved', revision: 'rev-b', backup_taken: false, notes: [] },
+      { document: 3, outcome: 'failed', error: { code: 'noWorkspaceOpen' } as never }
+    ]);
+    const lines = bulkFileLines(
+      result,
+      [{ document: 2, adoption: { kind: 'failed', failure } }],
+      [
+        { ...views()[0], loaded: true } as never,
+        { ...views()[1], loaded: true } as never
+      ]
+    );
+    expect(lines.map((line) => line.report.outcome)).toEqual(['saved', 'failed']);
+    expect(lines[0]).toMatchObject({ file: 'match/base.yml', rereadFailure: failure, error: null });
+    expect(lines[1]).toMatchObject({ file: 'match/other.yml', rereadFailure: null });
+    expect(lines[1]?.error).toEqual({ code: 'noWorkspaceOpen' });
+  });
+
+  it('narrows the selection to what nothing wrote, dropping and never re-resolving the rest', () => {
+    const selection = selectionOf(idOf(2, 0), idOf(3, 0), idOf(2, 1));
+    const result = resultOf(true, [
+      { document: 2, outcome: 'saved', revision: 'rev-b', backup_taken: false, notes: [] },
+      {
+        document: 3,
+        outcome: 'refused',
+        verdict: 'RefusedForUnacknowledgedSuspicions',
+        findings: [SUSPICION],
+        candidate: 'c',
+        intent: 'i'
+      }
+    ]);
+    expect(remainingBulkSelection(selection, result, selection)).toEqual([idOf(3, 0)]);
+    expect(bulkNarrowingOffered(selection, result, selection)).toEqual([idOf(3, 0)]);
+    expect(bulkNarrowingOffered([idOf(3, 0)], result, [idOf(3, 0)])).toBeNull();
+    expect(bulkNarrowingOffered([idOf(2, 0)], result, [idOf(2, 0)])).toBeNull();
+  });
+
+  it('keeps a snippet selected after the submission, whatever that answer says (review fix 3)', () => {
+    const submitted = selectionOf(idOf(2, 0));
+    const result = resultOf(true, [
+      { document: 2, outcome: 'saved', revision: 'rev-b', backup_taken: false, notes: [] }
+    ]);
+    // File 3 was selected after the apply; the answer does not name it.
+    const now = selectionOf(idOf(2, 0), idOf(3, 0));
+    expect(remainingBulkSelection(now, result, submitted)).toEqual([idOf(3, 0)]);
+    expect(bulkNarrowingOffered(now, result, submitted)).toEqual([idOf(3, 0)]);
+  });
+
+  it('offers consent only while the file as it would be sent is the one reviewed (review fix 2)', () => {
+    const selection = selectionOf(idOf(2, 0), idOf(3, 0));
+    const intents: BulkIntents = { word: { Set: 'true' } };
+    const ready = prepareBulkApply(inputs({ selection, intents }));
+    if (ready.kind !== 'ready') {
+      throw new Error('the fixture request must be ready');
+    }
+    const reviewed = ready.submission.keys.find((entry) => entry.document === 2)?.key;
+    const result = resultOf(false, [
+      {
+        document: 2,
+        outcome: 'refused',
+        verdict: 'RefusedForUnacknowledgedSuspicions',
+        findings: [SUSPICION],
+        candidate: 'cand-2',
+        intent: 'intent-2'
+      },
+      { document: 3, outcome: 'notAttempted' }
+    ]);
+    const plan = ready.plan;
+    expect(bulkConsentReviewStatus(reviewed, plan, intents, [], 2)).toBe('offered');
+    const grants = acknowledgeBulkRefusal([], ready.submission, result, 2);
+    expect(bulkConsentReviewStatus(reviewed, plan, intents, grants, 2)).toBe('recorded');
+    // Another option drafted: the review is about a request no longer on screen.
+    const changed: BulkIntents = { word: { Set: 'true' }, force_mode: { Set: 'keys' } };
+    expect(bulkConsentReviewStatus(reviewed, plan, changed, grants, 2)).toBe('outdated');
+    expect(bulkConsentReviewStatus(reviewed, plan, changed, [], 2)).toBe('outdated');
+    // Another selection in that file.
+    const wider = planBulkApply(selectionOf(idOf(2, 0), idOf(2, 1), idOf(3, 0)), views(), []);
+    expect(bulkConsentReviewStatus(reviewed, wider, intents, grants, 2)).toBe('outdated');
+    expect(bulkConsentReviewStatus(undefined, plan, intents, grants, 2)).toBe('outdated');
+    // Changing back makes the same review current again.
+    expect(bulkConsentReviewStatus(reviewed, plan, intents, grants, 2)).toBe('recorded');
+  });
+
+  it('keeps a grant only for a file the answer never reached', () => {
+    const grant = (document: number): BulkConsentGrant => ({
+      key: `k${document}`,
+      consent: {
+        document,
+        base_revision: 'r',
+        intent: 'i',
+        candidate: 'c',
+        acknowledgement: { accepted: [] }
+      }
+    });
+    const grants = [grant(2), grant(3), grant(4)];
+    const result = resultOf(false, [
+      { document: 2, outcome: 'consentStale', intent: 'i', candidate: 'c' },
+      { document: 3, outcome: 'notAttempted' }
+    ]);
+    const kept = grantsAfterBulkAnswer(grants, result);
+    expect(kept.map((held) => held.consent.document)).toEqual([3, 4]);
+    expect(bulkConsentRecorded(kept, 3)).toBe(true);
+    expect(bulkConsentRecorded(kept, 2)).toBe(false);
+  });
+
+  it('gives every counted line a sentence in both languages with the count in it, and no undo', () => {
+    const names: readonly BulkCountName[] = [
+      'saved',
+      'alreadyUnchanged',
+      'notWritten',
+      'writeOutcomeUnknown',
+      'notAttempted',
+      'excludedFiles',
+      'excludedSnippets'
+    ];
+    expect(new Set(names.map(bulkCountKey)).size).toBe(names.length);
+    for (const lang of LOCALES) {
+      for (const name of names) {
+        const sentence = describeBulkCount(lang, { name, count: 7 });
+        expect(sentence).toContain('7');
+        expect(sentence).not.toMatch(/[{}]/);
+        expect(sentence).not.toMatch(/undo|deshac|revert|restaur/i);
+      }
+    } // End of the loop over the two languages
+  });
+
+  it('names an undo only for the draft, and says a saved file is not taken back', () => {
+    for (const lang of LOCALES) {
+      const inspector = Object.entries(DICTIONARIES[lang]).filter(([key]) =>
+        key.startsWith('browser.bulkInspector.')
+      );
+      const naming = inspector
+        .filter(([, sentence]) => /undo|deshac|revert|anul|take.*back/i.test(sentence))
+        .map(([key]) => key);
+      expect(naming).toContain('browser.bulkInspector.draftUndo');
+      for (const key of naming) {
+        expect([
+          'browser.bulkInspector.draftOnly',
+          'browser.bulkInspector.draftUndo',
+          'browser.bulkInspector.noDiskUndo'
+        ]).toContain(key);
+      }
+    }
+    expect(translate('en', 'browser.bulkInspector.noDiskUndo')).toMatch(/nothing here takes that save back/);
+    expect(translate('es', 'browser.bulkInspector.noDiskUndo')).toMatch(/nada de aquí anula/);
+  });
+}); // End of the "what the inspector draws" suite

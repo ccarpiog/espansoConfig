@@ -182,10 +182,12 @@ import {
 import { conflictMessageKey, type ConflictMessage } from '../browser/saveOutcome';
 import {
   bulkBlockerKey,
+  bulkCountKey,
   bulkExclusionKey,
   bulkOutcomeHeadlineKey,
   optionSummaryKey,
   type BulkBlocker,
+  type BulkCountLine,
   type BulkExclusionReason,
   type BulkOutcomeHeadline,
   type WordedOptionSummary
@@ -2256,3 +2258,18 @@ export function describeBulkOptionSummary(locale: Locale, kind: WordedOptionSumm
 export function describeBulkOutcomeHeadline(locale: Locale, headline: BulkOutcomeHeadline): string {
   return translate(locale, bulkOutcomeHeadlineKey(headline));
 } // End of function describeBulkOutcomeHeadline()
+
+/**
+ * One counted line of a bulk edit's answer, in one language — Phase 3-11-2.
+ *
+ * Execution outcomes and exclusions have separate keys, and `bulkOutcomeCounts`
+ * in `../browser/bulkEdit.ts` hands them over in separate lists, so no sentence
+ * adds an exclusion to a failure.
+ *
+ * @param locale - The dictionary to read from.
+ * @param line - The counted line, from `bulkOutcomeCounts`.
+ * @returns The translated line, with the count substituted.
+ */
+export function describeBulkCount(locale: Locale, line: BulkCountLine): string {
+  return translate(locale, bulkCountKey(line.name), { count: line.count });
+} // End of function describeBulkCount()

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T13:34:07Z",
+  "updated": "2026-09-24T14:02:12Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1097,7 +1097,7 @@
       "id": "3-11",
       "title": "Bulk selection and inspector",
       "status": "in_progress",
-      "summary": "Split into 3-11-1 (closed), 3-11-2 and 3-11-3: bulk selection, Mixed, intents, consent and outcomes, then the window half.",
+      "summary": "Split into 3-11-1 and 3-11-2 (closed) and 3-11-3: bulk selection, Mixed, intents, consent and outcomes, then the window half.",
       "risk": "high"
     },
     {
@@ -1113,9 +1113,11 @@
     {
       "id": "3-11-2",
       "title": "Bulk selection: the components and the i18n",
-      "status": "queued",
+      "status": "done",
       "risk": "high",
-      "summary": "Queued: multi-select in the snippet list and a bulk inspector component."
+      "summary": "Multi-select in the snippet list and a bulk inspector draw the bulk model, with consent review, partial outcomes and a pending-apply lock.",
+      "review": "docs/reviews/phase-3-11-2.md",
+      "narrative": "docs/decisions/3-11-2-notes.md"
     },
     {
       "id": "3-11-3",

@@ -56,6 +56,7 @@
     MatchId,
     MatchView
   } from '../ipc/types';
+  import BulkInspector from './BulkInspector.svelte';
   import FileReconciliationStatus from './FileReconciliationStatus.svelte';
   import MatchCreator from './MatchCreator.svelte';
   import MatchDeleter from './MatchDeleter.svelte';
@@ -1205,6 +1206,15 @@
    * openers below are withdrawn while any of them is showing rather than drawn
    * beside it.
    *
+   * **The bulk inspector counts here too, and is not a registered write surface**
+   * (Phase 3-11-2, `docs/decisions/3-11-2-notes.md` §2 D1). While the list is
+   * selecting several, the inspector takes this pane and the openers below are
+   * withdrawn; the list refuses to start selecting while a registered surface is
+   * open (`bulkSelectingAvailability` in `../browser/bulkEdit.ts`). So the eight
+   * surfaces above and the inspector are mutually exclusive in this window, and
+   * that exclusivity is what stands in for a registry entry — which could not
+   * name the several files a bulk edit writes.
+   *
    * **This is also where the R36 refusal is actually enforced**: a snippet whose
    * draft is open — whether or not that draft's identity is still live — cannot be
    * moved or duplicated, because neither panel can be opened while the small
@@ -1219,7 +1229,8 @@
       movingMatch !== null ||
       duplicatingMatch !== null ||
       restoring !== null ||
-      creating
+      creating ||
+      browser.bulkSelecting
   );
 
   /*
@@ -1625,6 +1636,21 @@
       reportReceiver={bindReceiver('restore')}
       acknowledgement={surfaceAcknowledgement}
       close={() => (restoring = null)}
+    />
+  {:else if browser.bulkSelecting}
+    <!-- **The bulk inspector** (Phase 3-11-2). `openDrafts` is this pane's own
+         knowledge of which match editors are open — empty today, because `busy`
+         keeps an editor from opening beside the inspector, and wired so the
+         model's `editorOpen` exclusion is live the moment that stops being true. -->
+    <BulkInspector
+      selection={browser.bulkSelection}
+      views={browser.views}
+      documents={browser.documents}
+      openDrafts={openMatchDrafts()}
+      readSpellings={(id) => browser.matchOptionSpellings(id)}
+      apply={(request) => browser.applyBulkOptions(request)}
+      replaceSelection={(next) => browser.replaceBulkSelection(next)}
+      stop={() => browser.setBulkSelecting(false)}
     />
   {:else if browser.fileText !== null && browser.fileTextTarget !== null}
     {@const view = browser.fileText}

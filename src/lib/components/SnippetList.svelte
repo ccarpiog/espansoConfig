@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { bulkSelectingAvailability, isInBulkSelection } from '../browser/bulkEdit';
   import { describeFindings, hasFindings } from '../browser/findings';
   import { badgesOf, labelText, matchKey, triggerLabel } from '../browser/labels';
   import type { BrowserState } from '../browser/workspace.svelte';
@@ -40,6 +41,18 @@
    * a file's imports and its "not loaded automatically" explanation are about
    * the file, and a `_` file holding only `imports` has no snippet to select.
    * It is drawn only when one file is in scope; the "All" scope is no file.
+   *
+   * **Selecting several** (Phase 3-11-2). A *Select several* toggle puts the
+   * list into a mode in which a row press adds that snippet to the bulk
+   * selection or takes it out, instead of selecting it alone. The rows stay the
+   * same `<button>`s, now carrying `aria-pressed`, so the whole interaction is
+   * the keyboard's too: Tab reaches each row and Space or Return toggles it. No
+   * checkbox is drawn, which keeps one control per row. Whether the toggle may
+   * be turned on is `bulkSelectingAvailability` in `../browser/bulkEdit.ts` over
+   * the window's live write surfaces; while it is refused the control is
+   * disabled and the reason is said beside it. The selection itself lives on
+   * `BrowserState` (`bulkSelection`), because the detail pane's bulk inspector
+   * draws it too. Outside the mode nothing here changed.
    */
 
   const { browser }: { browser: BrowserState } = $props();
@@ -49,6 +62,8 @@
   // needed *before* the `{#if}` that would have to contain it. `$derived` also
   // means the call is memoized rather than repeated by each reader below.
   const findings = $derived(describeFindings(browser.scopedDocument));
+
+  const bulkAvailability = $derived(bulkSelectingAvailability(browser.openWriteSurfaces()));
 
   /**
    * Sends the search box's current text to the state.
@@ -72,6 +87,48 @@
       total: browser.scopedMatches.length
     })}
   </p>
+
+  <div class="bulk">
+    {#if browser.bulkSelecting}
+      <p class="choices">
+        <!-- Withdrawn while a bulk apply is out: `BrowserState.setBulkSelecting`
+             refuses then too, so the inspector and `busy` hold until it settles. -->
+        <button
+          type="button"
+          aria-pressed="true"
+          disabled={browser.bulkApplyPending}
+          onclick={() => browser.setBulkSelecting(false)}
+        >
+          {t('browser.list.bulk.stop')}
+        </button>
+        <button
+          type="button"
+          disabled={browser.bulkApplyPending || browser.bulkSelection.length === 0}
+          onclick={() => browser.replaceBulkSelection([])}
+        >
+          {t('browser.list.bulk.clear')}
+        </button>
+      </p>
+      <p class="hint">{t('browser.list.bulk.hint')}</p>
+      <p class="hint" role="status">
+        {t('browser.list.bulk.count', { count: browser.bulkSelection.length })}
+      </p>
+    {:else}
+      <p class="choices">
+        <button
+          type="button"
+          aria-pressed="false"
+          disabled={bulkAvailability !== 'available'}
+          onclick={() => browser.setBulkSelecting(true)}
+        >
+          {t('browser.list.bulk.start')}
+        </button>
+      </p>
+      {#if bulkAvailability === 'surfaceOpen'}
+        <p class="hint">{t('browser.list.bulk.unavailable')}</p>
+      {/if}
+    {/if}
+  </div>
 
   {#if hasFindings(findings)}
     <div class="notes" role="status" aria-label={t('browser.list.notes.label')}>
@@ -116,7 +173,35 @@
       {#each browser.visibleMatches as match (matchKey(match.id))}
         {@const trigger = triggerLabel(match)}
         {@const label = labelText(match)}
+        {@const picked = isInBulkSelection(browser.bulkSelection, match.id)}
         <li>
+          {#if browser.bulkSelecting}
+            <!-- Selecting several: the row toggles its snippet in the bulk
+                 selection. `aria-pressed` is the state a keyboard or a screen
+                 reader is told; the mark is the same fact drawn. -->
+            <button
+              type="button"
+              class="row"
+              aria-pressed={picked ? 'true' : 'false'}
+              disabled={browser.bulkApplyPending}
+              onclick={() => browser.toggleBulkSelection(match.id)}
+            >
+              <span class="mark" aria-hidden="true">{picked ? '☑' : '☐'}</span>
+              <span class="trigger">
+                {#if trigger.kind === 'text'}
+                  {trigger.text}
+                {:else}
+                  {tTriggerKind(trigger.code)}
+                {/if}
+              </span>
+              {#if label !== null}
+                <span class="label">{label}</span>
+              {/if}
+              {#if picked}
+                <span class="badge">{t('browser.list.bulk.selectedMark')}</span>
+              {/if}
+            </button>
+          {:else}
           <button
             type="button"
             class="row"
@@ -144,6 +229,7 @@
               </span>
             {/if}
           </button>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -180,6 +266,41 @@
   label {
     font-size: 0.8125rem;
     color: var(--muted);
+  }
+
+  .bulk .choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
+    margin: 0;
+  }
+
+  .bulk button {
+    font: inherit;
+    font-size: 0.8125rem;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: inherit;
+  }
+
+  .bulk button[aria-pressed='true'] {
+    background: var(--surface-raised);
+  }
+
+  .hint {
+    margin: 0.25rem 0 0;
+    font-size: 0.8125rem;
+    color: var(--muted);
+  }
+
+  .mark {
+    color: var(--muted);
+  }
+
+  .row[aria-pressed='true'] {
+    background: var(--surface-raised);
   }
 
   .summary,

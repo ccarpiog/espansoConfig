@@ -69,12 +69,13 @@
 
 import type { TranslationKey } from '../i18n/dictionaries';
 import type { CommandResult } from '../ipc/commands';
-import type { IpcFailure } from '../ipc/errors';
+import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
   Acknowledgement,
   BulkConsent,
   BulkFileOutcome,
   BulkFileOutcomeName,
+  BulkFileReport,
   BulkOption,
   BulkOptionChange,
   BulkOptionSpellings,
@@ -83,16 +84,21 @@ import type {
   BulkValue,
   ContentRevision,
   DocumentId,
+  DocumentSummary,
   DocumentView,
   Finding,
   MatchId,
+  MatchView,
   OptionSpelling,
   SaveVerdict
 } from '../ipc/types';
+import type { DetailFieldName } from './detail';
 import { HISTORY_LIMIT, deepFreeze } from './draft';
 import type { InvalidationStatus } from './invalidation';
 import { documentHasUnsavedDraft } from './matchDuplication';
+import { suggestionsFor } from './matchEditor';
 import { refusalAcknowledgement } from './rawSave';
+import type { OpenWriteSurface } from './restore';
 
 // ---------------------------------------------------------------------------
 // The seven options
@@ -423,6 +429,101 @@ export function setBulkIntent(draft: BulkDraft, option: BulkOption, value: BulkV
   const owned: BulkValue = value === 'Remove' ? 'Remove' : { Set: value.Set };
   return recordIntents(draft, { ...draft.intents, [option]: owned });
 } // End of function setBulkIntent()
+
+/**
+ * Whether the draft's last step was typing into this option's box: the step
+ * before differs from the current intents only in this option, and held a text
+ * for it too.
+ *
+ * @param draft - The draft.
+ * @param option - The option being typed into.
+ * @returns `true` when a new keystroke may join that step.
+ */
+function continuesTypingRun(draft: BulkDraft, option: BulkOption): boolean {
+  const previous = draft.past[draft.past.length - 1];
+  if (previous === undefined || draft.future.length > 0) {
+    return false;
+  }
+  const before = previous[option];
+  if (before === undefined || before === 'Remove') {
+    return false;
+  }
+  return BULK_OPTIONS.every(
+    (other) => other === option || sameValue(previous[other], draft.intents[other])
+  );
+} // End of function continuesTypingRun()
+
+/**
+ * Records one keystroke's worth of text for an option that is already set —
+ * Phase 3-11-2, the inspector's text box.
+ *
+ * **A run of typing into one box is one undoable step**, not one step per
+ * character. The rule is decided here, over the draft alone: when the step
+ * before this one differs from the current intents **only** in this option, and
+ * holds a text for it as well, the text is replaced in place and no step is
+ * added. Otherwise the edit is recorded as a new step through
+ * {@link setBulkIntent}. So choosing *Set to* is one step, the typing that
+ * follows is a second, and an edit to another option in between starts a new
+ * run. Only the seven options are accepted, as {@link setBulkIntent} states.
+ *
+ * @param draft - The draft.
+ * @param option - The option whose box was typed into.
+ * @param text - What the box holds now.
+ * @returns The draft with the text recorded, merged into the running step when
+ *   the rule above allows it.
+ */
+export function typeBulkIntentText(draft: BulkDraft, option: BulkOption, text: string): BulkDraft {
+  if (!isBulkOption(option)) {
+    return draft;
+  }
+  const current = draft.intents[option];
+  if (current === undefined || current === 'Remove' || !continuesTypingRun(draft, option)) {
+    return setBulkIntent(draft, option, { Set: text });
+  }
+  if (current.Set === text) {
+    return draft;
+  }
+  return deepFreeze({
+    intents: { ...draft.intents, [option]: { Set: text } },
+    past: draft.past,
+    future: []
+  });
+} // End of function typeBulkIntentText()
+
+/** What one option's intent control can be set to. */
+export type BulkIntentChoice = BulkControl['intent'];
+
+/**
+ * Applies a choice made in one option's intent control.
+ *
+ * - `untouched` — the option emits nothing again ({@link clearBulkIntent});
+ * - `set` — the option is set to the text it already held, or to an empty text
+ *   when it held none, which {@link prepareBulkApply} blocks until typed into;
+ * - `remove` — the option is removed.
+ *
+ * @param draft - The draft.
+ * @param option - The option.
+ * @param choice - What the control now says.
+ * @returns The draft with the choice recorded as one undoable step.
+ */
+export function chooseBulkIntent(
+  draft: BulkDraft,
+  option: BulkOption,
+  choice: BulkIntentChoice
+): BulkDraft {
+  switch (choice) {
+    case 'untouched':
+      return clearBulkIntent(draft, option);
+    case 'remove':
+      return setBulkIntent(draft, option, 'Remove');
+    case 'set': {
+      const held = draft.intents[option];
+      return setBulkIntent(draft, option, {
+        Set: held !== undefined && held !== 'Remove' ? held.Set : ''
+      });
+    }
+  }
+} // End of function chooseBulkIntent()
 
 /**
  * Returns one option to untouched, so it emits nothing again.
@@ -1091,8 +1192,446 @@ export function summarizeBulkResult(result: BulkResult, plan: BulkPlan): BulkOut
 } // End of function summarizeBulkResult()
 
 // ---------------------------------------------------------------------------
+// What the inspector draws — Phase 3-11-2
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a person may start selecting several snippets now.
+ *
+ * - `available` — no write surface is open;
+ * - `surfaceOpen` — an editor, a form or a panel that writes is open. Starting a
+ *   bulk selection is refused rather than drawn beside it, because the bulk
+ *   inspector takes the detail pane's place and a draft on screen may not be
+ *   dismissed by a click elsewhere in the window (`DetailPane.svelte`'s `busy`).
+ *
+ * **Why the bulk inspector registers no write surface of its own** is recorded
+ * in `docs/decisions/3-11-2-notes.md` §2 D1. In short: the registry holds one
+ * target per kind and a bulk edit names several files; its draft holds no file
+ * text, only intents and identities, so a reload under it loses nothing and
+ * turns the selection stale, which {@link prepareBulkApply} blocks; and while it
+ * is open no other write surface can be opened in this window.
+ *
+ * @param surfaces - The window's live write surfaces, as the registry answers.
+ * @returns Whether a bulk selection may start.
+ */
+export function bulkSelectingAvailability(
+  surfaces: readonly OpenWriteSurface[]
+): 'available' | 'surfaceOpen' {
+  return surfaces.length === 0 ? 'available' : 'surfaceOpen';
+} // End of function bulkSelectingAvailability()
+
+/**
+ * The selected snippets whose spellings have not been asked for yet.
+ *
+ * A read that failed is **not** asked for again here — that would retry in a
+ * loop on every change; {@link withoutFailedReads} is the person's *Read again*.
+ *
+ * @param selection - The selection.
+ * @param reads - The spelling reads taken so far, keyed by {@link matchKeyOf}.
+ * @param pending - Keys of reads already in flight.
+ * @returns The identities to read, in selection order.
+ */
+export function spellingReadsWanted(
+  selection: BulkSelection,
+  reads: ReadonlyMap<string, SpellingRead>,
+  pending: ReadonlySet<string>
+): readonly MatchId[] {
+  return selection.filter((id) => {
+    const key = matchKeyOf(id);
+    return !reads.has(key) && !pending.has(key);
+  });
+} // End of function spellingReadsWanted()
+
+/**
+ * How many selected snippets have a spelling read that failed for a reason other
+ * than a stale identity (a stale one is the selection's staleness, said apart).
+ *
+ * @param selection - The selection.
+ * @param reads - The spelling reads, keyed by {@link matchKeyOf}.
+ * @returns The count.
+ */
+export function failedSpellingReads(
+  selection: BulkSelection,
+  reads: ReadonlyMap<string, SpellingRead>
+): number {
+  return selection.filter((id) => reads.get(matchKeyOf(id))?.kind === 'failed').length;
+} // End of function failedSpellingReads()
+
+/**
+ * The reads with every failed one dropped, so {@link spellingReadsWanted} asks
+ * for those snippets again. A successful or stale read is kept.
+ *
+ * @param reads - The spelling reads.
+ * @returns A new map without the failed reads.
+ */
+export function withoutFailedReads(
+  reads: ReadonlyMap<string, SpellingRead>
+): ReadonlyMap<string, SpellingRead> {
+  return new Map([...reads].filter(([, read]) => read.kind !== 'failed'));
+} // End of function withoutFailedReads()
+
+/**
+ * The detail pane's label for one bulk option, so the inspector names an option
+ * with the same words the snippet's own detail uses.
+ *
+ * @param option - The option, as its espanso key.
+ * @returns The detail field that labels it.
+ */
+export function bulkOptionField(option: BulkOption): DetailFieldName {
+  switch (option) {
+    case 'word':
+      return 'word';
+    case 'left_word':
+      return 'leftWord';
+    case 'right_word':
+      return 'rightWord';
+    case 'propagate_case':
+      return 'propagateCase';
+    case 'uppercase_style':
+      return 'uppercaseStyle';
+    case 'force_mode':
+      return 'forceMode';
+    case 'force_clipboard':
+      return 'forceClipboard';
+  }
+} // End of function bulkOptionField()
+
+/**
+ * The suggested spellings for one bulk option: the single-snippet editor's own
+ * list (`OPTION_SUGGESTIONS` in `./matchEditor.ts`), exact strings compared by
+ * `===` only. Pressing one sets that exact text; nothing infers a type.
+ *
+ * @param option - The option.
+ * @returns The suggestions, possibly none.
+ */
+export function bulkSuggestionsFor(option: BulkOption): readonly string[] {
+  return suggestionsFor(option);
+} // End of function bulkSuggestionsFor()
+
+/** One excluded snippet, as the inspector lists it. */
+export interface BulkExclusionRow {
+  /** The snippet's identity. */
+  readonly match: MatchId;
+  /** Its projection, for its trigger; `null` when the window no longer holds it. */
+  readonly view: MatchView | null;
+  /** Its file's relative path, or `null` when the window no longer lists it. */
+  readonly file: string | null;
+  /** Why it is left out. */
+  readonly reason: BulkExclusionReason;
+}
+
+/**
+ * The plan's exclusions, each beside what a screen names it by.
+ *
+ * @param plan - The plan.
+ * @param views - The live projections.
+ * @returns One row per excluded snippet, in selection order.
+ */
+export function bulkExclusionRows(
+  plan: BulkPlan,
+  views: readonly DocumentView[]
+): readonly BulkExclusionRow[] {
+  return plan.exclusions.map((exclusion) => {
+    const view = views.find((held) => held.id === exclusion.match.document);
+    return {
+      match: exclusion.match,
+      view: view?.matches.find((held) => sameMatchId(held.id, exclusion.match)) ?? null,
+      file: view?.relative_path ?? null,
+      reason: exclusion.reason
+    };
+  });
+} // End of function bulkExclusionRows()
+
+/** How much an apply would send, drawn beside its button. */
+export interface BulkPlanCounts {
+  /** Files that would be written. */
+  readonly files: number;
+  /** Snippets that would be changed, over those files. */
+  readonly snippets: number;
+}
+
+/**
+ * How many files and snippets a plan would send.
+ *
+ * @param plan - The plan.
+ * @returns The counts.
+ */
+export function bulkPlanCounts(plan: BulkPlan): BulkPlanCounts {
+  return {
+    files: plan.files.length,
+    snippets: plan.files.reduce((sum, file) => sum + file.matches.length, 0)
+  };
+} // End of function bulkPlanCounts()
+
+/**
+ * The name of one counted line of an answer.
+ *
+ * The first five are **execution** outcomes; the last two are **exclusions**
+ * decided before the apply. {@link bulkOutcomeCounts} keeps them in two lists so
+ * a screen cannot draw them as one count.
+ */
+export type BulkCountName =
+  | 'saved'
+  | 'alreadyUnchanged'
+  | 'notWritten'
+  | 'writeOutcomeUnknown'
+  | 'notAttempted'
+  | 'excludedFiles'
+  | 'excludedSnippets';
+
+/** One counted line. */
+export interface BulkCountLine {
+  /** What is counted. */
+  readonly name: BulkCountName;
+  /** How many. Never zero: a zero line is not drawn. */
+  readonly count: number;
+}
+
+/** An answer's counts, execution and exclusions apart. */
+export interface BulkOutcomeCounts {
+  /** What happened to the applied files, non-zero lines only. */
+  readonly execution: readonly BulkCountLine[];
+  /** What was left out before the apply, non-zero lines only. */
+  readonly exclusions: readonly BulkCountLine[];
+}
+
+/**
+ * The counted lines of a summary, execution outcomes and exclusions in two
+ * separate lists, each without its zero lines.
+ *
+ * @param summary - What {@link summarizeBulkResult} answered.
+ * @returns The two lists.
+ */
+export function bulkOutcomeCounts(summary: BulkOutcomeSummary): BulkOutcomeCounts {
+  const execution: BulkCountLine[] = [
+    { name: 'saved', count: summary.saved },
+    { name: 'alreadyUnchanged', count: summary.alreadyUnchanged },
+    { name: 'notWritten', count: summary.notWritten },
+    { name: 'writeOutcomeUnknown', count: summary.writeOutcomeUnknown },
+    { name: 'notAttempted', count: summary.notAttempted }
+  ];
+  const exclusions: BulkCountLine[] = [
+    { name: 'excludedFiles', count: summary.excludedFiles },
+    { name: 'excludedSnippets', count: summary.excludedSnippets }
+  ];
+  return deepFreeze({
+    execution: execution.filter((line) => line.count > 0),
+    exclusions: exclusions.filter((line) => line.count > 0)
+  });
+} // End of function bulkOutcomeCounts()
+
+/** One file of an answer, as the inspector lists it. */
+export interface BulkFileLine {
+  /** The file's report. */
+  readonly report: BulkFileReport;
+  /** Its relative path, or `null` when the window no longer lists it. */
+  readonly file: string | null;
+  /**
+   * Why reading the file again afterwards failed, or `null`. **Never a failure
+   * of the save**: a saved file whose re-read failed is still saved.
+   */
+  readonly rereadFailure: IpcFailure | null;
+  /** The command error a `blocked`, `failed` or `writeOutcomeUnknown` file carries, or `null`. */
+  readonly error: CommandError | null;
+}
+
+/**
+ * The answer's files, each beside its name and its re-read's fate.
+ *
+ * @param result - What the bulk edit answered.
+ * @param adoptions - Per written or possibly written file, the re-read's fate.
+ * @param documents - The files the window lists.
+ * @returns One line per file, in the answer's order.
+ */
+export function bulkFileLines(
+  result: BulkResult,
+  adoptions: readonly { readonly document: DocumentId; readonly adoption: InvalidationStatus }[],
+  documents: readonly DocumentSummary[]
+): readonly BulkFileLine[] {
+  return result.files.map((report) => {
+    const adoption = adoptions.find((held) => held.document === report.document)?.adoption;
+    return {
+      report,
+      file: documents.find((held) => held.id === report.document)?.relative_path ?? null,
+      rereadFailure: adoption !== undefined && adoption.kind === 'failed' ? adoption.failure : null,
+      error:
+        report.outcome === 'blocked' ||
+        report.outcome === 'failed' ||
+        report.outcome === 'writeOutcomeUnknown'
+          ? report.error
+          : null
+    };
+  }); // End of the map over the answer's files
+} // End of function bulkFileLines()
+
+/**
+ * The selection narrowed to the snippets whose file wrote nothing, so a person
+ * can apply again to what is left — the *keep only what was not written* action.
+ *
+ * **Bound to the submission's own snapshot** (review fix 3). Only an identity
+ * that was in `submitted` — the selection the answer was for — is judged by the
+ * answer: taken out when its file was saved, already held the values, may have
+ * been written, or is not named by the answer at all. An identity selected
+ * **after** that submission is kept whatever the answer says, because the answer
+ * is not about it.
+ *
+ * **It drops; it never re-resolves.** What stays from the submission is an
+ * identity whose file nothing wrote, so it still names the parse it was selected
+ * from — unless something else changed that file, which
+ * {@link bulkSelectionFreshness} still says.
+ *
+ * @param selection - The selection now.
+ * @param result - The answer.
+ * @param submitted - The selection when the request the answer is for was built.
+ * @returns The narrowed selection, in the current order.
+ */
+export function remainingBulkSelection(
+  selection: BulkSelection,
+  result: BulkResult,
+  submitted: BulkSelection
+): BulkSelection {
+  return Object.freeze(
+    selection.filter((id) => {
+      if (!isInBulkSelection(submitted, id)) {
+        return true;
+      }
+      const report = result.files.find((file) => file.document === id.document);
+      return report !== undefined && bulkFileEffect(report).kind === 'nothingWritten';
+    })
+  );
+} // End of function remainingBulkSelection()
+
+/**
+ * The consent grants still worth keeping after an answer.
+ *
+ * A grant is kept only for a file the answer did not reach (`notAttempted`) or
+ * does not name: its findings were never re-judged, so it may still cover the
+ * next attempt. A file that was saved spent its consent; one that was refused
+ * again, came back `consentStale`, conflicted, failed or was blocked needs a
+ * fresh review, so its old grant is dropped rather than sent a second time.
+ *
+ * @param grants - The grants held when the request was sent.
+ * @param result - The answer.
+ * @returns The grants to keep.
+ */
+export function grantsAfterBulkAnswer(
+  grants: readonly BulkConsentGrant[],
+  result: BulkResult
+): readonly BulkConsentGrant[] {
+  return Object.freeze(
+    grants.filter((grant) => {
+      const report = result.files.find((file) => file.document === grant.consent.document);
+      return report === undefined || report.outcome === 'notAttempted';
+    })
+  );
+} // End of function grantsAfterBulkAnswer()
+
+/**
+ * Whether a consent has been recorded for one file and is still kept.
+ *
+ * **Recorded, not yet sent.** {@link prepareBulkApply} attaches it only while the
+ * file's selection and changes still match the key it was recorded under, so a
+ * screen saying *confirmed* says the person confirmed, not that the next request
+ * will carry it.
+ *
+ * @param grants - The grants held.
+ * @param document - The file.
+ * @returns `true` when a grant for that file is held.
+ */
+export function bulkConsentRecorded(
+  grants: readonly BulkConsentGrant[],
+  document: DocumentId
+): boolean {
+  return grants.some((grant) => grant.consent.document === document);
+} // End of function bulkConsentRecorded()
+
+/**
+ * Where one refused file's consent review stands **now** (review fix 2).
+ *
+ * - `offered` — the file as it would be sent now has the same key as the file
+ *   that was reviewed, and no consent is recorded for it: *Confirm* may be
+ *   pressed, and what it confirms is what is on screen;
+ * - `recorded` — the same, and a consent under that key is held;
+ * - `outdated` — the options or the selection changed since the review (or the
+ *   file is no longer planned), so the reviewed findings are not about what
+ *   would be sent: nothing may be confirmed, and a consent recorded earlier is
+ *   not shown as confirmed. {@link prepareBulkApply} would not attach it either.
+ *
+ * @param reviewedKey - {@link bulkFileKey} of the file in the submission that was
+ *   refused, or `undefined` when that submission did not carry the file.
+ * @param plan - The plan as it stands now.
+ * @param intents - The drafted intents now.
+ * @param grants - The grants held.
+ * @param document - The file.
+ * @returns The review's standing.
+ */
+export function bulkConsentReviewStatus(
+  reviewedKey: string | undefined,
+  plan: BulkPlan,
+  intents: BulkIntents,
+  grants: readonly BulkConsentGrant[],
+  document: DocumentId
+): 'offered' | 'recorded' | 'outdated' {
+  const file = plan.files.find((held) => held.document === document);
+  if (file === undefined || reviewedKey === undefined) {
+    return 'outdated';
+  }
+  const key = bulkFileKey(file, bulkChangesOf(intents));
+  if (key !== reviewedKey) {
+    return 'outdated';
+  }
+  return grants.some((grant) => grant.key === key && grant.consent.document === document)
+    ? 'recorded'
+    : 'offered';
+} // End of function bulkConsentReviewStatus()
+
+/**
+ * The narrowed selection a *keep only what was not written* action would leave,
+ * or `null` when it is not worth offering: it would change nothing, or leave
+ * nothing selected.
+ *
+ * @param selection - The selection now.
+ * @param result - The last answer.
+ * @param submitted - The selection that answer's request was built from.
+ * @returns The narrowed selection, or `null`.
+ */
+export function bulkNarrowingOffered(
+  selection: BulkSelection,
+  result: BulkResult,
+  submitted: BulkSelection
+): BulkSelection | null {
+  const remaining = remainingBulkSelection(selection, result, submitted);
+  return remaining.length === 0 || remaining.length === selection.length ? null : remaining;
+} // End of function bulkNarrowingOffered()
+
+// ---------------------------------------------------------------------------
 // Dictionary keys
 // ---------------------------------------------------------------------------
+
+/**
+ * The dictionary key for one counted line of an answer.
+ *
+ * @param name - What is counted.
+ * @returns The key holding its words, with a `{count}` placeholder.
+ */
+export function bulkCountKey(name: BulkCountName): TranslationKey {
+  switch (name) {
+    case 'saved':
+      return 'browser.bulkInspector.count.saved';
+    case 'alreadyUnchanged':
+      return 'browser.bulkInspector.count.alreadyUnchanged';
+    case 'notWritten':
+      return 'browser.bulkInspector.count.notWritten';
+    case 'writeOutcomeUnknown':
+      return 'browser.bulkInspector.count.writeOutcomeUnknown';
+    case 'notAttempted':
+      return 'browser.bulkInspector.count.notAttempted';
+    case 'excludedFiles':
+      return 'browser.bulkInspector.count.excludedFiles';
+    case 'excludedSnippets':
+      return 'browser.bulkInspector.count.excludedSnippets';
+  }
+} // End of function bulkCountKey()
 
 /**
  * The dictionary key for an exclusion's reason.

@@ -145,6 +145,7 @@ import type {
 import type { AutoLoadNote, AutoLoadPlacement, ImportsState } from '../browser/fileScope';
 import type {
   BulkBlocker,
+  BulkCountLine,
   BulkExclusionReason,
   BulkOutcomeHeadline,
   WordedOptionSummary
@@ -241,6 +242,7 @@ import {
   describeBackupTarget,
   describeBatchSkipped,
   describeBulkBlocker,
+  describeBulkCount,
   describeBulkExclusion,
   describeBulkFileOutcome,
   describeBulkOptionSummary,
@@ -342,6 +344,7 @@ export {
   describeBackupTarget,
   describeBatchSkipped,
   describeBulkBlocker,
+  describeBulkCount,
   describeBulkExclusion,
   describeBulkFileOutcome,
   describeBulkOptionSummary,
@@ -2707,3 +2710,14 @@ export function tBulkOptionSummary(kind: WordedOptionSummary): string {
 export function tBulkOutcomeHeadline(headline: BulkOutcomeHeadline): string {
   return describeBulkOutcomeHeadline(locale.current, headline);
 } // End of function tBulkOutcomeHeadline()
+
+/**
+ * Renders one counted line of a bulk edit's answer, in the current language —
+ * Phase 3-11-2. The reactive wrapper over `describeBulkCount` in `./codes`.
+ *
+ * @param line - The counted line, from `bulkOutcomeCounts`.
+ * @returns The translated line.
+ */
+export function tBulkCount(line: BulkCountLine): string {
+  return describeBulkCount(locale.current, line);
+} // End of function tBulkCount()
