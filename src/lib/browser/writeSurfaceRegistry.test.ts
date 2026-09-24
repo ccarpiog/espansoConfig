@@ -62,7 +62,7 @@ const OTHER: DocumentId = 99;
  * **Deliberately not a `satisfies Record<OpenWriteSurfaceKind, …>` table.** The
  * consult puts the one exhaustive assembly in the composition file and 2d-5-2b is
  * what writes it; a second one here would be a check in the wrong place. The
- * consequence is stated rather than glossed: a ninth kind added later would be
+ * consequence is stated rather than glossed: a tenth kind added later would be
  * missing from this list silently. What catches that is `restore.test.ts`'s own
  * `EVERY_SURFACE` table, which *is* `satisfies`-checked and fails to compile when a
  * kind is added without an entry.
@@ -74,6 +74,7 @@ const EVERY_SURFACE: readonly OpenWriteSurfaceKind[] = [
   'matchMover',
   'matchDuplicator',
   'rawEditor',
+  'rawSnippetEditor',
   'restore',
   'recovery'
 ];
@@ -139,7 +140,7 @@ function retained(surface: OpenWriteSurface): RetainedSurface {
 } // End of function retained()
 
 describe('registering a surface', () => {
-  it('answers it, for every one of the eight kinds', () => {
+  it('answers it, for every one of the nine kinds', () => {
     for (const kind of EVERY_SURFACE) {
       const registry = createWriteSurfaceRegistry();
       const told = transition();
@@ -150,7 +151,7 @@ describe('registering a surface', () => {
       expect(registry.transitionFor(kind), kind).toBe(told);
       expect(registry.generation(), kind).toBe(1);
     } // End of the loop over every surface kind
-  }); // End of the "every one of the eight kinds" case
+  }); // End of the "every one of the nine kinds" case
 
   it('starts empty, at generation zero', () => {
     const registry = createWriteSurfaceRegistry();

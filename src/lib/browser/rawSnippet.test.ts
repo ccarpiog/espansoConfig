@@ -626,3 +626,68 @@ describe('CF-55: under one held save, Undo and Redo are neither enabled nor muta
     } // End of the loop over the states built
   });
 });
+
+describe('Phase 3-8-2 additions', () => {
+  it('treats a save refused as identityStaleRevision as a stale identity: no retry is offered (3-8-1 §5 item 5)', () => {
+    const stale: IpcFailure = {
+      kind: 'command',
+      error: { code: 'identityStaleRevision', expected: BASE, found: AFTER }
+    };
+    const refused = failed(false, stale);
+    const view = rawSnippetView(refused);
+    expect(refused.identityStale).toBe(true);
+    expect(view.identityStale).toBe(true);
+    expect(view.canSave).toBe(false);
+    expect(view.editable).toBe(false);
+    expect(view.text).toBe(EDITED);
+    expect(beginSave(refused, () => refused)).toBeNull();
+    // Any other refusal that wrote nothing still allows a corrected retry.
+    const other = failed(false, engineRefused({ ItemTextLosesItsFinalLineBreak: { edit: 0 } }));
+    expect(other.identityStale).toBe(false);
+    // And a send that may have written keeps its own restriction, not this one.
+    expect(failed(true, stale).identityStale).toBe(false);
+  });
+
+  it('answers diverged for a fresh read whose range starts on another line, even with the sent text', () => {
+    const uncertain = failed(true, MAY_HAVE_WRITTEN);
+    const elsewhere: CommandResult<OwnedItemText> = {
+      ok: true,
+      value: { text: EDITED, first_line: 8, line_count: 3 }
+    };
+    expect(reconcileWithDisk(uncertain, MOVED, elsewhere)).toEqual({ kind: 'diverged' });
+    expect(uncertain.needsReconciliation).toBe(true);
+  });
+
+  it('explains a trailing blank line only for ItemTextEscapesTheItem over a text that ends with one', () => {
+    const escapes: EditError = {
+      Verification: { ItemTextEscapesTheItem: { edit: 0, at: { start: 1, end: 2 } } }
+    };
+    /**
+     * A session whose send of one text the engine refused with one error.
+     *
+     * @param text - The text sent.
+     * @param error - The core's refusal.
+     * @returns The session after the refusal.
+     */
+    const refusedWith = (text: string, error: EditError): RawSnippetSession => {
+      const waiting = started(editText(fresh(), text)).session;
+      return saveCouldNotBeSent(waiting, false, engineRefused(error), () => waiting);
+    };
+    expect(rawSnippetView(refusedWith(`${EDITED}\n`, escapes)).trailingBlankLineRefused).toBe(true);
+    expect(rawSnippetView(refusedWith(`${EDITED}  \t\n`, escapes)).trailingBlankLineRefused).toBe(true);
+    expect(rawSnippetView(refusedWith(EDITED, escapes)).trailingBlankLineRefused).toBe(false);
+    expect(
+      rawSnippetView(refusedWith(`${EDITED}\n`, { ItemTextLosesItsFinalLineBreak: { edit: 0 } }))
+        .trailingBlankLineRefused
+    ).toBe(false);
+    // The explanation goes with the failure it explains.
+    const blank = refusedWith(`${EDITED}\n`, escapes);
+    expect(rawSnippetView(editText(blank, THIRD)).trailingBlankLineRefused).toBe(false);
+  });
+
+  it('carries the failure lines of a send that produced no outcome, outermost first', () => {
+    const view = rawSnippetView(failed(false, engineRefused({ ItemTextLosesItsFinalLineBreak: { edit: 0 } })));
+    expect(view.failureLines.map((line) => line.kind)).toEqual(['failure', 'save', 'edit']);
+    expect(rawSnippetView(fresh()).failureLines).toEqual([]);
+  });
+});

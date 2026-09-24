@@ -63,6 +63,7 @@
   import MatchEditor from './MatchEditor.svelte';
   import MatchMover from './MatchMover.svelte';
   import RawEditor from './RawEditor.svelte';
+  import RawSnippetEditor from './RawSnippetEditor.svelte';
   import RestorePane from './RestorePane.svelte';
   import SourceText from './SourceText.svelte';
   import {
@@ -299,6 +300,51 @@
   // reason above: a projection is captured once and replaced whole, and the
   // editor owns the draft from then on.
   let editingMatch = $state.raw<MatchEditingSession | null>(null);
+
+  /**
+   * What the snippet text editor is open over: which snippet, in which file —
+   * Phase 3-8-2.
+   *
+   * **Both captured in one assignment**, for {@link MatchEditingSession}'s
+   * reason: the header names the file the save writes, so the two cannot come
+   * from two reads. The identity is the one the editor reads the text with; after
+   * a commit the editor holds the snippet's new identity itself, and this capture
+   * is what the surface registration and the draft reads below answer from — the
+   * same stance the small editor's capture takes.
+   */
+  interface SnippetTextSession {
+    /** The snippet, as it was projected when the editor opened. */
+    readonly match: MatchView;
+    /** The file it lives in. */
+    readonly file: DocumentSummary;
+  }
+
+  // The snippet text editor's session, or `null`. `$state.raw` for the reason the
+  // small editor's is.
+  let editingSnippetText = $state.raw<SnippetTextSession | null>(null);
+
+  /**
+   * The snippet this window points at in one file, or `null` — the snippet text
+   * editor's reconciliation identity, read when the person asks for it.
+   *
+   * @param document - The file the editor writes.
+   * @returns The selected snippet's identity when it is in that file, or `null`.
+   */
+  function selectedIdentityIn(document: DocumentId): MatchId | null {
+    const held = browser.selectedMatch;
+    return held !== null && held.id.document === document ? held.id : null;
+  } // End of function selectedIdentityIn()
+
+  /**
+   * Leaves the snippet text editor for its file's whole text — the
+   * `ItemRangeNotContiguous` fallback (ruling 11). The viewer that opens is the one
+   * this pane already draws, with its own *Edit* control and its own refusals, so
+   * this decides nothing about whether the whole-document editor may open.
+   */
+  function openWholeDocumentInstead(): void {
+    editingSnippetText = null;
+    void browser.showFileText(true);
+  } // End of function openWholeDocumentInstead()
 
   /**
    * The freshly projected snippet of one identity, or why there is none.
@@ -591,13 +637,13 @@
   type PaneWriteSurface = OpenWriteSurface | null;
 
   /**
-   * This pane's eight write surfaces, keyed by kind.
+   * This pane's nine write surfaces, keyed by kind.
    *
    * **The exhaustive assembly consult Q1 rules**
    * (`docs/reviews/phase-2d-5-design.md:39-45`), and the whole reason the type is
    * written out here rather than inferred: every member of
    * `OpenWriteSurfaceKind` has to appear, so **deleting a key from
-   * {@link openSurfaces} — or adding an eighth kind to the union and not adding a
+   * {@link openSurfaces} — or adding a tenth kind to the union and not adding a
    * key here — is a compile error in this file**, which is the composition file
    * and the only place that knows what this window can have open.
    *
@@ -605,7 +651,7 @@
    * It intersects the shipped union with the key, so each entry can only be a
    * surface *of the kind it is filed under*: the six keys that are opened over a
    * file reduce to the arm that requires one, and `matchCreator` and `recovery`
-   * reduce to the arm that allows `unknown`. Writing the eight arms out again
+   * reduce to the arm that allows `unknown`. Writing the nine arms out again
    * would be a second definition of `OpenWriteSurface` that can drift from the
    * first.
    *
@@ -613,7 +659,7 @@
    * mentioned and that no entry can describe another kind's surface; it does
    * **not** force that the value filed under a key is *true* — a key wired to the
    * wrong session, or to a document identity taken from the wrong side of a
-   * session, type-checks perfectly. `DetailPane.test.ts` opens each of the eight
+   * session, type-checks perfectly. `DetailPane.test.ts` opens each of the nine
    * and reads back what the registry holds, which is the only thing that can
    * catch that.
    */
@@ -642,9 +688,9 @@
    * production or in any test — 2d-5-1-C's measurement, quoted rather than
    * re-derived: its one caller sat inside the `{:else if restoring !== null}` arm,
    * so `restoring` was non-null and {@link busy} had already made the other five
-   * null. Nothing here is conditioned on which arm is being drawn, so all eight
+   * null. Nothing here is conditioned on which arm is being drawn, so all nine
    * entries are live. **What `busy` still means for the live set** is that at most
-   * one of the seven it counts is non-null at a time; the eighth, `recovery`, is
+   * one of the eight it counts is non-null at a time; `recovery` is
    * the exception the consult's §5.1 names — a recovery form is open *beside* the
    * editor or the new-snippet form that mounts it, so the registry can hold two
    * entries from this pane, and `targetingSurfaceFor`'s array order then decides
@@ -695,6 +741,13 @@
       editing === null
         ? null
         : { kind: 'rawEditor', target: { kind: 'document', document: editing.file.id } },
+    rawSnippetEditor:
+      editingSnippetText === null
+        ? null
+        : {
+            kind: 'rawSnippetEditor',
+            target: { kind: 'document', document: editingSnippetText.match.id.document }
+          },
     restore:
       restoring === null
         ? null
@@ -803,7 +856,7 @@
    * literals written in this file, checked against the shipped union by
    * {@link PaneWriteSurfaces}, and built with no cast and no assertion. The
    * registry's refusal fires on what a *read* answers rather than on what was
-   * declared, and neither read can run anything here — the eight sources are
+   * declared, and neither read can run anything here — the nine sources are
    * `$state.raw` or a boolean, so no reactive proxy stands between the registry
    * and a plain data property, and none of these objects has an accessor.
    *
@@ -825,7 +878,7 @@
    * Brings the registry into step with {@link openSurfaces}.
    *
    * **A reconciliation rather than a re-registration.** This runs on every change
-   * to any of the eight sessions — a keystroke in the raw editor replaces
+   * to any of the nine sessions — a keystroke in the raw editor replaces
    * {@link openSurfaces} whole — and every registration moves the registry's
    * generation, which consult Q5 makes a coordinator's guard. Tearing down and
    * rebuilding here would move that counter for changes nobody made. What this does
@@ -861,7 +914,7 @@
       if (surface !== null) {
         open.set(surface.kind, surface);
       }
-    } // End of the loop over the assembly's eight entries
+    } // End of the loop over the assembly's nine entries
     for (const kind of [...heldRegistrations.keys()]) {
       if (!open.has(kind)) {
         heldRegistrations.get(kind)?.lease();
@@ -900,7 +953,7 @@
 
   /*
    * **The registration itself.** An effect rather than a call in each opener and
-   * each closer: there are eight of the first and more than eight of the second —
+   * each closer: there are nine of the first and more than nine of the second —
    * a `close` prop on six components, {@link invalidateEverySurface}, the form's
    * own re-seed, and the recovery panel's own report — and a rule spread over that many call sites is a rule one
    * of them can omit, with no type to notice. Reading {@link openSurfaces} here is
@@ -942,7 +995,7 @@
       if (surface !== null) {
         open.push(surface);
       }
-    } // End of the loop over the assembly's eight entries
+    } // End of the loop over the assembly's nine entries
     receivers.reconcile(open, eligibleDocuments);
   });
 
@@ -951,7 +1004,7 @@
    * that a host can return it straight from a cleanup; this one is a loop instead,
    * because {@link heldRegistrations} is keyed by kind and this pane reconciles it
    * rather than owning a single registration for the life of one effect. **How many
-   * leases it actually holds is at most two** — one of the seven {@link busy}
+   * leases it actually holds is at most two** — one of the eight {@link busy}
    * keeps mutually exclusive, and a recovery form beside the editor or the form
    * that mounts it — and the loop is written over the map rather than over that
    * count. The receiver roster is disposed here too.
@@ -1013,6 +1066,9 @@
     if (editingMatch !== null && editingMatch.match.id.document === replaced) {
       editingMatch = null;
     }
+    if (editingSnippetText !== null && editingSnippetText.match.id.document === replaced) {
+      editingSnippetText = null;
+    }
     if (deletingMatch !== null && deletingMatch.projection.id === replaced) {
       deletingMatch = null;
     }
@@ -1045,7 +1101,7 @@
    * a coordinator is not.
    *
    * **Today it always answers `null` while a move panel is open**, and that is a
-   * fact about this pane rather than about the rule: the seven write surfaces
+   * fact about this pane rather than about the rule: the eight top-level write surfaces
    * {@link busy} counts are mutually exclusive through it, so a snippet with an open editor is
    * not offered a move in the first place — which is the same conservative refusal
    * reached one step earlier. The wiring is here so the model's own arm becomes
@@ -1056,14 +1112,17 @@
    *   `null`.
    */
   function unsavedDraftFor(): MatchId | null {
-    return editingMatch === null ? null : editingMatch.match.id;
+    if (editingMatch !== null) {
+      return editingMatch.match.id;
+    }
+    return editingSnippetText === null ? null : editingSnippetText.match.id;
   } // End of function unsavedDraftFor()
 
   /**
    * Every snippet this window has a match editor open over.
    *
    * A list of at most one today, because this pane holds one small-editor
-   * session and {@link busy} keeps the seven top-level write surfaces mutually
+   * session and {@link busy} keeps the eight top-level write surfaces mutually
    * exclusive (a recovery form may be open beside one, and holds no editor). It is
    * a list rather than a nullable identity because the question the model asks
    * is plural — *any* draft in the file — and a second concurrent editor would
@@ -1076,7 +1135,14 @@
    * @returns The identities, or an empty list.
    */
   function openMatchDrafts(): readonly MatchId[] {
-    return editingMatch === null ? [] : [editingMatch.match.id];
+    const open: MatchId[] = [];
+    if (editingMatch !== null) {
+      open.push(editingMatch.match.id);
+    }
+    if (editingSnippetText !== null) {
+      open.push(editingSnippetText.match.id);
+    }
+    return open;
   } // End of function openMatchDrafts()
 
   /**
@@ -1099,7 +1165,7 @@
    *
    * **Today it always answers `false` while a duplicate panel is open**, exactly
    * as {@link unsavedDraftFor} always answers `null` while a move panel is: the
-   * seven top-level write surfaces are mutually exclusive through {@link busy}, so a file with an
+   * eight top-level write surfaces are mutually exclusive through {@link busy}, so a file with an
    * open editor is not offered a duplicate in the first place — the same
    * conservative refusal reached one step earlier. The wiring is here so the
    * model's own arm becomes live the first moment that stops being true, and
@@ -1127,11 +1193,11 @@
   } // End of function projectionOf()
 
   /**
-   * Whether one of this pane's seven top-level write surfaces is open.
+   * Whether one of this pane's eight top-level write surfaces is open.
    *
-   * **Seven, not eight**: the recovery form is not counted, because it opens
-   * inside the editor or the new-snippet form, which already count — the eighth
-   * kind is the one surface that is open *beside* another (the 2d-6 record's §5.1).
+   * **Eight, not nine**: the recovery form is not counted, because it opens
+   * inside the editor or the new-snippet form, which already count — it is the
+   * one kind that is open *beside* another (the 2d-6 record's §5.1).
    *
    * They outrank the pane's read-only subjects and each other: a draft, a pending
    * confirmation, a chosen destination, an acknowledgement on screen or a save in
@@ -1148,6 +1214,7 @@
   const busy = $derived(
     editing !== null ||
       editingMatch !== null ||
+      editingSnippetText !== null ||
       deletingMatch !== null ||
       movingMatch !== null ||
       duplicatingMatch !== null ||
@@ -1166,7 +1233,7 @@
    * placements are one sentence rather than the same sentence twice. What the
    * surface placement leaves out is the acknowledgement, which a write renderer
    * owns because it must mint from the origin its own panel shows: each of the
-   * eight draws it under its conflict's disk snapshot, through the port below
+   * nine draws it under its conflict's disk snapshot, through the port below
    * (Phase 2d-6-9b-2), and none of them draws the held or unknown-outcome sentence
    * this block already says.
    */
@@ -1176,7 +1243,7 @@
 
   /**
    * The window's side of each write panel's own acknowledgement (Phase 2d-6-9b-2),
-   * built once over this pane's `BrowserState` and handed to the seven top-level
+   * built once over this pane's `BrowserState` and handed to the eight top-level
    * renderers; the editor and the new-snippet form hand it on to the recovery form.
    */
   const surfaceAcknowledgement = $derived(surfaceAcknowledgementPortOf(browser));
@@ -1381,6 +1448,32 @@
       standingConflictFor={(document) => browser.standingConflictFor(document)}
       close={() => (editingMatch = null)}
     />
+  {:else if editingSnippetText !== null}
+    {@const open = editingSnippetText}
+    <!-- **Keyed on the captured session**, so a second opening mounts a fresh
+         editor that reads its own text rather than reusing a session over another
+         snippet. `identityInWindow` is a function for `MatchCreator`'s reason: the
+         reconciliation asks which snippet the window points at when the person
+         presses, not when the editor opened. `openWholeDocument` is `null` while
+         the viewer would show another file's text. -->
+    {#key open}
+      <RawSnippetEditor
+        match={open.match.id}
+        file={open.file}
+        read={(id) => browser.matchItemText(id)}
+        save={(id, baseRevision, text, acknowledgement) =>
+          browser.saveMatchItemText(id, baseRevision, text, acknowledgement)}
+        identityInWindow={selectedIdentityIn}
+        {adoptDiskVersion}
+        reportReceiver={bindReceiver('rawSnippetEditor')}
+        acknowledgement={surfaceAcknowledgement}
+        openWholeDocument={browser.fileTextTarget !== null &&
+        browser.fileTextTarget.id === open.file.id
+          ? openWholeDocumentInstead
+          : null}
+        close={() => (editingSnippetText = null)}
+      />
+    {/key}
   {:else if deletingMatch !== null}
     {@const open = deletingMatch}
     <!-- **`projections` is a function, and that is the whole confirmation.** The
@@ -1622,6 +1715,25 @@
       <p class="toggle">
         <button type="button" onclick={() => (editingMatch = { match: selected, file: inFile })}>
           {t('browser.matchEditor.open')}
+        </button>
+      </p>
+    {/if}
+
+    {#if browser.selectedDocument !== null && !browser.selectedDocument.read_only}
+      {@const selected = browser.selectedMatch}
+      {@const inFile = browser.selectedDocument}
+      <!-- **The snippet text editor (Phase 3-8-2) is offered for any snippet of a
+           writable file**, including one the small editor refuses, for the reason
+           the deletion panel is: the editor says why it will not open, inline and
+           localized, and the core's own refusal — hazards in the sequence, a range
+           with holes, a carriage return — is the one that decides. A read-only
+           file is the one gate, because this app will not write to it at all. -->
+      <p class="toggle">
+        <button
+          type="button"
+          onclick={() => (editingSnippetText = { match: selected, file: inFile })}
+        >
+          {t('browser.rawSnippet.open')}
         </button>
       </p>
     {/if}

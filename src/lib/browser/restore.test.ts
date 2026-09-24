@@ -423,6 +423,7 @@ const COMPETING: readonly CompetingWriteSurfaceKind[] = [
   'matchMover',
   'matchDuplicator',
   'rawEditor',
+  'rawSnippetEditor',
   'recovery'
 ];
 
@@ -440,6 +441,7 @@ const EVERY_SURFACE = Object.keys({
   matchMover: true,
   matchDuplicator: true,
   rawEditor: true,
+  rawSnippetEditor: true,
   restore: true,
   recovery: true
 } satisfies Record<OpenWriteSurfaceKind, true>) as readonly OpenWriteSurfaceKind[];
@@ -894,7 +896,7 @@ describe('the candidate', () => {
   }); // End of the "handed unchanged" case
 }); // End of the "candidate" suite
 
-describe('the seven write surfaces a restore refuses to run beside', () => {
+describe('the eight write surfaces a restore refuses to run beside', () => {
   it('names every one of them, and never restore itself', () => {
     for (const kind of EVERY_SURFACE) {
       const surfaces: readonly OpenWriteSurface[] = [
@@ -912,7 +914,7 @@ describe('the seven write surfaces a restore refuses to run beside', () => {
     ).toBeNull();
   });
 
-  it('refuses to prepare, and to confirm, for each of the seven', () => {
+  it('refuses to prepare, and to confirm, for each of the eight', () => {
     for (const kind of COMPETING) {
       const surfaces: readonly OpenWriteSurface[] = [
         { kind, target: { kind: 'document', document: TARGET } }
@@ -929,7 +931,7 @@ describe('the seven write surfaces a restore refuses to run beside', () => {
       // post-commit safety proof": the coordinator is rechecked immediately before a
       // submission is produced, not only when the question is put.
       expect(((onHand) => confirmRestore(onHand, at(BASE, surfaces), () => onHand))(pending()), kind).toBeNull();
-    } // End of the loop over the seven competing surface kinds
+    } // End of the loop over the eight competing surface kinds
   }); // End of the "refuses to prepare and to confirm" case
 
   it('gives each of the seven its own sentence, and none of the seven claims unsaved edits', () => {
@@ -972,7 +974,7 @@ describe('the seven write surfaces a restore refuses to run beside', () => {
       } // End of the loop over the two editors
     } // End of the loop over the two locales
   }); // End of the "cannot read a dirty state" case
-}); // End of the "seven write surfaces" suite
+}); // End of the "eight write surfaces" suite
 
 /**
  * Every arm of a write surface's target, one key each.

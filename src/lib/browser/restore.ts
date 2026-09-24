@@ -408,10 +408,11 @@ import type { RawSaveAnswer } from './workspace.svelte';
 /**
  * One kind of surface this window can have open that writes a file.
  *
- * **Eight kinds, and restore is one of them**, which is consult Q4 read exactly:
+ * **Nine kinds, and restore is one of them**, which is consult Q4 read exactly:
  * a restore is a write surface for its target like any other, so a coordinator's
- * value has to be able to say so. The seven that *compete* with restore are
- * {@link CompetingWriteSurfaceKind}.
+ * value has to be able to say so. The eight that *compete* with restore are
+ * {@link CompetingWriteSurfaceKind}. The ninth, `rawSnippetEditor`, is Phase
+ * 3-8-2's.
  *
  * **The recovery form is the eighth, since Phase 2d-6-6b** — the 2d-6 record's
  * §5.1 and §3 entry 3. It chooses its own destination and calls
@@ -419,7 +420,7 @@ import type { RawSaveAnswer } from './workspace.svelte';
  * new-snippet form it was opened from, so an editor over one file protects no
  * recovery destination in another. `recoveryTargetOf` in `./recovery.ts` answers
  * the file it would write, and `DetailPane.svelte`'s `satisfies
- * Record<OpenWriteSurfaceKind, …>` assembly is where a ninth member would be a
+ * Record<OpenWriteSurfaceKind, …>` assembly is where a tenth member would be a
  * compile error. **What the union forces is that every member is assembled
  * there; it cannot force that the list of surfaces that write is complete** —
  * the seven-member version of this sentence was the claim §5.1 overturned.
@@ -437,6 +438,12 @@ export type OpenWriteSurfaceKind =
   | 'matchDuplicator'
   /** The file's whole text is open in the raw editor. */
   | 'rawEditor'
+  /**
+   * One snippet's own text is open in the local raw editor (Phase 3-8-2): a
+   * commit gives the snippet a new identity and makes every identity in the file
+   * stale, so it competes with a restore like the match editor does.
+   */
+  | 'rawSnippetEditor'
   /** A restore over the file is open. */
   | 'restore'
   /**
@@ -454,7 +461,7 @@ export type OpenWriteSurfaceKind =
 export type DestinationChoosingKind = Extract<OpenWriteSurfaceKind, 'matchCreator' | 'recovery'>;
 
 /**
- * The seven surface kinds a restore refuses to run beside.
+ * The eight surface kinds a restore refuses to run beside.
  *
  * **Derived by exclusion rather than written out**, so a new member of
  * {@link OpenWriteSurfaceKind} joins this type automatically and becomes a compile
@@ -690,8 +697,8 @@ export function creatorEligibilityOf(
  * however many such creators the list holds. It does **not** make the answer
  * canonical — this is still one answer out of possibly several exact matches, and
  * **array order still decides among those**, so two match editors over one file
- * answer whichever the caller listed first. It does not rank the **eight** members
- * of {@link OpenWriteSurfaceKind} against each other in any way — all eight,
+ * answer whichever the caller listed first. It does not rank the **nine** members
+ * of {@link OpenWriteSurfaceKind} against each other in any way — all nine,
  * `restore` included, since this predicate counts the kind
  * {@link CompetingWriteSurfaceKind} excludes. And it changes **no yes/no answer at
  * all**: an exact match and an eligible unknown creator each make the answer
@@ -827,8 +834,9 @@ export type RestoreRefusal =
  * describer in this directory: a renamed key is a compile error here, and a new
  * member of {@link CompetingWriteSurfaceKind} with no sentence is one too.
  *
- * **Every one of the seven sentences claims an open surface and nothing more.**
- * The seventh, `recoveryOpen`, is Phase 2d-6-6b's, for the recovery form. None
+ * **Every one of the eight sentences claims an open surface and nothing more.**
+ * The seventh, `recoveryOpen`, is Phase 2d-6-6b's, for the recovery form; the
+ * eighth, `rawSnippetEditorOpen`, is Phase 3-8-2's. None
  * of them says *unsaved changes*: `isDirty` is derived inside each surface's own
  * session, so no coordinator can observe it (R36), and this application has shipped
  * a sentence claiming otherwise twice already
@@ -858,6 +866,8 @@ export function openWriteSurfaceKey(surface: CompetingWriteSurfaceKind): Transla
       return 'browser.restore.refused.matchDuplicatorOpen';
     case 'rawEditor':
       return 'browser.restore.refused.rawEditorOpen';
+    case 'rawSnippetEditor':
+      return 'browser.restore.refused.rawSnippetEditorOpen';
     case 'recovery':
       return 'browser.restore.refused.recoveryOpen';
   }

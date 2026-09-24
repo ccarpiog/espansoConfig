@@ -629,6 +629,40 @@ describe('the mounted raw editor', () => {
     editor.stop();
   }); // End of the "cannot close while saving" case
 
+  it('draws Undo and Redo disabled under a held save, and a click on either changes nothing (CF-55, ruling 13)', async () => {
+    // **CF-55's mounted half on the whole-document surface** (Phase 3-8-2). The
+    // model half is `rawEditor.test.ts`; this is what reaches the screen from it:
+    // `view.canUndo`/`view.canRedo` are `canUndoEdit`/`canRedoEdit`, so a history
+    // holding both steps still draws both disabled while the save is held.
+    const editor = mountEditor([{ result: null, pending: true }]);
+    type(editor.target, `${ORIGINAL}# one\n`);
+    type(editor.target, `${ORIGINAL}# two\n`);
+    control(editor.target, 'browser.rawEditor.undo').click();
+    flushSync();
+    expect(textArea(editor.target).value).toBe(`${ORIGINAL}# one\n`);
+    expect(control(editor.target, 'browser.rawEditor.undo').disabled).toBe(false);
+    expect(control(editor.target, 'browser.rawEditor.redo').disabled).toBe(false);
+
+    control(editor.target, 'browser.rawEditor.save').click();
+    await settle();
+    expect(says(editor.target, 'browser.rawEditor.saving')).toBe(true);
+    const undo = control(editor.target, 'browser.rawEditor.undo');
+    const redo = control(editor.target, 'browser.rawEditor.redo');
+    expect(undo.disabled).toBe(true);
+    expect(redo.disabled).toBe(true);
+    // A synthetic click on each changes nothing. Whether jsdom delivers a click to
+    // a disabled button is not what this shows; that the handlers' transitions
+    // refuse under a held save (`undoEdit(held) === held`) is the model suite's.
+    undo.dispatchEvent(new MouseEvent('click'));
+    redo.dispatchEvent(new MouseEvent('click'));
+    flushSync();
+    expect(textArea(editor.target).value).toBe(`${ORIGINAL}# one\n`);
+    expect(textArea(editor.target).readOnly).toBe(true);
+    expect(control(editor.target, 'browser.rawEditor.close').disabled).toBe(true);
+    expect(editor.calls).toHaveLength(1);
+    editor.stop();
+  }); // End of the "CF-55 under a held save" case
+
   it('withdraws a discard confirmation that was raised before a save started', async () => {
     // The other half of the same finding: the dialog is the thing that says the
     // changes were not written, and a save started under it would make that false.

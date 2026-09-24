@@ -20,10 +20,11 @@
  * returns each registration when the surface closes, moves, or its component
  * is replaced.
  *
- * **All eight kinds receive.** The editor, the creator and the recovery form
+ * **All nine kinds receive.** The editor, the creator and the recovery form
  * since Phase 2d-6-6b, the three operation panels — the deleter, the mover and
- * the duplicator — since Phase 2d-6-7a, and the raw editor and restore since
- * Phase 2d-6-8a ({@link ReceivingSurfaceKind}).
+ * the duplicator — since Phase 2d-6-7a, the raw editor and restore since
+ * Phase 2d-6-8a, and the snippet text editor since Phase 3-8-2
+ * ({@link ReceivingSurfaceKind}).
  *
  * ## Instance-bound, by construction
  *
@@ -65,11 +66,12 @@ import type { ObservationReceiver, UnregisterObservationReceiver } from './works
 /**
  * The kinds whose receivers are reported and registered: the three authored
  * surfaces since Phase 2d-6-6b, the three operation panels since Phase 2d-6-7a,
- * the raw editor and restore since Phase 2d-6-8a — every `OpenWriteSurfaceKind`.
+ * the raw editor and restore since Phase 2d-6-8a, the snippet text editor since
+ * Phase 3-8-2 — every `OpenWriteSurfaceKind`.
  *
- * **Written out rather than aliased to `OpenWriteSurfaceKind`**, so a ninth
+ * **Written out rather than aliased to `OpenWriteSurfaceKind`**, so a tenth
  * surface kind is not a receiving kind until someone lists it here: the
- * exhaustive `switch` in {@link isReceivingKind} makes a ninth kind a compile
+ * exhaustive `switch` in {@link isReceivingKind} makes a tenth kind a compile
  * error there. What no type forces is that the list and the `switch` agree, or
  * that a kind listed here has a component that reports a receiver; the roster's
  * suite and the pane's mounted delivery cases pin both.
@@ -83,6 +85,7 @@ export type ReceivingSurfaceKind = Extract<
   | 'matchMover'
   | 'matchDuplicator'
   | 'rawEditor'
+  | 'rawSnippetEditor'
   | 'restore'
 >;
 
@@ -196,11 +199,11 @@ interface LiveBinding {
 }
 
 /**
- * Whether a kind is one of the eight that receive — since Phase 2d-6-8a, every
+ * Whether a kind is one of the nine that receive — since Phase 2d-6-8a, every
  * one.
  *
  * **Exhaustive by construction**: the `switch` covers every
- * `OpenWriteSurfaceKind`, so a ninth kind is a compile error here rather than a
+ * `OpenWriteSurfaceKind`, so a tenth kind is a compile error here rather than a
  * kind silently answered `false`. What it cannot force is that the answer for a
  * kind agrees with {@link ReceivingSurfaceKind}; the roster's suite pins both.
  *
@@ -216,6 +219,7 @@ function isReceivingKind(kind: OpenWriteSurfaceKind): kind is ReceivingSurfaceKi
     case 'matchMover':
     case 'matchDuplicator':
     case 'rawEditor':
+    case 'rawSnippetEditor':
     case 'restore':
       return true;
     default: {

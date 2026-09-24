@@ -61,6 +61,7 @@ const COMPETING = [
   'matchMover',
   'matchDuplicator',
   'rawEditor',
+  'rawSnippetEditor',
   'recovery'
 ] as const satisfies readonly CompetingWriteSurfaceKind[];
 
@@ -72,9 +73,9 @@ export type _CompetingKindsAreComplete = ExpectNever<
 /**
  * Every refusal a restore can answer, one value each.
  *
- * The `writeSurfaceOpen` arm appears seven times, once per competing surface,
+ * The `writeSurfaceOpen` arm appears eight times, once per competing surface,
  * because its key is chosen by the surface it carries and a single value would
- * exercise one of seven sentences. The two external arms (Phase 2d-6-5) render the
+ * exercise one of eight sentences. The two external arms (Phase 2d-6-5) render the
  * shared external-conflict sentences under `browser.externalConflict.*`, so they
  * are in the accessor's list and not in the pane's own namespace.
  */
@@ -105,8 +106,8 @@ function restoreKeys(): TranslationKey[] {
 describe('the restore refusal accessor', () => {
   it('names a distinct key for every arm, so no two refusals share a sentence', () => {
     const keys = REFUSALS.map(restoreRefusalKey);
-    expect(keys).toHaveLength(15);
-    expect(new Set(keys).size).toBe(15);
+    expect(keys).toHaveLength(16);
+    expect(new Set(keys).size).toBe(16);
   });
 
   it('delegates the open-surface arm rather than carrying a sentence of its own', () => {
@@ -118,7 +119,7 @@ describe('the restore refusal accessor', () => {
       expect(restoreRefusalKey({ kind: 'writeSurfaceOpen', surface })).toBe(
         openWriteSurfaceKey(surface)
       );
-    } // End of the loop over the seven competing surfaces
+    } // End of the loop over the eight competing surfaces
   });
 
   it.each(LOCALES)('renders a sentence for every arm in %s, never a gap', (locale) => {

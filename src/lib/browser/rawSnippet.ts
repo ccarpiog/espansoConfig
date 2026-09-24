@@ -6,7 +6,7 @@
  * over the text `match_item_text` answered, drafts it as one free-form text, and
  * sends it back through `save_match_item_text`, which re-derives the range in Rust
  * under the write lock and proves every byte outside it untouched, or refuses.
- * `src/lib/components/` draws nothing of it yet: the component is 3-8-2's.
+ * `src/lib/components/RawSnippetEditor.svelte` draws it (Phase 3-8-2).
  *
  * ## What this module does not do, said first
  *
@@ -68,8 +68,9 @@
  * terminus; a delivery that arrives while this session's own save is in flight is
  * held and replayed, first to last, after the save's answer, through the required
  * {@link ReadTheInstalledSession}. **What no type forces**: that a component
- * registers the receiver or installs what it answers. The write-surface kind and
- * the registration are 3-8-2's, and until then no receiver of this kind exists.
+ * registers the receiver or installs what it answers. The write-surface kind is
+ * `rawSnippetEditor` (Phase 3-8-2), registered by `DetailPane.svelte`'s assembly,
+ * and `RawSnippetEditor.svelte` reports the receiver.
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
@@ -112,6 +113,7 @@ import {
   reloadAsked,
   reloadConfirmed,
   reloadWasRefused,
+  sendFailureLines,
   sendFailureOf,
   settledAnswer,
   submissionIsStale,
@@ -120,7 +122,8 @@ import {
   type AdoptTheDiskVersion,
   type EditorPhase,
   type ReloadStep,
-  type SendFailure
+  type SendFailure,
+  type SendFailureLine
 } from './editorSave';
 import type { InvalidationStatus } from './invalidation';
 import type { AcknowledgeTheUncertainty } from './matchEditor';
@@ -341,9 +344,12 @@ export interface RawSnippetSession {
   /** How the last save failed to produce an outcome, or `null`. */
   readonly sendFailure: SendFailure | null;
   /**
-   * Whether a commit left this session with no identity to save against — no
-   * `moved`, or an adoption that failed. While `true` nothing can be saved or
-   * edited; the text stays on screen and the old identity is never sent again.
+   * Whether this session has no identity to save against: a commit answered no
+   * `moved`, or its adoption failed, or — since Phase 3-8-2 — a save was refused
+   * as `identityStaleRevision` ({@link saveCouldNotBeSent}). While `true` nothing
+   * can be saved or edited; the text stays on screen and the old identity is
+   * never sent again. Only {@link reconcileWithDisk} clears it, and only for a
+   * session that also needs reconciliation.
    */
   readonly identityStale: boolean;
   /**
@@ -829,11 +835,37 @@ export function saveCouldNotBeSent(
       ...session,
       phase: 'editing',
       sendFailure: sendFailureOf(mayHaveWritten, reason),
-      needsReconciliation: session.needsReconciliation || mayHaveWritten
+      needsReconciliation: session.needsReconciliation || mayHaveWritten,
+      identityStale: session.identityStale || refusedAsStaleIdentity(mayHaveWritten, reason)
     },
     current
   );
 } // End of function saveCouldNotBeSent()
+
+/**
+ * Whether a send was refused because the identity it carried is stale — the
+ * 3-8-1 record's §5 item 5, ruled at Phase 3-8-2.
+ *
+ * `identityStaleRevision` means the window's reading of the file is not the one
+ * this session's identity was minted from, so the same identity sent again is
+ * refused the same way: offering a retry would offer a control that cannot
+ * succeed. The session is therefore treated like a commit that left no identity
+ * ({@link RawSnippetSession.identityStale}): the text stays on screen and saving
+ * stops. A send that may have written is never read this way, because it keeps
+ * its own, stronger restriction ({@link RawSnippetSession.needsReconciliation}).
+ *
+ * @param mayHaveWritten - Whether the file may hold the submitted text.
+ * @param reason - Why the command rejected, or `null`.
+ * @returns `true` for a refusal that names a stale identity and wrote nothing.
+ */
+function refusedAsStaleIdentity(mayHaveWritten: boolean, reason: IpcFailure | null): boolean {
+  return (
+    !mayHaveWritten &&
+    reason !== null &&
+    reason.kind === 'command' &&
+    reason.error.code === 'identityStaleRevision'
+  );
+} // End of function refusedAsStaleIdentity()
 
 /** What {@link reconcileWithDisk} answers. */
 export type RawSnippetReconciliation =
@@ -851,11 +883,13 @@ export type RawSnippetReconciliation =
   | {
       /**
        * The discriminant: the fresh read holds neither the text this session was
-       * opened over nor the text the uncertain send carried, so somebody else
-       * changed the snippet. Nothing is rebased and the session is unchanged — the
-       * draft is kept, every save stays refused, and the way on is the conflict
-       * path (the watcher's external conflict: *Copy draft*, or a reload that
-       * closes this editor). Never a silent rebase.
+       * opened over nor the text the uncertain send carried, or its range does not
+       * start on the line this session's range started on. Either way it is not a
+       * reading this session can place: another writer changed the snippet, or
+       * the identity handed in names a different one. Nothing is rebased and the
+       * session is unchanged — the draft is kept, every save stays refused, and
+       * the way on is to copy the text and open the snippet again (or the
+       * watcher's external conflict, when one is raised). Never a silent rebase.
        */
       readonly kind: 'diverged';
     }
@@ -882,7 +916,9 @@ export type RawSnippetReconciliation =
  * clean when the two are equal, dirty otherwise, with one undo step back. Any other
  * fresh text is another writer's, and rebasing onto it would authorize the next
  * save to overwrite an edit nobody on this screen has seen; that answers
- * `diverged` and changes nothing.
+ * `diverged` and changes nothing. So does a fresh range that starts on another
+ * line (Phase 3-8-2), which is the one check that tells two byte-identical
+ * snippets apart.
  *
  * Refused, with the session unchanged, when nothing is owed, when the session is
  * closed or in flight, when the identity names another file, or when the fresh
@@ -915,7 +951,14 @@ export function reconcileWithDisk(
   const retained = session.draft.value;
   const sent = session.submitted?.candidate ?? null;
   const landed = sent !== null && fresh.draft.value === sent;
-  if (!landed && fresh.draft.value !== session.draft.baseValue) {
+  // **The range must start where this session's did** (Phase 3-8-2). The text
+  // comparison alone accepts any snippet whose text equals one of the two — a true
+  // duplicate is byte-identical by design — so an identity that names another
+  // snippet would pass it. Every byte before the range is unchanged by this
+  // session's own write, landed or not, so a range that starts elsewhere is not
+  // this session's range.
+  const samePlace = fresh.lines.first === session.lines.first;
+  if (!samePlace || (!landed && fresh.draft.value !== session.draft.baseValue)) {
     return { kind: 'diverged' };
   }
   return {
@@ -1288,6 +1331,19 @@ export interface RawSnippetView {
    * or `null`. The core's `EditError` itself is in the send failure's reason.
    */
   readonly fallback: RawSnippetFallback | null;
+  /**
+   * The *why* beside a send failure, outermost first — `sendFailureLines` over
+   * its reason, so a component walks codes and never builds a key.
+   */
+  readonly failureLines: readonly SendFailureLine[];
+  /**
+   * Whether the last send was refused as `ItemTextEscapesTheItem` **and** the
+   * text it carried ends with a blank line — the 3-7 record's §5 item 2. Both
+   * halves are checked, so a screen may say that the text ends with a blank line
+   * and that such a text is refused; what this does not establish is that the
+   * blank line was the only thing the core objected to.
+   */
+  readonly trailingBlankLineRefused: boolean;
   /** How the last save ended, or `null`. */
   readonly outcome: SaveOutcomeModel<RoundTripText> | null;
   /** The outcome's lines followed by anything said beside them. */
@@ -1347,6 +1403,28 @@ function effectiveCapabilitiesOf(session: RawSnippetSession): ConflictCapabiliti
 } // End of function effectiveCapabilitiesOf()
 
 /**
+ * Whether a core refusal is the verifier's `ItemTextEscapesTheItem`.
+ *
+ * @param error - The core's refusal of the send.
+ * @returns `true` for that one variant.
+ */
+function escapesTheItem(error: EditError): boolean {
+  return 'Verification' in error && 'ItemTextEscapesTheItem' in error.Verification;
+} // End of function escapesTheItem()
+
+/**
+ * Whether a text's last line is blank: it ends with a line feed and the line
+ * that line feed ends holds nothing but spaces and tabs. Reads the text with a
+ * pattern and cuts nothing.
+ *
+ * @param text - The text a send carried.
+ * @returns `true` when the text ends with a blank line.
+ */
+function endsWithBlankLine(text: string): boolean {
+  return /(?:^|\n)[ \t]*\n$/.test(text);
+} // End of function endsWithBlankLine()
+
+/**
  * Everything a screen needs about one session. Derived on every call, stored
  * nowhere.
  *
@@ -1375,6 +1453,12 @@ export function rawSnippetView(session: RawSnippetSession): RawSnippetView {
     needsReconciliation: session.needsReconciliation,
     sendFailure: session.sendFailure,
     fallback: sentError === null ? null : fallbackOf(refusalOfEditError(sentError)),
+    failureLines: sendFailureLines(session.sendFailure?.reason ?? null),
+    trailingBlankLineRefused:
+      sentError !== null &&
+      escapesTheItem(sentError) &&
+      session.submitted !== null &&
+      endsWithBlankLine(session.submitted.candidate),
     outcome,
     messages: outcome === null ? [] : [...outcome.messages, ...session.extraMessages],
     externalMessages: session.externalConflict === null ? [] : session.externalConflict.messages,

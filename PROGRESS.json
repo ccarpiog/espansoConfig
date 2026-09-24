@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T10:03:44Z",
+  "updated": "2026-09-24T10:33:48Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1027,7 +1027,7 @@
       "title": "The local raw UI, and CF-55",
       "status": "in_progress",
       "risk": "high",
-      "summary": "Cut into 3-8-1 (model), 3-8-2 (components) and 3-8-3 (window half); 3-8-1 is done, 3-8-2 is next."
+      "summary": "Cut into 3-8-1 (model), 3-8-2 (components) and 3-8-3 (window half); 3-8-1 and 3-8-2 are done, 3-8-3 is next."
     },
     {
       "id": "3-8-1",
@@ -1041,9 +1041,11 @@
     {
       "id": "3-8-2",
       "title": "Local raw UI: the components and the i18n",
-      "status": "queued",
+      "status": "done",
       "risk": "high",
-      "summary": "Raw-snippet component and RawEditor drawing 3-8-1's values, wording and CF-55's disabled controls."
+      "summary": "Raw-snippet editor in the detail pane, CF-55's disabled Undo/Redo on both raw surfaces, EN+ES wording; reviewed and fixed.",
+      "review": "docs/reviews/phase-3-8-2.md",
+      "narrative": "docs/decisions/3-8-2-notes.md"
     },
     {
       "id": "3-8-3",

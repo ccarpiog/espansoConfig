@@ -68,7 +68,9 @@ import type {
   DocumentSummary,
   DocumentView,
   ExternalObservation,
+  MatchId,
   MatchView,
+  OwnedItemText,
   ReconciliationBatch,
   SaveResult,
   WorkspaceSummary
@@ -300,6 +302,11 @@ interface PaneScript {
   readonly views?: readonly DocumentView[];
   /** What `save_match` answers, called once per save. */
   readonly saveMatch?: () => Promise<CommandResult<SaveResult>>;
+  /**
+   * What `match_item_text` answers, called once per read (Phase 3-8-2). Absent,
+   * it refuses, as every earlier case had it.
+   */
+  readonly matchItemText?: (id: MatchId) => Promise<CommandResult<OwnedItemText>>;
   /** What `delete_match` answers, called once per deletion (Phase 2d-6-7a). */
   readonly deleteMatch?: () => Promise<CommandResult<SaveResult>>;
   /**
@@ -398,7 +405,10 @@ function scriptedCommands(
         script.deleteMatch === undefined ? refusal : script.deleteMatch()
     ),
     duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
-    matchItemText: vi.fn(async () => refusal),
+    matchItemText: vi.fn(
+      async (id: MatchId): Promise<CommandResult<OwnedItemText>> =>
+        script.matchItemText === undefined ? refusal : script.matchItemText(id)
+    ),
     saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     saveRawDocument: vi.fn(
       async (
@@ -965,7 +975,7 @@ describe('the mounted detail pane', () => {
   }); // End of the "creation reachable" case
 }); // End of the "mounted detail pane" suite
 
-/** How one of the pane's eight write surfaces is opened, and how it is closed. */
+/** How one of the pane's nine write surfaces is opened, and how it is closed. */
 interface SurfaceWalk {
   /** What the commands answer beyond the defaults, when the walk needs it. */
   readonly script?: PaneScript;
@@ -981,7 +991,7 @@ interface SurfaceWalk {
   readonly confirm?: TranslationKey;
   /**
    * The surface open **beside** it, which closing it leaves registered — the
-   * recovery form's host (the 2d-6 record's §5.1). Absent for the other seven.
+   * recovery form's host (the 2d-6 record's §5.1). Absent for the other eight.
    */
   readonly beside?: OpenWriteSurface;
   /** What the registry must hold while it is open. */
@@ -1131,6 +1141,19 @@ const WALKS: Record<OpenWriteSurfaceKind, SurfaceWalk> = {
     close: 'browser.rawEditor.close',
     expected: { kind: 'rawEditor', target: { kind: 'document', document: 1 } }
   },
+  // **The ninth kind, Phase 3-8-2.** Opened over a snippet whose read the
+  // default script refuses, so the editor draws its refusal and still registers:
+  // the surface is the editor being open, not a session being drafted.
+  rawSnippetEditor: {
+    open: async (pane) => {
+      await pane.state.select(snippetOf(pane.state, 1));
+      flushSync();
+      control(pane.target, 'browser.rawSnippet.open').click();
+      await settle();
+    },
+    close: 'browser.rawSnippet.close',
+    expected: { kind: 'rawSnippetEditor', target: { kind: 'document', document: 1 } }
+  },
   restore: {
     open: async (pane) => {
       await pane.state.select(snippetOf(pane.state, 1));
@@ -1184,7 +1207,7 @@ describe('the pane as a write-surface host', () => {
       expect(registered(pane.state)).toEqual(beside);
       pane.stop();
     }); // End of the per-kind registration case
-  } // End of the loop over the eight kinds
+  } // End of the loop over the nine kinds
 
   it('returns every lease when the pane is unmounted', async () => {
     // Nothing in TypeScript forces a host to call the unregister it was handed —
@@ -3774,3 +3797,99 @@ describe('the delivery matrix’s remaining rows through the pane — Phase 2d-6
     pane.stop();
   }); // End of the "reopened recovery form" case
 }); // End of the "delivery matrix’s remaining rows" suite
+
+describe('the snippet text editor inside the pane — Phase 3-8-2', () => {
+  it('opens over the selected snippet and draws exactly the text the command answered', async () => {
+    const owned = '  - trigger: ":a"\n    replace: "b"\n';
+    const asked: MatchId[] = [];
+    const pane = await mountPane(false, {
+      matchItemText: async (id) => {
+        asked.push(id);
+        return { ok: true, value: { text: owned, first_line: 2, line_count: 2 } };
+      }
+    });
+    const selected = snippetOf(pane.state, 1);
+    await pane.state.select(selected);
+    flushSync();
+    control(pane.target, 'browser.rawSnippet.open').click();
+    await settle();
+    // Read by the identity the pane captured, and drawn whole: no text was cut here.
+    expect(asked).toEqual([selected.id]);
+    const box = pane.target.querySelector('.rawSnippet textarea');
+    expect(box instanceof HTMLTextAreaElement && box.value).toBe(owned);
+    expect(pane.target.textContent).toContain(
+      translate('en', 'browser.rawSnippet.startsAt', { line: 2 })
+    );
+    // The editor outranks the pane's other openers while it is open.
+    expect(pane.target.textContent).not.toContain(DICTIONARIES.en['browser.matchEditor.open']);
+    pane.stop();
+  }); // End of the "opens over the selected snippet" case
+
+  it('offers the whole-document editor for a range with holes, and the offer reaches it', async () => {
+    const pane = await mountPane(false, {
+      matchItemText: async () => ({
+        ok: false,
+        failure: {
+          kind: 'command',
+          error: {
+            code: 'itemTextRefused',
+            error: { ItemRangeNotContiguous: { edit: 0, hole: { start: 10, end: 20 } } }
+          }
+        }
+      })
+    });
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+    control(pane.target, 'browser.rawSnippet.open').click();
+    await settle();
+    expect(pane.target.textContent).toContain(
+      DICTIONARIES.en['browser.rawSnippet.refused.rangeNotContiguous']
+    );
+    // No box is drawn for a range the editor refused.
+    expect(pane.target.querySelector('.rawSnippet textarea')).toBeNull();
+
+    control(pane.target, 'browser.rawSnippet.openWholeDocument').click();
+    await settle();
+    // The snippet editor is gone, its surface is returned, and the file's whole
+    // text is on screen with the control that opens the whole-document editor.
+    expect(pane.target.querySelector('.rawSnippet')).toBeNull();
+    expect(registered(pane.state)).toEqual([]);
+    control(pane.target, 'browser.rawEditor.open').click();
+    flushSync();
+    expect(registered(pane.state)).toEqual([
+      { kind: 'rawEditor', target: { kind: 'document', document: 1 } }
+    ]);
+    pane.stop();
+  }); // End of the "whole-document fallback" case
+
+  it('says why the offer is missing while the window points at another file', async () => {
+    const pane = await mountPane(false, {
+      matchItemText: async () => ({
+        ok: false,
+        failure: {
+          kind: 'command',
+          error: {
+            code: 'itemTextRefused',
+            error: { ItemRangeNotContiguous: { edit: 0, hole: { start: 10, end: 20 } } }
+          }
+        }
+      })
+    });
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+    control(pane.target, 'browser.rawSnippet.open').click();
+    await settle();
+    // Another file's snippet is selected while the editor stays open over file 1.
+    await pane.state.select(snippetOf(pane.state, 2));
+    await settle();
+    expect(
+      [...pane.target.querySelectorAll('button')].some(
+        (one) => one.textContent?.trim() === DICTIONARIES.en['browser.rawSnippet.openWholeDocument']
+      )
+    ).toBe(false);
+    expect(pane.target.textContent).toContain(
+      DICTIONARIES.en['browser.rawSnippet.wholeDocumentElsewhere']
+    );
+    pane.stop();
+  }); // End of the "offer missing" case
+}); // End of the "snippet text editor inside the pane" suite
