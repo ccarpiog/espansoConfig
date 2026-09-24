@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T21:03:14Z",
+  "updated": "2026-09-24T21:03:44Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1194,7 +1194,8 @@
       "risk": "high",
       "summary": "Every Phase 3 writer has a success and a refusal test; command-path saves keep untouched bytes; corrupted candidates are refused.",
       "review": "docs/reviews/phase-3-15-1.md",
-      "narrative": "docs/decisions/3-15-1-notes.md"
+      "narrative": "docs/decisions/3-15-1-notes.md",
+      "commit": "261a9b6"
     },
     {
       "id": "3-15-2",
