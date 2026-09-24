@@ -1163,7 +1163,8 @@
       "status": "done",
       "risk": "high",
       "summary": "Sidebar draws display names beside the real path in rank order; the creator draws seeded defaults; a preferences control edits them.",
-      "review": "docs/reviews/phase-3-13-2.md"
+      "review": "docs/reviews/phase-3-13-2.md",
+      "commit": "e0d7f67"
     },
     {
       "id": "3-13-3",
