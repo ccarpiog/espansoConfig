@@ -293,6 +293,7 @@ all of it is in `git log`._
 | _**3-7** … **3-9-2** — six git-state rows_ | `340f389` … `21b2219` | ✅ all pushed; **archived verbatim 2026-09-24 at 3-11-1** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state rows of 3-7 … 3-9-2, as the live head held them"* |
 | _**3-10** and **3-11-1** — two git-state rows_ | `35d4624`, `ce54826` | ✅ both pushed; **archived verbatim 2026-09-24 at 3-11-3** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state rows of 3-10 and 3-11-1, as the live head held them"* |
 | **3-11-2 — bulk selection: the components and the i18n, reviewed (`ship-with-fixes`, Codex, 1 BLOCKER + 2 SHOULD-FIX, all fixed) and closed** | `fc728ec` (this SHA record is the commit after it) | ✅ pushed, `5aa8069..fc728ec  main -> main`; tree clean after it |
+| **3-11-3 — bulk selection: the window half (records only), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 2 SHOULD-FIX, both fixed in the records) and closed; step 3-11 closed** | `0b4279f` (this SHA record is the commit after it) | ✅ pushed, `601c4ff..0b4279f  main -> main`; tree clean after it. `PROGRESS.md` is ~71 KB, over the 64 KiB soft budget and under the hard one: the next phase's close should archive more of the live head |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed
