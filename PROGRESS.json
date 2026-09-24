@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T11:06:27Z",
+  "updated": "2026-09-24T11:07:00Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1055,7 +1055,8 @@
       "risk": "high",
       "summary": "Window reading of the local raw editor in EN and ES, CF-55 included; ship, 0 findings; step 3-8 closed.",
       "review": "docs/reviews/phase-3-8-3.md",
-      "narrative": "docs/decisions/3-8-3-notes.md"
+      "narrative": "docs/decisions/3-8-3-notes.md",
+      "commit": "c3a2ede"
     },
     {
       "id": "3-9",
