@@ -1019,7 +1019,8 @@
       "summary": "Cuts one snippet's contiguous owned text in Rust and saves an exact replacement of it through the one save path, with named refusals.",
       "risk": "high",
       "review": "docs/reviews/phase-3-7.md",
-      "narrative": "docs/decisions/3-7-notes.md"
+      "narrative": "docs/decisions/3-7-notes.md",
+      "commit": "340f389"
     },
     {
       "id": "3-8",
