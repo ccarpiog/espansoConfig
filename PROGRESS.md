@@ -290,6 +290,7 @@ all of it is in `git log`._
 | **3-8-3 — the local raw UI: the window half (records only), reviewed (`ship`, Codex, 0 findings) and closed; step 3-8 closed** | `c3a2ede` (this SHA record is the commit after it) | ✅ pushed, `3635c6c..c3a2ede  main -> main`; tree clean |
 | **3-9-1 — the file-scope inspector: model, components and i18n, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed; 3-9 cut into 3-9-1/2** | `d217ecf` (this SHA record is the commit after it) | ✅ pushed, `2a3b37e..d217ecf  main -> main`; tree clean |
 | **3-9-2 — the file-scope inspector: the window half (records only, plus the F1 numbering fix in `FileScope.svelte`), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed; step 3-9 closed** | `21b2219` (this SHA record is the commit after it) | ✅ pushed, `1ca667e..21b2219  main -> main`; tree clean after it |
+| **3-10 — the per-file bulk coordinator (core planner, command, wire, i18n), reviewed (`ship-with-fixes`, Codex, 1 BLOCKER + 1 SHOULD-FIX, both fixed) and closed** | `35d4624` (this SHA record is the commit after it) | ✅ pushed, `821125e..35d4624  main -> main`; tree clean after it |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed
