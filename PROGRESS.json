@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T21:18:35Z",
+  "updated": "2026-09-24T21:18:47Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1204,7 +1204,8 @@
       "risk": "high",
       "summary": "The Phase 3 closure record: translation inventory with producers, window halves read or owed, bounded risks, shipped scope.",
       "review": "docs/reviews/phase-3-15-2.md",
-      "narrative": "docs/decisions/3-15-2-notes.md"
+      "narrative": "docs/decisions/3-15-2-notes.md",
+      "commit": "de08385"
     },
     {
       "id": "4",
