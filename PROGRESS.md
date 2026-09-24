@@ -290,7 +290,7 @@ all of it is in `git log`._
 | **3-4 — bounded creation for the wider editor (core, command, wire), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed** | `3e593f0` | ✅ pushed, `9a12917..3e593f0  main -> main`; tree clean |
 | **3-5-1 — scalar content and options: the model and the coordination, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed** | `cffb301` (this SHA record is the commit after it) | ✅ pushed, `f59627e..cffb301  main -> main`; tree clean |
 | **3-5-2-1 — scalar content and options: the components and the i18n, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed; 3-5-2-2 blocked on a locked screen** | `adf1012` (this SHA record is the commit after it) | ✅ pushed, `693a3e1..adf1012  main -> main`; tree clean |
-| **3-5-2-2 — the window half of 3-5 (records only; a minimal uncommitted instrument, reviewed, then deleted), reviewed (`ship`, Codex, 0 findings) and closed; step 3-5 closed** | see the SHA record commit after it | pending |
+| **3-5-2-2 — the window half of 3-5 (records only; a minimal uncommitted instrument, reviewed, then deleted), reviewed (`ship`, Codex, 0 findings) and closed; step 3-5 closed** | `fdccb91` (this SHA record is the commit after it) | ✅ pushed, `d91257d..fdccb91  main -> main`; tree clean |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed

@@ -972,7 +972,8 @@
       "risk": "high",
       "summary": "A model reads window captures in EN and ES, including a block-scalar content conflict; records only, instrument deleted.",
       "review": "docs/reviews/phase-3-5-2-2.md",
-      "narrative": "docs/decisions/3-5-2-2-notes.md"
+      "narrative": "docs/decisions/3-5-2-2-notes.md",
+      "commit": "fdccb91"
     },
     {
       "id": "3-6",
