@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T10:03:09Z",
+  "updated": "2026-09-24T10:03:44Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1035,7 +1035,8 @@
       "status": "done",
       "risk": "high",
       "summary": "Browser raw-snippet model with IPC, the \\r refusal, retention, reconciliation and CF-55's model half; reviewed and fixed.",
-      "review": "docs/reviews/phase-3-8-1.md"
+      "review": "docs/reviews/phase-3-8-1.md",
+      "commit": "eabb219"
     },
     {
       "id": "3-8-2",
