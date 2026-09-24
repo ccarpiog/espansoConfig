@@ -1154,7 +1154,8 @@
       "risk": "high",
       "summary": "Browser models for display names, ordering and per-file creation defaults over the sidecar, seeded visibly into a new-snippet draft.",
       "review": "ship-with-fixes (Codex), 0 blockers + 3 should-fix, fixed",
-      "narrative": "docs/decisions/3-13-1-notes.md"
+      "narrative": "docs/decisions/3-13-1-notes.md",
+      "commit": "3a0a950"
     },
     {
       "id": "3-13-2",
