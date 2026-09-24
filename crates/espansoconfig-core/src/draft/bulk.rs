@@ -62,7 +62,7 @@ use crate::draft::plan::plan_match_edits;
 use crate::model::{DocumentView, IdentityError, MatchId, MatchView, ScalarView};
 use crate::patch::{DocumentEdit, EntryValue, FieldInsertGroup, ScalarEdit};
 use crate::syntax::SyntaxIndex;
-use crate::{DocumentId, ScalarStyle};
+use crate::{DocumentId, ScalarStyle, SourceDocument};
 
 /// One of the seven match options a bulk edit may write (ruling 20).
 ///
@@ -331,6 +331,150 @@ fn option_view(found: &MatchView, option: BulkOption) -> Option<&ScalarView> {
         BulkOption::ForceClipboard => options.force_clipboard.as_ref(),
     }
 } // End of function option_view()
+
+/// How one option is written in one snippet: absent, or present and spelled
+/// exactly so (Phase 3-11-1, ruling 20).
+///
+/// **Presence and source spelling, never a decoded value.** `word: true`,
+/// `word: 'true'` and `word: "true"` decode to the same text and are three
+/// different spellings here, because [`ScalarView::text`] is the decoder's
+/// output and a comparison over it would call them equal. The spelling is cut
+/// out of the document's text in Rust, so no caller ever slices a byte span out
+/// of a JavaScript string. For a block scalar it runs from the start of the
+/// `|`/`>` header to the end of the body, because the projected span is the
+/// body alone and `|` and `>` over one body are two spellings (Phase 3-11-1's
+/// review).
+///
+/// A display fact, not an intent: nothing here travels back into a bulk
+/// request, and a *Mixed* state built from several of these is never sent.
+///
+/// Every variant is a struct variant, so each crosses as a one-key object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum OptionSpelling {
+    /// The snippet does not write this option.
+    Absent {},
+    /// The snippet writes this option once, as one scalar spelled exactly
+    /// `source` — quotes, and a block scalar's whole header line (indicator,
+    /// chomping and indentation indicators, anything after them on that line)
+    /// with its body.
+    Written {
+        /// The scalar's bytes as the file holds them.
+        source: String,
+    },
+    /// The snippet writes this option, but not as one scalar the projection
+    /// models: the value is a collection or an alias, or the key is repeated.
+    /// Its bytes are not carried; the entry stays in the file as written.
+    NotOneScalar {},
+}
+
+/// How each of the seven bulk options is written in one snippet
+/// (Phase 3-11-1). One field per [`BulkOption`], named by its espanso key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BulkOptionSpellings {
+    /// `word`.
+    pub word: OptionSpelling,
+    /// `left_word`.
+    pub left_word: OptionSpelling,
+    /// `right_word`.
+    pub right_word: OptionSpelling,
+    /// `propagate_case`.
+    pub propagate_case: OptionSpelling,
+    /// `uppercase_style`.
+    pub uppercase_style: OptionSpelling,
+    /// `force_mode`.
+    pub force_mode: OptionSpelling,
+    /// `force_clipboard`.
+    pub force_clipboard: OptionSpelling,
+}
+
+impl BulkOptionSpellings {
+    /// The spelling of one option.
+    pub fn of(&self, option: BulkOption) -> &OptionSpelling {
+        match option {
+            BulkOption::Word => &self.word,
+            BulkOption::LeftWord => &self.left_word,
+            BulkOption::RightWord => &self.right_word,
+            BulkOption::PropagateCase => &self.propagate_case,
+            BulkOption::UppercaseStyle => &self.uppercase_style,
+            BulkOption::ForceMode => &self.force_mode,
+            BulkOption::ForceClipboard => &self.force_clipboard,
+        }
+    }
+} // End of impl BulkOptionSpellings
+
+/// The bytes one projected scalar is written as, header included.
+///
+/// A flow or plain scalar's projected span is its whole token, quotes included.
+/// A block scalar's projected span is its body only
+/// (`SyntaxIndex::push_scalar` publishes the layout's content span), so its
+/// spelling is widened back to the header's start, read off the syntax index.
+/// `None` when the index cannot vouch for the envelope.
+fn scalar_spelling<'a>(
+    source: &'a str,
+    syntax: Option<&SyntaxIndex>,
+    scalar: &ScalarView,
+) -> Option<&'a str> {
+    if !scalar.style.is_block() {
+        return scalar.span.slice(source);
+    }
+    let presentation = syntax?.node(scalar.node)?.scalar.as_ref()?.presentation;
+    if !presentation.style.is_block() || presentation.header_span.start > scalar.span.end {
+        return None;
+    }
+    source.get(presentation.header_span.start..scalar.span.end)
+} // End of function scalar_spelling()
+
+/// How one option is written in one snippet of the document `source` holds.
+fn option_spelling(
+    source: &str,
+    syntax: Option<&SyntaxIndex>,
+    found: &MatchView,
+    option: BulkOption,
+) -> OptionSpelling {
+    let key = option.key();
+    // An unmodelled entry under this key — a collection, an alias, or a second
+    // occurrence of the key — means the snippet does not write the option as
+    // one scalar, whatever the first occurrence holds.
+    let unmodelled = found
+        .unknown_entries
+        .iter()
+        .any(|entry| entry.key.as_deref() == Some(key));
+    if unmodelled {
+        return OptionSpelling::NotOneScalar {};
+    }
+    match option_view(found, option) {
+        None => OptionSpelling::Absent {},
+        Some(scalar) => match scalar_spelling(source, syntax, scalar) {
+            Some(spelled) => OptionSpelling::Written {
+                source: spelled.to_owned(),
+            },
+            // A span that does not cut the text it was projected from is a
+            // defect, and it is reported as the state that claims least.
+            None => OptionSpelling::NotOneScalar {},
+        },
+    }
+} // End of function option_spelling()
+
+/// How each of the seven bulk options is written in one snippet.
+///
+/// `document` is the snapshot `found` was projected from — its text, and its
+/// syntax index for a block scalar's header. Nothing in the type ties the two
+/// together; the caller passes one snapshot and one of its matches. It reads
+/// nothing else and writes nothing.
+pub fn option_spellings(document: &SourceDocument, found: &MatchView) -> BulkOptionSpellings {
+    let source = document.source.as_str();
+    let syntax = document.parse.syntax();
+    let spell = |option| option_spelling(source, syntax, found, option);
+    BulkOptionSpellings {
+        word: spell(BulkOption::Word),
+        left_word: spell(BulkOption::LeftWord),
+        right_word: spell(BulkOption::RightWord),
+        propagate_case: spell(BulkOption::PropagateCase),
+        uppercase_style: spell(BulkOption::UppercaseStyle),
+        force_mode: spell(BulkOption::ForceMode),
+        force_clipboard: spell(BulkOption::ForceClipboard),
+    }
+} // End of function option_spellings()
 
 /// Rewrites every value the single-match planner writes into plain source
 /// text: a scalar rewrite becomes [`ScalarEdit::plain_source`], and an

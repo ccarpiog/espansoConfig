@@ -1536,8 +1536,12 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// nineteen and the whole to twenty. It is the eighth writer and not a restore
 /// path either: the per-file bulk option edit, which ends in the same
 /// `run_one_save` once per file with a `SaveContent::Edits` batch.
+///
+/// Phase 3-11-1 adds `match_option_spellings`, taking the workspace surface to
+/// twenty and the whole to twenty-one. It is a reader — the bulk edit's own —
+/// and writes nothing.
 #[test]
-fn the_registered_commands_are_the_workspace_nineteen_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_twenty_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1546,8 +1550,8 @@ fn the_registered_commands_are_the_workspace_nineteen_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        19,
-        "the frontend declares eleven read-only commands and eight that write: {workspace:?}"
+        20,
+        "the frontend declares twelve read-only commands and eight that write: {workspace:?}"
     );
     assert!(
         workspace.contains("drain_external_changes"),
@@ -1582,6 +1586,11 @@ fn the_registered_commands_are_the_workspace_nineteen_and_the_menu_command() {
         workspace.contains("match_item_text") && !writing.contains(&"match_item_text"),
         "match_item_text is Phase 3-7's reader and must be declared, never as a writer"
     );
+    assert!(
+        workspace.contains("match_option_spellings")
+            && !writing.contains(&"match_option_spellings"),
+        "match_option_spellings is Phase 3-11-1's reader and must be declared, never as a writer"
+    );
     for read_only in [
         "list_backup_batches",
         "list_backup_entries",
@@ -1604,8 +1613,8 @@ fn the_registered_commands_are_the_workspace_nineteen_and_the_menu_command() {
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        20,
-        "Phase 3-10 registers nineteen workspace commands and one menu command, and no more: {registered:?}"
+        21,
+        "Phase 3-11-1 registers twenty workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1613,7 +1622,7 @@ fn the_registered_commands_are_the_workspace_nineteen_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_nineteen_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_twenty_and_the_menu_command()
 
 /// The names no read of the backup tree may so much as mention.
 ///
@@ -4729,3 +4738,75 @@ fn the_bulk_request_declares_exactly_what_rust_reads() {
         );
     } // End of the loop over the request's four levels
 } // End of function the_bulk_request_declares_exactly_what_rust_reads()
+
+/// The spelling reader's answer is declared exactly as Rust writes it: one
+/// property per bulk option, each a one-key object naming one of the three
+/// spellings, and only `Written` carrying an operand (Phase 3-11-1).
+#[test]
+fn the_option_spellings_declare_exactly_what_rust_writes() {
+    use espansoconfig_core::draft::{option_spellings, BulkOption, OptionSpelling};
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let text = "matches:\n  - trigger: ':a'\n    replace: a\n    word: true\n    \
+                left_word: [x]\n";
+    let context = espansoconfig_core::model::DocumentContext::detached(
+        espansoconfig_core::DocumentId(0),
+        "match/a.yml",
+    );
+    let document = espansoconfig_core::workspace::project_source(&context, text);
+    let spellings = option_spellings(&document, &document.view.matches[0]);
+    let written = json_of(&spellings);
+    let keys: BTreeSet<String> = BulkOption::ALL
+        .iter()
+        .map(|option| option.key().to_owned())
+        .collect();
+    assert_same_names(
+        "interface BulkOptionSpellings",
+        &json_keys(&written),
+        &interface_fields(&source, "BulkOptionSpellings"),
+    );
+    assert_eq!(json_keys(&written), keys, "one property per bulk option");
+    let samples = [
+        OptionSpelling::Absent {},
+        OptionSpelling::Written {
+            source: "true".to_owned(),
+        },
+        OptionSpelling::NotOneScalar {},
+    ];
+    let declared = declared_variants(
+        &read_repository_file("crates/espansoconfig-core/src/draft/bulk.rs"),
+        "OptionSpelling",
+    );
+    let enumerated: BTreeSet<String> = samples
+        .iter()
+        .map(|sample| variant_name(&json_of(sample)))
+        .collect();
+    assert_eq!(
+        declared, enumerated,
+        "one sample per OptionSpelling variant"
+    );
+    let tags: BTreeSet<String> = object_union_tags(&source, "OptionSpelling")
+        .into_keys()
+        .collect();
+    assert_same_names("type OptionSpelling", &enumerated, &tags);
+    for sample in &samples {
+        let json = json_of(sample);
+        let variant = variant_name(&json);
+        let payload: BTreeSet<String> = json[&variant]
+            .as_object()
+            .unwrap_or_else(|| panic!("OptionSpelling::{variant} crosses as a one-key object"))
+            .keys()
+            .cloned()
+            .collect();
+        let fields = tagged_variant_fields(&source, "OptionSpelling", &variant)
+            .unwrap_or_else(|| panic!("type OptionSpelling declares no payload for {variant}"));
+        assert_same_names(
+            &format!("the {variant} payload of type OptionSpelling"),
+            &payload,
+            &fields,
+        );
+    } // End of the loop over the three spellings
+    assert_eq!(
+        written["left_word"],
+        serde_json::json!({ "NotOneScalar": {} })
+    );
+} // End of function the_option_spellings_declare_exactly_what_rust_writes()

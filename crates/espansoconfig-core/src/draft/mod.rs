@@ -133,6 +133,11 @@
 //! spelling the person entered, verbatim, never quoted (D2u). The per-file bulk
 //! coordinator in `src-tauri` is its caller.
 //!
+//! [`option_spellings`] is that edit's read-only companion (Phase 3-11-1): how
+//! each of the seven options is written in one snippet — absent, or its exact
+//! source spelling cut out of the text here, in Rust — so a bulk inspector can
+//! compare snippets by spelling rather than by decoded text (ruling 20).
+//!
 //! # What this module never does
 //!
 //! It writes nothing. It has no `force` flag, no acknowledgement and no path to
@@ -153,8 +158,9 @@ mod sequence;
 
 pub use audit::{check_batch_independence, check_closed_surface, NestedKeys};
 pub use bulk::{
-    check_bulk_changes, check_bulk_documents, is_plain_source, plan_bulk_option_edits, BulkOption,
-    BulkOptionChange, BulkPlanError, BulkValue,
+    check_bulk_changes, check_bulk_documents, is_plain_source, option_spellings,
+    plan_bulk_option_edits, BulkOption, BulkOptionChange, BulkOptionSpellings, BulkPlanError,
+    BulkValue, OptionSpelling,
 };
 pub use error::DraftError;
 pub use field::DraftField;

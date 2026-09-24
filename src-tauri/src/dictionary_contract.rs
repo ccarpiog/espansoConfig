@@ -657,6 +657,15 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          screen shows",
     ),
     (
+        "OptionSpelling",
+        "a value shape, not a code: `Absent`, `Written` and `NotOneScalar` say how \
+         one option is written in one snippet, travel *out of* \
+         `match_option_spellings` (Phase 3-11-1) and are never rendered by name. \
+         A `Written` spelling is shown as the file's own bytes, and what a screen \
+         says about the other two, or about several of them together, comes from \
+         the frontend's own `browser.bulkEdit.*` keys",
+    ),
+    (
         "DraftTarget",
         "an address, not a code, exactly as `PathSegment` is: it says which \
          drafted value a refusal is about, and everything it can name is \

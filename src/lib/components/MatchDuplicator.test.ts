@@ -1263,6 +1263,8 @@ describe('a duplicate panel over the real workspace state', () => {
       }),
       matchItemText: vi.fn(async () => refusal),
       saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+      matchOptionSpellings: vi.fn(async () => refusal),
+      applyBulkOptions: vi.fn(async () => refusal),
       saveRawDocument: vi.fn(async () => refusal),
       drainExternalChanges: vi.fn(async () => refusal)
     };

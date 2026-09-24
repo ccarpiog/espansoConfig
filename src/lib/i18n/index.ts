@@ -144,6 +144,12 @@ import type {
 } from '../browser/observationDelivery';
 import type { AutoLoadNote, AutoLoadPlacement, ImportsState } from '../browser/fileScope';
 import type {
+  BulkBlocker,
+  BulkExclusionReason,
+  BulkOutcomeHeadline,
+  WordedOptionSummary
+} from '../browser/bulkEdit';
+import type {
   FileReconciliationState,
   FileStatePlacement,
   ReconciliationControl,
@@ -234,7 +240,11 @@ import {
   describeBackupStep,
   describeBackupTarget,
   describeBatchSkipped,
+  describeBulkBlocker,
+  describeBulkExclusion,
   describeBulkFileOutcome,
+  describeBulkOptionSummary,
+  describeBulkOutcomeHeadline,
   describeBulkPlanError,
   describeChangedContent,
   describeCommandError,
@@ -331,7 +341,11 @@ export {
   describeBackupStep,
   describeBackupTarget,
   describeBatchSkipped,
+  describeBulkBlocker,
+  describeBulkExclusion,
   describeBulkFileOutcome,
+  describeBulkOptionSummary,
+  describeBulkOutcomeHeadline,
   describeBulkPlanError,
   describeChangedContent,
   describeCommandError,
@@ -2645,3 +2659,51 @@ export function tImportsState(state: ImportsState): string {
 export function tUnsupportedImport(found: ValueKind): string {
   return describeUnsupportedImport(locale.current, found);
 } // End of function tUnsupportedImport()
+
+// ---------------------------------------------------------------------------
+// The bulk option edit — Phase 3-11-1
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders why a selected snippet is left out of a bulk edit, in the current
+ * language. The reactive wrapper over `describeBulkExclusion` in `./codes`.
+ *
+ * @param reason - The exclusion's reason.
+ * @returns The translated sentence.
+ */
+export function tBulkExclusion(reason: BulkExclusionReason): string {
+  return describeBulkExclusion(locale.current, reason);
+} // End of function tBulkExclusion()
+
+/**
+ * Renders why a bulk edit cannot be sent now, in the current language. The
+ * reactive wrapper over `describeBulkBlocker` in `./codes`.
+ *
+ * @param blocker - One blocker.
+ * @returns The translated sentence.
+ */
+export function tBulkBlocker(blocker: BulkBlocker): string {
+  return describeBulkBlocker(locale.current, blocker);
+} // End of function tBulkBlocker()
+
+/**
+ * Renders how one option is written across a selection, in the current
+ * language. The reactive wrapper over `describeBulkOptionSummary` in `./codes`.
+ *
+ * @param kind - The summary's kind; `same` is drawn as the file's own bytes.
+ * @returns The translated words.
+ */
+export function tBulkOptionSummary(kind: WordedOptionSummary): string {
+  return describeBulkOptionSummary(locale.current, kind);
+} // End of function tBulkOptionSummary()
+
+/**
+ * Renders the headline of a bulk edit's answer, in the current language. The
+ * reactive wrapper over `describeBulkOutcomeHeadline` in `./codes`.
+ *
+ * @param headline - The headline.
+ * @returns The translated sentence.
+ */
+export function tBulkOutcomeHeadline(headline: BulkOutcomeHeadline): string {
+  return describeBulkOutcomeHeadline(locale.current, headline);
+} // End of function tBulkOutcomeHeadline()

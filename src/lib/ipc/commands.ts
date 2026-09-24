@@ -1,5 +1,5 @@
 /**
- * The nineteen workspace commands, typed.
+ * The twenty workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -79,6 +79,7 @@ import type {
   BackupEntryId,
   BackupEntryListing,
   BackupTextResponse,
+  BulkOptionSpellings,
   BulkOptionsRequest,
   BulkResult,
   ContentRevision,
@@ -128,7 +129,8 @@ export const COMMAND_NAMES = [
   'drain_external_changes',
   'match_item_text',
   'save_match_item_text',
-  'apply_bulk_options'
+  'apply_bulk_options',
+  'match_option_spellings'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -875,6 +877,24 @@ export async function applyBulkOptions(
 ): Promise<CommandResult<BulkResult>> {
   return call<BulkResult>('apply_bulk_options', { request });
 } // End of function applyBulkOptions()
+
+/**
+ * Reads how each of the seven bulk options is written in one snippet (Phase
+ * 3-11-1, ruling 20).
+ *
+ * **A reader, and the bulk edit's own.** Each spelling is cut out of the file's
+ * text in Rust over the scalar's own byte span, so nothing here slices a byte
+ * span out of a JavaScript string, and the comparison a bulk inspector makes is
+ * over exact source spellings rather than decoded text. Nothing it answers is
+ * ever sent back: a *Mixed* state built from several answers is display only.
+ *
+ * @param id - The snippet, by identity.
+ * @returns The seven spellings, or a failure — `noWorkspaceOpen` or an identity
+ *   code, `identityStaleRevision` among them.
+ */
+export async function matchOptionSpellings(id: MatchId): Promise<CommandResult<BulkOptionSpellings>> {
+  return call<BulkOptionSpellings>('match_option_spellings', { id });
+} // End of function matchOptionSpellings()
 
 /**
  * Lists the recognised backup batches of the open workspace, newest name first.

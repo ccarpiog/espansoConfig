@@ -1,5 +1,5 @@
 /**
- * The nineteen command wrappers, against a stubbed `invoke`.
+ * The twenty command wrappers, against a stubbed `invoke`.
  *
  * What is under test here is the *boundary*, not the Rust behind it: which
  * command name each wrapper calls, which arguments it sends, and — the part
@@ -79,6 +79,7 @@ const {
   listBackupEntries,
   listDocuments,
   matchItemText,
+  matchOptionSpellings,
   moveMatch,
   openWorkspace,
   readBackupText,
@@ -171,7 +172,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the nineteen wire names, in order, and export no twentieth wrapper', async () => {
+  it('call the twenty wire names, in order, and export no twenty-first wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -198,6 +199,7 @@ describe('the command wrappers', () => {
     await matchItemText(IDENTITY);
     await saveMatchItemText(IDENTITY, 'a'.repeat(64), '  - trigger: a\n', { accepted: [] });
     await applyBulkOptions(BULK_REQUEST);
+    await matchOptionSpellings(IDENTITY);
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
       'applyBulkOptions',
@@ -212,6 +214,7 @@ describe('the command wrappers', () => {
       'listBackupEntries',
       'listDocuments',
       'matchItemText',
+      'matchOptionSpellings',
       'moveMatch',
       'openWorkspace',
       'readBackupText',
@@ -220,7 +223,7 @@ describe('the command wrappers', () => {
       'saveMatchItemText',
       'saveRawDocument'
     ]);
-  }); // End of the "call the nineteen wire names" case
+  }); // End of the "call the twenty wire names" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence
@@ -407,6 +410,14 @@ describe('the command wrappers', () => {
     expect(calls[0]?.args).toEqual({ request: BULK_REQUEST });
     expect(JSON.stringify(calls[0]?.args)).not.toContain('force');
   }); // End of the "bulk option arguments" case
+
+  it('reads option spellings by identity alone, with no span or offset', async () => {
+    // Phase 3-11-1. Rust cuts each spelling out of the file's text; the read
+    // takes the identity and nothing that could name a position.
+    await matchOptionSpellings(IDENTITY);
+    expect(calls[0]?.command).toBe('match_option_spellings');
+    expect(calls[0]?.args).toEqual({ id: IDENTITY });
+  });
 
   it('send the arguments the Rust signatures declare', async () => {
     await openWorkspace('/Users/somebody/.config/espanso');

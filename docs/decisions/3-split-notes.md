@@ -404,6 +404,32 @@ inspector component and i18n.
 
 **Risk `high`. Driven:** implementation yes; the window half per ruling 30. **Depends on** 3-6, 3-10.
 
+**Addendum, 2026-09-24 — cut into three pieces before starting.** The step touches a browser bulk
+model, selection and workspace coordination, the components and i18n, as 3-6 and 3-8 did, so the
+orchestrator cut it along their shape:
+
+- **3-11-1 — the model and the coordination.** Everything below the components: a browser bulk model
+  in `src/lib/browser/` over 3-10's `applyBulkOptions` — the multi-selection and its staleness (a
+  selection whose revisions no longer match the live projections blocks), **Mixed** by presence and
+  exact source spelling sliced in Rust (ruling 20; if no existing read gives the source spelling, a
+  read-only backend accessor is added, and it never slices in JavaScript), explicit per-option intents
+  limited to the seven allowed options, an untouched Mixed control emitting nothing, exclusions
+  (including matches with an open draft), consent review over 3-10's `BulkConsent`, partial outcomes
+  with exclusions and execution failures counted separately, draft undo and no disk batch undo, and the
+  workspace coordination that invalidates identities after a committed file. Any dictionary keys and
+  accessors those values need, EN and ES. A model test per acceptance clause. **No window half** — it
+  draws nothing new.
+- **3-11-2 — the components and the i18n.** Multi-select in `SnippetList.svelte`, a new bulk inspector
+  component drawing 3-11-1's values (Mixed, intents, exclusions, consent review, partial outcomes),
+  the dictionary keys EN and ES, and mounted tests. Its record says: *"No window reading was performed
+  or claimed."*
+- **3-11-3 — the window half.** EN and ES through the picker, including a partial success, per ruling
+  30 and §4.1, with a minimal uncommitted instrument inside its own single review. It needs a visible,
+  unlocked screen, and it closes step 3-11.
+
+Each piece is one phase with one worker and one review. The acceptance list above is the union of the
+three.
+
 ### 3-12 — The application sidecar store
 
 **Delivers** a versioned per-workspace metadata store in a new `src-tauri` module, confined to the app's

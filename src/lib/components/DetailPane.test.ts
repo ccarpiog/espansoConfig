@@ -410,6 +410,8 @@ function scriptedCommands(
         script.matchItemText === undefined ? refusal : script.matchItemText(id)
     ),
     saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+    matchOptionSpellings: vi.fn(async () => refusal),
+    applyBulkOptions: vi.fn(async () => refusal),
     saveRawDocument: vi.fn(
       async (
         document: DocumentId,

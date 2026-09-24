@@ -7,7 +7,8 @@
 //! `duplicate_match` (2c-3c-2) — and Phase 2c-5-2's three further readers:
 //! `list_backup_batches`, `list_backup_entries` and `read_backup_text`. Phase 3-7
 //! adds a seventh writer, `save_match_item_text`, and its reader,
-//! `match_item_text`, and Phase 3-10 an eighth, `apply_bulk_options`. Each is
+//! `match_item_text`, Phase 3-10 an eighth, `apply_bulk_options`, and Phase
+//! 3-11-1 that one's reader, `match_option_spellings`. Each is
 //! one line over a [`WorkspaceSession`] method; each of the original six readers
 //! is one call into `crate::workspace`, which Phase 1a built to be wrapped this
 //! way, and each of the three backup readers is one call into `crate::backup`.
@@ -29,7 +30,7 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Eight of the nineteen commands write, and they write the same way
+//! # Eight of the twenty commands write, and they write the same way
 //!
 //! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, 2b-2c-2 `create_match`
 //! and `delete_match`, 2b-2c-3b `save_raw_document`, 2c-3c-2
@@ -253,8 +254,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use espansoconfig_core::draft::{
-    check_bulk_changes, check_bulk_documents, plan_bulk_option_edits, plan_match_edits,
-    BulkOptionChange, MatchDraft, NewMatch,
+    check_bulk_changes, check_bulk_documents, option_spellings, plan_bulk_option_edits,
+    plan_match_edits, BulkOptionChange, BulkOptionSpellings, MatchDraft, NewMatch,
 };
 use espansoconfig_core::model::{DocumentView, MatchId, MatchView};
 use espansoconfig_core::patch::{
@@ -1398,6 +1399,29 @@ impl WorkspaceSession {
             apply_bulk_options_with(workspace, session_side, request, &mut run_one_save)
         })
     } // End of function apply_bulk_options()
+
+    /// Hands out how each of the seven bulk options is written in one match, for
+    /// the bulk inspector's *Mixed* comparison (Phase 3-11-1, ruling 20).
+    ///
+    /// **A reader, and it reads nothing from disk**: the spellings are cut out of
+    /// the same cached source [`WorkspaceSession::text`] serves, by
+    /// [`option_spellings`], over each scalar's own bytes — a block scalar's
+    /// header included. The frontend never
+    /// slices a byte span out of a JavaScript string (`CLAUDE.md` section 6), and
+    /// a projected `ScalarView::text` is decoded, so it cannot be the comparison.
+    ///
+    /// # What it refuses
+    ///
+    /// A stale identity — [`CommandError::IdentityStaleRevision`] from
+    /// [`DocumentView::match_by_id`], because a `MatchId` carries the revision it
+    /// was minted from (D2v) — and the other identity refusals, unchanged.
+    pub fn match_option_spellings(&self, id: MatchId) -> Result<BulkOptionSpellings, CommandError> {
+        self.with_workspace(|workspace| {
+            let snapshot = workspace.get_document(id.document)?;
+            let found = snapshot.view.match_by_id(id)?;
+            Ok(option_spellings(snapshot, found))
+        })
+    } // End of function match_option_spellings()
 
     /// Lists the recognised backup batches of the open workspace.
     ///
@@ -3916,6 +3940,26 @@ pub fn apply_bulk_options(
 ) -> Result<BulkResult, CommandError> {
     session.apply_bulk_options(&request)
 } // End of function apply_bulk_options()
+
+/// Returns how each of the seven bulk options is written in one match — absent,
+/// or its exact source spelling cut in Rust (Phase 3-11-1, ruling 20).
+///
+/// **The twentieth workspace command, and a reader**: it writes nothing and
+/// reads nothing from disk that [`document_text`] would not. See
+/// [`WorkspaceSession::match_option_spellings`].
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`] and the identity codes — a stale identity
+/// among them, which a bulk selection answers by blocking rather than by
+/// resolving the identity again.
+#[tauri::command]
+pub fn match_option_spellings(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+) -> Result<BulkOptionSpellings, CommandError> {
+    session.match_option_spellings(id)
+} // End of function match_option_spellings()
 
 /// Lists the recognised backup batches of the open workspace (design consult
 /// Q3).

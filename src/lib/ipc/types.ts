@@ -2297,6 +2297,42 @@ export interface BulkResult {
   readonly files: readonly BulkFileReport[];
 }
 
+/**
+ * How one option is written in one snippet — absent, or present and spelled
+ * exactly so (Phase 3-11-1, ruling 20).
+ *
+ * **Source spelling, cut in Rust, never a decoded value.** `word: true` and
+ * `word: 'true'` are two spellings here, where {@link ScalarView.text} would
+ * call them equal. A display fact only: nothing built from it is ever sent.
+ * `NotOneScalar` is an option written, but not as one scalar the projection
+ * models — a collection, an alias or a repeated key; its bytes are not carried.
+ */
+export type OptionSpelling =
+  | { readonly Absent: Record<string, never> }
+  | { readonly Written: { readonly source: string } }
+  | { readonly NotOneScalar: Record<string, never> };
+
+/**
+ * How each of the seven bulk options is written in one snippet, as
+ * `match_option_spellings` answers it. One property per {@link BulkOption}.
+ */
+export interface BulkOptionSpellings {
+  /** `word`. */
+  readonly word: OptionSpelling;
+  /** `left_word`. */
+  readonly left_word: OptionSpelling;
+  /** `right_word`. */
+  readonly right_word: OptionSpelling;
+  /** `propagate_case`. */
+  readonly propagate_case: OptionSpelling;
+  /** `uppercase_style`. */
+  readonly uppercase_style: OptionSpelling;
+  /** `force_mode`. */
+  readonly force_mode: OptionSpelling;
+  /** `force_clipboard`. */
+  readonly force_clipboard: OptionSpelling;
+}
+
 // ---------------------------------------------------------------------------
 // The read-only backup catalogue — Phase 2c-5-2
 // ---------------------------------------------------------------------------

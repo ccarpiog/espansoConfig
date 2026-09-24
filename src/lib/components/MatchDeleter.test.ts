@@ -1100,6 +1100,8 @@ describe('a committed deletion, over the real workspace state', () => {
       duplicateMatch: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       matchItemText: vi.fn(async () => refusal),
       saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
+      matchOptionSpellings: vi.fn(async () => refusal),
+      applyBulkOptions: vi.fn(async () => refusal),
       saveRawDocument: vi.fn(async () => refusal),
       drainExternalChanges: vi.fn(async () => refusal)
     };

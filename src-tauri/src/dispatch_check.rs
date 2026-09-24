@@ -1,4 +1,4 @@
-//! The twenty commands, invoked through the real dispatcher.
+//! The twenty-one commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -27,7 +27,7 @@
 //!    the local origin, `plugin:event|emit` and `plugin:event|emit_to` — which
 //!    `core:event:default` would also have granted — are asserted refused
 //!    through the resolved access-control list, and every plugin command is in
-//!    the remote-origin sweep beside the twenty application commands.
+//!    the remote-origin sweep beside the twenty-one application commands.
 //!
 //! `mock_builder()` swaps the platform webview for a mock; it does **not** swap
 //! the IPC dispatcher, the access-control resolution or the command macros, all
@@ -1158,6 +1158,51 @@ fn the_bulk_option_edit_is_reachable_and_accounts_for_each_file() {
     assert_eq!(refused["error"], json!({ "NoOptionChanges": {} }));
 } // End of function the_bulk_option_edit_is_reachable_and_accounts_for_each_file()
 
+/// Phase 3-11-1's spelling reader is reachable, answers each option's exact
+/// source spelling cut in Rust, and refuses a stale identity with its own code.
+#[test]
+fn the_option_spelling_reader_is_reachable_and_refuses_a_stale_identity() {
+    let source = "matches:\n  - trigger: ':one'\n    replace: first\n    word: 'true'\n";
+    let OverIpc {
+        webview,
+        view,
+        _app,
+        _dir: dir,
+        ..
+    } = opened_over_ipc(source);
+    let held = view["matches"][0]["id"].clone();
+    let spellings = invoke(&webview, "match_option_spellings", json!({ "id": held }))
+        .expect("the spellings read");
+    assert_eq!(
+        spellings["word"],
+        json!({ "Written": { "source": "'true'" } })
+    );
+    assert_eq!(spellings["force_mode"], json!({ "Absent": {} }));
+    assert_eq!(
+        spellings.as_object().map(serde_json::Map::len),
+        Some(7),
+        "seven spellings, one for each bulk option: {spellings}"
+    );
+
+    // Rewrite the file and re-read it, so the held identity names a parse the
+    // session no longer holds.
+    let target = dir.path().join("match").join("base.yml");
+    fs::write(
+        &target,
+        "matches:\n  - trigger: ':one'\n    replace: changed\n",
+    )
+    .expect("the file is rewritten");
+    invoke(
+        &webview,
+        "reload_document",
+        json!({ "id": held["document"] }),
+    )
+    .expect("the file is re-read");
+    let stale = invoke(&webview, "match_option_spellings", json!({ "id": held }))
+        .expect_err("a stale identity is refused");
+    assert_eq!(stale["code"], "identityStaleRevision", "{stale}");
+} // End of function the_option_spelling_reader_is_reachable_and_refuses_a_stale_identity()
+
 /// A save refused by the semantic gate crosses in the **`Ok`** channel.
 ///
 /// The distinction the whole result type is built on, measured at the boundary:
@@ -2016,7 +2061,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// resolved command carries `ExecutionContext::Local`, the remote origin
 /// resolves neither, and a window that is not `main` resolves neither.
 ///
-/// And the twenty application commands resolve to nothing from either
+/// And the twenty-one application commands resolve to nothing from either
 /// origin, which is the other half of what "names no application command"
 /// means: a local origin reaches them because the dispatcher does not consult
 /// this list for an application command, not because the list allows them, and
@@ -2111,7 +2156,7 @@ fn the_capability_grants_exactly_the_two_event_permissions() {
                 .is_none(),
             "{command} must resolve to nothing for a remote origin"
         );
-    } // End of the loop over the twenty application commands
+    } // End of the loop over the twenty-one application commands
 } // End of function the_capability_grants_exactly_the_two_event_permissions()
 
 /// A local `main` webview registers the wake listener through the event plugin.
@@ -2184,7 +2229,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
     );
 } // End of function the_registered_listener_is_removable_through_the_event_plugin()
 
-/// A page that is not this application cannot reach any of the twenty
+/// A page that is not this application cannot reach any of the twenty-one
 /// commands, nor either event-plugin command.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
@@ -2202,7 +2247,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All twenty are attempted, and the count is asserted against the registered
+/// **All twenty-one are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -2210,7 +2255,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// parsed out of `generate_handler!` by [`crate::rust_source`], so a command
 /// added to the application and forgotten here fails this test rather than
 /// silently leaving the sweep. **The two plugin commands are a second table**,
-/// kept apart so that the application count stays twenty: they are not in
+/// kept apart so that the application count stays twenty-one: they are not in
 /// `generate_handler!`, this test asserts they are not, and folding them into
 /// the first table would make the count claim about two different things.
 #[test]
@@ -2362,6 +2407,10 @@ fn a_remote_origin_is_refused() {
                 },
             }),
         ),
+        // Phase 3-11-1's reader. It hands out how a snippet's options are
+        // spelled, which is the user's configuration, so a navigated webview must
+        // not reach it for `document_text`'s reason.
+        ("match_option_spellings", json!({ "id": identity })),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -2376,7 +2425,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 20, "the surface is twenty commands");
+    assert_eq!(attempted.len(), 21, "the surface is twenty-one commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, REMOTE_ORIGIN, command, args)

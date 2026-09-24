@@ -1830,3 +1830,26 @@ Archived verbatim 2026-09-24 at 3-10.
 ### Phase 3-9-2's verification
 
 Run by the orchestrator after the fix worker, with the instrument deleted: `cargo test --workspace -- --test-threads=1` exit 0, **1465 passed, 0 failed**; `cargo clippy --workspace --all-targets -- -D warnings` exit 0; `cargo fmt --check` exit 0; `npm run check` exit 0, **474 files**, 0 errors, 0 warnings; `npm test` exit 0, **3824 passed** (+2: the per-locale position case in `FileScope.test.ts`); `npm run build` exit 0, **207 modules**. Bundle oracle: server-only markers absent, client-only present (2). Rust untouched, so `cargo tree` unchanged. Rung **`1465 / 474 / 3824 / 207`**.
+
+## The 3-10 status row and 3-10's verification block
+
+Archived verbatim 2026-09-24 at 3-11-1.
+
+| **3-10** | The per-file bulk coordinator: one backend command `apply_bulk_options` (`src-tauri/src/bulk.rs`, `commands.rs`) over a core planner (`crates/espansoconfig-core/src/draft/bulk.rs`) and a disk-free `preflight_edits` (`persist/save.rs`). It plans one edit batch per file for the seven allowed options (ruling 20), preflights every file (any blocker writes nothing), then calls `run_one_save` once per file in order, stopping at the first conflict, refusal, failure or uncertain write, and gives every file one outcome (ruling 19); a test seam `BulkSave` injects failures. Consent (`BulkConsent`) is bound to document, base revision, intent fingerprint, candidate and exact findings multiset (ruling 22). Options are written as **plain source** (`ScalarEdit::plain_source`, verified to read back as exactly that plain scalar, exempt from the ambiguous-plain-scalar property like the raw-item edit); wire types and EN/ES i18n codes added; no UI (3-11). Risk **high**; worker **opus** (fixes by the same worker); driven | ✅ **complete and CLOSED.** Review: `autoclaude-review.sh` **exited 0 — Codex**, no fallback: **`ship-with-fixes`, 1 BLOCKER + 1 SHOULD-FIX** — B1 boolean options written as quoted strings (`word: 'true'`) → **fixed** by the plain-source path, regression tests in `tests/draft_bulk.rs` and `bulk_check.rs`; S1 consent bound only to candidate bytes → **fixed** by binding document, base revision and intent, three replay tests ([`docs/reviews/phase-3-10.md`](docs/reviews/phase-3-10.md), brief [`phase-3-10.brief.md`](docs/reviews/phase-3-10.brief.md)). Rung **`1499 / 475 / 3833 / 207`**. Notes [`3-10-notes.md`](docs/decisions/3-10-notes.md) (§5 open items — item 1: **the 3-5 single-match options editor still writes `'true'` quoted**, a likely espanso-compatibility defect for a later phase; the intent fingerprint does not cover the excluded list; three pre-existing stale comments) |
+
+#### Phase 3-10's verification
+
+Run by the orchestrator after the review-fix round: `cargo test --workspace -- --test-threads=1` exit 0, **1499 passed, 0 failed** (+34 over 3-9-2); `cargo clippy --workspace --all-targets -- -D warnings` exit 0; `cargo fmt --check` exit 0; `cargo tree -p espansoconfig-core | rg tauri` finds nothing; `npm run check` exit 0, **475 files**, 0 errors, 0 warnings; `npm test` exit 0, **3833 passed**; `npm run build` exit 0, **207 modules**. Bundle oracle: server-only markers absent, client-only present (2). The same gates were also run and green before the review (`1491 / 475 / 3833 / 207`). Rung **`1499 / 475 / 3833 / 207`**.
+
+## The git-state rows of 3-7 … 3-9-2, as the live head held them
+
+Archived verbatim 2026-09-24 at 3-11-1.
+
+| Phase | Commit | Push |
+|---|---|---|
+| **3-7 — the local raw-item core edit (core, command, wire), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed** | `340f389` (this SHA record is the commit after it) | ✅ pushed, `5c7d64d..340f389  main -> main`; tree clean |
+| **3-8-1 — the local raw UI: the model and the coordination, reviewed (`ship-with-fixes`, Codex, 2 BLOCKERS + 1 SHOULD-FIX, all fixed) and closed; 3-8 cut into 3-8-1/2/3** | `eabb219` (this SHA record is the commit after it) | ✅ pushed, `1beef00..eabb219  main -> main`; tree clean |
+| **3-8-2 — the local raw UI: the components and the i18n, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 2 SHOULD-FIX, both fixed) and closed** | `4c42c89` (this SHA record is the commit after it) | ✅ pushed, `e8c2622..4c42c89  main -> main`; tree clean |
+| **3-8-3 — the local raw UI: the window half (records only), reviewed (`ship`, Codex, 0 findings) and closed; step 3-8 closed** | `c3a2ede` (this SHA record is the commit after it) | ✅ pushed, `3635c6c..c3a2ede  main -> main`; tree clean |
+| **3-9-1 — the file-scope inspector: model, components and i18n, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed; 3-9 cut into 3-9-1/2** | `d217ecf` (this SHA record is the commit after it) | ✅ pushed, `2a3b37e..d217ecf  main -> main`; tree clean |
+| **3-9-2 — the file-scope inspector: the window half (records only, plus the F1 numbering fix in `FileScope.svelte`), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed; step 3-9 closed** | `21b2219` (this SHA record is the commit after it) | ✅ pushed, `1ca667e..21b2219  main -> main`; tree clean after it |

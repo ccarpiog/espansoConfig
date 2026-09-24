@@ -8,8 +8,9 @@
 
 use espansoconfig_core::discovery::FileKind;
 use espansoconfig_core::draft::{
-    check_bulk_changes, check_bulk_documents, is_plain_source, plan_bulk_option_edits, BulkOption,
-    BulkOptionChange, BulkPlanError, BulkValue, MatchField,
+    check_bulk_changes, check_bulk_documents, is_plain_source, option_spellings,
+    plan_bulk_option_edits, BulkOption, BulkOptionChange, BulkPlanError, BulkValue, MatchField,
+    OptionSpelling,
 };
 use espansoconfig_core::model::{DocumentContext, IdentityError, MatchId};
 use espansoconfig_core::patch::{
@@ -444,3 +445,133 @@ fn the_engine_refuses_plain_source_that_does_not_read_back() {
         "{refused:?}"
     );
 } // End of function the_engine_refuses_plain_source_that_does_not_read_back()
+
+// ---------------------------------------------------------------------------
+// The read-only spelling accessor — Phase 3-11-1
+// ---------------------------------------------------------------------------
+
+/// Three spellings of one decoded text, a non-ASCII value before a span, an
+/// absent option, a collection and a repeated key.
+const SPELLINGS: &str = "matches:\n  - trigger: ':é'\n    replace: premier\n    word: true\n    \
+                         force_mode: clipboard\n  \
+                         - trigger: ':b'\n    replace: b\n    word: 'true'\n    \
+                         left_word: [a]\n  \
+                         - trigger: ':c'\n    replace: c\n    word: \"true\"\n    \
+                         right_word: yes\n    right_word: no\n";
+
+#[test]
+fn the_spelling_is_cut_in_rust_and_distinguishes_what_decoding_merges() {
+    let (_, document) = projected(SPELLINGS);
+    let found = &document.view.matches;
+    assert_eq!(found.len(), 3);
+    let words: Vec<OptionSpelling> = found
+        .iter()
+        .map(|one| option_spellings(&document, one).word)
+        .collect();
+    assert_eq!(
+        words,
+        vec![
+            OptionSpelling::Written {
+                source: "true".to_owned()
+            },
+            OptionSpelling::Written {
+                source: "'true'".to_owned()
+            },
+            OptionSpelling::Written {
+                source: "\"true\"".to_owned()
+            },
+        ],
+        "one decoded text, three spellings, and a non-ASCII byte before the first span"
+    );
+    let first = option_spellings(&document, &found[0]);
+    assert_eq!(
+        first.force_mode,
+        OptionSpelling::Written {
+            source: "clipboard".to_owned()
+        }
+    );
+    assert_eq!(first.left_word, OptionSpelling::Absent {});
+    assert_eq!(first.of(BulkOption::ForceMode), &first.force_mode);
+} // End of function the_spelling_is_cut_in_rust_and_distinguishes_what_decoding_merges()
+
+#[test]
+fn an_option_written_but_not_as_one_scalar_is_neither_absent_nor_spelled() {
+    let (_, document) = projected(SPELLINGS);
+    let found = &document.view.matches;
+    let second = option_spellings(&document, &found[1]);
+    assert_eq!(
+        second.left_word,
+        OptionSpelling::NotOneScalar {},
+        "a collection"
+    );
+    let third = option_spellings(&document, &found[2]);
+    assert_eq!(
+        third.right_word,
+        OptionSpelling::NotOneScalar {},
+        "a repeated key, whatever its first occurrence holds"
+    );
+} // End of function an_option_written_but_not_as_one_scalar_is_neither_absent_nor_spelled()
+
+#[test]
+fn the_spellings_cross_as_the_seven_keys_with_one_key_variants() {
+    let (_, document) = projected(SPELLINGS);
+    let written = serde_json::to_value(option_spellings(&document, &document.view.matches[0]))
+        .expect("the spellings serialize");
+    let keys: Vec<&str> = written
+        .as_object()
+        .expect("an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let mut expected: Vec<&str> = BulkOption::ALL.iter().map(|option| option.key()).collect();
+    expected.sort_unstable();
+    let mut sorted = keys.clone();
+    sorted.sort_unstable();
+    assert_eq!(sorted, expected, "one field per bulk option, and no other");
+    assert_eq!(
+        written["word"],
+        serde_json::json!({ "Written": { "source": "true" } })
+    );
+    assert_eq!(written["left_word"], serde_json::json!({ "Absent": {} }));
+} // End of function the_spellings_cross_as_the_seven_keys_with_one_key_variants()
+
+/// Four snippets writing one option with the same body under four block
+/// headers: literal, folded, literal keep and literal with an explicit indent.
+const BLOCK_HEADERS: &str = "matches:\n  - trigger: ':a'\n    replace: a\n    uppercase_style: |\n      capitalize\n  \
+                             - trigger: ':b'\n    replace: b\n    uppercase_style: >\n      capitalize\n  \
+                             - trigger: ':c'\n    replace: c\n    uppercase_style: |+\n      capitalize\n  \
+                             - trigger: ':d'\n    replace: d\n    uppercase_style: |2\n      capitalize\n";
+
+#[test]
+fn identical_block_bodies_under_different_headers_are_different_spellings() {
+    let (_, document) = projected(BLOCK_HEADERS);
+    let found = &document.view.matches;
+    assert_eq!(found.len(), 4);
+    let spelled: Vec<OptionSpelling> = found
+        .iter()
+        .map(|one| option_spellings(&document, one).uppercase_style)
+        .collect();
+    assert_eq!(
+        spelled,
+        vec![
+            OptionSpelling::Written {
+                source: "|\n      capitalize\n".to_owned()
+            },
+            OptionSpelling::Written {
+                source: ">\n      capitalize\n".to_owned()
+            },
+            OptionSpelling::Written {
+                source: "|+\n      capitalize\n".to_owned()
+            },
+            OptionSpelling::Written {
+                source: "|2\n      capitalize\n".to_owned()
+            },
+        ],
+        "the header's own bytes are part of the spelling, so no two of these compare equal"
+    );
+    for (left, spelling) in spelled.iter().enumerate() {
+        for other in spelled.iter().skip(left + 1) {
+            assert_ne!(spelling, other);
+        }
+    }
+} // End of function identical_block_bodies_under_different_headers_are_different_spellings()

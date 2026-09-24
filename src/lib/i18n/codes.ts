@@ -181,6 +181,16 @@ import {
 } from '../browser/fileScope';
 import { conflictMessageKey, type ConflictMessage } from '../browser/saveOutcome';
 import {
+  bulkBlockerKey,
+  bulkExclusionKey,
+  bulkOutcomeHeadlineKey,
+  optionSummaryKey,
+  type BulkBlocker,
+  type BulkExclusionReason,
+  type BulkOutcomeHeadline,
+  type WordedOptionSummary
+} from '../browser/bulkEdit';
+import {
   fileReconciliationStateKey,
   reconciliationControlKey,
   reconciliationRefusalKey,
@@ -2189,3 +2199,60 @@ export function describeImportsState(locale: Locale, state: ImportsState): strin
 export function describeUnsupportedImport(locale: Locale, found: ValueKind): string {
   return translate(locale, unsupportedImportKey(), { kind: describeValueKind(locale, found) });
 } // End of function describeUnsupportedImport()
+
+// ---------------------------------------------------------------------------
+// The bulk option edit — Phase 3-11-1
+// ---------------------------------------------------------------------------
+//
+// Frontend state under `browser.bulkEdit.*` (`docs/decisions/3-split-notes.md`
+// §2 step 3-11, rulings 20–22). The key functions live beside the types in
+// `../browser/bulkEdit.ts`; `../browser/bulkEdit.test.ts` calls every one of
+// these in both locales, because the Rust contract sees none of them.
+
+/**
+ * Why a selected snippet is left out of a bulk edit, in one language.
+ *
+ * `editorOpen` says an editor is open and that this app cannot tell whether it
+ * was edited — never that unsaved edits exist.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - The exclusion's reason, from `planBulkApply`.
+ * @returns The translated sentence.
+ */
+export function describeBulkExclusion(locale: Locale, reason: BulkExclusionReason): string {
+  return translate(locale, bulkExclusionKey(reason));
+} // End of function describeBulkExclusion()
+
+/**
+ * Why a bulk edit cannot be sent now, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param blocker - One blocker, from `prepareBulkApply`.
+ * @returns The translated sentence.
+ */
+export function describeBulkBlocker(locale: Locale, blocker: BulkBlocker): string {
+  return translate(locale, bulkBlockerKey(blocker));
+} // End of function describeBulkBlocker()
+
+/**
+ * How one option is written across a selection, in one language, for every
+ * summary but `same` — which a screen draws as the file's own bytes.
+ *
+ * @param locale - The dictionary to read from.
+ * @param kind - The summary's kind, from `summarizeOption`.
+ * @returns The translated words.
+ */
+export function describeBulkOptionSummary(locale: Locale, kind: WordedOptionSummary): string {
+  return translate(locale, optionSummaryKey(kind));
+} // End of function describeBulkOptionSummary()
+
+/**
+ * The headline of a bulk edit's answer, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param headline - The headline, from `summarizeBulkResult`.
+ * @returns The translated sentence.
+ */
+export function describeBulkOutcomeHeadline(locale: Locale, headline: BulkOutcomeHeadline): string {
+  return translate(locale, bulkOutcomeHeadlineKey(headline));
+} // End of function describeBulkOutcomeHeadline()

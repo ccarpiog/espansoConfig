@@ -42,6 +42,7 @@
  */
 
 import {
+  applyBulkOptions,
   createMatch,
   deleteMatch,
   documentText,
@@ -53,6 +54,7 @@ import {
   listBackupEntries,
   listDocuments,
   matchItemText,
+  matchOptionSpellings,
   moveMatch,
   openWorkspace,
   readBackupText,
@@ -85,6 +87,9 @@ import type {
   BackupEntryId,
   BackupEntryListing,
   BackupTextResponse,
+  BulkOptionSpellings,
+  BulkOptionsRequest,
+  BulkResult,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -129,6 +134,7 @@ import {
   type InvalidationStatus,
   type SealedWholeDocumentSave
 } from './invalidation';
+import { bulkFileEffect, type BulkApplyAnswer, type BulkFileEffect } from './bulkEdit';
 import type { RepairAttribution, SelectionNotice } from './notices';
 import { authorizeDiskAdoption } from './saveOutcome';
 import type { ConflictModel, DiskAdoptionOutcome, ReloadConfirmation } from './saveOutcome';
@@ -185,8 +191,9 @@ import {
  * — since Phase 2b-2a — the ones that write. {@link BrowserCommands.moveMatch},
  * {@link BrowserCommands.saveMatch}, {@link BrowserCommands.createMatch},
  * {@link BrowserCommands.deleteMatch}, {@link BrowserCommands.saveRawDocument},
- * {@link BrowserCommands.duplicateMatch} and (since Phase 3-8-1)
- * {@link BrowserCommands.saveMatchItemText} are the seven members that can change
+ * {@link BrowserCommands.duplicateMatch}, (since Phase 3-8-1)
+ * {@link BrowserCommands.saveMatchItemText} and (since Phase 3-11-1)
+ * {@link BrowserCommands.applyBulkOptions} are the eight members that can change
  * a file on disk, and they are here for the same reason the others are: a test
  * that cannot run Tauri still has to be able to drive a refusal, a conflict and
  * a commit and watch what this state does about each.
@@ -384,6 +391,24 @@ export interface BrowserCommands {
     acknowledgement: Acknowledgement
   ): Promise<CommandResult<SaveResult>>;
   /**
+   * Reads how each of the seven bulk options is written in one snippet, each
+   * spelling cut in Rust — Phase 3-11-1, over its own read-only command.
+   *
+   * @param id - The snippet, by identity.
+   * @returns The seven spellings, or a failure — `identityStaleRevision` among
+   *   them.
+   */
+  matchOptionSpellings(id: MatchId): Promise<CommandResult<BulkOptionSpellings>>;
+  /**
+   * Applies option intents to snippets of several files, one save per file —
+   * Phase 3-11-1, over the 3-10 command.
+   *
+   * @param request - The changes, the files in the order to attempt them, and
+   *   the files excluded before sending.
+   * @returns What happened to every file, or a failure of the whole request.
+   */
+  applyBulkOptions(request: BulkOptionsRequest): Promise<CommandResult<BulkResult>>;
+  /**
    * Hands back everything this session observed on disk above `afterSequence`.
    *
    * **The one member that is neither a read of the projection nor a write.** It
@@ -425,6 +450,8 @@ export const REAL_COMMANDS: BrowserCommands = {
   saveRawDocument,
   matchItemText,
   saveMatchItemText,
+  matchOptionSpellings,
+  applyBulkOptions,
   drainExternalChanges
 };
 
@@ -2067,11 +2094,12 @@ export interface BrowserState {
   /**
    * Moves one snippet inside the list it is in, and saves the file.
    *
-   * **The first of the seven entry points on this state that change a file**; the
+   * **The first of the eight entry points on this state that change a file**; the
    * others are {@link BrowserState.saveMatch},
    * {@link BrowserState.createMatch}, {@link BrowserState.deleteMatch},
-   * {@link BrowserState.saveRawDocument}, {@link BrowserState.duplicateMatch} and
-   * {@link BrowserState.saveMatchItemText}. Everything else here reads.
+   * {@link BrowserState.saveRawDocument}, {@link BrowserState.duplicateMatch},
+   * {@link BrowserState.saveMatchItemText} and {@link BrowserState.applyBulkOptions}.
+   * Everything else here reads.
    *
    * **The wrapper is the enforcement**, exactly as it is for
    * {@link BrowserState.saveMatch}: a committed move makes every `MatchId` this
@@ -2534,6 +2562,50 @@ export interface BrowserState {
     text: string,
     acknowledgement: Acknowledgement
   ): Promise<MatchSaveAnswer>;
+  /**
+   * Reads how each of the seven bulk options is written in one snippet — Phase
+   * 3-11-1.
+   *
+   * **A read this state performs and does not remember**, reported and answered
+   * like {@link BrowserState.matchItemText}. Each spelling is cut in Rust; nothing
+   * here slices a document's text by a byte span. A stale identity comes back as
+   * `identityStaleRevision`, which `spellingReadOf` in `./bulkEdit.ts` turns into
+   * a stale selection rather than a lookup of whatever now sits at that node.
+   *
+   * @param id - The snippet, by identity.
+   * @returns Whatever `match_option_spellings` answered, unchanged.
+   */
+  matchOptionSpellings(id: MatchId): Promise<CommandResult<BulkOptionSpellings>>;
+  /**
+   * Applies option intents to snippets of several files, one save per file —
+   * Phase 3-11-1, the eighth entry point on this state that changes a file.
+   *
+   * **Ruling 27's barrier opens on every applied file before the command and
+   * closes on each in a `finally`**, each settled on what its own outcome
+   * established: *saved* and *already unchanged* end on their revision, *write
+   * outcome unknown* is `uncertain`, and everything else wrote nothing. A file
+   * the request only excludes gets no lease, because nothing touches it.
+   *
+   * **After a committed file, every `MatchId` in it is stale**: every committed
+   * file is forgotten through the whole-document door (`forgetTheReplacedDocument`)
+   * in one synchronous block before the first await, and then each is re-read
+   * inside `adoptAfterTheCommit`, so a held selection there is looked for again
+   * positionally and then checked (R27) — unless the person expressed a newer
+   * selection intent while the re-read was out. A file whose write may have happened is
+   * re-read without being trusted. **A committed file is never reported as an
+   * error**: an exception while re-reading one travels back as that file's
+   * `failed` adoption beside the answer (`PROGRESS.md` D2). No undo of the saves
+   * is offered here or anywhere; the backups follow the session's ordinary policy.
+   *
+   * The request is the caller's and is sent unchanged; `prepareBulkApply` in
+   * `./bulkEdit.ts` is what builds one. Nothing here re-reads a base revision.
+   *
+   * @param request - What to send.
+   * @returns `answered` with every file's outcome and each re-read's fate;
+   *   `notAttempted` when this state holds no projection of an applied file; or
+   *   `failed` when the command rejected before any file was read.
+   */
+  applyBulkOptions(request: BulkOptionsRequest): Promise<BulkApplyAnswer>;
   /**
    * Lists the recognised backup batches.
    *
@@ -4579,7 +4651,7 @@ export function createBrowserState(
    *
    * **Nothing escapes {@link handOut}.** Each receiver call is isolated, and so is
    * the reporting of what it threw, because this runs from the write lease's
-   * `close()` inside the seven wrappers' `finally` — a throw escaping from here
+   * `close()` inside the eight wrappers' `finally` — a throw escaping from here
    * would replace a settled write's answer with a session's exception, and a
    * committed write is never afterwards reported as an error.
    *
@@ -4757,7 +4829,7 @@ export function createBrowserState(
    *
    * **Two methods, and the split is this phase's review, finding 3.** `expect`
    * records what the write has established without releasing anything; `close`
-   * releases, and is what the seven wrappers call from a `finally`. The barrier is
+   * releases, and is what the eight wrappers call from a `finally`. The barrier is
    * therefore closed on **every** exit a wrapper has, including an exception — a
    * rejected command, a reporter that threw, a re-read that threw — where the
    * previous shape left the file barriered for the life of the session and its
@@ -4899,10 +4971,13 @@ export function createBrowserState(
   } // End of function beginWrite()
 
   /**
-   * What one of the seven writing wrappers' answers settled as (ruling 27).
+   * What one of the seven single-file writing wrappers' answers settled as
+   * (ruling 27).
    *
    * **One mapping for all seven**, so a wrapper cannot invent a fourth reading of its
-   * own outcome. `saved` names the revision the transaction ended on whether or not
+   * own outcome. The bulk edit settles each of its files through
+   * {@link settlementOfBulkEffect}, which reads the same three settlements off a
+   * per-file outcome. `saved` names the revision the transaction ended on whether or not
    * it committed — `committed: false` is a documented success and the file holds
    * that revision either way — and both `refused` and `conflict` wrote nothing.
    *
@@ -4928,6 +5003,26 @@ export function createBrowserState(
   function settlementOfFailure(written: boolean): WriteSettlement {
     return written ? { kind: 'uncertain' } : { kind: 'nothingWritten' };
   } // End of function settlementOfFailure()
+
+  /**
+   * What one file of a bulk edit settled as (ruling 27): a save that ran ends on
+   * its revision whether or not it wrote, an unknown write is `uncertain`, and
+   * every other outcome wrote nothing.
+   *
+   * @param effect - The file's effect, from `bulkFileEffect` in `./bulkEdit.ts`.
+   * @returns The settlement.
+   */
+  function settlementOfBulkEffect(effect: BulkFileEffect): WriteSettlement {
+    switch (effect.kind) {
+      case 'committed':
+      case 'unchanged':
+        return { kind: 'ended', revision: effect.revision };
+      case 'uncertain':
+        return { kind: 'uncertain' };
+      case 'nothingWritten':
+        return { kind: 'nothingWritten' };
+    }
+  } // End of function settlementOfBulkEffect()
 
   /**
    * Takes the next re-read generation for one document.
@@ -6797,6 +6892,107 @@ export function createBrowserState(
       );
     },
 
+    async matchOptionSpellings(id: MatchId): Promise<CommandResult<BulkOptionSpellings>> {
+      return reportedRead(await commands.matchOptionSpellings(id));
+    },
+
+    async applyBulkOptions(request: BulkOptionsRequest): Promise<BulkApplyAnswer> {
+      // **The applied files, copied before anything else is read or awaited.** The
+      // request is the caller's object; reading `files` again after an await would
+      // be a check and a spend separated by a property read.
+      const applied: DocumentId[] = [];
+      for (const file of request.files) {
+        if (!applied.includes(file.document)) {
+          applied.push(file.document);
+        }
+      }
+      if (applied.some((document) => !views.some((held) => held.id === document))) {
+        // Nothing on this state describes one of the files, so nothing here could
+        // adopt what a commit produced there. Nothing was sent.
+        return { kind: 'notAttempted' };
+      }
+      // **Ruling 27's barrier opens on every applied file here and closes on each
+      // in the `finally` below**, each on what its own outcome established.
+      const leases = new Map<DocumentId, WriteLease>();
+      for (const document of applied) {
+        leases.set(document, beginWrite(document));
+      }
+      try {
+        const answer = await commands.applyBulkOptions(request);
+        if (!answer.ok) {
+          // The command rejected as a whole — a malformed request, no workspace —
+          // before any file was read. `mayHaveWritten` answers for it all the same,
+          // because it is the only thing that may say so.
+          const written = mayHaveWritten(answer.failure);
+          for (const lease of leases.values()) {
+            lease.expect(settlementOfFailure(written));
+          }
+          report(answer.failure);
+          if (written) {
+            forgetFileText();
+            for (const document of applied) {
+              await adoptTheDocumentOnDisk(document, null, null);
+            }
+            await readFileText();
+          }
+          return { kind: 'failed', mayHaveWritten: written, failure: answer.failure };
+        } // End of the arm for a command that rejected
+
+        // **Every settlement recorded before any adoption**, so an exception in an
+        // adoption cannot leave a known outcome to be closed as `uncertain`.
+        const result = answer.value;
+        const effects: { readonly document: DocumentId; readonly effect: BulkFileEffect }[] = [];
+        for (const one of result.files) {
+          const lease = leases.get(one.document);
+          if (lease === undefined) {
+            // An excluded file: no lease was opened, and nothing touched it.
+            continue;
+          }
+          const effect = bulkFileEffect(one);
+          lease.expect(settlementOfBulkEffect(effect));
+          effects.push({ document: one.document, effect });
+        } // End of the loop recording each file's settlement
+
+        // **Every committed file retired before the first await** (Phase 3-11-1's
+        // review): the answer establishes all of the commits at once, so no
+        // projection or identity of any of them may stay live while another one is
+        // being re-read. What each file's selection was is kept for its re-read.
+        const retired = new Map<DocumentId, SelectedMatch | null>();
+        for (const { document, effect } of effects) {
+          if (effect.kind === 'committed') {
+            retired.set(document, forgetTheReplacedDocument(document));
+          }
+        }
+        if (retired.size > 0) {
+          forgetFileText();
+        }
+        // The intent the re-reads may restore a selection for: taken after every
+        // forgetting above, so only a selection the person expresses from here on
+        // moves it and stops the restoration.
+        const intent = selectGeneration;
+
+        const adoptions: { readonly document: DocumentId; readonly adoption: InvalidationStatus }[] =
+          [];
+        for (const { document, effect } of effects) {
+          const adoption =
+            effect.kind === 'committed'
+              ? await adoptAfterTheCommit(document, () =>
+                  rereadRetiredDocument(document, retired.get(document) ?? null, intent)
+                )
+              : await adoptAfterTheBulkFile(document, effect);
+          if (adoption !== null) {
+            adoptions.push({ document, adoption });
+          }
+        } // End of the loop adopting each written or possibly written file
+        return { kind: 'answered', result, adoptions };
+      } finally {
+        // **Ruling 27's barrier closes here, on every file and on every exit.**
+        for (const lease of leases.values()) {
+          lease.close();
+        }
+      }
+    }, // End of function applyBulkOptions()
+
     async createMatch(
       document: DocumentId,
       newMatch: NewMatch,
@@ -8085,7 +8281,53 @@ export function createBrowserState(
    * @returns The failure of the re-read, or `null` when it succeeded.
    */
   async function adoptTheReplacedDocument(document: DocumentId): Promise<IpcFailure | null> {
+    const failure = await reprojectTheReplacedDocument(document);
+    if (failure !== null) {
+      return failure;
+    }
+    await readFileText();
+    return null;
+  } // End of function adoptTheReplacedDocument()
+
+  /**
+   * Forgets a replaced document and reads its projection again, without the
+   * viewer's text — {@link adoptTheReplacedDocument}'s first half. The forgetting
+   * is synchronous; the re-read and the guarded restoration are
+   * {@link rereadRetiredDocument}, which the bulk edit calls directly after
+   * retiring every committed file at once.
+   *
+   * @param document - The file whose bytes were replaced.
+   * @returns The failure of the re-read, or `null` when it succeeded.
+   */
+  async function reprojectTheReplacedDocument(document: DocumentId): Promise<IpcFailure | null> {
     const held = forgetTheReplacedDocument(document);
+    // Captured after the forgetting, which bumps the counter itself when it drops
+    // a selection, so only an intent expressed during the re-read stops the
+    // restoration below.
+    return rereadRetiredDocument(document, held, selectGeneration);
+  } // End of function reprojectTheReplacedDocument()
+
+  /**
+   * Re-reads a document already forgotten by {@link forgetTheReplacedDocument},
+   * installs the fresh projection, and looks for the selection it held.
+   *
+   * **The selection is restored only for an intent still standing** (Phase
+   * 3-11-1's review): `held` was captured before the await, and a person who
+   * selected something else — or started a `select()` that bumped the counter —
+   * while the read was out has expressed a newer intent. When `selectGeneration`
+   * is no longer `intent`, neither the selection nor the notice is touched. This
+   * is `saveRawDocument`'s path too, and the guard corrects it the same way.
+   *
+   * @param document - The file, already forgotten.
+   * @param held - The selection that was held in it, or `null`.
+   * @param intent - `selectGeneration` as it stood after the forgetting.
+   * @returns The failure of the re-read, or `null` when it succeeded.
+   */
+  async function rereadRetiredDocument(
+    document: DocumentId,
+    held: SelectedMatch | null,
+    intent: number
+  ): Promise<IpcFailure | null> {
     const fresh = await commands.getDocument(document);
     if (!fresh.ok) {
       report(fresh.failure);
@@ -8093,7 +8335,7 @@ export function createBrowserState(
     }
     const next = ownedProjectionOf(fresh.value);
     installView(next);
-    if (held !== null) {
+    if (held !== null && selectGeneration === intent) {
       // Positional, and then checked. `reresolve` answers `differentMatch` when
       // the snippet at the held position is not the one that was selected, which
       // after a whole-text replacement is the expected answer rather than the
@@ -8106,9 +8348,52 @@ export function createBrowserState(
         notice = found.outcome;
       }
     }
-    await readFileText();
     return null;
-  } // End of function adoptTheReplacedDocument()
+  } // End of function rereadRetiredDocument()
+
+  /**
+   * The re-read one file of a bulk edit owes, answered and **never thrown**.
+   *
+   * - A **committed** file is not this function's: `applyBulkOptions` retires
+   *   every committed file before its first await and re-reads each through
+   *   `adoptAfterTheCommit`; it owes nothing here.
+   * - An **unchanged** file whose revision is not the one this state projects was
+   *   moved on by another writer between the lock's two reads: it is re-read as
+   *   an external change, through the same policy.
+   * - A file whose write **may** have happened is re-read and not trusted, and an
+   *   exception on the way is answered as a `failed` adoption rather than thrown,
+   *   because a file committed earlier in the same run must still be reported
+   *   (`PROGRESS.md` D2).
+   * - Anything else wrote nothing and owes nothing.
+   *
+   * @param document - The file.
+   * @param effect - What its outcome did to it.
+   * @returns The re-read's fate, or `null` when none was owed.
+   */
+  async function adoptAfterTheBulkFile(
+    document: DocumentId,
+    effect: BulkFileEffect
+  ): Promise<InvalidationStatus | null> {
+    const view = views.find((held) => held.id === document);
+    if (effect.kind === 'unchanged') {
+      if (view === undefined || view.revision === effect.revision) {
+        return null;
+      }
+      forgetFileText();
+      return adoptAfterTheCommit(document, () => adoptTheDocumentOnDisk(document, null, null));
+    }
+    if (effect.kind === 'uncertain') {
+      try {
+        forgetFileText();
+        const stale = await adoptTheDocumentOnDisk(document, null, null);
+        await readFileText();
+        return stale === null ? { kind: 'done' } : { kind: 'failed', failure: stale };
+      } catch (raw: unknown) {
+        return { kind: 'failed', failure: classifiedAfterTheCommit(raw) };
+      }
+    }
+    return null;
+  } // End of function adoptAfterTheBulkFile()
 
   /**
    * The notice a repair raises when the selection was found again.

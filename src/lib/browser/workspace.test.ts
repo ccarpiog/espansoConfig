@@ -33,6 +33,9 @@ import type {
   BackupEntry,
   BackupEntryListing,
   BackupTextResponse,
+  BulkOptionSpellings,
+  BulkOptionsRequest,
+  BulkResult,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -439,6 +442,10 @@ interface Script {
   readonly itemTexts?: readonly CommandResult<OwnedItemText>[];
   /** What `save_match_item_text` answers, in order (Phase 3-8-1). */
   readonly itemSaves?: readonly CommandResult<SaveResult>[];
+  /** What `match_option_spellings` answers, in order (Phase 3-11-1). */
+  readonly spellings?: readonly CommandResult<BulkOptionSpellings>[];
+  /** What `apply_bulk_options` answers, in order (Phase 3-11-1). */
+  readonly bulks?: readonly CommandResult<BulkResult>[];
   /**
    * What `save_raw_document` answers, in order.
    *
@@ -602,12 +609,12 @@ function createBrowserState(
 } // End of function createBrowserState()
 
 /**
- * The seven members of a surface whose call opens ruling 27's barrier.
+ * The eight members of a surface whose call opens ruling 27's barrier.
  *
- * Each of the seven wrappers in `workspace.svelte.ts` opens the barrier on exactly
- * the file identity it then hands its command — `match.document`, `id.document`
- * or `document` — so the first argument of every recorded call names a file a
- * lease was opened for. Nothing in TypeScript keeps an eighth writer, or a
+ * Each of the eight wrappers in `workspace.svelte.ts` opens the barrier on exactly
+ * the file identities it then hands its command — `match.document`, `id.document`
+ * or `document`, and for a bulk edit every `request.files[].document` — so the
+ * first argument of every recorded call names the files a lease was opened for. Nothing in TypeScript keeps an eighth writer, or a
  * wrapper that opened the barrier on some other identity, in step with this
  * list; it is read against the module by hand.
  */
@@ -618,7 +625,8 @@ const BARRIERED_MEMBERS = [
   'deleteMatch',
   'duplicateMatch',
   'saveRawDocument',
-  'saveMatchItemText'
+  'saveMatchItemText',
+  'applyBulkOptions'
 ] as const;
 
 /**
@@ -644,6 +652,11 @@ function filesWrittenThrough(commands: BrowserCommands): ReadonlySet<DocumentId>
       const first: unknown = call[0];
       if (typeof first === 'number') {
         written.add(first);
+      } else if (typeof first === 'object' && first !== null && 'files' in first) {
+        // A bulk request: one lease per applied file.
+        for (const file of (first as BulkOptionsRequest).files) {
+          written.add(file.document);
+        }
       } else if (
         typeof first === 'object' &&
         first !== null &&
@@ -653,7 +666,7 @@ function filesWrittenThrough(commands: BrowserCommands): ReadonlySet<DocumentId>
         written.add(first.document);
       }
     } // End of the loop over one stub's recorded calls
-  } // End of the loop over the seven barriered members
+  } // End of the loop over the eight barriered members
   return written;
 } // End of function filesWrittenThrough()
 
@@ -708,6 +721,8 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
   let duplicates = 0;
   let itemTexts = 0;
   let itemSaves = 0;
+  let spellingReads = 0;
+  let bulks = 0;
   let raws = 0;
   let drained = 0;
   drainsPending += script.drains?.length ?? 0;
@@ -794,6 +809,20 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     }),
     saveMatchItemText: vi.fn(async () => {
       const answer: CommandResult<SaveResult> = script.itemSaves?.[itemSaves++] ?? {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+      };
+      return answer;
+    }),
+    matchOptionSpellings: vi.fn(async () => {
+      const answer: CommandResult<BulkOptionSpellings> = script.spellings?.[spellingReads++] ?? {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+      };
+      return answer;
+    }),
+    applyBulkOptions: vi.fn(async (_request: BulkOptionsRequest) => {
+      const answer: CommandResult<BulkResult> = script.bulks?.[bulks++] ?? {
         ok: false,
         failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
       };
@@ -4956,6 +4985,376 @@ describe('the local raw editor’s read and write (Phase 3-8-1)', () => {
     expect(state.writeOutcomeUncertain(2)).toBe(false);
   }); // End of the "engine refusal" case
 }); // End of the "local raw editor's read and write" suite
+
+describe('the bulk option edit’s read and write (Phase 3-11-1)', () => {
+  /** How `match_option_spellings` answers for a snippet writing `word: 'true'`. */
+  const SPELLINGS: BulkOptionSpellings = {
+    word: { Written: { source: "'true'" } },
+    left_word: { Absent: {} },
+    right_word: { Absent: {} },
+    propagate_case: { Absent: {} },
+    uppercase_style: { Absent: {} },
+    force_mode: { Absent: {} },
+    force_clipboard: { Absent: {} }
+  };
+
+  /**
+   * A bulk request over both snippet files, as `prepareBulkApply` builds one.
+   *
+   * @param excluded - The files excluded before sending.
+   * @returns The request.
+   */
+  function bothFiles(excluded: readonly DocumentId[] = []): BulkOptionsRequest {
+    return {
+      changes: [{ option: 'word', value: { Set: 'true' } }],
+      files: [
+        { document: 2, base_revision: 'rev-a', matches: [baseDocument().matches[0]!.id], consent: null },
+        { document: 3, base_revision: 'rev-a', matches: [otherDocument().matches[0]!.id], consent: null }
+      ],
+      excluded
+    };
+  } // End of function bothFiles()
+
+  /**
+   * What `match/base.yml` projects to after a bulk edit wrote `word: true` into it:
+   * a new revision and new nodes, the snippets in the same order.
+   *
+   * @returns The projection.
+   */
+  function bulkEditedDocument(): DocumentView {
+    return makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision: 'rev-b',
+      matches: [
+        makeMatch({ node: 40, document: 2, revision: 'rev-b', trigger: ':sig', label: 'Signature' }),
+        makeMatch({ node: 41, document: 2, revision: 'rev-b', trigger: ':date', label: 'Today' })
+      ]
+    });
+  } // End of function bulkEditedDocument()
+
+  it('answers a spelling read unchanged, and reports a refusal as well as answering it', async () => {
+    const stale: CommandResult<BulkOptionSpellings> = {
+      ok: false,
+      failure: { kind: 'command', error: { code: 'identityStaleRevision', expected: 'rev-b', found: 'rev-a' } }
+    };
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({ spellings: [{ ok: true, value: SPELLINGS }, stale] });
+    const state = createBrowserState(commands, (failure) => reported.push(failure));
+    await state.open(null);
+    const id = baseDocument().matches[0]!.id;
+
+    expect(await state.matchOptionSpellings(id)).toEqual({ ok: true, value: SPELLINGS });
+    expect(await state.matchOptionSpellings(id)).toBe(stale);
+    expect(reported).toEqual([stale.ok ? null : stale.failure]);
+    expect(vi.mocked(commands.matchOptionSpellings).mock.calls).toEqual([[id], [id]]);
+  }); // End of the "spelling read" case
+
+  it('sends nothing when the window holds no projection of an applied file', async () => {
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    const request: BulkOptionsRequest = {
+      ...bothFiles(),
+      files: [{ document: 9, base_revision: 'rev-a', matches: [], consent: null }]
+    };
+
+    expect(await state.applyBulkOptions(request)).toEqual({ kind: 'notAttempted' });
+    expect(commands.applyBulkOptions).not.toHaveBeenCalled();
+  });
+
+  it('keeps a committed file’s success beside a later failure, and retires that file’s identities', async () => {
+    const result: BulkResult = {
+      preflight_passed: true,
+      nothing_written: false,
+      files: [
+        { document: 2, outcome: 'saved', revision: 'rev-b', backup_taken: true, notes: [] },
+        { document: 3, outcome: 'failed', error: { code: 'noWorkspaceOpen' } }
+      ]
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, bulks: [{ ok: true, value: result }] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    documents.set(2, { ok: true, value: bulkEditedDocument() });
+    const request = bothFiles();
+
+    const answer = await state.applyBulkOptions(request);
+
+    expect(answer).toEqual({
+      kind: 'answered',
+      result,
+      adoptions: [{ document: 2, adoption: { kind: 'done' } }]
+    });
+    expect(vi.mocked(commands.applyBulkOptions).mock.calls).toEqual([[request]]);
+    // The identity the request was sent with names nothing the window holds now.
+    expect(state.selected?.id.revision).toBe('rev-b');
+    expect(state.scopedMatches.map((match) => match.id.node)).toEqual([40, 41]);
+    // Only the committed file was read again; the failed one wrote nothing.
+    expect(commands.getDocument).toHaveBeenCalledTimes(4);
+    expect(state.writeInFlight(2)).toBe(false);
+    expect(state.writeInFlight(3)).toBe(false);
+    expect(state.writeOutcomeUncertain(3)).toBe(false);
+  }); // End of the "committed file beside a failure" case
+
+  it('never turns a committed file into an error when re-reading it throws', async () => {
+    const result: BulkResult = {
+      preflight_passed: true,
+      nothing_written: false,
+      files: [
+        { document: 2, outcome: 'saved', revision: 'rev-b', backup_taken: false, notes: [] },
+        { document: 3, outcome: 'notAttempted' }
+      ]
+    };
+    const commands = scriptedCommands({ bulks: [{ ok: true, value: result }] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    vi.mocked(commands.getDocument).mockImplementationOnce(async () => {
+      throw new Error('the re-read threw');
+    });
+
+    const answer = await state.applyBulkOptions(bothFiles());
+
+    expect(answer.kind).toBe('answered');
+    if (answer.kind === 'answered') {
+      expect(answer.result).toBe(result);
+      expect(answer.adoptions).toHaveLength(1);
+      expect(answer.adoptions[0]?.adoption.kind).toBe('failed');
+    }
+    expect(state.writeInFlight(2)).toBe(false);
+    expect(state.writeOutcomeUncertain(2)).toBe(false);
+  }); // End of the "adoption throws" case
+
+  it('re-reads a file whose write may have happened, and leaves it marked uncertain', async () => {
+    const result: BulkResult = {
+      preflight_passed: true,
+      nothing_written: false,
+      files: [
+        { document: 2, outcome: 'writeOutcomeUnknown', error: { code: 'noWorkspaceOpen' } },
+        { document: 3, outcome: 'notAttempted' }
+      ]
+    };
+    const commands = scriptedCommands({ bulks: [{ ok: true, value: result }] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const answer = await state.applyBulkOptions(bothFiles());
+
+    expect(answer).toMatchObject({ kind: 'answered', adoptions: [{ document: 2, adoption: { kind: 'done' } }] });
+    expect(commands.getDocument).toHaveBeenCalledTimes(4);
+    expect(state.writeOutcomeUncertain(2)).toBe(true);
+    expect(state.writeOutcomeUncertain(3)).toBe(false);
+    expect(state.writeInFlight(2)).toBe(false);
+  }); // End of the "may have written" case
+
+  it('answers a request refused as a whole as a failure that wrote nothing, and closes every lease', async () => {
+    const refused: CommandResult<BulkResult> = {
+      ok: false,
+      failure: { kind: 'command', error: { code: 'bulkRefused', error: { NoOptionChanges: {} } } }
+    };
+    const commands = scriptedCommands({ bulks: [refused] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+
+    const answer = await state.applyBulkOptions(bothFiles());
+
+    expect(answer).toEqual({
+      kind: 'failed',
+      mayHaveWritten: false,
+      failure: refused.ok ? null : refused.failure
+    });
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+    expect(state.writeInFlight(2)).toBe(false);
+    expect(state.writeInFlight(3)).toBe(false);
+  }); // End of the "refused as a whole" case
+
+  it('opens no lease for an excluded file, and re-reads nothing when every file already held the values', async () => {
+    const result: BulkResult = {
+      preflight_passed: true,
+      nothing_written: true,
+      files: [
+        { document: 2, outcome: 'alreadyUnchanged', revision: 'rev-a' },
+        { document: 3, outcome: 'excludedBeforeApply' }
+      ]
+    };
+    const commands = scriptedCommands({ bulks: [{ ok: true, value: result }] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    const request: BulkOptionsRequest = { ...bothFiles([3]), files: [bothFiles().files[0]!] };
+
+    const answer = await state.applyBulkOptions(request);
+
+    expect(answer).toEqual({ kind: 'answered', result, adoptions: [] });
+    expect(commands.getDocument).toHaveBeenCalledTimes(3);
+    expect(state.writeInFlight(2)).toBe(false);
+    expect(state.writeOutcomeUncertain(3)).toBe(false);
+  }); // End of the "excluded and unchanged" case
+}); // End of the "bulk option edit's read and write" suite
+
+describe('the bulk option edit’s post-commit ordering (Phase 3-11-1 review fixes)', () => {
+  /** Both snippet files saved, as one answer establishes them. */
+  const BOTH_SAVED: BulkResult = {
+    preflight_passed: true,
+    nothing_written: false,
+    files: [
+      { document: 2, outcome: 'saved', revision: 'rev-b', backup_taken: true, notes: [] },
+      { document: 3, outcome: 'saved', revision: 'rev-y', backup_taken: true, notes: [] }
+    ]
+  };
+
+  /**
+   * A request over both snippet files.
+   *
+   * @returns The request.
+   */
+  function request(): BulkOptionsRequest {
+    return {
+      changes: [{ option: 'word', value: { Set: 'true' } }],
+      files: [
+        { document: 2, base_revision: 'rev-a', matches: [baseDocument().matches[0]!.id], consent: null },
+        { document: 3, base_revision: 'rev-a', matches: [otherDocument().matches[0]!.id], consent: null }
+      ],
+      excluded: []
+    };
+  } // End of function request()
+
+  /**
+   * The two files as they read after the bulk edit: new revisions, new nodes,
+   * the same bytes at each position.
+   *
+   * @returns The projections of documents 2 and 3.
+   */
+  function rewritten(): { base: DocumentView; other: DocumentView } {
+    return {
+      base: makeDocument({
+        id: 2,
+        relativePath: 'match/base.yml',
+        revision: 'rev-b',
+        matches: [
+          makeMatch({ node: 40, document: 2, revision: 'rev-b', trigger: ':sig', label: 'Signature' }),
+          makeMatch({ node: 41, document: 2, revision: 'rev-b', trigger: ':date', label: 'Today' })
+        ]
+      }),
+      other: makeDocument({
+        id: 3,
+        relativePath: 'match/other.yml',
+        revision: 'rev-y',
+        matches: [makeMatch({ node: 50, document: 3, revision: 'rev-y', trigger: ':sql', label: 'Query' })]
+      })
+    };
+  } // End of function rewritten()
+
+  it('retires every committed file before the first re-read is awaited', async () => {
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, bulks: [{ ok: true, value: BOTH_SAVED }] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    const fresh = rewritten();
+    documents.set(3, { ok: true, value: fresh.other });
+    const held = deferred<CommandResult<DocumentView>>();
+    vi.mocked(commands.getDocument).mockImplementationOnce(async () => held.promise);
+
+    const answer = state.applyBulkOptions(request());
+    await vi.waitFor(() => expect(commands.getDocument).toHaveBeenCalledTimes(4));
+
+    // File 2's re-read is out; file 3 committed too, so neither old projection
+    // may still be live.
+    expect(vi.mocked(commands.getDocument).mock.calls[3]).toEqual([2]);
+    expect(state.views.some((view) => view.id === 2)).toBe(false);
+    expect(state.views.some((view) => view.id === 3)).toBe(false);
+
+    held.resolve({ ok: true, value: fresh.base });
+    expect(await answer).toMatchObject({
+      kind: 'answered',
+      adoptions: [
+        { document: 2, adoption: { kind: 'done' } },
+        { document: 3, adoption: { kind: 'done' } }
+      ]
+    });
+    expect(state.views.find((view) => view.id === 2)?.revision).toBe('rev-b');
+    expect(state.views.find((view) => view.id === 3)?.revision).toBe('rev-y');
+  }); // End of the "retires every committed file" case
+
+  it('does not restore a selection over a newer intent expressed during the re-read', async () => {
+    const commands = scriptedCommands({
+      bulks: [{ ok: true, value: { ...BOTH_SAVED, files: [BOTH_SAVED.files[0]!] } }],
+      match: { ok: true, value: otherDocument().matches[0]! }
+    });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await state.select(baseDocument().matches[0]!);
+    const held = deferred<CommandResult<DocumentView>>();
+    vi.mocked(commands.getDocument).mockImplementationOnce(async () => held.promise);
+
+    const answer = state.applyBulkOptions({ ...request(), files: [request().files[0]!] });
+    await vi.waitFor(() => expect(commands.getDocument).toHaveBeenCalledTimes(4));
+    await state.select(otherDocument().matches[0]!);
+    held.resolve({ ok: true, value: rewritten().base });
+    await answer;
+
+    // Without the guard the re-read found the same bytes at the held position
+    // and dragged the selection back to file 2 with a `kept` notice.
+    expect(state.selected?.document).toBe(3);
+    expect(state.selected?.id).toEqual(otherDocument().matches[0]!.id);
+    expect(state.notice).toBeNull();
+  }); // End of the "newer intent, bulk" case
+
+  it('restores the selection when no newer intent was expressed', async () => {
+    const commands = scriptedCommands({
+      bulks: [{ ok: true, value: { ...BOTH_SAVED, files: [BOTH_SAVED.files[0]!] } }]
+    });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await state.select(baseDocument().matches[0]!);
+    const held = deferred<CommandResult<DocumentView>>();
+    vi.mocked(commands.getDocument).mockImplementationOnce(async () => held.promise);
+
+    const answer = state.applyBulkOptions({ ...request(), files: [request().files[0]!] });
+    await vi.waitFor(() => expect(commands.getDocument).toHaveBeenCalledTimes(4));
+    held.resolve({ ok: true, value: rewritten().base });
+    await answer;
+
+    expect(state.selected?.id.revision).toBe('rev-b');
+    expect(state.notice).toBe('kept');
+  }); // End of the "no newer intent" case
+
+  it('guards the raw save’s re-read the same way', async () => {
+    const committed: CommandResult<SaveResult> = {
+      ok: true,
+      value: { outcome: 'saved', revision: 'rev-c', committed: true, notes: [], backup_taken: false, moved: null }
+    };
+    const commands = scriptedCommands({
+      raws: [committed],
+      match: { ok: true, value: otherDocument().matches[0]! }
+    });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await state.select(baseDocument().matches[0]!);
+    const held = deferred<CommandResult<DocumentView>>();
+    vi.mocked(commands.getDocument).mockImplementationOnce(async () => held.promise);
+
+    const answer = state.saveRawDocument(2, 'rev-a', 'matches: []\n', NOTHING_ACKNOWLEDGED);
+    await vi.waitFor(() => expect(commands.getDocument).toHaveBeenCalledTimes(4));
+    await state.select(otherDocument().matches[0]!);
+    held.resolve({ ok: true, value: replacedDocument() });
+    await answer;
+
+    // Unguarded, the re-read set the `differentMatch` notice over the person's
+    // newer selection.
+    expect(state.selected?.document).toBe(3);
+    expect(state.notice).toBeNull();
+  }); // End of the "raw save" case
+}); // End of the "bulk option edit's post-commit ordering" suite
 
 /**
  * What `match/base.yml` projects to after its whole text was replaced.
