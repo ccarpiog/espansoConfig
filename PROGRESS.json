@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T11:07:00Z",
+  "updated": "2026-09-24T12:45:00Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1061,8 +1061,25 @@
     {
       "id": "3-9",
       "title": "File-scope inspector",
+      "status": "in_progress",
+      "risk": "routine",
+      "summary": "Cut into 3-9-1 (model, components, i18n) and 3-9-2 (window half); 3-9-1 is done, 3-9-2 is next."
+    },
+    {
+      "id": "3-9-1",
+      "title": "File-scope inspector: model, components and i18n",
+      "status": "done",
+      "risk": "routine",
+      "summary": "Ordered import display with absent, empty and unsupported states and a kind-dependent note for _ files; reviewed and fixed.",
+      "review": "docs/reviews/phase-3-9-1.md",
+      "narrative": "docs/decisions/3-9-1-notes.md"
+    },
+    {
+      "id": "3-9-2",
+      "title": "File-scope inspector: the window half",
       "status": "queued",
-      "summary": "Queued: File-scope inspector."
+      "risk": "routine",
+      "summary": "Queued: EN and ES window reading of the file-scope inspector."
     },
     {
       "id": "3-10",

@@ -351,6 +351,21 @@ i18n.
 
 **Risk `routine`. Driven:** implementation yes; the window half per ruling 30. **Depends on** 3-2 (§4.3).
 
+**Addendum, 2026-09-24 — cut into two pieces before starting.** The implementation and the window
+half need different conditions (the second a visible, unlocked screen), so the orchestrator cut the
+step along 3-8's shape:
+
+- **3-9-1 — the model, the components and the i18n.** A browser file-scope model in
+  `src/lib/browser/` (ordered import rows as written, unsupported entries kept in place with a reason
+  code, the absent/empty/unsupported states, the `_` explanation), the components drawing it in the
+  file-detail area and `Sidebar.svelte`, the dictionary keys EN and ES through typed accessors, a model
+  test per acceptance clause and a mounted test. **No window half.** Its record says: *"No window
+  reading was performed or claimed."*
+- **3-9-2 — the window half.** EN and ES through the picker, per ruling 30 and §4.1. It needs a
+  visible, unlocked screen, and it closes step 3-9.
+
+Each piece is one phase with one worker and one review.
+
 ### 3-10 — Per-file bulk coordinator
 
 **Delivers** one backend bulk command. It preflights every file, keeps consent per file, and runs one

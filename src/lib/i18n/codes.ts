@@ -164,6 +164,14 @@ import {
   type ExternalConflictAction,
   type ExternalConflictNotice
 } from '../browser/observationDelivery';
+import {
+  autoLoadKey,
+  importsStateKey,
+  unsupportedImportKey,
+  type AutoLoadNote,
+  type AutoLoadPlacement,
+  type ImportsState
+} from '../browser/fileScope';
 import { conflictMessageKey, type ConflictMessage } from '../browser/saveOutcome';
 import {
   fileReconciliationStateKey,
@@ -2028,3 +2036,62 @@ export function describeReconciliationRouteNote(locale: Locale, note: RouteContr
 export function describeReconciliationSurfaceNote(locale: Locale, note: SurfaceControlNote): string {
   return translate(locale, surfaceControlNoteKey(note));
 } // End of function describeReconciliationSurfaceNote()
+
+// ---------------------------------------------------------------------------
+// The file-scope inspector — Phase 3-9-1
+// ---------------------------------------------------------------------------
+//
+// Frontend state under `browser.fileScope.*` (`docs/decisions/3-split-notes.md`
+// §2 step 3-9, ruling 14). The key functions live beside the types in
+// `../browser/fileScope.ts`; `../browser/fileScope.test.ts` calls every one of
+// these in both locales, because the Rust contract sees none of them.
+
+/**
+ * The words a file the core flags for its `_` name reads as at one placement,
+ * in one language.
+ *
+ * A snippet or package file says "not loaded automatically", why, and how such
+ * a file is still brought in (`imports`, `includes`, `extra_includes`); a
+ * configuration profile says only that its name starts with `_` and that this
+ * app checks nothing further. Neither says the file is switched off (ruling 14).
+ *
+ * @param locale - The dictionary to read from.
+ * @param note - The flagged state, from `autoLoadOf`.
+ * @param placement - A sidebar mark or the inspector's full explanation.
+ * @returns The translated words.
+ */
+export function describeAutoLoadNote(
+  locale: Locale,
+  note: AutoLoadNote,
+  placement: AutoLoadPlacement
+): string {
+  return translate(locale, autoLoadKey(note, placement));
+} // End of function describeAutoLoadNote()
+
+/**
+ * The sentence one imports state reads as, in one language.
+ *
+ * `unsupportedShape` takes what the file writes `imports` as, through
+ * {@link describeValueKind}; no other state takes an operand.
+ *
+ * @param locale - The dictionary to read from.
+ * @param state - The state.
+ * @returns The translated sentence.
+ */
+export function describeImportsState(locale: Locale, state: ImportsState): string {
+  const key = importsStateKey(state.kind);
+  return state.kind === 'unsupportedShape'
+    ? translate(locale, key, { kind: describeValueKind(locale, state.found) })
+    : translate(locale, key);
+} // End of function describeImportsState()
+
+/**
+ * The reason one unsupported imports entry reads as, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param found - What the entry is written as instead of a single scalar.
+ * @returns The translated sentence.
+ */
+export function describeUnsupportedImport(locale: Locale, found: ValueKind): string {
+  return translate(locale, unsupportedImportKey(), { kind: describeValueKind(locale, found) });
+} // End of function describeUnsupportedImport()

@@ -142,6 +142,7 @@ import type {
   ExternalConflictAction,
   ExternalConflictNotice
 } from '../browser/observationDelivery';
+import type { AutoLoadNote, AutoLoadPlacement, ImportsState } from '../browser/fileScope';
 import type {
   FileReconciliationState,
   FileStatePlacement,
@@ -247,12 +248,14 @@ import {
   describeFindingClass,
   describeFindingCode,
   describeHazard,
+  describeImportsState,
   describeInvariantViolation,
   describeIpcFailure,
   describeLineEnding,
   describeMatchBadge,
   describeMoveSeam,
   describeNodeKind,
+  describeAutoLoadNote,
   describePathError,
   describeNotReencodable,
   describePresentationNote,
@@ -276,6 +279,7 @@ import {
   describeTriggerKind,
   describeUnknownReason,
   describeUnreadableReason,
+  describeUnsupportedImport,
   describeValueKind,
   describeVariableKind,
   describeVerificationFailure,
@@ -2554,3 +2558,44 @@ export function tReconciliationRouteNote(note: RouteControlNote): string {
 export function tReconciliationSurfaceNote(note: SurfaceControlNote): string {
   return describeReconciliationSurfaceNote(locale.current, note);
 } // End of function tReconciliationSurfaceNote()
+
+// ---------------------------------------------------------------------------
+// The file-scope inspector — Phase 3-9-1
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders the words for a file the core flags for its `_` name, at one
+ * placement, in the current language. The reactive wrapper over
+ * `describeAutoLoadNote` in `./codes`, drawn by `Sidebar.svelte` (the mark and
+ * its `title`) and `FileScope.svelte`.
+ *
+ * @param note - The flagged state, from `autoLoadOf`.
+ * @param placement - A sidebar mark or the full explanation.
+ * @returns The translated words.
+ */
+export function tAutoLoadNote(note: AutoLoadNote, placement: AutoLoadPlacement): string {
+  return describeAutoLoadNote(locale.current, note, placement);
+} // End of function tAutoLoadNote()
+
+/**
+ * Renders one imports state in the current language. The reactive wrapper over
+ * `describeImportsState` in `./codes`, drawn by `FileScope.svelte`.
+ *
+ * @param state - The state.
+ * @returns The translated sentence.
+ */
+export function tImportsState(state: ImportsState): string {
+  return describeImportsState(locale.current, state);
+} // End of function tImportsState()
+
+/**
+ * Renders one unsupported imports entry's reason in the current language. The
+ * reactive wrapper over `describeUnsupportedImport` in `./codes`, drawn by
+ * `FileScope.svelte`.
+ *
+ * @param found - What the entry is written as.
+ * @returns The translated sentence.
+ */
+export function tUnsupportedImport(found: ValueKind): string {
+  return describeUnsupportedImport(locale.current, found);
+} // End of function tUnsupportedImport()

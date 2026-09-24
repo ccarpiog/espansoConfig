@@ -3,6 +3,7 @@
   import { badgesOf, labelText, matchKey, triggerLabel } from '../browser/labels';
   import type { BrowserState } from '../browser/workspace.svelte';
   import { t, tDiagnostic, tHazard, tMatchBadge, tOccurrenceCount, tTriggerKind } from '../i18n';
+  import FileScope from './FileScope.svelte';
 
   /*
    * The second pane of plan section 8.1: a search box, whatever this app has to
@@ -34,6 +35,11 @@
    * `plural.ts` so that "in 1 place" can never appear where "in 20 places" is
    * meant. The threshold that decides whether the count is said at all is
    * `line.repeated`, and it is decided there rather than here.
+   *
+   * **The file-scope inspector sits here for the same reason** (Phase 3-9-1):
+   * a file's imports and its "not loaded automatically" explanation are about
+   * the file, and a `_` file holding only `imports` has no snippet to select.
+   * It is drawn only when one file is in scope; the "All" scope is no file.
    */
 
   const { browser }: { browser: BrowserState } = $props();
@@ -91,6 +97,10 @@
         </ul>
       {/if}
     </div>
+  {/if}
+
+  {#if browser.scopedDocument !== null}
+    <FileScope document={browser.scopedDocument} />
   {/if}
 
   {#if browser.visibleMatches.length === 0}

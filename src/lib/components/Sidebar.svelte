@@ -9,7 +9,14 @@
   import { ALL_DOCUMENTS, sameSelection, type SidebarRow } from '../browser/sidebar';
   import type { BrowserState } from '../browser/workspace.svelte';
   import type { DocumentId } from '../ipc/types';
-  import { t, tIpcFailure, tReconciliationFileState, tSnippetCount } from '../i18n';
+  import { autoLoadOf } from '../browser/fileScope';
+  import {
+    t,
+    tIpcFailure,
+    tAutoLoadNote,
+    tReconciliationFileState,
+    tSnippetCount
+  } from '../i18n';
 
   /*
    * The first pane of plan section 8.1: an "All" entry, then files, profiles
@@ -18,7 +25,12 @@
    *
    * Nothing here parses a path or a file name. `disabled` is espanso's own
    * "the default include glob skips this file", and `read_only` is what makes a
-   * package a package; both arrive on `DocumentSummary`.
+   * package a package; both arrive on `DocumentSummary`. The first is drawn as
+   * "not loaded automatically" for a snippet file and as a neutral "name starts
+   * with _" for a configuration profile, never as switched off (ruling 14): the
+   * mark is `autoLoadOf`'s in `../browser/fileScope.ts`, and its `title` carries the
+   * whole explanation, which `FileScope.svelte` also draws in the list pane once
+   * the file is shown, so a reader who never hovers still meets it.
    *
    * **A total that omits a file says so.** A `get_document` that refused during
    * the load leaves the "All" number counting the files that read and no others,
@@ -105,6 +117,7 @@
       </h2>
       <ul class="rows">
         {#each rows as row (row.document.id)}
+          {@const autoLoad = autoLoadOf(row.document)}
           <li>
             <button
               type="button"
@@ -118,8 +131,10 @@
               onclick={() => browser.show({ kind: 'document', id: row.document.id })}
             >
               <span class="name">{row.document.relative_path}</span>
-              {#if row.document.disabled}
-                <span class="mark">{t('browser.sidebar.notAutoLoaded')}</span>
+              {#if autoLoad.kind !== 'default'}
+                <span class="mark" title={tAutoLoadNote(autoLoad.kind, 'explanation')}>
+                  {tAutoLoadNote(autoLoad.kind, 'mark')}
+                </span>
               {/if}
               {#each rowStates(row.document.id) as drawn (drawn.state.kind)}
                 <span class="mark warn" title={tReconciliationFileState(drawn.state, 'header')}>

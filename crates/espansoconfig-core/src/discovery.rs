@@ -21,8 +21,8 @@
 //! - The default include glob is `../match/**/[!_]*.yml`, so **a file whose name
 //!   starts with `_` is not auto-loaded**. That is the supported mechanism for
 //!   scoping snippets to an app via `extra_includes`, not a mistake, and the
-//!   editor must show such files as intentionally disabled rather than hide or
-//!   "fix" them.
+//!   editor must show such files as not auto-loaded (never "inactive") rather
+//!   than hide or "fix" them.
 //! - Anything under `match/packages/` came from the Hub and is read-only.
 
 use serde::ser::SerializeStruct;

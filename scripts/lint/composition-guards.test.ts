@@ -109,6 +109,10 @@ const MOUNTED_SUITES: ReadonlyMap<string, { readonly guard: SuiteGuard; readonly
       'src/lib/components/MatchDuplicator.test.ts',
       { guard: 'invokeZero', reason: 'injected props, and one real BrowserState over injected commands' }
     ],
+    [
+      'src/lib/components/FileScope.test.ts',
+      { guard: 'invokeZero', reason: 'injected props, and real BrowserStates over injected commands' }
+    ],
     ['src/lib/components/RawEditor.test.ts', { guard: 'invokeZero', reason: 'injected props only' }],
     ['src/lib/components/RawSnippetEditor.test.ts', { guard: 'invokeZero', reason: 'injected props only' }],
     ['src/lib/components/RecoveryPanel.test.ts', { guard: 'invokeZero', reason: 'injected props only' }],
