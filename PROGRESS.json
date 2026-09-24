@@ -1137,7 +1137,8 @@
       "summary": "A versioned per-workspace sidecar store in src-tauri: hashed file name, lossless keys, atomic locked writes, truthful quarantine, 30-day orphans.",
       "risk": "high",
       "review": "ship-with-fixes (Codex), 2 blockers fixed",
-      "narrative": "docs/decisions/3-12-notes.md"
+      "narrative": "docs/decisions/3-12-notes.md",
+      "commit": "710a484"
     },
     {
       "id": "3-13",
