@@ -999,7 +999,8 @@
       "risk": "high",
       "summary": "Draws the trigger-form controls, list editing, Several/Absent and recovery rows for trigger lists and regex in EN and ES.",
       "review": "docs/reviews/phase-3-6-2.md",
-      "narrative": "docs/decisions/3-6-2-notes.md"
+      "narrative": "docs/decisions/3-6-2-notes.md",
+      "commit": "b708600"
     },
     {
       "id": "3-6-3",
