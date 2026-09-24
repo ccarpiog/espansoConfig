@@ -314,6 +314,8 @@ use crate::syntax::{
 };
 use crate::LineEnding;
 
+#[cfg(test)]
+mod corrupted_candidate_tests;
 mod flow;
 mod raw_item;
 

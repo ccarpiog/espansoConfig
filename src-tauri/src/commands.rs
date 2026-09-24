@@ -4188,6 +4188,9 @@ pub fn drain_external_changes(
 mod bulk_check;
 
 #[cfg(test)]
+mod preservation_check;
+
+#[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};

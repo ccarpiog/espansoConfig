@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T18:41:05Z",
+  "updated": "2026-09-24T21:03:14Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1183,9 +1183,25 @@
     {
       "id": "3-15",
       "title": "Cross-layer preservation and Phase 3 closure",
-      "status": "queued",
-      "summary": "Next: preservation evidence across layers and the Phase 3 record, with 3-13-3 and 3-14 listed as owed.",
+      "status": "in_progress",
+      "summary": "Cut into 3-15-1 (preservation evidence) and 3-15-2 (closure record); does not close Phase 3 while 3-13-3 and 3-14 are owed.",
       "risk": "high"
+    },
+    {
+      "id": "3-15-1",
+      "title": "Cross-layer preservation evidence",
+      "status": "done",
+      "risk": "high",
+      "summary": "Every Phase 3 writer has a success and a refusal test; command-path saves keep untouched bytes; corrupted candidates are refused.",
+      "review": "docs/reviews/phase-3-15-1.md",
+      "narrative": "docs/decisions/3-15-1-notes.md"
+    },
+    {
+      "id": "3-15-2",
+      "title": "The Phase 3 closure record",
+      "status": "queued",
+      "risk": "high",
+      "summary": "Next: translation inventory, window halves read or owed, bounded risk rows, and the shipped scope statement."
     },
     {
       "id": "4",

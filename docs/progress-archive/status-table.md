@@ -1919,3 +1919,8 @@ Run by the orchestrator after the worker's report and again after the review fix
 |---|---|---|
 | **3-11-3 — bulk selection: the window half (records only), reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 2 SHOULD-FIX, both fixed in the records) and closed; step 3-11 closed** | `0b4279f` (this SHA record is the commit after it) | ✅ pushed, `601c4ff..0b4279f  main -> main`; tree clean after it. |
 | **3-12 — the application sidecar store, reviewed (`ship-with-fixes`, Codex, 2 BLOCKERS, both fixed) and closed** | `710a484` (this SHA record is the commit after it) | ✅ pushed, `c46957a..710a484  main -> main`; tree clean after it. `PROGRESS.md` brought back under the 64 KiB soft budget at this close |
+
+
+## 3-13-2's verification block, archived 2026-09-24 at 3-15-1
+
+Run by the orchestrator after the worker's report, all exit 0, output redirected to files and checked: `cargo test --workspace -- --test-threads=1` **1534 passed**, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`, `npm run check` **487 files**, 0 errors, 0 warnings; `npm test` **4062 passed**; `npm run build` **214 modules**. After the review fix (TypeScript and Svelte only; the worker re-ran the Rust gate, 1534 passed) the orchestrator re-ran `npm run check` (487 files), `npm test` (**4064 passed**) and `npm run build` (214 modules), all exit 0. Bundle oracle: server-only markers absent, client-only present (2). Rung **`1534 / 487 / 4064 / 214`** (+4 svelte-check files for `preferencesControl.ts`, `FilePreferences.svelte` and their two tests; +58 vitest tests; +3 Vite modules: `preferencesControl.ts` one, the styled `FilePreferences.svelte` two).

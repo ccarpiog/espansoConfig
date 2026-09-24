@@ -537,6 +537,25 @@ integration tests, the Phase 3 translation-review inventory (ruling 29), and the
 **Risk `high`. Driven:** yes. It makes no new window claim and adds no feature. **Depends on** 3-1 …
 3-14.
 
+**Addendum, 2026-09-24 — cut into two pieces before starting.** The step joins a test sweep across the
+core, `src-tauri` and the browser models with a closure record over fourteen steps; one worker cannot
+do both coherently, so the orchestrator cut it along that seam:
+
+- **3-15-1 — the preservation evidence.** Tests only, plus the notes that map them: every writer Phase 3
+  added has a success case and a refusal case; unknown bytes and coverage are conserved outside explicit
+  raw edits, checked through the command path (disk bytes and the refreshed projection); stale,
+  uncertain and partial bulk outcomes are covered; a deliberately corrupted candidate fails the oracle.
+  Where an existing test already discharges a clause, the notes cite it by name rather than duplicating
+  it. No feature, no behaviour change, no window claim.
+- **3-15-2 — the closure record.** The Phase 3 translation-review inventory (ruling 29); the window
+  halves owed by 3-5 … 3-14, each as read (by whom) or unread, with **3-13-3 and 3-14 owed to an
+  attended session** (§4.8); R16, R30, R35, R38 and the untouched CF rows stated accurately bounded;
+  and a scope statement that matches what shipped (ruling 17). It **does not** say that Phase 3 or
+  step 3-13 is closed.
+
+Each piece is one phase with one worker and one review. The acceptance list above is the union of the
+two. After 3-15-2 the run stops BLOCKED on the attended session (§4.8).
+
 ---
 
 ## 3. The binding rulings

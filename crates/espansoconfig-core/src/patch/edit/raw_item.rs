@@ -116,6 +116,9 @@ use super::{
 };
 use serde::Serialize;
 
+#[cfg(test)]
+mod corrupted_candidate_tests;
+
 /// Replace one sequence item's owned physical-line range with exact text.
 ///
 /// The request carries **no offset**: the range is derived by the engine from
