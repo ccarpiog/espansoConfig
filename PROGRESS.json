@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-23T23:37:07Z",
+  "updated": "2026-09-24T06:34:44Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -935,8 +935,8 @@
     {
       "id": "3-5",
       "title": "Scalar content and options editor, and the cursor action",
-      "status": "in_progress",
-      "summary": "Split into 3-5-1 (done) and 3-5-2 (3-5-2-1 done, 3-5-2-2 window half blocked); 3-5-2-2 closes the step."
+      "status": "done",
+      "summary": "Split into 3-5-1 and 3-5-2; all pieces done, the window half read in EN and ES on 2026-09-24."
     },
     {
       "id": "3-5-1",
@@ -951,9 +951,9 @@
     {
       "id": "3-5-2",
       "title": "Scalar content and options: components, i18n and the window half",
-      "status": "in_progress",
+      "status": "done",
       "risk": "high",
-      "summary": "Split into 3-5-2-1 (components and i18n, done) and 3-5-2-2 (the window half, blocked on a locked screen); 3-5-2-2 closes the step."
+      "summary": "Split into 3-5-2-1 (components and i18n) and 3-5-2-2 (the window half); both done."
     },
     {
       "id": "3-5-2-1",
@@ -968,9 +968,11 @@
     {
       "id": "3-5-2-2",
       "title": "Scalar content and options: the window half",
-      "status": "blocked",
+      "status": "done",
       "risk": "high",
-      "summary": "Blocked: the window half needs a visible, unlocked screen, or an owner ruling to record it unread and owed."
+      "summary": "A model reads window captures in EN and ES, including a block-scalar content conflict; records only, instrument deleted.",
+      "review": "docs/reviews/phase-3-5-2-2.md",
+      "narrative": "docs/decisions/3-5-2-2-notes.md"
     },
     {
       "id": "3-6",
