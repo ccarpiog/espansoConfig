@@ -119,12 +119,14 @@ impl CodeEnum {
 
 /// Every enum whose variants can reach a user, and where its declaration is.
 ///
-/// All but four are on the wire in some form. Those four —
-/// `WorkspaceError`, `DiscoveryError`, `IdentityError` and `DocumentShape` as an
-/// operand — are here because a code with no string is worse than a code with no
-/// caller (`1b-2a-notes.md` section 9, hole 3): the first three never cross the
-/// Tauri boundary in their own shape, since `CommandError` flattens their
-/// conditions, and they still owe a sentence in case a later phase forwards one.
+/// All but three are on the wire in some form. Those three —
+/// `WorkspaceError`, `DiscoveryError` and `DocumentShape` as an operand — are
+/// here because a code with no string is worse than a code with no caller
+/// (`1b-2a-notes.md` section 9, hole 3): the first two never cross the Tauri
+/// boundary in their own shape, since `CommandError` flattens their conditions,
+/// and they still owe a sentence in case a later phase forwards one.
+/// `IdentityError` was the fourth until Phase 3-10, whose `BulkPlanError`
+/// forwards it whole.
 ///
 /// **Six were added by Phase 1b-2b's review.** `ScalarStyle`, `LineEnding`,
 /// `FileKind`, `TriggerKind`, `ContentKind` and `VariableKind` already cross the
@@ -424,6 +426,16 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "src-tauri/src/reconciliation.rs",
         name: "ChangedContent",
     },
+    // Phase 3-10's two: the core's bulk planning refusal, and the per-file
+    // outcome the bulk coordinator reports.
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/draft/bulk.rs",
+        name: "BulkPlanError",
+    },
+    CodeEnum {
+        source: "src-tauri/src/bulk.rs",
+        name: "BulkFileOutcome",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -443,7 +455,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("identityError", 3),
     ("workspaceError", 5),
     ("discoveryError", 3),
-    ("commandError", 22),
+    ("commandError", 23),
     ("scalarStyle", 5),
     ("lineEnding", 2),
     ("fileKind", 3),
@@ -465,7 +477,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("editError", 50),
     ("moveSeam", 4),
     ("duplicateSeam", 3),
-    ("verificationFailure", 40),
+    ("verificationFailure", 41),
     ("syntaxError", 3),
     ("invariantViolation", 5),
     ("pathError", 9),
@@ -487,6 +499,8 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("unreadableReason", 6),
     ("addedContent", 2),
     ("changedContent", 2),
+    ("bulkPlanError", 9),
+    ("bulkFileOutcome", 10),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.
@@ -627,6 +641,20 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          workspace resolves that number, which a screen answers by what it \
          draws rather than by a sentence. What a screen says about a removed or \
          unreadable file comes from `ExternalObservation`'s own namespace",
+    ),
+    (
+        "BulkOption",
+        "a field identifier, not a code, for the same reason as `MatchField` and \
+         with the same spelling on the wire: it names one of the seven options a \
+         bulk edit may write (Phase 3-10, ruling 20), which espanso spells one way \
+         and which `every_bulk_option_serializes_as_its_espanso_key` pins",
+    ),
+    (
+        "BulkValue",
+        "a protocol tag, not a code, exactly as `DraftField` is: `Set` and \
+         `Remove` travel *into* `apply_bulk_options` as one option's intent \
+         (Phase 3-10) and are never rendered — the value inside a `Set` is what a \
+         screen shows",
     ),
     (
         "DraftTarget",
@@ -1254,6 +1282,8 @@ fn every_typescript_wire_union_has_a_namespace() {
     assert_eq!(
         exempted,
         vec![
+            "BulkOption".to_owned(),
+            "BulkValue".to_owned(),
             "MatchField".to_owned(),
             "SequenceField".to_owned(),
             "ContentForm".to_owned(),
@@ -1261,7 +1291,10 @@ fn every_typescript_wire_union_has_a_namespace() {
             "VariableField".to_owned(),
             "ObservedDocumentName".to_owned()
         ],
-        "the unions exempted by NOT_A_CODE changed. The first five are field \
+        "the unions exempted by NOT_A_CODE changed, listed in the file's order. The \
+         first two are Phase 3-10's: `BulkOption` is a field identifier that \
+         serializes as an espanso key, and `BulkValue` is a protocol tag whose one \
+         bare member is `Remove`. Of the rest, the first five are field \
          identifiers that serialize as espanso keys (`ContentForm` since Phase \
          3-5-1, `TriggerForm` since Phase 3-6-1); the sixth is Phase 2d-4b's \
          mirror of the one reconciliation enum this table already classifies as an \

@@ -1531,8 +1531,13 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// path, it is the local raw-item edit — a `DocumentEdit` through
 /// `SaveContent::Edits`, whose core primitive (`ItemTextReplacement`) closed in
 /// the same phase before the command was registered.
+///
+/// Phase 3-10 adds `apply_bulk_options`, taking the workspace surface to
+/// nineteen and the whole to twenty. It is the eighth writer and not a restore
+/// path either: the per-file bulk option edit, which ends in the same
+/// `run_one_save` once per file with a `SaveContent::Edits` batch.
 #[test]
-fn the_registered_commands_are_the_workspace_eighteen_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_nineteen_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1541,8 +1546,8 @@ fn the_registered_commands_are_the_workspace_eighteen_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        18,
-        "the frontend declares eleven read-only commands and seven that write: {workspace:?}"
+        19,
+        "the frontend declares eleven read-only commands and eight that write: {workspace:?}"
     );
     assert!(
         workspace.contains("drain_external_changes"),
@@ -1557,6 +1562,7 @@ fn the_registered_commands_are_the_workspace_eighteen_and_the_menu_command() {
         "save_raw_document",
         "duplicate_match",
         "save_match_item_text",
+        "apply_bulk_options",
     ];
     for mutating in writing {
         assert!(
@@ -1566,10 +1572,11 @@ fn the_registered_commands_are_the_workspace_eighteen_and_the_menu_command() {
     }
     assert_eq!(
         writing.len(),
-        7,
-        "a restore is a content path on save_raw_document (Phase 2c-5 consult, Q1), and the \
-         seventh writer is Phase 3-7's local raw-item edit (ruling 11), so nothing may add \
-         an eighth writing command"
+        8,
+        "a restore is a content path on save_raw_document (Phase 2c-5 consult, Q1), the \
+         seventh writer is Phase 3-7's local raw-item edit (ruling 11) and the eighth is \
+         Phase 3-10's per-file bulk option edit (ruling 19), so nothing may add a ninth \
+         writing command"
     );
     assert!(
         workspace.contains("match_item_text") && !writing.contains(&"match_item_text"),
@@ -1597,8 +1604,8 @@ fn the_registered_commands_are_the_workspace_eighteen_and_the_menu_command() {
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        19,
-        "Phase 3-7 registers eighteen workspace commands and one menu command, and no more: {registered:?}"
+        20,
+        "Phase 3-10 registers nineteen workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1606,7 +1613,7 @@ fn the_registered_commands_are_the_workspace_eighteen_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_eighteen_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_nineteen_and_the_menu_command()
 
 /// The names no read of the backup tree may so much as mention.
 ///
@@ -2224,6 +2231,11 @@ fn verification_failure_samples() -> Vec<VerificationFailure> {
             wanted_len: 4,
             found_len: 5,
             first_difference: 2,
+        },
+        VerificationFailure::PlainSourceNotReadBack {
+            edit: 0,
+            at: 12,
+            len: 4,
         },
         VerificationFailure::DecoderDisagreement { edit: 0 },
         VerificationFailure::Undecodable {
@@ -2891,7 +2903,7 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 226,
+        variants, 227,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
          eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals, \
          Phase 2b-2c-2's fix round made PresentationNote a two-variant union, \
@@ -2911,7 +2923,8 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
          EditError::FlowListLayoutUnsupported and \
          VerificationFailure::SequenceStyleChanged, and Phase 3-7 added the local \
          raw-item edit's thirteen — six EditError refusals and seven \
-         VerificationFailure properties; \
+         VerificationFailure properties, and Phase 3-10 added \
+         VerificationFailure::PlainSourceNotReadBack; \
          this list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
@@ -3245,7 +3258,7 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (143, 12, 71),
+        (144, 12, 71),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
          and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
@@ -3265,7 +3278,7 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
          ShapeSwitchUnsupported and ItemNotInserted, and so are Phase 3-3's \
          FlowListTriviaAmbiguous, FlowListLayoutUnsupported and \
          SequenceStyleChanged, and Phase 3-7's thirteen raw-item variants are \
-         thirteen more; \
+         thirteen more, and Phase 3-10's PlainSourceNotReadBack is one more; \
          a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
@@ -3544,7 +3557,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 226,
+        checked, 227,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()
@@ -4426,3 +4439,293 @@ fn the_frontend_subscribes_to_exactly_the_event_rust_emits() {
         );
     }
 } // End of function the_frontend_subscribes_to_exactly_the_event_rust_emits()
+
+// ---------------------------------------------------------------------------
+// The bulk option edit — Phase 3-10
+// ---------------------------------------------------------------------------
+//
+// Its own tables, for the backup catalogue's reason: the counts pinned for the
+// save transaction are that family's, and folding a second family into them
+// would make every one of those numbers mean two things at once.
+
+/// One instance of every `BulkPlanError` variant, nested refusals included.
+fn bulk_plan_error_samples() -> Vec<espansoconfig_core::draft::BulkPlanError> {
+    use espansoconfig_core::draft::{BulkOption, BulkPlanError};
+    use espansoconfig_core::model::IdentityError;
+    use espansoconfig_core::DocumentId;
+    vec![
+        BulkPlanError::NoOptionChanges {},
+        BulkPlanError::OptionRepeated {
+            option: BulkOption::ForceMode,
+        },
+        BulkPlanError::OptionNotPlainSource {
+            option: BulkOption::Word,
+        },
+        BulkPlanError::NoFiles {},
+        BulkPlanError::DocumentRepeated {
+            document: DocumentId(3),
+        },
+        BulkPlanError::NoMatches {},
+        BulkPlanError::MatchRepeated { index: 2 },
+        BulkPlanError::Identity {
+            index: 0,
+            error: IdentityError::WrongDocument {
+                expected: DocumentId(1),
+                found: DocumentId(2),
+            },
+        },
+        BulkPlanError::Draft {
+            index: 1,
+            error: DraftError::MatchHasNoPath {},
+        },
+    ]
+} // End of function bulk_plan_error_samples()
+
+/// One instance of every `IdentityError` variant, as it crosses inside a
+/// `BulkPlanError`.
+fn identity_error_samples() -> Vec<espansoconfig_core::model::IdentityError> {
+    use espansoconfig_core::model::IdentityError;
+    use espansoconfig_core::{ContentRevision, DocumentId};
+    vec![
+        IdentityError::WrongDocument {
+            expected: DocumentId(1),
+            found: DocumentId(2),
+        },
+        IdentityError::StaleRevision {
+            expected: ContentRevision::of_bytes(b"a"),
+            found: ContentRevision::of_bytes(b"b"),
+        },
+        IdentityError::NoSuchMatch { node: first_node() },
+    ]
+} // End of function identity_error_samples()
+
+/// A real node identity, from a real parse.
+fn first_node() -> espansoconfig_core::NodeId {
+    espansoconfig_core::SyntaxIndex::parse("matches: []\n")
+        .expect("a trivial parse")
+        .nodes()[0]
+        .id
+}
+
+/// Both tagged enums of the bulk wire, their unions and their operands, are
+/// declared exactly as Rust writes them, and every sentence's placeholders name
+/// an operand Rust writes as a string or a number.
+#[test]
+fn every_bulk_tagged_union_declares_exactly_the_rust_variants_and_operands() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let english = crate::dictionary_contract::dictionary_values("src/lib/i18n/en.json");
+    let spanish = crate::dictionary_contract::dictionary_values("src/lib/i18n/es.json");
+    let tables: Vec<(&str, Vec<Value>)> = vec![
+        (
+            "BulkPlanError",
+            bulk_plan_error_samples().iter().map(json_of).collect(),
+        ),
+        (
+            "IdentityError",
+            identity_error_samples().iter().map(json_of).collect(),
+        ),
+    ];
+    let mut checked = 0usize;
+    for (name, samples) in tables {
+        let declared = crate::dictionary_contract::declared_variants_of(name);
+        let enumerated: BTreeSet<String> = samples.iter().map(variant_name).collect();
+        assert_eq!(
+            declared, enumerated,
+            "the {name} samples and declaration disagree"
+        );
+        assert_eq!(
+            samples.len(),
+            enumerated.len(),
+            "{name}: one sample per variant"
+        );
+        let union = format!("{name}Name");
+        assert_same_names(
+            &format!("type {union}"),
+            &enumerated,
+            &union_members(&source, &union),
+        );
+        for json in &samples {
+            let variant = variant_name(json);
+            let payload = json
+                .get(&variant)
+                .and_then(Value::as_object)
+                .unwrap_or_else(|| panic!("{name}::{variant} crosses as a one-key object"));
+            let written: BTreeSet<String> = payload.keys().cloned().collect();
+            let fields = tagged_variant_fields(&source, name, &variant)
+                .unwrap_or_else(|| panic!("type {name} declares no payload for {variant}"));
+            assert_same_names(
+                &format!("the {variant} payload of type {name}"),
+                &written,
+                &fields,
+            );
+            let operands: BTreeSet<String> = payload
+                .iter()
+                .filter(|(_, value)| value.is_string() || value.is_number())
+                .map(|(operand, _)| operand.clone())
+                .collect();
+            let key = crate::dictionary_contract::code_key(name, &variant);
+            for (locale, dictionary) in [("en", &english), ("es", &spanish)] {
+                let sentence = dictionary
+                    .get(&key)
+                    .unwrap_or_else(|| panic!("{locale}.json has no {key}"));
+                let unbacked: Vec<String> = placeholders_of(sentence)
+                    .difference(&operands)
+                    .cloned()
+                    .collect();
+                assert!(
+                    unbacked.is_empty(),
+                    "{locale}.json's {key} names {unbacked:?}, which Rust does not write"
+                );
+            } // End of the loop over the two dictionaries
+            checked += 1;
+        } // End of the loop over one enum's samples
+    } // End of the loop over the two tagged enums
+    assert_eq!(
+        checked, 12,
+        "nine BulkPlanError and three IdentityError variants"
+    );
+} // End of function every_bulk_tagged_union_declares_exactly_the_rust_variants_and_operands()
+
+/// The seven options and the two intents are declared as Rust spells them.
+#[test]
+fn the_bulk_option_and_value_unions_are_the_rust_spellings() {
+    use espansoconfig_core::draft::{BulkOption, BulkValue};
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let options: BTreeSet<String> = BulkOption::ALL
+        .iter()
+        .map(|option| json_of(option).as_str().expect("a key").to_owned())
+        .collect();
+    assert_eq!(options.len(), 7);
+    assert_same_names(
+        "type BulkOption",
+        &options,
+        &union_members(&source, "BulkOption"),
+    );
+    assert_eq!(
+        json_of(&BulkValue::Remove),
+        Value::String("Remove".to_owned())
+    );
+    assert_eq!(
+        json_of(&BulkValue::Set("true".to_owned())),
+        serde_json::json!({ "Set": "true" })
+    );
+    let body = union_body(&source, "BulkValue");
+    assert!(body.contains("readonly Set: string") && body.contains("'Remove'"));
+    assert!(
+        !body.contains("Unchanged"),
+        "an untouched control emits nothing, so the union has no Unchanged member"
+    );
+} // End of function the_bulk_option_and_value_unions_are_the_rust_spellings()
+
+/// Every file outcome is declared exactly as Rust writes it, flat, like
+/// `SaveResult`, and the result and its reports carry exactly what `serde`
+/// writes.
+#[test]
+fn every_bulk_outcome_and_the_result_declare_exactly_what_rust_writes() {
+    use crate::bulk::{every_bulk_file_outcome, BulkFileReport, BulkResult};
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let outcomes = every_bulk_file_outcome();
+    let names: BTreeSet<String> = outcomes
+        .iter()
+        .map(|outcome| outcome.outcome().to_owned())
+        .collect();
+    assert_eq!(names.len(), 10, "ten outcomes: {names:?}");
+    assert_same_names(
+        "type BulkFileOutcomeName",
+        &names,
+        &union_members(&source, "BulkFileOutcomeName"),
+    );
+    let declared = crate::dictionary_contract::declared_variants_of("BulkFileOutcome");
+    let uncapitalized: BTreeSet<String> = declared
+        .iter()
+        .map(|variant| {
+            let mut characters = variant.chars();
+            let first = characters.next().expect("a variant name is never empty");
+            format!("{}{}", first.to_ascii_lowercase(), characters.as_str())
+        })
+        .collect();
+    assert_eq!(
+        uncapitalized, names,
+        "each outcome code is its variant name uncapitalized, which is what \
+         bulkFileOutcomeKey in codes.ts relies on"
+    );
+    for outcome in &outcomes {
+        let code = outcome.outcome();
+        let mut characters = code.chars();
+        let first = characters.next().expect("an outcome is never empty");
+        let interface = format!(
+            "Bulk{}{}Outcome",
+            first.to_ascii_uppercase(),
+            characters.as_str()
+        );
+        assert_same_names(
+            &format!("interface {interface}"),
+            &json_keys(&json_of(outcome)),
+            &interface_fields(&source, &interface),
+        );
+        assert!(
+            union_body(&source, "BulkFileOutcome").contains(&interface),
+            "type BulkFileOutcome does not include {interface}"
+        );
+    } // End of the loop over the ten outcomes
+    let report = BulkFileReport {
+        document: espansoconfig_core::DocumentId(4),
+        outcome: crate::bulk::BulkFileOutcome::NotAttempted {},
+    };
+    assert_eq!(
+        json_of(&report),
+        serde_json::json!({ "document": 4, "outcome": "notAttempted" }),
+        "a report is its document beside its flattened outcome"
+    );
+    assert!(union_body(&source, "BulkFileReport").contains("readonly document: DocumentId"));
+    let result = BulkResult::new(true, vec![report]);
+    assert_same_names(
+        "interface BulkResult",
+        &json_keys(&json_of(&result)),
+        &interface_fields(&source, "BulkResult"),
+    );
+} // End of function every_bulk_outcome_and_the_result_declare_exactly_what_rust_writes()
+
+/// The request the frontend sends is exactly what Rust reads, at every level,
+/// and nothing else — no `force` property anywhere.
+#[test]
+fn the_bulk_request_declares_exactly_what_rust_reads() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let consent = serde_json::json!({
+        "document": 0,
+        "base_revision": "0".repeat(64),
+        "intent": "0".repeat(64),
+        "candidate": "0".repeat(64),
+        "acknowledgement": { "accepted": [] },
+    });
+    let change = serde_json::json!({ "option": "word", "value": "Remove" });
+    let file = serde_json::json!({
+        "document": 0,
+        "base_revision": "0".repeat(64),
+        "matches": [],
+        "consent": consent,
+    });
+    let request = serde_json::json!({
+        "changes": [change],
+        "files": [file],
+        "excluded": [1],
+    });
+    serde_json::from_value::<crate::bulk::BulkOptionsRequest>(request.clone())
+        .expect("the full request reads");
+    for (interface, value) in [
+        ("BulkOptionsRequest", &request),
+        ("BulkFileRequest", &file),
+        ("BulkConsent", &consent),
+        ("BulkOptionChange", &change),
+    ] {
+        assert_same_names(
+            &format!("interface {interface}"),
+            &json_keys(value),
+            &interface_fields(&source, interface),
+        );
+        assert!(
+            !interface_fields(&source, interface).contains("force"),
+            "{interface} declares no force flag"
+        );
+    } // End of the loop over the request's four levels
+} // End of function the_bulk_request_declares_exactly_what_rust_reads()

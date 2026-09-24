@@ -54,7 +54,7 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
 use espansoconfig_core::discovery::DiscoveryError;
-use espansoconfig_core::draft::DraftError;
+use espansoconfig_core::draft::{BulkPlanError, DraftError};
 use espansoconfig_core::model::IdentityError;
 use espansoconfig_core::patch::EditError;
 use espansoconfig_core::persist::{BackupReadError, SaveError};
@@ -501,6 +501,20 @@ pub enum CommandError {
         /// Why the range could not be read, exactly as the core reports it.
         error: EditError,
     },
+    /// A bulk option edit could not be planned (Phase 3-10).
+    ///
+    /// **Two places, one meaning: nothing was written.** As the whole
+    /// command's error it refuses a malformed request — no option change, an
+    /// option or a file named twice, no file — before any file is read. Inside
+    /// a `crate::bulk::BulkFileOutcome::Blocked` it is one file's preflight
+    /// blocker — no snippet selected, a snippet selected twice, an identity that
+    /// does not resolve, a snippet the planner refuses — and no file of the
+    /// request is written. The core's refusal travels whole, with its own
+    /// `bulkPlanError` namespace, for [`CommandError::DraftRefused`]'s reason.
+    BulkRefused {
+        /// Why the bulk edit could not be planned, exactly as the core reports it.
+        error: BulkPlanError,
+    },
 } // End of enum CommandError
 
 impl CommandError {
@@ -535,6 +549,7 @@ impl CommandError {
             CommandError::BackupEntryIsNotThisDocument { .. } => "backupEntryIsNotThisDocument",
             CommandError::BackupReadFailed { .. } => "backupReadFailed",
             CommandError::ItemTextRefused { .. } => "itemTextRefused",
+            CommandError::BulkRefused { .. } => "bulkRefused",
         }
     } // End of function code()
 } // End of impl CommandError
@@ -622,6 +637,9 @@ impl Serialize for CommandError {
             CommandError::ItemTextRefused { error } => {
                 out.serialize_field("error", error)?;
             }
+            CommandError::BulkRefused { error } => {
+                out.serialize_field("error", error)?;
+            }
         } // End of the match over the variants' operands
         out.end()
     } // End of function serialize() for CommandError
@@ -653,7 +671,10 @@ impl CommandError {
             | CommandError::DraftRefused { .. }
             // One operand, the core's whole range refusal: a read writes
             // nothing, so there is no `may_have_written` to add.
-            | CommandError::ItemTextRefused { .. } => 1,
+            | CommandError::ItemTextRefused { .. }
+            // One operand, the core's whole planning refusal: nothing was
+            // attempted, so there is no `may_have_written` to add.
+            | CommandError::BulkRefused { .. } => 1,
             CommandError::Io { .. }
             | CommandError::NotUtf8 { .. }
             | CommandError::IdentityWrongDocument { .. }
@@ -765,6 +786,11 @@ pub(crate) fn every_command_error() -> Vec<CommandError> {
                 edit: 0,
                 hole: espansoconfig_core::ByteSpan::new(40, 90),
             },
+        },
+        // Sampled with a request-level refusal, the shape the whole command
+        // answers with before any file is read.
+        CommandError::BulkRefused {
+            error: BulkPlanError::NoOptionChanges {},
         },
     ]
 } // End of function every_command_error()

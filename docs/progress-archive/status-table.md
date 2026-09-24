@@ -1818,3 +1818,15 @@ Run by the orchestrator after the worker, instrument still in place (it contribu
 ### Phase 3-9-1's verification
 
 Run by the orchestrator after the fix worker: `cargo test --workspace -- --test-threads=1` exit 0, **1465 passed, 0 failed**; `cargo clippy --workspace --all-targets -- -D warnings` exit 0; `cargo fmt --check` exit 0; `npm run check` exit 0, **474 files**, 0 errors, 0 warnings; `npm test` exit 0, **3822 passed**; `npm run build` exit 0, **207 modules** (+3: `fileScope.ts` one, the styled `FileScope.svelte` two). Bundle oracle: server-only markers absent, client-only present (2). `cargo tree -p espansoconfig-core | rg tauri` finds nothing. Rung **`1465 / 474 / 3822 / 207`**.
+
+## The 3-9-2 status row and 3-9-2's verification block
+
+Archived verbatim 2026-09-24 at 3-10.
+
+| Phase | Scope | State |
+|---|---|---|
+| **3-9-2** | The file-scope inspector: the window half; step 3-9 closed. A model's look at `screencapture -l` captures of a visible, unlocked window (`IOConsoleLocked = No` around every capture), EN and ES set through the picker, a fresh bundle path per launch, over synthetic fixtures in a minimal **uncommitted** instrument (`instrument-3-9-2/`, deleted after the review): all five shapes read in both languages; the two sidebar tooltips recorded **unread** (a real hover is a person's; DOM `title` evidence only). The reading found **F1** — the imports list drew position numbers only beside the reason rows, not beside the three rows drawn through `SourceText` — fixed in `FileScope.svelte` by drawing `row.position` explicitly (native marker off), a mounted test per locale, and re-read in launches L04 (EN) and L05 (ES): `1`–`5` drawn. Risk **routine**; worker **opus** (fix by the same worker); driven | ✅ **complete and CLOSED.** Review: `autoclaude-review.sh` **exited 0 — Codex**, no fallback: **`ship-with-fixes`, 0 BLOCKERS + 1 SHOULD-FIX** (fix F1 before 3-9 closes) — **fixed** as above ([`docs/reviews/phase-3-9-2.md`](docs/reviews/phase-3-9-2.md), brief [`phase-3-9-2.brief.md`](docs/reviews/phase-3-9-2.brief.md)). Rung **`1465 / 474 / 3824 / 207`**. Notes [`3-9-2-notes.md`](docs/decisions/3-9-2-notes.md) (§5 open items: the findings block's *The key "imports" holds a list…* wording describes an entry as the key; a `_` profile's detail pane offers *Add a snippet*), reading [`3-9-2-window-reading.md`](docs/decisions/3-9-2-window-reading.md); captures outside the repo in `/private/tmp/3-9-2/` |
+
+### Phase 3-9-2's verification
+
+Run by the orchestrator after the fix worker, with the instrument deleted: `cargo test --workspace -- --test-threads=1` exit 0, **1465 passed, 0 failed**; `cargo clippy --workspace --all-targets -- -D warnings` exit 0; `cargo fmt --check` exit 0; `npm run check` exit 0, **474 files**, 0 errors, 0 warnings; `npm test` exit 0, **3824 passed** (+2: the per-locale position case in `FileScope.test.ts`); `npm run build` exit 0, **207 modules**. Bundle oracle: server-only markers absent, client-only present (2). Rust untouched, so `cargo tree` unchanged. Rung **`1465 / 474 / 3824 / 207`**.

@@ -1,5 +1,5 @@
 /**
- * The eighteen command wrappers, against a stubbed `invoke`.
+ * The nineteen command wrappers, against a stubbed `invoke`.
  *
  * What is under test here is the *boundary*, not the Rust behind it: which
  * command name each wrapper calls, which arguments it sends, and — the part
@@ -16,7 +16,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RawSaveInvalidation } from './commands';
-import type { BackupBatchId, BackupEntryId, MatchDraft, NewMatch } from './types';
+import type {
+  BackupBatchId,
+  BackupEntryId,
+  BulkOptionsRequest,
+  MatchDraft,
+  NewMatch
+} from './types';
 
 /** Every call the stubbed `invoke` received, in order. */
 const calls: Array<{ command: string; args: unknown }> = [];
@@ -61,6 +67,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 const commands = await import('./commands');
 const {
   COMMAND_NAMES,
+  applyBulkOptions,
   createMatch,
   deleteMatch,
   documentText,
@@ -98,6 +105,13 @@ const IDENTITY = { document: 3, revision: 'a'.repeat(64), node: 11 };
  * anything happened.
  */
 const BATCH_ID: BackupBatchId = { name: '2026-01-02T030405Z-0' };
+
+/** A bulk option edit over one file, with no consent (Phase 3-10). */
+const BULK_REQUEST: BulkOptionsRequest = {
+  changes: [{ option: 'word', value: { Set: 'true' } }],
+  files: [{ document: 3, base_revision: 'a'.repeat(64), matches: [IDENTITY], consent: null }],
+  excluded: []
+};
 
 /** A backup entry identity, exactly as a listing would have produced it. */
 const ENTRY_ID: BackupEntryId = { batch: BATCH_ID, relative_path: 'match/base.yml' };
@@ -157,7 +171,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the eighteen wire names, in order, and export no nineteenth wrapper', async () => {
+  it('call the nineteen wire names, in order, and export no twentieth wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -183,8 +197,10 @@ describe('the command wrappers', () => {
     await drainExternalChanges(0);
     await matchItemText(IDENTITY);
     await saveMatchItemText(IDENTITY, 'a'.repeat(64), '  - trigger: a\n', { accepted: [] });
+    await applyBulkOptions(BULK_REQUEST);
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
+      'applyBulkOptions',
       'createMatch',
       'deleteMatch',
       'documentText',
@@ -204,7 +220,7 @@ describe('the command wrappers', () => {
       'saveMatchItemText',
       'saveRawDocument'
     ]);
-  }); // End of the "call the eighteen wire names" case
+  }); // End of the "call the nineteen wire names" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence
@@ -382,6 +398,15 @@ describe('the command wrappers', () => {
     });
     expect(JSON.stringify(calls[1]?.args)).not.toContain('force');
   }); // End of the "raw item arguments" case
+
+  it('sends a bulk option edit as one request and nothing that could waive a finding', async () => {
+    // Phase 3-10. The whole request travels under one argument; consent is per
+    // file inside it, and no property anywhere could force a save.
+    await applyBulkOptions(BULK_REQUEST);
+    expect(calls[0]?.command).toBe('apply_bulk_options');
+    expect(calls[0]?.args).toEqual({ request: BULK_REQUEST });
+    expect(JSON.stringify(calls[0]?.args)).not.toContain('force');
+  }); // End of the "bulk option arguments" case
 
   it('send the arguments the Rust signatures declare', async () => {
     await openWorkspace('/Users/somebody/.config/espanso');

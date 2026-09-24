@@ -329,12 +329,21 @@ pub use raw_item::{item_owned_text, ItemTextReplacement, OwnedItemText};
 /// no block indentation. Choosing how to spell it is
 /// [`crate::emit::preserve_scalar`]'s job, and it keeps the scalar's existing
 /// presentation wherever the new value still fits in it.
+///
+/// **Or, since Phase 3-10, this exact plain source text** ([`ScalarEdit::plain_source`]):
+/// the value is written verbatim as a plain scalar, no style is chosen, and
+/// verification requires the candidate's scalar to be plain and to read back as
+/// exactly those bytes. It exists for the bulk option edit, whose values are
+/// source text a person entered (D2u) — `word: true` must stay `true`, which
+/// the codec would otherwise quote because it is not a string in YAML.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScalarEdit {
     /// The value node to rewrite.
     path: DocumentPath,
-    /// The new logical value.
+    /// The new logical value, or the exact plain source text.
     value: String,
+    /// Whether `value` is written verbatim as a plain scalar.
+    plain_source: bool,
 }
 
 impl ScalarEdit {
@@ -343,7 +352,26 @@ impl ScalarEdit {
         ScalarEdit {
             path,
             value: value.into(),
+            plain_source: false,
         }
+    }
+
+    /// Builds an edit that writes `text` verbatim as the plain scalar at
+    /// `path` (Phase 3-10). The engine refuses nothing up front for it; a text
+    /// that does not read back as exactly one plain scalar with these bytes
+    /// fails verification with
+    /// [`VerificationFailure::PlainSourceNotReadBack`].
+    pub fn plain_source(path: DocumentPath, text: impl Into<String>) -> ScalarEdit {
+        ScalarEdit {
+            path,
+            value: text.into(),
+            plain_source: true,
+        }
+    }
+
+    /// Whether this edit writes its value verbatim as plain source text.
+    pub fn writes_plain_source(&self) -> bool {
+        self.plain_source
     }
 
     /// The path of the value node this edit rewrites.
@@ -635,13 +663,21 @@ pub enum EntryValue {
     Scalar(String),
     /// A list of scalars, each a decoded string, in order. Empty is `[]`.
     ScalarList(Vec<String>),
+    /// One scalar written **verbatim as plain source text** (Phase 3-10), for
+    /// [`ScalarEdit::plain_source`]'s reason. Verification requires the new
+    /// value to be a plain scalar whose bytes are exactly this text. Only a
+    /// [`FieldInsertGroup`] entry may carry it; a new item and a shape switch
+    /// refuse it.
+    PlainSource(String),
 }
 
 impl EntryValue {
-    /// The scalar this value is, or `None` for a list.
+    /// The scalar this value is — its decoded string, or its plain source text,
+    /// which for a single-line plain scalar is the same string — or `None` for
+    /// a list.
     pub fn as_scalar(&self) -> Option<&str> {
         match self {
-            EntryValue::Scalar(value) => Some(value),
+            EntryValue::Scalar(value) | EntryValue::PlainSource(value) => Some(value),
             EntryValue::ScalarList(_) => None,
         }
     }
@@ -649,7 +685,7 @@ impl EntryValue {
     /// The items this value holds, or `None` for a scalar.
     pub fn as_list(&self) -> Option<&[String]> {
         match self {
-            EntryValue::Scalar(_) => None,
+            EntryValue::Scalar(_) | EntryValue::PlainSource(_) => None,
             EntryValue::ScalarList(items) => Some(items),
         }
     }
@@ -2629,6 +2665,18 @@ pub enum VerificationFailure {
         /// Offset of the first differing byte inside the value.
         first_difference: usize,
     },
+    /// A value written as plain source text (Phase 3-10) does not read back as
+    /// a plain scalar holding exactly those bytes — the text needed quoting,
+    /// ran into a comment or an indicator, or otherwise parsed as something
+    /// else. Carries the candidate span, never the text.
+    PlainSourceNotReadBack {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// Offset of the value node in the candidate.
+        at: usize,
+        /// Length of the value node in the candidate.
+        len: usize,
+    },
     /// Our decoder and the substrate's disagree about the reparsed value.
     ///
     /// A disagreement means one of the two is wrong about the bytes we just
@@ -3520,6 +3568,11 @@ impl fmt::Display for VerificationFailure {
                  {wanted_len}-byte one was intended; they first differ at byte \
                  {first_difference}"
             ),
+            VerificationFailure::PlainSourceNotReadBack { edit, at, len } => write!(
+                formatter,
+                "edit {edit}: the value at {at} ({len} bytes) does not read back as the \
+                 plain source text written there"
+            ),
             VerificationFailure::DecoderDisagreement { edit } => write!(
                 formatter,
                 "edit {edit}: our decoder and the substrate disagree about the candidate"
@@ -4398,6 +4451,7 @@ fn plan_one(
         position,
         resolved.value,
         edit.value(),
+        edit.writes_plain_source(),
     )
 } // End of function plan_one()
 
@@ -4406,6 +4460,10 @@ fn plan_one(
 /// The body [`plan_one`] and a value-changing [`KeySubstitution`] share, so a
 /// substituted entry's new value is written exactly as a scalar edit would write
 /// it: gate first, then the node's kind, then the bytes.
+///
+/// `plain` writes `value` verbatim as a plain scalar instead of letting the
+/// codec choose a style ([`ScalarEdit::plain_source`], Phase 3-10); the gate,
+/// the kind check and the rendering of the spans are the same.
 fn plan_scalar_node(
     source: &str,
     index: &SyntaxIndex,
@@ -4413,6 +4471,7 @@ fn plan_scalar_node(
     position: usize,
     target: NodeId,
     value: &str,
+    plain: bool,
 ) -> Result<PlannedEdit, EditError> {
     let node = index.node(target).ok_or(EditError::MalformedSpan {
         edit: position,
@@ -4444,7 +4503,14 @@ fn plan_scalar_node(
     }
 
     let presentation = &scalar.presentation;
-    let (plan, context) = choose_plan(source, index, node, presentation, value);
+    let (plan, context) = if plain {
+        (
+            ScalarPlan::Plain(value.to_owned()),
+            scalar_context(source, index, node, presentation),
+        )
+    } else {
+        choose_plan(source, index, node, presentation, value)
+    };
     let note = presentation_note(source, position, presentation, &plan);
     let replacements = render_replacements(source, position, node, presentation, &plan, context)?;
 
@@ -4877,6 +4943,11 @@ fn plan_insertion_group(
                     choose_scalar(value, context).render()
                 ));
             }
+            // Verbatim (Phase 3-10); verification checks it reads back as a
+            // plain scalar holding exactly these bytes.
+            EntryValue::PlainSource(text) => {
+                lines.push(format!("{pad}{key}: {text}"));
+            }
             // The one spelling an empty sequence has (ruling 5).
             EntryValue::ScalarList(items) if items.is_empty() => {
                 lines.push(format!("{pad}{key}: []"));
@@ -5006,8 +5077,15 @@ fn plan_substitution(
     let decoded = match edit.value() {
         None => value_scalar.value.clone(),
         Some(value) => {
-            let value_plan =
-                plan_scalar_node(source, index, trivia, position, resolved.value, value)?;
+            let value_plan = plan_scalar_node(
+                source,
+                index,
+                trivia,
+                position,
+                resolved.value,
+                value,
+                false,
+            )?;
             replacements.extend(value_plan.replacements);
             permitted.extend(value_plan.permitted);
             note = value_plan.note;
@@ -7524,6 +7602,13 @@ fn render_item(
                     choose_scalar(value, context).render()
                 ));
             }
+            // Verbatim, as a group writes it. Nothing builds one for a new item
+            // today; `verify_entry_value` checks it reads back as written, and
+            // the ambiguity property is not waived for it here, so an ambiguous
+            // spelling in a new item is refused rather than written.
+            EntryValue::PlainSource(text) => {
+                lines.push(format!("{lead}{key}: {text}"));
+            }
             // The one spelling an empty sequence has (ruling 5).
             EntryValue::ScalarList(items) if items.is_empty() => {
                 lines.push(format!("{lead}{key}: []"));
@@ -9071,7 +9156,11 @@ fn verify(
     // scalars included, so the differential budget counts its subtree twice —
     // see the doc comment on the function for why that is not a weakening.
     let copied: Vec<NodeId> = duplicates.iter().map(|copy| copy.item).collect();
-    no_ambiguous_plain_scalar_is_introduced(original, &index, &copied, &[])?;
+    // A plain-source value (Phase 3-10) is text a person entered and the engine
+    // wrote verbatim; no emitter chose it, so it is not charged — exactly the
+    // stance the local raw-item edit takes. Its own read-back is checked below.
+    let authored = plain_source_nodes(original, &index, edits, expectations);
+    no_ambiguous_plain_scalar_is_introduced(original, &index, &copied, &authored)?;
     for relocation in moves {
         the_arrival_is_the_departure(source, original, replacements, relocation)?;
         document_lines_are_conserved(source, candidate)?;
@@ -9133,6 +9222,9 @@ fn verify(
         if ours != scalar.value {
             return Err(VerificationFailure::DecoderDisagreement { edit: position });
         }
+        if edit.writes_plain_source() {
+            plain_source_reads_back(candidate, position, node, scalar, edit.value())?;
+        }
         if scalar.value != edit.value() {
             return Err(VerificationFailure::ValueMismatch {
                 edit: position,
@@ -9151,6 +9243,81 @@ fn verify(
     }
     Ok(())
 } // End of function verify()
+
+/// The candidate value nodes a batch wrote as plain source text (Phase 3-10):
+/// every [`ScalarEdit::plain_source`] target, and every
+/// [`EntryValue::PlainSource`] entry of a changed mapping.
+///
+/// A path that does not resolve is simply skipped: the checks that follow
+/// report a lost target by name, and a node not found here is charged by the
+/// ambiguity property rather than exempted, which is the safe direction.
+fn plain_source_nodes(
+    original: &SyntaxIndex,
+    candidate: &SyntaxIndex,
+    edits: &[DocumentEdit],
+    expectations: &[FieldExpectation],
+) -> Vec<NodeId> {
+    let mut nodes = Vec::new();
+    for edit in edits {
+        if let DocumentEdit::Scalar(edit) = edit {
+            if edit.writes_plain_source() {
+                let path = candidate_path(original, edits, edit.path());
+                if let Ok(id) = resolve(candidate, &path) {
+                    nodes.push(id);
+                }
+            }
+        }
+    } // End of the loop over the batch's scalar edits
+    for expectation in expectations {
+        let written: Vec<&str> = expectation
+            .inserted
+            .iter()
+            .filter(|(_, value)| matches!(value, EntryValue::PlainSource(_)))
+            .map(|(key, _)| key.as_str())
+            .collect();
+        if written.is_empty() {
+            continue;
+        }
+        let Some(mapping) = resolve(candidate, &expectation.mapping)
+            .ok()
+            .and_then(|id| candidate.node(id))
+        else {
+            continue;
+        };
+        for entry in mapping_entries(mapping) {
+            let key = decoded_value(candidate, entry.key).unwrap_or_default();
+            if written.contains(&key) {
+                nodes.push(entry.value);
+            }
+        } // End of the loop over the mapping's entries
+    } // End of the loop over the changed mappings
+    nodes
+} // End of function plain_source_nodes()
+
+/// Checks that a plain-source value reads back as written: a plain scalar whose
+/// source bytes are exactly `text` (Phase 3-10). The decoded value is checked
+/// by the caller as for every scalar.
+///
+/// # Errors
+///
+/// [`VerificationFailure::PlainSourceNotReadBack`].
+fn plain_source_reads_back(
+    candidate: &str,
+    edit: usize,
+    node: &Node,
+    scalar: &crate::syntax::ScalarNode,
+    text: &str,
+) -> Result<(), VerificationFailure> {
+    let written = node.span.slice(candidate);
+    if scalar.presentation.style != ScalarStyle::Plain || written != Some(text) {
+        return Err(VerificationFailure::PlainSourceNotReadBack {
+            edit,
+            at: node.span.start,
+            len: node.span.len(),
+        });
+    }
+    Ok(())
+} // End of function plain_source_reads_back()
 
 /// Checks one structural edit against the reparsed candidate.
 ///
@@ -9309,6 +9476,10 @@ fn verify_entry_value(
             if &scalar.value != wanted {
                 return Err(missing);
             }
+        }
+        EntryValue::PlainSource(text) => {
+            let scalar = node.scalar.as_ref().ok_or(missing.clone())?;
+            plain_source_reads_back(candidate, edit, node, scalar, text)?;
         }
         EntryValue::ScalarList(items) => {
             if node.kind != NodeKind::Sequence {

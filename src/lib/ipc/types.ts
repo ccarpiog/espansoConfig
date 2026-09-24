@@ -945,6 +945,7 @@ export type VerificationFailureName =
   | 'TargetLost'
   | 'TargetKindChanged'
   | 'ValueMismatch'
+  | 'PlainSourceNotReadBack'
   | 'DecoderDisagreement'
   | 'Undecodable'
   | 'BytesOutsideTheSpanChanged'
@@ -998,6 +999,13 @@ export type VerificationFailure =
         readonly wanted_len: number;
         readonly found_len: number;
         readonly first_difference: number;
+      };
+    }
+  | {
+      readonly PlainSourceNotReadBack: {
+        readonly edit: number;
+        readonly at: number;
+        readonly len: number;
       };
     }
   | { readonly DecoderDisagreement: { readonly edit: number } }
@@ -2014,6 +2022,280 @@ export interface RefusedResult {
  * everything else rejects with a {@link CommandError}. Switch on `outcome`.
  */
 export type SaveResult = SavedResult | ConflictResult | RefusedResult;
+
+// ---------------------------------------------------------------------------
+// The bulk option edit — Phase 3-10
+// ---------------------------------------------------------------------------
+
+/**
+ * One of the seven match options a bulk edit may write (ruling 20), spelled as
+ * its espanso key.
+ *
+ * **A field identifier, not a code**, for {@link MatchField}'s reason: it
+ * crosses as the key itself, so a screen that names it shows espanso's own
+ * spelling. `every_bulk_option_serializes_as_its_espanso_key` in
+ * `crates/espansoconfig-core/tests/draft_bulk.rs` pins the two spellings. No
+ * other field can be sent: Rust refuses any other string while reading the
+ * request.
+ */
+export type BulkOption =
+  | 'word'
+  | 'left_word'
+  | 'right_word'
+  | 'propagate_case'
+  | 'uppercase_style'
+  | 'force_mode'
+  | 'force_clipboard';
+
+/**
+ * What a bulk edit asks of one option: a logical value, or its removal.
+ *
+ * Externally tagged exactly as {@link DraftField} is, and deliberately **without
+ * an `'Unchanged'` member**: an option the person did not touch — a *Mixed*
+ * control left alone included — is absent from the request.
+ */
+export type BulkValue = { readonly Set: string } | 'Remove';
+
+/** One option intent, applied to every selected snippet of every file. */
+export interface BulkOptionChange {
+  /** The option to write. */
+  readonly option: BulkOption;
+  /** What it should become. */
+  readonly value: BulkValue;
+}
+
+/**
+ * The consent one file carries: the candidate it was shown, and the findings
+ * acknowledged for it (ruling 22).
+ *
+ * Bound to one candidate by revision, so consent collected for one set of
+ * intents or one selection is reported stale rather than spent on another.
+ * TypeScript does not tie the two properties together; the Rust preflight is
+ * what compares them.
+ */
+export interface BulkConsent {
+  /** The file the consent was collected for. */
+  readonly document: DocumentId;
+  /** The base revision the consent was collected against. */
+  readonly base_revision: ContentRevision;
+  /** The intent fingerprint a refusal reported for this file's request. */
+  readonly intent: ContentRevision;
+  /** The candidate revision the findings were shown for. */
+  readonly candidate: ContentRevision;
+  /** The findings acknowledged for it. */
+  readonly acknowledgement: Acknowledgement;
+}
+
+/** One file of a bulk option edit. */
+export interface BulkFileRequest {
+  /** The file. */
+  readonly document: DocumentId;
+  /** The revision the selection was made against. */
+  readonly base_revision: ContentRevision;
+  /** The selected snippets of this file, each at most once. */
+  readonly matches: readonly MatchId[];
+  /** This file's consent, or `null` on a first attempt. */
+  readonly consent: BulkConsent | null;
+}
+
+/**
+ * One bulk option edit. There is **no `force` flag**: Rust refuses any property
+ * it does not declare, at every level of this request.
+ */
+export interface BulkOptionsRequest {
+  /** The option intents, each option at most once. */
+  readonly changes: readonly BulkOptionChange[];
+  /** The files, in the order they are attempted. */
+  readonly files: readonly BulkFileRequest[];
+  /** Files excluded before sending; reported, never read or written. */
+  readonly excluded: readonly DocumentId[];
+}
+
+/** The variant name of every {@link IdentityError} arm. */
+export type IdentityErrorName = 'WrongDocument' | 'StaleRevision' | 'NoSuchMatch';
+
+/**
+ * Why a snippet identity did not resolve, as the core writes it inside a
+ * {@link BulkPlanError}. Elsewhere the same three conditions cross flattened
+ * into `CommandError` codes.
+ */
+export type IdentityError =
+  | { readonly WrongDocument: { readonly expected: DocumentId; readonly found: DocumentId } }
+  | {
+      readonly StaleRevision: {
+        readonly expected: ContentRevision;
+        readonly found: ContentRevision;
+      };
+    }
+  | { readonly NoSuchMatch: { readonly node: NodeId } };
+
+/** The variant name of every {@link BulkPlanError} arm. */
+export type BulkPlanErrorName =
+  | 'NoOptionChanges'
+  | 'OptionRepeated'
+  | 'OptionNotPlainSource'
+  | 'NoFiles'
+  | 'DocumentRepeated'
+  | 'NoMatches'
+  | 'MatchRepeated'
+  | 'Identity'
+  | 'Draft';
+
+/**
+ * Why a bulk edit, or one file of it, could not be planned — and **nothing was
+ * written**. The first four refuse the whole request; the last four are one
+ * file's preflight blocker. `index` is a position in that file's selection.
+ */
+export type BulkPlanError =
+  | { readonly NoOptionChanges: Record<string, never> }
+  | { readonly OptionRepeated: { readonly option: BulkOption } }
+  | { readonly OptionNotPlainSource: { readonly option: BulkOption } }
+  | { readonly NoFiles: Record<string, never> }
+  | { readonly DocumentRepeated: { readonly document: DocumentId } }
+  | { readonly NoMatches: Record<string, never> }
+  | { readonly MatchRepeated: { readonly index: number } }
+  | { readonly Identity: { readonly index: number; readonly error: IdentityError } }
+  | { readonly Draft: { readonly index: number; readonly error: DraftError } };
+
+/** The discriminant of every {@link BulkFileOutcome} arm (ruling 19). */
+export type BulkFileOutcomeName =
+  | 'saved'
+  | 'alreadyUnchanged'
+  | 'conflicted'
+  | 'refused'
+  | 'consentStale'
+  | 'blocked'
+  | 'failed'
+  | 'writeOutcomeUnknown'
+  | 'notAttempted'
+  | 'excludedBeforeApply';
+
+/** The file was rewritten. */
+export interface BulkSavedOutcome {
+  /** Which arm this is. */
+  readonly outcome: 'saved';
+  /** The revision read back after the write. */
+  readonly revision: ContentRevision;
+  /**
+   * Whether this save wrote a pre-save copy. `false` is a success: this session
+   * had already copied the file. Not a promise that the file is recoverable.
+   */
+  readonly backup_taken: boolean;
+  /** Presentation changes the write had to make. */
+  readonly notes: readonly PresentationNote[];
+}
+
+/** Every selected snippet already held the values; nothing was written or copied. */
+export interface BulkAlreadyUnchangedOutcome {
+  /** Which arm this is. */
+  readonly outcome: 'alreadyUnchanged';
+  /** The revision the file held when the save re-read it. */
+  readonly revision: ContentRevision;
+}
+
+/** The file moved on under the write lock; nothing was written to it. */
+export interface BulkConflictedOutcome {
+  /** Which arm this is. */
+  readonly outcome: 'conflicted';
+  /** The revision the request was based on. */
+  readonly expected: ContentRevision;
+  /** The revision the locked read found. */
+  readonly found: ContentRevision;
+  /** The revision of a fresh read taken afterwards. */
+  readonly disk_revision: ContentRevision;
+}
+
+/** The save gate refused this file's candidate; nothing was written to it. */
+export interface BulkRefusedOutcome {
+  /** Which arm this is. */
+  readonly outcome: 'refused';
+  /** Which arm of the policy refused. */
+  readonly verdict: SaveVerdict;
+  /** Every finding the candidate produced. */
+  readonly findings: readonly Finding[];
+  /** The candidate those findings belong to — what a {@link BulkConsent} names. */
+  readonly candidate: ContentRevision;
+  /** The intent fingerprint a {@link BulkConsent} for them must name. */
+  readonly intent: ContentRevision;
+}
+
+/**
+ * The consent sent was collected for another file, base revision, intent or
+ * candidate; nothing was written anywhere.
+ */
+export interface BulkConsentStaleOutcome {
+  /** Which arm this is. */
+  readonly outcome: 'consentStale';
+  /** The intent fingerprint a fresh consent must name. */
+  readonly intent: ContentRevision;
+  /** The candidate the preflight derived, which a fresh consent must name. */
+  readonly candidate: ContentRevision;
+}
+
+/** The preflight could not plan or judge this file; nothing was written anywhere. */
+export interface BulkBlockedOutcome {
+  /** Which arm this is. */
+  readonly outcome: 'blocked';
+  /** Why, as every other command reports it. */
+  readonly error: import('./errors').CommandError;
+}
+
+/** The save failed and certainly did not write this file. */
+export interface BulkFailedOutcome {
+  /** Which arm this is. */
+  readonly outcome: 'failed';
+  /** The failure, as every other command reports it. */
+  readonly error: import('./errors').CommandError;
+}
+
+/** The save failed after its write may have happened; later files were not attempted. */
+export interface BulkWriteOutcomeUnknownOutcome {
+  /** Which arm this is. */
+  readonly outcome: 'writeOutcomeUnknown';
+  /** The failure, as every other command reports it. */
+  readonly error: import('./errors').CommandError;
+}
+
+/** The run stopped before this file; it was not touched. */
+export interface BulkNotAttemptedOutcome {
+  /** Which arm this is. */
+  readonly outcome: 'notAttempted';
+}
+
+/** The caller excluded this file before sending; it was not touched. */
+export interface BulkExcludedBeforeApplyOutcome {
+  /** Which arm this is. */
+  readonly outcome: 'excludedBeforeApply';
+}
+
+/** What happened to one file of a bulk option edit. Switch on `outcome`. */
+export type BulkFileOutcome =
+  | BulkSavedOutcome
+  | BulkAlreadyUnchangedOutcome
+  | BulkConflictedOutcome
+  | BulkRefusedOutcome
+  | BulkConsentStaleOutcome
+  | BulkBlockedOutcome
+  | BulkFailedOutcome
+  | BulkWriteOutcomeUnknownOutcome
+  | BulkNotAttemptedOutcome
+  | BulkExcludedBeforeApplyOutcome;
+
+/** One file's line of a {@link BulkResult}: its identity beside its outcome. */
+export type BulkFileReport = { readonly document: DocumentId } & BulkFileOutcome;
+
+/** What one bulk option edit did, file by file. */
+export interface BulkResult {
+  /** `false` means no file was written and no save ran. */
+  readonly preflight_passed: boolean;
+  /**
+   * `true` only when no file's outcome is `saved` or `writeOutcomeUnknown`.
+   * Derived in Rust from the outcomes below, never asserted beside them.
+   */
+  readonly nothing_written: boolean;
+  /** The applied files in request order, then the excluded ones. */
+  readonly files: readonly BulkFileReport[];
+}
 
 // ---------------------------------------------------------------------------
 // The read-only backup catalogue — Phase 2c-5-2

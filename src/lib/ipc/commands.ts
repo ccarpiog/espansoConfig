@@ -1,5 +1,5 @@
 /**
- * The eighteen workspace commands, typed.
+ * The nineteen workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -17,16 +17,19 @@
  * R27). A `try`/`catch` around an `invoke` is exactly the shape that turns the
  * first into the second.
  *
- * ## Seven of them write
+ * ## Eight of them write
  *
  * {@link moveMatch}, since Phase 2b-2a; {@link saveMatch}, since 2b-2b-3;
  * {@link createMatch} and {@link deleteMatch}, since 2b-2c-2;
  * {@link saveRawDocument}, since 2b-2c-3b; {@link duplicateMatch}, since
- * 2c-3c-2; and {@link saveMatchItemText}, the local raw-item edit, since 3-7.
+ * 2c-3c-2; {@link saveMatchItemText}, the local raw-item edit, since 3-7; and
+ * {@link applyBulkOptions}, the per-file bulk option edit, since 3-10.
  * They are the only functions in this application that can change a
- * file on disk, and what each answers with is a {@link SaveResult} in the value
- * channel rather than a thrown error: a save that was refused, and a save that
- * found the file had moved on, are **outcomes** and not failures.
+ * file on disk, and what each answers with is an outcome in the value channel
+ * rather than a thrown error — a {@link SaveResult} for the first seven, a
+ * {@link BulkResult} accounting for every file for the eighth: a save that was
+ * refused, and a save that found the file had moved on, are **outcomes** and not
+ * failures.
  *
  * ## The fifth is not an edit, and its signature says so
  *
@@ -76,6 +79,8 @@ import type {
   BackupEntryId,
   BackupEntryListing,
   BackupTextResponse,
+  BulkOptionsRequest,
+  BulkResult,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -122,7 +127,8 @@ export const COMMAND_NAMES = [
   'read_backup_text',
   'drain_external_changes',
   'match_item_text',
-  'save_match_item_text'
+  'save_match_item_text',
+  'apply_bulk_options'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -844,6 +850,31 @@ export async function saveMatchItemText(
 ): Promise<CommandResult<SaveResult>> {
   return call<SaveResult>('save_match_item_text', { id, baseRevision, text, acknowledgement });
 } // End of function saveMatchItemText()
+
+/**
+ * Applies up to seven option intents to snippets of several files, one save per
+ * file (Phase 3-10).
+ *
+ * **Per-file atomicity, not cross-file atomicity.** Rust preflights every file
+ * first — base revision, plan, candidate, findings under that file's own consent
+ * — and a single blocker anywhere writes nothing. Then each file is saved in
+ * request order, stopping at the first conflict, refusal, failure or uncertain
+ * write; what was committed before the stop stays committed and is reported, and
+ * later files are `notAttempted`. The answer accounts for every file, excluded
+ * ones included. There is deliberately **no force flag**, and consent is per
+ * file and per candidate.
+ *
+ * @param request - The option changes, the files in the order to attempt them,
+ *   and the files excluded before sending.
+ * @returns What happened to every file, or a failure — `noWorkspaceOpen`, or
+ *   `bulkRefused` for a malformed request, before any file is read. A per-file
+ *   failure is never a failure of the call.
+ */
+export async function applyBulkOptions(
+  request: BulkOptionsRequest
+): Promise<CommandResult<BulkResult>> {
+  return call<BulkResult>('apply_bulk_options', { request });
+} // End of function applyBulkOptions()
 
 /**
  * Lists the recognised backup batches of the open workspace, newest name first.

@@ -7,7 +7,7 @@
 //! `duplicate_match` (2c-3c-2) — and Phase 2c-5-2's three further readers:
 //! `list_backup_batches`, `list_backup_entries` and `read_backup_text`. Phase 3-7
 //! adds a seventh writer, `save_match_item_text`, and its reader,
-//! `match_item_text`. Each is
+//! `match_item_text`, and Phase 3-10 an eighth, `apply_bulk_options`. Each is
 //! one line over a [`WorkspaceSession`] method; each of the original six readers
 //! is one call into `crate::workspace`, which Phase 1a built to be wrapped this
 //! way, and each of the three backup readers is one call into `crate::backup`.
@@ -29,16 +29,18 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Seven of the eighteen commands write, and they write the same way
+//! # Eight of the nineteen commands write, and they write the same way
 //!
 //! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, 2b-2c-2 `create_match`
 //! and `delete_match`, 2b-2c-3b `save_raw_document`, 2c-3c-2
-//! `duplicate_match`, and 3-7 `save_match_item_text`. All seven go through
+//! `duplicate_match`, 3-7 `save_match_item_text`, and 3-10
+//! `apply_bulk_options`, which saves several files, one [`run_one_save`] per
+//! file. All eight go through
 //! [`espansoconfig_core::persist::save_document`] and through nothing else:
 //! `replace_file_atomically` and `replace_locked_file` take finished bytes,
 //! validate nothing, and the second one deadlocks if the lock is taken twice, so
 //! **no command in this crate calls either**. They also share [`run_one_save`],
-//! which is this layer's one cache-coherency policy rather than seven agreeing
+//! which is this layer's one cache-coherency policy rather than eight agreeing
 //! copies of it.
 //!
 //! Six of them differ only in **who derives the edits**. `move_match`,
@@ -49,6 +51,11 @@
 //! `save_match` hands a [`MatchDraft`] to [`plan_match_edits`], which derives
 //! the **smallest** batch that realises it — or refuses by name, in which case
 //! nothing is attempted and the caller gets [`CommandError::DraftRefused`].
+//! `apply_bulk_options` hands each file's selection to
+//! [`plan_bulk_option_edits`], which runs that same planner once per selected
+//! snippet with a draft holding only the requested options and concatenates the
+//! batches, one batch and one save per file — or refuses by name, as
+//! [`CommandError::BulkRefused`].
 //! None of them ever combines two kinds of edit in one batch (`PROGRESS.md`
 //! R25, `DuplicateMustBeTheOnlyEditInItsBatch` for a duplicate, and
 //! `ItemTextMustBeTheOnlyEditInItsBatch` for a raw item).
@@ -245,15 +252,18 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use espansoconfig_core::draft::{plan_match_edits, MatchDraft, NewMatch};
+use espansoconfig_core::draft::{
+    check_bulk_changes, check_bulk_documents, plan_bulk_option_edits, plan_match_edits,
+    BulkOptionChange, MatchDraft, NewMatch,
+};
 use espansoconfig_core::model::{DocumentView, MatchId, MatchView};
 use espansoconfig_core::patch::{
     item_owned_text, DocumentEdit, DocumentPath, DuplicateItem, EditError, InsertItem, ItemMove,
     ItemPlacement, ItemTextReplacement, OwnedItemText, RemoveItem,
 };
 use espansoconfig_core::persist::{
-    save_document, Acknowledgement, BackupSession, SaveContent, SaveError, SaveRequest,
-    SavedDocument,
+    preflight_edits, save_document, Acknowledgement, BackupSession, SaveContent, SaveError,
+    SaveRequest, SavedDocument,
 };
 use espansoconfig_core::reconcile::{
     reconcile, PlacementMode, ReapplyConfidence, ReapplyMode, ReapplyRequest,
@@ -263,6 +273,9 @@ use espansoconfig_core::{ContentRevision, DocumentId, NodeKind, SourceDocument};
 
 use crate::backup::{
     BackupBatchKey, BackupBatchListing, BackupEntryKey, BackupEntryListing, BackupTextResponse,
+};
+use crate::bulk::{
+    bulk_intent, BulkFileOutcome, BulkFileReport, BulkFileRequest, BulkOptionsRequest, BulkResult,
 };
 use crate::error::CommandError;
 use crate::ledger::{admitting_sink, AdmittedSink, ObservedState, WriteLedger};
@@ -1361,6 +1374,30 @@ impl WorkspaceSession {
             )
         })
     } // End of function save_match_item_text()
+
+    /// Applies up to seven option intents to snippets of several files, one
+    /// save transaction per file (Phase 3-10, rulings 19–22).
+    ///
+    /// The eighth method in this crate that can write a user's file, and it
+    /// writes each file the same one way: through [`run_one_save`], once per
+    /// file, with the batch [`plan_bulk_option_edits`] derived for that file.
+    /// See [`apply_bulk_options_with`] for the order of the steps, and
+    /// `crate::bulk` for the request, the result and the consent rule.
+    ///
+    /// **The session mutex is held across the whole run**, as it is across
+    /// every writer here, so the preflight and the saves see one cache and no
+    /// other command interleaves. **No path lock is held by this layer**: each
+    /// save takes and releases its own file's lock inside
+    /// [`espansoconfig_core::persist::save_document`], and that lock is not
+    /// reentrant, so holding one around [`run_one_save`] would hang.
+    pub fn apply_bulk_options(
+        &self,
+        request: &BulkOptionsRequest,
+    ) -> Result<BulkResult, CommandError> {
+        self.with_open(|workspace, session_side| {
+            apply_bulk_options_with(workspace, session_side, request, &mut run_one_save)
+        })
+    } // End of function apply_bulk_options()
 
     /// Lists the recognised backup batches of the open workspace.
     ///
@@ -2585,6 +2622,257 @@ fn save_one_item_text(
     )
 } // End of function save_one_item_text()
 
+/// The one save a bulk run performs per file — [`run_one_save`] in production.
+///
+/// **The test seam, and nothing else.** A test passes a closure that answers
+/// one file with an injected failure and hands every other file to
+/// [`run_one_save`], which is how a second-file failure and an uncertain write
+/// are driven without breaking a filesystem. Production passes
+/// [`run_one_save`] itself, from [`WorkspaceSession::apply_bulk_options`], the
+/// only production caller; nothing in the type forces a production caller to
+/// pass that function rather than another, and that one call site is what
+/// keeps every bulk write on the shared tail.
+type BulkSave<'s> = dyn FnMut(&mut Workspace, SessionSideOfASave<'_>, OneSave<'_>) -> Result<SaveResult, CommandError>
+    + 's;
+
+/// One file that passed the preflight, with everything its save needs.
+struct PreflightedFile {
+    /// The file.
+    document: DocumentId,
+    /// The revision the batch was planned against.
+    base_revision: ContentRevision,
+    /// The batch — possibly empty, for a file that is already unchanged.
+    edits: Vec<DocumentEdit>,
+    /// This file's consent, or none.
+    acknowledgement: Acknowledgement,
+    /// The candidate revision the preflight derived.
+    candidate: ContentRevision,
+    /// The intent fingerprint of this file's request.
+    intent: ContentRevision,
+} // End of struct PreflightedFile
+
+/// Runs one bulk option edit: refuses a malformed request, preflights every
+/// file, and only if every file passed saves them one at a time.
+///
+/// # The order of the steps is the contract
+///
+/// 1. **The request as a whole** — [`check_bulk_changes`] and
+///    [`check_bulk_documents`]. A malformed request is the command's
+///    [`CommandError::BulkRefused`], and no file is read.
+/// 2. **Every file's preflight** ([`preflight_one_file`]), in request order and
+///    all of them, even after one is blocked, so the result names every
+///    blocker at once. It reads the session's cached projection, plans, and
+///    judges the candidate with
+///    [`espansoconfig_core::persist::preflight_edits`]; it takes no lock and
+///    writes nothing. **Any blocker stops the run here**: blocked files carry
+///    their reason, every other file is *not attempted*, and no save
+///    transaction runs, so nothing is written anywhere.
+/// 3. **One save per file, in request order** — `save`, which is
+///    [`run_one_save`] in production, each with its own batch, its own base
+///    revision and its own consent. The first outcome that is not *saved* or
+///    *already unchanged* stops the run; every later file is *not attempted*,
+///    and every earlier result stands and is reported.
+/// 4. **The excluded files** are reported last, untouched.
+///
+/// **No path lock is held here.** A save takes its file's lock inside
+/// `save_document` and releases it before returning, so nothing this function
+/// holds can deadlock the next save; the only lock held across the run is the
+/// session mutex the caller took.
+///
+/// # Errors
+///
+/// [`CommandError::BulkRefused`] for a malformed request. Every per-file
+/// failure is an outcome in the `Ok` result instead, so that a committed
+/// earlier file is never reported afterwards as an error.
+fn apply_bulk_options_with(
+    workspace: &mut Workspace,
+    session_side: SessionSideOfASave<'_>,
+    request: &BulkOptionsRequest,
+    save: &mut BulkSave<'_>,
+) -> Result<BulkResult, CommandError> {
+    check_bulk_changes(&request.changes).map_err(|error| CommandError::BulkRefused { error })?;
+    let applied: Vec<DocumentId> = request.files.iter().map(|file| file.document).collect();
+    check_bulk_documents(&applied, &request.excluded)
+        .map_err(|error| CommandError::BulkRefused { error })?;
+
+    let preflighted: Vec<Result<PreflightedFile, BulkFileOutcome>> = request
+        .files
+        .iter()
+        .map(|file| preflight_one_file(workspace, file, &request.changes))
+        .collect();
+    let preflight_passed = preflighted.iter().all(Result::is_ok);
+
+    let mut reports = Vec::with_capacity(request.files.len() + request.excluded.len());
+    let mut stopped = !preflight_passed;
+    for (file, preflight) in request.files.iter().zip(preflighted) {
+        let outcome = match preflight {
+            Err(blocker) => blocker,
+            Ok(_) if stopped => BulkFileOutcome::NotAttempted {},
+            Ok(ready) => {
+                let outcome = execute_one_file(workspace, session_side, ready, save);
+                stopped = !outcome.lets_the_run_continue();
+                outcome
+            }
+        };
+        reports.push(BulkFileReport {
+            document: file.document,
+            outcome,
+        });
+    } // End of the loop over the applied files, in request order
+    reports.extend(request.excluded.iter().map(|document| BulkFileReport {
+        document: *document,
+        outcome: BulkFileOutcome::ExcludedBeforeApply {},
+    }));
+    Ok(BulkResult::new(preflight_passed, reports))
+} // End of function apply_bulk_options_with()
+
+/// Plans and judges one file of a bulk edit against the session's cached
+/// projection, or answers the blocker that stops the whole run.
+///
+/// Reads the cache and nothing else: no lock, no write, no backup. The steps,
+/// each a blocker when it refuses: the base revision against this session's
+/// projection ([`document_at`]); the batch ([`plan_bulk_option_edits`]); the
+/// candidate and its verdict under this file's consent
+/// ([`espansoconfig_core::persist::preflight_edits`]); consent collected for
+/// another document, base revision, intent fingerprint ([`bulk_intent`]) or
+/// candidate ([`BulkFileOutcome::ConsentStale`]); a verdict that does not
+/// proceed ([`BulkFileOutcome::Refused`], carrying the candidate and the intent
+/// the findings belong to).
+fn preflight_one_file(
+    workspace: &mut Workspace,
+    file: &BulkFileRequest,
+    changes: &[BulkOptionChange],
+) -> Result<PreflightedFile, BulkFileOutcome> {
+    let blocked = |error: CommandError| BulkFileOutcome::Blocked { error };
+    // Cloned so that the immutable borrow ends before the snapshot is taken;
+    // `run_one_save` does the same.
+    let context = workspace
+        .document_context(file.document)
+        .map_err(|error| blocked(error.into()))?
+        .clone();
+    let base = document_at(workspace, file.document, file.base_revision).map_err(blocked)?;
+    let edits = plan_bulk_option_edits(&base.source, &base.view, &file.matches, changes)
+        .map_err(|error| blocked(CommandError::BulkRefused { error }))?;
+    let intent = bulk_intent(file.document, file.base_revision, &file.matches, changes);
+    let acknowledgement = file
+        .consent
+        .as_ref()
+        .map(|consent| consent.acknowledgement.clone())
+        .unwrap_or_else(Acknowledgement::none);
+    let preflight = preflight_edits(&context, &base.source, &edits, &acknowledgement)
+        .map_err(|error| blocked(CommandError::SaveFailed { error }))?;
+    // Ruling 22: consent is spent only on the file, base revision, intent and
+    // candidate it was collected for. A finding holds document-local spans and
+    // paths, so the candidate alone would not tie it to this file.
+    if let Some(consent) = &file.consent {
+        let same = consent.document == file.document
+            && consent.base_revision == file.base_revision
+            && consent.intent == intent
+            && consent.candidate == preflight.candidate;
+        if !same {
+            return Err(BulkFileOutcome::ConsentStale {
+                intent,
+                candidate: preflight.candidate,
+            });
+        }
+    }
+    if !preflight.verdict.proceeds() {
+        return Err(BulkFileOutcome::Refused {
+            verdict: preflight.verdict,
+            findings: preflight.findings,
+            candidate: preflight.candidate,
+            intent,
+        });
+    }
+    Ok(PreflightedFile {
+        document: file.document,
+        base_revision: file.base_revision,
+        edits,
+        acknowledgement,
+        candidate: preflight.candidate,
+        intent,
+    })
+} // End of function preflight_one_file()
+
+/// Saves one preflighted file through `save` and names what happened.
+///
+/// **The one place a bulk outcome is read off a save's answer.** A commit is
+/// *saved* with the transaction's own backup answer; `committed: false` is
+/// *already unchanged*; a conflict and a gate refusal are reported with their
+/// operands; an error is *write outcome unknown* exactly when
+/// [`espansoconfig_core::persist::SaveError::may_have_written`] says the rename
+/// may have happened, and *failed* otherwise. [`run_one_save`] has already
+/// evicted the cache and asked for a re-observation on the uncertain arm.
+///
+/// A bulk batch names several snippets and no single one, so the save carries
+/// no `at` and its conflict evidence is [`ReapplyMode::Unsupported`]: the
+/// bulk result reports the conflict's revisions, and the caller re-reads.
+fn execute_one_file(
+    workspace: &mut Workspace,
+    session_side: SessionSideOfASave<'_>,
+    ready: PreflightedFile,
+    save: &mut BulkSave<'_>,
+) -> BulkFileOutcome {
+    let answer = save(
+        workspace,
+        session_side,
+        OneSave {
+            document: ready.document,
+            base_revision: ready.base_revision,
+            content: SaveContent::Edits(&ready.edits),
+            acknowledgement: &ready.acknowledgement,
+            at: None,
+            reapply: ReapplyRequest {
+                subject: ReapplyMode::Unsupported,
+                placement: PlacementMode::NotAnchored,
+            },
+        },
+    );
+    match answer {
+        Ok(SaveResult::Saved {
+            revision,
+            committed: true,
+            notes,
+            backup_taken,
+            ..
+        }) => BulkFileOutcome::Saved {
+            revision,
+            backup_taken,
+            notes,
+        },
+        Ok(SaveResult::Saved {
+            revision,
+            committed: false,
+            ..
+        }) => BulkFileOutcome::AlreadyUnchanged { revision },
+        Ok(SaveResult::Conflict {
+            expected,
+            found,
+            disk_revision,
+            ..
+        }) => BulkFileOutcome::Conflicted {
+            expected,
+            found,
+            disk_revision,
+        },
+        Ok(SaveResult::Refused { verdict, findings }) => BulkFileOutcome::Refused {
+            verdict,
+            findings,
+            candidate: ready.candidate,
+            intent: ready.intent,
+        },
+        Err(error) => {
+            let uncertain =
+                matches!(&error, CommandError::SaveFailed { error } if error.may_have_written());
+            if uncertain {
+                BulkFileOutcome::WriteOutcomeUnknown { error }
+            } else {
+                BulkFileOutcome::Failed { error }
+            }
+        }
+    } // End of the match over the save's answer
+} // End of function execute_one_file()
+
 /// Hands one whole replacement text to the save transaction.
 ///
 /// A free function for [`move_one_match`]'s reason, and the shortest of the
@@ -3595,6 +3883,40 @@ pub fn save_match_item_text(
     session.save_match_item_text(id, base_revision, &text, &acknowledgement)
 } // End of function save_match_item_text()
 
+/// Applies up to seven option intents to snippets of several files, one save
+/// per file (Phase 3-10; `docs/decisions/3-split-notes.md` rulings 19–22).
+///
+/// **The nineteenth workspace command, and the eighth that can write a user's
+/// file** — through [`run_one_save`], once per file, and through nothing else.
+///
+/// # Its argument
+///
+/// One [`BulkOptionsRequest`]: the option changes (the seven options of ruling
+/// 20 only, each at most once), the files in the order they are attempted —
+/// each with its base revision, its selected snippets and its own consent —
+/// and the files the caller excluded before sending. Every struct is
+/// `deny_unknown_fields`, and there is **no `force` flag**.
+///
+/// # What it answers
+///
+/// A [`BulkResult`] accounting for every file: saved, already unchanged,
+/// conflicted, refused, consent stale, blocked, failed, write outcome unknown,
+/// not attempted, excluded before apply. A preflight blocker anywhere writes
+/// nothing; an execution stop keeps every earlier commit and reports it.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`], and [`CommandError::BulkRefused`] for a
+/// malformed request, before any file is read. Nothing that happens to one file
+/// is an error of the command.
+#[tauri::command]
+pub fn apply_bulk_options(
+    session: State<'_, WorkspaceSession>,
+    request: BulkOptionsRequest,
+) -> Result<BulkResult, CommandError> {
+    session.apply_bulk_options(&request)
+} // End of function apply_bulk_options()
+
 /// Lists the recognised backup batches of the open workspace (design consult
 /// Q3).
 ///
@@ -3721,6 +4043,9 @@ pub fn drain_external_changes(
 ) -> Result<ReconciliationBatch, CommandError> {
     session.drain_external_changes(after_sequence)
 } // End of function drain_external_changes()
+
+#[cfg(test)]
+mod bulk_check;
 
 #[cfg(test)]
 mod tests {

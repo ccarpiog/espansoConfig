@@ -28,9 +28,10 @@
  *   so does a key here that names no variant.
  *
  * The compile-time half only covers the enums the frontend has a type for. The
- * Rust-side half covers every enum, including the three the wire never carries
- * (`WorkspaceError`, `DiscoveryError`, `IdentityError`, whose conditions reach
- * the frontend flattened into `CommandError`).
+ * Rust-side half covers every enum, including the two the wire never carries
+ * (`WorkspaceError` and `DiscoveryError`, whose conditions reach the frontend
+ * flattened into `CommandError`). `IdentityError` was the third until Phase
+ * 3-10, which carries it in its own shape inside a `BulkPlanError`.
  *
  * ## The six the review added
  *
@@ -75,6 +76,10 @@
 
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
+  BulkFileOutcome,
+  BulkFileOutcomeName,
+  BulkPlanError,
+  BulkPlanErrorName,
   BackupError,
   BackupErrorName,
   BackupReadError,
@@ -108,6 +113,8 @@ import type {
   FindingCode,
   FindingCodeName,
   HazardKind,
+  IdentityError,
+  IdentityErrorName,
   InvariantViolation,
   InvariantViolationName,
   LineEnding,
@@ -1400,6 +1407,92 @@ export function describeDraftError(locale: Locale, error: DraftError): string {
 } // End of function describeDraftError()
 
 // ---------------------------------------------------------------------------
+// The bulk option edit — Phase 3-10
+// ---------------------------------------------------------------------------
+
+/**
+ * The dictionary key for one reason a snippet identity did not resolve.
+ *
+ * Needed since Phase 3-10, when `IdentityError` first crossed the boundary in
+ * its own shape, inside a `BulkPlanError`'s `Identity` arm.
+ *
+ * @param name - The variant name of an `IdentityError`.
+ * @returns The key holding that reason's sentence.
+ */
+export function identityErrorKey(name: IdentityErrorName): TranslationKey {
+  return `code.identityError.${uncapitalize(name)}`;
+} // End of function identityErrorKey()
+
+/**
+ * The sentence one unresolved snippet identity reads as. No operand is
+ * interpolated: a revision is a digest and a node is an arena index.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - An identity refusal as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeIdentityError(locale: Locale, error: IdentityError): string {
+  return translate(locale, identityErrorKey(wireVariantName<IdentityErrorName>(error)));
+} // End of function describeIdentityError()
+
+/**
+ * The dictionary key for one reason a bulk edit could not be planned.
+ *
+ * @param name - The variant name of a `BulkPlanError`.
+ * @returns The key holding that reason's sentence.
+ */
+export function bulkPlanErrorKey(name: BulkPlanErrorName): TranslationKey {
+  return `code.bulkPlanError.${uncapitalize(name)}`;
+} // End of function bulkPlanErrorKey()
+
+/**
+ * The sentence one bulk planning refusal reads as.
+ *
+ * Only `optionRepeated` names an operand, and it is an espanso key. The
+ * selection `index` is deliberately not interpolated — it is a position a
+ * caller resolves against the selection it holds — and a nested
+ * `IdentityError` or `DraftError` is dropped by {@link scalarOperands} rather
+ * than rendered; a caller that shows it describes it with its own accessor.
+ *
+ * @param locale - The dictionary to read from.
+ * @param error - A bulk planning refusal as it crossed the boundary.
+ * @returns The translated message, with its operands substituted.
+ */
+export function describeBulkPlanError(locale: Locale, error: BulkPlanError): string {
+  const key = bulkPlanErrorKey(wireVariantName<BulkPlanErrorName>(error));
+  return translate(locale, key, scalarOperands(wireVariantOperands(error)));
+} // End of function describeBulkPlanError()
+
+/**
+ * The dictionary key for what happened to one file of a bulk edit.
+ *
+ * `BulkFileOutcome` is flat, like `SaveResult`, so the discriminant arrives
+ * already lowercase and equal to the Rust variant name uncapitalised.
+ *
+ * @param name - The `outcome` of one file's bulk report.
+ * @returns The key holding that outcome's sentence.
+ */
+export function bulkFileOutcomeKey(name: BulkFileOutcomeName): TranslationKey {
+  return `code.bulkFileOutcome.${uncapitalize(name)}`;
+} // End of function bulkFileOutcomeKey()
+
+/**
+ * The sentence one file's bulk outcome reads as.
+ *
+ * **Per file, never for the whole request.** No sentence here says that nothing
+ * was written anywhere except `blocked` and `consentStale`, which only a
+ * preflight produces, before any save ran; whether the whole request wrote
+ * nothing is the result's own `nothing_written` flag.
+ *
+ * @param locale - The dictionary to read from.
+ * @param outcome - One file's outcome as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeBulkFileOutcome(locale: Locale, outcome: BulkFileOutcome): string {
+  return translate(locale, bulkFileOutcomeKey(outcome.outcome));
+} // End of function describeBulkFileOutcome()
+
+// ---------------------------------------------------------------------------
 // The read-only backup catalogue — Phase 2c-5-2
 // ---------------------------------------------------------------------------
 //
@@ -1805,6 +1898,8 @@ export const CODE_NAMESPACE_KEY_BUILDERS = {
   backupStep: backupStepKey,
   backupTarget: backupTargetKey,
   batchSkipped: batchSkippedKey,
+  bulkFileOutcome: bulkFileOutcomeKey,
+  bulkPlanError: bulkPlanErrorKey,
   changedContent: changedContentKey,
   commandError: commandErrorKey,
   contentKind: contentKindKey,
@@ -1820,6 +1915,7 @@ export const CODE_NAMESPACE_KEY_BUILDERS = {
   findingClass: findingClassKey,
   findingCode: findingCodeKey,
   hazardKind: hazardKindKey,
+  identityError: identityErrorKey,
   invariantViolation: invariantViolationKey,
   lineEnding: lineEndingKey,
   matchBadge: matchBadgeKey,
@@ -1852,24 +1948,22 @@ export const CODE_NAMESPACE_KEY_BUILDERS = {
 /**
  * The `code.` namespaces that deliberately have no key builder.
  *
- * **Exactly three, and every one for the same stated reason**: `WorkspaceError`,
- * `DiscoveryError` and `IdentityError` never cross the Tauri boundary in their
- * own shape. `CommandError` flattens their conditions, so the frontend has no
- * wire type whose variants a builder could take, and their sentences exist
- * because a code with no string is worse than a code with no caller — the same
- * ruling `src-tauri/src/dictionary_contract.rs` records for them.
+ * **Exactly two, and both for the same stated reason**: `WorkspaceError` and
+ * `DiscoveryError` never cross the Tauri boundary in their own shape.
+ * `CommandError` flattens their conditions, so the frontend has no wire type
+ * whose variants a builder could take, and their sentences exist because a code
+ * with no string is worse than a code with no caller — the same ruling
+ * `src-tauri/src/dictionary_contract.rs` records for them. `IdentityError` was
+ * the third until Phase 3-10: a `BulkPlanError` carries it whole, so it has a
+ * builder now.
  *
  * **Not a suppression list.** `codes.test.ts` asserts this set exactly, in both
  * directions against the dictionary, so an entry that stops naming a real
  * namespace fails just as loudly as a namespace that is neither built nor listed
- * here. Adding a fourth entry is a claim that something else on this boundary
+ * here. Adding a third entry is a claim that something else on this boundary
  * cannot be rendered through a typed builder, and it has to be argued here.
  */
-export const CODE_NAMESPACES_WITHOUT_A_BUILDER = [
-  'workspaceError',
-  'discoveryError',
-  'identityError'
-] as const;
+export const CODE_NAMESPACES_WITHOUT_A_BUILDER = ['workspaceError', 'discoveryError'] as const;
 
 // ---------------------------------------------------------------------------
 // The external-conflict sentences a surface owes — Phase 2d-6-1a

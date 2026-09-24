@@ -346,7 +346,10 @@ const COMMAND_ERRORS = [
   {
     code: 'itemTextRefused',
     error: { ItemRangeNotContiguous: { edit: 0, hole: { start: 40, end: 90 } } }
-  }
+  },
+  // Phase 3-10's, sampled with the request-level refusal Rust's own
+  // `every_command_error()` samples.
+  { code: 'bulkRefused', error: { NoOptionChanges: {} } }
 ] as const satisfies readonly CommandError[];
 
 // ---------------------------------------------------------------------------
@@ -572,7 +575,7 @@ describe('the sample tables', () => {
       valueKinds: 5,
       documentShapes: 3,
       matchBadges: 10,
-      commandErrors: 22,
+      commandErrors: 23,
       scalarStyles: 5,
       lineEndings: 2,
       fileKinds: 3,
@@ -1041,6 +1044,8 @@ const CODE_NAMESPACE_SAMPLES: {
   backupStep: 'CreateBackupRoot',
   backupTarget: 'InConfigRoot',
   batchSkipped: 'ForeignName',
+  bulkFileOutcome: 'saved',
+  bulkPlanError: 'NoOptionChanges',
   changedContent: CHANGED_CONTENT_NAMES[0],
   commandError: COMMAND_ERRORS[0],
   contentKind: CONTENT_KINDS[0],
@@ -1056,6 +1061,7 @@ const CODE_NAMESPACE_SAMPLES: {
   findingClass: 'EditorModelError',
   findingCode: 'MatchHasNoContentField',
   hazardKind: HAZARD_KINDS[0],
+  identityError: 'StaleRevision',
   invariantViolation: 'InvertedSpan',
   lineEnding: LINE_ENDINGS[0],
   matchBadge: MATCH_BADGES[0],
@@ -1112,7 +1118,7 @@ describe('every code namespace has a typed accessor', () => {
   // every gate green and render nowhere. `duplicateSeam` had been in exactly
   // that state since Phase 2c-3c-1, and this check is what found it.
 
-  it('covers the dictionary in both directions, with three named exceptions', () => {
+  it('covers the dictionary in both directions, with two named exceptions', () => {
     const registered = Object.keys(CODE_NAMESPACE_KEY_BUILDERS);
     const reachable = [...registered, ...CODE_NAMESPACES_WITHOUT_A_BUILDER].sort();
     expect(reachable).toEqual([...dictionaryCodeNamespaces()]);
@@ -1121,18 +1127,15 @@ describe('every code namespace has a typed accessor', () => {
     expect(new Set(reachable).size).toBe(reachable.length);
   }); // End of the "both directions" case
 
-  it('admits exactly the three namespaces that never cross the wire in their own shape', () => {
-    // Not a suppression list. `CommandError` flattens all three conditions, so
-    // the frontend has no wire type whose variants a builder could take, and
-    // their sentences exist because a code with no string is worse than a code
-    // with no caller. A fourth entry is a claim about this boundary that has to
-    // be argued in `codes.ts`.
-    expect([...CODE_NAMESPACES_WITHOUT_A_BUILDER]).toEqual([
-      'workspaceError',
-      'discoveryError',
-      'identityError'
-    ]);
-  }); // End of the "three exceptions" case
+  it('admits exactly the two namespaces that never cross the wire in their own shape', () => {
+    // Not a suppression list. `CommandError` flattens both conditions, so the
+    // frontend has no wire type whose variants a builder could take, and their
+    // sentences exist because a code with no string is worse than a code with no
+    // caller. `identityError` left this list at Phase 3-10, when a
+    // `BulkPlanError` began carrying it whole. A third entry is a claim about
+    // this boundary that has to be argued in `codes.ts`.
+    expect([...CODE_NAMESPACES_WITHOUT_A_BUILDER]).toEqual(['workspaceError', 'discoveryError']);
+  }); // End of the "two exceptions" case
 
   it('registers callable functions, never namespace strings', () => {
     // The registry's whole point, in two halves. A manifest of strings could

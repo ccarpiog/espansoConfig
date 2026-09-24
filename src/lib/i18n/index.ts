@@ -179,6 +179,8 @@ import type {
   BackupStep,
   BackupTarget,
   BatchSkipped,
+  BulkFileOutcome,
+  BulkPlanError,
   ChangedContent,
   ContentKind,
   DecodeError,
@@ -192,6 +194,7 @@ import type {
   FindingClass,
   FindingCode,
   HazardKind,
+  IdentityError,
   InvariantViolation,
   LineEnding,
   MatchBadge,
@@ -231,6 +234,8 @@ import {
   describeBackupStep,
   describeBackupTarget,
   describeBatchSkipped,
+  describeBulkFileOutcome,
+  describeBulkPlanError,
   describeChangedContent,
   describeCommandError,
   describeConflictMessage,
@@ -248,6 +253,7 @@ import {
   describeFindingClass,
   describeFindingCode,
   describeHazard,
+  describeIdentityError,
   describeImportsState,
   describeInvariantViolation,
   describeIpcFailure,
@@ -311,6 +317,8 @@ export {
   backupStepKey,
   backupTargetKey,
   batchSkippedKey,
+  bulkFileOutcomeKey,
+  bulkPlanErrorKey,
   changedContentKey,
   commandErrorKey,
   contentKindKey,
@@ -323,6 +331,8 @@ export {
   describeBackupStep,
   describeBackupTarget,
   describeBatchSkipped,
+  describeBulkFileOutcome,
+  describeBulkPlanError,
   describeChangedContent,
   describeCommandError,
   describeConflictMessage,
@@ -340,6 +350,7 @@ export {
   describeFindingClass,
   describeFindingCode,
   describeHazard,
+  describeIdentityError,
   describeInvariantViolation,
   describeIpcFailure,
   describeLineEnding,
@@ -385,6 +396,7 @@ export {
   findingClassKey,
   findingCodeKey,
   hazardKindKey,
+  identityErrorKey,
   invariantViolationKey,
   lineEndingKey,
   matchBadgeKey,
@@ -2296,6 +2308,40 @@ export function tSourceConflictState(state: SourceConflictState): string {
 export function tDraftError(error: DraftError): string {
   return describeDraftError(locale.current, error);
 } // End of function tDraftError()
+
+/**
+ * Renders why a bulk option edit, or one file of it, could not be planned, in
+ * the current language (Phase 3-10). Nothing was written.
+ *
+ * @param error - A bulk planning refusal as it crossed the boundary.
+ * @returns The translated message.
+ */
+export function tBulkPlanError(error: BulkPlanError): string {
+  return describeBulkPlanError(locale.current, error);
+} // End of function tBulkPlanError()
+
+/**
+ * Renders what happened to one file of a bulk option edit, in the current
+ * language (Phase 3-10). A per-file sentence, never a claim about the whole
+ * request.
+ *
+ * @param outcome - One file's outcome as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tBulkFileOutcome(outcome: BulkFileOutcome): string {
+  return describeBulkFileOutcome(locale.current, outcome);
+} // End of function tBulkFileOutcome()
+
+/**
+ * Renders why a selected snippet's identity did not resolve, in the current
+ * language — the `Identity` arm of a bulk planning refusal (Phase 3-10).
+ *
+ * @param error - An identity refusal as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tIdentityError(error: IdentityError): string {
+  return describeIdentityError(locale.current, error);
+} // End of function tIdentityError()
 
 // ---------------------------------------------------------------------------
 // The read-only backup catalogue — Phase 2c-5-2

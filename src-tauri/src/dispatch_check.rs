@@ -1,4 +1,4 @@
-//! The nineteen commands, invoked through the real dispatcher.
+//! The twenty commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -27,7 +27,7 @@
 //!    the local origin, `plugin:event|emit` and `plugin:event|emit_to` — which
 //!    `core:event:default` would also have granted — are asserted refused
 //!    through the resolved access-control list, and every plugin command is in
-//!    the remote-origin sweep beside the nineteen application commands.
+//!    the remote-origin sweep beside the twenty application commands.
 //!
 //! `mock_builder()` swaps the platform webview for a mock; it does **not** swap
 //! the IPC dispatcher, the access-control resolution or the command macros, all
@@ -168,7 +168,7 @@ const REMOTE_ORIGIN: &str = "https://an-unrelated-site.example";
 /// The event plugin's registration command, as `@tauri-apps/api/event`'s
 /// `listen` spells it.
 ///
-/// A **plugin** command, which is what separates it from the nineteen: the
+/// A **plugin** command, which is what separates it from the twenty: the
 /// dispatcher access-checks it even from the local origin, so it is reachable
 /// only because `capabilities/default.json` grants `core:event:allow-listen`.
 const EVENT_LISTEN: &str = "plugin:event|listen";
@@ -1102,6 +1102,62 @@ fn the_local_raw_item_pair_is_reachable_and_its_text_reaches_the_disk() {
     );
 } // End of function the_local_raw_item_pair_is_reachable_and_its_text_reaches_the_disk()
 
+/// Phase 3-10's bulk option edit is reachable, its request deserializes from the
+/// JSON the frontend sends, and its answer accounts for the file — through the
+/// real dispatcher, with no `force` property anywhere in the request.
+#[test]
+fn the_bulk_option_edit_is_reachable_and_accounts_for_each_file() {
+    let source = "matches:\n  - trigger: ':one'\n    replace: first\n  \
+                  - trigger: ':two'\n    replace: second\n";
+    let OverIpc {
+        webview,
+        document_id,
+        view,
+        _app,
+        _dir: dir,
+    } = opened_over_ipc(source);
+    let target = dir.path().join("match").join("base.yml");
+    let request = json!({
+        "changes": [
+            { "option": "word", "value": { "Set": "true" } },
+            { "option": "force_mode", "value": { "Set": "clipboard" } },
+        ],
+        "files": [{
+            "document": document_id,
+            "base_revision": view["revision"],
+            "matches": [view["matches"][0]["id"], view["matches"][1]["id"]],
+            "consent": null,
+        }],
+        "excluded": [],
+    });
+    assert!(!request.to_string().contains("force\""));
+    let result = invoke(
+        &webview,
+        "apply_bulk_options",
+        json!({ "request": request }),
+    )
+    .expect("the bulk edit answers");
+    assert_eq!(result["preflight_passed"], true, "{result}");
+    assert_eq!(result["nothing_written"], false);
+    assert_eq!(result["files"][0]["document"], document_id);
+    assert_eq!(result["files"][0]["outcome"], "saved");
+    assert_eq!(result["files"][0]["backup_taken"], true);
+    assert_eq!(
+        fs::read_to_string(&target).expect("the file reads back"),
+        "matches:\n  - trigger: ':one'\n    replace: first\n    word: true\n    force_mode: clipboard\n  \
+         - trigger: ':two'\n    replace: second\n    word: true\n    force_mode: clipboard\n"
+    );
+
+    let refused = invoke(
+        &webview,
+        "apply_bulk_options",
+        json!({ "request": { "changes": [], "files": [], "excluded": [] } }),
+    )
+    .expect_err("a malformed request is refused");
+    assert_eq!(refused["code"], "bulkRefused");
+    assert_eq!(refused["error"], json!({ "NoOptionChanges": {} }));
+} // End of function the_bulk_option_edit_is_reachable_and_accounts_for_each_file()
+
 /// A save refused by the semantic gate crosses in the **`Ok`** channel.
 ///
 /// The distinction the whole result type is built on, measured at the boundary:
@@ -1960,7 +2016,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// resolved command carries `ExecutionContext::Local`, the remote origin
 /// resolves neither, and a window that is not `main` resolves neither.
 ///
-/// And the nineteen application commands resolve to nothing from either
+/// And the twenty application commands resolve to nothing from either
 /// origin, which is the other half of what "names no application command"
 /// means: a local origin reaches them because the dispatcher does not consult
 /// this list for an application command, not because the list allows them, and
@@ -2055,7 +2111,7 @@ fn the_capability_grants_exactly_the_two_event_permissions() {
                 .is_none(),
             "{command} must resolve to nothing for a remote origin"
         );
-    } // End of the loop over the nineteen application commands
+    } // End of the loop over the twenty application commands
 } // End of function the_capability_grants_exactly_the_two_event_permissions()
 
 /// A local `main` webview registers the wake listener through the event plugin.
@@ -2128,7 +2184,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
     );
 } // End of function the_registered_listener_is_removable_through_the_event_plugin()
 
-/// A page that is not this application cannot reach any of the nineteen
+/// A page that is not this application cannot reach any of the twenty
 /// commands, nor either event-plugin command.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
@@ -2146,7 +2202,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All nineteen are attempted, and the count is asserted against the registered
+/// **All twenty are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -2154,7 +2210,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// parsed out of `generate_handler!` by [`crate::rust_source`], so a command
 /// added to the application and forgotten here fails this test rather than
 /// silently leaving the sweep. **The two plugin commands are a second table**,
-/// kept apart so that the application count stays nineteen: they are not in
+/// kept apart so that the application count stays twenty: they are not in
 /// `generate_handler!`, this test asserts they are not, and folding them into
 /// the first table would make the count claim about two different things.
 #[test]
@@ -2289,6 +2345,23 @@ fn a_remote_origin_is_refused() {
                 "acknowledgement": { "accepted": [] },
             }),
         ),
+        // Phase 3-10's writer. It writes several files, so a navigated webview
+        // must not reach it for every writer's reason.
+        (
+            "apply_bulk_options",
+            json!({
+                "request": {
+                    "changes": [{ "option": "word", "value": { "Set": "true" } }],
+                    "files": [{
+                        "document": 0,
+                        "base_revision": "0".repeat(64),
+                        "matches": [identity],
+                        "consent": null,
+                    }],
+                    "excluded": [],
+                },
+            }),
+        ),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -2303,7 +2376,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 19, "the surface is nineteen commands");
+    assert_eq!(attempted.len(), 20, "the surface is twenty commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, REMOTE_ORIGIN, command, args)

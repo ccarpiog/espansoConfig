@@ -32,6 +32,9 @@
 //! same one entry point — `commands::save_match_item_text`, the local raw-item
 //! edit, riding `ItemTextReplacement` — and its reader,
 //! `commands::match_item_text`, which cuts one snippet's owned range out in Rust.
+//! Phase 3-10 adds an eighth, `commands::apply_bulk_options`, the per-file bulk
+//! option edit: one save through the same entry point per file, preflighted as a
+//! whole first; its request and result types are `bulk`.
 //!
 //! Phase 2c-5-2 adds three more, and **not one of them writes**:
 //! `commands::list_backup_batches`, `commands::list_backup_entries` and
@@ -153,6 +156,7 @@
 // attribute is set here. Add one before the first Windows build, not before.
 
 mod backup;
+mod bulk;
 mod commands;
 #[cfg(test)]
 mod dictionary_contract;
@@ -192,8 +196,8 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
-/// Registers the ten read-only workspace commands, the six commands that write,
-/// the menu command, and the state they share.
+/// Registers the eleven read-only workspace commands, the eight commands that
+/// write, the menu command, and the state they share.
 ///
 /// Shared with `dispatch_check.rs` so that the tested application is the built
 /// application: a command registered in `main` and absent from the test's
@@ -204,9 +208,10 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// project one, project one match, read one's bytes, re-read one — the three
 /// backup-catalogue commands `list_backup_batches`, `list_backup_entries` and
 /// `read_backup_text`, Phase 2d-4a's `drain_external_changes` and Phase 3-7's
-/// `match_item_text` are read-only. The seven save commands `move_match`,
+/// `match_item_text` are read-only. The eight save commands `move_match`,
 /// `save_match`, `create_match`, `delete_match`, `save_raw_document`,
-/// `duplicate_match` and Phase 3-7's `save_match_item_text` write, and every one of them does it through
+/// `duplicate_match`, Phase 3-7's `save_match_item_text` and Phase 3-10's
+/// `apply_bulk_options` write, and every one of them does it through
 /// `espansoconfig_core::persist::save_document` and through nothing else. The
 /// menu command, `set_menu_labels`, does not write a user file either: it hands
 /// the macOS menu the strings the frontend translated, because Tauri builds that
@@ -221,7 +226,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// the application publishes an ACL manifest of its own (`tauri::webview`'s
 /// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
 /// !is_local`). This crate publishes none, the webview's origin is local, and
-/// none of the nineteen commands is a plugin command, so none of them needs a
+/// none of the twenty commands is a plugin command, so none of them needs a
 /// permission. The two event permissions are for the frontend's one event
 /// listener: Tauri's `listen` invokes the plugin command `plugin:event|listen`,
 /// and the unlisten function it resolves with invokes `plugin:event|unlisten`.
@@ -267,6 +272,7 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::drain_external_changes,
             commands::match_item_text,
             commands::save_match_item_text,
+            commands::apply_bulk_options,
             menu::set_menu_labels,
         ])
 } // End of function register()

@@ -22,7 +22,13 @@
  * A type alone would be invisible to both.
  */
 
-import type { BackupReadError, DraftError, EditError, SaveError } from './types';
+import type {
+  BackupReadError,
+  BulkPlanError,
+  DraftError,
+  EditError,
+  SaveError
+} from './types';
 
 /**
  * Every code the Rust side may put in a rejection.
@@ -56,7 +62,8 @@ export const COMMAND_ERROR_CODES = [
   'unaddressableBackupEntry',
   'backupEntryIsNotThisDocument',
   'backupReadFailed',
-  'itemTextRefused'
+  'itemTextRefused',
+  'bulkRefused'
 ] as const;
 
 /** One of {@link COMMAND_ERROR_CODES}. */
@@ -505,6 +512,27 @@ export interface ItemTextRefusedError {
   readonly error: EditError;
 }
 
+/**
+ * A bulk option edit could not be planned (Phase 3-10), and **nothing was
+ * written**.
+ *
+ * As the whole command's rejection it refuses a malformed request — no option
+ * change, an option or a file named twice, no file — before any file is read.
+ * The same code also appears inside one file's `blocked` bulk outcome, as that
+ * file's preflight blocker. The core's `BulkPlanError` travels whole, with its
+ * own `code.bulkPlanError.*` sentences, as {@link DraftRefusedError}'s
+ * `DraftError` does.
+ */
+export interface BulkRefusedError {
+  /** The discriminant. */
+  readonly code: 'bulkRefused';
+  /**
+   * Why the bulk edit could not be planned, exactly as the core reports it.
+   * Always an object: every `BulkPlanError` variant is a struct variant.
+   */
+  readonly error: BulkPlanError;
+}
+
 /** Everything a command may reject with. */
 export type CommandError =
   | NoWorkspaceOpenError
@@ -528,7 +556,8 @@ export type CommandError =
   | UnaddressableBackupEntryError
   | BackupEntryIsNotThisDocumentError
   | BackupReadFailedError
-  | ItemTextRefusedError;
+  | ItemTextRefusedError
+  | BulkRefusedError;
 
 /**
  * Where the developer string of an unexpected failure is kept.
@@ -721,7 +750,8 @@ export const COMMAND_ERROR_OPERANDS = {
   unaddressableBackupEntry: { batch: 'string', relative_path: 'string' },
   backupEntryIsNotThisDocument: { document: 'number' },
   backupReadFailed: { error: 'object' },
-  itemTextRefused: { error: 'object' }
+  itemTextRefused: { error: 'object' },
+  bulkRefused: { error: 'object' }
 } as const;
 
 /**
@@ -927,6 +957,11 @@ export function identityRecovery(error: CommandError): SelectionRecovery {
     // that the identity stopped naming a snippet: a stale identity arrives as
     // `identityStaleRevision`, above, before any range is derived.
     case 'itemTextRefused':
+    // A refused bulk plan names a request or a selection, never a changed
+    // identity on its own: a stale selection arrives inside it as the core's
+    // `Identity` refusal, which the bulk inspector handles, and nothing was
+    // written.
+    case 'bulkRefused':
       return { action: 'none' };
   }
   // Every member of CommandError has an arm above, so `error` is `never` here.

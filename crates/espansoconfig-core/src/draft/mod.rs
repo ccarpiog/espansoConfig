@@ -124,6 +124,15 @@
 //! born holding at all, which is not the same request as one written with an
 //! empty value.
 //!
+//! # Several snippets of one file, since Phase 3-10
+//!
+//! [`plan_bulk_option_edits`] applies up to seven option intents
+//! ([`BulkOption`], ruling 20) to several snippets of one file as **one** batch,
+//! by calling [`plan_match_edits`] once per snippet with a draft that holds only
+//! those options, and writing every value as **plain source text** — the
+//! spelling the person entered, verbatim, never quoted (D2u). The per-file bulk
+//! coordinator in `src-tauri` is its caller.
+//!
 //! # What this module never does
 //!
 //! It writes nothing. It has no `force` flag, no acknowledgement and no path to
@@ -134,6 +143,7 @@
 //! crate that may write a user's file.
 
 mod audit;
+mod bulk;
 mod error;
 mod field;
 mod match_draft;
@@ -142,6 +152,10 @@ mod plan;
 mod sequence;
 
 pub use audit::{check_batch_independence, check_closed_surface, NestedKeys};
+pub use bulk::{
+    check_bulk_changes, check_bulk_documents, is_plain_source, plan_bulk_option_edits, BulkOption,
+    BulkOptionChange, BulkPlanError, BulkValue,
+};
 pub use error::DraftError;
 pub use field::DraftField;
 pub use match_draft::{

@@ -1319,6 +1319,76 @@ pub fn save_document(request: SaveRequest<'_>) -> Result<SavedDocument, SaveErro
     })
 } // End of function save_document()
 
+/// What a save of one batch of edits would meet, judged against a text this
+/// process already holds — Phase 3-10's preflight.
+///
+/// The value [`preflight_edits`] answers. It is a **prediction about one
+/// candidate**, not a promise about the disk: the transaction that later writes
+/// re-reads the file under its lock, re-derives the candidate and re-runs the
+/// gate, and a file that moved on in between is a revision mismatch there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavePreflight {
+    /// The revision the candidate would have — the hash of the patched text.
+    ///
+    /// The per-file consent a bulk edit collects is bound to it, so consent
+    /// shown for one candidate cannot be spent on another (ruling 22).
+    pub candidate: ContentRevision,
+    /// Whether the candidate differs from the text it was derived from, which
+    /// is exactly the condition under which [`save_document`] would commit.
+    pub changes: bool,
+    /// Every finding the candidate produces, in report order — the same pass
+    /// [`save_document`] runs.
+    pub findings: Vec<Finding>,
+    /// The blocking policy's answer to those findings and the acknowledgement
+    /// supplied.
+    pub verdict: SaveVerdict,
+}
+
+/// Runs a save's in-memory half — the read-only check, the patch, the reparse,
+/// the projection, the validation and the verdict — over `source`, and writes
+/// nothing.
+///
+/// **No lock, no read, no write, no backup.** `source` is text the caller
+/// already holds (a workspace snapshot), so the answer is about that text and
+/// nothing else. The steps and the findings pass are [`save_document`]'s own —
+/// the read-only check first, [`apply_edits`], then the private `findings_of`
+/// and [`verdict`] — shared as code rather than copied, so the preflight and the
+/// transaction cannot come to judge one candidate differently. What the
+/// preflight cannot see is anything the transaction learns under its lock: a
+/// file that changed since `source` was read. That is the transaction's
+/// revision check, and a preflight that passed does not make it unnecessary.
+///
+/// # Errors
+///
+/// [`SaveError::DocumentIsReadOnly`] for a package file,
+/// [`SaveError::Patch`] when the engine refuses the batch, and
+/// [`SaveError::CandidateParseDisagrees`] when the reparse contradicts the
+/// patch. A verdict that does not proceed is **not** an error here: it is
+/// [`SavePreflight::verdict`], so a caller can report the findings and the
+/// candidate they belong to.
+pub fn preflight_edits(
+    context: &DocumentContext,
+    source: &str,
+    edits: &[DocumentEdit],
+    acknowledgement: &Acknowledgement,
+) -> Result<SavePreflight, SaveError> {
+    if context.kind.is_read_only() {
+        return Err(SaveError::DocumentIsReadOnly {
+            path: context.path.clone(),
+        });
+    }
+    let patched = apply_edits(source, edits).map_err(SaveError::Patch)?;
+    let candidate = patched.text();
+    let findings = findings_of(context, &context.path, candidate, edits)?;
+    let verdict = verdict(&findings, acknowledgement);
+    Ok(SavePreflight {
+        candidate: ContentRevision::of_bytes(candidate.as_bytes()),
+        changes: candidate != source,
+        findings,
+        verdict,
+    })
+} // End of function preflight_edits()
+
 /// The candidate bytes, and the provenance that decides what may be said about
 /// them.
 ///

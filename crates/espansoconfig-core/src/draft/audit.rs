@@ -138,7 +138,9 @@ pub fn check_closed_surface(
             DocumentEdit::InsertFields(group) => {
                 group.mapping() == mapping
                     && group.entries().iter().all(|(key, value)| match value {
-                        EntryValue::Scalar(_) => MatchField::from_key(key).is_some(),
+                        EntryValue::Scalar(_) | EntryValue::PlainSource(_) => {
+                            MatchField::from_key(key).is_some()
+                        }
                         EntryValue::ScalarList(_) => SequenceField::from_key(key).is_some(),
                     })
             }
@@ -591,7 +593,11 @@ fn names_a_trigger_switch(
     let is_triggers = |key: &str| SequenceField::from_key(key) == Some(SequenceField::Triggers);
     match value {
         EntryValue::ScalarList(_) => is_trigger_form(old) && is_triggers(key),
-        EntryValue::Scalar(_) => is_triggers(old) && is_trigger_form(key),
+        // A shape switch refuses a plain-source value at planning, so naming
+        // one here authorises nothing the engine would write.
+        EntryValue::Scalar(_) | EntryValue::PlainSource(_) => {
+            is_triggers(old) && is_trigger_form(key)
+        }
     }
 } // End of function names_a_trigger_switch()
 
