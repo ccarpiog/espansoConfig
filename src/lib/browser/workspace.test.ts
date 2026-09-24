@@ -52,6 +52,10 @@ import type {
   ReapplyResolution,
   ReconciliationBatch,
   SaveResult,
+  SidecarChange,
+  SidecarState,
+  SidecarUpdateRequest,
+  SidecarUpdateResult,
   UnreadableReason,
   WorkspaceSummary
 } from '../ipc/types';
@@ -178,6 +182,7 @@ import {
   creationRefusal,
   creationTargetOf,
   editCreationField,
+  editCreationOption,
   matchCreationView,
   reapplyToDiskVersion as reapplyCreatorToDiskVersion,
   reloadTheDiskVersion as reloadCreatorDiskVersion,
@@ -232,6 +237,7 @@ import {
   startRawEditor,
   type RawEditorSession
 } from './rawEditor';
+import { NO_PREFERENCES } from './preferences';
 import {
   createBrowserState as createUnrecordedBrowserState,
   type BackupCommands,
@@ -446,6 +452,14 @@ interface Script {
   readonly spellings?: readonly CommandResult<BulkOptionSpellings>[];
   /** What `apply_bulk_options` answers, in order (Phase 3-11-1). */
   readonly bulks?: readonly CommandResult<BulkResult>[];
+  /**
+   * What `load_sidecar` answers, in order (Phase 3-13-1); a fresh, empty,
+   * writable sidecar once the list runs out, so a case that says nothing about
+   * preferences sees none and no reported failure.
+   */
+  readonly sidecarLoads?: readonly CommandResult<SidecarState>[];
+  /** What `update_sidecar` answers, in order; `noWorkspaceOpen` once it runs out. */
+  readonly sidecarUpdates?: readonly CommandResult<SidecarUpdateResult>[];
   /**
    * What `save_raw_document` answers, in order.
    *
@@ -723,6 +737,8 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
   let itemSaves = 0;
   let spellingReads = 0;
   let bulks = 0;
+  let sidecarLoads = 0;
+  let sidecarUpdates = 0;
   let raws = 0;
   let drained = 0;
   drainsPending += script.drains?.length ?? 0;
@@ -823,6 +839,22 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     }),
     applyBulkOptions: vi.fn(async (_request: BulkOptionsRequest) => {
       const answer: CommandResult<BulkResult> = script.bulks?.[bulks++] ?? {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+      };
+      return answer;
+    }),
+    loadSidecar: vi.fn(async () => {
+      const answer: CommandResult<SidecarState> = script.sidecarLoads?.[sidecarLoads++] ?? {
+        ok: true,
+        value: { status: { Fresh: {} }, writable: true, files: [], retained_orphans: 0 }
+      };
+      return answer;
+    }),
+    updateSidecar: vi.fn(async (_request: SidecarUpdateRequest) => {
+      const answer: CommandResult<SidecarUpdateResult> = script.sidecarUpdates?.[
+        sidecarUpdates++
+      ] ?? {
         ok: false,
         failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
       };
@@ -16783,3 +16815,307 @@ describe('the discarded-history recovery', () => {
     state.dispose();
   }); // End of the permitted-reload case
 }); // End of the "discarded-history recovery" suite
+
+describe('the application preferences — Phase 3-13-1', () => {
+  /** A sidecar answer holding defaults for file 2 (an empty `word` among them). */
+  const WITH_DEFAULTS: CommandResult<SidecarState> = {
+    ok: true,
+    value: {
+      status: { Loaded: {} },
+      writable: true,
+      files: [
+        {
+          document: 2,
+          display_name: 'Everyday',
+          sort_order: null,
+          defaults: [
+            { option: 'word', value: '' },
+            { option: 'force_mode', value: 'keys' }
+          ]
+        }
+      ],
+      retained_orphans: 0
+    }
+  };
+
+  /**
+   * An update answer holding the given defaults for file 2.
+   *
+   * @param value - `force_mode`'s new default.
+   * @returns What `update_sidecar` answers.
+   */
+  function updatedTo(value: string): CommandResult<SidecarUpdateResult> {
+    return {
+      ok: true,
+      value: {
+        outcome: { Saved: {} },
+        state: {
+          status: { Loaded: {} },
+          writable: true,
+          files: [
+            {
+              document: 2,
+              display_name: null,
+              sort_order: null,
+              defaults: [{ option: 'force_mode', value }]
+            }
+          ],
+          retained_orphans: 0
+        }
+      }
+    };
+  } // End of function updatedTo()
+
+  /**
+   * A creation form over the state's files, opened as a screen would open one,
+   * with file 2 chosen and the two required fields filled in.
+   *
+   * @param state - The browser state.
+   * @returns The form.
+   */
+  function creatorOver(state: BrowserState): MatchCreationSession {
+    let session = startMatchCreation(state.documents, state.views, null, () => 0, state.creationDefaults());
+    session = chooseDestination(session, 2);
+    session = editCreationField(session, 'trigger', ':new');
+    return editCreationField(session, 'replace', 'a body');
+  } // End of function creatorOver()
+
+  it('asks for the preferences on open and installs them, without the open waiting for them', async () => {
+    const commands = scriptedCommands({ sidecarLoads: [WITH_DEFAULTS] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await settleDrains();
+    expect(vi.mocked(commands.loadSidecar).mock.calls).toEqual([[]]);
+    expect(state.preferences.files.get(2)?.displayName).toBe('Everyday');
+    expect(state.creationDefaults().get(2)).toMatchObject({ word: '', force_mode: 'keys', left_word: null });
+    const session = creatorOver(state);
+    expect(matchCreationView(session).options.filter((one) => one.value !== null).map((one) => one.option)).toEqual([
+      'word',
+      'force_mode'
+    ]);
+    state.dispose();
+  });
+
+  it('reaches ready and creates while a stalled read never answers', async () => {
+    const commands: BrowserCommands = {
+      ...scriptedCommands(),
+      loadSidecar: vi.fn(() => new Promise<CommandResult<SidecarState>>(() => undefined))
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await settleDrains();
+    expect(state.status).toBe('ready');
+    expect(state.preferences).toBe(NO_PREFERENCES);
+    expect(state.creationDefaults().size).toBe(0);
+    const session = creatorOver(state);
+    expect(canCreate(session)).toBe(true);
+    // A second refresh joins the stalled read instead of piling up another.
+    void state.refreshPreferences();
+    expect(vi.mocked(commands.loadSidecar)).toHaveBeenCalledTimes(1);
+    state.dispose();
+  });
+
+  const unusable: readonly SidecarState['status'][] = [
+    { Fresh: {} },
+    { Quarantined: { aside: 'x.corrupt.json' } },
+    { QuarantineFailed: {} },
+    { FutureSchema: { version: '9' } },
+    { Unreadable: {} },
+    { RootUnresolved: {} },
+    { StorageUnavailable: {} }
+  ];
+
+  it.each(unusable)('leaves creation working with no defaults over a sidecar that is %j', async (status) => {
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({
+      sidecarLoads: [{ ok: true, value: { status, writable: false, files: [], retained_orphans: 0 } }]
+    });
+    const state = createBrowserState(commands, (failure) => reported.push(failure));
+    await state.open(null);
+    await settleDrains();
+    expect(state.preferences.reading).toEqual({ kind: 'read', status });
+    expect(state.creationDefaults().size).toBe(0);
+    expect(canCreate(creatorOver(state))).toBe(true);
+    expect(reported).toEqual([]);
+    state.dispose();
+  });
+
+  it('leaves creation working when the read fails or throws, reporting it and rejecting nothing', async () => {
+    const failure: IpcFailure = { kind: 'command', error: { code: 'noWorkspaceOpen' } };
+    for (const loadSidecar of [
+      vi.fn(async (): Promise<CommandResult<SidecarState>> => ({ ok: false, failure })),
+      vi.fn(async (): Promise<CommandResult<SidecarState>> => {
+        throw new Error('the boundary broke');
+      })
+    ]) {
+      const reported: IpcFailure[] = [];
+      const state = createBrowserState({ ...scriptedCommands(), loadSidecar }, (one) => reported.push(one));
+      await state.open(null);
+      await settleDrains();
+      expect(state.preferences.reading.kind).toBe('failed');
+      expect(reported).toHaveLength(1);
+      expect(canCreate(creatorOver(state))).toBe(true);
+      await expect(state.refreshPreferences()).resolves.toBeUndefined();
+      state.dispose();
+    } // End of the loop over the two ways a read fails
+  });
+
+  it('does not touch an open creation draft when a preference changes later', async () => {
+    const commands = scriptedCommands({ sidecarLoads: [WITH_DEFAULTS], sidecarUpdates: [updatedTo('clipboard')] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await settleDrains();
+    const open = editCreationOption(creatorOver(state), 'left_word', 'mine');
+    const before = open.draft.value;
+    const report = await state.updatePreferences(2, [{ SetDefault: { option: 'force_mode', value: 'clipboard' } }]);
+    expect(report).toEqual({ kind: 'saved' });
+    expect(state.creationDefaults().get(2)?.force_mode).toBe('clipboard');
+    // The form is a value holding its own snapshot: nothing reached it.
+    expect(open.draft.value).toBe(before);
+    expect(open.draft.value.options).toMatchObject({ word: '', force_mode: 'keys', left_word: 'mine' });
+    expect(creatorOver(state).draft.value.options.force_mode).toBe('clipboard');
+    state.dispose();
+  });
+
+  it('reports every failed preference save as a value, never a rejection, and changes nothing else', async () => {
+    const failure: IpcFailure = { kind: 'command', error: { code: 'unknownDocument', document: 2 } };
+    const notWritable: CommandResult<SidecarUpdateResult> = {
+      ok: true,
+      value: {
+        outcome: { NotWritable: {} },
+        state: { status: { QuarantineFailed: {} }, writable: false, files: [], retained_orphans: 0 }
+      }
+    };
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands({ sidecarUpdates: [{ ok: false, failure }, notWritable] });
+    const state = createBrowserState(commands, (one) => reported.push(one));
+    await state.open(null);
+    await settleDrains();
+    const session = creatorOver(state);
+    expect(await state.updatePreferences(2, [{ ClearDisplayName: {} }])).toEqual({ kind: 'failed', failure });
+    expect(state.preferenceSave).toEqual({ kind: 'ended', report: { kind: 'failed', failure } });
+    expect(await state.updatePreferences(2, [{ ClearDisplayName: {} }])).toEqual({
+      kind: 'notWritable',
+      status: { QuarantineFailed: {} }
+    });
+    const throwing = createBrowserState(
+      {
+        ...scriptedCommands(),
+        updateSidecar: vi.fn(async (): Promise<CommandResult<SidecarUpdateResult>> => {
+          throw new Error('the boundary broke');
+        })
+      },
+      () => undefined
+    );
+    await throwing.open(null);
+    await expect(throwing.updatePreferences(2, [])).resolves.toMatchObject({ kind: 'failed' });
+    expect(reported).toEqual([failure]);
+    expect(canCreate(session)).toBe(true);
+    // No user-file writer was reached by any of it.
+    expect(commands.saveMatch).not.toHaveBeenCalled();
+    expect(commands.createMatch).not.toHaveBeenCalled();
+    expect(commands.saveRawDocument).not.toHaveBeenCalled();
+    state.dispose();
+    throwing.dispose();
+  });
+
+  it('sends updates one at a time, copies the changes, and withdraws one queued across open()', async () => {
+    const first = deferred<CommandResult<SidecarUpdateResult>>();
+    const sent: SidecarUpdateRequest[] = [];
+    const commands: BrowserCommands = {
+      ...scriptedCommands(),
+      updateSidecar: vi.fn((request: SidecarUpdateRequest) => {
+        sent.push(request);
+        return sent.length === 1 ? first.promise : Promise.resolve(updatedTo('keys'));
+      })
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    const changes: SidecarChange[] = [{ SetDisplayName: { name: 'A' } }];
+    const one = state.updatePreferences(2, changes);
+    changes.push({ ClearDisplayName: {} });
+    const two = state.updatePreferences(3, [{ ClearDisplayName: {} }]);
+    await settleDrains();
+    expect(sent).toEqual([{ document: 2, changes: [{ SetDisplayName: { name: 'A' } }] }]);
+    expect(state.preferenceSave).toEqual({ kind: 'saving' });
+    await state.open(null);
+    first.resolve(updatedTo('clipboard'));
+    expect(await one).toEqual({ kind: 'saved' });
+    expect(await two).toEqual({ kind: 'withdrawn' });
+    // The second was never sent, and the closed workspace's answer installed nothing.
+    expect(sent).toHaveLength(1);
+    expect(state.preferences.files.size).toBe(0);
+    expect(state.preferenceSave).toEqual({ kind: 'idle' });
+    state.dispose();
+  });
+
+  it('sends a read called while an update is out only after it, so the read never serves pre-update values', async () => {
+    // A fake store with Rust's lock: whatever is served first is served in full.
+    // Its `force_mode` default is `keys` until the update is applied.
+    const update = deferred<CommandResult<SidecarUpdateResult>>();
+    let applied = false;
+    const order: string[] = [];
+    const commands: BrowserCommands = {
+      ...scriptedCommands(),
+      loadSidecar: vi.fn(async (): Promise<CommandResult<SidecarState>> => {
+        order.push(applied ? 'read after the update' : 'read before the update');
+        if (!applied) {
+          return WITH_DEFAULTS;
+        }
+        const after = updatedTo('clipboard');
+        if (!after.ok) {
+          throw new Error('unreachable');
+        }
+        return { ok: true, value: after.value.state };
+      }),
+      updateSidecar: vi.fn((_request: SidecarUpdateRequest) => {
+        order.push('update');
+        return update.promise;
+      })
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await settleDrains();
+    const saving = state.updatePreferences(2, [{ SetDefault: { option: 'force_mode', value: 'clipboard' } }]);
+    await settleDrains();
+    // Sent later than the update: without one queue it would reach the store
+    // first, answer `keys`, and win by its later number.
+    const refreshed = state.refreshPreferences();
+    await settleDrains();
+    expect(commands.loadSidecar).toHaveBeenCalledTimes(1);
+    applied = true;
+    update.resolve(updatedTo('clipboard'));
+    expect(await saving).toEqual({ kind: 'saved' });
+    await refreshed;
+    expect(order).toEqual(['read before the update', 'update', 'read after the update']);
+    expect(state.creationDefaults().get(2)?.force_mode).toBe('clipboard');
+    state.dispose();
+  });
+
+  it('discards a read answered after open() replaced the workspace it was asked about', async () => {
+    const stale = deferred<CommandResult<SidecarState>>();
+    let reads = 0;
+    const commands: BrowserCommands = {
+      ...scriptedCommands(),
+      loadSidecar: vi.fn(() => {
+        reads += 1;
+        return reads === 1
+          ? stale.promise
+          : Promise.resolve<CommandResult<SidecarState>>({
+              ok: true,
+              value: { status: { Fresh: {} }, writable: true, files: [], retained_orphans: 0 }
+            });
+      })
+    };
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    await state.open(null);
+    await settleDrains();
+    stale.resolve(WITH_DEFAULTS);
+    await settleDrains();
+    expect(reads).toBe(2);
+    expect(state.preferences.reading).toEqual({ kind: 'read', status: { Fresh: {} } });
+    expect(state.creationDefaults().size).toBe(0);
+    state.dispose();
+  });
+}); // End of the "application preferences" suite

@@ -240,8 +240,10 @@ import {
   type SendFailureLine
 } from './editorSave';
 import type { InvalidationStatus } from './invalidation';
+import { isBulkOption } from './bulkEdit';
 import {
   destinationEligibility,
+  NO_CREATION_OPTIONS,
   type CreationBuffers,
   type CreationField
 } from './matchCreation';
@@ -303,7 +305,8 @@ import { recordTyping, type Clock, type TypingRun } from './typing';
  * Four values where `ConflictDraftKind` has two, and the refinement is the whole
  * of the consult's Q4 surface matrix: *authored text* is not one thing when the
  * question is *can a new snippet be made out of it?* — the match editor drafts seventeen
- * projected fields, the creator drafts two authored ones, and the raw editor
+ * projected fields, the creator drafts two authored ones and up to seven
+ * options, and the raw editor
  * drafts a whole document that has no match shape at all.
  *
  * **It is a permanent fact about a surface**, exactly as {@link ConflictDraftKind}
@@ -314,7 +317,7 @@ import { recordTyping, type Clock, type TypingRun } from './typing';
 export type RecoveryDraftKind =
   /** The match editor's seventeen-field draft over a projected snippet. */
   | 'matchFields'
-  /** The creator's two authored fields, which were never in a file. */
+  /** The creator's two authored fields and its options, which were never in a file. */
   | 'creationFields'
   /** The mover's placement and the deleter's and duplicator's identity. */
   | 'operationChoice'
@@ -997,11 +1000,17 @@ export function transferOfMatchDraft(
 /**
  * What a creator's retained draft becomes in the new snippet.
  *
- * **Two authored fields and fifteen keys nobody authored.** The creation form
- * writes `trigger` and `replace` and omits every optional schema-known field,
- * which asks Rust to write no key for them — a different request from sending them
- * empty. So the other fifteen are `notInTheFile` here, in the literal sense: there
- * was no file and there was no key.
+ * **Two authored fields, the seven options the draft held, and the keys nobody
+ * authored.** The creation form writes `trigger`, `replace` and — since Phase
+ * 3-13-1 — every option its draft holds, seeded or typed, `''` included; it omits
+ * every other optional schema-known field, which asks Rust to write no key for
+ * them — a different request from sending them empty. So an option the draft held
+ * is `carried` with its exact text (ruling 23: the retained draft is what the
+ * recovered snippet is born holding), and an absent option and every other key are
+ * `notInTheFile` here, in the literal sense: there was no file and there was no key.
+ *
+ * **Recovery never consults a file's defaults** (ruling 28): what is carried is the
+ * retained draft's own values, and nothing in this module reads a preference.
  *
  * There is no baseline to consult, so the only refusal a value can meet is the
  * carriage return, which no control in this window can produce and which a caller
@@ -1012,12 +1021,18 @@ export function transferOfMatchDraft(
  */
 export function transferOfCreationDraft(buffers: CreationBuffers): RecoveryTransfer {
   const authored: Readonly<Record<CreationField, string>> = buffers;
+  const options = buffers.options;
   const transfer: Record<EditableField, FieldTransfer> = {} as Record<
     EditableField,
     FieldTransfer
   >;
   for (const field of EDITABLE_FIELDS) {
-    const typed = field === 'trigger' || field === 'replace' ? authored[field] : null;
+    const typed =
+      field === 'trigger' || field === 'replace'
+        ? authored[field]
+        : isBulkOption(field)
+          ? options[field]
+          : null;
     if (typed === null) {
       transfer[field] = { kind: 'notCarried', reason: { kind: 'notInTheFile' } };
     } else if (typed.includes('\r')) {
@@ -1484,7 +1499,11 @@ function openedRecovery<T>(
     // The body box holds whichever content key the transfer carries (Phase
     // 3-5-1); `CreationBuffers` calls it `replace` because the creation form's
     // body was always `replace`, and `recoveryBodyFieldOf` names the key.
-    replace: carriedText(transfer[recoveryBodyFieldOf(transfer)]) ?? ''
+    replace: carriedText(transfer[recoveryBodyFieldOf(transfer)]) ?? '',
+    // The recovery form drafts no option: the transfer carries them, fixed, and
+    // `newMatchOfRecovery` reads them from there (Phase 3-13-1). No default is
+    // ever consulted here, so none can override a recovered value.
+    options: NO_CREATION_OPTIONS
   };
   return {
     origin: {
@@ -1636,9 +1655,10 @@ export function startMatchFieldRecovery<S, O>(
 /**
  * Opens recovery from a **creator's** conflict.
  *
- * The creator's retained draft is already exactly two authored strings, so there
- * is no baseline to consult and no projection to read: what the person typed is
- * what the new snippet is born holding.
+ * The creator's retained draft is already exactly two authored strings and the
+ * options it held (Phase 3-13-1), so there is no baseline to consult and no
+ * projection to read: what the form held is what the new snippet is born
+ * holding, and no file's defaults are consulted.
  *
  * @typeParam S - The creator's session type, which this never touches.
  * @typeParam O - The creator's reapply obstacle type.
@@ -1931,9 +1951,7 @@ function withField(
   field: CreationField,
   text: string
 ): CreationBuffers {
-  const next: Record<CreationField, string> = { ...buffers };
-  next[field] = text;
-  return next;
+  return field === 'trigger' ? { ...buffers, trigger: text } : { ...buffers, replace: text };
 } // End of function withField()
 
 /**

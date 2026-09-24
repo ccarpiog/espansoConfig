@@ -1366,6 +1366,8 @@ describe('a move panel over the real workspace state', () => {
       saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       matchOptionSpellings: vi.fn(async () => refusal),
       applyBulkOptions: vi.fn(async () => refusal),
+      loadSidecar: vi.fn(async () => refusal),
+      updateSidecar: vi.fn(async () => refusal),
       saveRawDocument: vi.fn(async () => refusal),
       drainExternalChanges: vi.fn(async () => refusal)
     };
@@ -1473,6 +1475,8 @@ describe('a move panel over the real workspace state', () => {
       saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
       matchOptionSpellings: vi.fn(async () => refusal),
       applyBulkOptions: vi.fn(async () => refusal),
+      loadSidecar: vi.fn(async () => refusal),
+      updateSidecar: vi.fn(async () => refusal),
       saveRawDocument: vi.fn(async () => refusal),
       drainExternalChanges: vi.fn(async () => refusal)
     };

@@ -228,7 +228,7 @@
 //!   the webview as `serde`'s own English prose and there is no second error to
 //!   send instead.
 //!
-//! # Why every command is synchronous
+//! # Why every command but two is synchronous
 //!
 //! Tauri runs a command written without `async` on the main thread, and an
 //! `async` one on its own runtime. An `async` command here would have to hold
@@ -239,6 +239,20 @@
 //! browser is one parse of one file, and only on the first look at it. When
 //! Phase 2 edits on a debounce, that trade is worth re-examining rather than
 //! inheriting.
+//!
+//! **The two sidecar commands, [`load_sidecar`] and [`update_sidecar`], are the
+//! exception since Phase 3-13-1.** Each takes the sidecar store's cross-process
+//! advisory lock, which has **no timeout** (`docs/decisions/3-12-notes.md` §5):
+//! a second instance stopped while holding it stalls the call until that
+//! instance resumes or exits. On the main thread that stall would freeze the
+//! whole window. They are therefore declared `#[tauri::command(async)]`, which
+//! makes Tauri run their synchronous bodies on its async runtime instead; no
+//! `.await` appears inside them, so no guard is ever held across one. What this
+//! forces is only *where* a stalled call waits — it still waits, and it occupies
+//! one runtime worker thread while it does. The browser coordination keeps at
+//! most one load and one update outstanding (`src/lib/browser/workspace.svelte.ts`),
+//! and `the_sidecar_commands_run_off_the_main_thread` in
+//! `crate::wire_contract` fails if either loses the attribute.
 //!
 //! # Why a poisoned lock is absorbed rather than reported
 //!
@@ -4004,7 +4018,11 @@ pub fn match_option_spellings(
 ///
 /// [`CommandError::NoWorkspaceOpen`]. Everything about the sidecar itself is a
 /// status in the value channel.
-#[tauri::command]
+///
+/// **Runs off the main thread** (`async` in the attribute): the store's lock has
+/// no timeout, and a stall here must not freeze the window. See this module's
+/// header.
+#[tauri::command(async)]
 pub fn load_sidecar(
     session: State<'_, WorkspaceSession>,
     sidecar: State<'_, SidecarSession>,
@@ -4027,7 +4045,9 @@ pub fn load_sidecar(
 /// [`CommandError::NoWorkspaceOpen`], and [`CommandError::UnknownDocument`] for
 /// a file the workspace does not list. A refused or failed write is a
 /// [`crate::sidecar::SidecarUpdateOutcome`] in the value channel.
-#[tauri::command]
+///
+/// **Runs off the main thread**, for [`load_sidecar`]'s reason.
+#[tauri::command(async)]
 pub fn update_sidecar(
     session: State<'_, WorkspaceSession>,
     sidecar: State<'_, SidecarSession>,

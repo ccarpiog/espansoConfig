@@ -4867,6 +4867,65 @@ fn the_sidecar_route_names_no_user_file_writer() {
     } // End of the loop over the three command-side functions
 } // End of function the_sidecar_route_names_no_user_file_writer()
 
+/// The two sidecar commands run off the main thread, and every other command
+/// stays synchronous — Phase 3-13-1.
+///
+/// The sidecar store's cross-process lock has no timeout (3-12 notes §5), so a
+/// stalled second instance would freeze the window if either sidecar command ran
+/// on the main thread, where Tauri runs a command declared without `async`.
+/// This reads `commands.rs` with `syn` and checks each `#[tauri::command]`'s
+/// argument list: `async` on exactly `load_sidecar` and `update_sidecar`, and on
+/// nothing else, which is what the module header of `commands.rs` states.
+///
+/// **What it cannot see**: it checks the declaration, not Tauri's behaviour — a
+/// Tauri release that ran such a command on the main thread anyway would pass.
+#[test]
+fn the_sidecar_commands_run_off_the_main_thread() {
+    let source = read_repository_file("src-tauri/src/commands.rs");
+    let file = syn::parse_file(&source).expect("commands.rs parses");
+    let mut asynchronous: BTreeSet<String> = BTreeSet::new();
+    let mut commands = 0usize;
+    for item in &file.items {
+        let syn::Item::Fn(function) = item else {
+            continue;
+        };
+        for attribute in &function.attrs {
+            let path = attribute.path();
+            let is_command = path.segments.len() == 2
+                && path.segments[0].ident == "tauri"
+                && path.segments[1].ident == "command";
+            if !is_command {
+                continue;
+            }
+            commands += 1;
+            if let syn::Meta::List(list) = &attribute.meta {
+                if list
+                    .tokens
+                    .to_string()
+                    .split(',')
+                    .any(|arg| arg.trim() == "async")
+                {
+                    asynchronous.insert(function.sig.ident.to_string());
+                }
+            }
+            assert!(
+                function.sig.asyncness.is_none(),
+                "{} is an `async fn`; the header allows only the `async` attribute",
+                function.sig.ident
+            );
+        } // End of the loop over one function's attributes
+    } // End of the loop over the items of commands.rs
+    assert_eq!(
+        commands, 22,
+        "the twenty-two workspace commands were all read"
+    );
+    assert_eq!(
+        asynchronous,
+        BTreeSet::from(["load_sidecar".to_owned(), "update_sidecar".to_owned()]),
+        "exactly the two sidecar commands run off the main thread"
+    );
+} // End of function the_sidecar_commands_run_off_the_main_thread()
+
 /// Both sidecar enums are declared exactly as Rust writes them, and every
 /// sentence's placeholders name an operand Rust writes as a string.
 #[test]

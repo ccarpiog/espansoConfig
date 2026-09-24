@@ -27,6 +27,7 @@ import type {
 import { editDraft, isDirty } from './draft';
 import { makeConflict, makeDocument, makeMatch } from './fixtures';
 import type { InvalidationStatus } from './invalidation';
+import { NO_CREATION_OPTIONS } from './matchCreation';
 import {
   applySave,
   applySuggestion,
@@ -394,12 +395,12 @@ describe('recovery, per added field', () => {
       const held = editField(session(), field, `v-${field}`);
       const transfer = transferOfMatchDraft(held.baseline, held.draft.value);
       expect(transfer[field], field).toEqual({ kind: 'carried', text: `v-${field}` });
-      const newMatch = newMatchOfRecovery(transfer, { trigger: ':a', replace: 'b' }, LITERAL_TRIGGER_ONLY);
+      const newMatch = newMatchOfRecovery(transfer, { trigger: ':a', replace: 'b', options: NO_CREATION_OPTIONS }, LITERAL_TRIGGER_ONLY);
       expect((newMatch as unknown as Record<string, unknown>)[field], field).toBe(`v-${field}`);
       const untouched = session();
       const none = transferOfMatchDraft(untouched.baseline, untouched.draft.value);
       expect(none[field], field).toEqual({ kind: 'notCarried', reason: { kind: 'notInTheFile' } });
-      expect(field in newMatchOfRecovery(none, { trigger: ':a', replace: 'b' }, LITERAL_TRIGGER_ONLY), field).toBe(false);
+      expect(field in newMatchOfRecovery(none, { trigger: ':a', replace: 'b', options: NO_CREATION_OPTIONS }, LITERAL_TRIGGER_ONLY), field).toBe(false);
     } // End of the loop over the plain added fields
   });
 
@@ -408,7 +409,7 @@ describe('recovery, per added field', () => {
       const held = session(projection(holding(field, 'the body')));
       const transfer = transferOfMatchDraft(held.baseline, held.draft.value);
       expect(recoveryBodyFieldOf(transfer), field).toBe(field);
-      const newMatch = newMatchOfRecovery(transfer, { trigger: ':a', replace: 'the body' }, LITERAL_TRIGGER_ONLY);
+      const newMatch = newMatchOfRecovery(transfer, { trigger: ':a', replace: 'the body', options: NO_CREATION_OPTIONS }, LITERAL_TRIGGER_ONLY);
       expect(Object.values(newMatch.content), field).toEqual(['the body']);
       expect(Object.keys(newMatch.content)[0]?.toLowerCase().replace('_', ''), field).toBe(
         field.replace('_', '')
@@ -633,7 +634,7 @@ describe('the content switch — one compound intention, all or nothing', () => 
     expect(transfer.replace).toEqual({ kind: 'notCarried', reason: { kind: 'switchedAway' } });
     expect(transfer.markdown).toEqual({ kind: 'carried', text: 'recovered **body**' });
     expect(recoveryBodyFieldOf(transfer)).toBe('markdown');
-    expect(newMatchOfRecovery(transfer, { trigger: ':a', replace: 'recovered **body**' }, LITERAL_TRIGGER_ONLY).content).toEqual({
+    expect(newMatchOfRecovery(transfer, { trigger: ':a', replace: 'recovered **body**', options: NO_CREATION_OPTIONS }, LITERAL_TRIGGER_ONLY).content).toEqual({
       Markdown: 'recovered **body**'
     });
   });

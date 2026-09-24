@@ -228,7 +228,9 @@ import type {
   VariableKind,
   VerificationFailure,
   WriteError,
-  WriteStep
+  WriteStep,
+  SidecarStatus,
+  SidecarUpdateOutcome
 } from '../ipc/types';
 import { locale } from '../stores/locale.svelte';
 import type { Locale } from './locale';
@@ -302,8 +304,14 @@ import {
   describeVariableKind,
   describeVerificationFailure,
   describeWriteError,
-  describeWriteStep
+  describeWriteStep,
+  describeDefaultRefusal,
+  describeDisplayNameRefusal,
+  describeWithdrawnPreferenceSave,
+  describeSidecarStatus,
+  describeSidecarUpdateOutcome
 } from './codes';
+import type { DefaultRefusal, DisplayNameRefusal } from '../browser/preferences';
 import { translate, type TranslationKey, type TranslationParams } from './dictionaries';
 import { describeOccurrenceCount, describeSnippetCount, describeUnknownCount } from './plural';
 
@@ -2721,3 +2729,63 @@ export function tBulkOutcomeHeadline(headline: BulkOutcomeHeadline): string {
 export function tBulkCount(line: BulkCountLine): string {
   return describeBulkCount(locale.current, line);
 } // End of function tBulkCount()
+
+// ---------------------------------------------------------------------------
+// The sidecar, display names and new-snippet defaults — Phase 3-13-1
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders how the last sidecar read or update found the preferences file, in the
+ * current language. The reactive wrapper over `describeSidecarStatus` in
+ * `./codes` (3-12 notes §6 item 5).
+ *
+ * @param status - The status as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tSidecarStatus(status: SidecarStatus): string {
+  return describeSidecarStatus(locale.current, status);
+} // End of function tSidecarStatus()
+
+/**
+ * Renders what one sidecar update did, in the current language. The reactive
+ * wrapper over `describeSidecarUpdateOutcome` in `./codes`.
+ *
+ * @param outcome - The outcome as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tSidecarUpdateOutcome(outcome: SidecarUpdateOutcome): string {
+  return describeSidecarUpdateOutcome(locale.current, outcome);
+} // End of function tSidecarUpdateOutcome()
+
+/**
+ * Renders why a drafted display name was not saved, in the current language.
+ * The reactive wrapper over `describeDisplayNameRefusal` in `./codes`.
+ *
+ * @param reason - The refusal.
+ * @returns The translated sentence.
+ */
+export function tDisplayNameRefusal(reason: DisplayNameRefusal): string {
+  return describeDisplayNameRefusal(locale.current, reason);
+} // End of function tDisplayNameRefusal()
+
+/**
+ * Renders why a new-snippet default is not saved or not seeded, in the current
+ * language. The reactive wrapper over `describeDefaultRefusal` in `./codes`.
+ *
+ * @param reason - The refusal.
+ * @returns The translated sentence.
+ */
+export function tDefaultRefusal(reason: DefaultRefusal): string {
+  return describeDefaultRefusal(locale.current, reason);
+} // End of function tDefaultRefusal()
+
+/**
+ * Renders that a preference save was never sent because the workspace was
+ * replaced, in the current language. The reactive wrapper over
+ * `describeWithdrawnPreferenceSave` in `./codes`.
+ *
+ * @returns The translated sentence.
+ */
+export function tWithdrawnPreferenceSave(): string {
+  return describeWithdrawnPreferenceSave(locale.current);
+} // End of function tWithdrawnPreferenceSave()

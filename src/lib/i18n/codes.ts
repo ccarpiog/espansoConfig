@@ -185,6 +185,13 @@ import {
 } from '../browser/fileScope';
 import { conflictMessageKey, type ConflictMessage } from '../browser/saveOutcome';
 import {
+  defaultRefusalKey,
+  displayNameRefusalKey,
+  withdrawnPreferenceSaveKey,
+  type DefaultRefusal,
+  type DisplayNameRefusal
+} from '../browser/preferences';
+import {
   bulkBlockerKey,
   bulkCountKey,
   bulkExclusionKey,
@@ -1565,6 +1572,47 @@ export function describeSidecarUpdateOutcome(
     sidecarUpdateOutcomeKey(wireVariantName<SidecarUpdateOutcomeName>(outcome))
   );
 } // End of function describeSidecarUpdateOutcome()
+
+// ---------------------------------------------------------------------------
+// Display names and new-snippet defaults — Phase 3-13-1
+// ---------------------------------------------------------------------------
+//
+// Browser-model codes from `../browser/preferences.ts`; the key builders live
+// there, beside the codes, and `../browser/preferences.test.ts` calls both
+// accessors in both locales, because the Rust contract sees neither.
+
+/**
+ * Why a drafted display name was not saved, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - The refusal, from `displayNameChanges`.
+ * @returns The translated sentence.
+ */
+export function describeDisplayNameRefusal(locale: Locale, reason: DisplayNameRefusal): string {
+  return translate(locale, displayNameRefusalKey(reason));
+} // End of function describeDisplayNameRefusal()
+
+/**
+ * Why a new-snippet default is not saved or not seeded, in one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - The refusal, from `defaultRefusal` or `defaultChanges`.
+ * @returns The translated sentence.
+ */
+export function describeDefaultRefusal(locale: Locale, reason: DefaultRefusal): string {
+  return translate(locale, defaultRefusalKey(reason));
+} // End of function describeDefaultRefusal()
+
+/**
+ * That a preference save was never sent because the workspace was replaced, in
+ * one language.
+ *
+ * @param locale - The dictionary to read from.
+ * @returns The translated sentence.
+ */
+export function describeWithdrawnPreferenceSave(locale: Locale): string {
+  return translate(locale, withdrawnPreferenceSaveKey());
+} // End of function describeWithdrawnPreferenceSave()
 
 // ---------------------------------------------------------------------------
 // The read-only backup catalogue — Phase 2c-5-2

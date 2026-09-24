@@ -34,6 +34,7 @@ import type {
 import { editDraft, isDirty } from './draft';
 import { makeConflict, makeDocument, makeMatch, makeSummary, scalarItem } from './fixtures';
 import type { InvalidationStatus } from './invalidation';
+import { NO_CREATION_OPTIONS } from './matchCreation';
 import {
   addList,
   addListItem,
@@ -688,7 +689,7 @@ describe('recovery carries the trigger form and search_terms whole, or not at al
     });
     const transfer = transferOfMatchDraft(held.baseline, buffers);
     expect(transfer.trigger).toEqual({ kind: 'notCarried', reason: { kind: 'triggerFormCarried' } });
-    expect(newMatchOfRecovery(transfer, { trigger: '', replace: 'b' }, structure)).toMatchObject({
+    expect(newMatchOfRecovery(transfer, { trigger: '', replace: 'b', options: NO_CREATION_OPTIONS }, structure)).toMatchObject({
       trigger: { Multiple: [':one', ':two', ':three'] },
       search_terms: ['term']
     });

@@ -1,5 +1,6 @@
 /**
- * The new-snippet form: two required values, one destination and one position.
+ * The new-snippet form: two required values, seven optional options, one
+ * destination and one position.
  *
  * **No component and no screen.** This is the whole protocol as a value, exactly
  * as `./matchEditor.ts` is for the small editor and `./rawEditor.ts` is for the
@@ -20,13 +21,17 @@
  *   which is a projection of a snippet that does not exist — a value nothing read
  *   from a file, sitting in the one field whose whole purpose is to record what a
  *   file held;
- * - there is **no absent key in this form**. Its two values are the two `NewMatch`
- *   requires on the wire, and both are required here because a trigger with no
- *   body is not a usable espanso snippet. The four *optional* schema-known fields
- *   `NewMatch` has carried since 2c-4c-1 are simply not authored here — omitting
- *   one asks Rust to write no key for it, which is a different request from
- *   sending it empty — and the absent-key question arrives with the caller that
- *   does author them;
+ * - its two **required** values are the two `NewMatch` requires on the wire, and
+ *   both are required here because a trigger with no body is not a usable espanso
+ *   snippet. **Since Phase 3-13-1 it also drafts the seven bulk options**
+ *   ({@link CreationBuffers.options}), and there the absent-key question has
+ *   arrived: each is `null` (the snippet is born without the key) or a string
+ *   (born holding it, `''` included), seeded once from the chosen file's defaults
+ *   ({@link seedDefaults}) or typed, and removable ({@link removeCreationOption}).
+ *   That is still no baseline: absence here is a request about a file that does
+ *   not exist yet, not a fact read from one. Every other optional schema-known
+ *   field `NewMatch` carries is not authored here — omitting one asks Rust to
+ *   write no key for it, which is a different request from sending it empty;
  * - there is **no reprojection debt** of the small editor's kind. A committed
  *   create does invalidate this form — see below — but the reason is that the
  *   *destinations* it holds are stale, not that a scalar's spelling has changed.
@@ -170,6 +175,7 @@ import type { TranslationKey } from '../i18n/dictionaries';
 import type { IpcFailure } from '../ipc/errors';
 import type {
   Acknowledgement,
+  BulkOption,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -186,6 +192,7 @@ import type {
 import {
   canRedo,
   canUndo,
+  editDraft,
   isDirty,
   redoDraft,
   retargetedDraft,
@@ -274,6 +281,15 @@ import {
   type SaveOutcomeModel,
   reapplyAuthorizationFor
 } from './saveOutcome';
+import { BULK_OPTIONS, bulkOptionField, bulkSuggestionsFor } from './bulkEdit';
+import type { DetailFieldName } from './detail';
+import {
+  defaultRefusal,
+  NO_CREATION_DEFAULTS,
+  NO_FILE_DEFAULTS,
+  type CreationDefaults,
+  type FileDefaults
+} from './preferences';
 import { holdsMatches } from './sidebar';
 import { recordTyping, type Clock, type TypingRun } from './typing';
 
@@ -299,13 +315,77 @@ export type CreationField = 'trigger' | 'replace';
  */
 export const CREATION_FIELDS: readonly CreationField[] = ['trigger', 'replace'];
 
-/** What the form's two controls hold. */
+/**
+ * The seven option fields a new snippet may be born holding — Phase 3-13-1.
+ *
+ * Each is **optional text**: `null` means the created snippet is born without the
+ * key, and a string — `''` included — means it is born holding that key with that
+ * text. The keys are the seven bulk options (`BULK_OPTIONS` in `./bulkEdit.ts`),
+ * and the type makes a missing or an eighth key a compile error. Never a boolean.
+ */
+export type CreationOptions = Readonly<Record<BulkOption, string | null>>;
+
+/** No option drafted: every key absent. The creator's and the recovery form's start. */
+export const NO_CREATION_OPTIONS: CreationOptions = NO_FILE_DEFAULTS;
+
+/**
+ * What the form's controls hold.
+ *
+ * **Widened at Phase 3-13-1** by {@link CreationBuffers.options}, so the seven
+ * option fields — seeded from a file's defaults or typed — are drafted values
+ * like the trigger and the body: in the undo history, retained by a conflict,
+ * compared and copied, reapplied and transferred to recovery (ruling 23).
+ */
 export interface CreationBuffers {
   /** The literal text that will fire the snippet — espanso's `trigger`. */
   readonly trigger: string;
   /** What the snippet will expand to — espanso's `replace`. */
   readonly replace: string;
+  /**
+   * The seven options, each `null` (no key) or its text.
+   *
+   * **The recovery form holds {@link NO_CREATION_OPTIONS} here and never reads
+   * it**: its options are the retained draft's transfer, fixed, and
+   * `newMatchOfRecovery` in `./recovery.ts` takes them from there.
+   */
+  readonly options: CreationOptions;
 }
+
+/** Where typing is recorded: one of the two text fields, or one option. */
+export type CreationTypingField = CreationField | BulkOption;
+
+/**
+ * Whether a form's defaults have been seeded, and from which file — Phase 3-13-1
+ * (ruling 28: *once and visibly*).
+ *
+ * - `pending`: no eligible destination with at least one default has been chosen
+ *   while the form accepted changes. The next such choice seeds.
+ * - `seeded`: done, and never again for this form. `from` is the file whose
+ *   defaults were used; `seeded` lists the options put into the draft (each was
+ *   absent there before); `kept` lists the options that had a default but already
+ *   held a value, which was **not** replaced; `withheld` lists defaults refused
+ *   for a carriage return (`DefaultRefusal` in `./preferences.ts`).
+ */
+export type CreationSeeding =
+  | {
+      /** Nothing seeded yet. */
+      readonly kind: 'pending';
+    }
+  | {
+      /** Seeded once; never again for this form. */
+      readonly kind: 'seeded';
+      /** The file whose defaults were used. */
+      readonly from: DocumentId;
+      /** The options the seeding put into the draft, in option order. */
+      readonly seeded: readonly BulkOption[];
+      /** The options that had a default but already held a value, left alone. */
+      readonly kept: readonly BulkOption[];
+      /** The defaults not seeded because they hold a carriage return. */
+      readonly withheld: readonly BulkOption[];
+    };
+
+/** The pending seeding, shared rather than rebuilt. */
+const SEEDING_PENDING: CreationSeeding = Object.freeze({ kind: 'pending' as const });
 
 /**
  * How this form compares and snapshots its drafted value.
@@ -600,14 +680,14 @@ export interface MatchCreationSession {
    * function of the destination and cannot be decided once at the start.
    */
   readonly held: MatchId | null;
-  /** What the two controls hold. Drafted, with history and consent. */
+  /** What the controls hold — two fields and the seven options. Drafted, with history and consent. */
   readonly draft: Draft<CreationBuffers>;
   /** Whether a save is in flight. */
   readonly phase: EditorPhase;
   /** Which field has the focus, as the screen last reported it. */
-  readonly focus: CreationField | null;
+  readonly focus: CreationTypingField | null;
   /** The run of typing later keystrokes may join, or `null`. */
-  readonly group: TypingRun<CreationField> | null;
+  readonly group: TypingRun<CreationTypingField> | null;
   /** What the last attempt sent, or `null`. Kept so a refusal can be consented to. */
   readonly submitted: DraftSubmission<CreationBuffers> | null;
   /** How the last attempt ended, as the thing a screen draws, or `null`. */
@@ -751,6 +831,16 @@ export interface MatchCreationSession {
    * a delivery through this module at all.
    */
   readonly heldDeliveries: readonly ObservationDelivery[];
+  /**
+   * The defaults this form may seed from, **as they were when it was opened** —
+   * Phase 3-13-1. A snapshot: a preference changed later reaches the next form,
+   * never this one, and never a value already in this form's draft. Every
+   * record is a frozen copy taken at opening, so a caller changing its own
+   * records afterwards changes nothing here.
+   */
+  readonly defaults: CreationDefaults;
+  /** Whether the defaults have been seeded, and what was. */
+  readonly seeding: CreationSeeding;
   /** Where the typing run's boundary readings come from. */
   readonly clock: Clock;
 }
@@ -802,20 +892,29 @@ function defaultPlacement(
  * @param clock - Where the typing run's boundary readings come from.
  *   **Required**: a default would be `Date.now`, which is the one thing a test
  *   cannot drive.
- * @returns A clean form with no history, no consent and nothing said.
+ * @param defaults - Every file's new-snippet defaults as the window holds them
+ *   now (`BrowserState.creationDefaults()`), kept as a snapshot. **Optional, and
+ *   what that costs is stated here**: a caller that omits it gets
+ *   {@link NO_CREATION_DEFAULTS} and a form that seeds nothing, which is the
+ *   legal *no preferences* state rather than an error — and nothing forces a
+ *   caller to pass the live one. Since Phase 3-13-1.
+ * @returns A clean form with no history, no consent and nothing said — with the
+ *   chosen file's defaults already in the draft's starting value when that file
+ *   is eligible and has any ({@link seedDefaults}).
  */
 export function startMatchCreation(
   documents: readonly DocumentSummary[],
   views: readonly DocumentView[],
   held: MatchId | null,
-  clock: Clock
+  clock: Clock,
+  defaults: CreationDefaults = NO_CREATION_DEFAULTS
 ): MatchCreationSession {
   const destinations = destinationsOf(documents, views);
   const chosen =
     held !== null && destinations.some((one) => one.document === held.document)
       ? held.document
       : null;
-  return {
+  const opened: MatchCreationSession = {
     destinations,
     chosen,
     placement: defaultPlacement(destinations, held, chosen),
@@ -830,7 +929,7 @@ export function startMatchCreation(
     // revision conflicts rather than commits against a file the window has since
     // re-read. What no type forces is that a caller hands it *this* revision;
     // `submission.baseRevision` is where it is.
-    draft: startDraft(revisionOf(destinations, chosen), { trigger: '', replace: '' }, BUFFER_RULES),
+    draft: startDraft(revisionOf(destinations, chosen), EMPTY_BUFFERS, BUFFER_RULES),
     phase: 'editing',
     focus: null,
     group: null,
@@ -846,9 +945,123 @@ export function startMatchCreation(
     uncertaintyUnresolved: false,
     awaitingReconciliation: new Map(),
     heldDeliveries: [],
+    defaults: snapshotDefaults(defaults),
+    seeding: SEEDING_PENDING,
     clock
   };
+  return seedDefaults(opened);
 } // End of function startMatchCreation()
+
+/**
+ * The form's own copy of every file's defaults — the 3-13-1 review's second
+ * finding.
+ *
+ * Each record's seven values are read **once**, here, into a new frozen record,
+ * so a caller that later changes one of its own records (the type is `Readonly`,
+ * which does not freeze at runtime) changes nothing this form seeds. A value that
+ * is neither a string nor `null` is read as `null`, which no TypeScript caller can
+ * hand it. The map is a new `Map` this module never exposes for writing.
+ *
+ * @param defaults - The defaults as the caller handed them.
+ * @returns A new map of frozen copies.
+ */
+function snapshotDefaults(defaults: CreationDefaults): CreationDefaults {
+  const snapshot = new Map<DocumentId, FileDefaults>();
+  for (const [document, record] of defaults) {
+    const copy: Record<BulkOption, string | null> = { ...NO_FILE_DEFAULTS };
+    for (const option of BULK_OPTIONS) {
+      const value: unknown = record[option];
+      copy[option] = typeof value === 'string' ? value : null;
+    } // End of the loop over the seven options
+    snapshot.set(document, Object.freeze(copy));
+  } // End of the loop over the files with defaults
+  return snapshot;
+} // End of function snapshotDefaults()
+
+/** A blank form's value: no trigger, no body, no option. */
+const EMPTY_BUFFERS: CreationBuffers = Object.freeze({
+  trigger: '',
+  replace: '',
+  options: NO_CREATION_OPTIONS
+});
+
+/**
+ * Seeds the chosen file's defaults into the draft, **once** — Phase 3-13-1,
+ * ruling 28.
+ *
+ * It does something only while {@link MatchCreationSession.seeding} is
+ * `pending`, the form accepts changes ({@link isEditable}), and the chosen
+ * destination is eligible and has at least one default in the form's
+ * {@link MatchCreationSession.defaults} snapshot. Otherwise the form comes back
+ * unchanged and still pending, so a later destination may seed instead.
+ *
+ * **What it puts in, and what it never touches:**
+ *
+ * - each default goes into an option the draft holds as `null` (absent), as an
+ *   ordinary draft value the person sees and can edit or remove
+ *   ({@link removeCreationOption}); `''` stays `''`, distinct from absent;
+ * - an option that **already holds a value** — typed, or carried by anything
+ *   else that built this draft — is left exactly as it is and listed in `kept`.
+ *   A default never overrides a value;
+ * - a default holding a carriage return is not seeded and is listed in
+ *   `withheld`: no box here could show it (`CLAUDE.md` §6).
+ *
+ * **Where the values land in the history.** On a pristine draft — nothing typed,
+ * no history — they become the draft's starting value, so a form holding only
+ * seeded defaults is not *dirty* and closing it asks nothing; removing one then
+ * makes it dirty, as any edit does. On a draft that already has history they are
+ * one ordinary step, so *Undo* takes the whole seeding back in one move.
+ *
+ * @param session - The form.
+ * @returns The seeded form, or the same form when nothing is to be seeded.
+ */
+export function seedDefaults(session: MatchCreationSession): MatchCreationSession {
+  if (session.seeding.kind !== 'pending' || !isEditable(session)) {
+    return session;
+  }
+  const destination = chosenDestination(session);
+  if (destination === null || destination.eligibility.kind !== 'eligible') {
+    return session;
+  }
+  const defaults = session.defaults.get(destination.document) ?? NO_FILE_DEFAULTS;
+  const current = session.draft.value.options;
+  const options: Record<BulkOption, string | null> = { ...current };
+  const seeded: BulkOption[] = [];
+  const kept: BulkOption[] = [];
+  const withheld: BulkOption[] = [];
+  for (const option of BULK_OPTIONS) {
+    const value = defaults[option];
+    if (value === null) {
+      continue;
+    }
+    if (current[option] !== null) {
+      kept.push(option);
+    } else if (defaultRefusal(value) !== null) {
+      withheld.push(option);
+    } else {
+      options[option] = value;
+      seeded.push(option);
+    }
+  } // End of the loop over the seven options
+  if (seeded.length === 0 && kept.length === 0 && withheld.length === 0) {
+    return session;
+  }
+  const next: CreationBuffers = { ...session.draft.value, options };
+  const draft = session.draft;
+  const pristine = !isDirty(draft) && !canUndo(draft) && !canRedo(draft);
+  return {
+    ...session,
+    draft: pristine ? startDraft(draft.baseRevision, next, BUFFER_RULES) : editDraft(draft, next),
+    group: null,
+    seeding: Object.freeze({
+      kind: 'seeded' as const,
+      from: destination.document,
+      seeded: Object.freeze(seeded),
+      kept: Object.freeze(kept),
+      withheld: Object.freeze(withheld)
+    })
+  };
+} // End of function seedDefaults()
 
 /**
  * The wait that restricts this form **now**, or `null` — the chosen file's entry
@@ -1095,7 +1308,9 @@ function withdrawnSubmission(
  * what it cannot. The draft's base becomes **the revision this window holds** for
  * the file named, never the observed disk revision: that is the retargeting entry
  * 21 forbids, and it is left to the reapply, which only a form naming the file may
- * reach. Nothing here adopts, installs or spends. Whether the form was told of
+ * reach. A resolution that drops the conflict then seeds the named file's
+ * defaults as an ordinary choice would ({@link seedDefaults}); one that keeps it
+ * seeds nothing. Nothing here adopts, installs or spends. Whether the form was told of
  * two affected files and shows the later one is stated on
  * {@link MatchCreationSession.externalConflict}; the command's own revision check
  * is what refuses a base this window was told is stale.
@@ -1120,14 +1335,14 @@ export function chooseDestination(
     placement: defaultPlacement(session.destinations, session.held, document)
   };
   if (!requiresExplicitDestination(session)) {
-    return chosen;
+    return seedDefaults(chosen);
   }
   // **The explicit destination resolution.** The observation is read off this
   // module's own frozen model, and its `document` once.
   const conflict = session.externalConflict;
   const observation = conflict === null ? null : conflict.source.observation;
   const affected = observation !== null && observation.document === document;
-  return {
+  const resolved: MatchCreationSession = {
     ...chosen,
     externalConflict:
       affected && observation !== null
@@ -1138,6 +1353,11 @@ export function chooseDestination(
     // offered, is not spendable against the destination conflict (entry 12).
     reload: NOT_RELOADING
   };
+  // **A resolution that dropped the conflict is an ordinary destination choice**
+  // (the 3-13-1 review's third finding), so it seeds as one; `seedDefaults` still
+  // seeds only once and never over a value the draft holds. A form naming the
+  // affected file is still in conflict and is not seeded here.
+  return affected ? resolved : seedDefaults(resolved);
 } // End of function chooseDestination()
 
 /**
@@ -1195,9 +1415,7 @@ function withField(
   field: CreationField,
   text: string
 ): CreationBuffers {
-  const next: Record<CreationField, string> = { ...buffers };
-  next[field] = text;
-  return next;
+  return field === 'trigger' ? { ...buffers, trigger: text } : { ...buffers, replace: text };
 } // End of function withField()
 
 /**
@@ -1256,13 +1474,93 @@ export function editCreationField(
  */
 export function focusCreationField(
   session: MatchCreationSession,
-  field: CreationField | null
+  field: CreationTypingField | null
 ): MatchCreationSession {
   if (session.focus === field) {
     return session;
   }
   return { ...session, focus: field, group: null };
 } // End of function focusCreationField()
+
+/**
+ * Records what one option's control now holds — Phase 3-13-1.
+ *
+ * The option is **present** afterwards, holding `text` exactly — `''` included,
+ * which asks for the key with an empty value and is not the same request as
+ * {@link removeCreationOption}. Typing into one option coalesces as the two text
+ * fields do. A carriage return is refused here as {@link editCreationField}
+ * refuses one, and again at submit.
+ *
+ * @param session - The form.
+ * @param option - Which of the seven options.
+ * @param text - The control's whole value.
+ * @returns The form after the edit, or the same form when it is not accepting
+ *   changes, the text carries a carriage return, or nothing changed.
+ */
+export function editCreationOption(
+  session: MatchCreationSession,
+  option: BulkOption,
+  text: string
+): MatchCreationSession {
+  if (!isEditable(session) || text.includes('\r') || !BULK_OPTIONS.includes(option)) {
+    return session;
+  }
+  const recorded = recordTyping(
+    session.draft,
+    session.group,
+    option,
+    withOption(session.draft.value, option, text),
+    session.clock()
+  );
+  if (recorded === null) {
+    return session;
+  }
+  return {
+    ...session,
+    draft: recorded.draft,
+    focus: option,
+    group: recorded.group,
+    sendFailure: null
+  };
+} // End of function editCreationOption()
+
+/**
+ * Takes one option out of the draft, so the created snippet is born **without
+ * the key** — Phase 3-13-1. A seeded default is removed exactly this way.
+ *
+ * A structural action: its own history step, and the typing run ends.
+ *
+ * @param session - The form.
+ * @param option - Which of the seven options.
+ * @returns The form without the option, or the same form when it is not
+ *   accepting changes or the option was already absent.
+ */
+export function removeCreationOption(
+  session: MatchCreationSession,
+  option: BulkOption
+): MatchCreationSession {
+  if (!isEditable(session) || !BULK_OPTIONS.includes(option)) {
+    return session;
+  }
+  const draft = editDraft(session.draft, withOption(session.draft.value, option, null));
+  return draft === session.draft ? session : { ...session, draft, group: null, sendFailure: null };
+} // End of function removeCreationOption()
+
+/**
+ * The buffers with one option replaced.
+ *
+ * @param buffers - What the controls hold.
+ * @param option - Which option.
+ * @param value - Its text, or `null` for no key.
+ * @returns The new buffers.
+ */
+function withOption(
+  buffers: CreationBuffers,
+  option: BulkOption,
+  value: string | null
+): CreationBuffers {
+  return { ...buffers, options: { ...buffers.options, [option]: value } };
+} // End of function withOption()
 
 /**
  * Goes back one step.
@@ -1354,31 +1652,53 @@ export type CreationRefusal =
  * plain, quoted, or a `|` block — is Rust's decision, made by the same encoder
  * every other value this application writes goes through.
  *
- * **This form authors a single `trigger` and a `replace` body, and that is a
- * fact about the form rather than about the type**: {@link NewMatch} also offers
- * a `triggers` list, a `regex`, four other content keys and twelve optional
- * schema-known fields (Phase 3-4), and every optional one is omitted here, which
- * asks Rust to write no key for any of them. It is not the same request as
- * sending them empty.
+ * **This form authors a single `trigger`, a `replace` body and — since Phase
+ * 3-13-1 — the seven options, and that is a fact about the form rather than
+ * about the type**: {@link NewMatch} also offers a `triggers` list, a `regex`,
+ * four other content keys and five more optional schema-known fields (Phase
+ * 3-4), and every one of those is omitted here, which asks Rust to write no key
+ * for any of them. An option is spread in **only when the draft holds it**
+ * (`''` included): an absent one is no property at all, which `serde` reads as
+ * `None` and `NewMatch::entries()` writes as no line — not the same request as
+ * sending it empty. Seeded or typed, a value here is one the person could see
+ * and remove before *Create*.
  *
  * @param buffers - What the controls hold.
  * @returns The value `create_match` takes.
  */
 export function newMatchOf(buffers: CreationBuffers): NewMatch {
-  return { trigger: { Single: buffers.trigger }, content: { Replace: buffers.replace } };
+  const options: Partial<Record<BulkOption, string>> = {};
+  for (const option of BULK_OPTIONS) {
+    const value = buffers.options[option];
+    if (value !== null) {
+      options[option] = value;
+    }
+  } // End of the loop over the seven options
+  return {
+    trigger: { Single: buffers.trigger },
+    content: { Replace: buffers.replace },
+    ...options
+  };
 } // End of function newMatchOf()
 
 /**
  * The texts of a new snippet's two typed alternatives, as captured in the value.
  *
- * Reads the payloads of `trigger` and `content` — whatever arm each is — and
- * nothing else, which is everything {@link newMatchOf} puts in a `NewMatch`.
+ * Reads the payloads of `trigger` and `content` — whatever arm each is — and the
+ * seven options, which is everything {@link newMatchOf} puts in a `NewMatch`.
  *
  * @param newMatch - The value `create_match` would be sent.
- * @returns Every alias or text the two alternatives carry.
+ * @returns Every alias or text the value carries.
  */
 function capturedTexts(newMatch: NewMatch): string[] {
-  return [...Object.values(newMatch.trigger), ...Object.values(newMatch.content)].flat();
+  const options = BULK_OPTIONS.map((option) => newMatch[option]).filter(
+    (value): value is string => typeof value === 'string'
+  );
+  return [
+    ...Object.values(newMatch.trigger),
+    ...Object.values(newMatch.content),
+    ...options
+  ].flat();
 } // End of function capturedTexts()
 
 /**
@@ -1401,7 +1721,8 @@ function capturedTexts(newMatch: NewMatch): string[] {
  * exists.
  *
  * **The carriage-return check reads the value that would be sent**, which is the
- * buffers here because both fields are always written — unlike the small editor,
+ * buffers here because both fields and every present option are always written —
+ * unlike the small editor,
  * where a field refused *for* carrying a carriage return legitimately holds one
  * in its buffer while sending `'Unchanged'`.
  *
@@ -1450,7 +1771,11 @@ export function creationRefusal(session: MatchCreationSession): CreationRefusal 
   if (buffers.replace === '') {
     return 'replaceEmpty';
   }
-  if (buffers.trigger.includes('\r') || buffers.replace.includes('\r')) {
+  if (
+    buffers.trigger.includes('\r') ||
+    buffers.replace.includes('\r') ||
+    BULK_OPTIONS.some((option) => buffers.options[option]?.includes('\r') === true)
+  ) {
     return 'carriageReturn';
   }
   return null;
@@ -2535,8 +2860,9 @@ function unaskedGuard(conflict: ConflictModel<CreationBuffers> | null): Standing
  *   correspondence;
  * - every ordinary creation check, through {@link creationRefusal}: the destination
  *   is still a parsed writable snippet file with a match list, the anchor is still
- *   one of its own, and the two fields are still non-empty and free of carriage
- *   returns.
+ *   one of its own, and the two fields are still non-empty and, with every
+ *   drafted option, free of carriage returns. The options travel with the draft
+ *   unchanged, and the seeding is not run again.
  *
  * **There is no `alreadySatisfied` arm, and there must not be one.** *Somebody else
  * already added this snippet* would mean comparing the drafted trigger against the
@@ -2749,7 +3075,7 @@ export function reapplyToDiskVersion(
  * driven by this module's own suite since then — and `MatchCreator.svelte`'s
  * `conflictAction` calls them from the two controls `conflictChoicesFor` now names.
  * The copy is {@link MatchCreationView.retainedDraft} put through `tDraftCopy`: the
- * two typed strings under their labels, **never YAML**.
+ * two typed strings and every drafted option under their labels, **never YAML**.
  *
  * **The destination and the position are not in the copy**, and that is the
  * consult's Q4 read exactly: `Draft<CreationBuffers>` holds neither, so a copy
@@ -2842,6 +3168,14 @@ export interface MatchCreationView {
   readonly trigger: string;
   /** What the body control shows. */
   readonly replace: string;
+  /**
+   * The seven options, in option order, each with what the draft holds —
+   * Phase 3-13-1. A seeded default is here as an ordinary value, so what a
+   * create would write is exactly what this list shows.
+   */
+  readonly options: readonly CreationOptionView[];
+  /** Whether the defaults were seeded, and from which file. */
+  readonly seeding: CreationSeeding;
   /** Whether anything has been typed. Derived. */
   readonly dirty: boolean;
   /** Whether there is a step to go back to. Derived. */
@@ -2925,9 +3259,10 @@ export interface MatchCreationView {
    *
    * Empty whenever no conflict is showing. The panel draws this **and** the *Copy
    * draft* control builds its text from the same list, so what a person is told
-   * they copied is what the panel showed them. Both entries are `setting`,
-   * because a create writes both keys and there is no key here to leave alone or
-   * to take out.
+   * they copied is what the panel showed them. Every entry is `setting` — the two
+   * fields and, since Phase 3-13-1, each option the draft holds — because a
+   * create writes each of those keys and there is no key here to leave alone or
+   * to take out; an absent option is not listed.
    */
   readonly retainedDraft: readonly RetainedDraftField[];
   /** What to offer about the conflict. */
@@ -2984,6 +3319,38 @@ export interface MatchCreationView {
   readonly created: MatchId | null;
 }
 
+/** One option as a screen draws it — Phase 3-13-1. */
+export interface CreationOptionView {
+  /** The option, as its espanso key. */
+  readonly option: BulkOption;
+  /** The detail pane's label for it, so the form names it as the editor does. */
+  readonly label: DetailFieldName;
+  /** What the draft holds: `null` for no key, a string — `''` included — for one. */
+  readonly value: string | null;
+  /** Whether this form's seeding put the option in (it may have been edited since). */
+  readonly seeded: boolean;
+  /** The exact suggested spellings, compared by `===` only; possibly none. */
+  readonly suggestions: readonly string[];
+}
+
+/**
+ * The seven options, as a screen draws them.
+ *
+ * @param session - The form.
+ * @returns One entry per option, in option order.
+ */
+function optionViewsOf(session: MatchCreationSession): readonly CreationOptionView[] {
+  const seeding = session.seeding;
+  const options = session.draft.value.options;
+  return BULK_OPTIONS.map((option) => ({
+    option,
+    label: bulkOptionField(option),
+    value: options[option],
+    seeded: seeding.kind === 'seeded' && seeding.seeded.includes(option),
+    suggestions: bulkSuggestionsFor(option)
+  }));
+} // End of function optionViewsOf()
+
 /**
  * The retained draft of one conflict, labelled, for the panel and for the copy.
  *
@@ -2993,18 +3360,31 @@ export interface MatchCreationView {
  * create writes both keys, and the labels are the detail pane's own so the panel
  * names them exactly as the form above it does.
  *
+ * **Then every option the draft holds, in option order** (Phase 3-13-1), also
+ * `setting`, with its exact text — an empty one included, since a create writes
+ * that key. An absent option is not listed: a create writes no key for it, and
+ * the form never held one to compare.
+ *
  * @param conflict - The conflict holding the retained draft.
- * @returns One entry per field, in the order the form shows them.
+ * @returns One entry per field the create would write, in the order the form
+ *   shows them.
  */
 function retainedDraftOf(
   conflict: ConflictModel<CreationBuffers>
 ): readonly RetainedDraftField[] {
   const buffers = copyOfDraft(conflict);
-  return CREATION_FIELDS.map((field) => ({
+  const fields: RetainedDraftField[] = CREATION_FIELDS.map((field) => ({
     label: field,
     text: buffers[field],
     status: 'setting' as const
   }));
+  for (const option of BULK_OPTIONS) {
+    const value = buffers.options[option];
+    if (value !== null) {
+      fields.push({ label: bulkOptionField(option), text: value, status: 'setting' });
+    }
+  } // End of the loop over the seven options
+  return fields;
 } // End of function retainedDraftOf()
 
 /**
@@ -3035,6 +3415,8 @@ export function matchCreationView(session: MatchCreationSession): MatchCreationV
     placement: session.placement,
     trigger: session.draft.value.trigger,
     replace: session.draft.value.replace,
+    options: optionViewsOf(session),
+    seeding: session.seeding,
     dirty: isDirty(session.draft),
     canUndo: canUndo(session.draft),
     canRedo: canRedo(session.draft),

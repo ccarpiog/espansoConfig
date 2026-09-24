@@ -1899,3 +1899,8 @@ Run by the orchestrator after the worker's report: `npm run check` exit 0, **479
 | Phase | Commit | Push |
 |---|---|---|
 | **3-11-2 — bulk selection: the components and the i18n, reviewed (`ship-with-fixes`, Codex, 1 BLOCKER + 2 SHOULD-FIX, all fixed) and closed** | `fc728ec` (this SHA record is the commit after it) | ✅ pushed, `5aa8069..fc728ec  main -> main`; tree clean after it |
+
+
+## 3-12's verification block, archived 2026-09-24 at 3-13-1
+
+Run by the orchestrator after the worker's report and again after the review fixes, all exit 0, output redirected to files and checked: `cargo test --workspace -- --test-threads=1` **1533 passed** (1529 before the fixes), `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`, `npm run check` **480 files**, 0 errors, 0 warnings; `npm test` **3936 passed**; `npm run build` **210 modules**. Bundle oracle: server-only markers absent, client-only present (2). `cargo tree -p espansoconfig-core -i tauri` finds no `tauri` package in the core's tree. Rung **`1533 / 480 / 3936 / 210`** (+28 Rust tests, +1 svelte-check file for `sidecarCodes.test.ts`, +6 vitest tests; no new Vite module).

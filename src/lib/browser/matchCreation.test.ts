@@ -76,6 +76,7 @@ import {
   startMatchCreation,
   undoCreation,
   wirePosition,
+  NO_CREATION_OPTIONS,
   type CreationBuffers,
   type CreationReapplyObstacle,
   type CreationRefusal,
@@ -481,7 +482,7 @@ describe('where in the file the snippet goes', () => {
     // And the draft is drafted from the file it would now be written to.
     expect(retargeted.draft.baseRevision).toBe(OTHER);
     // What the person typed is theirs, and means the same thing in either file.
-    expect(retargeted.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
+    expect(retargeted.draft.value).toEqual({ trigger: ':new', replace: 'a body', options: NO_CREATION_OPTIONS });
   });
 
   it('withdraws consent and everything said when the position moves', () => {
@@ -618,7 +619,7 @@ describe('the carriage return', () => {
     const session = ready();
     const forced: MatchCreationSession = {
       ...session,
-      draft: editDraft(session.draft, { trigger: ':new', replace: 'a\rb' })
+      draft: editDraft(session.draft, { trigger: ':new', replace: 'a\rb', options: NO_CREATION_OPTIONS })
     };
     expect(creationRefusal(forced)).toBe('carriageReturn');
     expect(beginCreate(forced, () => forced)).toBeNull();
@@ -638,7 +639,8 @@ describe('the carriage return', () => {
           reads += 1;
           return reads === k ? ':n\rew' : ':new';
         },
-        replace: 'a body'
+        replace: 'a body',
+        options: NO_CREATION_OPTIONS
       };
       const base = ready();
       const session: MatchCreationSession = {
@@ -794,7 +796,7 @@ describe('what comes back', () => {
     expect(maybe.sendFailure).toEqual({ kind: 'mayHaveWritten', reason: failure });
     expect(matchCreationView(maybe).failureLines).toEqual([{ kind: 'failure', failure }]);
     // The draft is untouched either way, so nothing typed is lost.
-    expect(maybe.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
+    expect(maybe.draft.value).toEqual({ trigger: ':new', replace: 'a body', options: NO_CREATION_OPTIONS });
   });
 }); // End of the "what comes back" suite
 
@@ -1171,7 +1173,7 @@ describe('reapplying the retained form', () => {
     if (answer.kind !== 'reapplied') {
       throw new Error('this case is about the rebuilt form');
     }
-    expect(answer.session.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
+    expect(answer.session.draft.value).toEqual({ trigger: ':new', replace: 'a body', options: NO_CREATION_OPTIONS });
     expect(baseRevisionOf(answer.session)).toBe(AFTER);
     expect(canCreate(answer.session)).toBe(true);
     // The destination the form offers is the one the conflict carried, with the
@@ -1507,7 +1509,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(next.outcome).toBeNull();
       expect(isEditable(next)).toBe(false);
       expect(editCreationField(next, 'replace', 'other')).toBe(next);
-      expect(next.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
+      expect(next.draft.value).toEqual({ trigger: ':new', replace: 'a body', options: NO_CREATION_OPTIONS });
       // The refusal has a code of its own, whose sentence is the external origin's
       // first line and never *while this snippet was being written*.
       expect(creationRefusal(next)).toBe('externalConflict');
@@ -1583,7 +1585,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(told.chosen).toBeNull();
       expect(creationTargetOf(told)).toEqual({ kind: 'unknown' });
       expect(baseRevisionOf(told)).toBe('');
-      expect(told.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
+      expect(told.draft.value).toEqual({ trigger: ':new', replace: 'a body', options: NO_CREATION_OPTIONS });
       expect(isEditable(told)).toBe(false);
       expect(editCreationField(told, 'trigger', ':other')).toBe(told);
       // The refusal is the destination, because that is the resolution.
@@ -1640,7 +1642,7 @@ describe('the external session — Phase 2d-6-3', () => {
       const conflict = externalOf(affected);
       expect(conflict.source).toBe(externalConflictSource(seen));
       expect(conflict.draft).toBe(affected.draft);
-      expect(conflict.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
+      expect(conflict.draft.value).toEqual({ trigger: ':new', replace: 'a body', options: NO_CREATION_OPTIONS });
       expect(creationRefusal(affected)).toBe('externalConflict');
       const view = matchCreationView(affected);
       expect(view.destinationRequired).toBe(false);
@@ -1665,7 +1667,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(conflictOf(elsewhere)).toBeNull();
       expect(baseRevisionOf(elsewhere)).toBe(OTHER);
       expect(canCreate(elsewhere)).toBe(true);
-      expect(elsewhere.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
+      expect(elsewhere.draft.value).toEqual({ trigger: ':new', replace: 'a body', options: NO_CREATION_OPTIONS });
       expect(matchCreationView(elsewhere).destinationRequired).toBe(false);
       // The same destination twice is no choice at all.
       expect(chooseDestination(told, 2)).not.toBe(told);
@@ -1854,7 +1856,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(recorder.adoptions).toEqual([]);
       expect(reapplyToShow(attempt, next)).toBeNull();
       // The typed values survive.
-      expect(next.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
+      expect(next.draft.value).toEqual({ trigger: ':new', replace: 'a body', options: NO_CREATION_OPTIONS });
     }); // End of the "supersedes a save conflict" case
 
     it('keeps a committed success and a refusal as history, and lets a create that conflicts retire the external one', () => {
@@ -2027,7 +2029,7 @@ describe('the external session — Phase 2d-6-3', () => {
       }
       expect(answer.session.placement).toEqual({ kind: 'after', anchor: TWIN.id });
       expect(baseRevisionOf(answer.session)).toBe(AFTER);
-      expect(answer.session.draft.value).toEqual({ trigger: ':new', replace: 'a body' });
+      expect(answer.session.draft.value).toEqual({ trigger: ':new', replace: 'a body', options: NO_CREATION_OPTIONS });
       expect(answer.session.draft.consent).toBeNull();
       expect(canCreate(answer.session)).toBe(true);
       expect(beginCreate(answer.session, () => answer.session)?.position).toEqual({ After: { anchor: TWIN.id } });

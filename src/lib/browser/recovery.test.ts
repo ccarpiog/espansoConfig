@@ -53,6 +53,7 @@ import { makeConflict, makeDocument, makeMatch, makeSummary, scalar } from './fi
 import type { InvalidationStatus } from './invalidation';
 import {
   CONFLICT_CAPABILITIES as CREATOR_CAPABILITIES,
+  NO_CREATION_OPTIONS,
   type CreationBuffers,
   type CreationReapplyObstacle
 } from './matchCreation';
@@ -451,7 +452,7 @@ function openedOverEditor(
  * @returns The form.
  */
 function openedOverCreator(
-  buffers: CreationBuffers = { trigger: ':new', replace: 'A body' }
+  buffers: CreationBuffers = { trigger: ':new', replace: 'A body', options: NO_CREATION_OPTIONS }
 ): RecoverySession {
   const start = startCreationFieldRecovery(
     resolvedNothing<CreationReapplyObstacle>({ kind: 'notTheDestination' }),
@@ -596,7 +597,7 @@ describe('which surface recovery offers a new snippet on', () => {
       const offer = recoveryAvailability(
         'creationFields',
         resolvedNothing(obstacle),
-        conflictOver<CreationBuffers>({ trigger: ':x', replace: 'y' }),
+        conflictOver<CreationBuffers>({ trigger: ':x', replace: 'y', options: NO_CREATION_OPTIONS }),
         DOCUMENTS,
         [heldFile(), otherFile()]
       );
@@ -862,7 +863,7 @@ describe('what a retained draft becomes in the new snippet', () => {
   });
 
   it('makes the creator’s two authored fields the whole of its transfer', () => {
-    const transfer = transferOfCreationDraft({ trigger: ':new', replace: 'A body' });
+    const transfer = transferOfCreationDraft({ trigger: ':new', replace: 'A body', options: NO_CREATION_OPTIONS });
     expect(transfer.trigger).toEqual({ kind: 'carried', text: ':new' });
     expect(transfer.replace).toEqual({ kind: 'carried', text: 'A body' });
     expect(fieldsNotCarried(transfer)).toEqual([
@@ -891,7 +892,7 @@ describe('what a retained draft becomes in the new snippet', () => {
       { label: { text: '', removed: false } }
     );
     const transfer = transferOfMatchDraft(baseline, buffers);
-    const newMatch = newMatchOfRecovery(transfer, { trigger: ':sig', replace: 'Regards' }, LITERAL_TRIGGER_ONLY);
+    const newMatch = newMatchOfRecovery(transfer, { trigger: ':sig', replace: 'Regards', options: NO_CREATION_OPTIONS }, LITERAL_TRIGGER_ONLY);
     expect(newMatch).toEqual({
       trigger: { Single: ':sig' },
       content: { Replace: 'Regards' },
@@ -924,8 +925,8 @@ describe('what a retained draft becomes in the new snippet', () => {
   });
 
   it('takes the two mandatory values from the controls and never from the transfer', () => {
-    const transfer = transferOfCreationDraft({ trigger: ':new', replace: 'A body' });
-    expect(newMatchOfRecovery(transfer, { trigger: ':typed', replace: 'Typed' }, LITERAL_TRIGGER_ONLY)).toEqual({
+    const transfer = transferOfCreationDraft({ trigger: ':new', replace: 'A body', options: NO_CREATION_OPTIONS });
+    expect(newMatchOfRecovery(transfer, { trigger: ':typed', replace: 'Typed', options: NO_CREATION_OPTIONS }, LITERAL_TRIGGER_ONLY)).toEqual({
       trigger: { Single: ':typed' },
       content: { Replace: 'Typed' }
     });
@@ -1086,7 +1087,7 @@ describe('sending the recovery create', () => {
     // The mirror of the case above: a refusal calls neither callback, so nothing
     // installs a `saving` state a person could never leave.
     const installed: RecoverySession[] = [];
-    const blank = editRecoveryField(openedOverCreator({ trigger: '', replace: 'A body' }), 'trigger', '');
+    const blank = editRecoveryField(openedOverCreator({ trigger: '', replace: 'A body', options: NO_CREATION_OPTIONS }), 'trigger', '');
     const { create, calls } = recordingCreate([]);
     expect(await sendTracking(blank, create, (waiting) => installed.push(waiting))).toBe(blank);
     expect(installed).toEqual([]);
@@ -1829,9 +1830,9 @@ describe('the two ways out of a conflict of this form’s own', () => {
 
 describe('what the form refuses to send', () => {
   it('names each reason, and sends nothing while one stands', async () => {
-    const blank = editRecoveryField(openedOverCreator({ trigger: '', replace: 'A body' }), 'trigger', '');
+    const blank = editRecoveryField(openedOverCreator({ trigger: '', replace: 'A body', options: NO_CREATION_OPTIONS }), 'trigger', '');
     expect(recoveryRefusal(blank)).toBe('triggerEmpty');
-    const noBody = openedOverCreator({ trigger: ':new', replace: '' });
+    const noBody = openedOverCreator({ trigger: ':new', replace: '', options: NO_CREATION_OPTIONS });
     expect(recoveryRefusal(noBody)).toBe('replaceEmpty');
     const { create, calls } = recordingCreate([]);
     expect(await sendTracking(noBody, create, INSTALLS_NOTHING)).toBe(noBody);
@@ -1867,7 +1868,7 @@ describe('what the form refuses to send', () => {
     // a caller that is not a control can put one in the draft.
     const forced: RecoverySession = {
       ...session,
-      draft: { ...session.draft, value: { trigger: ':sig', replace: 'a\rb' } }
+      draft: { ...session.draft, value: { trigger: ':sig', replace: 'a\rb', options: NO_CREATION_OPTIONS } }
     };
     expect(recoveryRefusal(forced)).toBe('carriageReturn');
     expect(beginRecoveryCreate(forced, () => forced)).toBeNull();
@@ -2054,7 +2055,7 @@ describe('what recovery never does', () => {
     // it on every submittable form — so a gate removed anywhere in
     // `beginRecoveryCreate` makes this fail rather than pass vacuously.
     const create = vi.fn<CreateARecoveredSnippet>(async () => ({ kind: 'notAttempted' }));
-    const blank = openedOverCreator({ trigger: ':new', replace: '' });
+    const blank = openedOverCreator({ trigger: ':new', replace: '', options: NO_CREATION_OPTIONS });
     expect(await sendTracking(blank, create, INSTALLS_NOTHING)).toBe(blank);
     expect(create).not.toHaveBeenCalled();
     // And it is called exactly once for a form that may be.
@@ -2307,7 +2308,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(recoveryRefusal(told)).toBe('externalConflict');
       expect(recoveryRefusalKey('externalConflict')).toBe('browser.externalConflict.fileChangedWhileOpen');
       expect(beginRecoveryCreate(told, () => told)).toBeNull();
-      expect(told.draft.value).toEqual({ trigger: ':sig', replace: 'Regards' });
+      expect(told.draft.value).toEqual({ trigger: ':sig', replace: 'Regards', options: NO_CREATION_OPTIONS });
       const view = recoveryView(told);
       expect(view.conflict).toBe(conflict);
       expect(view.externalMessages[0]).toEqual({ kind: 'fileChangedWhileOpen' });
@@ -2373,7 +2374,7 @@ describe('the external session — Phase 2d-6-3', () => {
       expect(told.chosen).toBeNull();
       expect(recoveryTargetOf(told)).toEqual({ kind: 'unknown' });
       expect(recoveryBaseRevisionOf(told)).toBe('');
-      expect(told.draft.value).toEqual({ trigger: ':sig', replace: 'Regards' });
+      expect(told.draft.value).toEqual({ trigger: ':sig', replace: 'Regards', options: NO_CREATION_OPTIONS });
       expect(told.origin.conflict).toBe(form.origin.conflict);
       expect(recoveryRefusal(told)).toBe('noDestination');
       expect(beginRecoveryCreate(told, () => told)).toBeNull();

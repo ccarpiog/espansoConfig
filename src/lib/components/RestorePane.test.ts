@@ -554,6 +554,8 @@ async function mountRestore(
     saveMatchItemText: async (): Promise<CommandResult<SaveResult>> => refusal,
     matchOptionSpellings: async () => refusal,
     applyBulkOptions: async () => refusal,
+    loadSidecar: async () => refusal,
+    updateSidecar: async () => refusal,
     saveRawDocument: async (
       document: DocumentId,
       baseRevision: ContentRevision,

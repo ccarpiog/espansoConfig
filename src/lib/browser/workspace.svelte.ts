@@ -53,6 +53,7 @@ import {
   listBackupBatches,
   listBackupEntries,
   listDocuments,
+  loadSidecar,
   matchItemText,
   matchOptionSpellings,
   moveMatch,
@@ -61,7 +62,8 @@ import {
   reloadDocument,
   saveMatch,
   saveMatchItemText,
-  saveRawDocument
+  saveRawDocument,
+  updateSidecar
 } from '../ipc/commands';
 import type {
   CommandResult,
@@ -103,6 +105,10 @@ import type {
   ReconciliationBatch,
   SaveResult,
   ScalarView,
+  SidecarChange,
+  SidecarState,
+  SidecarUpdateRequest,
+  SidecarUpdateResult,
   WorkspaceSummary
 } from '../ipc/types';
 import {
@@ -143,6 +149,16 @@ import {
   type BulkSelection
 } from './bulkEdit';
 import type { RepairAttribution, SelectionNotice } from './notices';
+import {
+  creationDefaultsOf,
+  NO_PREFERENCES,
+  preferenceSaveReportOf,
+  preferencesOf,
+  preferencesReadFailed,
+  type CreationDefaults,
+  type PreferenceSaveReport,
+  type WorkspacePreferences
+} from './preferences';
 import { authorizeDiskAdoption } from './saveOutcome';
 import type { ConflictModel, DiskAdoptionOutcome, ReloadConfirmation } from './saveOutcome';
 import { documentTextState, rawTarget, type RawDocumentText } from './rawDocument';
@@ -212,6 +228,12 @@ import {
  * this repository refuses everywhere — and it is added here rather than on a
  * second surface because this step is free to update every implementation of
  * this interface, which the step that added {@link BackupCommands} was not.
+ *
+ * **Since Phase 3-13-1, two members touch the application's own sidecar**:
+ * {@link BrowserCommands.loadSidecar} and {@link BrowserCommands.updateSidecar}.
+ * Neither changes a user file — the second is the application-metadata writer's
+ * route (ruling 25) — so the count of members that can change a file on disk
+ * stays eight.
  */
 export interface BrowserCommands {
   /**
@@ -416,6 +438,27 @@ export interface BrowserCommands {
    */
   applyBulkOptions(request: BulkOptionsRequest): Promise<CommandResult<BulkResult>>;
   /**
+   * Reads the open workspace's sidecar preferences — Phase 3-13-1, over the
+   * 3-12 command. Writes no user file.
+   *
+   * **May not answer for a long time**: the store's cross-process lock has no
+   * timeout (3-12 notes §5). Rust runs it off the main thread, and this state
+   * never awaits it on a path anything else waits for.
+   *
+   * @returns The preferences and how the file was read, or a failure.
+   */
+  loadSidecar(): Promise<CommandResult<SidecarState>>;
+  /**
+   * Changes one file's sidecar preferences — Phase 3-13-1, over the 3-12
+   * command. **Not a user-file writer**: the application-metadata writer's only
+   * route, which Rust reloads before applying. May stall as
+   * {@link BrowserCommands.loadSidecar} may.
+   *
+   * @param request - The file and the changes.
+   * @returns What the update did and the preferences afterwards, or a failure.
+   */
+  updateSidecar(request: SidecarUpdateRequest): Promise<CommandResult<SidecarUpdateResult>>;
+  /**
    * Hands back everything this session observed on disk above `afterSequence`.
    *
    * **The one member that is neither a read of the projection nor a write.** It
@@ -459,6 +502,8 @@ export const REAL_COMMANDS: BrowserCommands = {
   saveMatchItemText,
   matchOptionSpellings,
   applyBulkOptions,
+  loadSidecar,
+  updateSidecar,
   drainExternalChanges
 };
 
@@ -1396,6 +1441,25 @@ export type FileRereadOutcome =
       /** The read did not fail and every guard held at the installation. */
       readonly kind: 'completed';
     };
+
+/**
+ * Whether a preference save is out, and how the last one ended — Phase 3-13-1.
+ * `idle` until the first save of this workspace.
+ */
+export type PreferenceSaveState =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'saving' }
+  | {
+      readonly kind: 'ended';
+      /** How the last save ended. */
+      readonly report: PreferenceSaveReport;
+    };
+
+/** The idle preference-save state, shared. */
+const PREFERENCES_IDLE: PreferenceSaveState = Object.freeze({ kind: 'idle' as const });
+
+/** The saving preference-save state, shared. */
+const PREFERENCES_SAVING: PreferenceSaveState = Object.freeze({ kind: 'saving' as const });
 
 /** The browser's reactive state. */
 export interface BrowserState {
@@ -2661,6 +2725,72 @@ export interface BrowserState {
    */
   applyBulkOptions(request: BulkOptionsRequest): Promise<BulkApplyAnswer>;
   /**
+   * The application preferences in effect for the open workspace — Phase 3-13-1.
+   *
+   * {@link NO_PREFERENCES} until the first read answers, after `open()` replaces
+   * the workspace, and whenever the sidecar is absent, corrupt, newer, unreadable
+   * or unreachable (ruling 27): **empty is a legal state and never an error**, and
+   * nothing that creates a snippet waits for it.
+   */
+  readonly preferences: WorkspacePreferences;
+  /** Whether a preference save is out, and how the last one ended. */
+  readonly preferenceSave: PreferenceSaveState;
+  /**
+   * Reads the sidecar again and installs what it holds — Phase 3-13-1.
+   *
+   * `open()` starts one as soon as the workspace's files are listed, **without
+   * awaiting it**. Reads share one queue with
+   * {@link BrowserState.updatePreferences}, so a read is sent only after every
+   * read and update called before it has settled. A call while a read is queued
+   * or out, with no update queued behind it, answers that read's promise. An answer installs only if the workspace it
+   * was asked about is still open and no later preference answer has been
+   * installed. A failure of the call is reported and installed as empty
+   * preferences; it never rejects.
+   *
+   * **The promise may not settle for as long as another instance holds the
+   * store's lock**, which has no timeout (3-12 notes §5). Rust runs the command off
+   * the main thread, so the window stays responsive; a caller that awaits this is
+   * choosing to wait, and no creation path does.
+   *
+   * @returns When the read has been installed or discarded.
+   */
+  refreshPreferences(): Promise<void>;
+  /**
+   * Changes one file's preferences — Phase 3-13-1, the only route to
+   * `update_sidecar`. **Writes no user file.**
+   *
+   * The changes are copied before anything is awaited. Updates and reads run
+   * **one at a time, in call order**, through one queue, so at most one request
+   * is out; Rust reloads the sidecar under
+   * its lock immediately before applying them (ruling 26), and the preferences it
+   * answers replace this state's, under the same rule as
+   * {@link BrowserState.refreshPreferences}. **Never rejects**: every ending,
+   * including a failed call and a request withdrawn because `open()` replaced the
+   * workspace before it was sent, is a {@link PreferenceSaveReport}, and
+   * {@link BrowserState.preferenceSave} carries the last one. Nothing here touches
+   * a snippet or a creation form.
+   *
+   * @param document - The file, by this session's identity.
+   * @param changes - What to change, in order (`displayNameChanges`,
+   *   `defaultChanges` and `reorderRequests` in `./preferences.ts` build them).
+   * @returns How the save ended. Like the read, it may not settle while another
+   *   instance holds the lock.
+   */
+  updatePreferences(
+    document: DocumentId,
+    changes: readonly SidecarChange[]
+  ): Promise<PreferenceSaveReport>;
+  /**
+   * Every file's new-snippet defaults as this state holds them **now**, for a
+   * creation form to keep as its snapshot (`startMatchCreation` in
+   * `./matchCreation.ts`). Synchronous and never waits for a read: before the
+   * first read answers, or with no usable sidecar, it is empty and creation seeds
+   * nothing.
+   *
+   * @returns A new map of every file with at least one default.
+   */
+  creationDefaults(): CreationDefaults;
+  /**
    * Lists the recognised backup batches.
    *
    * **A read this state performs and does not remember.** Nothing here caches a
@@ -3391,6 +3521,25 @@ export function createBrowserState(
   // How many `applyBulkOptions` calls are out (review fix 1). While any is, the
   // bulk selection session may not end and its selection may not change.
   let bulkAppliesInFlight = $state(0);
+  // The application preferences (Phase 3-13-1). Raw: each value is a frozen
+  // snapshot built by `./preferences.ts`, replaced whole.
+  let preferences = $state.raw<WorkspacePreferences>(NO_PREFERENCES);
+  let preferenceSave = $state.raw<PreferenceSaveState>(PREFERENCES_IDLE);
+  // Not `$state`, for the generation counters' reason below: nothing renders
+  // them. `preferenceRequests` numbers every read and update when it is sent;
+  // `preferenceInstalled` is the number of the answer on screen, so an answer
+  // older than it is discarded. `preferenceQueue` is the tail of the one queue
+  // that sends **reads and updates alike** one at a time, in call order (the
+  // 3-13-1 review's first finding), so send order is the order Rust serves them
+  // in. `preferenceLoad` is the read queued last, while no update has been queued
+  // behind it; `preferenceUpdatesOut` is how many updates are queued or out, and
+  // `preferenceQueued` how many requests of either kind are.
+  let preferenceRequests = 0;
+  let preferenceInstalled = 0;
+  let preferenceLoad: Promise<void> | null = null;
+  let preferenceQueue: Promise<unknown> = Promise.resolve();
+  let preferenceQueued = 0;
+  let preferenceUpdatesOut = 0;
   let fileTextShown = $state(false);
   // What `document_text` answered, and which file it answered about. The two
   // are kept apart so that an answer can never be drawn under the wrong file
@@ -6009,6 +6158,60 @@ export function createBrowserState(
     }
   } // End of function runBulkApply()
 
+  /**
+   * Installs one preference answer, unless it is stale — Phase 3-13-1.
+   *
+   * Stale means asked under a workspace `open()` has since replaced, or older
+   * than the answer already installed (numbered when sent). Reads and updates
+   * share one queue that sends the next only after the previous has settled, so
+   * two requests never overlap and the sending number is the order Rust served
+   * them in (the 3-13-1 review's first finding). **What the queue cannot see** is
+   * another instance writing the sidecar between two of them; the next read
+   * corrects that, and there is no watcher (ruling 26).
+   *
+   * @param next - The preferences the answer holds.
+   * @param generation - The number the request took when it was sent.
+   * @param workspace - The open generation it was asked under.
+   */
+  function installPreferences(
+    next: WorkspacePreferences,
+    generation: number,
+    workspace: number
+  ): void {
+    if (workspace !== openGeneration || generation < preferenceInstalled) {
+      return;
+    }
+    preferenceInstalled = generation;
+    preferences = next;
+  } // End of function installPreferences()
+
+  /**
+   * Puts one sidecar request on the preference queue — the 3-13-1 review's first
+   * finding.
+   *
+   * The request is sent only after every request queued before it has settled,
+   * so reads and updates never overlap. **An idle queue sends at once**, in the
+   * caller's synchronous turn, so `open()`'s read is invoked where it was before
+   * the queue existed. `send` must never reject: the queue's tail is its promise.
+   * A request queued under a workspace `open()` has since replaced settles into
+   * nothing here; `open()` starts a fresh queue and count.
+   *
+   * @param send - What sends the request and handles its answer.
+   * @returns What `send` answers.
+   */
+  function enqueuePreferenceRequest<T>(send: () => Promise<T>): Promise<T> {
+    const workspace = openGeneration;
+    const sent = preferenceQueued === 0 ? send() : preferenceQueue.then(send, send);
+    preferenceQueued += 1;
+    preferenceQueue = sent;
+    void sent.finally(() => {
+      if (workspace === openGeneration) {
+        preferenceQueued -= 1;
+      }
+    });
+    return sent;
+  } // End of function enqueuePreferenceRequest()
+
   const state: BrowserState = {
     get status(): BrowserStatus {
       return status;
@@ -6069,6 +6272,12 @@ export function createBrowserState(
     },
     get bulkApplyPending(): boolean {
       return bulkAppliesInFlight > 0;
+    },
+    get preferences(): WorkspacePreferences {
+      return preferences;
+    },
+    get preferenceSave(): PreferenceSaveState {
+      return preferenceSave;
     },
     get selectedMatch(): MatchView | null {
       const held = selected;
@@ -6606,6 +6815,16 @@ export function createBrowserState(
       // A bulk selection names identities of the workspace being closed.
       bulkSelecting = false;
       bulkSelection = EMPTY_BULK_SELECTION;
+      // So do the preferences (Phase 3-13-1). A read or an update still out for
+      // the closed workspace settles into nothing: each compares the open
+      // generation it was asked under. A fresh queue, so a stalled update of the
+      // closed workspace never holds up one of this.
+      preferences = NO_PREFERENCES;
+      preferenceSave = PREFERENCES_IDLE;
+      preferenceLoad = null;
+      preferenceQueue = Promise.resolve();
+      preferenceQueued = 0;
+      preferenceUpdatesOut = 0;
       // **What the watcher told this window about the workspace being closed goes
       // too** — Phase 2d-5-4. A status says what the watcher reported about a file
       // while *that* workspace was open, and a path drift is a statement about
@@ -6686,6 +6905,11 @@ export function createBrowserState(
         return;
       }
       documents = rows;
+      // **The preferences are asked for now and never awaited** (Phase 3-13-1):
+      // the sidecar's lock has no timeout, so nothing below — and nothing that
+      // creates a snippet — may wait on it. Rust lists the session's files for the
+      // sidecar itself; the call only has to come after `open_workspace` did.
+      void state.refreshPreferences();
 
       // **Every file is projected up front, config profiles included.** The
       // sidebar's counts and the "All" list are both statements about the whole
@@ -7108,6 +7332,99 @@ export function createBrowserState(
         bulkAppliesInFlight -= 1;
       }
     }, // End of function applyBulkOptions()
+
+    refreshPreferences(): Promise<void> {
+      if (preferenceLoad !== null) {
+        return preferenceLoad;
+      }
+      const workspace = openGeneration;
+      const read = async (): Promise<void> => {
+        if (workspace !== openGeneration) {
+          // Queued under a workspace `open()` has since replaced: never sent.
+          return;
+        }
+        // Numbered when sent, not when queued: the queue sends one at a time, so
+        // this is the order Rust serves it in.
+        const generation = ++preferenceRequests;
+        let next: WorkspacePreferences;
+        try {
+          const answer = await commands.loadSidecar();
+          if (answer.ok) {
+            next = preferencesOf(answer.value);
+          } else {
+            report(answer.failure);
+            next = preferencesReadFailed(answer.failure);
+          }
+        } catch (raw: unknown) {
+          // An injected command that throws, or an answer whose copy throws: the
+          // same empty preferences a failed call leaves, never a rejection.
+          const failure = classifyFailure(raw);
+          report(failure);
+          next = preferencesReadFailed(failure);
+        }
+        installPreferences(next, generation, workspace);
+      }; // End of function read()
+      // Behind every read and update already queued, never beside one: a read
+      // sent while an update is out could be served first and answer the values
+      // from before it. `read` never rejects, so the queue never breaks.
+      const load = enqueuePreferenceRequest(read);
+      preferenceLoad = load;
+      void load.finally(() => {
+        if (preferenceLoad === load) {
+          preferenceLoad = null;
+        }
+      });
+      return load;
+    }, // End of function refreshPreferences()
+
+    updatePreferences(
+      document: DocumentId,
+      changes: readonly SidecarChange[]
+    ): Promise<PreferenceSaveReport> {
+      const workspace = openGeneration;
+      // Copied before anything is awaited: the caller's array is not read again.
+      const request: SidecarUpdateRequest = { document, changes: [...changes] };
+      preferenceUpdatesOut += 1;
+      preferenceSave = PREFERENCES_SAVING;
+      const send = async (): Promise<PreferenceSaveReport> => {
+        if (workspace !== openGeneration) {
+          // A `DocumentId` is this session's; after `open()` it may name another
+          // file, so a request queued before the replacement is never sent.
+          return { kind: 'withdrawn' };
+        }
+        const generation = ++preferenceRequests;
+        try {
+          const answer = await commands.updateSidecar(request);
+          const ended = preferenceSaveReportOf(answer);
+          if (answer.ok) {
+            installPreferences(preferencesOf(answer.value.state), generation, workspace);
+          } else {
+            report(answer.failure);
+          }
+          return ended;
+        } catch (raw: unknown) {
+          const failure = classifyFailure(raw);
+          report(failure);
+          return { kind: 'failed', failure };
+        }
+      }; // End of function send()
+      const sent = enqueuePreferenceRequest(send);
+      // A read queued before this update answers the values from before it, so a
+      // later refresh must not join that read: it queues a new one behind this.
+      preferenceLoad = null;
+      return sent.then((ended) => {
+        if (workspace === openGeneration) {
+          preferenceUpdatesOut -= 1;
+          preferenceSave =
+            preferenceUpdatesOut > 0 ? PREFERENCES_SAVING : Object.freeze({ kind: 'ended', report: ended });
+        }
+        return ended;
+      });
+    }, // End of function updatePreferences()
+
+    creationDefaults(): CreationDefaults {
+      return creationDefaultsOf(preferences);
+    },
 
     async createMatch(
       document: DocumentId,

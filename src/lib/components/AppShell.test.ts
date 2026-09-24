@@ -46,7 +46,12 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 import { makeDocument, makeSummary } from '../browser/fixtures';
 import { DICTIONARIES, type TranslationKey } from '../i18n/dictionaries';
 import { RECONCILIATION_EVENT_NAMES } from '../ipc/events';
-import type { ReconciliationBatch, ReconciliationWake, WorkspaceSummary } from '../ipc/types';
+import type {
+  ReconciliationBatch,
+  ReconciliationWake,
+  SidecarState,
+  WorkspaceSummary
+} from '../ipc/types';
 import { locale } from '../stores/locale.svelte';
 import AppShell from './AppShell.svelte';
 
@@ -306,6 +311,18 @@ const EMPTY_SUMMARY: WorkspaceSummary = {
 };
 
 /**
+ * A fresh, empty sidecar, as `load_sidecar` answers for a configuration with no
+ * preferences saved — Phase 3-13-1. Every open that lists its files asks for it,
+ * never awaited, so a case that opens a workspace answers it and declares it.
+ */
+const FRESH_SIDECAR: SidecarState = {
+  status: { Fresh: {} },
+  writable: true,
+  files: [],
+  retained_orphans: 0
+};
+
+/**
  * An empty batch for epoch one, as `drain_external_changes` answers when the
  * queue holds nothing.
  *
@@ -492,6 +509,8 @@ describe('the mounted shell', () => {
           return opened.promise;
         case 'list_documents':
           return Promise.resolve([]);
+        case 'load_sidecar':
+          return Promise.resolve(FRESH_SIDECAR);
         case 'drain_external_changes':
           return Promise.resolve(emptyBatch());
         default:
@@ -506,28 +525,32 @@ describe('the mounted shell', () => {
     expect(invoked).toHaveBeenCalledTimes(1);
 
     opened.resolve(EMPTY_SUMMARY);
-    expectedInvokes.push(['list_documents', {}], ['drain_external_changes', { afterSequence: 0 }]);
+    expectedInvokes.push(
+      ['list_documents', {}],
+      ['load_sidecar', {}],
+      ['drain_external_changes', { afterSequence: 0 }]
+    );
     await settle();
     // One physical drain satisfied both reasons, and the empty workspace is drawn.
-    expect(invoked).toHaveBeenCalledTimes(3);
+    expect(invoked).toHaveBeenCalledTimes(4);
     expect(shell.target.textContent).toContain(DICTIONARIES.en['browser.status.empty.heading']);
 
     // A wake for the adopted epoch, delivered through the handler the real
-    // adapter registered, is a fourth call; one for another epoch is nothing.
+    // adapter registered, is a fifth call (the open also asked for the preferences); one for another epoch is nothing.
     registration(0).deliver({ event: READY, id: 1, payload: { workspace_epoch: 1, newest_sequence: 3 } });
     expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
     await settle();
-    expect(invoked).toHaveBeenCalledTimes(4);
+    expect(invoked).toHaveBeenCalledTimes(5);
     registration(0).deliver({ event: READY, id: 1, payload: { workspace_epoch: 2, newest_sequence: 1 } });
     await settle();
-    expect(invoked).toHaveBeenCalledTimes(4);
+    expect(invoked).toHaveBeenCalledTimes(5);
 
     shell.stop();
     expect(unlisten).toHaveBeenCalledTimes(1);
     // A wake after disposal reaches a disposed coordinator and drains nothing.
     registration(0).deliver({ event: READY, id: 1, payload: { workspace_epoch: 1, newest_sequence: 9 } });
     await settle();
-    expect(invoked).toHaveBeenCalledTimes(4);
+    expect(invoked).toHaveBeenCalledTimes(5);
   }); // End of the "drains through the composition" case
 }); // End of the describe over the mounted shell
 
@@ -552,6 +575,8 @@ describe('the shell over an emptied workspace — Phase 2d-6-6b', () => {
             return Promise.resolve({ ...EMPTY_SUMMARY, documents: 1, match_files: 1 });
           case 'list_documents':
             return Promise.resolve([only]);
+          case 'load_sidecar':
+            return Promise.resolve(FRESH_SIDECAR);
           case 'get_document':
             return Promise.resolve(view);
           case 'drain_external_changes':
@@ -583,6 +608,7 @@ describe('the shell over an emptied workspace — Phase 2d-6-6b', () => {
       await settle();
       expectedInvokes.push(
         ['list_documents', {}],
+        ['load_sidecar', {}],
         ['get_document', { id: 1 }],
         ['drain_external_changes', { afterSequence: 0 }]
       );
@@ -624,6 +650,8 @@ describe('the shell over an emptied workspace — Phase 2d-6-6b', () => {
             return Promise.resolve(EMPTY_SUMMARY);
           case 'list_documents':
             return Promise.resolve([]);
+          case 'load_sidecar':
+            return Promise.resolve(FRESH_SIDECAR);
           case 'drain_external_changes':
             drained += 1;
             return Promise.resolve(
@@ -650,7 +678,11 @@ describe('the shell over an emptied workspace — Phase 2d-6-6b', () => {
       };
       const shell = mountShell(false);
       resolveRegistration(0);
-      expectedInvokes.push(['list_documents', {}], ['drain_external_changes', { afterSequence: 0 }]);
+      expectedInvokes.push(
+        ['list_documents', {}],
+        ['load_sidecar', {}],
+        ['drain_external_changes', { afterSequence: 0 }]
+      );
       await settle();
       registration(0).deliver({ event: READY, id: 1, payload: { workspace_epoch: 1, newest_sequence: 1 } });
       expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
@@ -669,6 +701,7 @@ describe('the shell over an emptied workspace — Phase 2d-6-6b', () => {
       expectedInvokes.push(
         ['open_workspace', { root: null }],
         ['list_documents', {}],
+        ['load_sidecar', {}],
         ['drain_external_changes', { afterSequence: 0 }]
       );
       await settle();
@@ -712,6 +745,8 @@ function scriptOpenWorkspace(): void {
         return Promise.resolve(EMPTY_SUMMARY);
       case 'list_documents':
         return Promise.resolve([]);
+      case 'load_sidecar':
+        return Promise.resolve(FRESH_SIDECAR);
       case 'drain_external_changes':
         return Promise.resolve(emptyBatch());
       default:
@@ -730,10 +765,14 @@ async function mountOpenShell(): Promise<MountedShell> {
   scriptOpenWorkspace();
   const shell = mountShell(false);
   resolveRegistration(0);
-  expectedInvokes.push(['list_documents', {}], ['drain_external_changes', { afterSequence: 0 }]);
+  expectedInvokes.push(
+    ['list_documents', {}],
+    ['load_sidecar', {}],
+    ['drain_external_changes', { afterSequence: 0 }]
+  );
   await settle();
   await settle();
-  expect(invoked).toHaveBeenCalledTimes(3);
+  expect(invoked).toHaveBeenCalledTimes(4);
   return shell;
 } // End of function mountOpenShell()
 
@@ -749,13 +788,13 @@ describe('the foreground fallback — Phase 2d-6-10', () => {
     document.dispatchEvent(new Event('visibilitychange'));
     await settle();
     // Hidden asks for nothing: the call list is unchanged.
-    expect(invoked).toHaveBeenCalledTimes(3);
+    expect(invoked).toHaveBeenCalledTimes(4);
 
     setVisibility('visible');
     document.dispatchEvent(new Event('visibilitychange'));
     expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
     await settle();
-    expect(invoked).toHaveBeenCalledTimes(4);
+    expect(invoked).toHaveBeenCalledTimes(5);
     shell.stop();
   }); // End of the "visibilitychange" case
 
@@ -764,7 +803,7 @@ describe('the foreground fallback — Phase 2d-6-10', () => {
     window.dispatchEvent(new Event('focus'));
     expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
     await settle();
-    expect(invoked).toHaveBeenCalledTimes(4);
+    expect(invoked).toHaveBeenCalledTimes(5);
     shell.stop();
   }); // End of the "focus" case
 
@@ -782,7 +821,7 @@ describe('the foreground fallback — Phase 2d-6-10', () => {
     expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
     await settle();
     await settle();
-    expect(invoked).toHaveBeenCalledTimes(4);
+    expect(invoked).toHaveBeenCalledTimes(5);
     shell.stop();
   }); // End of the "coalesce" case
 
@@ -883,6 +922,8 @@ function scriptLostHistory(): void {
         return Promise.resolve({ ...EMPTY_SUMMARY, documents: 1, match_files: 1 });
       case 'list_documents':
         return Promise.resolve([only]);
+      case 'load_sidecar':
+        return Promise.resolve(FRESH_SIDECAR);
       case 'get_document':
         return Promise.resolve(view);
       case 'drain_external_changes':
@@ -916,6 +957,7 @@ describe('the lost-history recovery through the composition — Phase 2d-6-11a',
       resolveRegistration(0);
       expectedInvokes.push(
         ['list_documents', {}],
+        ['load_sidecar', {}],
         ['get_document', { id: 1 }],
         ['drain_external_changes', { afterSequence: 0 }]
       );
@@ -928,7 +970,7 @@ describe('the lost-history recovery through the composition — Phase 2d-6-11a',
       expectedInvokes.push(['drain_external_changes', { afterSequence: 0 }]);
       await settle();
       await settle();
-      expect(invoked).toHaveBeenCalledTimes(5);
+      expect(invoked).toHaveBeenCalledTimes(6);
       expect(shell.target.textContent).toContain(DICTIONARIES[lang]['browser.reconciliation.lostHistory']);
       expect(
         controlIn(shell.target, lang, 'browser.reconciliation.action.lostHistoryRecovery').disabled
@@ -938,7 +980,7 @@ describe('the lost-history recovery through the composition — Phase 2d-6-11a',
       controlIn(shell.target, lang, 'browser.matchCreation.close').click();
       flushSync();
       await settle();
-      expect(invoked).toHaveBeenCalledTimes(5);
+      expect(invoked).toHaveBeenCalledTimes(6);
       const recover = controlIn(shell.target, lang, 'browser.reconciliation.action.lostHistoryRecovery');
       expect(recover.disabled).toBe(false);
 
@@ -946,6 +988,7 @@ describe('the lost-history recovery through the composition — Phase 2d-6-11a',
       expectedInvokes.push(
         ['open_workspace', { root: null }],
         ['list_documents', {}],
+        ['load_sidecar', {}],
         ['get_document', { id: 1 }],
         ['drain_external_changes', { afterSequence: 0 }]
       );
@@ -974,6 +1017,7 @@ describe('the lost-history recovery through the composition — Phase 2d-6-11a',
     resolveRegistration(0);
     expectedInvokes.push(
       ['list_documents', {}],
+      ['load_sidecar', {}],
       ['get_document', { id: 1 }],
       ['drain_external_changes', { afterSequence: 0 }]
     );
@@ -985,6 +1029,7 @@ describe('the lost-history recovery through the composition — Phase 2d-6-11a',
       ['drain_external_changes', { afterSequence: 0 }],
       ['open_workspace', { root: null }],
       ['list_documents', {}],
+      ['load_sidecar', {}],
       ['get_document', { id: 1 }],
       ['drain_external_changes', { afterSequence: 0 }]
     );

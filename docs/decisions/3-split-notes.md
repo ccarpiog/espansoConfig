@@ -471,6 +471,34 @@ seeded **visibly** into a new-snippet draft (ruling 28).
 **Risk `high`. Driven:** implementation yes; the window half per ruling 30. **Depends on** 3-4, 3-5,
 3-12.
 
+**Addendum, 2026-09-24 — cut into three pieces before starting.** The step touches preference and
+creation models, the workspace integration, the components and i18n, as 3-6, 3-8 and 3-11 did, so the
+orchestrator cut it along their shape:
+
+- **3-13-1 — the model and the coordination.** Everything below the components: browser models in
+  `src/lib/browser/` over 3-12's `load_sidecar` / `update_sidecar` — the display-name model (the real
+  filename always available beside a display name; the empty-name, whitespace and ordering decisions
+  3-12's notes §6 items 2-3 hand on, made and recorded), the per-file defaults model (the seven
+  bulk-option fields as optional text, absent distinct from empty, never booleans), the seeding of a
+  new-snippet creation draft once and visibly (each seeded default is a draft value the creator can
+  remove, removal suppresses its key, a later preference change does not touch an open draft, recovery
+  values are never overridden), and the workspace coordination that loads the sidecar on open and
+  before each mutation, with an absent or corrupt sidecar leaving creation working. The blocking
+  advisory lock (3-12 notes §5) is decided deliberately: where a sidecar call may stall, the UI must not
+  freeze. The reactive `index.ts` wrapper for the sidecar `describe*` accessors (3-12 notes §6 item 5).
+  Any dictionary keys and accessors those values need, EN and ES. A model test per acceptance clause.
+  **No window half** — it draws nothing new.
+- **3-13-2 — the components and the i18n.** `Sidebar.svelte` drawing display names with the real
+  filename visible, `MatchCreator.svelte` drawing the seeded defaults visibly and removably, a
+  preferences control for display names and defaults, the dictionary keys EN and ES, and mounted tests.
+  Its record says: *"No window reading was performed or claimed."*
+- **3-13-3 — the window half.** EN and ES through the picker, with a long display name, per ruling 30
+  and §4.1, with a minimal uncommitted instrument inside its own single review. It needs a visible,
+  unlocked screen, and it closes step 3-13.
+
+Each piece is one phase with one worker and one review. The acceptance list above is the union of the
+three.
+
 ### 3-14 — Delete-conflict wording and action placement
 
 **Delivers** the fold (CF-52) and paragraph-overlap (CF-54) changes **the owner rules for**. CF-53's

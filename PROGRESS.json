@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T15:07:17Z",
+  "updated": "2026-09-24T15:48:09Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1143,8 +1143,32 @@
     {
       "id": "3-13",
       "title": "Display names and visible creation defaults",
+      "status": "in_progress",
+      "summary": "Display names and visible creation defaults; split into 3-13-1, 3-13-2 and 3-13-3.",
+      "risk": "high"
+    },
+    {
+      "id": "3-13-1",
+      "title": "Display names and defaults: the model and the coordination",
+      "status": "done",
+      "risk": "high",
+      "summary": "Browser models for display names, ordering and per-file creation defaults over the sidecar, seeded visibly into a new-snippet draft.",
+      "review": "ship-with-fixes (Codex), 0 blockers + 3 should-fix, fixed",
+      "narrative": "docs/decisions/3-13-1-notes.md"
+    },
+    {
+      "id": "3-13-2",
+      "title": "Display names and defaults: the components and the i18n",
       "status": "queued",
-      "summary": "Queued: Display names and visible creation defaults."
+      "risk": "high",
+      "summary": "Sidebar, creator and a preferences control draw display names and seeded defaults, EN and ES."
+    },
+    {
+      "id": "3-13-3",
+      "title": "Display names and defaults: the window half",
+      "status": "queued",
+      "risk": "high",
+      "summary": "Reads display names and seeded defaults in a window in English and Spanish, with a long name."
     },
     {
       "id": "3-14",
