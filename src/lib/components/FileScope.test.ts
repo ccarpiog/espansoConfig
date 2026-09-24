@@ -149,7 +149,7 @@ describe.each(LOCALES)('the inspector alone, in %s', (lang) => {
     expect(rows).toHaveLength(3);
     expect(rows[0]?.querySelector('.sourceText')?.textContent).toBe('_b.yml');
     expect(rows[1]?.querySelector('.sourceText')).toBeNull();
-    expect(rows[1]?.textContent?.trim()).toBe(
+    expect(rows[1]?.querySelector('.entry')?.textContent?.trim()).toBe(
       translate(lang, 'browser.fileScope.imports.entryNotAPath', {
         kind: describeValueKind(lang, 'Mapping')
       })
@@ -157,6 +157,42 @@ describe.each(LOCALES)('the inspector alone, in %s', (lang) => {
     expect(rows[2]?.querySelector('.sourceText')?.textContent).toBe('a.yml');
     expect(texts(target, 'p.state')).toEqual([words(lang, 'browser.fileScope.imports.listed')]);
     expect(texts(target, 'h2')).toEqual([words(lang, 'browser.fileScope.imports.heading')]);
+  });
+
+  it('draws every row its own position, the rows drawn through SourceText included', () => {
+    // The 3-9-2 window reading (`docs/decisions/3-9-2-notes.md` §5 item 1) saw
+    // WebKit draw no `<ol>` marker beside a `SourceText` row, so the position is
+    // an element of the row. jsdom does no layout: this proves each row carries
+    // its number in the DOM, and the window reading proves it is drawn.
+    locale.setOverride(lang);
+    const target = mountScope(
+      withImports(
+        [
+          scalarItem('first.yml'),
+          elidedValue('Sequence', 4),
+          scalarItem('third.yml'),
+          elidedValue('Mapping', 8),
+          scalarItem('fifth.yml')
+        ],
+        { Items: { location: LOCATION, flow: false, count: 5 } }
+      )
+    );
+    const rows = [...target.querySelectorAll('ol.imports > li')];
+    expect(rows.map((row) => row.querySelector(':scope > .position')?.textContent)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5'
+    ]);
+    expect(rows.map((row) => row.querySelector('.sourceText') !== null)).toEqual([
+      true,
+      false,
+      true,
+      false,
+      true
+    ]);
+    expect(texts(target, 'ol.imports .sourceText')).toEqual(['first.yml', 'third.yml', 'fifth.yml']);
   });
 
   it('draws the absent, empty, unsupported-shape and unread states, each with no list', () => {

@@ -36,23 +36,26 @@
     <ol class="imports">
       {#each scope.imports.rows as row (row.position)}
         <li>
-          {#if row.kind === 'asWritten'}
-            {#if row.display.empty}
-              <span class="marker">{t('browser.detail.emptyText')}</span>
+          <span class="position">{row.position}</span>
+          <div class="entry">
+            {#if row.kind === 'asWritten'}
+              {#if row.display.empty}
+                <span class="marker">{t('browser.detail.emptyText')}</span>
+              {:else}
+                <SourceText text={row.display.scalar.text} />
+              {/if}
+              {#if row.display.style !== null}
+                <span class="marker">{tScalarStyle(row.display.style)}</span>
+              {/if}
+              {#if row.display.ambiguous}
+                <span class="marker" title={t('browser.detail.ambiguousDetail')}>
+                  {t('browser.detail.ambiguous')}
+                </span>
+              {/if}
             {:else}
-              <SourceText text={row.display.scalar.text} />
+              <span class="unsupported">{tUnsupportedImport(row.found)}</span>
             {/if}
-            {#if row.display.style !== null}
-              <span class="marker">{tScalarStyle(row.display.style)}</span>
-            {/if}
-            {#if row.display.ambiguous}
-              <span class="marker" title={t('browser.detail.ambiguousDetail')}>
-                {t('browser.detail.ambiguous')}
-              </span>
-            {/if}
-          {:else}
-            <span class="unsupported">{tUnsupportedImport(row.found)}</span>
-          {/if}
+          </div>
         </li>
       {/each}
     </ol>
@@ -84,15 +87,35 @@
     color: var(--muted);
   }
 
-  /* Numbered by the browser, so the number is the entry's position in the
-     file; an unsupported entry keeps its number too. */
+  /* The position is drawn by this component, not by the list marker: the 3-9-2
+     window reading saw WebKit draw no `<ol>` marker beside a row whose first
+     child is `SourceText`'s scrolling block, so rows 1, 3 and 5 of a mixed list
+     lost their numbers (`docs/decisions/3-9-2-notes.md` §5 item 1). Every row,
+     unsupported or not, carries its 1-based position in the file as a digit. */
   .imports {
     margin: 0.375rem 0 0;
-    padding-inline-start: 1.5rem;
+    padding: 0;
+    list-style: none;
   }
 
   .imports li {
+    display: grid;
+    grid-template-columns: 1.25rem minmax(0, 1fr);
+    align-items: baseline;
     margin-top: 0.25rem;
+  }
+
+  .position {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+    padding-inline-end: 0.375rem;
+  }
+
+  /* `minmax(0, 1fr)` above and `min-width: 0` here keep `SourceText`'s own
+     horizontal scrolling working inside the grid cell. */
+  .entry {
+    min-width: 0;
   }
 
   .marker {
