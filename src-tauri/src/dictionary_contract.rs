@@ -436,6 +436,16 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "src-tauri/src/bulk.rs",
         name: "BulkFileOutcome",
     },
+    // Phase 3-12's two: how a sidecar load ended, and what a sidecar update
+    // did (rulings 25-27).
+    CodeEnum {
+        source: "src-tauri/src/sidecar.rs",
+        name: "SidecarStatus",
+    },
+    CodeEnum {
+        source: "src-tauri/src/sidecar.rs",
+        name: "SidecarUpdateOutcome",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -501,6 +511,8 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("changedContent", 2),
     ("bulkPlanError", 9),
     ("bulkFileOutcome", 10),
+    ("sidecarStatus", 8),
+    ("sidecarUpdateOutcome", 4),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.

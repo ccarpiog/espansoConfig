@@ -1,5 +1,5 @@
 /**
- * The twenty command wrappers, against a stubbed `invoke`.
+ * The twenty-two command wrappers, against a stubbed `invoke`.
  *
  * What is under test here is the *boundary*, not the Rust behind it: which
  * command name each wrapper calls, which arguments it sends, and — the part
@@ -21,7 +21,8 @@ import type {
   BackupEntryId,
   BulkOptionsRequest,
   MatchDraft,
-  NewMatch
+  NewMatch,
+  SidecarUpdateRequest
 } from './types';
 
 /** Every call the stubbed `invoke` received, in order. */
@@ -78,6 +79,7 @@ const {
   listBackupBatches,
   listBackupEntries,
   listDocuments,
+  loadSidecar,
   matchItemText,
   matchOptionSpellings,
   moveMatch,
@@ -86,7 +88,8 @@ const {
   reloadDocument,
   saveMatch,
   saveMatchItemText,
-  saveRawDocument
+  saveRawDocument,
+  updateSidecar
 } = commands;
 
 /** Every function this module exports, sorted. */
@@ -112,6 +115,15 @@ const BULK_REQUEST: BulkOptionsRequest = {
   changes: [{ option: 'word', value: { Set: 'true' } }],
   files: [{ document: 3, base_revision: 'a'.repeat(64), matches: [IDENTITY], consent: null }],
   excluded: []
+};
+
+/** A sidecar update of one file: a display name and an empty default (Phase 3-12). */
+const SIDECAR_REQUEST: SidecarUpdateRequest = {
+  document: 3,
+  changes: [
+    { SetDisplayName: { name: 'Everyday' } },
+    { SetDefault: { option: 'word', value: '' } }
+  ]
 };
 
 /** A backup entry identity, exactly as a listing would have produced it. */
@@ -172,7 +184,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the twenty wire names, in order, and export no twenty-first wrapper', async () => {
+  it('call the twenty-two wire names, in order, and export no twenty-third wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -200,6 +212,8 @@ describe('the command wrappers', () => {
     await saveMatchItemText(IDENTITY, 'a'.repeat(64), '  - trigger: a\n', { accepted: [] });
     await applyBulkOptions(BULK_REQUEST);
     await matchOptionSpellings(IDENTITY);
+    await loadSidecar();
+    await updateSidecar(SIDECAR_REQUEST);
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
       'applyBulkOptions',
@@ -213,6 +227,7 @@ describe('the command wrappers', () => {
       'listBackupBatches',
       'listBackupEntries',
       'listDocuments',
+      'loadSidecar',
       'matchItemText',
       'matchOptionSpellings',
       'moveMatch',
@@ -221,9 +236,10 @@ describe('the command wrappers', () => {
       'reloadDocument',
       'saveMatch',
       'saveMatchItemText',
-      'saveRawDocument'
+      'saveRawDocument',
+      'updateSidecar'
     ]);
-  }); // End of the "call the twenty wire names" case
+  }); // End of the "call the twenty-two wire names" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence

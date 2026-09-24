@@ -1,5 +1,5 @@
 /**
- * The twenty workspace commands, typed.
+ * The twenty-two workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -55,6 +55,14 @@
  * it is a whole-document replacement like any other, with the destination's own
  * base revision and the ordinary findings.
  *
+ * ## Two touch the application's own sidecar, and neither writes a user file
+ *
+ * {@link loadSidecar} and {@link updateSidecar}, since Phase 3-12. They read and
+ * write the per-workspace preferences store (display names, ordering,
+ * new-snippet defaults) inside the application's own storage. Rust names that
+ * file from the workspace root; nothing here sends a path. A refused or failed
+ * preference write is an outcome in the value channel, like a save's.
+ *
  * ## The sixteenth reads what changed on disk, and writes nothing
  *
  * {@link drainExternalChanges}, since Phase 2d-4b. It is the authoritative half
@@ -94,6 +102,9 @@ import type {
   OwnedItemText,
   ReconciliationBatch,
   SaveResult,
+  SidecarState,
+  SidecarUpdateRequest,
+  SidecarUpdateResult,
   WorkspaceSummary
 } from './types';
 
@@ -130,7 +141,9 @@ export const COMMAND_NAMES = [
   'match_item_text',
   'save_match_item_text',
   'apply_bulk_options',
-  'match_option_spellings'
+  'match_option_spellings',
+  'load_sidecar',
+  'update_sidecar'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -895,6 +908,40 @@ export async function applyBulkOptions(
 export async function matchOptionSpellings(id: MatchId): Promise<CommandResult<BulkOptionSpellings>> {
   return call<BulkOptionSpellings>('match_option_spellings', { id });
 } // End of function matchOptionSpellings()
+
+/**
+ * Reads the open workspace's sidecar preferences (Phase 3-12, rulings 25-28).
+ *
+ * **Writes no user file.** Rust reads the sidecar on every call — there is no
+ * watcher — and may, inside the application's own storage only, rename a
+ * corrupt sidecar aside or record which entries' files have gone missing. How
+ * the read ended is the answer's `status`; a corrupt, newer-format or
+ * unreadable sidecar is a status, never a failure of the call.
+ *
+ * @returns The preferences in effect, or a failure — `noWorkspaceOpen`.
+ */
+export async function loadSidecar(): Promise<CommandResult<SidecarState>> {
+  return call<SidecarState>('load_sidecar', {});
+} // End of function loadSidecar()
+
+/**
+ * Changes one file's sidecar preferences (Phase 3-12).
+ *
+ * **The application-metadata writer's only caller, and not a user-file
+ * writer.** Rust reloads the sidecar immediately before applying the changes
+ * and replaces it atomically. Another running instance's overlapping write is
+ * not detected: the replacement that lands last is what the sidecar holds.
+ *
+ * @param request - The file and the changes, applied in order.
+ * @returns What the update did and the preferences in effect afterwards, or a
+ *   failure — `noWorkspaceOpen`, or `unknownDocument` for a file the workspace
+ *   does not list. A refused or failed write is an outcome, not a failure.
+ */
+export async function updateSidecar(
+  request: SidecarUpdateRequest
+): Promise<CommandResult<SidecarUpdateResult>> {
+  return call<SidecarUpdateResult>('update_sidecar', { request });
+} // End of function updateSidecar()
 
 /**
  * Lists the recognised backup batches of the open workspace, newest name first.

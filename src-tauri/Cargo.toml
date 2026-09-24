@@ -18,6 +18,18 @@ repository.workspace = true
 espansoconfig-core = { path = "../crates/espansoconfig-core" }
 serde.workspace = true
 serde_json.workspace = true
+# Phase 3-12. The application sidecar store names its file after a SHA-256 of a
+# versioned, lossless encoding of the canonical workspace root (ruling 26). The
+# digest is the sidecar's own, rather than `ContentRevision::of_bytes`, so that
+# the name of a stored file never depends on what the core decides a content
+# revision is. Already in the workspace's lockfile through the core.
+sha2.workspace = true
+# Phase 3-12's review, finding 2: the sidecar store serializes instances with an
+# exclusive `flock(2)` on a lock file inside its own directory. `File::lock` is
+# stable only since Rust 1.89 and the workspace's `rust-version` is 1.82, so the
+# call goes through `libc`, already a workspace dependency (the core's
+# `copyfile(3)` binding) with no dependencies of its own and no tauri.
+libc.workspace = true
 tauri = { workspace = true }
 
 [build-dependencies]

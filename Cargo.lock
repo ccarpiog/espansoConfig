@@ -754,9 +754,11 @@ name = "espansoconfig"
 version = "0.1.0"
 dependencies = [
  "espansoconfig-core",
+ "libc",
  "proc-macro2",
  "serde",
  "serde_json",
+ "sha2",
  "syn 2.0.119",
  "tauri",
  "tauri-build",

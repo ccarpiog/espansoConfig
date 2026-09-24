@@ -1079,6 +1079,8 @@ const CODE_NAMESPACE_SAMPLES: {
   saveVerdict: 'Proceed',
   scalarStyle: SCALAR_STYLES[0],
   sequencePresence: 'Empty',
+  sidecarStatus: 'Quarantined',
+  sidecarUpdateOutcome: 'Saved',
   syntaxError: 'Parse',
   targetDifference: 'Retargeted',
   triggerKind: TRIGGER_KINDS[0],

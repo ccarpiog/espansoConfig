@@ -39,6 +39,13 @@
 //! source spelling out in Rust so a bulk inspector compares spellings rather
 //! than decoded text.
 //!
+//! Phase 3-12 adds `commands::load_sidecar` and `commands::update_sidecar`,
+//! and **neither writes a user file**: `sidecar` is the application-owned
+//! per-workspace metadata store (display names, ordering, new-snippet
+//! defaults), written only under the application's data directory by its own
+//! writer, which accepts no destination path (ruling 25). Its storage root is
+//! installed in `register`'s setup.
+//!
 //! Phase 2c-5-2 adds three more, and **not one of them writes**:
 //! `commands::list_backup_batches`, `commands::list_backup_entries` and
 //! `commands::read_backup_text` put Phase 2c-5-1's read-only backup catalogue on
@@ -181,6 +188,7 @@ mod retained_state_contract;
 #[cfg(test)]
 mod rust_source;
 mod save;
+mod sidecar;
 mod watch;
 #[cfg(test)]
 mod watch_check;
@@ -215,7 +223,10 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// `save_match`, `create_match`, `delete_match`, `save_raw_document`,
 /// `duplicate_match`, Phase 3-7's `save_match_item_text` and Phase 3-10's
 /// `apply_bulk_options` write, and every one of them does it through
-/// `espansoconfig_core::persist::save_document` and through nothing else. The
+/// `espansoconfig_core::persist::save_document` and through nothing else.
+/// Phase 3-12's `load_sidecar` and `update_sidecar` write no user file: the
+/// second writes only the application-owned sidecar store, through
+/// `crate::sidecar`'s own writer, which accepts no destination path. The
 /// menu command, `set_menu_labels`, does not write a user file either: it hands
 /// the macOS menu the strings the frontend translated, because Tauri builds that
 /// menu in Rust and hardcoding either language here is what plan section 9
@@ -229,7 +240,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// the application publishes an ACL manifest of its own (`tauri::webview`'s
 /// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
 /// !is_local`). This crate publishes none, the webview's origin is local, and
-/// none of the twenty-one commands is a plugin command, so none of them needs a
+/// none of the twenty-three commands is a plugin command, so none of them needs a
 /// permission. The two event permissions are for the frontend's one event
 /// listener: Tauri's `listen` invokes the plugin command `plugin:event|listen`,
 /// and the unlisten function it resolves with invokes `plugin:event|unlisten`.
@@ -244,6 +255,11 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(commands::WorkspaceSession::new())
+        // Phase 3-12. The sidecar store's storage root is installed in the
+        // setup below, from the application's own data directory; until then
+        // every sidecar load is `StorageUnavailable`. Tests replace the root
+        // with a temporary directory through the same managed state.
+        .manage(sidecar::SidecarSession::new())
         // The session is managed before an application handle exists, so the
         // reconciliation wake's emitter is installed here rather than in the
         // constructor. It is in `register` and not in `main` so that
@@ -254,6 +270,14 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             let emitter = events::wake_emitter(app.handle().clone());
             app.state::<commands::WorkspaceSession>()
                 .install_wake_emitter(emitter);
+            // The application-owned storage root (ruling 25): nothing is
+            // created here, and a directory Tauri cannot resolve leaves the
+            // sidecar reporting `StorageUnavailable` rather than failing the
+            // launch.
+            if let Ok(root) = app.path().app_data_dir() {
+                app.state::<sidecar::SidecarSession>()
+                    .install_storage_root(root);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -277,6 +301,8 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::save_match_item_text,
             commands::apply_bulk_options,
             commands::match_option_spellings,
+            commands::load_sidecar,
+            commands::update_sidecar,
             menu::set_menu_labels,
         ])
 } // End of function register()

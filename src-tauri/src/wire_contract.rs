@@ -1540,8 +1540,15 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// Phase 3-11-1 adds `match_option_spellings`, taking the workspace surface to
 /// twenty and the whole to twenty-one. It is a reader — the bulk edit's own —
 /// and writes nothing.
+///
+/// Phase 3-12 adds `load_sidecar` and `update_sidecar`, taking the workspace
+/// surface to twenty-two and the whole to twenty-three. **Neither is counted
+/// among the writers below**, because that list is the commands that write a
+/// user's file: `update_sidecar` writes only the application-owned sidecar
+/// store, through `crate::sidecar`'s own writer (ruling 25), and
+/// [`the_sidecar_route_names_no_user_file_writer`] is its tripwire.
 #[test]
-fn the_registered_commands_are_the_workspace_twenty_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_twenty_two_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1550,8 +1557,9 @@ fn the_registered_commands_are_the_workspace_twenty_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        20,
-        "the frontend declares twelve read-only commands and eight that write: {workspace:?}"
+        22,
+        "the frontend declares twelve read-only commands, eight that write a user's file \
+         and the two sidecar commands: {workspace:?}"
     );
     assert!(
         workspace.contains("drain_external_changes"),
@@ -1591,6 +1599,13 @@ fn the_registered_commands_are_the_workspace_twenty_and_the_menu_command() {
             && !writing.contains(&"match_option_spellings"),
         "match_option_spellings is Phase 3-11-1's reader and must be declared, never as a writer"
     );
+    for sidecar in ["load_sidecar", "update_sidecar"] {
+        assert!(
+            workspace.contains(sidecar) && !writing.contains(&sidecar),
+            "{sidecar} is Phase 3-12's sidecar command and must be declared, never as a \
+             writer of a user's file"
+        );
+    }
     for read_only in [
         "list_backup_batches",
         "list_backup_entries",
@@ -1613,8 +1628,8 @@ fn the_registered_commands_are_the_workspace_twenty_and_the_menu_command() {
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        21,
-        "Phase 3-11-1 registers twenty workspace commands and one menu command, and no more: {registered:?}"
+        23,
+        "Phase 3-12 registers twenty-two workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1622,7 +1637,7 @@ fn the_registered_commands_are_the_workspace_twenty_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_twenty_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_twenty_two_and_the_menu_command()
 
 /// The names no read of the backup tree may so much as mention.
 ///
@@ -4810,3 +4825,225 @@ fn the_option_spellings_declare_exactly_what_rust_writes() {
         serde_json::json!({ "NotOneScalar": {} })
     );
 } // End of function the_option_spellings_declare_exactly_what_rust_writes()
+
+// ---------------------------------------------------------------------------
+// The application sidecar store — Phase 3-12
+// ---------------------------------------------------------------------------
+
+/// The sidecar module and the three command-side functions that reach it name
+/// no writer of a user's file.
+///
+/// **A tripwire over a fixed vocabulary, not a proof**, exactly as
+/// [`the_known_backup_routes_name_no_writer`] is: a user-file writer reached
+/// under a name not in [`NO_WRITER_IDENTIFIERS`] passes it. What it pins is the
+/// route ruling 25 separates: the sidecar's writer is its own, and nothing on
+/// the path from `load_sidecar` or `update_sidecar` into `crate::sidecar` names
+/// `save_document` or the user-file write primitives.
+#[test]
+fn the_sidecar_route_names_no_user_file_writer() {
+    for module in [
+        "src-tauri/src/sidecar.rs",
+        "src-tauri/src/sidecar/format.rs",
+        "src-tauri/src/sidecar/store.rs",
+    ] {
+        let source = read_repository_file(module);
+        for forbidden in NO_WRITER_IDENTIFIERS {
+            assert!(
+                !crate::rust_source::mentions_identifier(&source, forbidden),
+                "{module} names {forbidden}; the sidecar writer is application metadata \
+                 and must not reach a user-file writer (ruling 25)"
+            );
+        }
+    } // End of the loop over the sidecar's modules
+    let commands = read_repository_file("src-tauri/src/commands.rs");
+    for name in ["load_sidecar", "update_sidecar", "sidecar_files"] {
+        let body = function_body(&commands, name);
+        for forbidden in NO_WRITER_IDENTIFIERS {
+            assert!(
+                !body.contains(forbidden),
+                "the body of {name} names {forbidden}"
+            );
+        }
+    } // End of the loop over the three command-side functions
+} // End of function the_sidecar_route_names_no_user_file_writer()
+
+/// Both sidecar enums are declared exactly as Rust writes them, and every
+/// sentence's placeholders name an operand Rust writes as a string.
+#[test]
+fn every_sidecar_union_declares_exactly_the_rust_variants_and_operands() {
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let english = crate::dictionary_contract::dictionary_values("src/lib/i18n/en.json");
+    let spanish = crate::dictionary_contract::dictionary_values("src/lib/i18n/es.json");
+    let tables: Vec<(&str, Vec<Value>)> = vec![
+        (
+            "SidecarStatus",
+            crate::sidecar::every_sidecar_status()
+                .iter()
+                .map(json_of)
+                .collect(),
+        ),
+        (
+            "SidecarUpdateOutcome",
+            crate::sidecar::every_sidecar_update_outcome()
+                .iter()
+                .map(json_of)
+                .collect(),
+        ),
+    ];
+    let mut checked = 0usize;
+    for (name, samples) in tables {
+        let declared = crate::dictionary_contract::declared_variants_of(name);
+        let enumerated: BTreeSet<String> = samples.iter().map(variant_name).collect();
+        assert_eq!(
+            declared, enumerated,
+            "the {name} samples and declaration disagree"
+        );
+        assert_eq!(
+            samples.len(),
+            enumerated.len(),
+            "{name}: one sample per variant"
+        );
+        assert_same_names(
+            &format!("type {name}Name"),
+            &enumerated,
+            &union_members(&source, &format!("{name}Name")),
+        );
+        for json in &samples {
+            let variant = variant_name(json);
+            let payload = json
+                .get(&variant)
+                .and_then(Value::as_object)
+                .unwrap_or_else(|| panic!("{name}::{variant} crosses as a one-key object"));
+            let written: BTreeSet<String> = payload.keys().cloned().collect();
+            let fields = tagged_variant_fields(&source, name, &variant)
+                .unwrap_or_else(|| panic!("type {name} declares no payload for {variant}"));
+            assert_same_names(
+                &format!("the {variant} payload of type {name}"),
+                &written,
+                &fields,
+            );
+            let operands: BTreeSet<String> = payload
+                .iter()
+                .filter(|(_, value)| value.is_string() || value.is_number())
+                .map(|(operand, _)| operand.clone())
+                .collect();
+            let key = crate::dictionary_contract::code_key(name, &variant);
+            for (locale, dictionary) in [("en", &english), ("es", &spanish)] {
+                let sentence = dictionary
+                    .get(&key)
+                    .unwrap_or_else(|| panic!("{locale}.json has no {key}"));
+                let unbacked: Vec<String> = placeholders_of(sentence)
+                    .difference(&operands)
+                    .cloned()
+                    .collect();
+                assert!(
+                    unbacked.is_empty(),
+                    "{locale}.json's {key} names {unbacked:?}, which Rust does not write"
+                );
+            } // End of the loop over the two dictionaries
+            checked += 1;
+        } // End of the loop over one enum's samples
+    } // End of the loop over the two sidecar enums
+    assert_eq!(checked, 12, "eight statuses and four update outcomes");
+} // End of function every_sidecar_union_declares_exactly_the_rust_variants_and_operands()
+
+/// The state, a file's preferences, one default and the update result carry
+/// exactly what `serde` writes; the request and every change carry exactly
+/// what Rust reads.
+#[test]
+fn the_sidecar_structs_and_request_declare_exactly_what_rust_writes_and_reads() {
+    use crate::sidecar::{
+        SidecarDefault, SidecarFilePreferences, SidecarState, SidecarStatus, SidecarUpdateOutcome,
+        SidecarUpdateRequest, SidecarUpdateResult,
+    };
+    use espansoconfig_core::draft::BulkOption;
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let default = SidecarDefault {
+        option: BulkOption::Word,
+        value: String::new(),
+    };
+    let file = SidecarFilePreferences {
+        document: DocumentId(1),
+        display_name: Some("Everyday".to_owned()),
+        sort_order: None,
+        defaults: vec![default.clone()],
+    };
+    let state = SidecarState {
+        status: SidecarStatus::Loaded {},
+        writable: true,
+        files: vec![file.clone()],
+        retained_orphans: 0,
+    };
+    let result = SidecarUpdateResult {
+        outcome: SidecarUpdateOutcome::Saved {},
+        state: state.clone(),
+    };
+    for (interface, value) in [
+        ("SidecarDefault", json_of(&default)),
+        ("SidecarFilePreferences", json_of(&file)),
+        ("SidecarState", json_of(&state)),
+        ("SidecarUpdateResult", json_of(&result)),
+    ] {
+        assert_same_names(
+            &format!("interface {interface}"),
+            &json_keys(&value),
+            &interface_fields(&source, interface),
+        );
+    } // End of the loop over the four written structs
+    assert_eq!(
+        json_of(&file)["sort_order"],
+        Value::Null,
+        "an absent preference crosses as null, not as a missing key"
+    );
+    assert_eq!(
+        json_of(&default)["value"],
+        "",
+        "an empty default is an empty string"
+    );
+
+    let changes = [
+        serde_json::json!({ "SetDisplayName": { "name": "x" } }),
+        serde_json::json!({ "ClearDisplayName": {} }),
+        serde_json::json!({ "SetSortOrder": { "order": 2 } }),
+        serde_json::json!({ "ClearSortOrder": {} }),
+        serde_json::json!({ "SetDefault": { "option": "force_mode", "value": "" } }),
+        serde_json::json!({ "ClearDefault": { "option": "word" } }),
+    ];
+    let request = serde_json::json!({ "document": 1, "changes": changes });
+    serde_json::from_value::<SidecarUpdateRequest>(request.clone())
+        .expect("the full request reads");
+    assert_same_names(
+        "interface SidecarUpdateRequest",
+        &json_keys(&request),
+        &interface_fields(&source, "SidecarUpdateRequest"),
+    );
+    let declared = declared_variants(
+        &read_repository_file("src-tauri/src/sidecar.rs"),
+        "SidecarChange",
+    );
+    let sampled: BTreeSet<String> = changes.iter().map(variant_name).collect();
+    assert_eq!(declared, sampled, "one sample per SidecarChange variant");
+    let tags: BTreeSet<String> = object_union_tags(&source, "SidecarChange")
+        .into_keys()
+        .collect();
+    assert_same_names("type SidecarChange", &sampled, &tags);
+    for change in &changes {
+        let variant = variant_name(change);
+        let fields = tagged_variant_fields(&source, "SidecarChange", &variant)
+            .unwrap_or_else(|| panic!("type SidecarChange declares no payload for {variant}"));
+        assert_same_names(
+            &format!("the {variant} payload of type SidecarChange"),
+            &json_keys(&change[&variant]),
+            &fields,
+        );
+    } // End of the loop over the six changes
+    assert!(
+        serde_json::from_value::<SidecarUpdateRequest>(serde_json::json!({
+            "document": 1,
+            "changes": [],
+            "path": "/elsewhere",
+        }))
+        .is_err(),
+        "the request takes no path, and an unknown property is refused"
+    );
+} // End of function the_sidecar_structs_and_request_declare_exactly_what_rust_writes_and_reads()

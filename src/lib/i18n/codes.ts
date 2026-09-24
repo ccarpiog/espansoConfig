@@ -141,6 +141,10 @@ import type {
   ScalarStyle,
   SequencePresence,
   SequencePresenceName,
+  SidecarStatus,
+  SidecarStatusName,
+  SidecarUpdateOutcome,
+  SidecarUpdateOutcomeName,
   SyntaxError,
   SyntaxErrorName,
   TargetDifference,
@@ -1505,6 +1509,64 @@ export function describeBulkFileOutcome(locale: Locale, outcome: BulkFileOutcome
 } // End of function describeBulkFileOutcome()
 
 // ---------------------------------------------------------------------------
+// The application sidecar store — Phase 3-12
+// ---------------------------------------------------------------------------
+
+/**
+ * The dictionary key for how one sidecar load ended.
+ *
+ * @param name - The variant name of a `SidecarStatus`.
+ * @returns The key holding that status's sentence.
+ */
+export function sidecarStatusKey(name: SidecarStatusName): TranslationKey {
+  return `code.sidecarStatus.${uncapitalize(name)}`;
+} // End of function sidecarStatusKey()
+
+/**
+ * The sentence one sidecar status reads as.
+ *
+ * `quarantined` interpolates `aside`, the name the corrupt file was renamed to
+ * — a name Rust generated, not the person's text — and `futureSchema`
+ * interpolates the declared `version`. No other status carries an operand.
+ *
+ * @param locale - The dictionary to read from.
+ * @param status - A sidecar status as it crossed the boundary.
+ * @returns The translated sentence, with its operands substituted.
+ */
+export function describeSidecarStatus(locale: Locale, status: SidecarStatus): string {
+  const key = sidecarStatusKey(wireVariantName<SidecarStatusName>(status));
+  return translate(locale, key, scalarOperands(wireVariantOperands(status)));
+} // End of function describeSidecarStatus()
+
+/**
+ * The dictionary key for what one sidecar update did.
+ *
+ * @param name - The variant name of a `SidecarUpdateOutcome`.
+ * @returns The key holding that outcome's sentence.
+ */
+export function sidecarUpdateOutcomeKey(name: SidecarUpdateOutcomeName): TranslationKey {
+  return `code.sidecarUpdateOutcome.${uncapitalize(name)}`;
+} // End of function sidecarUpdateOutcomeKey()
+
+/**
+ * The sentence one sidecar update outcome reads as. Why a write was refused is
+ * the accompanying state's status, described with {@link describeSidecarStatus}.
+ *
+ * @param locale - The dictionary to read from.
+ * @param outcome - A sidecar update outcome as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeSidecarUpdateOutcome(
+  locale: Locale,
+  outcome: SidecarUpdateOutcome
+): string {
+  return translate(
+    locale,
+    sidecarUpdateOutcomeKey(wireVariantName<SidecarUpdateOutcomeName>(outcome))
+  );
+} // End of function describeSidecarUpdateOutcome()
+
+// ---------------------------------------------------------------------------
 // The read-only backup catalogue — Phase 2c-5-2
 // ---------------------------------------------------------------------------
 //
@@ -1945,6 +2007,8 @@ export const CODE_NAMESPACE_KEY_BUILDERS = {
   saveVerdict: saveVerdictKey,
   scalarStyle: scalarStyleKey,
   sequencePresence: sequencePresenceKey,
+  sidecarStatus: sidecarStatusKey,
+  sidecarUpdateOutcome: sidecarUpdateOutcomeKey,
   syntaxError: syntaxErrorKey,
   targetDifference: targetDifferenceKey,
   triggerKind: triggerKindKey,

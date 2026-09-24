@@ -150,7 +150,10 @@ the phase records under `docs/decisions/` hold the details.
 **Writing files**
 
 - `espansoconfig_core::persist::save_document` (`crates/espansoconfig-core/src/persist/save.rs`) is
-  the **only** entry point that may write a user's file. Never call `replace_file_atomically` or
+  the **only** writer of user espanso configuration contents. A separate application-metadata
+  writer, `src-tauri/src/sidecar/store.rs` (driven by `src-tauri/src/sidecar.rs`), may write only the
+  application-owned sidecar store under the app data directory, and accepts no destination path; it
+  never reaches `save_document` or the user-file primitives. Never call `replace_file_atomically` or
   `replace_locked_file` from a command or from inside the transaction: **the lock is not reentrant, so
   the process hangs silently and forever.** Forcing a write into existence anywhere else bypasses the
   lock, the revision check, the reparse, the validation verdict, the acknowledgement and the backup

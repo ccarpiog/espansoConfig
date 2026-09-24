@@ -8,7 +8,10 @@
 //! `list_backup_batches`, `list_backup_entries` and `read_backup_text`. Phase 3-7
 //! adds a seventh writer, `save_match_item_text`, and its reader,
 //! `match_item_text`, Phase 3-10 an eighth, `apply_bulk_options`, and Phase
-//! 3-11-1 that one's reader, `match_option_spellings`. Each is
+//! 3-11-1 that one's reader, `match_option_spellings`. Phase 3-12 adds the
+//! sidecar pair, `load_sidecar` and `update_sidecar`, which read the open
+//! workspace's file list and hand it to `crate::sidecar`; neither writes a user
+//! file. Each is
 //! one line over a [`WorkspaceSession`] method; each of the original six readers
 //! is one call into `crate::workspace`, which Phase 1a built to be wrapped this
 //! way, and each of the three backup readers is one call into `crate::backup`.
@@ -282,6 +285,10 @@ use crate::error::CommandError;
 use crate::ledger::{admitting_sink, AdmittedSink, ObservedState, WriteLedger};
 use crate::reconciliation::{queueing_sink, ReconciliationBatch, ReconciliationQueue, WakeEmitter};
 use crate::save::SaveResult;
+use crate::sidecar::{
+    unix_now, SidecarSession, SidecarState, SidecarUpdateRequest, SidecarUpdateResult,
+    WorkspaceFiles,
+};
 use crate::watch::{
     EpochSpaceExhausted, LifecycleConfig, ObservationSink, ReObserver, WatchStatusView,
     WatcherLifecycle, WorkspaceEpochs, NO_EPOCH,
@@ -1422,6 +1429,29 @@ impl WorkspaceSession {
             Ok(option_spellings(snapshot, found))
         })
     } // End of function match_option_spellings()
+
+    /// The open workspace's root and listed files, as the sidecar store keys
+    /// them (Phase 3-12).
+    ///
+    /// **Reads nothing from disk and writes nothing**: the list is the one the
+    /// session already holds. The session lock is released before the sidecar
+    /// is read, so no sidecar I/O runs under it.
+    ///
+    /// # Errors
+    ///
+    /// [`CommandError::NoWorkspaceOpen`].
+    pub fn sidecar_files(&self) -> Result<WorkspaceFiles, CommandError> {
+        self.with_workspace_read(|workspace| {
+            Ok(WorkspaceFiles {
+                root: workspace.root().to_path_buf(),
+                files: workspace
+                    .list_documents()
+                    .into_iter()
+                    .map(|summary| (summary.id, summary.relative_path.into_path_buf()))
+                    .collect(),
+            })
+        })
+    } // End of function sidecar_files()
 
     /// Lists the recognised backup batches of the open workspace.
     ///
@@ -3960,6 +3990,52 @@ pub fn match_option_spellings(
 ) -> Result<BulkOptionSpellings, CommandError> {
     session.match_option_spellings(id)
 } // End of function match_option_spellings()
+
+/// Reads the open workspace's application sidecar: display names, ordering and
+/// new-snippet defaults (Phase 3-12, rulings 25-28).
+///
+/// **The twenty-first workspace command, and it writes no user file.** It
+/// reads the sidecar on every call — there is no watcher — and may rename a
+/// corrupt sidecar aside or persist changed orphan marks, both inside the
+/// application's own storage and through `crate::sidecar`'s writer. What it
+/// found is the answer's `status`; see [`crate::sidecar`].
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`]. Everything about the sidecar itself is a
+/// status in the value channel.
+#[tauri::command]
+pub fn load_sidecar(
+    session: State<'_, WorkspaceSession>,
+    sidecar: State<'_, SidecarSession>,
+) -> Result<SidecarState, CommandError> {
+    let files = session.sidecar_files()?;
+    Ok(sidecar.load(&files, unix_now()))
+} // End of function load_sidecar()
+
+/// Applies changes to one file's sidecar preferences (Phase 3-12).
+///
+/// **The twenty-second workspace command, and the application-metadata
+/// writer's only caller** (ruling 25). It writes only the application-owned
+/// sidecar store and takes no destination path; it is not one of the eight
+/// commands that write a user's file, and nothing here reaches
+/// `espansoconfig_core::persist`. The sidecar is reloaded immediately before
+/// the change, and concurrent instances follow last-write-wins.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`], and [`CommandError::UnknownDocument`] for
+/// a file the workspace does not list. A refused or failed write is a
+/// [`crate::sidecar::SidecarUpdateOutcome`] in the value channel.
+#[tauri::command]
+pub fn update_sidecar(
+    session: State<'_, WorkspaceSession>,
+    sidecar: State<'_, SidecarSession>,
+    request: SidecarUpdateRequest,
+) -> Result<SidecarUpdateResult, CommandError> {
+    let files = session.sidecar_files()?;
+    sidecar.update(&files, &request, unix_now())
+} // End of function update_sidecar()
 
 /// Lists the recognised backup batches of the open workspace (design consult
 /// Q3).

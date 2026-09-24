@@ -2334,6 +2334,116 @@ export interface BulkOptionSpellings {
 }
 
 // ---------------------------------------------------------------------------
+// The application sidecar store — Phase 3-12
+// ---------------------------------------------------------------------------
+
+/** The variant name of every {@link SidecarStatus} (ruling 27). */
+export type SidecarStatusName =
+  | 'Fresh'
+  | 'Loaded'
+  | 'Quarantined'
+  | 'QuarantineFailed'
+  | 'FutureSchema'
+  | 'Unreadable'
+  | 'RootUnresolved'
+  | 'StorageUnavailable';
+
+/**
+ * How one sidecar load ended. Only `Fresh`, `Loaded` and `Quarantined` allow a
+ * write, which {@link SidecarState.writable} restates.
+ *
+ * `Quarantined` is built only after the corrupt file **was** renamed aside, to
+ * `aside`, inside the application's own folder. `QuarantineFailed`,
+ * `FutureSchema` and `Unreadable` leave the file's bytes untouched and refuse
+ * every write. `version` is the declared schema version in decimal.
+ */
+export type SidecarStatus =
+  | { readonly Fresh: Record<string, never> }
+  | { readonly Loaded: Record<string, never> }
+  | { readonly Quarantined: { readonly aside: string } }
+  | { readonly QuarantineFailed: Record<string, never> }
+  | { readonly FutureSchema: { readonly version: string } }
+  | { readonly Unreadable: Record<string, never> }
+  | { readonly RootUnresolved: Record<string, never> }
+  | { readonly StorageUnavailable: Record<string, never> };
+
+/**
+ * One new-snippet default: an option and its source **text** (ruling 28).
+ * `''` is an empty default; an option with no entry has no default.
+ */
+export interface SidecarDefault {
+  /** Which of the seven options. */
+  readonly option: BulkOption;
+  /** The text, exactly as stored. Never a boolean. */
+  readonly value: string;
+}
+
+/** The sidecar preferences of one listed file. */
+export interface SidecarFilePreferences {
+  /** The file. */
+  readonly document: DocumentId;
+  /** The person's label for it, as written — user data, never translated. */
+  readonly display_name: string | null;
+  /** Its sidebar position, if one is set. */
+  readonly sort_order: number | null;
+  /** Its defaults, in option order. */
+  readonly defaults: readonly SidecarDefault[];
+}
+
+/** What `load_sidecar` answers: the preferences in effect and how they were read. */
+export interface SidecarState {
+  /** How the load ended. */
+  readonly status: SidecarStatus;
+  /** Whether an update may write; derived in Rust from `status`. */
+  readonly writable: boolean;
+  /** The listed files that have preferences, in the workspace's order. */
+  readonly files: readonly SidecarFilePreferences[];
+  /** Entries kept for files the workspace does not list (kept thirty days). */
+  readonly retained_orphans: number;
+}
+
+/**
+ * One change to one file's preferences. Applied in order; a later change to
+ * the same field wins.
+ */
+export type SidecarChange =
+  | { readonly SetDisplayName: { readonly name: string } }
+  | { readonly ClearDisplayName: Record<string, never> }
+  | { readonly SetSortOrder: { readonly order: number } }
+  | { readonly ClearSortOrder: Record<string, never> }
+  | { readonly SetDefault: { readonly option: BulkOption; readonly value: string } }
+  | { readonly ClearDefault: { readonly option: BulkOption } };
+
+/** What `update_sidecar` takes. It carries no path: the file is named by Rust. */
+export interface SidecarUpdateRequest {
+  /** The file, by session identity. */
+  readonly document: DocumentId;
+  /** The changes, in order. */
+  readonly changes: readonly SidecarChange[];
+}
+
+/** The variant name of every {@link SidecarUpdateOutcome}. */
+export type SidecarUpdateOutcomeName = 'Saved' | 'Unchanged' | 'NotWritable' | 'WriteFailed';
+
+/**
+ * What one sidecar update did. `WriteFailed` means the replacement failed
+ * before its rename, so the sidecar holds what it held.
+ */
+export type SidecarUpdateOutcome =
+  | { readonly Saved: Record<string, never> }
+  | { readonly Unchanged: Record<string, never> }
+  | { readonly NotWritable: Record<string, never> }
+  | { readonly WriteFailed: Record<string, never> };
+
+/** What `update_sidecar` answers. */
+export interface SidecarUpdateResult {
+  /** What the update did. */
+  readonly outcome: SidecarUpdateOutcome;
+  /** The preferences in effect afterwards. */
+  readonly state: SidecarState;
+}
+
+// ---------------------------------------------------------------------------
 // The read-only backup catalogue — Phase 2c-5-2
 // ---------------------------------------------------------------------------
 

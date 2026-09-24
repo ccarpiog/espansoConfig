@@ -1,4 +1,4 @@
-//! The twenty-one commands, invoked through the real dispatcher.
+//! The twenty-three commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -27,7 +27,7 @@
 //!    the local origin, `plugin:event|emit` and `plugin:event|emit_to` — which
 //!    `core:event:default` would also have granted — are asserted refused
 //!    through the resolved access-control list, and every plugin command is in
-//!    the remote-origin sweep beside the twenty-one application commands.
+//!    the remote-origin sweep beside the twenty-three application commands.
 //!
 //! `mock_builder()` swaps the platform webview for a mock; it does **not** swap
 //! the IPC dispatcher, the access-control resolution or the command macros, all
@@ -1203,6 +1203,77 @@ fn the_option_spelling_reader_is_reachable_and_refuses_a_stale_identity() {
     assert_eq!(stale["code"], "identityStaleRevision", "{stale}");
 } // End of function the_option_spelling_reader_is_reachable_and_refuses_a_stale_identity()
 
+/// Phase 3-12's sidecar pair is reachable, its request deserializes from the
+/// JSON the frontend sends, and what it writes lands under the storage root the
+/// test installed — never in the workspace.
+///
+/// The storage root `main.rs`'s setup installed from the app data directory is
+/// **replaced** with a temporary directory before either command runs, so this
+/// test never touches the real application storage.
+#[test]
+fn the_sidecar_pair_is_reachable_and_writes_only_under_the_storage_root() {
+    use tauri::Manager as _;
+    let OverIpc {
+        webview,
+        document_id,
+        _app: app,
+        _dir: dir,
+        ..
+    } = opened_over_ipc("matches:\n  - trigger: ':one'\n    replace: first\n");
+    let storage = TempDir::new().expect("a storage root");
+    app.state::<crate::sidecar::SidecarSession>()
+        .install_storage_root(storage.path().to_path_buf());
+    let before = fs::read(dir.path().join("match").join("base.yml")).unwrap();
+
+    let fresh = invoke(&webview, "load_sidecar", json!({})).expect("the sidecar reads");
+    assert_eq!(fresh["status"], json!({ "Fresh": {} }), "{fresh}");
+    assert_eq!(fresh["writable"], true);
+
+    let updated = invoke(
+        &webview,
+        "update_sidecar",
+        json!({
+            "request": {
+                "document": document_id,
+                "changes": [
+                    { "SetDisplayName": { "name": "Everyday" } },
+                    { "SetDefault": { "option": "word", "value": "" } },
+                ],
+            },
+        }),
+    )
+    .expect("the update answers");
+    assert_eq!(updated["outcome"], json!({ "Saved": {} }), "{updated}");
+    assert_eq!(updated["state"]["files"][0]["display_name"], "Everyday");
+    assert_eq!(
+        updated["state"]["files"][0]["defaults"],
+        json!([{ "option": "word", "value": "" }])
+    );
+    let mut written: Vec<String> = fs::read_dir(storage.path().join("workspaces"))
+        .expect("the sidecar directory exists")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    written.sort();
+    assert_eq!(written.len(), 2, "{written:?}");
+    assert!(
+        written[0].ends_with(".json") && written[1] == "sidecar.lock",
+        "one sidecar file and the lock file under the storage root: {written:?}"
+    );
+    assert_eq!(
+        fs::read(dir.path().join("match").join("base.yml")).unwrap(),
+        before,
+        "the espanso file is unchanged"
+    );
+
+    let unknown = invoke(
+        &webview,
+        "update_sidecar",
+        json!({ "request": { "document": 999, "changes": [] } }),
+    )
+    .expect_err("an unlisted document is refused");
+    assert_eq!(unknown["code"], "unknownDocument", "{unknown}");
+} // End of function the_sidecar_pair_is_reachable_and_writes_only_under_the_storage_root()
+
 /// A save refused by the semantic gate crosses in the **`Ok`** channel.
 ///
 /// The distinction the whole result type is built on, measured at the boundary:
@@ -2061,7 +2132,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// resolved command carries `ExecutionContext::Local`, the remote origin
 /// resolves neither, and a window that is not `main` resolves neither.
 ///
-/// And the twenty-one application commands resolve to nothing from either
+/// And the twenty-three application commands resolve to nothing from either
 /// origin, which is the other half of what "names no application command"
 /// means: a local origin reaches them because the dispatcher does not consult
 /// this list for an application command, not because the list allows them, and
@@ -2156,7 +2227,7 @@ fn the_capability_grants_exactly_the_two_event_permissions() {
                 .is_none(),
             "{command} must resolve to nothing for a remote origin"
         );
-    } // End of the loop over the twenty-one application commands
+    } // End of the loop over the twenty-three application commands
 } // End of function the_capability_grants_exactly_the_two_event_permissions()
 
 /// A local `main` webview registers the wake listener through the event plugin.
@@ -2229,7 +2300,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
     );
 } // End of function the_registered_listener_is_removable_through_the_event_plugin()
 
-/// A page that is not this application cannot reach any of the twenty-one
+/// A page that is not this application cannot reach any of the twenty-three
 /// commands, nor either event-plugin command.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
@@ -2247,7 +2318,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All twenty-one are attempted, and the count is asserted against the registered
+/// **All twenty-three are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -2255,7 +2326,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// parsed out of `generate_handler!` by [`crate::rust_source`], so a command
 /// added to the application and forgotten here fails this test rather than
 /// silently leaving the sweep. **The two plugin commands are a second table**,
-/// kept apart so that the application count stays twenty-one: they are not in
+/// kept apart so that the application count stays twenty-three: they are not in
 /// `generate_handler!`, this test asserts they are not, and folding them into
 /// the first table would make the count claim about two different things.
 #[test]
@@ -2411,6 +2482,19 @@ fn a_remote_origin_is_refused() {
         // spelled, which is the user's configuration, so a navigated webview must
         // not reach it for `document_text`'s reason.
         ("match_option_spellings", json!({ "id": identity })),
+        // Phase 3-12's pair. The reader hands out the person's display names
+        // and defaults, and the writer changes the application's own store, so
+        // a navigated webview must reach neither.
+        ("load_sidecar", json!({})),
+        (
+            "update_sidecar",
+            json!({
+                "request": {
+                    "document": 0,
+                    "changes": [{ "SetDisplayName": { "name": "remote" } }],
+                },
+            }),
+        ),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -2425,7 +2509,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 21, "the surface is twenty-one commands");
+    assert_eq!(attempted.len(), 23, "the surface is twenty-three commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, REMOTE_ORIGIN, command, args)

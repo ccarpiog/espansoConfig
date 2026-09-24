@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T14:25:57Z",
+  "updated": "2026-09-24T15:07:17Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1133,8 +1133,11 @@
     {
       "id": "3-12",
       "title": "The application sidecar store",
-      "status": "queued",
-      "summary": "Queued: The application sidecar store."
+      "status": "done",
+      "summary": "A versioned per-workspace sidecar store in src-tauri: hashed file name, lossless keys, atomic locked writes, truthful quarantine, 30-day orphans.",
+      "risk": "high",
+      "review": "ship-with-fixes (Codex), 2 blockers fixed",
+      "narrative": "docs/decisions/3-12-notes.md"
     },
     {
       "id": "3-13",
