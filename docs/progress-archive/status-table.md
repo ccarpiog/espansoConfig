@@ -1863,3 +1863,24 @@ Archived verbatim 2026-09-24 at 3-11-2.
 #### Phase 3-11-1's verification
 
 Run by the orchestrator after the review-fix round: `cargo test --workspace -- --test-threads=1` exit 0, **1505 passed, 0 failed** (+6 over 3-10); `cargo clippy --workspace --all-targets -- -D warnings` exit 0; `cargo fmt --check` exit 0; `cargo tree -p espansoconfig-core` shows no tauri; `npm run check` exit 0, **477 files**, 0 errors, 0 warnings; `npm test` exit 0, **3884 passed**; `npm run build` exit 0, **208 modules** (+1: `codes.ts` now imports `bulkEdit.ts`). Bundle oracle: server-only markers absent, client-only present (2). The same gates were green before the review (`1504 / 477 / 3880 / 208`). Rung **`1505 / 477 / 3884 / 208`**.
+
+## The 3-11-2 status row and 3-11-2's verification block
+
+Archived verbatim 2026-09-24 at 3-11-3.
+
+| Phase | Scope | State |
+|---|---|---|
+| **3-11-2** | Bulk selection: the components and the i18n. A *Select several* toggle in `SnippetList.svelte` (rows become toggle buttons, keyboard-reachable, no checkboxes; refused while any write surface is open); a new `BulkInspector.svelte` drawn by `DetailPane.svelte` (Mixed or the file's spelling per option, seven textual option intents, exclusions with reasons, per-file consent review, partial outcomes with exclusions and execution failures listed apart, draft undo/redo, no disk batch undo promised); 17 new model functions in `bulkEdit.ts`; 53 new keys EN/ES plus `tBulkCount`. **Decided: no new write-surface kind** — the registry names one file per kind; the inspector counts in `DetailPane`'s `busy` and the toggle is refused while a surface is open (resting on `busy` and the refusal, not on a type). Risk **high**; worker **opus** (fixes by the same worker); driven | ✅ **complete and CLOSED.** Review: `autoclaude-review.sh` **exited 0 — Codex**, no fallback: **`ship-with-fixes`, 1 BLOCKER + 2 SHOULD-FIX, all fixed** — B1 the list's Stop ended the selection while a bulk apply was pending, unmounting the inspector and releasing `busy` → **fixed**, `BrowserState.bulkApplyPending` refuses ending or changing the selection until the apply settles and the list's Stop, Clear and rows are disabled; S1 a confirmation stayed actionable after the options changed → **fixed**, `bulkConsentReviewStatus` offers or shows consent only while the file's current submission key matches the reviewed one; S2 *keep only the snippets that were not written* dropped snippets selected after the request → **fixed**, it judges only the submitted selection (all reproduced as model and mounted tests) ([`docs/reviews/phase-3-11-2.md`](docs/reviews/phase-3-11-2.md), brief [`phase-3-11-2.brief.md`](docs/reviews/phase-3-11-2.brief.md)). Rung **`1505 / 479 / 3930 / 210`** (+2 files, +2 modules: the component and its stylesheet). Notes [`3-11-2-notes.md`](docs/decisions/3-11-2-notes.md) (§5 open items: *show file text* toggle still drawn while selecting several; the editor-open exclusion is unreachable in the app beside the inspector; after a save the selection goes stale and blocks until narrowed or cleared; re-opening the workspace still resets the bulk selection while an apply is pending). No window reading was performed or claimed |
+
+#### Phase 3-11-2's verification
+
+Run by the orchestrator after the review-fix round: `npm run check` exit 0, **479 files**, 0 errors, 0 warnings; `npm test` exit 0, **3930 passed**; `npm run build` exit 0, **210 modules** (+2: `BulkInspector.svelte` and its stylesheet; no new `.ts` module). Bundle oracle: server-only markers absent, client-only present (2). No Rust changed in the fix round; before it the orchestrator ran `cargo test --workspace -- --test-threads=1` exit 0, **1505 passed**, `cargo clippy --workspace --all-targets -- -D warnings` exit 0 and `cargo fmt --check` exit 0, with the TypeScript gates at `479 / 3922 / 210`. Rung **`1505 / 479 / 3930 / 210`**.
+
+## The git-state rows of 3-10 and 3-11-1, as the live head held them
+
+Archived verbatim 2026-09-24 at 3-11-3.
+
+| Phase | Commit | Push |
+|---|---|---|
+| **3-10 — the per-file bulk coordinator (core planner, command, wire, i18n), reviewed (`ship-with-fixes`, Codex, 1 BLOCKER + 1 SHOULD-FIX, both fixed) and closed** | `35d4624` (this SHA record is the commit after it) | ✅ pushed, `821125e..35d4624  main -> main`; tree clean after it |
+| **3-11-1 — bulk selection: the model and the coordination, reviewed (`ship-with-fixes`, Codex, 1 BLOCKER + 2 SHOULD-FIX, all fixed) and closed; 3-11 cut into 3-11-1/2/3** | `ce54826` (this SHA record is the commit after it) | ✅ pushed, `150d5d8..69ca863  main -> main` (with its SHA-record commit `69ca863`); the first `git push` right after `ce54826` exited 128 (`Permission denied (publickey)`, `ssh-add -l`: no identities) and the retry after the record commit succeeded — a transient SSH-agent failure, nothing forced; tree clean after it |

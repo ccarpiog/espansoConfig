@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T14:02:12Z",
+  "updated": "2026-09-24T14:25:22Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1096,8 +1096,8 @@
     {
       "id": "3-11",
       "title": "Bulk selection and inspector",
-      "status": "in_progress",
-      "summary": "Split into 3-11-1 and 3-11-2 (closed) and 3-11-3: bulk selection, Mixed, intents, consent and outcomes, then the window half.",
+      "status": "done",
+      "summary": "Bulk selection, Mixed, intents, consent and partial outcomes; split into 3-11-1, 3-11-2 and 3-11-3, all closed.",
       "risk": "high"
     },
     {
@@ -1123,9 +1123,11 @@
     {
       "id": "3-11-3",
       "title": "Bulk selection: the window half",
-      "status": "queued",
+      "status": "done",
       "risk": "high",
-      "summary": "Queued: an EN and ES window reading including a partial success."
+      "summary": "Reads the bulk selection UI in a window in English and Spanish, including a real partial success.",
+      "review": "ship-with-fixes (Codex), 0 blockers + 2 should-fix, fixed",
+      "narrative": "docs/decisions/3-11-3-notes.md"
     },
     {
       "id": "3-12",
