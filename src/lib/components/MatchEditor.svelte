@@ -4,6 +4,8 @@
     acknowledgeSnapshot,
     acknowledgeFindings,
     acknowledgementOf,
+    addList,
+    addListItem,
     applyObservation,
     applySave,
     applySuggestion,
@@ -11,11 +13,16 @@
     baseRevisionOf,
     beginSave,
     cancelContentSwitch,
+    cancelTriggerForm,
     chooseContentSwitch,
+    chooseTriggerForm,
     confirmContentSwitch,
     confirmDiskReload,
+    confirmTriggerForm,
     CONFLICT_CAPABILITIES,
     editField,
+    editListItem,
+    editRegex,
     focusField,
     insertCursorPosition,
     keepEditing,
@@ -24,6 +31,8 @@
     redoEdit,
     reloadTheDiskVersion,
     removeField,
+    removeList,
+    removeListItem,
     restoreField,
     saveCouldNotBeSent,
     startMatchEditor,
@@ -32,8 +41,10 @@
     type EditableField,
     type EditableFieldModel,
     type EditorReapplyAttempt,
+    type ListModel,
     type MatchEditorSession,
     type Reprojection,
+    type TriggerShape,
     undoEdit
   } from '../browser/matchEditor';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
@@ -79,6 +90,9 @@
     tFindingCode,
     tHazard,
     tIpcFailure,
+    tListItemStatus,
+    tListRefusal,
+    tListStyleNote,
     tOptionGroup,
     tPresentationNote,
     tRawSaveChoice,
@@ -90,6 +104,12 @@
     tSaveOutcomeMessage,
     tSaveVerdict,
     tSaveWithheld,
+    tTriggerFormChoice,
+    tTriggerFormRefusal,
+    tTriggerFormTextNote,
+    tTriggerPresentation,
+    tTriggerRepair,
+    tTriggerWithdrawal,
     tValueKind
   } from '../i18n';
   import type {
@@ -101,7 +121,8 @@
     DocumentView,
     MatchDraft,
     MatchId,
-    MatchView
+    MatchView,
+    SequenceField
   } from '../ipc/types';
   import {
     decideSurfaceAcknowledgement,
@@ -115,7 +136,9 @@
   /*
    * The small editor: one snippet's editable fields, drafted and saved — seventeen
    * since Phase 3-5-1, drawn in the model's sections since Phase 3-5-2-1, with the
-   * change of content kind, the option suggestions and the cursor action.
+   * change of content kind, the option suggestions and the cursor action; since
+   * Phase 3-6-2 the trigger side (the one control of the drafted trigger form, the
+   * choices of form and a change's preview) and `search_terms` as list controls.
    *
    * **This file is presentation.** Every decision about what may be edited, what
    * a draft means, when a save may start, what it says and what a commit moves is
@@ -147,6 +170,15 @@
    * (`docs/decisions/2c-2-2-window-reading.md` §6). So a box would misdraw the
    * file even while refusing to write to it; through `SourceText` the carriage
    * return is a visible marker instead.
+   *
+   * **The trigger side draws one control, the drafted form's** (Phase 3-6-2,
+   * `TriggerFormView.control`): the literal's block, the `regex` box or the
+   * `triggers` list. A `Several` draws the literal's refused block, which shows
+   * every form the file holds and picks none; an `Absent` draws no control until a
+   * form is added. List items are one-line boxes the model refuses a line break or
+   * a carriage return in; a read-only list is drawn through `SourceText` from
+   * `ListModel.shown`. No list control reorders anything: the core has no
+   * capability for it.
    *
    * **What it shows is `field.shown`, which is a list, and each entry may name the
    * key it came from.** The window reading's first finding was that this drew
@@ -694,6 +726,84 @@
   function onCancelSwitch(): void {
     session = cancelContentSwitch(session);
   } // End of function onCancelSwitch()
+
+  /**
+   * Drafts a change of trigger form, or an addition on a snippet with none —
+   * `chooseTriggerForm` decides which, and refuses a form it does not offer.
+   *
+   * @param to - The form chosen.
+   */
+  function onChooseForm(to: TriggerShape): void {
+    session = chooseTriggerForm(session, to);
+  } // End of function onChooseForm()
+
+  /** Confirms the drafted change of trigger form after its preview. */
+  function onConfirmForm(): void {
+    session = confirmTriggerForm(session);
+  } // End of function onConfirmForm()
+
+  /** Withdraws the drafted trigger form: a change's cancellation or an addition's. */
+  function onWithdrawForm(): void {
+    session = cancelTriggerForm(session);
+  } // End of function onWithdrawForm()
+
+  /**
+   * Records whatever the `regex` box now holds. The model refuses a line break
+   * or a carriage return, and compiles nothing: the Rust validator does, on save.
+   *
+   * @param text - The box's whole value.
+   */
+  function onRegexTyped(text: string): void {
+    session = editRegex(session, text);
+  } // End of function onRegexTyped()
+
+  /**
+   * Records whatever one list item's box now holds.
+   *
+   * @param field - Which list.
+   * @param position - The item's position in the drafted list.
+   * @param text - The box's whole value.
+   */
+  function onItemTyped(field: SequenceField, position: number, text: string): void {
+    session = editListItem(session, field, position, text);
+  } // End of function onItemTyped()
+
+  /**
+   * Adds one empty item at the end of a list.
+   *
+   * @param list - The list, as the view describes it.
+   */
+  function onAddItem(list: ListModel): void {
+    session = addListItem(session, list.field, list.items.length);
+  } // End of function onAddItem()
+
+  /**
+   * Takes one item out of a list; the model refuses the last one.
+   *
+   * @param field - Which list.
+   * @param position - The item's position in the drafted list.
+   */
+  function onRemoveItem(field: SequenceField, position: number): void {
+    session = removeListItem(session, field, position);
+  } // End of function onRemoveItem()
+
+  /**
+   * Adds a whole list where the snippet holds none (`search_terms` only).
+   *
+   * @param field - Which list.
+   */
+  function onAddList(field: SequenceField): void {
+    session = addList(session, field);
+  } // End of function onAddList()
+
+  /**
+   * Takes a whole list out (`search_terms` only).
+   *
+   * @param field - Which list.
+   */
+  function onRemoveList(field: SequenceField): void {
+    session = removeList(session, field);
+  } // End of function onRemoveList()
 
   /**
    * The cursor action's advisory, held with the session it was answered for.
@@ -1256,6 +1366,229 @@
   </div>
 {/snippet}
 
+<!-- **One list, `triggers` or `search_terms`** (Phase 3-6-2, `ListModel`). A list
+     the model refuses is drawn from `list.shown` through `SourceText`, each item
+     captioned by what it is, with the refusal beside it — never as boxes, which
+     would normalise a carriage return away. An editable list is one one-line box
+     per item, in the drafted order, with its status marker; items are added at
+     the end and taken out one at a time (never the last one), and nothing here
+     reorders an item. The style note says how the file writes the list and that
+     a save keeps it. -->
+{#snippet listBlock(list: ListModel)}
+  {@const styleNote = tListStyleNote(list.style)}
+  <div class="field list">
+    <p class="name">{tDetailField(list.label)}</p>
+    {#if list.refusal !== null}
+      {#each list.shown as one, index (index)}
+        <div class="shownValue">
+          {#if one.kind === 'text'}
+            <span class="marker">{t('browser.detail.valueAsWritten')}</span>
+            <SourceText text={one.text} />
+          {:else}
+            <span class="marker">{t('browser.matchEditor.shapeOnly')}</span>
+            <span class="marker">{tValueKind(one.shape)}</span>
+          {/if}
+        </div>
+      {/each}
+      <p class="kind">{tListRefusal(list.refusal)}</p>
+    {:else}
+      {#if styleNote !== null}
+        <p class="kind">{styleNote}</p>
+      {/if}
+      {#if list.saysAbsent}
+        <p class="kind">{t('browser.matchEditor.list.absent')}</p>
+      {/if}
+      {#if list.removing}
+        <p class="kind">{t('browser.matchEditor.list.removing')}</p>
+      {/if}
+      {#if list.saysEmpty}
+        <p class="kind">{t('browser.matchEditor.list.empty')}</p>
+      {/if}
+      {#each list.items as item (item.position)}
+        {@const status = tListItemStatus(item.status)}
+        <!-- A list the draft takes out keeps its items in its buffer, and the model
+             refuses an edit to any of them (`itemsEditable` is `false`), so they are
+             shown through `SourceText` rather than as boxes that would keep typed
+             text the draft never holds (Phase 3-6-2's review fix). -->
+        {#if !list.present}
+          <SourceText text={item.text} />
+        {:else}
+        <div class="item">
+          <label>
+            <span class="marker">
+              {t('browser.matchEditor.list.item', { number: item.position + 1 })}
+            </span>
+            {#if status !== null}
+              <span class="marker">{status}</span>
+            {/if}
+            <input
+              class="text"
+              type="text"
+              spellcheck="false"
+              readonly={!list.itemsEditable}
+              value={item.text}
+              oninput={(event) => onItemTyped(list.field, item.position, event.currentTarget.value)}
+              onblur={() => onBlur()}
+            />
+          </label>
+          <p class="choices">
+            <button
+              type="button"
+              disabled={!list.canRemoveItem}
+              onclick={() => onRemoveItem(list.field, item.position)}
+            >
+              {t('browser.matchEditor.list.removeItem')}
+            </button>
+          </p>
+        </div>
+        {/if}
+      {/each}
+      {#if list.lastItemKept}
+        <p class="kind">{t('browser.matchEditor.list.lastItemKept')}</p>
+      {/if}
+      {#if list.present && list.removed.length > 0}
+        <p class="kind">{t('browser.matchEditor.list.removedItems')}</p>
+        {#each list.removed as item (item.origin)}
+          <SourceText text={item.text} />
+        {/each}
+      {/if}
+      <p class="choices">
+        {#if list.present}
+          <button type="button" disabled={!list.editable} onclick={() => onAddItem(list)}>
+            {t('browser.matchEditor.list.addItem')}
+          </button>
+        {/if}
+        {#if list.canAddList}
+          <button type="button" onclick={() => onAddList(list.field)}>
+            {t('browser.matchEditor.list.add')}
+          </button>
+        {/if}
+        {#if list.canRemoveList}
+          <button type="button" onclick={() => onRemoveList(list.field)}>
+            {t('browser.matchEditor.list.remove')}
+          </button>
+        {/if}
+      </p>
+    {/if}
+  </div>
+{/snippet}
+
+<!-- **The `regex` box** (Phase 3-6-2, `RegexFieldModel`). A pattern the
+     projection refused is drawn through `SourceText` with its reason; otherwise a
+     one-line box. Nothing here or in the model compiles the pattern: whether it
+     compiles is the Rust validator's `RegexDoesNotCompile`, answered by a save and
+     drawn in the refused outcome below, which keeps the draft. -->
+{#snippet regexBlock()}
+  {@const regex = view.structure.trigger.regex}
+  <div class="field">
+    {#if regex.refusal !== null}
+      <p class="name">{tDetailField('regex')}</p>
+      {#if regex.text !== ''}
+        <div class="shownValue">
+          <span class="marker">{t('browser.detail.valueAsWritten')}</span>
+          <SourceText text={regex.text} />
+        </div>
+      {/if}
+      <p class="kind">{tFieldRefusal(regex.refusal)}</p>
+    {:else}
+      <label>
+        <span class="name">{tDetailField('regex')}</span>
+        <input
+          class="text"
+          type="text"
+          spellcheck="false"
+          readonly={!regex.editable}
+          value={regex.text}
+          oninput={(event) => onRegexTyped(event.currentTarget.value)}
+          onblur={() => onBlur()}
+        />
+      </label>
+      <p class="kind">{t('browser.matchEditor.regex.hint')}</p>
+    {/if}
+  </div>
+{/snippet}
+
+<!-- **The trigger side** (Phase 3-6-2, `TriggerFormView`): the presentation's
+     sentence and, for a `Several`, the raw-repair offer; the one control the model
+     names; the choices of form, each offered or refused with its reason (a list of
+     more than one item is refused with its count, never converted); and a drafted
+     change's preview with its confirmation. The save is withheld until the
+     confirmation (`view.saveWithheld`, drawn beside *Save*). -->
+{#snippet triggerSide(literal: EditableFieldModel)}
+  {@const side = view.structure.trigger}
+  {@const presentation = tTriggerPresentation(side.presentation)}
+  <div class="group" role="group" aria-label={t('browser.matchEditor.triggerForm.heading')}>
+    <h3>{t('browser.matchEditor.triggerForm.heading')}</h3>
+    {#if presentation !== null}
+      <p class="kind">{presentation}</p>
+    {/if}
+    {#if side.presentation.kind === 'several'}
+      <p class="kind">{tTriggerRepair(side.presentation.repair)}</p>
+    {/if}
+    {#if side.control === 'literal' || side.control === 'heldForms'}
+      {@render fieldBlock(literal)}
+    {:else if side.control === 'regex'}
+      {@render regexBlock()}
+    {:else if side.control === 'triggers'}
+      {@render listBlock(side.triggers)}
+    {/if}
+    {#if side.choices.length > 0}
+      <p class="kind">{t('browser.matchEditor.triggerForm.offer')}</p>
+      <p class="choices">
+        {#each side.choices as choice (choice.to)}
+          <button
+            type="button"
+            disabled={!choice.offered || choice.drafted || !view.editable}
+            onclick={() => onChooseForm(choice.to)}
+          >
+            {tTriggerFormChoice(side.presentation, choice.label)}
+          </button>
+        {/each}
+      </p>
+      {#each side.choices as choice (choice.to)}
+        {#if choice.offered === false}
+          <p class="refusedChoice">
+            <span class="marker">{tDetailField(choice.label)}</span>
+            <span class="kind">{tTriggerFormRefusal(choice.refusal)}</span>
+          </p>
+        {/if}
+      {/each}
+    {/if}
+    {#if side.preview !== null}
+      {@const preview = side.preview}
+      <div class="panel preview" role="status">
+        <p>{t('browser.matchEditor.triggerForm.previewFrom', { form: tDetailField(preview.fromLabel) })}</p>
+        <p>{t('browser.matchEditor.triggerForm.previewTo', { form: tDetailField(preview.toLabel) })}</p>
+        <p class="kind">{tTriggerFormTextNote(preview)}</p>
+        {#each preview.texts as text, index (index)}
+          <SourceText {text} />
+        {/each}
+        {#if preview.confirmed}
+          <p class="kind">{t('browser.matchEditor.triggerForm.confirmed')}</p>
+        {/if}
+        <p class="choices">
+          {#if !preview.confirmed}
+            <button type="button" disabled={!view.editable} onclick={() => onConfirmForm()}>
+              {t('browser.matchEditor.triggerForm.confirm')}
+            </button>
+          {/if}
+          {#if side.withdrawal !== null}
+            <button type="button" disabled={!view.editable} onclick={() => onWithdrawForm()}>
+              {tTriggerWithdrawal(side.withdrawal)}
+            </button>
+          {/if}
+        </p>
+      </div>
+    {:else if side.withdrawal !== null}
+      <p class="choices">
+        <button type="button" disabled={!view.editable} onclick={() => onWithdrawForm()}>
+          {tTriggerWithdrawal(side.withdrawal)}
+        </button>
+      </p>
+    {/if}
+  </div>
+{/snippet}
+
 <!-- **The change of content kind** (ruling 8, Phase 3-5-2-1): the choices, then
      the preview of a drafted switch — what is renamed, whether the text is kept
      as written, which companion keys stay — and its confirmation. The save is
@@ -1377,15 +1710,19 @@
   {/if}
 
   <!-- **The sections are the model's** (`view.sections`, Phase 3-5-2-1): the
-       trigger and the five content keys, the change of content kind directly
-       under them when there is one to offer or show, the label and the comment,
-       then the four option groups under the detail pane's own headings. Each
+       trigger side (Phase 3-6-2), the five content keys, the change of content
+       kind directly under them when there is one to offer or show, the label and
+       the comment, `search_terms` (Phase 3-6-2), then the four option groups under the detail pane's own headings. Each
        option is a text box and never a checkbox (D2u); the *Insertion* group
        holds `force_mode` and `force_clipboard` as two boxes, each with its own
        label, and nothing here relates one to the other. -->
   {#each view.sections as section, index (index)}
     {#if section.kind === 'contentSwitch'}
       {@render contentKind()}
+    {:else if section.kind === 'triggerSide'}
+      {@render triggerSide(section.literal)}
+    {:else if section.kind === 'searchTerms'}
+      {@render listBlock(view.structure.searchTerms)}
     {:else if section.group !== null}
       <div class="group" role="group" aria-label={tOptionGroup(section.group)}>
         <h3>{tOptionGroup(section.group)}</h3>
@@ -1643,6 +1980,21 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+  }
+
+  /* One item of an editable list: its box, then its own *Take this item out*. */
+  .item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  /* A trigger form offered and refused: its name, then why. */
+  .refusedChoice {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    margin: 0;
   }
 
   /* One piece of what a refused field holds, with the key it came from above it.

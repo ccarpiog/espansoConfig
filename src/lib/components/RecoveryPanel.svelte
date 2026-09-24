@@ -837,22 +837,36 @@
          fixed end and `RECOVERY_POSITION` is the only value anywhere. -->
     <p class="kind">{t('browser.recovery.position')}</p>
 
+    <!-- **The trigger side is drawn under the form it is carried in** (Phase
+         3-6-2, `form.triggerForm` and `form.triggerLabel`): a carried pattern in
+         the box labelled as a regular expression, and a carried `triggers` list as
+         its items — every one, in order, through `SourceText` — with no box at all,
+         because the model writes the list and refuses the box's input
+         (`triggerEditable`). -->
     <div class="field">
-      <label>
-        <span class="name">{tDetailField('trigger')}</span>
-        <input
-          class="text"
-          type="text"
-          spellcheck="false"
-          readonly={!form.editable}
-          value={form.trigger}
-          oninput={(event) => onTyped('trigger', event.currentTarget.value)}
-          onfocus={() => onFocus('trigger')}
-          onblur={() => onFocus(null)}
-        />
-      </label>
-      <!-- The `<input>`'s measured normalisation, disclosed beside the `<input>`. -->
-      <p class="kind">{t('browser.recovery.lineEndings.trigger')}</p>
+      {#if form.triggerForm === 'triggers'}
+        <p class="name">{tDetailField(form.triggerLabel)}</p>
+        <p class="kind">{t('browser.recovery.triggerItems')}</p>
+        {#each form.triggerItems as item, index (index)}
+          <SourceText text={item} />
+        {/each}
+      {:else}
+        <label>
+          <span class="name">{tDetailField(form.triggerLabel)}</span>
+          <input
+            class="text"
+            type="text"
+            spellcheck="false"
+            readonly={!form.triggerEditable}
+            value={form.trigger}
+            oninput={(event) => onTyped('trigger', event.currentTarget.value)}
+            onfocus={() => onFocus('trigger')}
+            onblur={() => onFocus(null)}
+          />
+        </label>
+        <!-- The `<input>`'s measured normalisation, disclosed beside the `<input>`. -->
+        <p class="kind">{t('browser.recovery.lineEndings.trigger')}</p>
+      {/if}
     </div>
 
     <div class="field">
@@ -872,6 +886,25 @@
       </label>
       <!-- The `<textarea>`'s, which is a different fact and so a different sentence. -->
       <p class="kind">{t('browser.recovery.lineEndings.replace')}</p>
+    </div>
+
+    <!-- **`search_terms`, whole or not at all** (Phase 3-6-2, `form.searchTerms`):
+         every carried item in order through `SourceText`, an explicitly empty list
+         said as such, or the reason nothing of it is carried. -->
+    <div class="field">
+      <p class="name">{tDetailField('searchTerms')}</p>
+      {#if form.searchTerms.kind === 'carried'}
+        {#if form.searchTerms.items.length === 0}
+          <p class="kind">{t('browser.recovery.searchTerms.empty')}</p>
+        {:else}
+          <p class="kind">{t('browser.recovery.searchTerms.carried')}</p>
+          {#each form.searchTerms.items as item, index (index)}
+            <SourceText text={item} />
+          {/each}
+        {/if}
+      {:else}
+        <p class="kind">{tTransferRefusal(form.searchTerms.reason)}</p>
+      {/if}
     </div>
 
     <div class="actions">

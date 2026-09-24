@@ -648,6 +648,28 @@ function blockOf(target: HTMLElement, field: EditableField, lang: Locale = 'en')
 } // End of function blockOf()
 
 /**
+ * The block whose name is one label's English sentence, or `null` — for the
+ * trigger side's controls (Phase 3-6-2), which are not all among the seventeen
+ * fields `blockOf` looks up.
+ *
+ * @param target - Where the component was mounted.
+ * @param key - The key holding the block's label.
+ * @returns The block, or `null` when none is drawn.
+ */
+function labelledBlock(target: HTMLElement, key: TranslationKey): HTMLElement | null {
+  const label = DICTIONARIES.en[key];
+  for (const element of target.querySelectorAll('.field')) {
+    if (
+      element instanceof HTMLElement &&
+      element.querySelector('.name')?.textContent?.trim() === label
+    ) {
+      return element;
+    }
+  } // End of the loop over the editor's blocks
+  return null;
+} // End of function labelledBlock()
+
+/**
  * The control one field is edited through, or `null` when it draws none.
  *
  * **A refused field draws none**, which is what several cases below check: the
@@ -962,44 +984,37 @@ describe('the mounted small editor', () => {
     editor.stop();
   }); // End of the "carriage return elsewhere" case
 
-  it('refuses the trigger of a snippet that does not fire from one literal trigger', () => {
+  it('draws a regex snippet’s pattern in its own box, and no literal trigger box', () => {
+    // **Changed at Phase 3-6-2.** Until then the literal trigger's refused block
+    // showed the pattern read-only; the trigger side now draws the drafted form's
+    // one control, so a `regex:` snippet's pattern is in the `regex` box and the
+    // literal trigger draws no block of its own.
     const editor = mountEditor([], projection({ triggerKind: 'Regex', regex: 'a.*b' }));
-    expect(boxFor(editor.target, 'trigger')).toBeNull();
-    expect(says(editor.target, 'browser.matchEditor.readOnly.triggerNotSingle')).toBe(true);
-    // Read-only is not blank: the pattern it does fire from is on screen.
-    expect(blockOf(editor.target, 'trigger').textContent).toContain('a.*b');
+    expect(labelledBlock(editor.target, 'browser.detail.field.trigger')).toBeNull();
+    const regex = labelledBlock(editor.target, 'browser.detail.field.regex');
+    expect(regex?.querySelector('input')?.value).toBe('a.*b');
+    expect(says(editor.target, 'browser.matchEditor.readOnly.triggerNotSingle')).toBe(false);
     // And nothing else on the snippet is refused because of it.
     expect(boxFor(editor.target, 'replace')).not.toBeNull();
     editor.stop();
-  }); // End of the "trigger refused" case
+  }); // End of the "regex box" case
 
   it('draws every trigger of a `triggers:` list, not the one scalar it does not have', () => {
     // **The 2c-2-2 window reading's one finding** (§5.1, measured as `open
-    // triggersOnScreen: no`). A `triggers:` list has no scalar behind `trigger:`,
-    // so the field drew its name and its reason with nothing between them — and
-    // this editor replaces the whole detail pane, so the triggers were visible
-    // nowhere in the window at all.
+    // triggersOnScreen: no`): a `triggers:` list's items must be on screen. Since
+    // Phase 3-6-2 they are the list control's boxes, every one, in the order the
+    // list carries them.
     const editor = mountEditor(
       [],
       projection({ trigger: null, triggers: [':r1', ':r2'], triggerKind: 'Multiple' })
     );
-    const block = blockOf(editor.target, 'trigger');
-
-    expect(boxFor(editor.target, 'trigger')).toBeNull();
-    expect(says(editor.target, 'browser.matchEditor.readOnly.triggerNotSingle')).toBe(true);
-    // **All of them, in the order the list carries them.** Drawing only the first
-    // would be the same defect one level down. This is a claim about items within
-    // one `triggers:` list, which the wire delivers in source order; the ordering
-    // of the three *forms* against each other is `shownValuesOf`'s and is pinned
-    // in the model suite.
-    expect(block.textContent).toContain(':r1');
-    expect(block.textContent).toContain(':r2');
-    expect(block.textContent?.indexOf(':r1')).toBeLessThan(block.textContent?.indexOf(':r2') ?? -1);
-    // Through `SourceText`, so the values are drawn rather than typed into.
-    expect(block.querySelectorAll('.sourceText')).toHaveLength(2);
-    expect(block.querySelectorAll('input, textarea')).toHaveLength(0);
-    // And the marker that says these bytes are the file's own is drawn once.
-    expect(says(editor.target, 'browser.detail.valueAsWritten')).toBe(true);
+    expect(labelledBlock(editor.target, 'browser.detail.field.trigger')).toBeNull();
+    const block = labelledBlock(editor.target, 'browser.detail.field.triggers');
+    expect([...(block?.querySelectorAll('input') ?? [])].map((one) => one.value)).toEqual([
+      ':r1',
+      ':r2'
+    ]);
+    expect(block?.querySelectorAll('textarea')).toHaveLength(0);
     editor.stop();
   }); // End of the "triggers list" case
 
@@ -1007,16 +1022,19 @@ describe('the mounted small editor', () => {
     // **The confirmation pass's first finding.** One `valueAsWritten` caption sat
     // above the whole list, so a `triggers:` item this projection cannot draw as
     // text — presented as the localized words "a list" — was captioned *shown here
-    // as the file writes it*, which the file does not contain.
+    // as the file writes it*, which the file does not contain. Since Phase 3-6-2
+    // the read-only list is drawn by the list control, from `ListModel.shown`.
     const match = projection({ trigger: null, triggers: [':r1'], triggerKind: 'Multiple' });
     const withCollection: MatchView = {
       ...match,
       trigger: { ...match.trigger, triggers: [...match.trigger.triggers, { Sequence: [] }] }
     };
     const editor = mountEditor([], withCollection);
-    const boxes = [...blockOf(editor.target, 'trigger').querySelectorAll('.shownValue')];
+    const block = labelledBlock(editor.target, 'browser.detail.field.triggers');
+    const boxes = [...(block?.querySelectorAll('.shownValue') ?? [])];
 
     expect(boxes).toHaveLength(2);
+    expect(block?.querySelectorAll('input, textarea')).toHaveLength(0);
     // The scalar keeps the bytes caption; the shape gets the caption that is true
     // of it, and never the other way round.
     expect(boxes[0]?.textContent).toContain(DICTIONARIES.en['browser.detail.valueAsWritten']);
@@ -1025,6 +1043,7 @@ describe('the mounted small editor', () => {
     expect(boxes[1]?.textContent).not.toContain(
       DICTIONARIES.en['browser.detail.valueAsWritten']
     );
+    expect(says(editor.target, 'browser.matchEditor.list.readOnly.itemNotText')).toBe(true);
     editor.stop();
   }); // End of the "shape caption" case
 

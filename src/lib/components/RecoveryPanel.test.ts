@@ -791,6 +791,97 @@ describe('the transfer table', () => {
   });
 }); // End of the "transfer table" suite
 
+describe('the trigger form and search_terms carried (Phase 3-6-2)', () => {
+  /**
+   * The names the form's blocks are drawn under, in document order.
+   *
+   * @param target - Where the component was mounted.
+   * @returns The names.
+   */
+  function names(target: HTMLElement): string[] {
+    return [...target.querySelectorAll('.field .name')].map((one) => one.textContent?.trim() ?? '');
+  } // End of function names()
+
+  it.each(LOCALES)('labels a carried pattern as a regular expression, in its box (%s)', (lang) => {
+    const panel = mountPanel({ match: snippet({ trigger: null, regex: '^sig', triggerKind: 'Regex' }) });
+    openForm(panel);
+    // The form is opened by its English control; the language is chosen after.
+    locale.setOverride(lang);
+    flushSync();
+    expect(names(panel.target)).toContain(DICTIONARIES[lang]['browser.detail.field.regex']);
+    expect(names(panel.target)).not.toContain(DICTIONARIES[lang]['browser.detail.field.trigger']);
+    expect(box(panel.target, 'trigger').value).toBe('^sig');
+    expect(box(panel.target, 'trigger').readOnly).toBe(false);
+    panel.stop();
+  });
+
+  it('draws a carried triggers list as its items, in order, with no box the model refuses', () => {
+    const panel = mountPanel({
+      match: snippet({ trigger: null, triggers: [':one', ':two'], triggerKind: 'Multiple' })
+    });
+    openForm(panel);
+    expect(names(panel.target)).toContain(DICTIONARIES.en['browser.detail.field.triggers']);
+    expect(panel.target.querySelector('input.text')).toBeNull();
+    expect(says(panel.target, 'browser.recovery.triggerItems')).toBe(true);
+    const field = [...panel.target.querySelectorAll('.field')].find(
+      (one) => one.querySelector('.name')?.textContent?.trim() === DICTIONARIES.en['browser.detail.field.triggers']
+    );
+    const items = [...(field?.querySelectorAll('.sourceText') ?? [])].map((one) => one.textContent ?? '');
+    expect(items).toHaveLength(2);
+    expect(items[0]).toContain(':one');
+    expect(items[1]).toContain(':two');
+    panel.stop();
+  });
+
+  it.each([
+    ['a regex', { trigger: null, regex: '^sig', triggerKind: 'Regex' }],
+    ['a triggers list', { trigger: null, triggers: [':one', ':two'], triggerKind: 'Multiple' }]
+  ] as const)('never asks for a literal trigger when %s is carried (review fix)', (_name, overrides) => {
+    const panel = mountPanel({ match: snippet(overrides) });
+    openForm(panel);
+    const row = rowFor(panel.target, 'trigger');
+    expect(row).toContain(DICTIONARIES.en[transferStatusKey('carriedInAnotherForm')]);
+    expect(row).not.toContain(DICTIONARIES.en[transferStatusKey('needsAValue')]);
+    expect(row).toContain(DICTIONARIES.en[transferRefusalKey({ kind: 'triggerFormCarried' })]);
+    panel.stop();
+  });
+
+  it('carries search_terms whole, says an empty list is written [], and says why none is carried', () => {
+    const carried = mountPanel({ match: snippet({ searchTerms: ['alpha', 'beta'] }) });
+    openForm(carried);
+    expect(says(carried.target, 'browser.recovery.searchTerms.carried')).toBe(true);
+    expect(carried.target.textContent).toContain('alpha');
+    expect(carried.target.textContent).toContain('beta');
+    carried.stop();
+
+    const none = mountPanel();
+    openForm(none);
+    const field = [...none.target.querySelectorAll('.field')].find(
+      (one) => one.querySelector('.name')?.textContent?.trim() === DICTIONARIES.en['browser.detail.field.searchTerms']
+    );
+    expect(field?.textContent).toContain(DICTIONARIES.en[transferRefusalKey({ kind: 'notInTheFile' })]);
+    none.stop();
+
+    const match = snippet({ searchTerms: ['x'] });
+    const empty = mountPanel({
+      match: { ...match, search_terms: [], search_terms_presence: {
+        Empty: {
+          location: {
+            key_node: 0,
+            key_span: { start: 0, end: 0 },
+            value_node: 0,
+            value_span: { start: 0, end: 0 },
+            path: null
+          }
+        }
+      } }
+    });
+    openForm(empty);
+    expect(says(empty.target, 'browser.recovery.searchTerms.empty')).toBe(true);
+    empty.stop();
+  });
+});
+
 describe('where the new snippet goes', () => {
   it('offers only files it may write into, and never invents a snippet list', () => {
     // The opposite of the creator's list, and deliberately so: recovery is an

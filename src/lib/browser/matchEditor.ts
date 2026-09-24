@@ -298,6 +298,7 @@ import {
   type ListProblem,
   type ListReapplyVerdict,
   type ListRefusal,
+  type ListShownItem,
   type ListStyle,
   type RemovedListItem
 } from './matchLists';
@@ -5849,11 +5850,12 @@ export const OPTION_GROUPS: readonly {
 ];
 
 /**
- * One section of the editor, in the order a screen draws them — Phase 3-5-2-1.
+ * One section of the editor, in the order a screen draws them — Phase 3-5-2-1;
+ * the trigger side and `search_terms` are sections of their own since Phase
+ * 3-6-2.
  *
  * `fields` is a run of field blocks under an option group's heading, or under no
- * heading (`group: null`) for the trigger, the content keys, the label and the
- * comment. `contentSwitch` is where the change of content kind — its choices,
+ * heading (`group: null`) for the content keys, the label and the comment. `contentSwitch` is where the change of content kind — its choices,
  * its preview and its confirmation — is drawn: directly under the five content
  * keys, and only when there is something to draw.
  */
@@ -5865,7 +5867,28 @@ export type EditorSection =
       /** The field blocks, in {@link EDITABLE_FIELDS} order. */
       readonly fields: readonly EditableFieldModel[];
     }
-  | { readonly kind: 'contentSwitch' };
+  | { readonly kind: 'contentSwitch' }
+  | {
+      /**
+       * The trigger side — Phase 3-6-2: the one control
+       * {@link TriggerFormView.control} names, the presentation's sentences, the
+       * choices of form and a drafted change's preview. First, where the literal
+       * trigger's block used to be.
+       */
+      readonly kind: 'triggerSide';
+      /**
+       * The literal `trigger` field's model, drawn when the control is `literal`
+       * or `heldForms`.
+       */
+      readonly literal: EditableFieldModel;
+    }
+  | {
+      /**
+       * `search_terms` — Phase 3-6-2, directly under the label and the comment,
+       * as the detail pane groups them.
+       */
+      readonly kind: 'searchTerms';
+    };
 
 /**
  * The editor's sections, from the field models already built.
@@ -5880,13 +5903,19 @@ function sectionsOf(
 ): readonly EditorSection[] {
   const pick = (names: readonly EditableField[]): readonly EditableFieldModel[] =>
     fields.filter((one) => names.includes(one.field));
+  const [literal] = pick(['trigger']);
+  if (literal === undefined) {
+    throw new Error('the seventeen field models always hold the trigger');
+  }
   const sections: EditorSection[] = [
-    { kind: 'fields', group: null, fields: pick(['trigger', ...CONTENT_FIELDS]) }
+    { kind: 'triggerSide', literal },
+    { kind: 'fields', group: null, fields: pick(CONTENT_FIELDS) }
   ];
   if (switchDrawn) {
     sections.push({ kind: 'contentSwitch' });
   }
   sections.push({ kind: 'fields', group: null, fields: pick(['label', 'comment']) });
+  sections.push({ kind: 'searchTerms' });
   for (const { group, fields: names } of OPTION_GROUPS) {
     sections.push({ kind: 'fields', group, fields: pick(names) });
   } // End of the loop over the option groups
@@ -6076,6 +6105,36 @@ export interface ListModel {
   readonly canAddList: boolean;
   /** Whether *Remove this list* would do anything. */
   readonly canRemoveList: boolean;
+  /**
+   * What the file holds, for a list no control draws — Phase 3-6-2
+   * ({@link ListBaseline.shown}). Empty for an editable list.
+   */
+  readonly shown: readonly ListShownItem[];
+  /**
+   * Whether the screen says the file does not hold this list — Phase 3-6-2:
+   * the file has no such key and the draft adds none.
+   */
+  readonly saysAbsent: boolean;
+  /**
+   * Whether the draft takes the whole list out — Phase 3-6-2: the file holds it
+   * and the drafted snippet does not ({@link removeList}).
+   */
+  readonly removing: boolean;
+  /** Whether the drafted list is present and holds no item — Phase 3-6-2. */
+  readonly saysEmpty: boolean;
+  /**
+   * Whether the item boxes accept typing — Phase 3-6-2's review fix: the list is
+   * editable **and present**. {@link editListItem} refuses an item of a list the
+   * draft takes out, so a screen that drew a writable box there would show text
+   * the draft never holds; such a list's items are shown, not boxed.
+   */
+  readonly itemsEditable: boolean;
+  /**
+   * Whether the screen says why the one item left cannot be taken out — Phase
+   * 3-6-2: the list is editable, present and holds exactly one item, which
+   * {@link removeListItem} refuses (ruling 6).
+   */
+  readonly lastItemKept: boolean;
 }
 
 /** The trigger side, as a screen draws it — Phase 3-6-1. */
@@ -6092,7 +6151,100 @@ export interface TriggerFormView {
   readonly regex: RegexFieldModel;
   /** The `triggers` list. */
   readonly triggers: ListModel;
+  /** Which control draws the trigger side now — Phase 3-6-2 ({@link TriggerControl}). */
+  readonly control: TriggerControl;
+  /**
+   * What withdrawing the drafted form is, or `null` when the draft holds the
+   * file's own form — Phase 3-6-2 ({@link TriggerWithdrawal}).
+   */
+  readonly withdrawal: TriggerWithdrawal | null;
 }
+
+/**
+ * Which control draws the trigger side — Phase 3-6-2. **One control, never two**:
+ * the drafted form's, so a pattern and a literal are never both on screen as
+ * though either could be edited.
+ *
+ * - `literal` — the literal `trigger` field's own block (the drafted form is
+ *   `trigger`: held, the destination of a change, or an addition);
+ * - `regex` — the `regex` box ({@link TriggerFormView.regex});
+ * - `triggers` — the list control ({@link TriggerFormView.triggers});
+ * - `heldForms` — a `Several`: the literal field's refused block, which shows
+ *   **every** form the file holds, each named by its key, and picks none
+ *   (ruling 6);
+ * - `none` — an `Absent` snippet with nothing drafted: there is no trigger to
+ *   show, and the choices are the explicit *Add trigger*.
+ */
+export type TriggerControl = 'literal' | 'regex' | 'triggers' | 'heldForms' | 'none';
+
+/**
+ * What withdrawing a drafted trigger form is — Phase 3-6-2. `change` for a
+ * change of form over a held one (the preview's *Cancel*), `addition` for a form
+ * drafted onto a snippet with no trigger. Both are {@link cancelTriggerForm}.
+ */
+export type TriggerWithdrawal = 'change' | 'addition';
+
+/**
+ * Which control draws the trigger side.
+ *
+ * @param held - What the file holds on the trigger side.
+ * @param drafted - The drafted form, or `null`.
+ * @returns The control.
+ */
+function triggerControlOf(held: TriggerSideBaseline, drafted: TriggerShape | null): TriggerControl {
+  if (drafted !== null) {
+    return drafted === 'trigger' ? 'literal' : drafted;
+  }
+  return held.kind === 'Several' ? 'heldForms' : 'none';
+} // End of function triggerControlOf()
+
+/**
+ * The dictionary key naming one trigger-form choice's control — Phase 3-6-2:
+ * *Change to* over a held form, *Add a trigger as* on a snippet with none.
+ * `{form}` takes the choice's label.
+ *
+ * @param presentation - How the trigger side is presented.
+ * @returns The key.
+ */
+export function triggerFormChoiceKey(presentation: TriggerPresentation): TranslationKey {
+  return presentation.kind === 'absent'
+    ? 'browser.matchEditor.triggerForm.add'
+    : 'browser.matchEditor.triggerForm.to';
+} // End of function triggerFormChoiceKey()
+
+/**
+ * The dictionary key introducing what a change of trigger form writes — Phase
+ * 3-6-2: the list's items in order for `triggers`, the kept text for a rename
+ * that keeps the bytes, and the text as it now stands otherwise. Never a claim
+ * that a list's text is *kept as the file writes it*: a scalar carried into a
+ * new list is a new item.
+ *
+ * @param preview - The drafted change's preview.
+ * @returns The key.
+ */
+export function triggerFormTextNoteKey(preview: TriggerFormPreview): TranslationKey {
+  if (preview.to === 'triggers') {
+    return 'browser.matchEditor.triggerForm.listHolds';
+  }
+  return preview.textKept
+    ? 'browser.matchEditor.triggerForm.textKept'
+    : 'browser.matchEditor.triggerForm.textEdited';
+} // End of function triggerFormTextNoteKey()
+
+/**
+ * The dictionary key naming the withdrawal control — Phase 3-6-2.
+ *
+ * @param withdrawal - What withdrawing is.
+ * @returns The key.
+ */
+export function triggerWithdrawalKey(withdrawal: TriggerWithdrawal): TranslationKey {
+  switch (withdrawal) {
+    case 'change':
+      return 'browser.matchEditor.triggerForm.cancel';
+    case 'addition':
+      return 'browser.matchEditor.triggerForm.cancelAddition';
+  }
+} // End of function triggerWithdrawalKey()
 
 /** Everything beyond the seventeen fields — Phase 3-6-1. */
 export interface StructureView {
@@ -6118,6 +6270,7 @@ function listModelOf(
   const editable = isListEditable(session, baseline.field);
   const rows = listRowsOf(baseline, buffer);
   const isTerms = baseline.field === 'search_terms';
+  const held = baseline.style !== 'absent' && baseline.style !== 'unsupported';
   return {
     field: baseline.field,
     label: listLabelName(baseline.field),
@@ -6129,7 +6282,13 @@ function listModelOf(
     refusal: baseline.eligibility.kind === 'readOnly' ? baseline.eligibility.reason : null,
     canRemoveItem: editable && buffer.present && buffer.items.length > 1,
     canAddList: editable && isTerms && !buffer.present,
-    canRemoveList: editable && isTerms && buffer.present
+    canRemoveList: editable && isTerms && buffer.present,
+    shown: baseline.shown,
+    saysAbsent: baseline.style === 'absent' && !buffer.present,
+    removing: held && !buffer.present,
+    saysEmpty: buffer.present && buffer.items.length === 0,
+    itemsEditable: editable && buffer.present,
+    lastItemKept: editable && buffer.present && buffer.items.length === 1
   };
 } // End of function listModelOf()
 
@@ -6186,7 +6345,10 @@ function triggerFormViewOf(
       refusal: held.regex.eligibility.kind === 'readOnly' ? held.regex.eligibility.reason : null,
       intent: side.regex
     },
-    triggers: listModelOf(session, held.triggers, captured.side.triggers)
+    triggers: listModelOf(session, held.triggers, captured.side.triggers),
+    control: triggerControlOf(held, drafted),
+    withdrawal:
+      drafted === null || drafted === held.form ? null : held.form === null ? 'addition' : 'change'
   };
 } // End of function triggerFormViewOf()
 
@@ -6281,8 +6443,8 @@ export interface MatchEditorView {
   /** Why the save is held back although the draft is dirty, or `null`. */
   readonly saveWithheld: SaveWithheld | null;
   /**
-   * The trigger side and `search_terms`, as a screen draws them — Phase 3-6-1.
-   * No component draws this yet (3-6-2 does).
+   * The trigger side and `search_terms`, as a screen draws them — Phase 3-6-1;
+   * `MatchEditor.svelte` draws it since Phase 3-6-2.
    */
   readonly structure: StructureView;
   /** Whether the draft differs from what the file held. Derived. */
@@ -6483,7 +6645,11 @@ function fieldModel(
     suggested,
     unfamiliar: suggestions.length > 0 && buffer.text !== '' && !suggested,
     roleNote,
-    saysAbsent: !baseline.present && roleNote === null,
+    // Never for the literal trigger (Phase 3-6-2): when the file does not hold it,
+    // its box is drawn only as the destination of a change of form or an
+    // addition, where a blank box is withheld (`triggerFormEmpty`) rather than
+    // "writing nothing".
+    saysAbsent: !baseline.present && roleNote === null && field !== 'trigger',
     cursorAction: field === 'replace' && cursorActionOffered(session)
   };
 } // End of function fieldModel()

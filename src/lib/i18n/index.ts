@@ -63,20 +63,32 @@ import {
   fieldRefusalKey,
   reprojectionRefusalKey,
   saveWithheldKey,
+  triggerFormChoiceKey,
   triggerFormRefusalKey,
+  triggerFormTextNoteKey,
   triggerPresentationKey,
   triggerRepairKey,
+  triggerWithdrawalKey,
   type ContentRoleNote,
   type CursorAdvisory,
   type EditorReapplyObstacle,
   type FieldRefusal,
   type ReprojectionRefusal,
   type SaveWithheld,
+  type TriggerFormPreview,
   type TriggerFormRefusal,
   type TriggerPresentation,
-  type TriggerRepair
+  type TriggerRepair,
+  type TriggerWithdrawal
 } from '../browser/matchEditor';
-import { listRefusalKey, type ListRefusal } from '../browser/matchLists';
+import {
+  listItemStatusKey,
+  listRefusalKey,
+  listStyleNoteKey,
+  type ListItemStatus,
+  type ListRefusal,
+  type ListStyle
+} from '../browser/matchLists';
 import {
   externalEvidenceRefusalKey,
   reapplyOutcomeKey,
@@ -777,6 +789,66 @@ export function tTriggerPresentation(presentation: TriggerPresentation): string 
 export function tTriggerRepair(repair: TriggerRepair): string {
   return translate(locale.current, triggerRepairKey(repair));
 } // End of function tTriggerRepair()
+
+/**
+ * Renders the label of one trigger-form choice's control, in the current
+ * language — Phase 3-6-2: *Change to* over a held form, *Add a trigger as* on a
+ * snippet with none.
+ *
+ * @param presentation - `TriggerFormView.presentation` in
+ *   `../browser/matchEditor.ts`.
+ * @param form - The choice's label, as `TriggerFormChoice.label` names it.
+ * @returns The translated label.
+ */
+export function tTriggerFormChoice(presentation: TriggerPresentation, form: DetailFieldName): string {
+  return translate(locale.current, triggerFormChoiceKey(presentation), { form: tDetailField(form) });
+} // End of function tTriggerFormChoice()
+
+/**
+ * Renders the sentence introducing what a drafted change of trigger form writes,
+ * in the current language — Phase 3-6-2.
+ *
+ * @param preview - `TriggerFormView.preview` in `../browser/matchEditor.ts`.
+ * @returns The translated sentence.
+ */
+export function tTriggerFormTextNote(preview: TriggerFormPreview): string {
+  return translate(locale.current, triggerFormTextNoteKey(preview));
+} // End of function tTriggerFormTextNote()
+
+/**
+ * Renders the label of the control that withdraws a drafted trigger form, in the
+ * current language — Phase 3-6-2.
+ *
+ * @param withdrawal - `TriggerFormView.withdrawal` in `../browser/matchEditor.ts`.
+ * @returns The translated label.
+ */
+export function tTriggerWithdrawal(withdrawal: TriggerWithdrawal): string {
+  return translate(locale.current, triggerWithdrawalKey(withdrawal));
+} // End of function tTriggerWithdrawal()
+
+/**
+ * Renders how the file writes a list and that a save keeps it, in the current
+ * language, or `null` for a style that owes no note — Phase 3-6-2.
+ *
+ * @param style - `ListModel.style` in `../browser/matchEditor.ts`.
+ * @returns The translated sentence, or `null`.
+ */
+export function tListStyleNote(style: ListStyle): string | null {
+  const key = listStyleNoteKey(style);
+  return key === null ? null : translate(locale.current, key);
+} // End of function tListStyleNote()
+
+/**
+ * Renders the marker one drafted list item carries, in the current language, or
+ * `null` for an item kept as the file has it — Phase 3-6-2.
+ *
+ * @param status - `ListItemModel.status` in `../browser/matchLists.ts`.
+ * @returns The translated marker, or `null`.
+ */
+export function tListItemStatus(status: ListItemStatus): string | null {
+  const key = listItemStatusKey(status);
+  return key === null ? null : translate(locale.current, key);
+} // End of function tListItemStatus()
 
 /**
  * Renders why this window cannot read one snippet again.

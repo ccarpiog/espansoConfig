@@ -252,6 +252,7 @@ import {
   fieldLabelName,
   NO_SWITCH,
   switchRoleOf,
+  triggerShapeLabel,
   type AcknowledgeTheUncertainty,
   type SwitchRole,
   type EditableField,
@@ -3696,6 +3697,12 @@ export interface RecoveryView {
    * {@link RecoveryView.triggerItems} is what is written.
    */
   readonly triggerForm: TriggerShape;
+  /**
+   * The label the trigger side is drawn under, for `tDetailField` — Phase 3-6-2:
+   * {@link RecoveryView.triggerForm}'s own, so a carried pattern is labelled a
+   * regular expression and a carried list a list of triggers, never *trigger*.
+   */
+  readonly triggerLabel: DetailFieldName;
   /** The carried `triggers` items, in order, or none — Phase 3-6-1. */
   readonly triggerItems: readonly string[];
   /** Whether the trigger control accepts changes — Phase 3-6-1. */
@@ -3850,6 +3857,7 @@ export function recoveryView(session: RecoverySession): RecoveryView {
     bodyLabel: fieldLabelName(recoveryBodyFieldOf(session.transfer)),
     trigger: session.draft.value.trigger,
     triggerForm: session.structure.trigger.form,
+    triggerLabel: triggerShapeLabel(session.structure.trigger.form),
     triggerItems: session.structure.trigger.form === 'triggers' ? session.structure.trigger.items : [],
     triggerEditable:
       isRecoveryEditable(session) && session.structure.trigger.form !== 'triggers',
@@ -4111,6 +4119,9 @@ export function recoveryWithoutCreation<T>(
  *   contract seen from a screen. A key carried with an empty value is written as
  *   `label:` with nothing after it; an omitted key is not written at all. The two
  *   look identical in a table that only says *carried*;
+ * - **`carriedInAnotherForm`** (Phase 3-6-2's review fix) is the literal trigger
+ *   left out because the trigger is carried as `regex` or as a `triggers` list:
+ *   neither *omitted* nor *needs a value*, since nothing is missing;
  * - **`omitted` against `needsAValue`** is which of the two a person can do
  *   something about. The four optional fields have no control at all, so *not
  *   carried* is the end of the story for them; the trigger and the body have a box
@@ -4129,6 +4140,12 @@ export function transferStatusOf(field: RecoveryFieldModel): TransferStatus {
   if (field.transfer.kind === 'carried') {
     return field.transfer.text === '' ? 'carriedEmptyValue' : 'carried';
   }
+  // The literal left out because the trigger is carried as `regex` or `triggers`
+  // (Phase 3-6-2's review fix): nothing is missing, so the row never asks for a
+  // value to be typed — the carried form is drawn below it.
+  if (field.transfer.reason.kind === 'triggerFormCarried') {
+    return 'carriedInAnotherForm';
+  }
   return field.editable ? 'needsAValue' : 'omitted';
 } // End of function transferStatusOf()
 
@@ -4141,7 +4158,12 @@ export type TransferStatus =
   /** It is born without this key, and there is no control that could supply one. */
   | 'omitted'
   /** It is born without this key, the field is required, and the box below is blank. */
-  | 'needsAValue';
+  | 'needsAValue'
+  /**
+   * The literal trigger is not written because the trigger is carried in another
+   * form, `regex` or `triggers`, drawn below — Phase 3-6-2's review fix.
+   */
+  | 'carriedInAnotherForm';
 
 /**
  * The dictionary key holding the phrase one transfer-table row shows.
@@ -4159,6 +4181,8 @@ export function transferStatusKey(status: TransferStatus): TranslationKey {
       return 'browser.recovery.transfer.omitted';
     case 'needsAValue':
       return 'browser.recovery.transfer.needsAValue';
+    case 'carriedInAnotherForm':
+      return 'browser.recovery.transfer.carriedInAnotherForm';
   }
 } // End of function transferStatusKey()
 

@@ -9,7 +9,8 @@
  * alias silently, conservative list reapply (ruling 23), recovery that carries
  * everything or refuses explicitly, and the carriage return refused at the
  * three gates for every new control. Then the `Several`/`Absent` presentation,
- * the conflict copy and the dictionary keys the new codes need.
+ * the conflict copy and the dictionary keys the new codes need; last, the view
+ * values Phase 3-6-2 added so `MatchEditor.svelte` decides nothing.
  *
  * Per `1b-2a-notes.md` section 14, a `describe`/`it` callback whose sibling
  * argument is already its description carries no JSDoc of its own; ordinary
@@ -57,17 +58,27 @@ import {
   removeListItem,
   saveWithheldKey,
   startMatchEditor,
+  triggerFormChoiceKey,
   triggerFormChoices,
   triggerFormRefusalKey,
+  triggerFormTextNoteKey,
   triggerPresentationKey,
   triggerRepairKey,
+  triggerWithdrawalKey,
   undoEdit,
   type MatchBuffers,
   type MatchEditorSession,
   type SaveWithheld,
   type TriggerFormRefusal
 } from './matchEditor';
-import { listRefusalKey, type ListRefusal } from './matchLists';
+import {
+  listItemStatusKey,
+  listRefusalKey,
+  listStyleNoteKey,
+  type ListItemStatus,
+  type ListRefusal,
+  type ListStyle
+} from './matchLists';
 import {
   beginRecoveryCreate,
   editRecoveryField,
@@ -965,5 +976,150 @@ describe('review fix: flow-list insertions never overlap a removal', () => {
       { RemoveItem: { field: 'search_terms', index: 1 } },
       { InsertItems: { field: 'search_terms', at: { After: { index: 1 } }, items: ['new'] } }
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3-6-2: the values the components draw
+// ---------------------------------------------------------------------------
+
+describe('the trigger side names its one control and its withdrawal (Phase 3-6-2)', () => {
+  it('draws the held form’s control, the held forms of a Several, and nothing for an Absent', () => {
+    const control = (match: MatchView): string => matchEditorView(session(match)).structure.trigger.control;
+    expect(control(projection())).toBe('literal');
+    expect(control(regexed('^a'))).toBe('regex');
+    expect(control(listed([':a', ':b']))).toBe('triggers');
+    expect(control(projection({ trigger: ':a', regex: '^b', triggerKind: 'Several' }))).toBe('heldForms');
+    expect(control(projection({ trigger: null, triggerKind: 'Absent' }))).toBe('none');
+    for (const match of [projection(), regexed('^a'), listed([':a'])]) {
+      expect(matchEditorView(session(match)).structure.trigger.withdrawal).toBeNull();
+    } // End of the loop over the held forms
+  });
+
+  it('follows the drafted form, and calls withdrawing a change or an addition', () => {
+    const changed = chooseTriggerForm(session(), 'triggers');
+    expect(matchEditorView(changed).structure.trigger).toMatchObject({
+      control: 'triggers',
+      withdrawal: 'change'
+    });
+    const added = chooseTriggerForm(session(projection({ trigger: null, triggerKind: 'Absent' })), 'regex');
+    expect(matchEditorView(added).structure.trigger).toMatchObject({
+      control: 'regex',
+      withdrawal: 'addition'
+    });
+    const literal = chooseTriggerForm(session(regexed('^a')), 'trigger');
+    expect(matchEditorView(literal).structure.trigger.control).toBe('literal');
+    expect(matchEditorView(cancelTriggerForm(literal)).structure.trigger.withdrawal).toBeNull();
+  });
+
+  it('never says a blank literal trigger “writes nothing” when it is a destination or an addition', () => {
+    const added = chooseTriggerForm(session(projection({ trigger: null, triggerKind: 'Absent' })), 'trigger');
+    const literal = matchEditorView(added).fields.find((one) => one.field === 'trigger');
+    expect(literal).toMatchObject({ editable: true, present: false, saysAbsent: false });
+    // A key that is not the literal trigger keeps its sentence.
+    expect(matchEditorView(added).fields.find((one) => one.field === 'label')?.saysAbsent).toBe(true);
+  });
+
+  it('names the choice by the presentation, and the preview’s text by what is written', () => {
+    expect(triggerFormChoiceKey({ kind: 'absent' })).toBe('browser.matchEditor.triggerForm.add');
+    expect(triggerFormChoiceKey({ kind: 'form', form: 'trigger' })).toBe(
+      'browser.matchEditor.triggerForm.to'
+    );
+    const kept = matchEditorView(chooseTriggerForm(session(), 'regex')).structure.trigger.preview;
+    expect(kept === null ? null : triggerFormTextNoteKey(kept)).toBe(
+      'browser.matchEditor.triggerForm.textKept'
+    );
+    const edited = matchEditorView(editRegex(chooseTriggerForm(session(), 'regex'), '^z')).structure
+      .trigger.preview;
+    expect(edited === null ? null : triggerFormTextNoteKey(edited)).toBe(
+      'browser.matchEditor.triggerForm.textEdited'
+    );
+    // A list is never said to keep the file's text: the scalar becomes a new item.
+    const list = matchEditorView(chooseTriggerForm(session(), 'triggers')).structure.trigger.preview;
+    expect(list === null ? null : triggerFormTextNoteKey(list)).toBe(
+      'browser.matchEditor.triggerForm.listHolds'
+    );
+  });
+});
+
+describe('a list model says what a screen owes beside it (Phase 3-6-2)', () => {
+  it('shows a read-only list’s items, naming one that is not text, and an editable one’s not at all', () => {
+    const base = listed([':r1']);
+    const withCollection: MatchView = {
+      ...base,
+      trigger: { ...base.trigger, triggers: [...base.trigger.triggers, { Sequence: [] }] }
+    };
+    const refused = matchEditorView(session(withCollection)).structure.trigger.triggers;
+    expect(refused.refusal).toBe('itemNotText');
+    expect(refused.shown).toEqual([
+      { kind: 'text', text: ':r1' },
+      { kind: 'notScalar', shape: 'Sequence' }
+    ]);
+    expect(matchEditorView(session(listed([':a']))).structure.trigger.triggers.shown).toEqual([]);
+  });
+
+  it('says absent, empty, being removed and the last item kept, each only when true', () => {
+    const none = matchEditorView(session()).structure.searchTerms;
+    expect(none).toMatchObject({ saysAbsent: true, saysEmpty: false, removing: false, lastItemKept: false });
+    const added = matchEditorView(addList(session(), 'search_terms')).structure.searchTerms;
+    expect(added).toMatchObject({ saysAbsent: false, saysEmpty: true, removing: false });
+    const one = session(projection({ searchTerms: ['alpha'] }));
+    expect(matchEditorView(one).structure.searchTerms).toMatchObject({
+      saysAbsent: false,
+      lastItemKept: true,
+      canRemoveItem: false
+    });
+    expect(matchEditorView(addListItem(one, 'search_terms', 1, 'beta')).structure.searchTerms).toMatchObject({
+      lastItemKept: false,
+      canRemoveItem: true
+    });
+    const gone = matchEditorView(removeList(one, 'search_terms')).structure.searchTerms;
+    expect(gone).toMatchObject({ removing: true, saysAbsent: false, present: false });
+    // Review fix: a list the draft takes out has no writable items.
+    expect(matchEditorView(one).structure.searchTerms.itemsEditable).toBe(true);
+    expect(gone.itemsEditable).toBe(false);
+  });
+
+  it('owes a style note for a block or a flow list only, and a marker for a changed item only', () => {
+    const notes: Record<ListStyle, string | null> = {
+      absent: null,
+      empty: null,
+      block: 'browser.matchEditor.list.style.block',
+      flow: 'browser.matchEditor.list.style.flow',
+      unsupported: null
+    };
+    for (const [style, key] of Object.entries(notes) as [ListStyle, string | null][]) {
+      expect(listStyleNoteKey(style), style).toBe(key);
+    } // End of the loop over the list styles
+    const markers: Record<ListItemStatus, string | null> = {
+      kept: null,
+      edited: 'browser.matchEditor.list.item.edited',
+      added: 'browser.matchEditor.list.item.added'
+    };
+    for (const [status, key] of Object.entries(markers) as [ListItemStatus, string | null][]) {
+      expect(listItemStatusKey(status), status).toBe(key);
+    } // End of the loop over the item statuses
+  });
+
+  it('has a sentence, in both languages, for every key the new values name', () => {
+    const keys = [
+      triggerFormChoiceKey({ kind: 'absent' }),
+      triggerFormChoiceKey({ kind: 'form', form: 'regex' }),
+      triggerWithdrawalKey('change'),
+      triggerWithdrawalKey('addition'),
+      'browser.matchEditor.triggerForm.textKept',
+      'browser.matchEditor.triggerForm.textEdited',
+      'browser.matchEditor.triggerForm.listHolds',
+      'browser.matchEditor.list.style.block',
+      'browser.matchEditor.list.style.flow',
+      'browser.matchEditor.list.item.added',
+      'browser.matchEditor.list.item.edited'
+    ] as const;
+    for (const lang of LOCALES) {
+      for (const key of keys) {
+        expect(DICTIONARIES[lang][key], `${lang} ${key}`).toBeTruthy();
+      } // End of the loop over the keys
+      expect(DICTIONARIES[lang][triggerFormChoiceKey({ kind: 'absent' })]).toContain('{form}');
+    } // End of the loop over the languages
   });
 });

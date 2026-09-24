@@ -69,6 +69,7 @@ import type {
   SequenceField,
   SequenceIntent,
   SequencePresence,
+  ValueKind,
   ValueView
 } from '../ipc/types';
 import type { DetailFieldName } from './detail';
@@ -138,7 +139,54 @@ export interface ListBaseline {
   readonly items: readonly string[];
   /** Whether the list may be drafted, and why not. */
   readonly eligibility: ListEligibility;
+  /**
+   * What the file holds, **for a list no control will draw** — Phase 3-6-2.
+   *
+   * Empty for an editable list (its item controls show every item). For a
+   * read-only one, every item in the file's order: its text when it is one piece
+   * of text, its shape when it is not — the same two arms as the match editor's
+   * `ShownValue`, so a read-only list is shown rather than blank and an item that
+   * is not text is named rather than drawn as an empty string.
+   */
+  readonly shown: readonly ListShownItem[];
 }
+
+/**
+ * One item of a read-only list, as the thing a screen draws — Phase 3-6-2.
+ * `text` is handed to `SourceText`; `shape` to `tValueKind`.
+ */
+export type ListShownItem =
+  | {
+      /** Source text, drawn exactly as the projection carries it. */
+      readonly kind: 'text';
+      /** What to hand `SourceText`. */
+      readonly text: string;
+    }
+  | {
+      /** An item that is not one piece of text, named rather than drawn. */
+      readonly kind: 'notScalar';
+      /** What to hand `tValueKind`. */
+      readonly shape: ValueKind;
+    };
+
+/**
+ * What one read-only item is shown as.
+ *
+ * @param value - The item as it crossed the boundary.
+ * @returns Its text when it is a scalar, its shape when it is not.
+ */
+function shownItemOf(value: ValueView): ListShownItem {
+  if ('Scalar' in value) {
+    return { kind: 'text', text: value.Scalar.text };
+  }
+  if ('Sequence' in value) {
+    return { kind: 'notScalar', shape: 'Sequence' };
+  }
+  if ('Mapping' in value) {
+    return { kind: 'notScalar', shape: 'Mapping' };
+  }
+  return { kind: 'notScalar', shape: 'Alias' in value ? 'Alias' : value.Elided.kind };
+} // End of function shownItemOf()
 
 /** One item of a drafted list. */
 export interface ListItemBuffer {
@@ -241,7 +289,8 @@ export function listBaselineOf(
     field,
     style,
     items: Object.freeze(values.map((value) => ('Scalar' in value ? value.Scalar.text : ''))),
-    eligibility
+    eligibility,
+    shown: Object.freeze(eligibility.kind === 'editable' ? [] : values.map(shownItemOf))
   });
 } // End of function listBaselineOf()
 
@@ -842,3 +891,44 @@ export function listRefusalKey(reason: ListRefusal): TranslationKey {
       return 'browser.matchEditor.list.readOnly.ownsNoBytes';
   }
 } // End of function listRefusalKey()
+
+/**
+ * The dictionary key holding the note a list's style owes beside it, or `null` —
+ * Phase 3-6-2. A `block` or `flow` list says how the file writes it and that a
+ * save keeps it that way (ruling 5, {@link ListBaseline.style}); `absent`,
+ * `empty` and `unsupported` owe no such note — an absent or empty list has no
+ * item layout to keep, and an unsupported one is not a list.
+ *
+ * @param style - The file's own presentation of the list.
+ * @returns The key, or `null`.
+ */
+export function listStyleNoteKey(style: ListStyle): TranslationKey | null {
+  switch (style) {
+    case 'block':
+      return 'browser.matchEditor.list.style.block';
+    case 'flow':
+      return 'browser.matchEditor.list.style.flow';
+    case 'absent':
+    case 'empty':
+    case 'unsupported':
+      return null;
+  }
+} // End of function listStyleNoteKey()
+
+/**
+ * The dictionary key holding the marker one drafted item carries, or `null` for
+ * an item kept as the file has it, which owes none — Phase 3-6-2.
+ *
+ * @param status - What the item is to the file.
+ * @returns The key, or `null`.
+ */
+export function listItemStatusKey(status: ListItemStatus): TranslationKey | null {
+  switch (status) {
+    case 'kept':
+      return null;
+    case 'edited':
+      return 'browser.matchEditor.list.item.edited';
+    case 'added':
+      return 'browser.matchEditor.list.item.added';
+  }
+} // End of function listItemStatusKey()

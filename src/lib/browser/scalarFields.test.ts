@@ -761,18 +761,26 @@ describe('the values the components draw — Phase 3-5-2-1', () => {
   });
 
   it('cuts the seventeen fields into sections, with the switch section under the content keys only when offered', () => {
+    // Since Phase 3-6-2 the trigger side leads (carrying the literal trigger's
+    // model) and `search_terms` follows the label and the comment.
     const offered = matchEditorView(session());
     expect(offered.sections.map((one) => (one.kind === 'fields' ? one.group : one.kind))).toEqual([
+      'triggerSide',
       null,
       'contentSwitch',
       null,
+      'searchTerms',
       'matching',
       'case',
       'injection',
       'other'
     ]);
     const walked = offered.sections.flatMap((one) =>
-      one.kind === 'fields' ? one.fields.map((field) => field.field) : []
+      one.kind === 'fields'
+        ? one.fields.map((field) => field.field)
+        : one.kind === 'triggerSide'
+          ? [one.literal.field]
+          : []
     );
     expect(walked).toEqual(EDITABLE_FIELDS);
     // Two content keys: no switch to offer and none drafted, so no section.
