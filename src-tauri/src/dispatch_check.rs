@@ -1,4 +1,4 @@
-//! The seventeen commands, invoked through the real dispatcher.
+//! The nineteen commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -27,7 +27,7 @@
 //!    the local origin, `plugin:event|emit` and `plugin:event|emit_to` — which
 //!    `core:event:default` would also have granted — are asserted refused
 //!    through the resolved access-control list, and every plugin command is in
-//!    the remote-origin sweep beside the seventeen application commands.
+//!    the remote-origin sweep beside the nineteen application commands.
 //!
 //! `mock_builder()` swaps the platform webview for a mock; it does **not** swap
 //! the IPC dispatcher, the access-control resolution or the command macros, all
@@ -168,7 +168,7 @@ const REMOTE_ORIGIN: &str = "https://an-unrelated-site.example";
 /// The event plugin's registration command, as `@tauri-apps/api/event`'s
 /// `listen` spells it.
 ///
-/// A **plugin** command, which is what separates it from the seventeen: the
+/// A **plugin** command, which is what separates it from the nineteen: the
 /// dispatcher access-checks it even from the local origin, so it is reachable
 /// only because `capabilities/default.json` grants `core:event:allow-listen`.
 const EVENT_LISTEN: &str = "plugin:event|listen";
@@ -1005,6 +1005,102 @@ fn duplicate_match_is_reachable_and_round_trips_its_own_finding() {
         "the session's cache must agree with the disk it just wrote"
     );
 } // End of function duplicate_match_is_reachable_and_round_trips_its_own_finding()
+
+/// Phase 3-7's pair is reachable, its arguments deserialize from the shapes the
+/// frontend sends, and the saved range reaches the disk byte for byte.
+///
+/// Four claims a direct call cannot make: both commands are registered and
+/// unblocked by a capability set naming no application command; `id`,
+/// `baseRevision`, `text` and `acknowledgement` deserialize from camelCase JSON;
+/// the read's answer crosses as `{ text, first_line, line_count }` and its
+/// refusal as `itemTextRefused` carrying the core's `EditError` whole; and the
+/// committed file is read **from the disk**, while `document_text` pins that the
+/// session serves the same bytes.
+#[test]
+fn the_local_raw_item_pair_is_reachable_and_its_text_reaches_the_disk() {
+    let source = "matches:\n  # about one\n  - trigger: ':one'\n    replace: first\n  \
+                  - trigger: ':two'\n    replace: second\n";
+    let OverIpc {
+        webview,
+        document_id,
+        view,
+        _app,
+        _dir: dir,
+    } = opened_over_ipc(source);
+    let target = dir.path().join("match").join("base.yml");
+    let held = view["matches"][0]["id"].clone();
+
+    let read = invoke(&webview, "match_item_text", json!({ "id": held })).expect("the range reads");
+    assert_eq!(
+        read,
+        json!({
+            "text": "  # about one\n  - trigger: ':one'\n    replace: first\n",
+            "first_line": 2,
+            "line_count": 3,
+        })
+    );
+
+    let text = "  # about one, rewritten\n  - trigger: ':one'\n    replace: changed\n";
+    let saved = invoke(
+        &webview,
+        "save_match_item_text",
+        json!({
+            "id": held,
+            "baseRevision": view["revision"],
+            "text": text,
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect("the save commits");
+    assert_eq!(saved["outcome"], "saved", "{saved}");
+    assert_eq!(saved["committed"], true);
+    assert!(
+        saved["moved"].is_object(),
+        "the edited match is named: {saved}"
+    );
+    let expected =
+        "matches:\n  # about one, rewritten\n  - trigger: ':one'\n    replace: changed\n  \
+                    - trigger: ':two'\n    replace: second\n";
+    assert_eq!(
+        fs::read(&target).expect("the file is readable"),
+        expected.as_bytes(),
+        "the range must be persisted, not only cached"
+    );
+    let served = invoke(&webview, "document_text", json!({ "id": document_id }))
+        .expect("the document's bytes read");
+    assert_eq!(served.as_str(), Some(expected));
+
+    // The identity held before the save is stale for the read too.
+    let stale = invoke(&webview, "match_item_text", json!({ "id": held }))
+        .expect_err("a stale identity must not read");
+    assert_eq!(
+        stale.get("code").and_then(Value::as_str),
+        Some("identityStaleRevision"),
+        "{stale}"
+    );
+
+    // A refused range crosses as `itemTextRefused`, carrying the core's code.
+    let holed = "matches:\n  - trigger: ':one'\n    vars:\n      first: 'one'\n      \
+                 # a note the file owns\n\n      second: 'two'\n    replace: x\n";
+    let OverIpc {
+        webview,
+        view,
+        _app,
+        _dir: _holed_dir,
+        ..
+    } = opened_over_ipc(holed);
+    let refused = invoke(
+        &webview,
+        "match_item_text",
+        json!({ "id": view["matches"][0]["id"] }),
+    )
+    .expect_err("a holed range is refused");
+    assert_eq!(refused["code"], "itemTextRefused", "{refused}");
+    assert!(
+        refused["error"]["ItemRangeNotContiguous"].is_object(),
+        "the core's refusal travels whole: {refused}"
+    );
+} // End of function the_local_raw_item_pair_is_reachable_and_its_text_reaches_the_disk()
 
 /// A save refused by the semantic gate crosses in the **`Ok`** channel.
 ///
@@ -1864,7 +1960,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// resolved command carries `ExecutionContext::Local`, the remote origin
 /// resolves neither, and a window that is not `main` resolves neither.
 ///
-/// And the seventeen application commands resolve to nothing from either
+/// And the nineteen application commands resolve to nothing from either
 /// origin, which is the other half of what "names no application command"
 /// means: a local origin reaches them because the dispatcher does not consult
 /// this list for an application command, not because the list allows them, and
@@ -1959,7 +2055,7 @@ fn the_capability_grants_exactly_the_two_event_permissions() {
                 .is_none(),
             "{command} must resolve to nothing for a remote origin"
         );
-    } // End of the loop over the seventeen application commands
+    } // End of the loop over the nineteen application commands
 } // End of function the_capability_grants_exactly_the_two_event_permissions()
 
 /// A local `main` webview registers the wake listener through the event plugin.
@@ -2032,7 +2128,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
     );
 } // End of function the_registered_listener_is_removable_through_the_event_plugin()
 
-/// A page that is not this application cannot reach any of the seventeen
+/// A page that is not this application cannot reach any of the nineteen
 /// commands, nor either event-plugin command.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
@@ -2050,7 +2146,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All seventeen are attempted, and the count is asserted against the registered
+/// **All nineteen are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -2058,7 +2154,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// parsed out of `generate_handler!` by [`crate::rust_source`], so a command
 /// added to the application and forgotten here fails this test rather than
 /// silently leaving the sweep. **The two plugin commands are a second table**,
-/// kept apart so that the application count stays seventeen: they are not in
+/// kept apart so that the application count stays nineteen: they are not in
 /// `generate_handler!`, this test asserts they are not, and folding them into
 /// the first table would make the count claim about two different things.
 #[test]
@@ -2180,6 +2276,19 @@ fn a_remote_origin_is_refused() {
         // text, so a navigated webview must not be able to read the user's
         // configuration back out of the application through it either.
         ("drain_external_changes", json!({ "afterSequence": 0 })),
+        // Phase 3-7's pair. The reader hands out a snippet's own text, so a
+        // navigated webview must not reach it for `document_text`'s reason; the
+        // writer replaces that text, so it must not reach it for every writer's.
+        ("match_item_text", json!({ "id": identity })),
+        (
+            "save_match_item_text",
+            json!({
+                "id": identity,
+                "baseRevision": "0".repeat(64),
+                "text": "  - trigger: ':remote'\n",
+                "acknowledgement": { "accepted": [] },
+            }),
+        ),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -2194,7 +2303,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 17, "the surface is seventeen commands");
+    assert_eq!(attempted.len(), 19, "the surface is nineteen commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, REMOTE_ORIGIN, command, args)
@@ -2212,7 +2321,7 @@ fn a_remote_origin_is_refused() {
     // The event plugin's two commands, from the same origin. Both are granted to
     // the local context only, and neither is an application command — asserted,
     // because a plugin command that found its way into `generate_handler!` would
-    // be counted above as an eighteenth.
+    // be counted above as a twentieth.
     let plugin_attempts: [(&str, Value); 2] = [
         (EVENT_LISTEN, listen_arguments(1)),
         (EVENT_UNLISTEN, unlisten_arguments(1)),

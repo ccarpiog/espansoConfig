@@ -5,7 +5,9 @@
 //! that write: `move_match` (2b-2a), `save_match` (2b-2b-3), `create_match` and
 //! `delete_match` (2b-2c-2), `save_raw_document` (2b-2c-3b), and
 //! `duplicate_match` (2c-3c-2) — and Phase 2c-5-2's three further readers:
-//! `list_backup_batches`, `list_backup_entries` and `read_backup_text`. Each is
+//! `list_backup_batches`, `list_backup_entries` and `read_backup_text`. Phase 3-7
+//! adds a seventh writer, `save_match_item_text`, and its reader,
+//! `match_item_text`. Each is
 //! one line over a [`WorkspaceSession`] method; each of the original six readers
 //! is one call into `crate::workspace`, which Phase 1a built to be wrapped this
 //! way, and each of the three backup readers is one call into `crate::backup`.
@@ -27,27 +29,36 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Six of the sixteen commands write, and they write the same way
+//! # Seven of the eighteen commands write, and they write the same way
 //!
 //! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, 2b-2c-2 `create_match`
-//! and `delete_match`, 2b-2c-3b `save_raw_document`, and 2c-3c-2
-//! `duplicate_match`. All six go through
+//! and `delete_match`, 2b-2c-3b `save_raw_document`, 2c-3c-2
+//! `duplicate_match`, and 3-7 `save_match_item_text`. All seven go through
 //! [`espansoconfig_core::persist::save_document`] and through nothing else:
 //! `replace_file_atomically` and `replace_locked_file` take finished bytes,
 //! validate nothing, and the second one deadlocks if the lock is taken twice, so
 //! **no command in this crate calls either**. They also share [`run_one_save`],
-//! which is this layer's one cache-coherency policy rather than six agreeing
+//! which is this layer's one cache-coherency policy rather than seven agreeing
 //! copies of it.
 //!
-//! Five of them differ only in **who derives the edits**. `move_match`,
-//! `create_match`, `delete_match` and `duplicate_match` each build their own
-//! single primitive — an [`ItemMove`], an [`InsertItem`], a [`RemoveItem`], a
-//! [`DuplicateItem`] — because each is one operation with nothing to diff.
+//! Six of them differ only in **who derives the edits**. `move_match`,
+//! `create_match`, `delete_match`, `duplicate_match` and `save_match_item_text`
+//! each build their own single primitive — an [`ItemMove`], an [`InsertItem`], a
+//! [`RemoveItem`], a [`DuplicateItem`], an [`ItemTextReplacement`] — because each
+//! is one operation with nothing to diff.
 //! `save_match` hands a [`MatchDraft`] to [`plan_match_edits`], which derives
 //! the **smallest** batch that realises it — or refuses by name, in which case
 //! nothing is attempted and the caller gets [`CommandError::DraftRefused`].
 //! None of them ever combines two kinds of edit in one batch (`PROGRESS.md`
-//! R25, and `DuplicateMustBeTheOnlyEditInItsBatch` for a duplicate).
+//! R25, `DuplicateMustBeTheOnlyEditInItsBatch` for a duplicate, and
+//! `ItemTextMustBeTheOnlyEditInItsBatch` for a raw item).
+//!
+//! **`save_match_item_text` is not `save_raw_document` scrolled to a snippet.**
+//! Its text replaces one snippet's owned range, re-derived by the engine under
+//! the write lock, and the engine proves every byte outside that range
+//! untouched or refuses; a result that does not parse is refused rather than
+//! offered the raw save's acknowledgeable finding (the Phase 3 design consult's
+//! Q4, rulings 11 and 12).
 //!
 //! **`save_raw_document` derives no edits at all**, and that is the one real
 //! difference on this surface. Phase 2b-2c-3a gave the single writing entry point
@@ -72,7 +83,8 @@
 //! Its `subject` is the item the operation is about and its `placement` is the
 //! item it is placed after, and each is answered separately: a drafted match save
 //! is the only subject that may fall back to a unique unchanged trigger; a move,
-//! a deletion and a duplication take exact item correspondence; a creation brings
+//! a deletion, a duplication and a raw item replacement take exact item
+//! correspondence; a creation brings
 //! its own snippet and is `Targetless`; and a raw replacement is `Unsupported`,
 //! permanently. Every `after` anchor — a move's and a creation's alike — is a
 //! **placement** at exact item correspondence, and every other operation's
@@ -236,7 +248,8 @@ use tauri::State;
 use espansoconfig_core::draft::{plan_match_edits, MatchDraft, NewMatch};
 use espansoconfig_core::model::{DocumentView, MatchId, MatchView};
 use espansoconfig_core::patch::{
-    DocumentEdit, DocumentPath, DuplicateItem, InsertItem, ItemMove, ItemPlacement, RemoveItem,
+    item_owned_text, DocumentEdit, DocumentPath, DuplicateItem, EditError, InsertItem, ItemMove,
+    ItemPlacement, ItemTextReplacement, OwnedItemText, RemoveItem,
 };
 use espansoconfig_core::persist::{
     save_document, Acknowledgement, BackupSession, SaveContent, SaveError, SaveRequest,
@@ -246,7 +259,7 @@ use espansoconfig_core::reconcile::{
     reconcile, PlacementMode, ReapplyConfidence, ReapplyMode, ReapplyRequest,
 };
 use espansoconfig_core::workspace::{DocumentSummary, Workspace, WorkspaceSummary};
-use espansoconfig_core::{ContentRevision, DocumentId, SourceDocument};
+use espansoconfig_core::{ContentRevision, DocumentId, NodeKind, SourceDocument};
 
 use crate::backup::{
     BackupBatchKey, BackupBatchListing, BackupEntryKey, BackupEntryListing, BackupTextResponse,
@@ -1263,6 +1276,91 @@ impl WorkspaceSession {
             duplicate_one_match(workspace, session_side, id, base_revision, acknowledgement)
         })
     } // End of function duplicate_match()
+
+    /// Hands out one match's owned physical-line range as text, cut in Rust, for
+    /// the local raw editor (Phase 3-7).
+    ///
+    /// **A reader, and it reads nothing from disk**: the range is cut out of the
+    /// same cached source [`WorkspaceSession::text`] serves, by
+    /// [`espansoconfig_core::patch::item_owned_text`] — the derivation the save
+    /// below re-runs under the write lock. The frontend never slices a byte span
+    /// out of a JavaScript string (`CLAUDE.md` section 6); this is where the
+    /// slicing happens instead.
+    ///
+    /// # What it refuses
+    ///
+    /// - a stale identity — [`CommandError::IdentityStaleRevision`] from
+    ///   [`DocumentView::match_by_id`], because a `MatchId` carries the revision
+    ///   it was minted from (D2v) and a range read from a newer parse would be
+    ///   another snippet's;
+    /// - the other identity refusals, unchanged;
+    /// - every refusal of the range derivation, as
+    ///   [`CommandError::ItemTextRefused`] carrying the core's own
+    ///   [`EditError`]. `ItemRangeNotContiguous` is the one a caller answers by
+    ///   offering the whole-document editor instead (ruling 11), and
+    ///   `ItemTextHoldsCarriageReturn` is ruling 12's refusal at load.
+    pub fn match_item_text(&self, id: MatchId) -> Result<OwnedItemText, CommandError> {
+        self.with_workspace(|workspace| {
+            let snapshot = workspace.get_document(id.document)?;
+            let found = snapshot.view.match_by_id(id)?;
+            let path = item_text_path(found, id)?;
+            item_owned_text(&snapshot.source, &path)
+                .map_err(|error| CommandError::ItemTextRefused { error })
+        })
+    } // End of function match_item_text()
+
+    /// Replaces one match's owned physical-line range with exact text, and saves
+    /// the file (Phase 3-7, the local raw-item edit).
+    ///
+    /// The seventh method in this crate that can write a user's file, and it
+    /// writes it the same one way: through
+    /// [`espansoconfig_core::persist::save_document`], with exactly one
+    /// [`DocumentEdit::ReplaceItemText`] — a locality-preserving edit whose
+    /// verification proves every byte outside the range untouched. **It is not
+    /// [`WorkspaceSession::save_raw_document`] scrolled to a snippet**: that one
+    /// carries no locality claim, and this one is refused by the engine rather
+    /// than written whenever its claim would not hold (ruling 11).
+    ///
+    /// # What it refuses before it attempts anything
+    ///
+    /// - a `base_revision` that is not the revision this session holds —
+    ///   [`CommandError::IdentityStaleRevision`], through [`document_at`], for
+    ///   the reason every writing command shares;
+    /// - the identity refusals, unchanged.
+    ///
+    /// Everything the engine refuses — a range with holes, a `\r` in the range
+    /// or the text, zero or two items, an escaped line, either block-scalar
+    /// seam, a changed sibling, a result that does not parse — arrives as
+    /// [`CommandError::SaveFailed`] with the engine's [`EditError`] inside, and
+    /// **a result that does not parse is never offered the whole-document
+    /// editor's acknowledgeable `DocumentDoesNotParse` finding** (ruling 12).
+    /// There is no `force` flag.
+    ///
+    /// # What it answers with
+    ///
+    /// [`SaveResult`]. On a commit, [`SaveResult::Saved::moved`] is the edited
+    /// match's identity in the new revision, minted at the same path — the item
+    /// stays in its slot, and every identity the caller held for the file is
+    /// stale. `moved: None` on a commit says only that the item could not be
+    /// identified in the read that followed the write.
+    pub fn save_match_item_text(
+        &self,
+        id: MatchId,
+        base_revision: ContentRevision,
+        text: &str,
+        acknowledgement: &Acknowledgement,
+    ) -> Result<SaveResult, CommandError> {
+        self.with_open(|workspace, session_side| {
+            save_one_item_text(
+                workspace,
+                session_side,
+                id,
+                base_revision,
+                text,
+                acknowledgement,
+            )
+        })
+    } // End of function save_match_item_text()
 
     /// Lists the recognised backup batches of the open workspace.
     ///
@@ -2410,6 +2508,83 @@ fn duplicate_one_match(
     )
 } // End of function duplicate_one_match()
 
+/// The path a local raw-item read or save addresses the match `found` by.
+///
+/// [`item_address`]'s answer, re-joined into the item's own path. Its refusal
+/// names a *move*, so it is not leaked here: a match this projection cannot
+/// address as a sequence item crosses as [`CommandError::ItemTextRefused`]
+/// carrying [`EditError::NotASequenceItem`] for the match's own mapping node —
+/// the same negative claim, in the vocabulary the range derivation already
+/// uses. Unreachable through today's projection, for the reason
+/// [`CommandError::DuplicateSourceNotASequenceItem`] records.
+fn item_text_path(found: &MatchView, id: MatchId) -> Result<DocumentPath, CommandError> {
+    let (sequence, at) = item_address(found).map_err(|_| CommandError::ItemTextRefused {
+        error: EditError::NotASequenceItem {
+            edit: 0,
+            node: id.node,
+            kind: NodeKind::Mapping,
+        },
+    })?;
+    Ok(sequence.with_index(at))
+} // End of function item_text_path()
+
+/// Plans and runs one local raw-item save against an open workspace.
+///
+/// [`duplicate_one_match`]'s identity discipline exactly: resolve the snapshot
+/// through [`document_at`] first, address the held identity as a sequence
+/// item, construct exactly one [`ItemTextReplacement`], and hand it to the
+/// shared tail. The range itself is **not** derived here — the engine derives
+/// it again from the bytes under the write lock, and the base-revision check is
+/// what makes that the range the text was read from.
+///
+/// # Its conflict evidence is the item's own bytes
+///
+/// The replacement names one item and rewrites its whole range, so nothing
+/// weaker than exact item correspondence may stand in for it: a unique trigger
+/// would say *some* snippet with that trigger still exists, not that the bytes
+/// the person drafted against are still the ones on disk. It is placed after
+/// nothing, so it names no anchor.
+///
+/// # The landed address is the same slot
+///
+/// `at` is the item's own path: a replacement keeps the item in its slot, so
+/// [`after_a_save`] mints [`SaveResult::Saved::moved`] as the edited match's
+/// identity in the fresh revision.
+fn save_one_item_text(
+    workspace: &mut Workspace,
+    session_side: SessionSideOfASave<'_>,
+    id: MatchId,
+    base_revision: ContentRevision,
+    text: &str,
+    acknowledgement: &Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    // A stale identity is refused before it can be turned into an index that
+    // still resolves — to a different snippet, whose range would be replaced.
+    let base = document_at(workspace, id.document, base_revision)?;
+    let found = base.view.match_by_id(id)?;
+    let path = item_text_path(found, id)?;
+    let reapply = ReapplyRequest {
+        subject: ReapplyMode::anchored(base, found, ReapplyConfidence::ExactItem),
+        placement: PlacementMode::NotAnchored,
+    };
+    let edits = [DocumentEdit::ReplaceItemText(ItemTextReplacement::new(
+        path.clone(),
+        text,
+    ))];
+    run_one_save(
+        workspace,
+        session_side,
+        OneSave {
+            document: id.document,
+            base_revision,
+            content: SaveContent::Edits(&edits),
+            acknowledgement,
+            at: Some(&path),
+            reapply,
+        },
+    )
+} // End of function save_one_item_text()
+
 /// Hands one whole replacement text to the save transaction.
 ///
 /// A free function for [`move_one_match`]'s reason, and the shortest of the
@@ -3376,6 +3551,49 @@ pub fn duplicate_match(
 ) -> Result<SaveResult, CommandError> {
     session.duplicate_match(id, base_revision, &acknowledgement)
 } // End of function duplicate_match()
+
+/// Returns one match's owned physical-line range as text, cut in Rust, for the
+/// local raw editor (Phase 3-7).
+///
+/// A reader: it writes nothing and reads nothing from disk that
+/// [`document_text`] would not. See [`WorkspaceSession::match_item_text`].
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`], the identity codes — a stale identity
+/// among them — and [`CommandError::ItemTextRefused`] carrying the core's own
+/// refusal of the range.
+#[tauri::command]
+pub fn match_item_text(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+) -> Result<OwnedItemText, CommandError> {
+    session.match_item_text(id)
+} // End of function match_item_text()
+
+/// Replaces one match's owned physical-line range with exact text and saves the
+/// file (Phase 3-7, the local raw-item edit).
+///
+/// The arguments are [`duplicate_match`]'s plus `text`, the exact bytes the
+/// range is to hold — never an offset: the range is re-derived by the engine
+/// under the write lock. There is deliberately **no `force` flag**.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`] and the identity codes before anything is
+/// attempted; [`CommandError::SaveFailed`] for the transaction's own typed
+/// failures, the engine's refusals of the range and the text among them. A
+/// conflict and a refusal are **not** errors — see [`SaveResult`].
+#[tauri::command]
+pub fn save_match_item_text(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+    base_revision: ContentRevision,
+    text: String,
+    acknowledgement: Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    session.save_match_item_text(id, base_revision, &text, &acknowledgement)
+} // End of function save_match_item_text()
 
 /// Lists the recognised backup batches of the open workspace (design consult
 /// Q3).
@@ -7076,6 +7294,184 @@ mod tests {
         );
         assert_eq!(base_bytes(&dir), TWO_SNIPPETS, "a refusal writes nothing");
     } // End of function a_wide_creation_meets_the_saves_own_findings()
+
+    // -----------------------------------------------------------------------
+    // match_item_text and save_match_item_text — Phase 3-7
+    // -----------------------------------------------------------------------
+
+    /// The local raw pair's ordinary path: the range is cut in Rust, the
+    /// replacement lands in place, and the answer names the edited match.
+    ///
+    /// Item 1 of [`BASE_YML`] holds an unknown entry and a plain `yes`, so this
+    /// also pins that an unknown entry inside the range may stay or change at
+    /// the author's word, and that everything outside the range — the header
+    /// comment and item 0 — is byte-identical afterwards.
+    #[test]
+    fn a_raw_item_is_cut_in_rust_and_saved_in_place_naming_the_edited_match() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[1].id;
+
+        let read = session.match_item_text(held).expect("the range reads");
+        assert_eq!(
+            read.text,
+            "  - trigger: ':two'\n    replace: second\n    invented_by_a_later_espanso: yes\n"
+        );
+        assert_eq!((read.first_line, read.line_count), (5, 3));
+
+        let text =
+            "  - trigger: ':two'\n    replace: rewritten\n    invented_by_a_later_espanso: no\n";
+        let (revision, moved) = expect_saved(
+            session
+                .save_match_item_text(held, before.revision, text, &Acknowledgement::none())
+                .expect("the save commits"),
+            "raw item save",
+        );
+        assert_ne!(revision, before.revision);
+        assert_eq!(
+            base_bytes(&dir),
+            concat!(
+                "# A synthetic match file.\n",
+                "matches:\n",
+                "  - trigger: ':one'\n",
+                "    replace: first\n",
+                "  - trigger: ':two'\n",
+                "    replace: rewritten\n",
+                "    invented_by_a_later_espanso: no\n",
+            )
+        );
+        let moved = moved.expect("a committed raw item save names the edited match");
+        let found = session
+            .match_view(moved)
+            .expect("the answered identity resolves");
+        assert_eq!(trigger_text(&found), ":two");
+        assert_eq!(
+            found.path,
+            Some(
+                espansoconfig_core::patch::DocumentPath::root(0)
+                    .with_key("matches")
+                    .with_index(1)
+            ),
+            "the item stays in its slot"
+        );
+        assert_eq!(session.text(id).expect("the bytes read"), base_bytes(&dir));
+    } // End of function a_raw_item_is_cut_in_rust_and_saved_in_place_naming_the_edited_match()
+
+    /// A stale identity is refused by the read and by the save, and a stale
+    /// base revision by the save, before anything is attempted (D2v).
+    #[test]
+    fn a_stale_identity_is_refused_by_the_raw_item_read_and_save() {
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[0].id;
+
+        // Another save moves the file on; `held` and `before.revision` are now
+        // both from the previous parse.
+        let (_, moved) = expect_saved(
+            session
+                .save_match_item_text(
+                    before.matches[1].id,
+                    before.revision,
+                    "  - trigger: ':two'\n    replace: second\n",
+                    &Acknowledgement::none(),
+                )
+                .expect("the first save commits"),
+            "raw item save",
+        );
+        let written = base_bytes(&dir);
+
+        let read = session
+            .match_item_text(held)
+            .expect_err("a stale identity must not read");
+        assert_eq!(read.code(), "identityStaleRevision");
+        let save = session
+            .save_match_item_text(
+                held,
+                before.revision,
+                "  - trigger: ':one'\n    replace: mine\n",
+                &Acknowledgement::none(),
+            )
+            .expect_err("a stale identity must not save");
+        assert_eq!(save.code(), "identityStaleRevision");
+        // A fresh identity sent with the stale base revision is refused too.
+        let fresh = moved.expect("the first save named its match");
+        let save = session
+            .save_match_item_text(
+                fresh,
+                before.revision,
+                "  - trigger: ':two'\n    replace: mine\n",
+                &Acknowledgement::none(),
+            )
+            .expect_err("a stale base revision must not save");
+        assert_eq!(save.code(), "identityStaleRevision");
+        assert_eq!(
+            base_bytes(&dir),
+            written,
+            "no refused attempt wrote anything"
+        );
+    } // End of function a_stale_identity_is_refused_by_the_raw_item_read_and_save()
+
+    /// The engine's refusals cross as `saveFailed` on a save and as
+    /// `itemTextRefused` on a read, each carrying the core's `EditError`, and
+    /// neither writes.
+    #[test]
+    fn raw_item_refusals_cross_with_the_cores_own_code() {
+        use crate::error::CommandError;
+        use espansoconfig_core::patch::{EditError, VerificationFailure};
+        use espansoconfig_core::persist::SaveError;
+
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+
+        // A result that does not parse is refused by the engine — never offered
+        // the whole-document editor's acknowledgeable finding (ruling 12).
+        let error = session
+            .save_match_item_text(
+                before.matches[0].id,
+                before.revision,
+                "  - trigger: ':one\n",
+                &Acknowledgement::none(),
+            )
+            .expect_err("a text that does not parse is refused");
+        match error {
+            CommandError::SaveFailed {
+                error:
+                    SaveError::Patch(EditError::Verification(VerificationFailure::DoesNotParse(_))),
+            } => {}
+            other => panic!("expected the engine's parse refusal, got {other:?}"),
+        }
+        assert_eq!(base_bytes(&dir), BASE_YML);
+
+        // A range with a file-owned hole is refused on the read with the code a
+        // caller answers by offering the whole-document editor.
+        let holed = tree_holding(
+            "matches:\n  - trigger: ':one'\n    vars:\n      first: 'one'\n      \
+             # a note the file owns\n\n      second: 'two'\n    replace: x\n",
+        );
+        let session = open_session(&holed);
+        let id = id_of(&session, "match/base.yml");
+        let view = session.document(id).expect("the file reads");
+        match session.match_item_text(view.matches[0].id) {
+            Err(CommandError::ItemTextRefused {
+                error: EditError::ItemRangeNotContiguous { .. },
+            }) => {}
+            other => panic!("expected the hole refusal, got {other:?}"),
+        }
+        let serialized = serde_json::to_value(
+            session
+                .match_item_text(view.matches[0].id)
+                .expect_err("still refused"),
+        )
+        .expect("a command error serializes");
+        assert_eq!(serialized["code"], "itemTextRefused");
+        assert!(serialized["error"]["ItemRangeNotContiguous"]["hole"].is_object());
+    } // End of function raw_item_refusals_cross_with_the_cores_own_code()
 
     // -----------------------------------------------------------------------
     // duplicate_match — Phase 2c-3c-2

@@ -1408,7 +1408,7 @@ fn every_draft_error_variant_crosses_as_an_object() {
 /// bottom rather than taken on trust.
 #[test]
 fn every_edit_error_variant_crosses_as_an_object() {
-    for (name, count) in [("EditError", 44), ("SaveError", 10)] {
+    for (name, count) in [("EditError", 50), ("SaveError", 10)] {
         let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of(name);
         assert_eq!(
             declared.len(),
@@ -1524,8 +1524,15 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// and the one it is meant to be in: **there is no exception list here now, and
 /// a later step that needs one re-adds it with its own reason rather than
 /// finding an empty one already in place.**
+///
+/// Phase 3-7 adds `match_item_text` and `save_match_item_text`, taking the
+/// workspace surface to eighteen and the whole to nineteen. The writer is the
+/// seventh, and the restore ruling above is untouched by it: it is not a restore
+/// path, it is the local raw-item edit — a `DocumentEdit` through
+/// `SaveContent::Edits`, whose core primitive (`ItemTextReplacement`) closed in
+/// the same phase before the command was registered.
 #[test]
-fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_eighteen_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1534,8 +1541,8 @@ fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        16,
-        "the frontend declares ten read-only commands and six that write: {workspace:?}"
+        18,
+        "the frontend declares eleven read-only commands and seven that write: {workspace:?}"
     );
     assert!(
         workspace.contains("drain_external_changes"),
@@ -1549,6 +1556,7 @@ fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
         "delete_match",
         "save_raw_document",
         "duplicate_match",
+        "save_match_item_text",
     ];
     for mutating in writing {
         assert!(
@@ -1558,9 +1566,14 @@ fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
     }
     assert_eq!(
         writing.len(),
-        6,
-        "a restore is a content path on save_raw_document (Phase 2c-5 consult, Q1), so \
-         nothing may add a seventh writing command"
+        7,
+        "a restore is a content path on save_raw_document (Phase 2c-5 consult, Q1), and the \
+         seventh writer is Phase 3-7's local raw-item edit (ruling 11), so nothing may add \
+         an eighth writing command"
+    );
+    assert!(
+        workspace.contains("match_item_text") && !writing.contains(&"match_item_text"),
+        "match_item_text is Phase 3-7's reader and must be declared, never as a writer"
     );
     for read_only in [
         "list_backup_batches",
@@ -1584,8 +1597,8 @@ fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        17,
-        "Phase 2d-4a registers sixteen workspace commands and one menu command, and no more: {registered:?}"
+        19,
+        "Phase 3-7 registers eighteen workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1593,7 +1606,7 @@ fn the_registered_commands_are_the_workspace_sixteen_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_sixteen_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_eighteen_and_the_menu_command()
 
 /// The names no read of the backup tree may so much as mention.
 ///
@@ -2300,6 +2313,35 @@ fn verification_failure_samples() -> Vec<VerificationFailure> {
         VerificationFailure::EntriesNotInTheIntendedOrder { edit: 0, entry: 1 },
         VerificationFailure::ItemNotInserted { edit: 0, item: 1 },
         VerificationFailure::SequenceStyleChanged { edit: 0 },
+        VerificationFailure::ItemTextRangeNotOwned {
+            edit: 0,
+            at: a_span(),
+        },
+        VerificationFailure::ItemTextIsNotOneItem {
+            edit: 0,
+            expected: 3,
+            found: 4,
+        },
+        VerificationFailure::ItemTextIsNotAMapping {
+            edit: 0,
+            kind: NodeKind::Scalar,
+        },
+        VerificationFailure::ConstructChangedOutsideTheItemText {
+            edit: 0,
+            node: a_node(),
+        },
+        VerificationFailure::ItemTextExtendsPastItsRange {
+            edit: 0,
+            at: a_span(),
+        },
+        VerificationFailure::ItemTextEscapesTheItem {
+            edit: 0,
+            at: a_span(),
+        },
+        VerificationFailure::ItemTextIntroducesAHazard {
+            edit: 0,
+            hazard: HazardKind::AnchorDefinition,
+        },
     ]
 } // End of function verification_failure_samples()
 
@@ -2465,6 +2507,18 @@ fn edit_error_samples() -> Vec<EditError> {
         EditError::FlowListLayoutUnsupported {
             edit: 0,
             sequence: a_node(),
+        },
+        EditError::ItemTextMustBeTheOnlyEditInItsBatch { edit: 0, edits: 2 },
+        EditError::ItemRangeNotContiguous {
+            edit: 0,
+            hole: a_span(),
+        },
+        EditError::ItemTextHoldsCarriageReturn { edit: 0 },
+        EditError::ItemTextLosesItsFinalLineBreak { edit: 0 },
+        EditError::ItemTextEscapesItsIndentation { edit: 0, line: 1 },
+        EditError::ItemTextWouldExtendABlockScalar {
+            edit: 0,
+            block: a_node(),
         },
         EditError::Verification(VerificationFailure::DecoderDisagreement { edit: 0 }),
     ]
@@ -2675,6 +2729,18 @@ fn save_transaction_structs() -> Vec<(&'static str, Value)> {
                 placement: ReapplyPlacement::NotAnchored {},
             }),
         ),
+        // Phase 3-7's read answer: a real cut of a hand-written range, so the
+        // sample is what the engine produces rather than a literal of its shape.
+        (
+            "OwnedItemText",
+            json_of(
+                &espansoconfig_core::patch::item_owned_text(
+                    "matches:\n  - trigger: a\n",
+                    &DocumentPath::root(0).with_key("matches").with_index(0),
+                )
+                .expect("the one item is readable"),
+            ),
+        ),
     ]
 } // End of function save_transaction_structs()
 
@@ -2825,7 +2891,7 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 213,
+        variants, 226,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
          eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals, \
          Phase 2b-2c-2's fix round made PresentationNote a two-variant union, \
@@ -2843,7 +2909,9 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
          EditError::ShapeSwitchUnsupported and VerificationFailure::ItemNotInserted, \
          and Phase 3-3 added EditError::FlowListTriviaAmbiguous, \
          EditError::FlowListLayoutUnsupported and \
-         VerificationFailure::SequenceStyleChanged; \
+         VerificationFailure::SequenceStyleChanged, and Phase 3-7 added the local \
+         raw-item edit's thirteen — six EditError refusals and seven \
+         VerificationFailure properties; \
          this list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
@@ -3177,7 +3245,7 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (130, 12, 71),
+        (143, 12, 71),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
          and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
@@ -3196,7 +3264,8 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
          EntriesNotInTheIntendedOrder are two more, and so are Phase 3-2's \
          ShapeSwitchUnsupported and ItemNotInserted, and so are Phase 3-3's \
          FlowListTriviaAmbiguous, FlowListLayoutUnsupported and \
-         SequenceStyleChanged; \
+         SequenceStyleChanged, and Phase 3-7's thirteen raw-item variants are \
+         thirteen more; \
          a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
@@ -3475,7 +3544,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 213,
+        checked, 226,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

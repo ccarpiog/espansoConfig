@@ -160,9 +160,11 @@ the phase records under `docs/decisions/` hold the details.
   `committed: false` and `backup: None` are both legal on a success.
 - **A committed write is never afterwards reported as an error**, in TypeScript as well as Rust
   (`saveRawDocument` returns `RawSaveOutcome` for exactly this reason).
-- A raw save may write text the YAML parser rejects — the owner's settled ruling, so the app can repair
-  a file that is already broken. It comes back with an acknowledgeable `DocumentDoesNotParse` finding
-  content-addressed to that exact text, so consent for one draft cannot be spent on another.
+- A whole-document raw save (`save_raw_document`) may write text the YAML parser rejects — the owner's
+  settled ruling, so the app can repair a file that is already broken. It comes back with an
+  acknowledgeable `DocumentDoesNotParse` finding content-addressed to that exact text, so consent for
+  one draft cannot be spent on another. The local raw-item save (`save_match_item_text`, an
+  `ItemTextReplacement`) never does: a result that does not parse is an engine refusal (ruling 12).
 - All writing commands in `src-tauri/src/commands.rs` end in one `run_one_save`, which holds this
   layer's single cache-coherency policy. A new writer calls it; it is never copied.
 - **D2u:** the UI shows a scalar's source text as written, never an inferred type; flagging one as YAML

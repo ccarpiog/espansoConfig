@@ -56,6 +56,7 @@ use serde::{Serialize, Serializer};
 use espansoconfig_core::discovery::DiscoveryError;
 use espansoconfig_core::draft::DraftError;
 use espansoconfig_core::model::IdentityError;
+use espansoconfig_core::patch::EditError;
 use espansoconfig_core::persist::{BackupReadError, SaveError};
 use espansoconfig_core::wire::WirePath;
 use espansoconfig_core::workspace::WorkspaceError;
@@ -479,6 +480,27 @@ pub enum CommandError {
         /// reports it.
         error: BackupReadError,
     },
+    /// A snippet's owned range could not be handed out as text for the local
+    /// raw editor (Phase 3-7), for a reason the core's range derivation reports.
+    ///
+    /// **A refusal of the read, in the `Err` channel**, for
+    /// [`CommandError::DraftRefused`]'s reason: nothing was attempted and no
+    /// acknowledgement could change the answer. The refusal travels **whole** —
+    /// [`espansoconfig_core::patch::EditError`] already has its own `editError`
+    /// dictionary namespace, and the two answers a caller acts on are variants
+    /// of it: `ItemRangeNotContiguous` (the range has file-owned holes, so the
+    /// whole-document editor is offered instead, ruling 11) and
+    /// `ItemTextHoldsCarriageReturn` (the snippet's own text holds a `\r`,
+    /// ruling 12). A **save** of the same range that the engine refuses crosses
+    /// as [`CommandError::SaveFailed`] with the same `EditError` inside, because
+    /// there a transaction did run.
+    ///
+    /// It carries spans and counts only, never the snippet's text
+    /// (`CLAUDE.md` section 1).
+    ItemTextRefused {
+        /// Why the range could not be read, exactly as the core reports it.
+        error: EditError,
+    },
 } // End of enum CommandError
 
 impl CommandError {
@@ -512,6 +534,7 @@ impl CommandError {
             CommandError::UnaddressableBackupEntry { .. } => "unaddressableBackupEntry",
             CommandError::BackupEntryIsNotThisDocument { .. } => "backupEntryIsNotThisDocument",
             CommandError::BackupReadFailed { .. } => "backupReadFailed",
+            CommandError::ItemTextRefused { .. } => "itemTextRefused",
         }
     } // End of function code()
 } // End of impl CommandError
@@ -596,6 +619,9 @@ impl Serialize for CommandError {
             CommandError::BackupReadFailed { error } => {
                 out.serialize_field("error", error)?;
             }
+            CommandError::ItemTextRefused { error } => {
+                out.serialize_field("error", error)?;
+            }
         } // End of the match over the variants' operands
         out.end()
     } // End of function serialize() for CommandError
@@ -624,7 +650,10 @@ impl CommandError {
             | CommandError::BackupReadFailed { .. }
             // One operand, and it is the core's whole refusal: a `DraftError`
             // has no second question to answer the way `SaveFailed` does.
-            | CommandError::DraftRefused { .. } => 1,
+            | CommandError::DraftRefused { .. }
+            // One operand, the core's whole range refusal: a read writes
+            // nothing, so there is no `may_have_written` to add.
+            | CommandError::ItemTextRefused { .. } => 1,
             CommandError::Io { .. }
             | CommandError::NotUtf8 { .. }
             | CommandError::IdentityWrongDocument { .. }
@@ -727,6 +756,14 @@ pub(crate) fn every_command_error() -> Vec<CommandError> {
                     std::path::Path::new("match/base.yml"),
                 )
                 .expect("a relative path this catalogue can address"),
+            },
+        },
+        // Sampled with the refusal a caller answers by offering the
+        // whole-document editor, and it carries a span, never text.
+        CommandError::ItemTextRefused {
+            error: EditError::ItemRangeNotContiguous {
+                edit: 0,
+                hole: espansoconfig_core::ByteSpan::new(40, 90),
             },
         },
     ]

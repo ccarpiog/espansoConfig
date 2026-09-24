@@ -23,12 +23,15 @@
 //! Phase 2 opens the other direction. `commands::move_match` (2b-2a),
 //! `commands::save_match` (2b-2b-3), `commands::create_match` and
 //! `commands::delete_match` (both 2b-2c-2), `commands::save_raw_document`
-//! (2b-2c-3b) and `commands::duplicate_match` (2c-3c-2) are the six commands
-//! that can write a user's file, and every one of them does it through
+//! (2b-2c-3b) and `commands::duplicate_match` (2c-3c-2) were Phase 2's six
+//! commands that can write a user's file, and every one of them does it through
 //! `espansoconfig_core::persist::save_document` and through nothing else — see
 //! `commands` for why there is exactly one entry point. The fifth was the last
 //! of Phase 2b-2c; the sixth is Phase 2c-3c's true duplicate, riding the
-//! `DuplicateItem` primitive 2c-3c-1 built.
+//! `DuplicateItem` primitive 2c-3c-1 built. Phase 3-7 adds a seventh through the
+//! same one entry point — `commands::save_match_item_text`, the local raw-item
+//! edit, riding `ItemTextReplacement` — and its reader,
+//! `commands::match_item_text`, which cuts one snippet's owned range out in Rust.
 //!
 //! Phase 2c-5-2 adds three more, and **not one of them writes**:
 //! `commands::list_backup_batches`, `commands::list_backup_entries` and
@@ -200,10 +203,10 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// The original six workspace readers — read a workspace, list its files,
 /// project one, project one match, read one's bytes, re-read one — the three
 /// backup-catalogue commands `list_backup_batches`, `list_backup_entries` and
-/// `read_backup_text`, and Phase 2d-4a's `drain_external_changes` are
-/// read-only. The six save commands `move_match`,
-/// `save_match`, `create_match`, `delete_match`, `save_raw_document` and
-/// `duplicate_match` write, and every one of them does it through
+/// `read_backup_text`, Phase 2d-4a's `drain_external_changes` and Phase 3-7's
+/// `match_item_text` are read-only. The seven save commands `move_match`,
+/// `save_match`, `create_match`, `delete_match`, `save_raw_document`,
+/// `duplicate_match` and Phase 3-7's `save_match_item_text` write, and every one of them does it through
 /// `espansoconfig_core::persist::save_document` and through nothing else. The
 /// menu command, `set_menu_labels`, does not write a user file either: it hands
 /// the macOS menu the strings the frontend translated, because Tauri builds that
@@ -218,7 +221,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// the application publishes an ACL manifest of its own (`tauri::webview`'s
 /// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
 /// !is_local`). This crate publishes none, the webview's origin is local, and
-/// none of the seventeen commands is a plugin command, so none of them needs a
+/// none of the nineteen commands is a plugin command, so none of them needs a
 /// permission. The two event permissions are for the frontend's one event
 /// listener: Tauri's `listen` invokes the plugin command `plugin:event|listen`,
 /// and the unlisten function it resolves with invokes `plugin:event|unlisten`.
@@ -262,6 +265,8 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::list_backup_entries,
             commands::read_backup_text,
             commands::drain_external_changes,
+            commands::match_item_text,
+            commands::save_match_item_text,
             menu::set_menu_labels,
         ])
 } // End of function register()

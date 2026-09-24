@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T08:56:05Z",
+  "updated": "2026-09-24T09:34:40Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1015,8 +1015,11 @@
     {
       "id": "3-7",
       "title": "The local raw-item core edit",
-      "status": "queued",
-      "summary": "Queued: The local raw-item core edit."
+      "status": "done",
+      "summary": "Cuts one snippet's contiguous owned text in Rust and saves an exact replacement of it through the one save path, with named refusals.",
+      "risk": "high",
+      "review": "docs/reviews/phase-3-7.md",
+      "narrative": "docs/decisions/3-7-notes.md"
     },
     {
       "id": "3-8",

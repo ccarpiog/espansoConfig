@@ -110,15 +110,24 @@
 //! never converting it to block style; a comment or comma the rule cannot place
 //! is [`EditError::FlowListTriviaAmbiguous`]. Verification gains
 //! [`VerificationFailure::SequenceStyleChanged`] for every item edit.
+//!
+//! **3-7 — [`ItemTextReplacement`], the local raw-item edit.** One snippet's
+//! owned physical-line range, cut in Rust by [`item_owned_text`] and replaced by
+//! exact text as a [`DocumentEdit`], alone in its batch. The range must be one
+//! contiguous run ([`EditError::ItemRangeNotContiguous`] otherwise) and hold no
+//! `\r`; the candidate must hold exactly one mapping item in the slot, change
+//! no construct outside it, keep both block-scalar seams and every comment's
+//! owner, and parse — a result that does not parse is never saved this way.
 
 pub mod edit;
 pub mod path;
 
 pub use edit::{
     apply_edits, apply_scalar_edit, apply_scalar_edits, duplicate_item, insert_field, insert_item,
-    insertion_landings, item_positions, move_item, remove_field, remove_item, DocumentEdit,
-    DuplicateItem, DuplicateSeam, EditError, EntryValue, FieldInsert, FieldInsertGroup,
-    FieldRemoval, InsertItem, ItemMove, ItemPlacement, KeySubstitution, MoveSeam, PatchedDocument,
+    insertion_landings, item_owned_text, item_positions, move_item, remove_field, remove_item,
+    replace_item_text, DocumentEdit, DuplicateItem, DuplicateSeam, EditError, EntryValue,
+    FieldInsert, FieldInsertGroup, FieldRemoval, InsertItem, ItemMove, ItemPlacement,
+    ItemTextReplacement, KeySubstitution, MoveSeam, OwnedItemText, PatchedDocument,
     PresentationNote, RemoveItem, Replacement, ScalarEdit, ScalarItemInsert, ShapeSwitch,
     VerificationFailure,
 };

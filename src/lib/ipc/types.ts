@@ -973,7 +973,14 @@ export type VerificationFailureName =
   | 'ConstructChangedOutsideTheDuplicate'
   | 'EntriesNotInTheIntendedOrder'
   | 'ItemNotInserted'
-  | 'SequenceStyleChanged';
+  | 'SequenceStyleChanged'
+  | 'ItemTextRangeNotOwned'
+  | 'ItemTextIsNotOneItem'
+  | 'ItemTextIsNotAMapping'
+  | 'ConstructChangedOutsideTheItemText'
+  | 'ItemTextExtendsPastItsRange'
+  | 'ItemTextEscapesTheItem'
+  | 'ItemTextIntroducesAHazard';
 
 /**
  * Why a candidate document was rejected after being reparsed.
@@ -1056,7 +1063,30 @@ export type VerificationFailure =
     }
   | { readonly EntriesNotInTheIntendedOrder: { readonly edit: number; readonly entry: number } }
   | { readonly ItemNotInserted: { readonly edit: number; readonly item: number } }
-  | { readonly SequenceStyleChanged: { readonly edit: number } };
+  | { readonly SequenceStyleChanged: { readonly edit: number } }
+  | { readonly ItemTextRangeNotOwned: { readonly edit: number; readonly at: ByteSpan } }
+  | {
+      readonly ItemTextIsNotOneItem: {
+        readonly edit: number;
+        readonly expected: number;
+        readonly found: number;
+      };
+    }
+  | { readonly ItemTextIsNotAMapping: { readonly edit: number; readonly kind: NodeKind } }
+  | {
+      readonly ConstructChangedOutsideTheItemText: {
+        readonly edit: number;
+        readonly node: NodeId;
+      };
+    }
+  | { readonly ItemTextExtendsPastItsRange: { readonly edit: number; readonly at: ByteSpan } }
+  | { readonly ItemTextEscapesTheItem: { readonly edit: number; readonly at: ByteSpan } }
+  | {
+      readonly ItemTextIntroducesAHazard: {
+        readonly edit: number;
+        readonly hazard: HazardKind;
+      };
+    };
 
 /** The name of every {@link EditError} variant. */
 export type EditErrorName =
@@ -1103,6 +1133,12 @@ export type EditErrorName =
   | 'ShapeSwitchUnsupported'
   | 'FlowListTriviaAmbiguous'
   | 'FlowListLayoutUnsupported'
+  | 'ItemTextMustBeTheOnlyEditInItsBatch'
+  | 'ItemRangeNotContiguous'
+  | 'ItemTextHoldsCarriageReturn'
+  | 'ItemTextLosesItsFinalLineBreak'
+  | 'ItemTextEscapesItsIndentation'
+  | 'ItemTextWouldExtendABlockScalar'
   | 'Verification';
 
 /** Why a change was not applied to a document's bytes. */
@@ -1249,6 +1285,17 @@ export type EditError =
       };
     }
   | { readonly FlowListLayoutUnsupported: { readonly edit: number; readonly sequence: NodeId } }
+  | {
+      readonly ItemTextMustBeTheOnlyEditInItsBatch: {
+        readonly edit: number;
+        readonly edits: number;
+      };
+    }
+  | { readonly ItemRangeNotContiguous: { readonly edit: number; readonly hole: ByteSpan } }
+  | { readonly ItemTextHoldsCarriageReturn: { readonly edit: number } }
+  | { readonly ItemTextLosesItsFinalLineBreak: { readonly edit: number } }
+  | { readonly ItemTextEscapesItsIndentation: { readonly edit: number; readonly line: number } }
+  | { readonly ItemTextWouldExtendABlockScalar: { readonly edit: number; readonly block: NodeId } }
   | { readonly Verification: VerificationFailure };
 
 /** The name of every {@link FindingCode} variant. */
@@ -1414,6 +1461,28 @@ export interface Finding {
 export interface Acknowledgement {
   /** The suspicions the caller accepted, in the order it supplied them. */
   readonly accepted: readonly Finding[];
+}
+
+/**
+ * One snippet's owned physical-line range, cut in Rust and handed out as text
+ * for the local raw editor (Phase 3-7) — `match_item_text`'s answer.
+ *
+ * **It carries no byte offset**, and no caller may cut one out of any other
+ * string: a byte span is not a JavaScript string index. The save sends the text
+ * back with the match's identity and the base revision, and Rust re-derives the
+ * range itself. The two line numbers are display data only.
+ */
+export interface OwnedItemText {
+  /**
+   * The range's exact text — leading comment block, dash, every line of the
+   * item and each line's own terminator. Never holds a `\r`: such a range is
+   * refused by the read.
+   */
+  readonly text: string;
+  /** The physical line the range starts on, one-based. */
+  readonly first_line: number;
+  /** How many physical lines the range covers. */
+  readonly line_count: number;
 }
 
 /** Why the semantic gate refused a save, with its evidence. */

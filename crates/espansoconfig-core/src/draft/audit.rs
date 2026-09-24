@@ -158,6 +158,10 @@ pub fn check_closed_surface(
             // Refused as outside the surface rather than by a name of its own,
             // because that is what it is: the surface has no shape for them.
             DocumentEdit::InsertItem(_) | DocumentEdit::DuplicateItem(_) => false,
+            // A local raw-item replacement writes a whole item as authored text
+            // (Phase 3-7). It is its own command's edit, never a draft's, and a
+            // draft batch holding one is outside the surface by construction.
+            DocumentEdit::ReplaceItemText(_) => false,
         };
         if !within {
             return Err(DraftError::OutsideTheClosedSurface { edit: position });
@@ -363,13 +367,14 @@ fn check_every_named_key_is_unique(
             // follows it.
             DocumentEdit::InsertScalarItems(insert) => named_key_in_parent(insert.sequence()),
             DocumentEdit::RemoveItem(removal) => named_key_in_parent(removal.item()),
-            // None of the three names a key in a parent mapping that the surface
-            // admits: a move, a duplicate and a mapping-item insertion address a
-            // **position**, and `check_closed_surface` has already refused all
-            // three.
+            // None of the four names a key in a parent mapping that the surface
+            // admits: a move, a duplicate, a mapping-item insertion and a raw
+            // item replacement address a **position**, and
+            // `check_closed_surface` has already refused all four.
             DocumentEdit::MoveItem(_)
             | DocumentEdit::InsertItem(_)
-            | DocumentEdit::DuplicateItem(_) => None,
+            | DocumentEdit::DuplicateItem(_)
+            | DocumentEdit::ReplaceItemText(_) => None,
         };
         let Some((parent, key)) = named else {
             continue;

@@ -1,5 +1,5 @@
 /**
- * The sixteen workspace commands, typed.
+ * The eighteen workspace commands, typed.
  *
  * One function per `#[tauri::command]` in `src-tauri/src/commands.rs`, with the
  * command's wire name written once, here, and nowhere else in the frontend.
@@ -17,12 +17,13 @@
  * R27). A `try`/`catch` around an `invoke` is exactly the shape that turns the
  * first into the second.
  *
- * ## Six of them write
+ * ## Seven of them write
  *
  * {@link moveMatch}, since Phase 2b-2a; {@link saveMatch}, since 2b-2b-3;
  * {@link createMatch} and {@link deleteMatch}, since 2b-2c-2;
- * {@link saveRawDocument}, since 2b-2c-3b; and {@link duplicateMatch}, since
- * 2c-3c-2. They are the only functions in this application that can change a
+ * {@link saveRawDocument}, since 2b-2c-3b; {@link duplicateMatch}, since
+ * 2c-3c-2; and {@link saveMatchItemText}, the local raw-item edit, since 3-7.
+ * They are the only functions in this application that can change a
  * file on disk, and what each answers with is a {@link SaveResult} in the value
  * channel rather than a thrown error: a save that was refused, and a save that
  * found the file had moved on, are **outcomes** and not failures.
@@ -84,6 +85,7 @@ import type {
   MatchView,
   NewMatch,
   NewMatchPosition,
+  OwnedItemText,
   ReconciliationBatch,
   SaveResult,
   WorkspaceSummary
@@ -118,7 +120,9 @@ export const COMMAND_NAMES = [
   'list_backup_batches',
   'list_backup_entries',
   'read_backup_text',
-  'drain_external_changes'
+  'drain_external_changes',
+  'match_item_text',
+  'save_match_item_text'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -776,6 +780,70 @@ export async function duplicateMatch(
 ): Promise<CommandResult<SaveResult>> {
   return call<SaveResult>('duplicate_match', { id, baseRevision, acknowledgement });
 } // End of function duplicateMatch()
+
+/**
+ * Reads one snippet's owned physical-line range as text, cut in Rust, for the
+ * local raw editor (Phase 3-7).
+ *
+ * Writes nothing. The range — leading comment block, dash, every line of the
+ * snippet and each line's own terminator — is sliced in Rust, because a byte
+ * span is not a JavaScript string index; no caller slices it out of the
+ * document's text itself.
+ *
+ * ## What a rejection means
+ *
+ * `itemTextRefused` carries the core's `EditError`. Its
+ * `ItemRangeNotContiguous` means the snippet's range has comments the file owns
+ * inside it, so the whole-document editor is the way to edit it; its
+ * `ItemTextHoldsCarriageReturn` means the snippet's own text holds a carriage
+ * return, which a text box cannot carry. A stale identity is
+ * `identityStaleRevision`.
+ *
+ * @param id - The snippet, by identity.
+ * @returns The range's text with its display line numbers, or a failure —
+ *   `noWorkspaceOpen`, an identity code, or `itemTextRefused`.
+ */
+export async function matchItemText(id: MatchId): Promise<CommandResult<OwnedItemText>> {
+  return call<OwnedItemText>('match_item_text', { id });
+} // End of function matchItemText()
+
+/**
+ * Replaces one snippet's owned range with exact text, and saves the file
+ * (Phase 3-7, the local raw-item edit).
+ *
+ * **Not a whole-document replacement scrolled to the snippet.** Rust re-derives
+ * the range from the file under the write lock and proves every byte outside it
+ * untouched, or refuses; the text is written exactly as sent, never normalized
+ * or re-indented. A text that does not parse, holds no snippet or two, reaches
+ * outside the snippet's indentation, changes a neighbour or holds a carriage
+ * return is refused by the engine and arrives as `saveFailed` carrying its
+ * `EditError` — never as an acknowledgeable finding. There is deliberately
+ * **no force flag**.
+ *
+ * ## `saved.moved` is the edited snippet
+ *
+ * Every {@link MatchId} held for this file is stale after a commit;
+ * `saved.moved` is the edited snippet's identity in the new revision, in the
+ * same slot. `null` on a commit means only that it could not be identified in
+ * the read that followed the write.
+ *
+ * @param id - The snippet, by identity.
+ * @param baseRevision - The revision the text was read against. Checked against
+ *   this session's projection and again against the bytes under the write lock.
+ * @param text - The exact text the range is to hold.
+ * @param acknowledgement - The suspicions already shown to a person, by
+ *   content. Pass `{ accepted: [] }` on a first attempt.
+ * @returns How the save ended, or a failure — `noWorkspaceOpen`, an identity
+ *   code, or `saveFailed`.
+ */
+export async function saveMatchItemText(
+  id: MatchId,
+  baseRevision: ContentRevision,
+  text: string,
+  acknowledgement: Acknowledgement
+): Promise<CommandResult<SaveResult>> {
+  return call<SaveResult>('save_match_item_text', { id, baseRevision, text, acknowledgement });
+} // End of function saveMatchItemText()
 
 /**
  * Lists the recognised backup batches of the open workspace, newest name first.

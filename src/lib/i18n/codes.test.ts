@@ -342,6 +342,10 @@ const COMMAND_ERRORS = [
         }
       }
     }
+  },
+  {
+    code: 'itemTextRefused',
+    error: { ItemRangeNotContiguous: { edit: 0, hole: { start: 40, end: 90 } } }
   }
 ] as const satisfies readonly CommandError[];
 
@@ -568,7 +572,7 @@ describe('the sample tables', () => {
       valueKinds: 5,
       documentShapes: 3,
       matchBadges: 10,
-      commandErrors: 21,
+      commandErrors: 22,
       scalarStyles: 5,
       lineEndings: 2,
       fileKinds: 3,

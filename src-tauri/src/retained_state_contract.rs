@@ -365,7 +365,7 @@ const INVENTORY: &[Judged] = &[
     Judged {
         file: "crates/espansoconfig-core/src/patch/edit.rs",
         phrase: "in lockstep",
-        count: 5,
+        count: 6,
         reason: "false positive: the patch engine walking two parses node for node — an execution statement about a walk",
     },
     Judged {
@@ -373,6 +373,12 @@ const INVENTORY: &[Judged] = &[
         phrase: "in one block",
         count: 4,
         reason: "false positive: two positions in one block sequence sitting at the same column, which is a column argument",
+    },
+    Judged {
+        file: "crates/espansoconfig-core/src/patch/edit/raw_item.rs",
+        phrase: "in lockstep",
+        count: 2,
+        reason: "false positive: the raw-item edit walking two parses node for node with the item's slot skipped — an execution statement about a walk",
     },
     Judged {
         file: "crates/espansoconfig-core/src/persist/backup.rs",

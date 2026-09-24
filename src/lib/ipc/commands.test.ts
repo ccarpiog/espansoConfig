@@ -1,5 +1,5 @@
 /**
- * The sixteen command wrappers, against a stubbed `invoke`.
+ * The eighteen command wrappers, against a stubbed `invoke`.
  *
  * What is under test here is the *boundary*, not the Rust behind it: which
  * command name each wrapper calls, which arguments it sends, and — the part
@@ -71,11 +71,13 @@ const {
   listBackupBatches,
   listBackupEntries,
   listDocuments,
+  matchItemText,
   moveMatch,
   openWorkspace,
   readBackupText,
   reloadDocument,
   saveMatch,
+  saveMatchItemText,
   saveRawDocument
 } = commands;
 
@@ -155,7 +157,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the sixteen wire names, in order, and export no seventeenth wrapper', async () => {
+  it('call the eighteen wire names, in order, and export no nineteenth wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -179,6 +181,8 @@ describe('the command wrappers', () => {
     await listBackupEntries(BATCH_ID);
     await readBackupText(ENTRY_ID, 1);
     await drainExternalChanges(0);
+    await matchItemText(IDENTITY);
+    await saveMatchItemText(IDENTITY, 'a'.repeat(64), '  - trigger: a\n', { accepted: [] });
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
       'createMatch',
@@ -191,14 +195,16 @@ describe('the command wrappers', () => {
       'listBackupBatches',
       'listBackupEntries',
       'listDocuments',
+      'matchItemText',
       'moveMatch',
       'openWorkspace',
       'readBackupText',
       'reloadDocument',
       'saveMatch',
+      'saveMatchItemText',
       'saveRawDocument'
     ]);
-  }); // End of the "call the sixteen wire names" case
+  }); // End of the "call the eighteen wire names" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence
@@ -356,6 +362,26 @@ describe('the command wrappers', () => {
     });
     expect(JSON.stringify(calls[0]?.args)).not.toContain('force');
   }); // End of the "duplicate arguments" case
+
+  it('sends a raw item read as an identity and its save as identity, revision, text and acknowledgement', async () => {
+    // Phase 3-7. The read takes the identity alone — no offset, no path, no
+    // range: Rust cuts the range. The save sends the text exactly as given and
+    // nothing that could name a position or waive a finding.
+    await matchItemText(IDENTITY);
+    expect(calls[0]?.command).toBe('match_item_text');
+    expect(calls[0]?.args).toEqual({ id: IDENTITY });
+
+    const text = '  # a note\n  - trigger: a\n    replace: b\n';
+    await saveMatchItemText(IDENTITY, 'f'.repeat(64), text, { accepted: [] });
+    expect(calls[1]?.command).toBe('save_match_item_text');
+    expect(calls[1]?.args).toEqual({
+      id: IDENTITY,
+      baseRevision: 'f'.repeat(64),
+      text,
+      acknowledgement: { accepted: [] }
+    });
+    expect(JSON.stringify(calls[1]?.args)).not.toContain('force');
+  }); // End of the "raw item arguments" case
 
   it('send the arguments the Rust signatures declare', async () => {
     await openWorkspace('/Users/somebody/.config/espanso');

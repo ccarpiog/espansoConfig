@@ -279,6 +279,17 @@
 //! [`VerificationFailure::SequenceStyleChanged`] for **every** item edit: the
 //! reparsed sequence must have the collection style it had.
 //!
+//! # Phase 3-7 — the local raw-item edit
+//!
+//! An [`ItemTextReplacement`] replaces one sequence item's **owned physical-line
+//! range** — the lift's own envelope, required to be a single run — with exact
+//! text, and [`item_owned_text`] cuts that range out for a caller to draft
+//! from. It is a locality-preserving edit, never a whole-document replacement
+//! scrolled to the snippet (the Phase 3 design consult's Q4, rulings 11 and 12),
+//! and it is planned, spliced and verified in `patch/edit/raw_item.rs`, whose
+//! module documentation lists every refusal and every property. It is alone in
+//! its batch, like a move and a duplicate.
+//!
 //! # What is *not* here
 //!
 //! Cross-**document** and cross-**file** moves (plan section 8.4, a UI-phase
@@ -304,6 +315,9 @@ use crate::syntax::{
 use crate::LineEnding;
 
 mod flow;
+mod raw_item;
+
+pub use raw_item::{item_owned_text, ItemTextReplacement, OwnedItemText};
 
 // ---------------------------------------------------------------------------
 // The request
@@ -1388,6 +1402,9 @@ pub enum DocumentEdit {
     InsertScalarItems(ScalarItemInsert),
     /// Switch one entry between a scalar and a block list, renaming its key.
     SwitchShape(ShapeSwitch),
+    /// Replace one sequence item's owned physical-line range with exact text
+    /// (Phase 3-7, the local raw-item edit). Alone in its batch.
+    ReplaceItemText(ItemTextReplacement),
 }
 
 impl From<ScalarEdit> for DocumentEdit {
@@ -1453,6 +1470,12 @@ impl From<ScalarItemInsert> for DocumentEdit {
 impl From<ShapeSwitch> for DocumentEdit {
     fn from(edit: ShapeSwitch) -> DocumentEdit {
         DocumentEdit::SwitchShape(edit)
+    }
+}
+
+impl From<ItemTextReplacement> for DocumentEdit {
+    fn from(edit: ItemTextReplacement) -> DocumentEdit {
+        DocumentEdit::ReplaceItemText(edit)
     }
 }
 
@@ -2406,6 +2429,80 @@ pub enum EditError {
         /// The flow sequence.
         sequence: NodeId,
     },
+    /// A local raw-item replacement shares its batch with another edit (Phase
+    /// 3-7).
+    ///
+    /// Its verification is the original document with one range replaced, and
+    /// nothing else in a batch is modelled by that expectation — the move's and
+    /// the duplicate's batch rule, for the same reason.
+    ItemTextMustBeTheOnlyEditInItsBatch {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// How many edits the batch holds.
+        edits: usize,
+    },
+    /// The item's owned range is not contiguous: the ownership rules give a
+    /// comment inside its hull to the file, so the range is several runs with
+    /// file-owned holes between them (Phase 3-7, ruling 11).
+    ///
+    /// Concatenating the runs into one text and redistributing edited text
+    /// afterwards would invent a mapping between old and new text, so the local
+    /// raw edit refuses the shape — on the read and on the edit alike — and a
+    /// caller offers the whole-document editor instead. Carries the first
+    /// hole's byte span, never its text.
+    ItemRangeNotContiguous {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The first file-owned region between two runs of the range.
+        hole: ByteSpan,
+    },
+    /// The item's owned range, or the replacement text, holds a carriage return
+    /// (Phase 3-7, ruling 12).
+    ///
+    /// A text box normalizes every line break to LF, so a range holding a `\r`
+    /// cannot be drafted without reformatting it, and a replacement holding one
+    /// did not come from such a box. Only the snippet's own text is examined: a
+    /// `\r` elsewhere in the document does not refuse an LF-only snippet.
+    ItemTextHoldsCarriageReturn {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+    },
+    /// The replacement text does not end with the line break the range ends
+    /// with, and bytes follow the range (Phase 3-7).
+    ///
+    /// The line after the range would join the text's last line — a change to a
+    /// neighbour nobody asked for. Nothing adds the break back: submitted text
+    /// is never reconstructed.
+    ItemTextLosesItsFinalLineBreak {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+    },
+    /// A content line of the replacement text sits left of the item's dash
+    /// column, so it would belong to something outside the item (Phase 3-7).
+    ///
+    /// Comment lines and blank lines are not judged here: whether the item owns
+    /// a comment is the ownership layer's answer, asked of the reparsed
+    /// candidate. Identified by line position within the submitted text, never
+    /// by the line.
+    ItemTextEscapesItsIndentation {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The offending line of the replacement text, zero-based.
+        line: usize,
+    },
+    /// The replacement text's first non-blank line would become content of a
+    /// block scalar that ends directly above the range — the opening seam
+    /// (Phase 3-7).
+    ///
+    /// The closing seam is verification's, because the block that could swallow
+    /// the line below the range is one the text itself writes:
+    /// [`VerificationFailure::ItemTextExtendsPastItsRange`].
+    ItemTextWouldExtendABlockScalar {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The block scalar, in the original document, that would absorb it.
+        block: NodeId,
+    },
     /// The candidate document failed verification and was discarded.
     Verification(VerificationFailure),
 }
@@ -3041,6 +3138,82 @@ pub enum VerificationFailure {
         /// Position of the edit in the requested batch.
         edit: usize,
     },
+    /// The range a local raw-item edit planned is not the single run the text
+    /// says the item owns (Phase 3-7).
+    ///
+    /// The planner's range is the lift's envelope; this is `entry_owned_runs`,
+    /// derived from the node spans and the text without consulting the envelope.
+    /// The two agree for every item the engine accepts, and a disagreement is a
+    /// planning defect rather than a request to refuse. Carries the first run
+    /// that differs.
+    ItemTextRangeNotOwned {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The first owned run that is not the planned range.
+        at: ByteSpan,
+    },
+    /// The item's slot does not hold exactly one item after a local raw-item
+    /// edit: the text wrote none, or several, or took a neighbour with it
+    /// (Phase 3-7).
+    ItemTextIsNotOneItem {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// How many items the sequence held.
+        expected: usize,
+        /// How many it holds now; zero when the sequence is gone.
+        found: usize,
+    },
+    /// The item a local raw-item edit wrote is not a mapping (Phase 3-7).
+    ItemTextIsNotAMapping {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// What the slot holds instead.
+        kind: NodeKind,
+    },
+    /// A construct outside the replaced item decodes differently after a local
+    /// raw-item edit: another match, a key beside `matches`, or anything else
+    /// the two parses no longer agree on (Phase 3-7).
+    ///
+    /// Walked in lockstep with the item's own slot skipped. Carries the
+    /// candidate node at which the two disagree, never a value.
+    ConstructChangedOutsideTheItemText {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The candidate node that is not what the original said.
+        node: NodeId,
+    },
+    /// The item a local raw-item edit wrote owns lines outside the written text
+    /// — the closing seam: a block scalar at the end of the text swallowed what
+    /// follows, or the item's leading comment walk climbed above it (Phase 3-7).
+    ItemTextExtendsPastItsRange {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The item's own lines, or its first owned run, in the candidate.
+        at: ByteSpan,
+    },
+    /// The written text holds bytes the item it wrote does not own — a line
+    /// that became part of something else, a trailing blank line, or a comment
+    /// the file owns (Phase 3-7). The escape, read off the candidate.
+    ItemTextEscapesTheItem {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The first owned run that differs from the written text, in the
+        /// candidate.
+        at: ByteSpan,
+    },
+    /// The sequence a local raw-item edit changed now raises a hazard the gate
+    /// would refuse — an anchor, an alias, a merge key, a tag or any other
+    /// (Phase 3-7).
+    ///
+    /// The original sequence raised none, or the edit would have been refused
+    /// before planning; an anchor written into the item could re-bind an alias
+    /// elsewhere, which no comparison of decoded values can see.
+    ItemTextIntroducesAHazard {
+        /// Position of the edit in the requested batch.
+        edit: usize,
+        /// The hazard the candidate raises.
+        hazard: HazardKind,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -3289,6 +3462,34 @@ impl fmt::Display for EditError {
                 "edit {edit}: flow list {} is laid out in a way item edits do not support",
                 sequence.get()
             ),
+            EditError::ItemTextMustBeTheOnlyEditInItsBatch { edit, edits } => write!(
+                formatter,
+                "edit {edit}: a raw item replacement must be the only edit in its batch, and \
+                 this batch holds {edits}"
+            ),
+            EditError::ItemRangeNotContiguous { edit, hole } => write!(
+                formatter,
+                "edit {edit}: the item's owned range has a file-owned hole at bytes {}..{}",
+                hole.start, hole.end
+            ),
+            EditError::ItemTextHoldsCarriageReturn { edit } => write!(
+                formatter,
+                "edit {edit}: the item's owned range or its replacement holds a carriage return"
+            ),
+            EditError::ItemTextLosesItsFinalLineBreak { edit } => write!(
+                formatter,
+                "edit {edit}: the replacement drops the line break the range ends with"
+            ),
+            EditError::ItemTextEscapesItsIndentation { edit, line } => write!(
+                formatter,
+                "edit {edit}: line {line} of the replacement sits left of the item's dash column"
+            ),
+            EditError::ItemTextWouldExtendABlockScalar { edit, block } => write!(
+                formatter,
+                "edit {edit}: the replacement's first line would become content of the block \
+                 scalar at node {}",
+                block.get()
+            ),
             EditError::Verification(failure) => write!(formatter, "{failure}"),
         }
     } // End of function fmt() for EditError
@@ -3476,6 +3677,42 @@ impl fmt::Display for VerificationFailure {
                 "edit {edit}: a list the batch changed the items of is no longer written in its \
                  own style"
             ),
+            VerificationFailure::ItemTextRangeNotOwned { edit, at } => write!(
+                formatter,
+                "edit {edit}: the planned range is not the run the item owns ({}..{})",
+                at.start, at.end
+            ),
+            VerificationFailure::ItemTextIsNotOneItem {
+                edit,
+                expected,
+                found,
+            } => write!(
+                formatter,
+                "edit {edit}: the sequence held {expected} items and now holds {found}"
+            ),
+            VerificationFailure::ItemTextIsNotAMapping { edit, kind } => write!(
+                formatter,
+                "edit {edit}: the item's slot holds a {kind:?}, not a mapping"
+            ),
+            VerificationFailure::ConstructChangedOutsideTheItemText { edit, node } => write!(
+                formatter,
+                "edit {edit}: candidate node {} outside the item no longer matches the original",
+                node.get()
+            ),
+            VerificationFailure::ItemTextExtendsPastItsRange { edit, at } => write!(
+                formatter,
+                "edit {edit}: the written item owns bytes {}..{}, outside the written text",
+                at.start, at.end
+            ),
+            VerificationFailure::ItemTextEscapesTheItem { edit, at } => write!(
+                formatter,
+                "edit {edit}: the written text holds bytes the item does not own ({}..{})",
+                at.start, at.end
+            ),
+            VerificationFailure::ItemTextIntroducesAHazard { edit, hazard } => write!(
+                formatter,
+                "edit {edit}: the changed sequence now raises the hazard {hazard:?}"
+            ),
         }
     } // End of function fmt() for VerificationFailure
 }
@@ -3657,6 +3894,30 @@ pub fn duplicate_item(source: &str, item: &DocumentPath) -> Result<PatchedDocume
     )
 } // End of function duplicate_item()
 
+/// Replaces one sequence item's owned range with exact text, returning the
+/// verified candidate document.
+///
+/// A convenience over [`apply_edits`] with a one-element batch holding an
+/// [`ItemTextReplacement`] (Phase 3-7); every rule and every check is the same.
+///
+/// # Errors
+///
+/// See [`EditError`], and the module documentation of the raw-item edit for the
+/// refusals and verification failures that are its own.
+pub fn replace_item_text(
+    source: &str,
+    item: &DocumentPath,
+    text: &str,
+) -> Result<PatchedDocument, EditError> {
+    apply_edits(
+        source,
+        &[DocumentEdit::ReplaceItemText(ItemTextReplacement::new(
+            item.clone(),
+            text,
+        ))],
+    )
+}
+
 /// Applies a batch of edits of **any kind** to one document and verifies it.
 ///
 /// This is the batch protocol itself, and [`apply_scalar_edits`] is a wrapper
@@ -3741,6 +4002,21 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
                     });
                 }
                 plan_move(source, &index, &trivia, position, relocation)?
+            }
+            DocumentEdit::ReplaceItemText(replacement) => {
+                // Phase 3-7: the local raw-item edit. The move's batch rule, and
+                // then a path of its own — planned, spliced and verified in
+                // `raw_item`, because its expectation is the original document
+                // with one range replaced and nothing else in this loop models
+                // that. Being alone, it is the whole batch, so its answer is
+                // this function's.
+                if edits.len() != 1 {
+                    return Err(EditError::ItemTextMustBeTheOnlyEditInItsBatch {
+                        edit: position,
+                        edits: edits.len(),
+                    });
+                }
+                return raw_item::apply_item_text(source, &index, &trivia, position, replacement);
             }
             DocumentEdit::DuplicateItem(duplicate) => {
                 // The same batch rule as the move's, for the same reason and
@@ -8795,7 +9071,7 @@ fn verify(
     // scalars included, so the differential budget counts its subtree twice —
     // see the doc comment on the function for why that is not a weakening.
     let copied: Vec<NodeId> = duplicates.iter().map(|copy| copy.item).collect();
-    no_ambiguous_plain_scalar_is_introduced(original, &index, &copied)?;
+    no_ambiguous_plain_scalar_is_introduced(original, &index, &copied, &[])?;
     for relocation in moves {
         the_arrival_is_the_departure(source, original, replacements, relocation)?;
         document_lines_are_conserved(source, candidate)?;
@@ -9340,6 +9616,15 @@ fn file_comments_survive(
 /// scalar, and a duplicate writes none — its bytes are the source's own, which
 /// [`the_arrival_is_the_copy`] pins byte for byte.
 ///
+/// # An authored item is not charged, and nothing else is exempted
+///
+/// `authored` names **candidate** subtrees whose bytes a person wrote as-is —
+/// the item a [`ItemTextReplacement`] wrote (Phase 3-7). The property exists to
+/// catch an emitter's choice, and no emitter chose those bytes; the
+/// whole-document editor takes the same stance. Every candidate scalar outside
+/// those subtrees is charged exactly as before, so the property still says no
+/// edit introduced an ambiguous plain scalar anywhere it did not author.
+///
 /// # Errors
 ///
 /// [`VerificationFailure::AmbiguousPlainScalarIntroduced`], carrying the offset
@@ -9348,6 +9633,7 @@ fn no_ambiguous_plain_scalar_is_introduced(
     original: &SyntaxIndex,
     candidate: &SyntaxIndex,
     copied: &[NodeId],
+    authored: &[NodeId],
 ) -> Result<(), VerificationFailure> {
     let mut budget: BTreeMap<&str, usize> = BTreeMap::new();
     for node in original.nodes() {
@@ -9368,6 +9654,14 @@ fn no_ambiguous_plain_scalar_is_introduced(
         let Some(text) = ambiguous_plain_scalar(node) else {
             continue;
         };
+        // A scalar inside text an author wrote as-is is not charged: the check
+        // exists to catch an emitter's choice, and no emitter chose it.
+        if authored
+            .iter()
+            .any(|root| in_subtree(candidate, *root, node.id))
+        {
+            continue;
+        }
         match budget.get_mut(text) {
             Some(remaining) if *remaining > 0 => *remaining -= 1,
             _ => {
@@ -10664,7 +10958,7 @@ mod tests {
         let source = SyntaxIndex::parse("a: 'no'\nb: keep\n").expect("parses");
         let plain = SyntaxIndex::parse("a: no\nb: keep\n").expect("parses");
         assert!(matches!(
-            no_ambiguous_plain_scalar_is_introduced(&source, &plain, &[]),
+            no_ambiguous_plain_scalar_is_introduced(&source, &plain, &[], &[]),
             Err(VerificationFailure::AmbiguousPlainScalarIntroduced { .. })
         ));
 
@@ -10673,18 +10967,18 @@ mod tests {
         // or delete an ambiguous plain scalar the document already held.
         let held = SyntaxIndex::parse("a: no\nb: keep\n").expect("parses");
         assert_eq!(
-            no_ambiguous_plain_scalar_is_introduced(&held, &held, &[]),
+            no_ambiguous_plain_scalar_is_introduced(&held, &held, &[], &[]),
             Ok(())
         );
         let deleted = SyntaxIndex::parse("b: keep\n").expect("parses");
         assert_eq!(
-            no_ambiguous_plain_scalar_is_introduced(&held, &deleted, &[]),
+            no_ambiguous_plain_scalar_is_introduced(&held, &deleted, &[], &[]),
             Ok(())
         );
         // Two occurrences where the source had one is still an introduction, so
         // the comparison has to count rather than merely look up.
         let twice = SyntaxIndex::parse("a: no\nb: no\n").expect("parses");
-        assert!(no_ambiguous_plain_scalar_is_introduced(&held, &twice, &[]).is_err());
+        assert!(no_ambiguous_plain_scalar_is_introduced(&held, &twice, &[], &[]).is_err());
     } // End of function the_ambiguity_property_fires_on_a_candidate_no_emitter_would_produce()
 
     #[test]

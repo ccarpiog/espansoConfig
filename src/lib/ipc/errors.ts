@@ -22,7 +22,7 @@
  * A type alone would be invisible to both.
  */
 
-import type { BackupReadError, DraftError, SaveError } from './types';
+import type { BackupReadError, DraftError, EditError, SaveError } from './types';
 
 /**
  * Every code the Rust side may put in a rejection.
@@ -55,7 +55,8 @@ export const COMMAND_ERROR_CODES = [
   'unrecognisedBackupBatch',
   'unaddressableBackupEntry',
   'backupEntryIsNotThisDocument',
-  'backupReadFailed'
+  'backupReadFailed',
+  'itemTextRefused'
 ] as const;
 
 /** One of {@link COMMAND_ERROR_CODES}. */
@@ -479,6 +480,31 @@ export interface BackupReadFailedError {
   readonly error: BackupReadError;
 }
 
+/**
+ * A snippet's owned range could not be handed out as text for the local raw
+ * editor (Phase 3-7).
+ *
+ * **A refusal of the read**: nothing was attempted and no acknowledgement can
+ * change the answer. The core's `EditError` travels whole, as
+ * {@link DraftRefusedError}'s `DraftError` does, and two of its variants are
+ * the answers a caller acts on: `ItemRangeNotContiguous` — the range has
+ * file-owned holes, so the whole-document editor is offered instead — and
+ * `ItemTextHoldsCarriageReturn` — the snippet's own text holds a `\r`, which a
+ * text box cannot carry. A **save** the engine refuses arrives as
+ * {@link SaveFailedError} with the same `EditError` inside. It carries spans and
+ * counts only, never the snippet's text.
+ */
+export interface ItemTextRefusedError {
+  /** The discriminant. */
+  readonly code: 'itemTextRefused';
+  /**
+   * Why the range could not be read, exactly as the core reports it. Always an
+   * object on this path: every refusal the range derivation produces is a
+   * struct variant or a newtype variant of `EditError`.
+   */
+  readonly error: EditError;
+}
+
 /** Everything a command may reject with. */
 export type CommandError =
   | NoWorkspaceOpenError
@@ -501,7 +527,8 @@ export type CommandError =
   | UnrecognisedBackupBatchError
   | UnaddressableBackupEntryError
   | BackupEntryIsNotThisDocumentError
-  | BackupReadFailedError;
+  | BackupReadFailedError
+  | ItemTextRefusedError;
 
 /**
  * Where the developer string of an unexpected failure is kept.
@@ -693,7 +720,8 @@ export const COMMAND_ERROR_OPERANDS = {
   unrecognisedBackupBatch: { batch: 'string' },
   unaddressableBackupEntry: { batch: 'string', relative_path: 'string' },
   backupEntryIsNotThisDocument: { document: 'number' },
-  backupReadFailed: { error: 'object' }
+  backupReadFailed: { error: 'object' },
+  itemTextRefused: { error: 'object' }
 } as const;
 
 /**
@@ -895,6 +923,10 @@ export function identityRecovery(error: CommandError): SelectionRecovery {
     case 'unaddressableBackupEntry':
     case 'backupEntryIsNotThisDocument':
     case 'backupReadFailed':
+    // A refused raw-item read says the range cannot be drafted locally, never
+    // that the identity stopped naming a snippet: a stale identity arrives as
+    // `identityStaleRevision`, above, before any range is derived.
+    case 'itemTextRefused':
       return { action: 'none' };
   }
   // Every member of CommandError has an arm above, so `error` is `never` here.
