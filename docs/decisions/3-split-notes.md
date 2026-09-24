@@ -726,7 +726,8 @@ follows the owner's own instruction in the 2d-7-9 session to read captures rathe
 Two things do not change:
 
 - A driven step on a locked screen cannot take a window half. It records the half as **owed, unread**,
-  and **does not close**. It stops under the workflow's BLOCKED procedure.
+  and **does not close**. It stops under the workflow's BLOCKED procedure. *(Since 2026-09-24 a driven
+  run sets such a step aside and continues instead of stopping: §4.8.)*
 - No window half is credited from a hidden-page snapshot or from a mounted test.
 
 ### 4.2 Narrowing: raw *Undo*'s unread half stays unread until 3-8 reads it
@@ -772,6 +773,39 @@ pointer here.
 
 The consult's per-step key table (`:269-283`) is a planning range. No step's acceptance is measured
 against it, and each step records the keys it actually added.
+
+### 4.8 Owner ruling, 2026-09-24: driven runs set aside what needs the screen or the owner
+
+The driven iteration of 2026-09-24 (17:15 WEST) found the screen locked at 3-13-3 and stopped
+BLOCKED under §4.1. The owner answered in chat on 2026-09-24, verbatim:
+
+> "Then, prepare autoclaude so it skips the parts where it needs the screen unlocked and launch it again"
+
+Asked what a driven run should do at 3-14, which needs the owner's CF-52/CF-54 ruling before its
+window half, the owner chose, verbatim, the option labelled **"Skip 3-14 too, run 3-15
+(Recommended)"**, whose description read: *"Standing rule: unattended runs set aside every step that
+needs the screen or your ruling, and keep a list of them. 3-15 runs and lists 3-13-3 and 3-14 as owed.
+Phase 3 stays open until an attended session does those two."*
+
+What this changes, and what it does not:
+
+- **A driven run sets aside, and does not take, a step that needs a visible unlocked screen or an owner
+  ruling.** It records the step as **owed to an attended session**, adds it to the list below, and
+  continues with the next step that needs neither. It does not stop BLOCKED for that reason alone.
+- **§4.1 is unchanged in substance.** A set-aside window half is still **owed, unread**; the step still
+  **does not close**; nothing is ever recorded as read on a locked screen or on mounted tests. The
+  ruling changes only whether the run stops there.
+- **3-15 runs with 3-13-3 and 3-14 owed.** Its acceptance clause that lists the window halves "each as
+  read (by whom) or unread" lists these two as owed. 3-15 does not close **Phase 3**, and its record must
+  not say that Phase 3 is closed while anything on the list below is owed. Step 3-13 stays open while
+  3-13-3 is owed.
+- **After 3-15 the run stops.** Phase 3 cannot close with owed steps, and the ruling does not start
+  Phase 4, so the iteration after 3-15 ends BLOCKED on the attended session.
+
+**Owed to an attended session** (the live copy is in `PROGRESS.md`'s next action):
+
+1. **3-13-3** — the window half of step 3-13; its task is unchanged (§2, the addendum under 3-13).
+2. **3-14** — the owner's CF-52/CF-54 rulings first, then its window half (§2, step 3-14).
 
 ---
 

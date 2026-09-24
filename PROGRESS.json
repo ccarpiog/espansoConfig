@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T16:15:00Z",
+  "updated": "2026-09-24T18:41:05Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1144,7 +1144,7 @@
       "id": "3-13",
       "title": "Display names and visible creation defaults",
       "status": "in_progress",
-      "summary": "Display names and visible creation defaults; split into 3-13-1, 3-13-2 and 3-13-3.",
+      "summary": "Display names and visible creation defaults; 3-13-1 and 3-13-2 done, 3-13-3 owed to an attended session.",
       "risk": "high"
     },
     {
@@ -1169,21 +1169,23 @@
     {
       "id": "3-13-3",
       "title": "Display names and defaults: the window half",
-      "status": "queued",
+      "status": "blocked",
       "risk": "high",
-      "summary": "Reads display names and seeded defaults in a window in English and Spanish, with a long name."
+      "summary": "Owed to an attended session: the window reading needs an unlocked screen, so driven runs set it aside (owner ruling 2026-09-24)."
     },
     {
       "id": "3-14",
       "title": "Delete-conflict wording and action placement",
-      "status": "queued",
-      "summary": "Queued: Delete-conflict wording and action placement."
+      "status": "blocked",
+      "summary": "Owed to an attended session: needs the owner's CF-52/CF-54 rulings and a window reading, so driven runs set it aside.",
+      "risk": "routine"
     },
     {
       "id": "3-15",
       "title": "Cross-layer preservation and Phase 3 closure",
       "status": "queued",
-      "summary": "Queued: Cross-layer preservation and Phase 3 closure."
+      "summary": "Next: preservation evidence across layers and the Phase 3 record, with 3-13-3 and 3-14 listed as owed.",
+      "risk": "high"
     },
     {
       "id": "4",
