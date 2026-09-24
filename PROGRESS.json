@@ -1009,7 +1009,8 @@
       "risk": "high",
       "summary": "Reads the trigger-form and search_terms controls in a window in EN and ES; the commented flow list is drawn not editable.",
       "review": "docs/reviews/phase-3-6-3.md",
-      "narrative": "docs/decisions/3-6-3-notes.md"
+      "narrative": "docs/decisions/3-6-3-notes.md",
+      "commit": "3b40978"
     },
     {
       "id": "3-7",
