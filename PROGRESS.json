@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T12:45:00Z",
+  "updated": "2026-09-24T12:50:00Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1072,7 +1072,8 @@
       "risk": "routine",
       "summary": "Ordered import display with absent, empty and unsupported states and a kind-dependent note for _ files; reviewed and fixed.",
       "review": "docs/reviews/phase-3-9-1.md",
-      "narrative": "docs/decisions/3-9-1-notes.md"
+      "narrative": "docs/decisions/3-9-1-notes.md",
+      "commit": "d217ecf"
     },
     {
       "id": "3-9-2",
