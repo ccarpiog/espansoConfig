@@ -989,7 +989,8 @@
       "risk": "high",
       "summary": "Widens the editor model, save wire, reapply and recovery to trigger lists, regex and search_terms, never dropping an alias.",
       "review": "docs/reviews/phase-3-6-1.md",
-      "narrative": "docs/decisions/3-6-1-notes.md"
+      "narrative": "docs/decisions/3-6-1-notes.md",
+      "commit": "5c4eca6"
     },
     {
       "id": "3-6-2",
