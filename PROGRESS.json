@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T07:59:58Z",
+  "updated": "2026-09-24T08:56:05Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -978,9 +978,9 @@
     {
       "id": "3-6",
       "title": "Multiple and regex trigger controls, and search_terms",
-      "status": "in_progress",
+      "status": "done",
       "risk": "high",
-      "summary": "Split into 3-6-1 (model), 3-6-2 (components and i18n) and 3-6-3 (window half); 3-6-1 and 3-6-2 done, 3-6-3 next."
+      "summary": "Trigger lists, regex and search_terms editing, split into model, components and window half; all three done."
     },
     {
       "id": "3-6-1",
@@ -1005,9 +1005,11 @@
     {
       "id": "3-6-3",
       "title": "Trigger forms and search_terms: the window half",
-      "status": "queued",
+      "status": "done",
       "risk": "high",
-      "summary": "Queued: a window reading in EN and ES including the commented multi-line flow list."
+      "summary": "Reads the trigger-form and search_terms controls in a window in EN and ES; the commented flow list is drawn not editable.",
+      "review": "docs/reviews/phase-3-6-3.md",
+      "narrative": "docs/decisions/3-6-3-notes.md"
     },
     {
       "id": "3-7",
