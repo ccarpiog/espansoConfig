@@ -144,7 +144,9 @@ const UNCHANGED_DRAFT: MatchDraft = {
   search_terms: [],
   vars: [],
   form_fields: [],
-  content_switch: null
+  content_switch: null,
+  trigger_form: null,
+  sequences: []
 };
 
 beforeEach(() => {

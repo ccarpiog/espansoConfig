@@ -238,6 +238,33 @@ integration, the editor components and i18n.
 **Risk `high`. Driven:** implementation yes; the window half per ruling 30. **Depends on** 3-2, 3-3,
 3-4, 3-5.
 
+**Addendum, 2026-09-24 — cut into three pieces before starting.** The step touches the editor model,
+recovery, reapply, IPC and the components, as 3-5 did, so the orchestrator cut it along 3-5's final
+shape:
+
+- **3-6-1 — the model and the coordination.** Everything below the components: the sequence and
+  trigger-form switch submodels inside the match editor model (`trigger` / `triggers` / `regex`, and
+  `search_terms`), list add/remove/edit intents that keep block or flow style and the intended order,
+  the `Several`/`Absent` presentation as model values (no silent winner, raw repair offered as a code),
+  multiple→single conversion that never silently drops an alias, the regex finding taken from the
+  Rust validator (`RegexDoesNotCompile`) with the draft kept, conservative list reapply (ruling 23:
+  an external reorder or duplicate-list ambiguity refuses the whole list), recovery that transfers
+  everything or refuses explicitly, the `\r` refusal for every new textual control, and any Rust or
+  wire work those need with its dictionaries and accessors. A model test per acceptance clause. **No
+  window half** — it draws nothing new.
+- **3-6-2 — the components and the i18n.** `MatchEditor.svelte`, `RecoveryPanel.svelte` (which after
+  3-6-1 still labels a carried regex box "trigger" and draws a box the model refuses for a carried
+  `triggers` list — `3-6-1-notes.md`) and the detail integration drawing
+  3-6-1's values: list controls, the trigger-form switch, the `Several`/`Absent` presentation with its
+  raw-repair offer, the regex finding; the dictionary keys EN and ES; mounted tests. Its record says:
+  *"No window reading was performed or claimed."*
+- **3-6-3 — the window half.** EN and ES through the picker, including the commented multi-line flow
+  list at `flow-collections.yml:16-22` (ruling 31), per ruling 30 and §4.1, with a minimal uncommitted
+  instrument inside its own single review. It needs a visible, unlocked screen, and it closes step 3-6.
+
+Each piece is one phase with one worker and one review. The acceptance list above is the union of the
+three.
+
 ### 3-7 — The local raw-item core edit
 
 **Delivers** a Rust-cut, **contiguous** owned-range text for one snippet and an exact replacement of

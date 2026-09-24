@@ -5725,6 +5725,107 @@ mod tests {
         );
     } // End of function a_drafted_content_switch_renames_the_key_through_save_match()
 
+    /// A draft carrying a change of trigger form and a list intent (Phase 3-6-1)
+    /// saves through `save_match` and `run_one_save` with no new command: the
+    /// literal becomes a block `triggers` list holding it first, `search_terms`
+    /// is added whole, and the second snippet's bytes are untouched.
+    #[test]
+    fn a_drafted_trigger_form_and_list_save_through_save_match() {
+        use espansoconfig_core::draft::{
+            ScalarItems, SequenceField, SequenceIntent, TriggerForm, TriggerFormChange,
+            TriggerSwitch,
+        };
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[0].id;
+        let items =
+            ScalarItems::from_vec(vec![":one".to_owned(), ":uno".to_owned()]).expect("two items");
+        let draft = MatchDraft::new()
+            .with_trigger_form(TriggerFormChange::Switch {
+                switch: TriggerSwitch::ToList {
+                    from: TriggerForm::Trigger,
+                    items,
+                },
+            })
+            .with_sequence(SequenceIntent::InsertField {
+                field: SequenceField::SearchTerms,
+                items: vec!["first term".to_owned()],
+            });
+        let result = session
+            .save_match(held, &draft, before.revision, &Acknowledgement::none())
+            .expect("the draft plans and the save runs");
+        let (_revision, moved) = expect_saved(result, "trigger form and list");
+        let found = session
+            .match_view(moved.expect("a committed save names the match it saved"))
+            .expect("the answered identity resolves");
+        let texts = |values: &[espansoconfig_core::model::ValueView]| -> Vec<String> {
+            values
+                .iter()
+                .filter_map(|value| value.as_scalar().map(|scalar| scalar.text.clone()))
+                .collect()
+        };
+        assert!(found.trigger.trigger.is_none());
+        assert_eq!(texts(&found.trigger.triggers), vec![":one", ":uno"]);
+        assert_eq!(texts(&found.search_terms), vec!["first term"]);
+        let written = fs::read_to_string(dir.path().join("match").join("base.yml")).unwrap();
+        assert!(
+            written.starts_with("# A synthetic match file.\nmatches:\n"),
+            "{written}"
+        );
+        assert!(
+            written.ends_with(
+                "  - trigger: ':two'\n    replace: second\n    invented_by_a_later_espanso: yes\n"
+            ),
+            "the second snippet is untouched: {written}"
+        );
+    } // End of function a_drafted_trigger_form_and_list_save_through_save_match()
+
+    /// A drafted regex that does not compile is refused by the Rust validator
+    /// with `RegexDoesNotCompile` (Phase 3-6-1, ruling 7), is not acknowledgeable,
+    /// and writes nothing — the frontend keeps the draft and compiles nothing.
+    #[test]
+    fn a_drafted_regex_that_does_not_compile_is_refused_and_writes_nothing() {
+        use espansoconfig_core::draft::{MatchField, TriggerForm, TriggerFormChange};
+        let dir = synthetic_tree();
+        let session = open_session(&dir);
+        let id = id_of(&session, "match/base.yml");
+        let before = session.document(id).expect("the file reads");
+        let held = before.matches[0].id;
+        let draft = MatchDraft::new()
+            .with(MatchField::Regex, "(unclosed")
+            .with_trigger_form(TriggerFormChange::Rename {
+                from: TriggerForm::Trigger,
+            });
+        let findings = match session
+            .save_match(held, &draft, before.revision, &Acknowledgement::none())
+            .expect("a refusal is an outcome")
+        {
+            SaveResult::Refused { verdict, findings } => {
+                assert_eq!(verdict, SaveVerdict::RefusedForEditorModelErrors);
+                findings
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert!(findings
+            .iter()
+            .any(|finding| matches!(finding.code, FindingCode::RegexDoesNotCompile { .. })));
+        let again = session
+            .save_match(
+                held,
+                &draft,
+                before.revision,
+                &Acknowledgement::of(&findings),
+            )
+            .expect("a refusal is an outcome");
+        assert!(
+            matches!(again, SaveResult::Refused { .. }),
+            "an editor-model error is not acknowledgeable: {again:?}"
+        );
+        assert_eq!(base_bytes(&dir), BASE_YML, "a refusal writes nothing");
+    } // End of function a_drafted_regex_that_does_not_compile_is_refused_and_writes_nothing()
+
     /// A draft that asks for the value already there is a **success** that writes
     /// nothing.
     ///

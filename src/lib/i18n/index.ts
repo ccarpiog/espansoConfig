@@ -56,20 +56,27 @@ import {
   type MoveSubmissionRefusal
 } from '../browser/matchMove';
 import {
+  collisionLabelName,
   contentRoleNoteKey,
   cursorAdvisoryKey,
   editorReapplyObstacleKey,
-  fieldLabelName,
   fieldRefusalKey,
   reprojectionRefusalKey,
   saveWithheldKey,
+  triggerFormRefusalKey,
+  triggerPresentationKey,
+  triggerRepairKey,
   type ContentRoleNote,
   type CursorAdvisory,
   type EditorReapplyObstacle,
   type FieldRefusal,
   type ReprojectionRefusal,
-  type SaveWithheld
+  type SaveWithheld,
+  type TriggerFormRefusal,
+  type TriggerPresentation,
+  type TriggerRepair
 } from '../browser/matchEditor';
+import { listRefusalKey, type ListRefusal } from '../browser/matchLists';
 import {
   externalEvidenceRefusalKey,
   reapplyOutcomeKey,
@@ -718,6 +725,58 @@ export function tSaveWithheld(code: SaveWithheld): string {
 export function tContentRoleNote(note: ContentRoleNote): string {
   return translate(locale.current, contentRoleNoteKey(note));
 } // End of function tContentRoleNote()
+
+/**
+ * Renders why a list (`triggers`, `search_terms`) is shown rather than edited,
+ * in the current language — Phase 3-6-1.
+ *
+ * @param reason - The code `ListModel.refusal` in `../browser/matchEditor.ts`
+ *   answered.
+ * @returns The translated sentence.
+ */
+export function tListRefusal(reason: ListRefusal): string {
+  return translate(locale.current, listRefusalKey(reason));
+} // End of function tListRefusal()
+
+/**
+ * Renders why a trigger form cannot be chosen, in the current language — Phase
+ * 3-6-1.
+ *
+ * @param refusal - The code a `TriggerFormChoice` in `../browser/matchEditor.ts`
+ *   carries; `wouldDropAliases` fills `{count}`.
+ * @returns The translated sentence.
+ */
+export function tTriggerFormRefusal(refusal: TriggerFormRefusal): string {
+  return translate(
+    locale.current,
+    triggerFormRefusalKey(refusal),
+    refusal.kind === 'wouldDropAliases' ? { count: refusal.count } : {}
+  );
+} // End of function tTriggerFormRefusal()
+
+/**
+ * Renders what a trigger presentation says, in the current language, or `null`
+ * for a snippet with one form, which owes no sentence — Phase 3-6-1.
+ *
+ * @param presentation - `TriggerFormView.presentation` in
+ *   `../browser/matchEditor.ts`.
+ * @returns The translated sentence, or `null`.
+ */
+export function tTriggerPresentation(presentation: TriggerPresentation): string | null {
+  const key = triggerPresentationKey(presentation);
+  return key === null ? null : translate(locale.current, key);
+} // End of function tTriggerPresentation()
+
+/**
+ * Renders the repair a `several` presentation offers, in the current language —
+ * Phase 3-6-1.
+ *
+ * @param repair - The repair code.
+ * @returns The translated sentence.
+ */
+export function tTriggerRepair(repair: TriggerRepair): string {
+  return translate(locale.current, triggerRepairKey(repair));
+} // End of function tTriggerRepair()
 
 /**
  * Renders why this window cannot read one snippet again.
@@ -1736,7 +1795,7 @@ export function describeEditorReapplyObstacle(
     case 'fieldCollisions':
       return translate(locale, editorReapplyObstacleKey(obstacle), {
         fields: obstacle.fields
-          .map((field) => translate(locale, detailFieldKey(fieldLabelName(field))))
+          .map((field) => translate(locale, detailFieldKey(collisionLabelName(field))))
           .join(', ')
       });
     case 'targetNotEditable':
@@ -2031,6 +2090,9 @@ export function tTransferStatus(status: TransferStatus): string {
  */
 export function describeTransferRefusal(locale: Locale, refusal: TransferRefusal): string {
   const key = transferRefusalKey(refusal);
+  if (refusal.kind === 'listNotEditable') {
+    return `${translate(locale, key)} ${translate(locale, listRefusalKey(refusal.reason))}`;
+  }
   return refusal.kind === 'fieldNotEditable'
     ? `${translate(locale, key)} ${translate(locale, fieldRefusalKey(refusal.reason))}`
     : translate(locale, key);

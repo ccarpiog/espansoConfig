@@ -13,11 +13,17 @@
 //! - an intent that must add at least one item carries a [`ScalarItems`], which
 //!   has no empty spelling.
 //!
-//! They are an **argument** to [`crate::draft::plan_match_edits_with`], not a
-//! field of [`crate::draft::MatchDraft`], for 3-1's reason
-//! (`docs/decisions/3-1-notes.md` §4.4): `MatchDraft` crosses the wire with
-//! `deny_unknown_fields`, and this core-first step commits no wire shape before
-//! a UI step needs one. None of the types here serializes.
+//! They are an **argument** to [`crate::draft::plan_match_edits_with`], and,
+//! since Phase 3-6-1, a **field** of [`crate::draft::MatchDraft`] too: the match
+//! editor's list controls are the UI step 3-1 §4.4 waited for, so
+//! [`SequenceIntent`] now crosses the wire as `MatchDraft::sequences`, and a
+//! trigger-form change crosses as `MatchDraft::trigger_form`
+//! ([`TriggerFormChange`]). The wire forms are closed exactly as the types are:
+//! [`ScalarItems`] is read through a check that refuses an empty list, a
+//! placement is a [`ListPlacement`] and never a byte offset, and every item is a
+//! `String`. [`MatchStructure`] itself still does not serialize.
+
+use serde::{Deserialize, Serialize};
 
 use crate::draft::match_draft::{FieldSubstitution, SequenceField, TriggerForm};
 use crate::patch::ItemPlacement;
@@ -26,7 +32,12 @@ use crate::patch::ItemPlacement;
 ///
 /// The type an intent carries when it must add at least one item: a first item
 /// and the rest, so "add no items" has no spelling and needs no refusal.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **On the wire it is a plain array of strings** (Phase 3-6-1), read through
+/// [`ScalarItems::from_vec`]: an empty array is refused while a command's
+/// arguments are read, so the non-empty guarantee survives the boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<String>", into = "Vec<String>")]
 pub struct ScalarItems {
     /// The first item.
     first: String,
@@ -70,12 +81,94 @@ impl ScalarItems {
     }
 } // End of impl ScalarItems
 
+impl TryFrom<Vec<String>> for ScalarItems {
+    type Error = String;
+
+    fn try_from(items: Vec<String>) -> Result<ScalarItems, String> {
+        ScalarItems::from_vec(items)
+            .ok_or_else(|| "a list of new items holds at least one".to_owned())
+    }
+}
+
+impl From<ScalarItems> for Vec<String> {
+    fn from(items: ScalarItems) -> Vec<String> {
+        items.to_vec()
+    }
+}
+
+/// Where new items go in an existing list, as the wire spells it (Phase 3-6-1).
+///
+/// The wire twin of [`ItemPlacement`], which stays an engine type with no serde
+/// of its own. Every variant is a one-key object — `{"Front": {}}`,
+/// `{"After": {"index": 2}}`, `{"End": {}}` — the shape `NewMatchPosition` uses,
+/// and an index is a position in the **original** list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ListPlacement {
+    /// Above the list's first item.
+    Front {},
+    /// After the item at this index in the original list.
+    After {
+        /// The item's index in the original list.
+        index: usize,
+    },
+    /// After the list's last item.
+    End {},
+}
+
+impl From<ListPlacement> for ItemPlacement {
+    fn from(placement: ListPlacement) -> ItemPlacement {
+        match placement {
+            ListPlacement::Front {} => ItemPlacement::Front,
+            ListPlacement::After { index } => ItemPlacement::After(index),
+            ListPlacement::End {} => ItemPlacement::End,
+        }
+    }
+}
+
+impl From<ItemPlacement> for ListPlacement {
+    fn from(placement: ItemPlacement) -> ListPlacement {
+        match placement {
+            ItemPlacement::Front => ListPlacement::Front {},
+            ItemPlacement::After(index) => ListPlacement::After { index },
+            ItemPlacement::End => ListPlacement::End {},
+        }
+    }
+}
+
+/// Serde for an [`ItemPlacement`] field, through [`ListPlacement`].
+mod placement_wire {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::ListPlacement;
+    use crate::patch::ItemPlacement;
+
+    /// Writes a placement as its wire twin.
+    pub fn serialize<S: Serializer>(
+        placement: &ItemPlacement,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        ListPlacement::from(*placement).serialize(serializer)
+    }
+
+    /// Reads a placement from its wire twin.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<ItemPlacement, D::Error> {
+        ListPlacement::deserialize(deserializer).map(ItemPlacement::from)
+    }
+} // End of mod placement_wire
+
 /// One intent about the cardinality or the presence of a scalar list.
 ///
 /// Every index is a position in the **original** list, exactly as an
 /// [`crate::draft::ItemDraft`]'s is: the batch is planned against the file as
 /// it stands, so an index never means "wherever this ends up".
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **It crosses the wire since Phase 3-6-1**, as one entry of
+/// `MatchDraft::sequences`, externally tagged (`{"RemoveItem": {"field":
+/// "triggers", "index": 1}}`), each variant closed by `deny_unknown_fields`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum SequenceIntent {
     /// Add items to an existing list — block, flow or `[]` — at one place, in
     /// order. A flow list stays a flow list (Phase 3-3).
@@ -83,6 +176,7 @@ pub enum SequenceIntent {
         /// Which list.
         field: SequenceField,
         /// Where, in the original list.
+        #[serde(with = "placement_wire")]
         at: ItemPlacement,
         /// The new items.
         items: ScalarItems,
@@ -142,7 +236,8 @@ impl SequenceIntent {
 /// One compound intent, all or nothing (ruling 23): the key is renamed and the
 /// value changes shape in one edit, [`crate::patch::ShapeSwitch`], in place — so
 /// a compact `- trigger: x` keeps its `-`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum TriggerSwitch {
     /// `trigger: x` (or `regex: x`) becomes a block `triggers:` list holding
     /// exactly `items`. The old value is not carried over implicitly: a caller
@@ -174,6 +269,59 @@ impl TriggerSwitch {
         }
     }
 } // End of impl TriggerSwitch
+
+/// A drafted change of **trigger form**, as it crosses the wire inside a
+/// [`crate::draft::MatchDraft`] (Phase 3-6-1).
+///
+/// The three changes the match editor can draft between `trigger`, `regex` and a
+/// block `triggers` list, as one closed type:
+///
+/// - [`TriggerFormChange::Rename`] — `trigger`↔`regex`, one
+///   [`FieldSubstitution::Trigger`]: the key token is re-spelled in place and the
+///   value's bytes are kept unless the draft's own field for the destination key
+///   is `Set` to something else (3-1's rule, unchanged);
+/// - [`TriggerFormChange::Switch`] — a [`TriggerSwitch`] between a scalar form and
+///   a block `triggers` list, one [`crate::patch::ShapeSwitch`].
+///
+/// **One compound intention, all or nothing** (ruling 23). A `Rename` names only
+/// its source, because `trigger` and `regex` are the only two scalar forms and
+/// the destination is the other one; so a rename to itself has no spelling.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum TriggerFormChange {
+    /// `trigger` becomes `regex`, or `regex` becomes `trigger`, in place.
+    Rename {
+        /// The scalar form the match holds now; the destination is the other.
+        from: TriggerForm,
+    },
+    /// A scalar form becomes a block `triggers` list, or a one-item block list
+    /// becomes a scalar form.
+    Switch {
+        /// The switch.
+        switch: TriggerSwitch,
+    },
+}
+
+impl TriggerFormChange {
+    /// The substitution a rename derives, or `None` for a switch.
+    pub fn substitution(&self) -> Option<FieldSubstitution> {
+        match self {
+            TriggerFormChange::Rename { from } => Some(FieldSubstitution::Trigger {
+                from: *from,
+                to: from.other(),
+            }),
+            TriggerFormChange::Switch { .. } => None,
+        }
+    }
+
+    /// The switch this change is, or `None` for a rename.
+    pub fn switch(&self) -> Option<&TriggerSwitch> {
+        match self {
+            TriggerFormChange::Rename { .. } => None,
+            TriggerFormChange::Switch { switch } => Some(switch),
+        }
+    }
+} // End of impl TriggerFormChange
 
 /// Everything a draft asks for beyond rewriting what is there.
 ///

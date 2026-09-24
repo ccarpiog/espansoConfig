@@ -1605,7 +1605,21 @@ export type DraftFieldStatus =
    * The content kind a drafted switch renames the source key to, holding this
    * text (Phase 3-5-1) — whether or not the text differs from the source's.
    */
-  | 'switchingTo';
+  | 'switchingTo'
+  /** A list item the save would add (Phase 3-6-1). */
+  | 'itemAdded'
+  /** A list item the save would take out of its list (Phase 3-6-1). */
+  | 'itemRemoved'
+  /**
+   * The trigger form a drafted change of form replaces, with what it holds
+   * (Phase 3-6-1).
+   */
+  | 'triggerFormAway'
+  /**
+   * The trigger form a drafted change of form writes, holding this text or this
+   * item (Phase 3-6-1).
+   */
+  | 'triggerFormTo';
 
 /**
  * One labelled piece of a draft a conflict retained.
@@ -1701,6 +1715,14 @@ export function draftFieldStatusKey(status: DraftFieldStatus): TranslationKey {
       return 'browser.saveOutcome.field.switchingAway';
     case 'switchingTo':
       return 'browser.saveOutcome.field.switchingTo';
+    case 'itemAdded':
+      return 'browser.saveOutcome.field.itemAdded';
+    case 'itemRemoved':
+      return 'browser.saveOutcome.field.itemRemoved';
+    case 'triggerFormAway':
+      return 'browser.saveOutcome.field.triggerFormAway';
+    case 'triggerFormTo':
+      return 'browser.saveOutcome.field.triggerFormTo';
   }
 } // End of function draftFieldStatusKey()
 

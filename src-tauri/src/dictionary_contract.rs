@@ -549,6 +549,39 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          way and which `the_content_switch_wire_form_is_closed` pins",
     ),
     (
+        "TriggerForm",
+        "a field identifier, not a code, for the same reason as `MatchField` and \
+         with the same spelling on the wire: it names `trigger` or `regex` inside \
+         a `TriggerFormChange` (Phase 3-6-1), which espanso spells one way and \
+         which `the_list_and_trigger_form_wire_forms_are_closed` pins",
+    ),
+    (
+        "TriggerFormChange",
+        "a protocol tag, not a code, exactly as `DraftField` is: `Rename` and \
+         `Switch` travel *into* `save_match` inside a draft as which change of \
+         trigger form the person asked for (Phase 3-6-1), and are never rendered. \
+         What a screen names is the espanso key of each form",
+    ),
+    (
+        "TriggerSwitch",
+        "a protocol tag, not a code: `ToList` and `FromList` travel *into* \
+         `save_match` inside a `TriggerFormChange` (Phase 3-6-1) and are never \
+         rendered; what a screen shows is the list's items and the form's key",
+    ),
+    (
+        "SequenceIntent",
+        "a protocol tag, not a code: `InsertItems`, `RemoveItem`, `InsertField` \
+         and `RemoveField` travel *into* `save_match` as `MatchDraft::sequences` \
+         (Phase 3-6-1) and are never rendered; what a screen shows is the list \
+         itself",
+    ),
+    (
+        "ListPlacement",
+        "a protocol tag, not a code, exactly as `NewMatchPosition` is: `Front`, \
+         `After` and `End` travel *into* `save_match` as where new list items go \
+         (Phase 3-6-1), and are never rendered",
+    ),
+    (
         "SequenceField",
         "a field identifier, not a code, for the same reason as `MatchField` and \
          with the same spelling on the wire: it names `triggers` or \
@@ -1224,12 +1257,13 @@ fn every_typescript_wire_union_has_a_namespace() {
             "MatchField".to_owned(),
             "SequenceField".to_owned(),
             "ContentForm".to_owned(),
+            "TriggerForm".to_owned(),
             "VariableField".to_owned(),
             "ObservedDocumentName".to_owned()
         ],
-        "the unions exempted by NOT_A_CODE changed. The first four are field \
+        "the unions exempted by NOT_A_CODE changed. The first five are field \
          identifiers that serialize as espanso keys (`ContentForm` since Phase \
-         3-5-1); the fifth is Phase 2d-4b's \
+         3-5-1, `TriggerForm` since Phase 3-6-1); the sixth is Phase 2d-4b's \
          mirror of the one reconciliation enum this table already classifies as an \
          address rather than a code, and it appears here — as the `…Name` twin \
          rather than as the value union — because the value union has no \

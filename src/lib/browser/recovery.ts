@@ -51,11 +51,16 @@
  *   `comment` and the nine options — each as logical text, spelled into the file
  *   by Rust's own encoder, and every field has an explicit disposition
  *   ({@link FieldTransfer}); ruling 23 of `docs/decisions/3-split-notes.md`;
+ * - since Phase 3-6-1 the **trigger side and `search_terms`** are carried too,
+ *   **whole or not at all** ({@link StructureTransfer}): a drafted `regex` is
+ *   seeded into the trigger box and written as `regex:`, a drafted `triggers`
+ *   list is written with every item in order, and `search_terms` is carried as
+ *   the whole intended list or not carried with its reason — no list is ever
+ *   carried in part;
  * - what is **not carried** is everything else the source held: comments, unknown
- *   keys, key order, scalar spelling and quoting, tags, anchors, `regex`, the four
- *   collections (`triggers`, `search_terms`, `vars`, `form_fields`) and any second
- *   content key. The projection is read-only and cannot support a stronger
- *   promise (`CLAUDE.md` section 3);
+ *   keys, key order, scalar spelling and quoting, tags, anchors, `vars`,
+ *   `form_fields` and any second content key. The projection is read-only and
+ *   cannot support a stronger promise (`CLAUDE.md` section 3);
  * - what it **writes** is a new snippet at the end of a chosen destination.
  *   Whatever the file now holds is left exactly as it is, and nothing here rebases
  *   the pending change onto it — that is `./reapply.ts`'s transition, and this is
@@ -254,8 +259,10 @@ import {
   type FieldBuffer,
   type FieldRefusal,
   type MatchBaseline,
-  type MatchBuffers
+  type MatchBuffers,
+  type TriggerShape
 } from './matchEditor';
+import { capturedList, intendedTexts, unreadableItem, type ListRefusal } from './matchLists';
 import type { RawSaveChoice } from './rawSave';
 import {
   enterReapply,
@@ -678,7 +685,148 @@ export type TransferRefusal =
        * from a source holding two content keys, a shape espanso does not accept.
        */
       readonly kind: 'oneContentOnly';
+    }
+  | {
+      /**
+       * The literal `trigger` is not carried because the snippet's trigger is
+       * carried in its other form — `regex` or the `triggers` list — which
+       * {@link RecoverySession.structure} names (Phase 3-6-1).
+       */
+      readonly kind: 'triggerFormCarried';
+    }
+  | {
+      /**
+       * A list is one this editor may not edit, so it is not carried — **whole**:
+       * no part of a list is ever carried (Phase 3-6-1).
+       */
+      readonly kind: 'listNotEditable';
+      /** Which refusal, as the list's own code. */
+      readonly reason: ListRefusal;
     };
+
+/**
+ * What the retained draft's trigger side becomes in the new snippet — Phase
+ * 3-6-1, ruling 23's explicit recovery disposition.
+ *
+ * - `trigger` — the literal, typed into the form's trigger box as before;
+ * - `regex` — the drafted pattern, seeded into that same box and written as
+ *   `regex:`;
+ * - `triggers` — the drafted list, **every item in order**, written as a
+ *   `triggers:` list; the box is not used.
+ *
+ * A trigger side that cannot be carried whole — several forms, an unreadable
+ * list, a list with no item, a value holding a carriage return — falls back to
+ * `trigger` with a blank box, and its row in the transfer table says why: the
+ * person supplies a literal, and nothing is carried in part.
+ */
+export type TriggerTransfer =
+  | {
+      /** The literal trigger, in the box. */
+      readonly form: 'trigger';
+    }
+  | {
+      /** The regex pattern, in the box. */
+      readonly form: 'regex';
+      /** The pattern the box is seeded with. */
+      readonly text: string;
+    }
+  | {
+      /** The `triggers` list, carried whole. */
+      readonly form: 'triggers';
+      /** Every item, in order. Never empty. */
+      readonly items: readonly [string, ...string[]];
+    };
+
+/**
+ * What the retained draft's `search_terms` becomes — Phase 3-6-1. **Everything
+ * or nothing**: the whole intended list, in order, or no list with the reason.
+ */
+export type ListTransfer =
+  | {
+      /** The new snippet is born holding the list, with these items (`[]` included). */
+      readonly kind: 'carried';
+      /** Every item, in order. */
+      readonly items: readonly string[];
+    }
+  | {
+      /** The new snippet is born without the list. */
+      readonly kind: 'notCarried';
+      /** Why. */
+      readonly reason: TransferRefusal;
+    };
+
+/** What the retained draft's trigger side and `search_terms` become — Phase 3-6-1. */
+export interface StructureTransfer {
+  /** The trigger side. */
+  readonly trigger: TriggerTransfer;
+  /** `search_terms`. */
+  readonly searchTerms: ListTransfer;
+}
+
+/**
+ * The structure transfer of a draft that has none: the literal trigger in the
+ * box, and no `search_terms` — the creator's, and every draft's before 3-6-1.
+ */
+export const LITERAL_TRIGGER_ONLY: StructureTransfer = Object.freeze({
+  trigger: Object.freeze({ form: 'trigger' as const }),
+  searchTerms: Object.freeze({ kind: 'notCarried' as const, reason: { kind: 'notInTheFile' as const } })
+});
+
+/**
+ * What a match editor's retained trigger side and `search_terms` become in the
+ * new snippet — Phase 3-6-1. **Transfers everything or refuses explicitly**:
+ * a list is carried whole or not at all, with a reason.
+ *
+ * @param baseline - What the file held when the editing session was seeded.
+ * @param buffers - The draft the conflict retained.
+ * @returns The structure transfer.
+ */
+export function structureTransferOfMatchDraft(
+  baseline: MatchBaseline,
+  buffers: MatchBuffers
+): StructureTransfer {
+  const side = baseline.structure.trigger;
+  const drafted = buffers.triggerSide;
+  const form: TriggerShape | null = drafted.form;
+  const regexText = drafted.regex.text;
+  let trigger: TriggerTransfer = { form: 'trigger' };
+  if (form === 'regex' && side.regex.eligibility.kind === 'editable' && regexText !== '' && !unreadableItem(regexText)) {
+    trigger = { form: 'regex', text: regexText };
+  } else if (form === 'triggers' && side.triggers.eligibility.kind === 'editable') {
+    const texts = intendedTexts(side.triggers, capturedList(drafted.triggers)) ?? [];
+    const [first, ...rest] = texts;
+    if (first !== undefined && !texts.some(unreadableItem)) {
+      trigger = { form: 'triggers', items: [first, ...rest] };
+    }
+  }
+  return { trigger, searchTerms: listTransferOf(baseline, buffers) };
+} // End of function structureTransferOfMatchDraft()
+
+/**
+ * What the retained `search_terms` becomes.
+ *
+ * @param baseline - What the file held.
+ * @param buffers - The retained draft.
+ * @returns The list transfer.
+ */
+function listTransferOf(baseline: MatchBaseline, buffers: MatchBuffers): ListTransfer {
+  const held = baseline.structure.searchTerms;
+  if (held.eligibility.kind !== 'editable') {
+    return held.style === 'absent'
+      ? { kind: 'notCarried', reason: { kind: 'notInTheFile' } }
+      : { kind: 'notCarried', reason: { kind: 'listNotEditable', reason: held.eligibility.reason } };
+  }
+  const buffer = capturedList(buffers.searchTerms);
+  const texts = intendedTexts(held, buffer);
+  if (texts === null) {
+    return held.style === 'absent'
+      ? { kind: 'notCarried', reason: { kind: 'notInTheFile' } }
+      : { kind: 'notCarried', reason: { kind: 'removedByTheDraft' } };
+  }
+  return texts.some(unreadableItem)
+    ? { kind: 'notCarried', reason: { kind: 'carriageReturn' } }
+    : { kind: 'carried', items: [...texts] };
+} // End of function listTransferOf()
 
 /**
  * What one field of a retained draft becomes in the new snippet.
@@ -783,8 +931,11 @@ export function transferOfField(
  *
  * **Every field the editor drafts is transferred since Phase 3-5-1** (ruling 23):
  * an option the draft left alone is carried with the file's value, exactly as the
- * label was; `regex` and the four collections are not drafted by this editor and
- * are not in the table. **One content key at most**: the first carried in
+ * label was; `vars` and `form_fields` are not drafted by this editor and are not
+ * in the table, and the trigger side and `search_terms` are
+ * {@link structureTransferOfMatchDraft}'s (Phase 3-6-1) — when that carries the
+ * trigger as `regex` or `triggers`, the literal's row says `triggerFormCarried`.
+ * **One content key at most**: the first carried in
  * {@link CONTENT_FIELDS} order stays carried and any later one becomes
  * `oneContentOnly`, because `NewContent` is one alternative.
  *
@@ -820,6 +971,25 @@ export function transferOfMatchDraft(
     }
     bodyFound = true;
   } // End of the loop that keeps one carried content key
+  const structure = structureTransferOfMatchDraft(baseline, buffers);
+  if (structure.trigger.form !== 'trigger') {
+    // The trigger is carried in its other form (Phase 3-6-1): the literal row says
+    // so rather than claiming a literal the draft does not hold.
+    transfer.trigger = { kind: 'notCarried', reason: { kind: 'triggerFormCarried' } };
+  } else if (
+    buffers.triggerSide.form === 'trigger' &&
+    baseline.structure.trigger.form !== 'trigger'
+  ) {
+    // A literal the draft switched to or added (Phase 3-6-1): the box's text is
+    // what the draft would have written under `trigger`.
+    const text = buffers.trigger.text;
+    transfer.trigger =
+      text === ''
+        ? { kind: 'notCarried', reason: { kind: 'notInTheFile' } }
+        : text.includes('\r')
+          ? { kind: 'notCarried', reason: { kind: 'carriageReturn' } }
+          : { kind: 'carried', text };
+  }
   return transfer;
 } // End of function transferOfMatchDraft()
 
@@ -892,7 +1062,8 @@ function carriedText(transfer: FieldTransfer): string | null {
  */
 export function newMatchOfRecovery(
   transfer: RecoveryTransfer,
-  buffers: CreationBuffers
+  buffers: CreationBuffers,
+  structure: StructureTransfer
 ): NewMatch {
   const carried: Partial<Record<OptionalRecoveryField, string>> = {};
   for (const field of OPTIONAL_RECOVERY_FIELDS) {
@@ -901,12 +1072,33 @@ export function newMatchOfRecovery(
       carried[field] = text;
     }
   }
+  const terms = structure.searchTerms;
   return {
-    trigger: { Single: buffers.trigger },
+    trigger: newTriggerOf(structure.trigger, buffers.trigger),
     content: newContentOf(recoveryBodyFieldOf(transfer), buffers.replace),
-    ...carried
+    ...carried,
+    ...(terms.kind === 'carried' ? { search_terms: terms.items } : {})
   };
 } // End of function newMatchOfRecovery()
+
+/**
+ * The creation trigger for one trigger transfer — Phase 3-6-1.
+ *
+ * @param trigger - What the trigger side became.
+ * @param box - What the trigger box holds.
+ * @returns The `NewTrigger` arm: the box as a literal or a pattern, or the
+ *   carried list.
+ */
+function newTriggerOf(trigger: TriggerTransfer, box: string): NewMatch['trigger'] {
+  switch (trigger.form) {
+    case 'trigger':
+      return { Single: box };
+    case 'regex':
+      return { Regex: box };
+    case 'triggers':
+      return { Multiple: trigger.items };
+  }
+} // End of function newTriggerOf()
 
 /**
  * The optional keys a recovered snippet may be born holding: every editable field
@@ -1038,6 +1230,12 @@ export interface RecoverySession {
   readonly origin: RecoveryOrigin;
   /** What the retained draft became, per field. Not drafted: nothing edits it. */
   readonly transfer: RecoveryTransfer;
+  /**
+   * What the retained trigger side and `search_terms` became — Phase 3-6-1. Not
+   * drafted: a carried list has no control, and its items are what the draft
+   * would have left in the file.
+   */
+  readonly structure: StructureTransfer;
   /** Every file this may write into, in window order. Never empty. */
   readonly destinations: readonly RecoveryDestination[];
   /** The file chosen, or `null` when the person must choose one. */
@@ -1266,6 +1464,7 @@ export type RecoveryStart =
 function openedRecovery<T>(
   conflict: ConflictModel<T>,
   transfer: RecoveryTransfer,
+  structure: StructureTransfer,
   destinations: readonly RecoveryDestination[],
   clock: Clock
 ): RecoverySession {
@@ -1273,8 +1472,14 @@ function openedRecovery<T>(
   const buffers: CreationBuffers = {
     // Seeded from the transfer, and blank when it carried nothing. Blank is what
     // the consult requires of a value this application could not transfer: the
-    // person supplies one, and nothing here invents content.
-    trigger: carriedText(transfer.trigger) ?? '',
+    // person supplies one, and nothing here invents content. A carried pattern
+    // is seeded into the same box (Phase 3-6-1); a carried list uses no box.
+    trigger:
+      structure.trigger.form === 'regex'
+        ? structure.trigger.text
+        : structure.trigger.form === 'triggers'
+          ? ''
+          : (carriedText(transfer.trigger) ?? ''),
     // The body box holds whichever content key the transfer carries (Phase
     // 3-5-1); `CreationBuffers` calls it `replace` because the creation form's
     // body was always `replace`, and `recoveryBodyFieldOf` names the key.
@@ -1287,6 +1492,7 @@ function openedRecovery<T>(
       diskRevision: conflict.diskRevision
     },
     transfer,
+    structure,
     destinations,
     chosen,
     draft: startDraft(revisionOf(destinations, chosen), buffers, BUFFER_RULES),
@@ -1417,8 +1623,13 @@ export function startMatchFieldRecovery<S, O>(
   if (offer.kind !== 'offered' || conflict === null) {
     return { kind: 'unavailable', reason: offer.kind === 'offered' ? 'noConflict' : offer.reason };
   }
-  const transfer = transferOfMatchDraft(baseline, copyOfDraft(conflict));
-  return { kind: 'ready', session: openedRecovery(conflict, transfer, offer.destinations, clock) };
+  const retained = copyOfDraft(conflict);
+  const transfer = transferOfMatchDraft(baseline, retained);
+  const structure = structureTransferOfMatchDraft(baseline, retained);
+  return {
+    kind: 'ready',
+    session: openedRecovery(conflict, transfer, structure, offer.destinations, clock)
+  };
 } // End of function startMatchFieldRecovery()
 
 /**
@@ -1449,7 +1660,10 @@ export function startCreationFieldRecovery<S, O>(
     return { kind: 'unavailable', reason: offer.kind === 'offered' ? 'noConflict' : offer.reason };
   }
   const transfer = transferOfCreationDraft(copyOfDraft(conflict));
-  return { kind: 'ready', session: openedRecovery(conflict, transfer, offer.destinations, clock) };
+  return {
+    kind: 'ready',
+    session: openedRecovery(conflict, transfer, LITERAL_TRIGGER_ONLY, offer.destinations, clock)
+  };
 } // End of function startCreationFieldRecovery()
 
 /**
@@ -1742,7 +1956,13 @@ export function editRecoveryField(
   field: CreationField,
   text: string
 ): RecoverySession {
-  if (!isRecoveryEditable(session) || text.includes('\r')) {
+  if (
+    !isRecoveryEditable(session) ||
+    text.includes('\r') ||
+    (field === 'trigger' && session.structure.trigger.form === 'triggers')
+  ) {
+    // A carried `triggers` list uses no box (Phase 3-6-1): the trigger box is
+    // not what the new snippet is born holding, so typing into it is refused.
     return session;
   }
   const recorded = recordTyping(
@@ -1916,7 +2136,7 @@ export function recoveryRefusal(session: RecoverySession): RecoveryRefusal | nul
     return 'destinationUnavailable';
   }
   const buffers = session.draft.value;
-  if (buffers.trigger === '') {
+  if (buffers.trigger === '' && session.structure.trigger.form !== 'triggers') {
     return 'triggerEmpty';
   }
   if (buffers.replace === '') {
@@ -2037,7 +2257,7 @@ export function beginRecoveryCreate(
     return null;
   }
   const submission = submissionOf(session.draft);
-  const newMatch = newMatchOfRecovery(session.transfer, submission.candidate);
+  const newMatch = newMatchOfRecovery(session.transfer, submission.candidate, session.structure);
   if (textsOfNewMatch(newMatch).some((value) => value.includes('\r'))) {
     return null;
   }
@@ -3469,6 +3689,19 @@ export interface RecoveryView {
   readonly fields: readonly RecoveryFieldModel[];
   /** What the trigger control shows. */
   readonly trigger: string;
+  /**
+   * Which trigger form the new snippet is born with — Phase 3-6-1. The trigger
+   * control holds the literal for `trigger` and the pattern for `regex`; for
+   * `triggers` it holds nothing and accepts nothing, and
+   * {@link RecoveryView.triggerItems} is what is written.
+   */
+  readonly triggerForm: TriggerShape;
+  /** The carried `triggers` items, in order, or none — Phase 3-6-1. */
+  readonly triggerItems: readonly string[];
+  /** Whether the trigger control accepts changes — Phase 3-6-1. */
+  readonly triggerEditable: boolean;
+  /** What becomes of `search_terms`, whole or not at all — Phase 3-6-1. */
+  readonly searchTerms: ListTransfer;
   /** What the body control shows. */
   readonly replace: string;
   /**
@@ -3616,6 +3849,11 @@ export function recoveryView(session: RecoverySession): RecoveryView {
     bodyField: recoveryBodyFieldOf(session.transfer),
     bodyLabel: fieldLabelName(recoveryBodyFieldOf(session.transfer)),
     trigger: session.draft.value.trigger,
+    triggerForm: session.structure.trigger.form,
+    triggerItems: session.structure.trigger.form === 'triggers' ? session.structure.trigger.items : [],
+    triggerEditable:
+      isRecoveryEditable(session) && session.structure.trigger.form !== 'triggers',
+    searchTerms: session.structure.searchTerms,
     replace: session.draft.value.replace,
     dirty: isDirty(session.draft),
     canUndo: canUndo(session.draft),
@@ -3950,6 +4188,10 @@ export function transferRefusalKey(refusal: TransferRefusal): TranslationKey {
       return 'browser.recovery.transfer.switchedAway';
     case 'oneContentOnly':
       return 'browser.recovery.transfer.oneContentOnly';
+    case 'triggerFormCarried':
+      return 'browser.recovery.transfer.triggerFormCarried';
+    case 'listNotEditable':
+      return 'browser.recovery.transfer.listNotEditable';
   }
 } // End of function transferRefusalKey()
 

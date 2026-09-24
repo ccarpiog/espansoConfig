@@ -100,6 +100,7 @@ import {
   focusRecoveryField,
   isRecoveryEditable,
   keepRecovering,
+  LITERAL_TRIGGER_ONLY,
   newMatchOfRecovery,
   preferredRecoveryDestination,
   recoveryAvailability,
@@ -831,7 +832,9 @@ describe('what a retained draft becomes in the new snippet', () => {
   it('carries nothing for any of the five fields this editor may not edit', () => {
     const cases: readonly (readonly [MatchView, 'trigger' | 'replace' | 'label' | 'word', string])[] =
       [
-        [snippet({ triggerKind: 'Regex', regex: '^a' }), 'trigger', 'triggerNotSingle'],
+        // A `Several` rather than a `Regex` since Phase 3-6-1: a regex is now carried
+        // in its own form, and several forms are the shape that still carries none.
+        [snippet({ triggerKind: 'Several', regex: '^a' }), 'trigger', 'triggerNotSingle'],
         [withScalar('replace', { ...scalar('b'), decoded: false }), 'replace', 'notDecodable'],
         [withScalar('replace', scalar('a\rb')), 'replace', 'carriageReturn'],
         [withScalar('label', { ...scalar(''), span: { start: 12, end: 12 } }), 'label', 'ownsNoBytes'],
@@ -888,7 +891,7 @@ describe('what a retained draft becomes in the new snippet', () => {
       { label: { text: '', removed: false } }
     );
     const transfer = transferOfMatchDraft(baseline, buffers);
-    const newMatch = newMatchOfRecovery(transfer, { trigger: ':sig', replace: 'Regards' });
+    const newMatch = newMatchOfRecovery(transfer, { trigger: ':sig', replace: 'Regards' }, LITERAL_TRIGGER_ONLY);
     expect(newMatch).toEqual({
       trigger: { Single: ':sig' },
       content: { Replace: 'Regards' },
@@ -922,7 +925,7 @@ describe('what a retained draft becomes in the new snippet', () => {
 
   it('takes the two mandatory values from the controls and never from the transfer', () => {
     const transfer = transferOfCreationDraft({ trigger: ':new', replace: 'A body' });
-    expect(newMatchOfRecovery(transfer, { trigger: ':typed', replace: 'Typed' })).toEqual({
+    expect(newMatchOfRecovery(transfer, { trigger: ':typed', replace: 'Typed' }, LITERAL_TRIGGER_ONLY)).toEqual({
       trigger: { Single: ':typed' },
       content: { Replace: 'Typed' }
     });
@@ -1463,6 +1466,10 @@ const NOT_A_FORM_TRANSITION: readonly string[] = [
   'textsOfNewMatch',
   // Phase 3-5-1: a transfer in, the body's content key out; it takes no form.
   'recoveryBodyFieldOf',
+  // Phase 3-6-1: a baseline and a draft in, the structure transfer out; and the
+  // structure transfer of a draft that has none. Neither takes a form.
+  'structureTransferOfMatchDraft',
+  'LITERAL_TRIGGER_ONLY',
   'conflictDraftKindOf',
   'recoveryRouteOf',
   'fieldsNotCarried',
@@ -1837,7 +1844,11 @@ describe('what the form refuses to send', () => {
     // The consult's Q1: a trigger that is not one literal cannot be transferred,
     // so the box is empty, the reason is on the table beside it, and nothing here
     // invents content.
-    const session = openedOverEditor(snippet({ triggerKind: 'Multiple', triggers: [':a', ':b'] }));
+    // A `Several` since Phase 3-6-1, which carries a `Multiple` list whole: several
+    // forms are the trigger side no transfer picks a winner in.
+    const session = openedOverEditor(
+      snippet({ triggerKind: 'Several', triggers: [':a', ':b'], regex: '^a' })
+    );
     expect(session.draft.value.trigger).toBe('');
     expect(recoveryRefusal(session)).toBe('triggerEmpty');
     expect(session.transfer.trigger).toEqual({

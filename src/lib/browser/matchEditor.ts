@@ -18,9 +18,20 @@
  * `right_word`, `propagate_case`, `uppercase_style`, `force_mode`,
  * `force_clipboard`, `paragraph` and `anchor`, each its own textual field and
  * never one control over several. Seventeen `DraftField<string>`s of a
- * twenty-two-field {@link MatchDraft}; `regex` and all four lists go out
- * `'Unchanged'` (3-6 owns the trigger forms and the lists). Until Phase 3-5-1 it
+ * {@link MatchDraft}; `vars` and `form_fields` go out empty. Until Phase 3-5-1 it
  * was six: the trigger, `replace`, the label and the three word-boundary keys.
+ *
+ * **The trigger side and `search_terms`, since Phase 3-6-1**, are drafted beside
+ * the fields ({@link TriggerSideBuffer}, and `./matchLists.ts` for the lists):
+ * the three trigger forms — the literal `trigger`, `regex` and the `triggers`
+ * list — with a compound, confirmed change of form between them
+ * ({@link chooseTriggerForm}; ruling 6), list items added, removed and edited in
+ * the intended order with the file's own block or flow style kept, and the
+ * `Several` and `Absent` shapes presented as model values
+ * ({@link TriggerPresentation}) — no winner picked, raw repair offered as a code.
+ * A regex is never compiled here: `RegexDoesNotCompile` is the Rust validator's
+ * answer at save time, and the draft is kept. {@link triggerSideDerivationOf} is
+ * the one producer of the trigger side's wire intents.
  *
  * **Three further things are drafted beside the fields** (Phase 3-5-1), and each
  * is a value of this model rather than a rule of a renderer:
@@ -248,15 +259,48 @@ import type {
   ContentForm,
   ContentRevision,
   DraftField,
+  ItemDraft,
   MatchDraft,
   MatchId,
   MatchView,
   PresentationNote,
   SaveResult,
   ScalarView,
+  SequenceField,
+  SequenceIntent,
+  TriggerFormChange,
+  TriggerKind,
   ValueKind,
   ValueView
 } from '../ipc/types';
+import {
+  capturedList,
+  committedList,
+  listBaselineOf,
+  listBufferOf,
+  listDerivationOf,
+  listLabelName,
+  listReapply,
+  listRowsOf,
+  rebuiltList,
+  sameListState,
+  textsWritten,
+  unreadableItem,
+  withItemAdded,
+  withItemRemoved,
+  withItemText,
+  withListAdded,
+  withListRemoved,
+  type ListBaseline,
+  type ListBuffer,
+  type ListDerivation,
+  type ListItemModel,
+  type ListProblem,
+  type ListReapplyVerdict,
+  type ListRefusal,
+  type ListStyle,
+  type RemovedListItem
+} from './matchLists';
 import type { DetailFieldName, OptionGroupName } from './detail';
 import { matchEditability, type MatchEditability } from './detail';
 import {
@@ -706,8 +750,74 @@ export interface FieldBaseline {
   readonly shown: readonly ShownValue[];
 }
 
-/** What the file held for all seventeen fields. */
-export type MatchBaseline = Readonly<Record<EditableField, FieldBaseline>>;
+/**
+ * One of the three trigger forms, spelled as its espanso key — Phase 3-6-1.
+ *
+ * `trigger` and `regex` are scalar forms and `triggers` is a list. A snippet
+ * espanso accepts holds exactly one of them; which one is {@link TriggerSideBaseline.form}.
+ */
+export type TriggerShape = 'trigger' | 'regex' | 'triggers';
+
+/** The three trigger forms, in `TriggerSpec`'s order. */
+export const TRIGGER_SHAPES: readonly TriggerShape[] = ['trigger', 'regex', 'triggers'];
+
+/**
+ * What the file held on the trigger side when the session was seeded — Phase
+ * 3-6-1. **Not drafted.**
+ *
+ * The literal `trigger` is the seventeen-field record's own `trigger` entry and
+ * is not repeated here; this holds what that record cannot: the shape of the
+ * whole trigger side, the `regex` scalar and the `triggers` list.
+ */
+export interface TriggerSideBaseline {
+  /** The projection's own verdict on the trigger side. */
+  readonly kind: TriggerKind;
+  /**
+   * The one form the snippet holds — `trigger` for `Single`, `regex` for
+   * `Regex`, `triggers` for `Multiple` — or `null` for `Several` (no winner is
+   * picked) and `Absent` (there is none).
+   */
+  readonly form: TriggerShape | null;
+  /**
+   * `regex`, as a scalar field: present or not, its logical value, and whether
+   * the scalar could be edited — the same five checks every scalar field meets.
+   * Whether the **box** is editable is a question about the drafted form too
+   * ({@link isRegexEditable}).
+   */
+  readonly regex: FieldBaseline;
+  /** `triggers`, as a list. */
+  readonly triggers: ListBaseline;
+  /**
+   * Whether each form's key is free: absent, and not held in any shape the
+   * projection did not model. A switch or an addition may only write a free key.
+   */
+  readonly keyFree: Readonly<Record<TriggerShape, boolean>>;
+  /**
+   * The forms the file holds, **in the order the file writes them** — every one
+   * of them, so a `Several` shows them all and picks none (ruling 6).
+   */
+  readonly heldForms: readonly TriggerShape[];
+}
+
+/**
+ * What the file held beyond the seventeen scalar fields — Phase 3-6-1: the
+ * trigger side and the `search_terms` list.
+ */
+export interface StructureBaseline {
+  /** The trigger side. */
+  readonly trigger: TriggerSideBaseline;
+  /** `search_terms`. */
+  readonly searchTerms: ListBaseline;
+}
+
+/**
+ * What the file held for all seventeen fields, and, since Phase 3-6-1, for the
+ * trigger side and `search_terms` ({@link MatchBaseline.structure}).
+ */
+export type MatchBaseline = Readonly<Record<EditableField, FieldBaseline>> & {
+  /** The trigger side and `search_terms`. */
+  readonly structure: StructureBaseline;
+};
 
 /**
  * What one field's controls hold now.
@@ -765,16 +875,49 @@ export interface DraftedContentSwitch {
 }
 
 /**
- * What all seventeen fields' controls hold now, and the drafted content switch.
+ * What the trigger side's controls hold — Phase 3-6-1. **The draft side.**
  *
- * The switch is a property beside the fields rather than a field: a
- * `Record<EditableField, …>` walk sees every field and never the switch, and the
- * switch is read by {@link intentsOf} and nothing that walks fields alone.
+ * `form` is the drafted trigger form: the baseline's own when nothing is
+ * switched, another when a switch is drafted, and — for a snippet with no
+ * trigger — the form the person chose to add. `confirmed` is ruling 6's
+ * confirmation of a switch, a model value exactly as the content switch's is,
+ * so undo walks it back and {@link canSave} refuses until it is `true`. An
+ * addition to a snippet with no trigger needs none: nothing is renamed.
+ *
+ * The literal trigger's box is the seventeen-field record's own `trigger`
+ * buffer; `regex` is this box, and `triggers` this list.
+ */
+export interface TriggerSideBuffer {
+  /** The drafted trigger form, or `null` when none is drafted. */
+  readonly form: TriggerShape | null;
+  /** Whether a drafted switch has been confirmed after its preview. */
+  readonly confirmed: boolean;
+  /** What the `regex` box holds. Its `removed` flag is never set. */
+  readonly regex: FieldBuffer;
+  /** What the `triggers` list holds. */
+  readonly triggers: ListBuffer;
+}
+
+/**
+ * What all seventeen fields' controls hold now, the drafted content switch, and
+ * — since Phase 3-6-1 — the trigger side and `search_terms`.
+ *
+ * The switch, the trigger side and the list are properties beside the fields
+ * rather than fields: a `Record<EditableField, …>` walk sees every field and
+ * never them, and they are read by {@link intentsOf} and {@link matchDraftOf}
+ * and nothing that walks fields alone.
  */
 export type MatchBuffers = Readonly<Record<EditableField, FieldBuffer>> & {
   /** The drafted switch of content kind, or `null`. */
   readonly contentSwitch: DraftedContentSwitch | null;
+  /** The drafted trigger side — Phase 3-6-1. */
+  readonly triggerSide: TriggerSideBuffer;
+  /** The drafted `search_terms` list — Phase 3-6-1. */
+  readonly searchTerms: ListBuffer;
 };
+
+/** {@link MatchBuffers} with every property writable, for building one. */
+type WritableBuffers = { -readonly [K in keyof MatchBuffers]: MatchBuffers[K] };
 
 /**
  * How this editor compares and snapshots its drafted value.
@@ -810,7 +953,15 @@ export { TYPING_GROUP_IDLE_MS };
  * The shared {@link TypingRun} named over this editor's own field union, so the
  * session's shape is unchanged by the 2c-3a extraction.
  */
-export type TypingGroup = TypingRun<EditableField>;
+export type TypingGroup = TypingRun<TypingSubject>;
+
+/**
+ * What a run of typing is in — Phase 3-6-1: one of the seventeen fields, the
+ * `regex` box, or one item of a list named by its list and its position in the
+ * drafted array. A structural action (an item added or removed) ends every run,
+ * so a position cannot come to name another item inside one.
+ */
+export type TypingSubject = EditableField | 'regex' | `${SequenceField}#${number}`;
 
 /**
  * One editing session over one snippet's seventeen editable fields.
@@ -1302,17 +1453,136 @@ function shownValuesOf(
 } // End of function shownValuesOf()
 
 /**
- * What the file holds for all seventeen fields, and which of them may be edited.
+ * Whether the `regex` scalar may be edited, decided from the projection alone —
+ * Phase 3-6-1.
+ *
+ * {@link fieldEligibility}'s five checks for a one-line scalar, in `plan_scalar`'s
+ * order, with no trigger-kind check: whether the regex box is the snippet's form
+ * is the trigger side's question ({@link isRegexEditable}), not the scalar's.
+ *
+ * @param match - The snippet's projection.
+ * @returns The verdict.
+ */
+function regexEligibility(match: MatchView): FieldEligibility {
+  const scalar = match.trigger.regex;
+  if (scalar === null) {
+    return match.unknown_entries.some((entry) => entry.key === 'regex')
+      ? { kind: 'readOnly', reason: 'unmodelledShape' }
+      : EDITABLE;
+  }
+  if (!scalar.decoded) {
+    return { kind: 'readOnly', reason: 'notDecodable' };
+  }
+  if (scalar.text.includes('\r')) {
+    return { kind: 'readOnly', reason: 'carriageReturn' };
+  }
+  if (scalar.text.includes('\n')) {
+    return { kind: 'readOnly', reason: 'lineBreak' };
+  }
+  return scalar.span.start === scalar.span.end ? { kind: 'readOnly', reason: 'ownsNoBytes' } : EDITABLE;
+} // End of function regexEligibility()
+
+/**
+ * The trigger form one projected trigger kind is, or `null`.
+ *
+ * @param kind - The projection's verdict.
+ * @returns The form, or `null` for `Several` and `Absent`.
+ */
+function formOfKind(kind: TriggerKind): TriggerShape | null {
+  switch (kind) {
+    case 'Single':
+      return 'trigger';
+    case 'Regex':
+      return 'regex';
+    case 'Multiple':
+      return 'triggers';
+    case 'Several':
+    case 'Absent':
+      return null;
+  }
+} // End of function formOfKind()
+
+/**
+ * The forms one snippet holds, in the order the file writes them.
+ *
+ * Each placed by the first byte of its value — {@link orderedForms}' rule, which
+ * {@link shownValuesOf} states in full — so a `Several` names its forms as the
+ * file does.
+ *
+ * @param match - The snippet's projection.
+ * @returns The forms held.
+ */
+function heldFormsOf(match: MatchView): readonly TriggerShape[] {
+  const spec = match.trigger;
+  const placed: { readonly form: TriggerShape; readonly position: number | null }[] = [];
+  if (spec.trigger !== null) {
+    placed.push({ form: 'trigger', position: spec.trigger.span.start });
+  }
+  if (!('Absent' in spec.triggers_presence)) {
+    const starts = spec.triggers.map(spanStartOf).filter((start): start is number => start !== null);
+    placed.push({ form: 'triggers', position: starts.length === 0 ? null : Math.min(...starts) });
+  }
+  if (spec.regex !== null) {
+    placed.push({ form: 'regex', position: spec.regex.span.start });
+  }
+  // `orderedForms`' stable partition, over forms rather than shown values.
+  const located = placed
+    .filter((one): one is { readonly form: TriggerShape; readonly position: number } => one.position !== null)
+    .sort((left, right) => left.position - right.position);
+  return [...located, ...placed.filter((one) => one.position === null)].map((one) => one.form);
+} // End of function heldFormsOf()
+
+/**
+ * What the file holds on the trigger side and in `search_terms` — Phase 3-6-1.
+ *
+ * @param match - The snippet's projection.
+ * @returns The structure baseline.
+ */
+function structureBaselineOf(match: MatchView): StructureBaseline {
+  const unknownKeys = match.unknown_entries.map((entry) => entry.key);
+  const spec = match.trigger;
+  const regex = spec.regex;
+  const eligibility = regexEligibility(match);
+  const triggers = listBaselineOf('triggers', spec.triggers_presence, spec.triggers, unknownKeys);
+  return {
+    trigger: {
+      kind: spec.kind,
+      form: formOfKind(spec.kind),
+      regex: {
+        present: regex !== null,
+        value: regex === null ? '' : regex.text,
+        eligibility,
+        shown: []
+      },
+      triggers,
+      keyFree: {
+        trigger: spec.trigger === null && !unknownKeys.includes('trigger'),
+        regex: regex === null && !unknownKeys.includes('regex'),
+        triggers: triggers.style === 'absent' && !unknownKeys.includes('triggers')
+      },
+      heldForms: heldFormsOf(match)
+    },
+    searchTerms: listBaselineOf(
+      'search_terms',
+      match.search_terms_presence,
+      match.search_terms,
+      unknownKeys
+    )
+  };
+} // End of function structureBaselineOf()
+
+/**
+ * What the file holds for all seventeen fields, and which of them may be edited,
+ * and — since Phase 3-6-1 — the trigger side and `search_terms`.
  *
  * @param match - The snippet's projection.
  * @returns The baseline, frozen, so nothing downstream can change what the file
  *   is recorded as having held.
  */
 export function baselineOf(match: MatchView): MatchBaseline {
-  const baseline: Record<EditableField, FieldBaseline> = {} as Record<
-    EditableField,
-    FieldBaseline
-  >;
+  const baseline: Record<EditableField, FieldBaseline> & { structure: StructureBaseline } =
+    {} as Record<EditableField, FieldBaseline> & { structure: StructureBaseline };
+  baseline.structure = structureBaselineOf(match);
   for (const field of EDITABLE_FIELDS) {
     const scalar = projectedScalar(match, field);
     const eligibility = fieldEligibility(match, field);
@@ -1342,8 +1612,30 @@ export function buffersOf(baseline: MatchBaseline): MatchBuffers {
   for (const field of EDITABLE_FIELDS) {
     fields[field] = { text: baseline[field].value, removed: false };
   }
-  return { ...fields, contentSwitch: null };
+  return {
+    ...fields,
+    contentSwitch: null,
+    triggerSide: triggerSideBufferOf(baseline.structure.trigger),
+    searchTerms: listBufferOf(baseline.structure.searchTerms)
+  };
 } // End of function buffersOf()
+
+/**
+ * The trigger side's starting buffer: the baseline's own form, nothing
+ * confirmed, the `regex` box holding the file's value and the `triggers` list
+ * holding the file's list.
+ *
+ * @param side - What the file holds on the trigger side.
+ * @returns The starting buffer.
+ */
+function triggerSideBufferOf(side: TriggerSideBaseline): TriggerSideBuffer {
+  return {
+    form: side.form,
+    confirmed: false,
+    regex: { text: side.regex.value, removed: false },
+    triggers: listBufferOf(side.triggers)
+  };
+} // End of function triggerSideBufferOf()
 
 /**
  * What one field's draft says should happen to it.
@@ -1494,19 +1786,46 @@ export function intentsOf(
   buffers: MatchBuffers,
   contentSwitch: DraftedContentSwitch | null
 ): Readonly<Record<EditableField, DraftField<string>>> {
+  return intentsWith(
+    baseline,
+    buffers,
+    contentSwitch,
+    triggerSideDerivationOf(baseline, capturedStructure(buffers))
+  );
+} // End of function intentsOf()
+
+/**
+ * {@link intentsOf} over a trigger side the caller has already derived.
+ *
+ * **The literal `trigger`'s intent is the trigger side's** (Phase 3-6-1): in
+ * place it is exactly {@link fieldIntent}'s answer, and under a drafted switch
+ * or an addition it is the switch's — so the field walk skips `trigger` and
+ * reads no buffer of it.
+ *
+ * @param baseline - What the file holds.
+ * @param buffers - What the controls hold.
+ * @param contentSwitch - The drafted switch, read once by the caller.
+ * @param side - The trigger side's derivation, built from one read.
+ * @returns One intent per field.
+ */
+function intentsWith(
+  baseline: MatchBaseline,
+  buffers: MatchBuffers,
+  contentSwitch: DraftedContentSwitch | null,
+  side: TriggerSideDerivation
+): Readonly<Record<EditableField, DraftField<string>>> {
   const intents: Record<EditableField, DraftField<string>> = {} as Record<
     EditableField,
     DraftField<string>
   >;
   for (const field of EDITABLE_FIELDS) {
-    intents[field] = fieldIntent(
-      baseline[field],
-      buffers[field],
-      switchRoleOf(baseline, contentSwitch, field)
-    );
-  }
+    intents[field] =
+      field === 'trigger'
+        ? side.trigger
+        : fieldIntent(baseline[field], buffers[field], switchRoleOf(baseline, contentSwitch, field));
+  } // End of the loop over the seventeen editable fields
   return intents;
-} // End of function intentsOf()
+} // End of function intentsWith()
 
 /**
  * The whole twenty-two-field draft to send.
@@ -1516,37 +1835,45 @@ export function intentsOf(
  * phase breaks this function rather than being silently omitted. A spread over a
  * partial would give both of those away, and what it would buy is six fewer lines.
  *
- * `regex` and all four lists go out saying *leave this alone*, which is what
+ * `vars` and `form_fields` go out saying *leave this alone*, which is what
  * makes an unedited field's spelling, quoting and surrounding comments survive a
- * save byte for byte; so does every field whose intent is `'Unchanged'`. Since
- * Phase 3-5-1 the draft also carries `content_switch`, built from the switch read
- * once and used for both the intents and the wire value.
+ * save byte for byte; so does every field whose intent is `'Unchanged'`, and every
+ * list and form the draft did not touch. Since Phase 3-5-1 the draft also carries
+ * `content_switch`, built from the switch read once and used for both the intents
+ * and the wire value; since Phase 3-6-1, `regex`, the `triggers` and
+ * `search_terms` item edits, `sequences` and `trigger_form`, built from the trigger
+ * side and the lists read once ({@link triggerSideDerivationOf}, `listDerivationOf`).
  *
  * @param baseline - What the file holds.
  * @param buffers - What the controls hold.
  * @returns The draft `save_match` takes.
  */
 export function matchDraftOf(baseline: MatchBaseline, buffers: MatchBuffers): MatchDraft {
-  return draftWith(baseline, buffers, capturedSwitch(buffers));
+  return draftWith(baseline, buffers, capturedSwitch(buffers), capturedStructure(buffers));
 } // End of function matchDraftOf()
 
 /**
- * {@link matchDraftOf} over a switch the caller has already read once.
+ * {@link matchDraftOf} over a switch and a structure the caller has already read
+ * once.
  *
  * @param baseline - What the file holds.
  * @param buffers - What the controls hold.
  * @param contentSwitch - The drafted switch, captured by the caller, or `null`.
+ * @param structure - The trigger side and the lists, captured by the caller.
  * @returns The draft `save_match` takes.
  */
 function draftWith(
   baseline: MatchBaseline,
   buffers: MatchBuffers,
-  contentSwitch: DraftedContentSwitch | null
+  contentSwitch: DraftedContentSwitch | null,
+  structure: CapturedStructure
 ): MatchDraft {
-  const intents = intentsOf(baseline, buffers, contentSwitch);
+  const side = triggerSideDerivationOf(baseline, structure);
+  const terms = listDerivationOf(baseline.structure.searchTerms, structure.searchTerms);
+  const intents = intentsWith(baseline, buffers, contentSwitch, side);
   return {
     trigger: intents.trigger,
-    regex: 'Unchanged',
+    regex: side.regex,
     replace: intents.replace,
     markdown: intents.markdown,
     html: intents.html,
@@ -1563,11 +1890,13 @@ function draftWith(
     force_clipboard: intents.force_clipboard,
     paragraph: intents.paragraph,
     anchor: intents.anchor,
-    triggers: [],
-    search_terms: [],
+    triggers: side.items,
+    search_terms: terms.kind === 'changed' ? terms.items : [],
     vars: [],
     form_fields: [],
-    content_switch: contentSwitchOf(contentSwitch)
+    content_switch: contentSwitchOf(contentSwitch),
+    trigger_form: side.change,
+    sequences: [...side.sequences, ...(terms.kind === 'changed' ? terms.sequences : [])]
   };
 } // End of function draftWith()
 
@@ -1588,6 +1917,862 @@ export function contentSwitchOf(
     ? null
     : { from: drafted.from, to: drafted.to };
 } // End of function contentSwitchOf()
+
+/**
+ * Why the drafted trigger side or a drafted list cannot be sent as it stands —
+ * Phase 3-6-1. Codes, reported through {@link SaveWithheld}.
+ *
+ * - `triggerFormUnconfirmed` — a switch of trigger form is drafted and not yet
+ *   confirmed after its preview (ruling 6);
+ * - `triggerFormEmpty` — the drafted form holds nothing: a blank scalar, a list
+ *   with no item, or the removal of the only trigger form (ruling 6: removing the
+ *   final trigger never leaves an unnoticed null);
+ * - `triggerFormNotOffered` — a form the session does not offer is drafted, which
+ *   only a buffer built by hand can express;
+ * - `listNotInOrder`, `listEveryItemReplaced`, `listWouldBeEmpty` — a drafted
+ *   list's {@link ListProblem}.
+ */
+export type StructureProblem =
+  | 'triggerFormUnconfirmed'
+  | 'triggerFormEmpty'
+  | 'triggerFormNotOffered'
+  | 'listNotInOrder'
+  | 'listEveryItemReplaced'
+  | 'listWouldBeEmpty';
+
+/**
+ * What the drafted trigger side asks of a save — Phase 3-6-1.
+ *
+ * The literal `trigger`'s intent, the `regex` intent, the `triggers` item edits
+ * and list intents, and at most one change of form. **One compound intention,
+ * all or nothing** (ruling 23): a switch's two keys are never sent apart.
+ */
+export interface TriggerSideDerivation {
+  /** The intent for `trigger`. */
+  readonly trigger: DraftField<string>;
+  /** The intent for `regex`. */
+  readonly regex: DraftField<string>;
+  /** Edited items of `triggers`, by index in the file's list. */
+  readonly items: readonly ItemDraft[];
+  /** Items or the whole of `triggers` added or removed. */
+  readonly sequences: readonly SequenceIntent[];
+  /** The change of trigger form, or `null`. */
+  readonly change: TriggerFormChange | null;
+  /** Why this cannot be sent, or `null`. */
+  readonly problem: StructureProblem | null;
+}
+
+/** A trigger side that asks for nothing. */
+const NOTHING_DRAFTED: TriggerSideDerivation = Object.freeze({
+  trigger: 'Unchanged' as const,
+  regex: 'Unchanged' as const,
+  items: [],
+  sequences: [],
+  change: null,
+  problem: null
+});
+
+/**
+ * The trigger side and `search_terms`, copied into plain values so each is read
+ * exactly once — the check-and-spend rule of `CLAUDE.md` section 6.
+ */
+interface CapturedStructure {
+  /** The literal trigger's box. */
+  readonly trigger: FieldBuffer;
+  /** The trigger side. */
+  readonly side: TriggerSideBuffer;
+  /** `search_terms`. */
+  readonly searchTerms: ListBuffer;
+}
+
+/**
+ * Reads the structure part of a buffer once.
+ *
+ * @param buffers - What the controls hold.
+ * @returns Plain copies of the trigger box, the trigger side and the list.
+ */
+function capturedStructure(buffers: MatchBuffers): CapturedStructure {
+  const trigger = buffers.trigger;
+  const side = buffers.triggerSide;
+  const regex = side.regex;
+  return {
+    trigger: { text: trigger.text, removed: trigger.removed },
+    side: {
+      form: side.form,
+      confirmed: side.confirmed,
+      regex: { text: regex.text, removed: false },
+      triggers: capturedList(side.triggers)
+    },
+    searchTerms: capturedList(buffers.searchTerms)
+  };
+} // End of function capturedStructure()
+
+/**
+ * The structure problem one list problem is.
+ *
+ * @param problem - The list's own code.
+ * @returns The code {@link SaveWithheld} carries.
+ */
+function listStructureProblem(problem: ListProblem): StructureProblem {
+  switch (problem) {
+    case 'notInOrder':
+      return 'listNotInOrder';
+    case 'everyItemReplaced':
+      return 'listEveryItemReplaced';
+    case 'wouldBeEmpty':
+      return 'listWouldBeEmpty';
+  }
+} // End of function listStructureProblem()
+
+/**
+ * Whether the drafted form's key may be written where the file holds another
+ * form or none: the form's key is free, and a scalar form's scalar could be
+ * edited were it there.
+ *
+ * @param side - What the file holds on the trigger side.
+ * @param to - The drafted form.
+ * @returns `true` when the key is free.
+ */
+function formKeyFree(side: TriggerSideBaseline, to: TriggerShape): boolean {
+  return side.keyFree[to] && (to !== 'regex' || side.regex.eligibility.kind === 'editable');
+} // End of function formKeyFree()
+
+/**
+ * Whether the held form can be switched away from at all: its scalar editable,
+ * or its list an editable **block** list of exactly one item (a longer list
+ * would drop aliases, and a flow list is not reshaped).
+ *
+ * @param baseline - What the file holds.
+ * @param from - The held form.
+ * @returns The refusal, or `null` when the source can be switched.
+ */
+function sourceRefusal(baseline: MatchBaseline, from: TriggerShape): TriggerFormRefusal | null {
+  const side = baseline.structure.trigger;
+  switch (from) {
+    case 'trigger':
+      return baseline.trigger.eligibility.kind === 'editable' ? null : { kind: 'notEditable' };
+    case 'regex':
+      return side.regex.eligibility.kind === 'editable' ? null : { kind: 'notEditable' };
+    case 'triggers': {
+      const list = side.triggers;
+      if (list.eligibility.kind !== 'editable' || list.items.length === 0) {
+        return { kind: 'notEditable' };
+      }
+      if (list.style === 'flow') {
+        return { kind: 'flowList' };
+      }
+      return list.items.length === 1 ? null : { kind: 'wouldDropAliases', count: list.items.length };
+    }
+  }
+} // End of function sourceRefusal()
+
+/**
+ * What the drafted trigger side derives — Phase 3-6-1. **The one producer of
+ * the trigger side's wire intents.**
+ *
+ * | The file holds | The draft holds | Derives |
+ * |---|---|---|
+ * | a form | the same form | that form edited in place: the literal through {@link fieldIntent}, `regex` likewise, a list through `listDerivationOf` |
+ * | `trigger` or `regex` | the other | a `Rename`, the destination `Set` unless its text is the source's value |
+ * | `trigger` or `regex` | `triggers` | a `ToList` switch with the drafted items |
+ * | a one-item block `triggers` | `trigger` or `regex` | a `FromList` switch with the box's value |
+ * | nothing (`Absent`) | a form | that form added: a `Set`, or `InsertField` |
+ * | several forms | anything | nothing: no winner is picked, and raw repair is the route |
+ *
+ * **Removing the only trigger form is never derived**: an in-place scalar's
+ * `removed` flag is ignored (no transition sets it for these keys) and a drafted
+ * absent `triggers` list is `triggerFormEmpty`.
+ *
+ * @param baseline - What the file holds.
+ * @param captured - The structure, read once by the caller.
+ * @returns The derivation.
+ */
+export function triggerSideDerivationOf(
+  baseline: MatchBaseline,
+  captured: CapturedStructure
+): TriggerSideDerivation {
+  const side = baseline.structure.trigger;
+  const drafted = captured.side;
+  const from = side.form;
+  const to = drafted.form;
+  if (to === null) {
+    return NOTHING_DRAFTED;
+  }
+  if (from === null) {
+    return side.kind === 'Absent' && formKeyFree(side, to)
+      ? addedForm(baseline, captured, to)
+      : { ...NOTHING_DRAFTED, problem: 'triggerFormNotOffered' };
+  }
+  if (from === to) {
+    return formInPlace(baseline, captured, from);
+  }
+  if (sourceRefusal(baseline, from) !== null || !formKeyFree(side, to)) {
+    return { ...NOTHING_DRAFTED, problem: 'triggerFormNotOffered' };
+  }
+  return switchedForm(baseline, captured, from, to);
+} // End of function triggerSideDerivationOf()
+
+/**
+ * The trigger side edited in its own form.
+ *
+ * @param baseline - What the file holds.
+ * @param captured - The structure, read once.
+ * @param form - The held form, which the draft keeps.
+ * @returns The derivation.
+ */
+function formInPlace(
+  baseline: MatchBaseline,
+  captured: CapturedStructure,
+  form: TriggerShape
+): TriggerSideDerivation {
+  const side = baseline.structure.trigger;
+  switch (form) {
+    case 'trigger':
+      return {
+        ...NOTHING_DRAFTED,
+        trigger: fieldIntent(baseline.trigger, { text: captured.trigger.text, removed: false })
+      };
+    case 'regex':
+      return { ...NOTHING_DRAFTED, regex: fieldIntent(side.regex, captured.side.regex) };
+    case 'triggers': {
+      if (!captured.side.triggers.present) {
+        return { ...NOTHING_DRAFTED, problem: 'triggerFormEmpty' };
+      }
+      const derived = listDerivationOf(side.triggers, captured.side.triggers);
+      if (derived.kind === 'refused') {
+        return { ...NOTHING_DRAFTED, problem: listStructureProblem(derived.problem) };
+      }
+      return derived.kind === 'unchanged'
+        ? NOTHING_DRAFTED
+        : { ...NOTHING_DRAFTED, items: derived.items, sequences: derived.sequences };
+    }
+  }
+} // End of function formInPlace()
+
+/**
+ * A form added to a snippet that holds no trigger — ruling 6's explicit *Add
+ * trigger*. No confirmation is owed: nothing is renamed or dropped.
+ *
+ * @param baseline - What the file holds.
+ * @param captured - The structure, read once.
+ * @param to - The form added.
+ * @returns The derivation.
+ */
+function addedForm(
+  baseline: MatchBaseline,
+  captured: CapturedStructure,
+  to: TriggerShape
+): TriggerSideDerivation {
+  const side = baseline.structure.trigger;
+  switch (to) {
+    case 'trigger':
+      return captured.trigger.text === ''
+        ? { ...NOTHING_DRAFTED, problem: 'triggerFormEmpty' }
+        : { ...NOTHING_DRAFTED, trigger: { Set: captured.trigger.text } };
+    case 'regex':
+      return captured.side.regex.text === ''
+        ? { ...NOTHING_DRAFTED, problem: 'triggerFormEmpty' }
+        : { ...NOTHING_DRAFTED, regex: { Set: captured.side.regex.text } };
+    case 'triggers': {
+      const list = captured.side.triggers;
+      if (!list.present || list.items.length === 0) {
+        return { ...NOTHING_DRAFTED, problem: 'triggerFormEmpty' };
+      }
+      const derived: ListDerivation = listDerivationOf(side.triggers, list);
+      return derived.kind === 'changed'
+        ? { ...NOTHING_DRAFTED, items: derived.items, sequences: derived.sequences }
+        : { ...NOTHING_DRAFTED, problem: 'triggerFormEmpty' };
+    }
+  }
+} // End of function addedForm()
+
+/**
+ * The text a scalar form's box holds in a captured structure.
+ *
+ * @param captured - The structure, read once.
+ * @param form - `trigger` or `regex`.
+ * @returns The box's text.
+ */
+function scalarText(captured: CapturedStructure, form: 'trigger' | 'regex'): string {
+  return form === 'trigger' ? captured.trigger.text : captured.side.regex.text;
+} // End of function scalarText()
+
+/**
+ * A switch of trigger form — one compound intention (rulings 6 and 23).
+ *
+ * @param baseline - What the file holds.
+ * @param captured - The structure, read once.
+ * @param from - The held form.
+ * @param to - The drafted form, another one.
+ * @returns The derivation, `triggerFormUnconfirmed` until confirmed.
+ */
+function switchedForm(
+  baseline: MatchBaseline,
+  captured: CapturedStructure,
+  from: TriggerShape,
+  to: TriggerShape
+): TriggerSideDerivation {
+  const side = baseline.structure.trigger;
+  const unconfirmed: StructureProblem | null = captured.side.confirmed
+    ? null
+    : 'triggerFormUnconfirmed';
+  if (to === 'triggers') {
+    if (from === 'triggers') {
+      return NOTHING_DRAFTED;
+    }
+    const list = captured.side.triggers;
+    const items = list.present ? list.items.map((item) => item.text) : [];
+    return items.length === 0
+      ? { ...NOTHING_DRAFTED, problem: 'triggerFormEmpty' }
+      : {
+          ...NOTHING_DRAFTED,
+          change: { Switch: { switch: { ToList: { from, items } } } },
+          problem: unconfirmed
+        };
+  }
+  const text = scalarText(captured, to);
+  if (text === '') {
+    return { ...NOTHING_DRAFTED, problem: 'triggerFormEmpty' };
+  }
+  if (from === 'triggers') {
+    return {
+      ...NOTHING_DRAFTED,
+      change: { Switch: { switch: { FromList: { to, value: text } } } },
+      problem: unconfirmed
+    };
+  }
+  const reference = from === 'trigger' ? baseline.trigger.value : side.regex.value;
+  const destination: DraftField<string> = text === reference ? 'Unchanged' : { Set: text };
+  return {
+    ...NOTHING_DRAFTED,
+    trigger: to === 'trigger' ? destination : 'Unchanged',
+    regex: to === 'regex' ? destination : 'Unchanged',
+    change: { Rename: { from } },
+    problem: unconfirmed
+  };
+} // End of function switchedForm()
+
+/**
+ * Why the drafted structure cannot be sent, or `null` — Phase 3-6-1.
+ *
+ * @param baseline - What the file holds.
+ * @param captured - The structure, read once by the caller.
+ * @returns The first problem, the trigger side's before the list's.
+ */
+function structureProblemOf(
+  baseline: MatchBaseline,
+  captured: CapturedStructure
+): StructureProblem | null {
+  const side = triggerSideDerivationOf(baseline, captured).problem;
+  if (side !== null) {
+    return side;
+  }
+  const terms = listDerivationOf(baseline.structure.searchTerms, captured.searchTerms);
+  return terms.kind === 'refused' ? listStructureProblem(terms.problem) : null;
+} // End of function structureProblemOf()
+
+/**
+ * Why one trigger form cannot be switched to, as a code with its operands —
+ * Phase 3-6-1. `triggerFormRefusalKey` names the key, `tTriggerFormRefusal`
+ * renders it.
+ *
+ * - `wouldDropAliases` — the `triggers` list holds `count` items and a scalar
+ *   form holds one: **converting would drop an alias, so it is refused rather
+ *   than done silently**. Removing the others and saving first is the route;
+ * - `flowList` — the list is written in flow style, which a switch does not
+ *   reshape;
+ * - `listEdited` — the list has drafted edits, which a switch would discard;
+ * - `notEditable` — the held form or the destination key is one this editor may
+ *   not write (unreadable, unmodelled, or already in the file).
+ */
+export type TriggerFormRefusal =
+  | {
+      /** A scalar form would drop all but one of the list's items. */
+      readonly kind: 'wouldDropAliases';
+      /** How many items the list holds, at least two. */
+      readonly count: number;
+    }
+  | { readonly kind: 'flowList' }
+  | { readonly kind: 'listEdited' }
+  | { readonly kind: 'notEditable' };
+
+/** One trigger form a screen may offer, and whether it is offered. */
+export type TriggerFormChoice =
+  | {
+      /** The form. */
+      readonly to: TriggerShape;
+      /** Its label, for `tDetailField`. */
+      readonly label: DetailFieldName;
+      /** The form can be chosen. */
+      readonly offered: true;
+      /** Whether the draft already holds it. */
+      readonly drafted: boolean;
+    }
+  | {
+      /** The form. */
+      readonly to: TriggerShape;
+      /** Its label, for `tDetailField`. */
+      readonly label: DetailFieldName;
+      /** The form cannot be chosen now. */
+      readonly offered: false;
+      /** Why, as a code. */
+      readonly refusal: TriggerFormRefusal;
+    };
+
+/**
+ * The label a trigger form is named by.
+ *
+ * @param form - The form.
+ * @returns Its `DetailFieldName`.
+ */
+export function triggerShapeLabel(form: TriggerShape): DetailFieldName {
+  return form;
+} // End of function triggerShapeLabel()
+
+/**
+ * The trigger forms a screen offers now — Phase 3-6-1.
+ *
+ * **Several forms: none** — no winner is picked, and the view's presentation
+ * offers raw repair instead (ruling 6). **No trigger: each free form**, to add.
+ * **One form: the other two**, each offered or refused with its reason — a
+ * refused one is still listed, so a person is told *why* rather than finding a
+ * control missing.
+ *
+ * R37, as {@link contentSwitchTargets} states it: the choices, the view and the
+ * submission come from the one projection this session was seeded from, and
+ * TypeScript does not force a component to ask with the current session.
+ *
+ * @param session - The session to ask about.
+ * @returns The choices, in {@link TRIGGER_SHAPES} order.
+ */
+export function triggerFormChoices(session: MatchEditorSession): readonly TriggerFormChoice[] {
+  if (!isEditable(session)) {
+    return [];
+  }
+  const side = session.baseline.structure.trigger;
+  const drafted = session.draft.value.triggerSide.form;
+  if (side.kind === 'Several') {
+    return [];
+  }
+  const held = side.form;
+  // **The list as drafted, not as the file holds it** (Phase 3-6-1's review fix):
+  // re-pointing a drafted `triggers` list at a scalar form carries one item, so a
+  // drafted list of more than one item is refused with its count — its buffer is
+  // left as it is, and nothing is dropped.
+  const draftedList = capturedList(session.draft.value.triggerSide.triggers);
+  const draftedAliases =
+    drafted === 'triggers' && held !== 'triggers' && draftedList.present ? draftedList.items.length : 0;
+  const dropsDrafted = (to: TriggerShape): TriggerFormRefusal | null =>
+    to !== 'triggers' && draftedAliases > 1 ? { kind: 'wouldDropAliases', count: draftedAliases } : null;
+  if (held === null) {
+    return TRIGGER_SHAPES.filter((to) => formKeyFree(side, to)).map((to): TriggerFormChoice => {
+      const refusal = dropsDrafted(to);
+      return refusal === null
+        ? { to, label: triggerShapeLabel(to), offered: true, drafted: drafted === to }
+        : { to, label: triggerShapeLabel(to), offered: false, refusal };
+    });
+  }
+  const listDrafted =
+    listDerivationOf(side.triggers, capturedList(session.draft.value.triggerSide.triggers)).kind !==
+    'unchanged';
+  return TRIGGER_SHAPES.filter((to) => to !== held).map((to): TriggerFormChoice => {
+    const refusal: TriggerFormRefusal | null =
+      sourceRefusal(session.baseline, held) ??
+      dropsDrafted(to) ??
+      (!formKeyFree(side, to)
+        ? { kind: 'notEditable' }
+        : held === 'triggers' && listDrafted
+          ? { kind: 'listEdited' }
+          : null);
+    return refusal === null
+      ? { to, label: triggerShapeLabel(to), offered: true, drafted: drafted === to }
+      : { to, label: triggerShapeLabel(to), offered: false, refusal };
+  });
+} // End of function triggerFormChoices()
+
+/**
+ * The buffers with one form's box or list given back to what the file holds.
+ *
+ * @param baseline - What the file holds.
+ * @param buffers - The buffers being built.
+ * @param form - The form whose box is reset.
+ */
+function resetForm(baseline: MatchBaseline, buffers: WritableBuffers, form: TriggerShape): void {
+  const side = baseline.structure.trigger;
+  if (form === 'trigger') {
+    buffers.trigger = { text: baseline.trigger.value, removed: false };
+  } else if (form === 'regex') {
+    buffers.triggerSide = { ...buffers.triggerSide, regex: { text: side.regex.value, removed: false } };
+  } else {
+    buffers.triggerSide = { ...buffers.triggerSide, triggers: listBufferOf(side.triggers) };
+  }
+} // End of function resetForm()
+
+/**
+ * Drafts a change of trigger form to `to`, unconfirmed — Phase 3-6-1, rulings 6
+ * and 23.
+ *
+ * **One compound intention.** The text moves with the form, unconverted: to a
+ * scalar the box is given what the source box (or the one-item list) holds; to
+ * `triggers` the list is given one new item holding that text. **Nothing is
+ * dropped**: a list of more than one item is refused ({@link triggerFormChoices}'
+ * `wouldDropAliases`), and the source box keeps its text, so
+ * {@link cancelTriggerForm} gives everything back. Re-pointing a drafted switch
+ * resets the abandoned destination and drops the confirmation. Choosing the
+ * held form is the cancellation. On a snippet with no trigger this is ruling
+ * 6's *Add trigger*, and no confirmation is owed.
+ *
+ * A structural action: its own history step.
+ *
+ * @param session - The session being edited.
+ * @param to - The form to draft.
+ * @returns The session with the form drafted, or the same session when `to` is
+ *   not offered or is already drafted.
+ */
+export function chooseTriggerForm(session: MatchEditorSession, to: TriggerShape): MatchEditorSession {
+  const side = session.baseline.structure.trigger;
+  if (to === side.form) {
+    // Choosing the held scalar form back over a drafted list of several items
+    // would drop them as silently as re-pointing does (the review fix's sibling
+    // path): refused, and `cancelTriggerForm` is the explicit way to discard.
+    const list = capturedList(session.draft.value.triggerSide.triggers);
+    const drafted = session.draft.value.triggerSide.form;
+    if (to !== 'triggers' && drafted === 'triggers' && list.present && list.items.length > 1) {
+      return session;
+    }
+    return cancelTriggerForm(session);
+  }
+  const choice = triggerFormChoices(session).find((one) => one.to === to);
+  if (choice === undefined || !choice.offered || choice.drafted) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const captured = capturedStructure(buffers);
+  const current = captured.side.form;
+  let carried = '';
+  if (current === 'trigger' || current === 'regex') {
+    carried = scalarText(captured, current);
+  } else if (current === 'triggers') {
+    carried = captured.side.triggers.items[0]?.text ?? '';
+  }
+  const next: WritableBuffers = { ...buffers };
+  if (current !== null && current !== side.form) {
+    resetForm(session.baseline, next, current);
+  }
+  if (to === 'trigger') {
+    next.trigger = { text: carried, removed: false };
+  } else if (to === 'regex') {
+    next.triggerSide = { ...next.triggerSide, regex: { text: carried, removed: false } };
+  } else {
+    next.triggerSide = {
+      ...next.triggerSide,
+      triggers: { present: true, items: carried === '' ? [] : [{ origin: null, text: carried }] }
+    };
+  }
+  next.triggerSide = { ...next.triggerSide, form: to, confirmed: false };
+  return { ...session, draft: editDraft(session.draft, next), group: null, sendFailure: null };
+} // End of function chooseTriggerForm()
+
+/**
+ * Confirms the drafted switch of trigger form after its preview — ruling 6.
+ *
+ * @param session - The session being edited.
+ * @returns The session with the switch confirmed, or the same session when no
+ *   switch is drafted, it is already confirmed, or the session is not editable.
+ */
+export function confirmTriggerForm(session: MatchEditorSession): MatchEditorSession {
+  if (!isEditable(session)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const drafted = buffers.triggerSide;
+  const held = session.baseline.structure.trigger.form;
+  if (held === null || drafted.form === null || drafted.form === held || drafted.confirmed) {
+    return session;
+  }
+  const value: MatchBuffers = { ...buffers, triggerSide: { ...drafted, confirmed: true } };
+  return { ...session, draft: editDraft(session.draft, value), group: null, sendFailure: null };
+} // End of function confirmTriggerForm()
+
+/**
+ * Withdraws a drafted change of trigger form: the held form comes back, and the
+ * destination's box or list goes back to what the file holds. The source box
+ * was never cleared, so nothing typed there is lost.
+ *
+ * @param session - The session being edited.
+ * @returns The session with no change of form drafted, or the same session.
+ */
+export function cancelTriggerForm(session: MatchEditorSession): MatchEditorSession {
+  if (!isEditable(session)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const held = session.baseline.structure.trigger.form;
+  const drafted = buffers.triggerSide.form;
+  if (drafted === held) {
+    return session;
+  }
+  const next: WritableBuffers = { ...buffers };
+  if (drafted !== null) {
+    resetForm(session.baseline, next, drafted);
+  }
+  next.triggerSide = { ...next.triggerSide, form: held, confirmed: false };
+  return { ...session, draft: editDraft(session.draft, next), group: null, sendFailure: null };
+} // End of function cancelTriggerForm()
+
+/**
+ * Whether the drafted form's key is one this session may write: its own held
+ * form, or — for a switch or an addition — a free key.
+ *
+ * @param session - The session to ask about.
+ * @param form - The form whose box or list is asked about.
+ * @returns `true` when the drafted form is `form` and its key may be written.
+ */
+function draftedFormWritable(session: MatchEditorSession, form: TriggerShape): boolean {
+  const side = session.baseline.structure.trigger;
+  if (session.draft.value.triggerSide.form !== form) {
+    return false;
+  }
+  if (side.form === form) {
+    return true;
+  }
+  return formKeyFree(side, form) && (side.form !== null || side.kind === 'Absent');
+} // End of function draftedFormWritable()
+
+/**
+ * Whether the `regex` box accepts changes now — Phase 3-6-1: the session is
+ * editable, the drafted form is `regex`, and the scalar is editable (held) or
+ * its key free (a switch or an addition).
+ *
+ * @param session - The session to ask about.
+ * @returns `true` when {@link editRegex} would do anything.
+ */
+export function isRegexEditable(session: MatchEditorSession): boolean {
+  const side = session.baseline.structure.trigger;
+  return (
+    isEditable(session) &&
+    draftedFormWritable(session, 'regex') &&
+    side.regex.eligibility.kind === 'editable'
+  );
+} // End of function isRegexEditable()
+
+/**
+ * Whether one list accepts changes now — Phase 3-6-1. `search_terms` whenever
+ * it is eligible; `triggers` only while the drafted form is `triggers`.
+ *
+ * @param session - The session to ask about.
+ * @param field - Which list.
+ * @returns `true` when the list's transitions would do anything.
+ */
+export function isListEditable(session: MatchEditorSession, field: SequenceField): boolean {
+  if (!isEditable(session)) {
+    return false;
+  }
+  const structure = session.baseline.structure;
+  if (field === 'search_terms') {
+    return structure.searchTerms.eligibility.kind === 'editable';
+  }
+  return (
+    draftedFormWritable(session, 'triggers') &&
+    structure.trigger.triggers.eligibility.kind === 'editable'
+  );
+} // End of function isListEditable()
+
+/**
+ * The buffers with one list replaced.
+ *
+ * @param buffers - What the controls hold.
+ * @param field - Which list.
+ * @param list - What it should hold.
+ * @returns The new buffers.
+ */
+function withList(buffers: MatchBuffers, field: SequenceField, list: ListBuffer): MatchBuffers {
+  return field === 'triggers'
+    ? { ...buffers, triggerSide: { ...buffers.triggerSide, triggers: list } }
+    : { ...buffers, searchTerms: list };
+} // End of function withList()
+
+/**
+ * One list's buffer, read from the buffers.
+ *
+ * @param buffers - What the controls hold.
+ * @param field - Which list.
+ * @returns A plain copy of its buffer.
+ */
+function listOf(buffers: MatchBuffers, field: SequenceField): ListBuffer {
+  return capturedList(field === 'triggers' ? buffers.triggerSide.triggers : buffers.searchTerms);
+} // End of function listOf()
+
+/**
+ * Records a keystroke in a structure control, joining the open typing run for
+ * the same subject — `recordChange`'s rule; the focus is the seventeen fields'
+ * and is left alone.
+ *
+ * @param session - The session being edited.
+ * @param subject - The control typed into.
+ * @param buffers - What the controls now hold.
+ * @returns The session after the change, or the same session.
+ */
+function recordStructureTyping(
+  session: MatchEditorSession,
+  subject: TypingSubject,
+  buffers: MatchBuffers
+): MatchEditorSession {
+  const recorded = recordTyping(session.draft, session.group, subject, buffers, session.clock());
+  if (recorded === null) {
+    return session;
+  }
+  return { ...session, draft: recorded.draft, group: recorded.group, sendFailure: null };
+} // End of function recordStructureTyping()
+
+/**
+ * A structural change to the buffers: its own history step.
+ *
+ * @param session - The session being edited.
+ * @param buffers - What the controls now hold, or `null` for a refusal.
+ * @returns The session after the change, or the same session.
+ */
+function structuralChange(session: MatchEditorSession, buffers: MatchBuffers | null): MatchEditorSession {
+  if (buffers === null) {
+    return session;
+  }
+  const draft = editDraft(session.draft, buffers);
+  return draft === session.draft ? session : { ...session, draft, group: null, sendFailure: null };
+} // End of function structuralChange()
+
+/**
+ * Records whatever the `regex` box now holds — Phase 3-6-1.
+ *
+ * **A carriage return or a line feed is refused here**, as at the verdict and
+ * at {@link beginSave}: the box is one line, and a caller that is not a control
+ * is what this closes. The pattern is not compiled here or anywhere in
+ * TypeScript: whether it compiles is the Rust validator's `RegexDoesNotCompile`
+ * at save time (ruling 7), which refuses the save and keeps the draft.
+ *
+ * @param session - The session being edited.
+ * @param text - The box's whole value.
+ * @returns The session after the edit, or the same session.
+ */
+export function editRegex(session: MatchEditorSession, text: string): MatchEditorSession {
+  if (!isRegexEditable(session) || unreadableItem(text)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const next: MatchBuffers = {
+    ...buffers,
+    triggerSide: { ...buffers.triggerSide, regex: { text, removed: false } }
+  };
+  return recordStructureTyping(session, 'regex', next);
+} // End of function editRegex()
+
+/**
+ * Records whatever one list item's box now holds — Phase 3-6-1. A carriage
+ * return or a line feed is refused.
+ *
+ * @param session - The session being edited.
+ * @param field - Which list.
+ * @param position - The item's position in the drafted list.
+ * @param text - The box's whole value.
+ * @returns The session after the edit, or the same session.
+ */
+export function editListItem(
+  session: MatchEditorSession,
+  field: SequenceField,
+  position: number,
+  text: string
+): MatchEditorSession {
+  if (!isListEditable(session, field)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const list = withItemText(listOf(buffers, field), position, text);
+  return list === null
+    ? session
+    : recordStructureTyping(session, `${field}#${position}`, withList(buffers, field, list));
+} // End of function editListItem()
+
+/**
+ * Adds one item to a list at a position of the drafted list — Phase 3-6-1. The
+ * intended order is the drafted order, and a save keeps it.
+ *
+ * @param session - The session being edited.
+ * @param field - Which list.
+ * @param position - Where the new item goes, `0` to the list's length.
+ * @param text - Its text; empty by default.
+ * @returns The session with the item added, or the same session.
+ */
+export function addListItem(
+  session: MatchEditorSession,
+  field: SequenceField,
+  position: number,
+  text = ''
+): MatchEditorSession {
+  if (!isListEditable(session, field)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const list = withItemAdded(listOf(buffers, field), position, text);
+  return structuralChange(session, list === null ? null : withList(buffers, field, list));
+} // End of function addListItem()
+
+/**
+ * Takes one item out of a list — Phase 3-6-1. The last item is refused
+ * (ruling 6): {@link removeList} is the explicit intent for no list.
+ *
+ * @param session - The session being edited.
+ * @param field - Which list.
+ * @param position - The item's position in the drafted list.
+ * @returns The session with the item removed, or the same session.
+ */
+export function removeListItem(
+  session: MatchEditorSession,
+  field: SequenceField,
+  position: number
+): MatchEditorSession {
+  if (!isListEditable(session, field)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const list = withItemRemoved(listOf(buffers, field), position);
+  return structuralChange(session, list === null ? null : withList(buffers, field, list));
+} // End of function removeListItem()
+
+/**
+ * Adds `search_terms` where the snippet holds none, as an empty list — Phase
+ * 3-6-1. A list saved with no item is written `[]`, an explicitly requested
+ * empty list (ruling 5). `triggers` is added through {@link chooseTriggerForm},
+ * never here.
+ *
+ * @param session - The session being edited.
+ * @param field - Which list; only `search_terms` is accepted.
+ * @returns The session with the list drafted, or the same session.
+ */
+export function addList(session: MatchEditorSession, field: SequenceField): MatchEditorSession {
+  if (field !== 'search_terms' || !isListEditable(session, field)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const list = withListAdded(session.baseline.structure.searchTerms, listOf(buffers, field));
+  return structuralChange(session, list === null ? null : withList(buffers, field, list));
+} // End of function addList()
+
+/**
+ * Takes the whole `search_terms` list out — Phase 3-6-1, as its own explicit
+ * intent. `triggers` is never removed whole here: it would remove the only
+ * trigger form (ruling 6).
+ *
+ * @param session - The session being edited.
+ * @param field - Which list; only `search_terms` is accepted.
+ * @returns The session with the removal drafted, or the same session.
+ */
+export function removeList(session: MatchEditorSession, field: SequenceField): MatchEditorSession {
+  if (field !== 'search_terms' || !isListEditable(session, field)) {
+    return session;
+  }
+  const buffers = session.draft.value;
+  const list = withListRemoved(listOf(buffers, field));
+  return structuralChange(session, list === null ? null : withList(buffers, field, list));
+} // End of function removeList()
 
 /**
  * Starts an editing session over one snippet's seventeen fields.
@@ -1703,6 +2888,17 @@ export function isEditable(session: MatchEditorSession): boolean {
  * @returns `true` when {@link editField} would do anything.
  */
 export function isFieldEditable(session: MatchEditorSession, field: EditableField): boolean {
+  if (field === 'trigger') {
+    // **The literal trigger's box belongs to the trigger side** (Phase 3-6-1): it
+    // accepts changes while the drafted form is `trigger` — held and editable, or
+    // the destination of a switch or an addition onto a free key.
+    return (
+      isEditable(session) &&
+      draftedFormWritable(session, 'trigger') &&
+      (session.baseline.structure.trigger.form !== 'trigger' ||
+        session.baseline.trigger.eligibility.kind === 'editable')
+    );
+  }
   if (!isEditable(session) || session.baseline[field].eligibility.kind !== 'editable') {
     return false;
   }
@@ -1870,9 +3066,7 @@ function withField(
   field: EditableField,
   buffer: FieldBuffer
 ): MatchBuffers {
-  const next: Record<EditableField, FieldBuffer> & {
-    contentSwitch: DraftedContentSwitch | null;
-  } = { ...buffers };
+  const next: WritableBuffers = { ...buffers };
   next[field] = buffer;
   return next;
 } // End of function withField()
@@ -1956,7 +3150,9 @@ export function removeField(
   session: MatchEditorSession,
   field: EditableField
 ): MatchEditorSession {
-  if (!isFieldEditable(session, field) || !session.baseline[field].present) {
+  if (field === 'trigger' || !isFieldEditable(session, field) || !session.baseline[field].present) {
+    // The literal trigger is never removed here: it is the snippet's only trigger
+    // form, and removing the final trigger is not an edit of one key (ruling 6).
     return session;
   }
   const drafted = capturedSwitch(session.draft.value);
@@ -2073,7 +3269,7 @@ export function chooseContentSwitch(
     return session;
   }
   const carried = drafted === null ? buffers[from].text : buffers[drafted.to].text;
-  const next: Record<EditableField, FieldBuffer> = { ...buffers };
+  const next: WritableBuffers = { ...buffers };
   if (drafted !== null) {
     next[drafted.to] = { text: session.baseline[drafted.to].value, removed: false };
   }
@@ -2124,7 +3320,7 @@ export function cancelContentSwitch(session: MatchEditorSession): MatchEditorSes
   if (drafted === null) {
     return session;
   }
-  const next: Record<EditableField, FieldBuffer> = { ...buffers };
+  const next: WritableBuffers = { ...buffers };
   next[drafted.from] = { text: buffers[drafted.to].text, removed: false };
   next[drafted.to] = { text: session.baseline[drafted.to].value, removed: false };
   const value: MatchBuffers = { ...next, contentSwitch: null };
@@ -2445,7 +3641,8 @@ export function canSave(session: MatchEditorSession): boolean {
     isDirty(session.draft) &&
     session.awaitingReconciliation === null &&
     switchIsReady(session.baseline, capturedSwitch(session.draft.value)) &&
-    !removesACompanion(matchDraftOf(session.baseline, session.draft.value))
+    !removesACompanion(matchDraftOf(session.baseline, session.draft.value)) &&
+    structureProblemOf(session.baseline, capturedStructure(session.draft.value)) === null
   );
 } // End of function canSave()
 
@@ -2484,11 +3681,47 @@ export interface StartedMatchSave {
  *   or with a line feed its control cannot hold.
  */
 function writesACarriageReturn(draft: MatchDraft): boolean {
-  return EDITABLE_FIELDS.some((field) => {
+  const fields = EDITABLE_FIELDS.some((field) => {
     const intent = draft[field];
     return typeof intent === 'object' && unreadableIn(field, intent.Set);
   });
+  return fields || structureTextsOf(draft).some(unreadableItem);
 } // End of function writesACarriageReturn()
+
+/**
+ * Every text the trigger side and the lists of a wire draft would write —
+ * Phase 3-6-1: the `regex` value, every rewritten or added item, and a
+ * switch's items or value. Each is written by a one-line control, so each is
+ * checked by {@link writesACarriageReturn} for a carriage return **and** a line
+ * feed, whatever built the draft.
+ *
+ * @param draft - The draft that would be sent.
+ * @returns The texts, in no particular order.
+ */
+function structureTextsOf(draft: MatchDraft): readonly string[] {
+  const texts: string[] = [];
+  if (typeof draft.regex === 'object') {
+    texts.push(draft.regex.Set);
+  }
+  for (const item of [...draft.triggers, ...draft.search_terms]) {
+    if (typeof item.value === 'object') {
+      texts.push(item.value.Set);
+    }
+  } // End of the loop over the rewritten items
+  texts.push(
+    ...textsWritten({ kind: 'changed', items: [], sequences: draft.sequences })
+  );
+  const change = draft.trigger_form;
+  if (change !== null && 'Switch' in change) {
+    const switched = change.Switch.switch;
+    if ('ToList' in switched) {
+      texts.push(...switched.ToList.items);
+    } else {
+      texts.push(switched.FromList.value);
+    }
+  }
+  return texts;
+} // End of function structureTextsOf()
 
 /**
  * Reads the session a caller currently holds — the one its registered receiver
@@ -2583,7 +3816,13 @@ export function beginSave(
   if (!switchIsReady(session.baseline, captured)) {
     return null;
   }
-  const draft = draftWith(session.baseline, submission.candidate, captured);
+  // **The candidate's trigger side and lists, read once** (Phase 3-6-1): the
+  // problem check and the wire draft are built from the same copy.
+  const structure = capturedStructure(submission.candidate);
+  if (structureProblemOf(session.baseline, structure) !== null) {
+    return null;
+  }
+  const draft = draftWith(session.baseline, submission.candidate, captured, structure);
   if (writesACarriageReturn(draft) || removesACompanion(draft)) {
     return null;
   }
@@ -2619,13 +3858,25 @@ export function beginSave(
  * @returns The baselines to measure the next edit against.
  */
 function committedBaseline(baseline: MatchBaseline, buffers: MatchBuffers): MatchBaseline {
-  const next: Record<EditableField, FieldBaseline> = {} as Record<EditableField, FieldBaseline>;
+  const next: Record<EditableField, FieldBaseline> & { structure: StructureBaseline } =
+    {} as Record<EditableField, FieldBaseline> & { structure: StructureBaseline };
   const contentSwitch = capturedSwitch(buffers);
-  const intents = intentsOf(baseline, buffers, contentSwitch);
+  const captured = capturedStructure(buffers);
+  const intents = intentsWith(
+    baseline,
+    buffers,
+    contentSwitch,
+    triggerSideDerivationOf(baseline, captured)
+  );
+  const committed = committedStructure(baseline, captured);
+  next.structure = committed.structure;
   for (const field of EDITABLE_FIELDS) {
     const was = baseline[field];
     const intent = intents[field];
-    if (contentSwitch !== null && field === contentSwitch.from) {
+    if (field === 'trigger') {
+      // The trigger side decided what the literal holds after the save.
+      next.trigger = committed.trigger;
+    } else if (contentSwitch !== null && field === contentSwitch.from) {
       // The switch renamed this key away: the file no longer holds it.
       next[field] = { ...was, present: false, value: '' };
     } else if (contentSwitch !== null && field === contentSwitch.to) {
@@ -2641,6 +3892,79 @@ function committedBaseline(baseline: MatchBaseline, buffers: MatchBuffers): Matc
   } // End of the loop over the seventeen editable fields
   return deepFreeze(next);
 } // End of function committedBaseline()
+
+/**
+ * The trigger side and `search_terms` a committed save leaves behind — Phase
+ * 3-6-1: the drafted form becomes the held form, a switched-away key is
+ * absent, the destination holds what was written, and each list holds its
+ * intended items. Eligibility is carried, for {@link committedBaseline}'s reason.
+ *
+ * @param baseline - What the file held before the save.
+ * @param captured - The candidate's structure, read once.
+ * @returns The literal trigger's baseline and the structure baseline.
+ */
+function committedStructure(
+  baseline: MatchBaseline,
+  captured: CapturedStructure
+): { readonly trigger: FieldBaseline; readonly structure: StructureBaseline } {
+  const side = baseline.structure.trigger;
+  const derived = triggerSideDerivationOf(baseline, captured);
+  const form = derived.problem === null ? (captured.side.form ?? side.form) : side.form;
+  const scalarAfter = (
+    shape: 'trigger' | 'regex',
+    was: FieldBaseline,
+    intent: DraftField<string>
+  ): FieldBaseline => {
+    if (form !== shape) {
+      return side.form === shape ? { ...was, present: false, value: '' } : was;
+    }
+    if (typeof intent === 'object') {
+      return { ...was, present: true, value: intent.Set };
+    }
+    // Unchanged while the form is this one: the held value, or — for a rename
+    // that kept the bytes — the source's value under this key.
+    if (side.form === shape) {
+      return was;
+    }
+    const change = derived.change;
+    if (change !== null && 'Switch' in change && 'FromList' in change.Switch.switch) {
+      return { ...was, present: true, value: change.Switch.switch.FromList.value };
+    }
+    return {
+      ...was,
+      present: true,
+      value: shape === 'trigger' ? side.regex.value : baseline.trigger.value
+    };
+  }; // End of function scalarAfter()
+  const trigger = scalarAfter('trigger', baseline.trigger, derived.trigger);
+  const regex = scalarAfter('regex', side.regex, derived.regex);
+  const triggers =
+    form === 'triggers'
+      ? committedList(side.triggers, captured.side.triggers)
+      : side.form === 'triggers'
+        ? committedList(side.triggers, { present: false, items: [] })
+        : side.triggers;
+  const kind: TriggerKind =
+    form === 'trigger' ? 'Single' : form === 'regex' ? 'Regex' : form === 'triggers' ? 'Multiple' : side.kind;
+  return {
+    trigger,
+    structure: {
+      trigger: {
+        kind,
+        form,
+        regex,
+        triggers,
+        keyFree: {
+          trigger: !trigger.present,
+          regex: !regex.present,
+          triggers: triggers.style === 'absent'
+        },
+        heldForms: form === null ? side.heldForms : [form]
+      },
+      searchTerms: committedList(baseline.structure.searchTerms, captured.searchTerms)
+    }
+  };
+} // End of function committedStructure()
 
 /**
  * Takes a save's answer.
@@ -3495,6 +4819,137 @@ function switchReapply(
   return sourceGone && destinationThere ? 'satisfied' : 'collision';
 } // End of function switchReapply()
 
+/**
+ * What a reapply's collision names — Phase 3-6-1: one of the seventeen fields,
+ * or a part of the trigger side or a list, named by its espanso key.
+ */
+export type CollisionSubject = EditableField | 'regex' | 'triggers' | 'search_terms';
+
+/**
+ * The label a collision subject is named by, for `tDetailField`.
+ *
+ * @param subject - What collided.
+ * @returns Its `DetailFieldName`.
+ */
+export function collisionLabelName(subject: CollisionSubject): DetailFieldName {
+  switch (subject) {
+    case 'regex':
+      return 'regex';
+    case 'triggers':
+    case 'search_terms':
+      return listLabelName(subject);
+    default:
+      return fieldLabelName(subject);
+  }
+} // End of function collisionLabelName()
+
+/**
+ * What a reapply does with the drafted trigger side — Phase 3-6-1, ruling 23.
+ *
+ * **A change of form is compound, all or nothing**: `applicable` only when the
+ * new projection holds the whole trigger side — its kind, the literal, `regex`
+ * and `triggers` — exactly as the draft's baseline did; `satisfied` when it
+ * already holds the drafted form with the drafted value or items and nothing
+ * else; a `collision` of every form involved otherwise. **In place**, `regex`
+ * follows {@link fieldReapply} and `triggers` follows `listReapply` — the whole
+ * list collides on any external reorder, addition, removal, retyping or
+ * duplication. The literal edited in place is the field walk's, as it always
+ * was.
+ */
+export interface TriggerSideReapply {
+  /** The verdict. `unchanged` when the draft says nothing here. */
+  readonly verdict: ListReapplyVerdict;
+  /** Whether it is a change of form (compound) rather than an in-place edit. */
+  readonly compound: boolean;
+  /** What collided, when it did. */
+  readonly subjects: readonly CollisionSubject[];
+}
+
+/**
+ * The collision subject of one trigger form.
+ *
+ * @param form - The form.
+ * @returns Its subject.
+ */
+function formSubject(form: TriggerShape): CollisionSubject {
+  return form;
+} // End of function formSubject()
+
+/**
+ * Whether two readings hold the same trigger side: kind, literal, `regex` and
+ * `triggers`.
+ *
+ * @param was - What the file held when the session was seeded.
+ * @param now - What the newly parsed projection holds.
+ * @returns `true` when nothing about the trigger side moved.
+ */
+function sameTriggerSide(was: MatchBaseline, now: MatchBaseline): boolean {
+  const old = was.structure.trigger;
+  const fresh = now.structure.trigger;
+  return (
+    old.kind === fresh.kind &&
+    sameBaselineState(was.trigger, now.trigger) &&
+    sameBaselineState(old.regex, fresh.regex) &&
+    sameListState(old.triggers, fresh.triggers)
+  );
+} // End of function sameTriggerSide()
+
+/**
+ * The reapply verdict of the drafted trigger side.
+ *
+ * @param was - What the file held when the session was seeded.
+ * @param captured - The retained structure, read once.
+ * @param now - What the newly parsed projection holds.
+ * @returns The verdict.
+ */
+function triggerSideReapply(
+  was: MatchBaseline,
+  captured: CapturedStructure,
+  now: MatchBaseline
+): TriggerSideReapply {
+  const side = was.structure.trigger;
+  const held = side.form;
+  const drafted = captured.side.form;
+  const derived = triggerSideDerivationOf(was, captured);
+  if (drafted === null || drafted === held) {
+    if (held === 'regex') {
+      const verdict = fieldReapply(side.regex, captured.side.regex, now.structure.trigger.regex);
+      return { verdict: verdict.kind, compound: false, subjects: verdict.kind === 'collision' ? ['regex'] : [] };
+    }
+    if (held === 'triggers' && captured.side.triggers.present) {
+      const verdict = listReapply(side.triggers, captured.side.triggers, now.structure.trigger.triggers);
+      return { verdict, compound: false, subjects: verdict === 'collision' ? ['triggers'] : [] };
+    }
+    return { verdict: 'unchanged', compound: false, subjects: [] };
+  }
+  const involved = [...new Set<CollisionSubject>([...(held === null ? [] : [formSubject(held)]), formSubject(drafted)])];
+  if (derived.problem !== null) {
+    return { verdict: 'collision', compound: true, subjects: involved };
+  }
+  if (sameTriggerSide(was, now)) {
+    return { verdict: 'applicable', compound: true, subjects: [] };
+  }
+  const fresh = now.structure.trigger;
+  let there = false;
+  if (fresh.form === drafted) {
+    if (drafted === 'triggers') {
+      const intended = captured.side.triggers.items.map((item) => item.text);
+      there =
+        fresh.triggers.eligibility.kind === 'editable' &&
+        fresh.triggers.items.length === intended.length &&
+        intended.every((text, index) => fresh.triggers.items[index] === text);
+    } else {
+      const destination = drafted === 'trigger' ? now.trigger : fresh.regex;
+      there =
+        destination.eligibility.kind === 'editable' &&
+        destination.value === scalarText(captured, drafted);
+    }
+  }
+  return there
+    ? { verdict: 'satisfied', compound: true, subjects: [] }
+    : { verdict: 'collision', compound: true, subjects: involved };
+} // End of function triggerSideReapply()
+
 /** What a reapply would do with all seventeen fields and a drafted switch. */
 export interface MatchReapplyPlan {
   /**
@@ -3505,14 +4960,20 @@ export interface MatchReapplyPlan {
    * switch applies the source is `unchanged` (it is renamed, not written) and the
    * destination is `applicable` with its `Set` when the text differs from the
    * source's, `unchanged` when the bytes are kept. {@link MatchReapplyPlan.contentSwitch}
-   * is the switch's own verdict.
+   * is the switch's own verdict. **The literal trigger carries a change of
+   * trigger form's verdict** the same way (Phase 3-6-1).
    */
   readonly verdicts: Readonly<Record<EditableField, FieldReapplyVerdict>>;
   /** The drafted switch's verdict, or `null` when none was retained. */
   readonly contentSwitch: SwitchReapplyVerdict | null;
+  /** The drafted trigger side's verdict — Phase 3-6-1. */
+  readonly triggerSide: TriggerSideReapply;
+  /** The drafted `search_terms` list's verdict — Phase 3-6-1. */
+  readonly searchTerms: ListReapplyVerdict;
   /**
    * The drafted fields the new projection does not hold in the state the draft
-   * was built against, in field order.
+   * was built against, in field order, then the trigger side's and the list's
+   * subjects (Phase 3-6-1).
    *
    * **Any one of them blocks the whole reapply** (consult Q4): *Keep my draft*
    * claims one retained intention, and saving the safe fields only would strand the
@@ -3521,9 +4982,10 @@ export interface MatchReapplyPlan {
    * **"Moved under a drafted change" is what this used to say and it was too
    * strong**: presence, value and eligibility are three ways to differ, and only
    * two of them are a change to what the file *says*. The rendered sentence names
-   * all three; see {@link FieldReapplyVerdict}'s `collision` arm.
+   * all three; see {@link FieldReapplyVerdict}'s `collision` arm. A list also
+   * differs by the order of its items.
    */
-  readonly collisions: readonly EditableField[];
+  readonly collisions: readonly CollisionSubject[];
   /**
    * The buffers to hold over the new baseline.
    *
@@ -3543,6 +5005,8 @@ export interface MatchReapplyPlan {
  *
  * Exported because it is the whole of the consult's Q4 rule and a test drives it
  * directly, one row at a time; {@link reapplyToDiskVersion} is what acts on it.
+ * Since Phase 3-6-1 it covers the trigger side and `search_terms` under ruling
+ * 23's conservative rule ({@link TriggerSideReapply}, `listReapply`).
  *
  * @param was - What the file held when the session was seeded.
  * @param buffers - What the retained draft holds.
@@ -3563,6 +5027,10 @@ export function planMatchReapply(
   const contentSwitch = capturedSwitch(buffers);
   const switched =
     contentSwitch === null ? null : switchReapply(was, buffers, now, contentSwitch);
+  const structure = capturedStructure(buffers);
+  const side = triggerSideReapply(was, structure, now);
+  const derivedSide = triggerSideDerivationOf(was, structure);
+  const terms = listReapply(was.structure.searchTerms, structure.searchTerms, now.structure.searchTerms);
   for (const field of EDITABLE_FIELDS) {
     if (contentSwitch !== null && switched !== null && (field === contentSwitch.from || field === contentSwitch.to)) {
       verdicts[field] = switchedFieldVerdict(was, buffers, contentSwitch, switched, field);
@@ -3570,7 +5038,29 @@ export function planMatchReapply(
       writesAnything ||= switched === 'applicable';
       continue;
     }
-    const verdict = fieldReapply(was[field], buffers[field], now[field]);
+    if (field === 'trigger' && side.compound) {
+      // A change of trigger form: the literal carries the compound verdict.
+      const intent = derivedSide.trigger;
+      verdicts.trigger =
+        side.verdict === 'applicable'
+          ? intent === 'Unchanged'
+            ? { kind: 'unchanged' }
+            : { kind: 'applicable', intent }
+          : side.verdict === 'satisfied'
+            ? { kind: 'satisfied' }
+            : side.verdict === 'collision'
+              ? { kind: 'collision' }
+              : { kind: 'unchanged' };
+      rebuilt.trigger =
+        side.verdict === 'applicable'
+          ? { text: structure.trigger.text, removed: false }
+          : { text: now.trigger.value, removed: false };
+      continue;
+    }
+    const verdict =
+      field === 'trigger'
+        ? fieldReapply(was.trigger, { text: structure.trigger.text, removed: false }, now.trigger)
+        : fieldReapply(was[field], buffers[field], now[field]);
     verdicts[field] = verdict;
     if (verdict.kind === 'applicable') {
       writesAnything = true;
@@ -3583,14 +5073,28 @@ export function planMatchReapply(
         ? { text: verdict.intent.Set, removed: false }
         : { text: now[field].value, removed: verdict.kind === 'applicable' };
   } // End of the loop over the seventeen editable fields
-  const collisions = EDITABLE_FIELDS.filter((field) => verdicts[field].kind === 'collision');
+  writesAnything ||= side.verdict === 'applicable' || terms === 'applicable';
+  const collisions: CollisionSubject[] = EDITABLE_FIELDS.filter(
+    (field) => verdicts[field].kind === 'collision' && !(field === 'trigger' && side.compound)
+  );
+  collisions.push(...side.subjects);
+  if (terms === 'collision') {
+    collisions.push('search_terms');
+  }
   return {
     verdicts,
     contentSwitch: switched,
+    triggerSide: side,
+    searchTerms: terms,
     collisions,
     buffers: {
       ...rebuilt,
-      contentSwitch: switched === 'applicable' ? contentSwitch : null
+      contentSwitch: switched === 'applicable' ? contentSwitch : null,
+      triggerSide:
+        side.verdict === 'applicable'
+          ? structure.side
+          : triggerSideBufferOf(now.structure.trigger),
+      searchTerms: rebuiltList(terms, structure.searchTerms, now.structure.searchTerms)
     },
     writesAnything
   };
@@ -3670,8 +5174,11 @@ export type EditorReapplyObstacle =
        * a false reason for a correct refusal (2c-4b-3c-2 §11.5).
        */
       readonly kind: 'fieldCollisions';
-      /** The fields, in {@link EDITABLE_FIELDS} order. */
-      readonly fields: readonly EditableField[];
+      /**
+       * The fields, in {@link EDITABLE_FIELDS} order, then the trigger side's and
+       * the lists' subjects (Phase 3-6-1), named by `collisionLabelName`.
+       */
+      readonly fields: readonly CollisionSubject[];
     }
   | {
       /**
@@ -4398,8 +5905,290 @@ export function saveWithheldKey(code: SaveWithheld): TranslationKey {
       return 'browser.matchEditor.saveWithheld.contentSwitchUnconfirmed';
     case 'switchRemovesCompanion':
       return 'browser.matchEditor.saveWithheld.switchRemovesCompanion';
+    case 'triggerFormUnconfirmed':
+      return 'browser.matchEditor.saveWithheld.triggerFormUnconfirmed';
+    case 'triggerFormEmpty':
+      return 'browser.matchEditor.saveWithheld.triggerFormEmpty';
+    case 'triggerFormNotOffered':
+      return 'browser.matchEditor.saveWithheld.triggerFormNotOffered';
+    case 'listNotInOrder':
+      return 'browser.matchEditor.saveWithheld.listNotInOrder';
+    case 'listEveryItemReplaced':
+      return 'browser.matchEditor.saveWithheld.listEveryItemReplaced';
+    case 'listWouldBeEmpty':
+      return 'browser.matchEditor.saveWithheld.listWouldBeEmpty';
   }
 } // End of function saveWithheldKey()
+
+/**
+ * How the view presents the trigger side — Phase 3-6-1, ruling 6.
+ *
+ * - `form` — the snippet holds one form, which the editor edits;
+ * - `several` — it holds more than one: **every form is shown and none is
+ *   picked**, so no control edits any of them, and the repair offered is the raw
+ *   document editor ({@link TriggerRepair}) — the one surface that can take a
+ *   form out without this editor choosing which;
+ * - `absent` — it holds none, and the choices are the explicit *Add trigger*.
+ */
+export type TriggerPresentation =
+  | {
+      /** One form, edited in place or switched. */
+      readonly kind: 'form';
+      /** The held form. */
+      readonly form: TriggerShape;
+    }
+  | {
+      /** Several forms, no winner. */
+      readonly kind: 'several';
+      /** Every form held, in the order the file writes them. */
+      readonly forms: readonly TriggerShape[];
+      /** The repair offered, as a code. */
+      readonly repair: TriggerRepair;
+    }
+  | {
+      /** No trigger at all. */
+      readonly kind: 'absent';
+    };
+
+/**
+ * The repair a `several` presentation offers, as a code: `rawDocument` is the
+ * whole-document raw editor, whose content-addressed consent (`CLAUDE.md`
+ * section 6) is the route for a shape this editor will not pick a winner in.
+ */
+export type TriggerRepair = 'rawDocument';
+
+/**
+ * The dictionary key holding the sentence a trigger presentation owes, or `null`
+ * for a `form`, which owes none.
+ *
+ * @param presentation - What the view answered.
+ * @returns The key, or `null`.
+ */
+export function triggerPresentationKey(presentation: TriggerPresentation): TranslationKey | null {
+  switch (presentation.kind) {
+    case 'form':
+      return null;
+    case 'several':
+      return 'browser.matchEditor.triggerForm.several';
+    case 'absent':
+      return 'browser.matchEditor.triggerForm.absent';
+  }
+} // End of function triggerPresentationKey()
+
+/**
+ * The dictionary key holding one repair offer's sentence.
+ *
+ * @param repair - The repair offered.
+ * @returns The key.
+ */
+export function triggerRepairKey(repair: TriggerRepair): TranslationKey {
+  switch (repair) {
+    case 'rawDocument':
+      return 'browser.matchEditor.triggerForm.repair.rawDocument';
+  }
+} // End of function triggerRepairKey()
+
+/**
+ * The dictionary key holding one trigger-form refusal's sentence.
+ *
+ * @param refusal - Why the form cannot be chosen.
+ * @returns The key; `wouldDropAliases`' `{count}` takes `refusal.count`.
+ */
+export function triggerFormRefusalKey(refusal: TriggerFormRefusal): TranslationKey {
+  switch (refusal.kind) {
+    case 'wouldDropAliases':
+      return 'browser.matchEditor.triggerForm.refused.wouldDropAliases';
+    case 'flowList':
+      return 'browser.matchEditor.triggerForm.refused.flowList';
+    case 'listEdited':
+      return 'browser.matchEditor.triggerForm.refused.listEdited';
+    case 'notEditable':
+      return 'browser.matchEditor.triggerForm.refused.notEditable';
+  }
+} // End of function triggerFormRefusalKey()
+
+/**
+ * What a drafted change of trigger form will do, for its preview — Phase
+ * 3-6-1. Data only.
+ */
+export interface TriggerFormPreview {
+  /** The form the file holds. */
+  readonly from: TriggerShape;
+  /** The form the draft holds. */
+  readonly to: TriggerShape;
+  /** `from`'s label. */
+  readonly fromLabel: DetailFieldName;
+  /** `to`'s label. */
+  readonly toLabel: DetailFieldName;
+  /**
+   * What the new form will hold: one text for a scalar form, every item in
+   * order for `triggers`. Nothing is converted, and nothing is dropped: a switch
+   * that would drop an alias is never drafted ({@link TriggerFormRefusal}).
+   */
+  readonly texts: readonly string[];
+  /**
+   * Whether the value's bytes are kept exactly (a `trigger`↔`regex` rename whose
+   * text is the source's own value).
+   */
+  readonly textKept: boolean;
+  /** Whether the change has been confirmed. {@link canSave} requires it. */
+  readonly confirmed: boolean;
+}
+
+/** The `regex` box, as a screen draws it — Phase 3-6-1. */
+export interface RegexFieldModel {
+  /** What the box holds. */
+  readonly text: string;
+  /** Whether the file held `regex` when the session was seeded. */
+  readonly present: boolean;
+  /** Whether the box accepts changes — {@link isRegexEditable}. */
+  readonly editable: boolean;
+  /** Why the scalar may not be edited, or `null`. */
+  readonly refusal: FieldRefusal | null;
+  /** What a save would say about `regex`. */
+  readonly intent: DraftField<string>;
+}
+
+/** One list, as a screen draws it — Phase 3-6-1. */
+export interface ListModel {
+  /** Which list. */
+  readonly field: SequenceField;
+  /** Its label, for `tDetailField`. */
+  readonly label: DetailFieldName;
+  /**
+   * The file's own presentation, which a save keeps: a flow list stays in
+   * brackets and a block list stays block (ruling 5).
+   */
+  readonly style: ListStyle;
+  /** Whether the drafted snippet holds the list. */
+  readonly present: boolean;
+  /** The drafted items, in the intended order. */
+  readonly items: readonly ListItemModel[];
+  /** The file's items the draft takes out, in file order. */
+  readonly removed: readonly RemovedListItem[];
+  /** Whether the list accepts changes — {@link isListEditable}. */
+  readonly editable: boolean;
+  /** Why the list may not be edited, or `null`. */
+  readonly refusal: ListRefusal | null;
+  /** Whether an item may be removed (never the last one: ruling 6). */
+  readonly canRemoveItem: boolean;
+  /** Whether *Add this list* would do anything. */
+  readonly canAddList: boolean;
+  /** Whether *Remove this list* would do anything. */
+  readonly canRemoveList: boolean;
+}
+
+/** The trigger side, as a screen draws it — Phase 3-6-1. */
+export interface TriggerFormView {
+  /** How the trigger side is presented. */
+  readonly presentation: TriggerPresentation;
+  /** The drafted form, or `null`. */
+  readonly form: TriggerShape | null;
+  /** The forms offered, each with its refusal when it is not. */
+  readonly choices: readonly TriggerFormChoice[];
+  /** The preview of a drafted change of form, or `null`. */
+  readonly preview: TriggerFormPreview | null;
+  /** The `regex` box. */
+  readonly regex: RegexFieldModel;
+  /** The `triggers` list. */
+  readonly triggers: ListModel;
+}
+
+/** Everything beyond the seventeen fields — Phase 3-6-1. */
+export interface StructureView {
+  /** The trigger side. */
+  readonly trigger: TriggerFormView;
+  /** `search_terms`. */
+  readonly searchTerms: ListModel;
+}
+
+/**
+ * One list's model.
+ *
+ * @param session - The session to describe.
+ * @param baseline - What the file holds for the list.
+ * @param buffer - What the controls hold, read once by the caller.
+ * @returns The model.
+ */
+function listModelOf(
+  session: MatchEditorSession,
+  baseline: ListBaseline,
+  buffer: ListBuffer
+): ListModel {
+  const editable = isListEditable(session, baseline.field);
+  const rows = listRowsOf(baseline, buffer);
+  const isTerms = baseline.field === 'search_terms';
+  return {
+    field: baseline.field,
+    label: listLabelName(baseline.field),
+    style: baseline.style,
+    present: buffer.present,
+    items: rows.items,
+    removed: rows.removed,
+    editable,
+    refusal: baseline.eligibility.kind === 'readOnly' ? baseline.eligibility.reason : null,
+    canRemoveItem: editable && buffer.present && buffer.items.length > 1,
+    canAddList: editable && isTerms && !buffer.present,
+    canRemoveList: editable && isTerms && buffer.present
+  };
+} // End of function listModelOf()
+
+/**
+ * The trigger side's view.
+ *
+ * @param session - The session to describe.
+ * @param captured - The structure, read once by the caller.
+ * @param side - Its derivation, built from that read.
+ * @returns The view.
+ */
+function triggerFormViewOf(
+  session: MatchEditorSession,
+  captured: CapturedStructure,
+  side: TriggerSideDerivation
+): TriggerFormView {
+  const held = session.baseline.structure.trigger;
+  const drafted = captured.side.form;
+  let presentation: TriggerPresentation;
+  if (held.form !== null) {
+    presentation = { kind: 'form', form: held.form };
+  } else if (held.kind === 'Several') {
+    presentation = { kind: 'several', forms: held.heldForms, repair: 'rawDocument' };
+  } else {
+    presentation = { kind: 'absent' };
+  }
+  let preview: TriggerFormPreview | null = null;
+  if (held.form !== null && drafted !== null && drafted !== held.form) {
+    const texts =
+      drafted === 'triggers'
+        ? captured.side.triggers.items.map((item) => item.text)
+        : [scalarText(captured, drafted)];
+    const reference =
+      held.form === 'trigger' ? session.baseline.trigger.value : held.form === 'regex' ? held.regex.value : null;
+    preview = {
+      from: held.form,
+      to: drafted,
+      fromLabel: triggerShapeLabel(held.form),
+      toLabel: triggerShapeLabel(drafted),
+      texts,
+      textKept: drafted !== 'triggers' && reference !== null && texts[0] === reference,
+      confirmed: captured.side.confirmed
+    };
+  }
+  return {
+    presentation,
+    form: drafted,
+    choices: triggerFormChoices(session),
+    preview,
+    regex: {
+      text: captured.side.regex.text,
+      present: held.regex.present,
+      editable: isRegexEditable(session),
+      refusal: held.regex.eligibility.kind === 'readOnly' ? held.regex.eligibility.reason : null,
+      intent: side.regex
+    },
+    triggers: listModelOf(session, held.triggers, captured.side.triggers)
+  };
+} // End of function triggerFormViewOf()
 
 /**
  * What a drafted content switch will do, for its preview — Phase 3-5-1.
@@ -4450,7 +6239,10 @@ export interface SwitchChoice {
   readonly drafted: boolean;
 }
 
-/** Why a dirty session's save is held back, as a code. */
+/**
+ * Why a dirty session's save is held back, as a code. Since Phase 3-6-1 every
+ * {@link StructureProblem} is one too.
+ */
 export type SaveWithheld =
   /** A content switch is drafted and not confirmed (ruling 8). */
   | 'contentSwitchUnconfirmed'
@@ -4458,7 +6250,8 @@ export type SaveWithheld =
    * A content switch is drafted beside the removal of a companion key it keeps
    * (ruling 8: a switch removes no companion field silently).
    */
-  | 'switchRemovesCompanion';
+  | 'switchRemovesCompanion'
+  | StructureProblem;
 
 /** Everything a screen needs about one session, derived on every read. */
 export interface MatchEditorView {
@@ -4487,6 +6280,11 @@ export interface MatchEditorView {
   readonly cursorMarkers: number;
   /** Why the save is held back although the draft is dirty, or `null`. */
   readonly saveWithheld: SaveWithheld | null;
+  /**
+   * The trigger side and `search_terms`, as a screen draws them — Phase 3-6-1.
+   * No component draws this yet (3-6-2 does).
+   */
+  readonly structure: StructureView;
   /** Whether the draft differs from what the file held. Derived. */
   readonly dirty: boolean;
   /** Whether there is a step to go back to. Derived. */
@@ -4671,10 +6469,14 @@ function fieldModel(
     removed: buffer.removed,
     editable,
     control: fieldControlOf(field),
-    refusal: baseline.eligibility.kind === 'readOnly' ? baseline.eligibility.reason : null,
+    // An editable box owes no refusal — the literal trigger as the destination of a
+    // change of form is editable over a baseline that refused it (Phase 3-6-1).
+    refusal: editable || baseline.eligibility.kind !== 'readOnly' ? null : baseline.eligibility.reason,
     shown: baseline.shown,
     intent,
-    canRemove: editable && baseline.present && !buffer.removed && !switched,
+    // The literal trigger is never removed as a field: it is the only trigger
+    // form (ruling 6).
+    canRemove: editable && baseline.present && !buffer.removed && !switched && field !== 'trigger',
     canRestore: editable && buffer.removed,
     contentRole,
     suggestions,
@@ -4691,19 +6493,23 @@ function fieldModel(
  *
  * @param contentSwitch - The drafted switch, read once by the caller.
  * @param intents - The intents built from that same read.
+ * @param structure - The trigger side's or a list's problem, from one read.
  * @returns The code.
  */
 function saveWithheldOf(
   contentSwitch: DraftedContentSwitch | null,
-  intents: Readonly<Record<EditableField, DraftField<string>>>
+  intents: Readonly<Record<EditableField, DraftField<string>>>,
+  structure: StructureProblem | null
 ): SaveWithheld | null {
-  if (contentSwitch === null) {
-    return null;
+  if (contentSwitch !== null) {
+    if (intents.paragraph === 'Remove') {
+      return 'switchRemovesCompanion';
+    }
+    if (!contentSwitch.confirmed) {
+      return 'contentSwitchUnconfirmed';
+    }
   }
-  if (intents.paragraph === 'Remove') {
-    return 'switchRemovesCompanion';
-  }
-  return contentSwitch.confirmed ? null : 'contentSwitchUnconfirmed';
+  return structure;
 } // End of function saveWithheldOf()
 
 /**
@@ -4779,13 +6585,103 @@ function retainedDraftOf(
 ): readonly RetainedDraftField[] {
   const buffers = copyOfDraft(conflict);
   const contentSwitch = capturedSwitch(buffers);
-  const intents = intentsOf(session.baseline, buffers, contentSwitch);
-  return EDITABLE_FIELDS.map((field) => ({
+  const structure = capturedStructure(buffers);
+  const side = triggerSideDerivationOf(session.baseline, structure);
+  const intents = intentsWith(session.baseline, buffers, contentSwitch, side);
+  const held = session.baseline.structure.trigger.form;
+  const drafted = structure.side.form;
+  const formChanged = drafted !== null && drafted !== held;
+  const fields = EDITABLE_FIELDS.map((field) => ({
     label: fieldLabelName(field),
-    text: buffers[field].text,
-    status: retainedStatusOf(field, intents[field], contentSwitch)
+    text: field === 'trigger' ? structure.trigger.text : buffers[field].text,
+    status:
+      field === 'trigger' && formChanged && (held === 'trigger' || drafted === 'trigger')
+        ? drafted === 'trigger'
+          ? ('triggerFormTo' as const)
+          : ('triggerFormAway' as const)
+        : retainedStatusOf(field, intents[field], contentSwitch)
   }));
+  return [...fields, ...structureRowsOf(session.baseline, structure, side)];
 } // End of function retainedDraftOf()
+
+/**
+ * The retained draft's rows beyond the seventeen fields — Phase 3-6-1: `regex`,
+ * the items of `triggers` and of `search_terms`, **each only when the draft
+ * says something about it**, so a copy of a draft that never touched a list
+ * reads exactly as it did before this phase. A change of trigger form lists
+ * what the form it replaces holds and what the new form will hold; a list edit
+ * lists the drafted items in order, then the items it takes out.
+ *
+ * @param baseline - What the file holds.
+ * @param structure - The retained structure, read once.
+ * @param side - Its derivation, built from that read.
+ * @returns The rows, in the order a screen shows them.
+ */
+function structureRowsOf(
+  baseline: MatchBaseline,
+  structure: CapturedStructure,
+  side: TriggerSideDerivation
+): readonly RetainedDraftField[] {
+  const rows: RetainedDraftField[] = [];
+  const held = baseline.structure.trigger;
+  const drafted = structure.side.form;
+  const formChanged = drafted !== null && drafted !== held.form;
+  if (held.form === 'regex' || drafted === 'regex') {
+    if (formChanged) {
+      rows.push({
+        label: 'regex',
+        text: drafted === 'regex' ? structure.side.regex.text : held.regex.value,
+        status: drafted === 'regex' ? 'triggerFormTo' : 'triggerFormAway'
+      });
+    } else if (side.regex !== 'Unchanged') {
+      rows.push({ label: 'regex', text: structure.side.regex.text, status: statusOfIntent(side.regex) });
+    }
+  }
+  if (held.form === 'triggers' || drafted === 'triggers') {
+    if (formChanged) {
+      const texts =
+        drafted === 'triggers'
+          ? structure.side.triggers.items.map((item) => item.text)
+          : held.triggers.items;
+      const status = drafted === 'triggers' ? ('triggerFormTo' as const) : ('triggerFormAway' as const);
+      rows.push(...texts.map((text) => ({ label: 'triggers' as const, text, status })));
+    } else {
+      rows.push(...listRowsFor(held.triggers, structure.side.triggers));
+    }
+  }
+  rows.push(...listRowsFor(baseline.structure.searchTerms, structure.searchTerms));
+  return rows;
+} // End of function structureRowsOf()
+
+/**
+ * One list's retained rows, or none when the draft leaves it alone.
+ *
+ * @param baseline - What the file holds for the list.
+ * @param buffer - What the retained draft holds, read once.
+ * @returns The drafted items in order, then the items taken out.
+ */
+function listRowsFor(baseline: ListBaseline, buffer: ListBuffer): readonly RetainedDraftField[] {
+  if (listDerivationOf(baseline, buffer).kind === 'unchanged') {
+    return [];
+  }
+  const label = listLabelName(baseline.field);
+  const rows = listRowsOf(baseline, buffer);
+  return [
+    ...(buffer.present
+      ? rows.items.map((item) => ({
+          label,
+          text: item.text,
+          status:
+            item.status === 'added'
+              ? ('itemAdded' as const)
+              : item.status === 'edited'
+                ? ('setting' as const)
+                : ('unchanged' as const)
+        }))
+      : []),
+    ...rows.removed.map((item) => ({ label, text: item.text, status: 'itemRemoved' as const }))
+  ];
+} // End of function listRowsFor()
 
 /**
  * The status one retained field is copied with, the drafted switch included.
@@ -4832,7 +6728,9 @@ export function matchEditorView(session: MatchEditorSession): MatchEditorView {
   const externallyBlocked = session.externalConflict !== null || session.awaitingReconciliation !== null;
   const refusalChoices = offeredRefusalChoices(refused, stale);
   const contentSwitch = capturedSwitch(session.draft.value);
-  const intents = intentsOf(session.baseline, session.draft.value, contentSwitch);
+  const structure = capturedStructure(session.draft.value);
+  const side = triggerSideDerivationOf(session.baseline, structure);
+  const intents = intentsWith(session.baseline, session.draft.value, contentSwitch, side);
   const fields = EDITABLE_FIELDS.map((field) =>
     fieldModel(session, field, intents[field], contentSwitch)
   );
@@ -4850,7 +6748,15 @@ export function matchEditorView(session: MatchEditorSession): MatchEditorView {
     })),
     cursorActionOffered: cursorActionOffered(session),
     cursorMarkers: cursorMarkerCount(session.draft.value.replace.text),
-    saveWithheld: saveWithheldOf(contentSwitch, intents),
+    saveWithheld: saveWithheldOf(
+      contentSwitch,
+      intents,
+      structureProblemOf(session.baseline, structure)
+    ),
+    structure: {
+      trigger: triggerFormViewOf(session, structure, side),
+      searchTerms: listModelOf(session, session.baseline.structure.searchTerms, structure.searchTerms)
+    },
     dirty: isDirty(session.draft),
     canUndo: canUndo(session.draft),
     canRedo: canRedo(session.draft),

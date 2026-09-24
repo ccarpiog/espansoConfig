@@ -2338,6 +2338,64 @@ export type SequenceField = 'triggers' | 'search_terms';
 export type ContentForm = 'replace' | 'markdown' | 'html' | 'image_path' | 'form';
 
 /**
+ * One of the two scalar trigger keys, spelled as its espanso key — Phase 3-6-1.
+ *
+ * Mirrors Rust's `TriggerForm`, which serializes as the key for
+ * {@link MatchField}'s reason: a field identifier, not a code, so it owes no
+ * dictionary entry (`NOT_A_CODE` in `src-tauri/src/dictionary_contract.rs`).
+ */
+export type TriggerForm = 'trigger' | 'regex';
+
+/**
+ * Where new items go in an existing list — Phase 3-6-1, mirroring Rust's
+ * `ListPlacement`. An index is a position in the **original** list, never a
+ * byte offset and never "wherever this ends up".
+ */
+export type ListPlacement =
+  | { readonly Front: Record<string, never> }
+  | { readonly After: { readonly index: number } }
+  | { readonly End: Record<string, never> };
+
+/**
+ * One intent about the cardinality or presence of `triggers` or
+ * `search_terms` — Phase 3-6-1, mirroring Rust's `SequenceIntent`.
+ *
+ * **What no type here forces, and Rust does**: an `items` array of
+ * `InsertItems` is never empty (Rust reads it through `ScalarItems`, which
+ * refuses `[]` while the command's arguments are read). `InsertField` with no
+ * items is the explicitly requested empty list, written `[]`.
+ */
+export type SequenceIntent =
+  | {
+      readonly InsertItems: {
+        readonly field: SequenceField;
+        readonly at: ListPlacement;
+        readonly items: readonly string[];
+      };
+    }
+  | { readonly RemoveItem: { readonly field: SequenceField; readonly index: number } }
+  | { readonly InsertField: { readonly field: SequenceField; readonly items: readonly string[] } }
+  | { readonly RemoveField: { readonly field: SequenceField } };
+
+/**
+ * The switch between a scalar trigger form and a block `triggers` list —
+ * Phase 3-6-1, mirroring Rust's `TriggerSwitch`. `ToList.items` is never
+ * empty, which Rust forces and this type does not.
+ */
+export type TriggerSwitch =
+  | { readonly ToList: { readonly from: TriggerForm; readonly items: readonly string[] } }
+  | { readonly FromList: { readonly to: TriggerForm; readonly value: string } };
+
+/**
+ * A drafted change of trigger form — Phase 3-6-1, mirroring Rust's
+ * `TriggerFormChange`. `Rename` names only its source, because the
+ * destination is the other scalar form; `Switch` carries a {@link TriggerSwitch}.
+ */
+export type TriggerFormChange =
+  | { readonly Rename: { readonly from: TriggerForm } }
+  | { readonly Switch: { readonly switch: TriggerSwitch } };
+
+/**
  * A drafted switch of content kind: the match's one content key renamed to
  * another, in place — Phase 3-5-1, mirroring Rust's `ContentSwitch`.
  *
@@ -2548,6 +2606,14 @@ export interface MatchDraft {
    * above (`'Unchanged'` keeps the value's bytes exactly).
    */
   readonly content_switch: ContentSwitch | null;
+  /**
+   * A drafted change of trigger form, or `null` — Phase 3-6-1. A `Rename`'s
+   * source must be `'Unchanged'` above and its destination's value is the
+   * destination field above; a `Switch` is the only intent about `triggers`.
+   */
+  readonly trigger_form: TriggerFormChange | null;
+  /** Drafted list intents about `triggers` and `search_terms` — Phase 3-6-1. */
+  readonly sequences: readonly SequenceIntent[];
 }
 
 // ---------------------------------------------------------------------------

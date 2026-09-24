@@ -38,6 +38,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::draft::field::DraftField;
+use crate::draft::sequence::{SequenceIntent, TriggerFormChange};
 
 /// The key `vars` is written under.
 ///
@@ -173,7 +174,13 @@ impl MatchField {
 } // End of impl MatchField
 
 /// One of the two scalar trigger keys a [`FieldSubstitution`] may switch between.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// **It serializes as the espanso key** (`trigger`, `regex`), for
+/// [`MatchField`]'s reason: since Phase 3-6-1 it crosses the wire inside a
+/// [`crate::draft::TriggerFormChange`], and what a screen puts beside a trigger
+/// form is that key, spelled the same in every language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TriggerForm {
     /// `trigger`.
     Trigger,
@@ -187,6 +194,14 @@ impl TriggerForm {
         match self {
             TriggerForm::Trigger => MatchField::Trigger,
             TriggerForm::Regex => MatchField::Regex,
+        }
+    }
+
+    /// The other scalar trigger form: `regex` for `trigger`, `trigger` for `regex`.
+    pub fn other(self) -> TriggerForm {
+        match self {
+            TriggerForm::Trigger => TriggerForm::Regex,
+            TriggerForm::Regex => TriggerForm::Trigger,
         }
     }
 } // End of impl TriggerForm
@@ -860,6 +875,20 @@ pub struct MatchDraft {
     /// the destination field above. See [`ContentSwitch`].
     #[serde(default)]
     pub content_switch: Option<ContentSwitch>,
+    /// A drafted change of trigger form, or `None` (Phase 3-6-1).
+    ///
+    /// A [`crate::draft::TriggerFormChange::Rename`] is planned as one more
+    /// [`FieldSubstitution`], exactly as [`MatchDraft::content_switch`] is; a
+    /// [`crate::draft::TriggerFormChange::Switch`] is the structure's one
+    /// [`crate::draft::TriggerSwitch`]. Every rule of
+    /// [`crate::draft::plan_match_edits_with`] applies to either unchanged.
+    #[serde(default)]
+    pub trigger_form: Option<TriggerFormChange>,
+    /// Drafted list intents about `triggers` and `search_terms`, in order
+    /// (Phase 3-6-1): items added or removed, or a whole list added or removed.
+    /// Planned beside a structure's own intents, under the same coherence rules.
+    #[serde(default)]
+    pub sequences: Vec<SequenceIntent>,
 }
 
 impl MatchDraft {
@@ -973,6 +1002,18 @@ impl MatchDraft {
     /// Builder: drafts a switch of content kind (Phase 3-5-1).
     pub fn with_content_switch(mut self, switch: ContentSwitch) -> MatchDraft {
         self.content_switch = Some(switch);
+        self
+    }
+
+    /// Builder: drafts a change of trigger form (Phase 3-6-1).
+    pub fn with_trigger_form(mut self, change: TriggerFormChange) -> MatchDraft {
+        self.trigger_form = Some(change);
+        self
+    }
+
+    /// Builder: adds one drafted list intent (Phase 3-6-1).
+    pub fn with_sequence(mut self, intent: SequenceIntent) -> MatchDraft {
+        self.sequences.push(intent);
         self
     }
 } // End of impl MatchDraft

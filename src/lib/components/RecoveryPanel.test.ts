@@ -772,8 +772,10 @@ describe('the transfer table', () => {
     // so the box is empty, the reason is on the table beside it, and nothing here
     // invents content. The refusal is composed of two sentences: this table's own,
     // and the match editor's for the eligibility that produced it.
+    // A `Several` since Phase 3-6-1: a `Multiple` list is now carried whole, and
+    // several forms are the trigger side no transfer picks a winner in.
     const panel = mountPanel({
-      match: snippet({ triggerKind: 'Multiple', triggers: [':a', ':b'] })
+      match: snippet({ triggerKind: 'Several', triggers: [':a', ':b'], regex: '^a' })
     });
     openForm(panel);
     const row = rowFor(panel.target, 'trigger');

@@ -218,15 +218,36 @@ pub fn plan_match_edits_with(
     // no key is named twice, the destination's value is its own field — applies
     // to it unchanged. A structure that already names the same substitution is
     // refused by `check_substitutions_are_coherent` as a key named twice.
+    //
+    // Since Phase 3-6-1 the draft's own trigger-form change and list intents are
+    // merged the same way: a rename is one more substitution, a switch is the
+    // structure's switch (a second one is two intents about `triggers`), and the
+    // list intents are appended after the structure's own, so every coherence
+    // rule below reads them together.
     let merged;
-    let structure = match draft.content_switch {
-        None => structure,
-        Some(switch) => {
-            let mut widened = structure.clone();
+    let mut two_switches = false;
+    let structure = if draft.content_switch.is_none()
+        && draft.trigger_form.is_none()
+        && draft.sequences.is_empty()
+    {
+        structure
+    } else {
+        let mut widened = structure.clone();
+        if let Some(switch) = draft.content_switch {
             widened.substitutions.push(switch.substitution());
-            merged = widened;
-            &merged
         }
+        if let Some(change) = &draft.trigger_form {
+            if let Some(substitution) = change.substitution() {
+                widened.substitutions.push(substitution);
+            }
+            if let Some(switch) = change.switch() {
+                two_switches = widened.switch.is_some();
+                widened.switch = Some(switch.clone());
+            }
+        }
+        widened.sequences.extend(draft.sequences.iter().cloned());
+        merged = widened;
+        &merged
     };
     let substitutions = structure.substitutions.as_slice();
     let path = view.path.as_ref().ok_or(DraftError::MatchHasNoPath {})?;
@@ -246,6 +267,13 @@ pub fn plan_match_edits_with(
     }
     if !view.safely_editable {
         return Err(DraftError::MatchNotEditable { hazard: None });
+    }
+    if two_switches {
+        // The structure named a switch and the draft names another: two intents
+        // about `triggers`, refused at intent level with the list's own code.
+        return Err(DraftError::SequenceIntentsConflict {
+            field: SequenceField::Triggers,
+        });
     }
     check_no_index_is_drafted_twice(draft)?;
     check_no_entry_drafts_two_shapes(draft)?;

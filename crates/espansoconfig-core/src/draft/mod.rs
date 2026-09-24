@@ -101,6 +101,12 @@
 //! and removed between its brackets, never converting it (Phase 3-3); a switch
 //! still needs a block list.
 //!
+//! **On the wire since Phase 3-6-1.** [`MatchDraft::sequences`] carries the list
+//! intents and [`MatchDraft::trigger_form`] one [`TriggerFormChange`] — a
+//! `trigger`↔`regex` rename or a [`TriggerSwitch`] — so [`plan_match_edits`]
+//! alone plans everything the match editor's list and trigger-form controls can
+//! draft, merged into the structure exactly as `content_switch` is.
+//!
 //! # The match that does not exist yet, since Phase 2b-2c-2
 //!
 //! [`NewMatch`] is what a match is **born** holding, and it is a second type
@@ -144,4 +150,6 @@ pub use match_draft::{
 };
 pub use new_match::{NewContent, NewMatch, NewTrigger, TriggerList};
 pub use plan::{plan_match_edits, plan_match_edits_with, plan_match_edits_with_substitutions};
-pub use sequence::{MatchStructure, ScalarItems, SequenceIntent, TriggerSwitch};
+pub use sequence::{
+    ListPlacement, MatchStructure, ScalarItems, SequenceIntent, TriggerFormChange, TriggerSwitch,
+};
