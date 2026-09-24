@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T13:32:30Z",
+  "updated": "2026-09-24T13:33:09Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1107,7 +1107,8 @@
       "risk": "high",
       "summary": "A browser bulk model computes Mixed from Rust-cut spellings, blocks stale selections, excludes open drafts and reports per-file outcomes.",
       "review": "docs/reviews/phase-3-11-1.md",
-      "narrative": "docs/decisions/3-11-1-notes.md"
+      "narrative": "docs/decisions/3-11-1-notes.md",
+      "commit": "ce54826"
     },
     {
       "id": "3-11-2",

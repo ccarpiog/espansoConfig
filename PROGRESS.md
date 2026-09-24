@@ -179,7 +179,7 @@ any of them anything.
 
 **Owed by the owner, not by a driven run:** plan §12's Phase 2 exit — *the owner uses it for a week on their real config with zero data loss* — has not been run; it does not block the Phase 3 consult. R35 (native-speaker review of the 145-row ES inventory, `2d-7-10-notes.md` §3) stays the owner's, before Phase 5. `2d-8-notes.md` reports the §4.6 entries (the shipped identifier's WebKit/Caches pairs, left for the owner; `/private/tmp/espanso.out` and `.err`, held open by the running espanso daemon) and that CF-1 … CF-4 cite a `probe.rs` header that was never committed and is now unrecoverable.
 
-**The tree is clean.** No instrument is in the tree (the last one, 3-9-2's `instrument-3-9-2/`, was deleted after its review) and no path is deliberately dirty. Stage by path all the same, and never run `git stash`, `git checkout`, `git restore` or `git reset` over work in progress.
+**Push owed:** `ce54826` and its SHA-record commit are not on the remote (SSH agent held no key in the driven process) — run `git push` before starting 3-11-2, and record the result here. **The tree is clean.** No instrument is in the tree (the last one, 3-9-2's `instrument-3-9-2/`, was deleted after its review) and no path is deliberately dirty. Stage by path all the same, and never run `git stash`, `git checkout`, `git restore` or `git reset` over work in progress.
 
 **Reviews:** Codex answered at 2d-8, at the Phase 3 design consult, at 3-1, at 3-2, at 3-3, at 3-4, at 3-5-1, at 3-5-2-1, at 3-5-2-2, at 3-6-1, at 3-6-2, at 3-6-3, at 3-7, at 3-8-1, at 3-8-2, at 3-8-3, at 3-9-1, at 3-9-2, at 3-10 and at 3-11-1 (`autoclaude-review.sh` exited 0 each time).
 
@@ -290,6 +290,7 @@ all of it is in `git log`._
 | _**2d-7-8** — one row, `ship` (Codex), rung unchanged_ | `2aa798a` (SHA record `64abc77`; the owner's option-(a) record `abd49ce`) | ✅ pushed; **archived 2026-09-23 at 2d-7-9** to [`status-table.md`](docs/progress-archive/status-table.md) |
 | _**3-7** … **3-9-2** — six git-state rows_ | `340f389` … `21b2219` | ✅ all pushed; **archived verbatim 2026-09-24 at 3-11-1** to [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state rows of 3-7 … 3-9-2, as the live head held them"* |
 | **3-10 — the per-file bulk coordinator (core planner, command, wire, i18n), reviewed (`ship-with-fixes`, Codex, 1 BLOCKER + 1 SHOULD-FIX, both fixed) and closed** | `35d4624` (this SHA record is the commit after it) | ✅ pushed, `821125e..35d4624  main -> main`; tree clean after it |
+| **3-11-1 — bulk selection: the model and the coordination, reviewed (`ship-with-fixes`, Codex, 1 BLOCKER + 2 SHOULD-FIX, all fixed) and closed; 3-11 cut into 3-11-1/2/3** | `ce54826` (this SHA record is the commit after it) | ⚠️ **NOT pushed** — `git push` exited 128, `git@github.com: Permission denied (publickey)`; `ssh-add -l` answered *"The agent has no identities."* (the driven process's SSH agent held no key). Nothing was forced. **The next session pushes first** (`git push`); both `ce54826` and this record commit are local-only until then |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed
