@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T11:54:11Z",
+  "updated": "2026-09-24T11:54:45Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1081,7 +1081,8 @@
       "status": "done",
       "risk": "routine",
       "summary": "Window reading of the file-scope inspector in EN and ES; missing import position numbers found and fixed.",
-      "review": "ship-with-fixes (Codex), 1 SHOULD-FIX fixed"
+      "review": "ship-with-fixes (Codex), 1 SHOULD-FIX fixed",
+      "commit": "21b2219"
     },
     {
       "id": "3-10",
