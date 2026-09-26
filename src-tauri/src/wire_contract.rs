@@ -1604,8 +1604,15 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// user's file: `update_sidecar` writes only the application-owned sidecar
 /// store, through `crate::sidecar`'s own writer (ruling 25), and
 /// [`the_sidecar_route_names_no_user_file_writer`] is its tripwire.
+///
+/// Phase 4-8 adds `match_authoring_snapshot`, `analyze_match_candidate` and
+/// `move_variable`, taking the workspace surface to twenty-five and the whole
+/// to twenty-six. The first two are readers; `move_variable` is the ninth
+/// writer, the dedicated variable-reorder writer ruling 10 of
+/// `docs/decisions/4-split-notes.md` names, and ends in the same `run_one_save`
+/// ([`the_variable_reorder_writer_reaches_the_one_tail_and_no_lock`]).
 #[test]
-fn the_registered_commands_are_the_workspace_twenty_two_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_twenty_five_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1614,8 +1621,8 @@ fn the_registered_commands_are_the_workspace_twenty_two_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        22,
-        "the frontend declares twelve read-only commands, eight that write a user's file \
+        25,
+        "the frontend declares fourteen read-only commands, nine that write a user's file \
          and the two sidecar commands: {workspace:?}"
     );
     assert!(
@@ -1632,6 +1639,7 @@ fn the_registered_commands_are_the_workspace_twenty_two_and_the_menu_command() {
         "duplicate_match",
         "save_match_item_text",
         "apply_bulk_options",
+        "move_variable",
     ];
     for mutating in writing {
         assert!(
@@ -1641,12 +1649,18 @@ fn the_registered_commands_are_the_workspace_twenty_two_and_the_menu_command() {
     }
     assert_eq!(
         writing.len(),
-        8,
+        9,
         "a restore is a content path on save_raw_document (Phase 2c-5 consult, Q1), the \
-         seventh writer is Phase 3-7's local raw-item edit (ruling 11) and the eighth is \
-         Phase 3-10's per-file bulk option edit (ruling 19), so nothing may add a ninth \
-         writing command"
+         seventh writer is Phase 3-7's local raw-item edit (ruling 11), the eighth is \
+         Phase 3-10's per-file bulk option edit (ruling 19) and the ninth is Phase 4-8's \
+         variable reorder (Phase 4 ruling 10), so nothing may add a tenth writing command"
     );
+    for reader in ["match_authoring_snapshot", "analyze_match_candidate"] {
+        assert!(
+            workspace.contains(reader) && !writing.contains(&reader),
+            "{reader} is Phase 4-8's reader and must be declared, never as a writer"
+        );
+    } // End of the loop over Phase 4-8's two readers
     assert!(
         workspace.contains("match_item_text") && !writing.contains(&"match_item_text"),
         "match_item_text is Phase 3-7's reader and must be declared, never as a writer"
@@ -1685,8 +1699,8 @@ fn the_registered_commands_are_the_workspace_twenty_two_and_the_menu_command() {
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        23,
-        "Phase 3-12 registers twenty-two workspace commands and one menu command, and no more: {registered:?}"
+        26,
+        "Phase 4-8 registers twenty-five workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1694,7 +1708,347 @@ fn the_registered_commands_are_the_workspace_twenty_two_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_twenty_two_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_twenty_five_and_the_menu_command()
+
+/// The lock and write primitives no single-save writer and no reader of Phase
+/// 4-8 may name: each would be a second lock or a second route to the disk.
+///
+/// A fixed vocabulary, and therefore a tripwire as [`NO_WRITER_IDENTIFIERS`]
+/// is: a primitive reached under another name is not seen.
+const SECOND_LOCK_IDENTIFIERS: &[&str] = &[
+    "save_document",
+    "replace_file_atomically",
+    "replace_locked_file",
+    "PathWriteLock",
+    "lock_path",
+    "SaveRequest",
+];
+
+/// **The variable-reorder writer ends in the one save tail, and nothing on
+/// Phase 4-8's paths names a lock or a write primitive** (`docs/decisions/
+/// 4-split-notes.md` step 4-8: *every writer reaches `run_one_save` and none
+/// takes a second lock*).
+///
+/// Three halves. The session method hands the planning function exactly
+/// `run_one_save` as its tail, as `save_match` does; the planning function and
+/// both readers' bodies name no primitive of [`SECOND_LOCK_IDENTIFIERS`], and
+/// the readers name no save tail at all; and the control — the same scan over
+/// `run_one_save`'s own body does find the one writer it delegates to — so a
+/// negative is a statement about those bodies rather than about a scanner that
+/// stopped reading. `crate::commands::authoring_check` is the behavioural
+/// half: a probing tail proves no path lock is held around the save, and an
+/// analysis returns while another holder has the lock.
+#[test]
+fn the_variable_reorder_writer_reaches_the_one_tail_and_no_lock() {
+    let commands = read_repository_file("src-tauri/src/commands.rs");
+    for (method, planner) in [
+        ("move_variable", "move_one_variable"),
+        ("save_match", "save_one_match"),
+    ] {
+        let body = function_body(&commands, method);
+        assert!(
+            body.contains(planner) && body.contains("&mut run_one_save"),
+            "{method} must hand {planner} the one save tail, run_one_save"
+        );
+    } // End of the loop over the two single-save writers with a seam
+    for name in [
+        "move_one_variable",
+        "save_one_match",
+        "analyze_one_candidate",
+        "match_authoring_snapshot",
+        "analyze_match_candidate",
+    ] {
+        let body = function_body(&commands, name);
+        for forbidden in SECOND_LOCK_IDENTIFIERS {
+            assert!(
+                !crate::rust_source::mentions_identifier(body, forbidden),
+                "the body of {name} names {forbidden}: a second lock or a second route \
+                 to the disk"
+            );
+        } // End of the loop over the forbidden identifiers
+    } // End of the loop over Phase 4-8's bodies
+    for reader in [
+        "analyze_one_candidate",
+        "match_authoring_snapshot",
+        "analyze_match_candidate",
+    ] {
+        let body = function_body(&commands, reader);
+        for tail in ["run_one_save", "with_open", "BackupSession"] {
+            assert!(
+                !crate::rust_source::mentions_identifier(body, tail),
+                "{reader} is a reader and must not reach {tail}"
+            );
+        } // End of the loop over the save tails
+    } // End of the loop over the readers
+    assert!(
+        crate::rust_source::mentions_identifier(
+            function_body(&commands, "commit_and_record"),
+            "save_document"
+        ),
+        "the scanner stopped seeing the one writer the save tail delegates to"
+    );
+} // End of function the_variable_reorder_writer_reaches_the_one_tail_and_no_lock()
+
+/// Phase 4-8's authoring shapes are declared in `types.ts` exactly as `serde`
+/// writes them, and the one inbound shape exactly as it reads.
+///
+/// Every struct and every variant of the snapshot, the analysis summary and
+/// the candidate answer, sampled from real projections of an inline synthetic
+/// fixture rather than built, so what is compared is what a document produces.
+#[test]
+fn the_authoring_shapes_declare_exactly_what_rust_writes_and_reads() {
+    use espansoconfig_core::analysis::{FormSource, IncompleteReason};
+    use espansoconfig_core::authoring::{
+        analyze_candidate, authoring_snapshot, CandidateOperation, ContainerBaseline, LayoutPiece,
+    };
+    use espansoconfig_core::draft::{ListPlacement, MatchDraft};
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let fixture = concat!(
+        "matches:\n",
+        "  - trigger: ':a'\n",
+        "    replace: '{{a}} {{b}} {{f.y}}'\n",
+        "    vars:\n",
+        "      - name: a\n",
+        "        type: echo\n",
+        "        params:\n",
+        "          echo: '{{b}}'\n",
+        "      - name: b\n",
+        "        type: echo\n",
+        "        depends_on:\n",
+        "          - a\n",
+        "          - ghost\n",
+        "        params:\n",
+        "          echo: y\n",
+        "      - name: f\n",
+        "        type: form\n",
+        "        params:\n",
+        "          layout: 'Hi [[x]]'\n",
+        "  - trigger: ':b'\n",
+        "    form: 'Hi [[name]] [[]] {{form1.name}}'\n",
+        "    form_fields:\n",
+        "      name:\n",
+        "        type: text\n",
+    );
+    let context = DocumentContext {
+        id: DocumentId(0),
+        path: PathBuf::from("/nowhere/match/authoring.yml"),
+        relative_path: PathBuf::from("match/authoring.yml"),
+        kind: FileKind::MatchFile,
+        disabled: false,
+    };
+    let document = project_source(&context, fixture);
+    let first = authoring_snapshot(&document, &document.view.matches[0]);
+    let second = authoring_snapshot(&document, &document.view.matches[1]);
+    let summary = &first.analysis;
+    let declaration = &summary.declarations[2];
+    let layout = declaration.layout.as_ref().expect("the form has a layout");
+    let edits = CandidateOperation::VariableMove {
+        variable: 1,
+        to: ListPlacement::Front {},
+    }
+    .plan(&document.view.matches[0])
+    .expect("the move plans");
+    let judged = analyze_candidate(
+        &context,
+        fixture,
+        &document.view.matches[0],
+        &edits,
+        &Acknowledgement::none(),
+    )
+    .expect("judged");
+    let structs: Vec<(&str, Value)> = vec![
+        ("AuthoringSnapshot", json_of(&first)),
+        ("AnalysisSummary", json_of(summary)),
+        ("DeclarationSummary", json_of(declaration)),
+        ("Usage", json_of(&declaration.usage)),
+        ("LayoutSummary", json_of(layout)),
+        ("EdgeSummary", json_of(&summary.edges[0])),
+        ("DependencyCycle", json_of(&summary.cycles[0])),
+        (
+            "MissingDependencySummary",
+            json_of(&summary.missing_dependencies[0]),
+        ),
+        (
+            "OrderAdvisory",
+            json_of(&judged.analysis.as_ref().expect("analysed").order_advisories[0]),
+        ),
+        ("FormAdvisorySummary", json_of(&summary.form_advisories[0])),
+        (
+            "ReferenceSummary",
+            json_of(&second.analysis.unverified_layout_references[0]),
+        ),
+        ("MatchCandidate", json_of(&judged)),
+    ];
+    for (interface, value) in &structs {
+        assert_same_names(
+            &format!("interface {interface}"),
+            &json_keys(value),
+            &interface_fields(&source, interface),
+        );
+    } // End of the loop over the written structs
+
+    // Every variant of the three tagged value shapes and of the reason code,
+    // with its operands.
+    let baselines = vec![
+        json_of(&first.vars),
+        json_of(&first.form_fields),
+        json_of(&ContainerBaseline::Uncut {}),
+    ];
+    // The first piece of each kind across the two layouts: the variable's has
+    // text and a placeholder, the shorthand one a malformed region.
+    let shorthand = second
+        .analysis
+        .shorthand_form
+        .as_ref()
+        .expect("the second match has a shorthand layout");
+    let mut pieces: Vec<Value> = Vec::new();
+    for piece in layout.pieces.iter().chain(&shorthand.pieces) {
+        let json = json_of(piece);
+        if !pieces
+            .iter()
+            .any(|seen| variant_name(seen) == variant_name(&json))
+        {
+            pieces.push(json);
+        }
+    } // End of the loop over both layouts' pieces
+    pieces.push(json_of(&LayoutPiece::Uncut {}));
+    let sources = vec![
+        json_of(&FormSource::Variable { index: 0 }),
+        json_of(&FormSource::Shorthand {}),
+    ];
+    let reasons: Vec<Value> = vec![
+        IncompleteReason::ImportsOpenScope {},
+        IncompleteReason::GlobalVarsUnreadable {},
+        IncompleteReason::LocalVarsUnreadable {},
+        IncompleteReason::RegexCapturesUnknown {},
+        IncompleteReason::DuplicateDeclaration {
+            declarations: vec![0, 1],
+        },
+        IncompleteReason::NameUnreadable { declaration: 0 },
+        IncompleteReason::LocalNameUnreadable { declaration: 0 },
+        IncompleteReason::GlobalNameUnreadable { declaration: 0 },
+        IncompleteReason::DependsOnUnreadable { declaration: 0 },
+        IncompleteReason::ParamsUnreadable { declaration: 0 },
+        IncompleteReason::InjectionUncertain { declaration: 0 },
+        IncompleteReason::LayoutUnavailable {
+            form: FormSource::Shorthand {},
+        },
+        IncompleteReason::LayoutUnsupported {
+            form: FormSource::Variable { index: 1 },
+        },
+    ]
+    .iter()
+    .map(json_of)
+    .collect();
+    let tables: [(&str, &str, &str, Vec<Value>); 4] = [
+        (
+            "ContainerBaseline",
+            "crates/espansoconfig-core/src/authoring.rs",
+            "ContainerBaseline",
+            baselines,
+        ),
+        (
+            "LayoutPiece",
+            "crates/espansoconfig-core/src/authoring.rs",
+            "LayoutPiece",
+            pieces,
+        ),
+        (
+            "FormSource",
+            "crates/espansoconfig-core/src/analysis/dependency.rs",
+            "FormSource",
+            sources,
+        ),
+        (
+            "IncompleteReason",
+            "crates/espansoconfig-core/src/analysis/dependency.rs",
+            "IncompleteReason",
+            reasons,
+        ),
+    ];
+    let mut checked = 0usize;
+    for (union, file, rust, samples) in tables {
+        let declared = declared_variants(&read_repository_file(file), rust);
+        let sampled: BTreeSet<String> = samples.iter().map(variant_name).collect();
+        assert_eq!(declared, sampled, "one sample per {rust} variant");
+        let tags: BTreeSet<String> = object_union_tags(&source, union).into_keys().collect();
+        assert_same_names(&format!("type {union}"), &sampled, &tags);
+        for sample in &samples {
+            let variant = variant_name(sample);
+            let fields = tagged_variant_fields(&source, union, &variant)
+                .unwrap_or_else(|| panic!("type {union} declares no payload for {variant}"));
+            assert_same_names(
+                &format!("the {variant} payload of type {union}"),
+                &json_keys(&sample[&variant]),
+                &fields,
+            );
+            checked += 1;
+        } // End of the loop over one union's samples
+    } // End of the loop over the four tagged unions
+    assert_eq!(checked, 3 + 4 + 2 + 13, "every variant was compared");
+    assert_same_names(
+        "type IncompleteReasonName",
+        &declared_variants(
+            &read_repository_file("crates/espansoconfig-core/src/analysis/dependency.rs"),
+            "IncompleteReason",
+        ),
+        &union_members(&source, "IncompleteReasonName"),
+    );
+    for (union, file) in [
+        (
+            "Injection",
+            "crates/espansoconfig-core/src/analysis/dependency.rs",
+        ),
+        (
+            "EdgeKind",
+            "crates/espansoconfig-core/src/analysis/dependency.rs",
+        ),
+        (
+            "MalformedPlaceholder",
+            "crates/espansoconfig-core/src/analysis/placeholder.rs",
+        ),
+    ] {
+        assert_same_names(
+            &format!("type {union}"),
+            &declared_variants(&read_repository_file(file), union),
+            &union_members(&source, union),
+        );
+    } // End of the loop over the three string unions
+
+    // The inbound operation: every variant reads, with exactly the operands the
+    // TypeScript declares, and nothing else is read.
+    let operations = [
+        serde_json::json!({ "Draft": { "draft": json_of(&MatchDraft::default()) } }),
+        serde_json::json!({ "VariableMove": { "variable": 1, "to": { "End": {} } } }),
+    ];
+    let tags: BTreeSet<String> = object_union_tags(&source, "CandidateOperation")
+        .into_keys()
+        .collect();
+    assert_same_names(
+        "type CandidateOperation",
+        &operations.iter().map(variant_name).collect(),
+        &tags,
+    );
+    assert_eq!(
+        declared_variants(
+            &read_repository_file("crates/espansoconfig-core/src/authoring.rs"),
+            "CandidateOperation",
+        ),
+        tags,
+        "one sample per CandidateOperation variant"
+    );
+    for operation in &operations {
+        serde_json::from_value::<CandidateOperation>(operation.clone())
+            .unwrap_or_else(|error| panic!("{operation} must read: {error}"));
+        let variant = variant_name(operation);
+        assert_same_names(
+            &format!("the {variant} payload of type CandidateOperation"),
+            &json_keys(&operation[&variant]),
+            &tagged_variant_fields(&source, "CandidateOperation", &variant)
+                .unwrap_or_else(|| panic!("no payload for {variant}")),
+        );
+    } // End of the loop over the inbound operations
+} // End of function the_authoring_shapes_declare_exactly_what_rust_writes_and_reads()
 
 /// The names no read of the backup tree may so much as mention.
 ///
@@ -4985,8 +5339,8 @@ fn the_sidecar_commands_run_off_the_main_thread() {
         } // End of the loop over one function's attributes
     } // End of the loop over the items of commands.rs
     assert_eq!(
-        commands, 22,
-        "the twenty-two workspace commands were all read"
+        commands, 25,
+        "the twenty-five workspace commands were all read"
     );
     assert_eq!(
         asynchronous,

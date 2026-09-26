@@ -1,4 +1,4 @@
-//! The twenty-three commands, invoked through the real dispatcher.
+//! The twenty-six commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -27,7 +27,7 @@
 //!    the local origin, `plugin:event|emit` and `plugin:event|emit_to` — which
 //!    `core:event:default` would also have granted — are asserted refused
 //!    through the resolved access-control list, and every plugin command is in
-//!    the remote-origin sweep beside the twenty-three application commands.
+//!    the remote-origin sweep beside the twenty-six application commands.
 //!
 //! `mock_builder()` swaps the platform webview for a mock; it does **not** swap
 //! the IPC dispatcher, the access-control resolution or the command macros, all
@@ -1203,6 +1203,81 @@ fn the_option_spelling_reader_is_reachable_and_refuses_a_stale_identity() {
     assert_eq!(stale["code"], "identityStaleRevision", "{stale}");
 } // End of function the_option_spelling_reader_is_reachable_and_refuses_a_stale_identity()
 
+/// Phase 4-8's three commands are reachable, their arguments deserialize from
+/// the JSON the frontend sends — `baseRevision`, a `CandidateOperation`, a
+/// `ListPlacement` — and the reorder writes the file while the readers do not.
+#[test]
+fn the_authoring_commands_are_reachable_and_only_the_reorder_writes() {
+    let source = "matches:\n  - trigger: ':one'\n    replace: '{{a}} {{b}}'\n    vars:\n      \
+                  - name: a\n        type: echo\n        params:\n          echo: x\n      \
+                  - name: b\n        type: echo\n        params:\n          echo: y\n";
+    let OverIpc {
+        webview,
+        view,
+        _app,
+        _dir: dir,
+        ..
+    } = opened_over_ipc(source);
+    let target = dir.path().join("match").join("base.yml");
+    let held = view["matches"][0]["id"].clone();
+    let revision = view["revision"].clone();
+
+    let snapshot = invoke(&webview, "match_authoring_snapshot", json!({ "id": held }))
+        .expect("the snapshot reads");
+    let text = snapshot["vars"]["Present"]["text"]
+        .as_str()
+        .expect("the container is present");
+    assert!(source.contains(text), "{snapshot}");
+    assert_eq!(snapshot["form_fields"], json!({ "Absent": {} }));
+    assert_eq!(
+        snapshot["analysis"]["declarations"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+
+    let judged = invoke(
+        &webview,
+        "analyze_match_candidate",
+        json!({
+            "id": held,
+            "operation": { "VariableMove": { "variable": 1, "to": { "Front": {} } } },
+            "baseRevision": revision,
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect("the candidate is judged");
+    assert_eq!(judged["changes"], true, "{judged}");
+    assert_eq!(judged["verdict"], "Proceed");
+    assert_eq!(
+        fs::read_to_string(&target).expect("the file reads back"),
+        source,
+        "an analysis writes nothing"
+    );
+
+    let saved = invoke(
+        &webview,
+        "move_variable",
+        json!({
+            "id": held,
+            "variable": 1,
+            "to": { "Front": {} },
+            "baseRevision": revision,
+            "acknowledgement": { "accepted": [] },
+        }),
+    )
+    .expect("the reorder saves");
+    assert_eq!(saved["outcome"], "saved", "{saved}");
+    assert_eq!(saved["committed"], true);
+    assert!(fs::read_to_string(&target)
+        .expect("the file reads back")
+        .contains("    vars:\n      - name: b\n"));
+
+    let stale = invoke(&webview, "match_authoring_snapshot", json!({ "id": held }))
+        .expect_err("the held identity is stale after the commit");
+    assert_eq!(stale["code"], "identityStaleRevision", "{stale}");
+} // End of function the_authoring_commands_are_reachable_and_only_the_reorder_writes()
+
 /// Phase 3-12's sidecar pair is reachable, its request deserializes from the
 /// JSON the frontend sends, and what it writes lands under the storage root the
 /// test installed — never in the workspace.
@@ -2132,7 +2207,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// resolved command carries `ExecutionContext::Local`, the remote origin
 /// resolves neither, and a window that is not `main` resolves neither.
 ///
-/// And the twenty-three application commands resolve to nothing from either
+/// And the twenty-six application commands resolve to nothing from either
 /// origin, which is the other half of what "names no application command"
 /// means: a local origin reaches them because the dispatcher does not consult
 /// this list for an application command, not because the list allows them, and
@@ -2227,7 +2302,7 @@ fn the_capability_grants_exactly_the_two_event_permissions() {
                 .is_none(),
             "{command} must resolve to nothing for a remote origin"
         );
-    } // End of the loop over the twenty-three application commands
+    } // End of the loop over the twenty-six application commands
 } // End of function the_capability_grants_exactly_the_two_event_permissions()
 
 /// A local `main` webview registers the wake listener through the event plugin.
@@ -2300,7 +2375,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
     );
 } // End of function the_registered_listener_is_removable_through_the_event_plugin()
 
-/// A page that is not this application cannot reach any of the twenty-three
+/// A page that is not this application cannot reach any of the twenty-six
 /// commands, nor either event-plugin command.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
@@ -2318,7 +2393,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All twenty-three are attempted, and the count is asserted against the registered
+/// **All twenty-six are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -2326,7 +2401,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// parsed out of `generate_handler!` by [`crate::rust_source`], so a command
 /// added to the application and forgotten here fails this test rather than
 /// silently leaving the sweep. **The two plugin commands are a second table**,
-/// kept apart so that the application count stays twenty-three: they are not in
+/// kept apart so that the application count stays twenty-six: they are not in
 /// `generate_handler!`, this test asserts they are not, and folding them into
 /// the first table would make the count claim about two different things.
 #[test]
@@ -2482,6 +2557,30 @@ fn a_remote_origin_is_refused() {
         // spelled, which is the user's configuration, so a navigated webview must
         // not reach it for `document_text`'s reason.
         ("match_option_spellings", json!({ "id": identity })),
+        // Phase 4-8's three. The snapshot hands out a snippet's own container
+        // text and the analysis a candidate's findings, so a navigated webview
+        // must reach neither for `document_text`'s reason; the reorder writes,
+        // so it must not reach it for every writer's.
+        ("match_authoring_snapshot", json!({ "id": identity })),
+        (
+            "analyze_match_candidate",
+            json!({
+                "id": identity,
+                "operation": { "VariableMove": { "variable": 0, "to": { "End": {} } } },
+                "baseRevision": "0".repeat(64),
+                "acknowledgement": { "accepted": [] },
+            }),
+        ),
+        (
+            "move_variable",
+            json!({
+                "id": identity,
+                "variable": 0,
+                "to": { "End": {} },
+                "baseRevision": "0".repeat(64),
+                "acknowledgement": { "accepted": [] },
+            }),
+        ),
         // Phase 3-12's pair. The reader hands out the person's display names
         // and defaults, and the writer changes the application's own store, so
         // a navigated webview must reach neither.
@@ -2509,7 +2608,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 23, "the surface is twenty-three commands");
+    assert_eq!(attempted.len(), 26, "the surface is twenty-six commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, REMOTE_ORIGIN, command, args)

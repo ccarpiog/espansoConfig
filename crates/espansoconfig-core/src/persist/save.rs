@@ -1373,6 +1373,56 @@ pub fn preflight_edits(
     edits: &[DocumentEdit],
     acknowledgement: &Acknowledgement,
 ) -> Result<SavePreflight, SaveError> {
+    preflight_patched(context, source, edits, acknowledgement).map(|(preflight, _)| preflight)
+} // End of function preflight_edits()
+
+/// A preflight together with the candidate text it judged — Phase 4-8's
+/// candidate analysis.
+///
+/// The value [`preflight_candidate`] answers. `text` is the exact candidate
+/// the findings in [`CandidatePreflight::preflight`] belong to: its hash is
+/// [`SavePreflight::candidate`], so an analysis a caller runs over it describes
+/// the same bytes the findings do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CandidatePreflight {
+    /// What a save of the batch would meet.
+    pub preflight: SavePreflight,
+    /// The patched text itself, never written anywhere.
+    pub text: String,
+}
+
+/// [`preflight_edits`], also answering the candidate text — for a caller that
+/// must analyse the candidate as well as judge it (Phase 4-8).
+///
+/// **The same steps and the same findings pass**, shared as code: both
+/// functions are one private body, so a candidate analysis and a bulk preflight
+/// cannot judge one batch differently. No lock, no read, no write, no backup.
+///
+/// # Errors
+///
+/// Exactly [`preflight_edits`]'s.
+pub fn preflight_candidate(
+    context: &DocumentContext,
+    source: &str,
+    edits: &[DocumentEdit],
+    acknowledgement: &Acknowledgement,
+) -> Result<CandidatePreflight, SaveError> {
+    preflight_patched(context, source, edits, acknowledgement).map(|(preflight, patched)| {
+        CandidatePreflight {
+            preflight,
+            text: patched.text().to_owned(),
+        }
+    })
+} // End of function preflight_candidate()
+
+/// The one body of [`preflight_edits`] and [`preflight_candidate`]: the
+/// read-only check, the patch, the findings pass and the verdict.
+fn preflight_patched(
+    context: &DocumentContext,
+    source: &str,
+    edits: &[DocumentEdit],
+    acknowledgement: &Acknowledgement,
+) -> Result<(SavePreflight, PatchedDocument), SaveError> {
     if context.kind.is_read_only() {
         return Err(SaveError::DocumentIsReadOnly {
             path: context.path.clone(),
@@ -1382,13 +1432,14 @@ pub fn preflight_edits(
     let candidate = patched.text();
     let findings = findings_of(context, &context.path, source, candidate, edits)?;
     let verdict = verdict(&findings, acknowledgement);
-    Ok(SavePreflight {
+    let preflight = SavePreflight {
         candidate: ContentRevision::of_bytes(candidate.as_bytes()),
         changes: candidate != source,
         findings,
         verdict,
-    })
-} // End of function preflight_edits()
+    };
+    Ok((preflight, patched))
+} // End of function preflight_patched()
 
 /// The candidate bytes, and the provenance that decides what may be said about
 /// them.

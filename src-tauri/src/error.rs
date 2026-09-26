@@ -515,6 +515,20 @@ pub enum CommandError {
         /// Why the bulk edit could not be planned, exactly as the core reports it.
         error: BulkPlanError,
     },
+    /// A candidate analysis could not judge the batch it planned (Phase 4-8).
+    ///
+    /// **Nothing was attempted and nothing was written**: the analysis is a
+    /// preflight over text the session already holds, with no lock and no
+    /// write. The core's refusal travels whole, for
+    /// [`CommandError::SaveFailed`]'s reason — it is the same `SaveError` a
+    /// save of that batch would meet before writing (a package file, a batch
+    /// the engine refuses, a reparse that contradicts the patch) — and unlike
+    /// that variant it carries no `may_have_written`, because no write step
+    /// exists on this path to have happened.
+    CandidateRefused {
+        /// Why the candidate could not be judged, exactly as the core reports it.
+        error: SaveError,
+    },
 } // End of enum CommandError
 
 impl CommandError {
@@ -550,6 +564,7 @@ impl CommandError {
             CommandError::BackupReadFailed { .. } => "backupReadFailed",
             CommandError::ItemTextRefused { .. } => "itemTextRefused",
             CommandError::BulkRefused { .. } => "bulkRefused",
+            CommandError::CandidateRefused { .. } => "candidateRefused",
         }
     } // End of function code()
 } // End of impl CommandError
@@ -640,6 +655,9 @@ impl Serialize for CommandError {
             CommandError::BulkRefused { error } => {
                 out.serialize_field("error", error)?;
             }
+            CommandError::CandidateRefused { error } => {
+                out.serialize_field("error", error)?;
+            }
         } // End of the match over the variants' operands
         out.end()
     } // End of function serialize() for CommandError
@@ -674,7 +692,10 @@ impl CommandError {
             | CommandError::ItemTextRefused { .. }
             // One operand, the core's whole planning refusal: nothing was
             // attempted, so there is no `may_have_written` to add.
-            | CommandError::BulkRefused { .. } => 1,
+            | CommandError::BulkRefused { .. }
+            // One operand, the core's whole preflight refusal: an analysis
+            // writes nothing, so there is no `may_have_written` to add.
+            | CommandError::CandidateRefused { .. } => 1,
             CommandError::Io { .. }
             | CommandError::NotUtf8 { .. }
             | CommandError::IdentityWrongDocument { .. }
@@ -791,6 +812,13 @@ pub(crate) fn every_command_error() -> Vec<CommandError> {
         // answers with before any file is read.
         CommandError::BulkRefused {
             error: BulkPlanError::NoOptionChanges {},
+        },
+        // Sampled with the refusal a package file meets, the one arm of the
+        // preflight that names no edit.
+        CommandError::CandidateRefused {
+            error: SaveError::DocumentIsReadOnly {
+                path: std::path::PathBuf::from("/nowhere/match/packages/one/package.yml"),
+            },
         },
     ]
 } // End of function every_command_error()

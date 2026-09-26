@@ -63,7 +63,8 @@ export const COMMAND_ERROR_CODES = [
   'backupEntryIsNotThisDocument',
   'backupReadFailed',
   'itemTextRefused',
-  'bulkRefused'
+  'bulkRefused',
+  'candidateRefused'
 ] as const;
 
 /** One of {@link COMMAND_ERROR_CODES}. */
@@ -533,6 +534,21 @@ export interface BulkRefusedError {
   readonly error: BulkPlanError;
 }
 
+/**
+ * A candidate analysis could not judge the batch it planned (Phase 4-8), and
+ * **nothing was attempted or written**.
+ *
+ * The preflight's `SaveError` travels whole, as {@link SaveFailedError}'s does —
+ * a package file, a batch the engine refuses, a reparse that contradicts the
+ * patch — with no `may_have_written`, because an analysis has no write step.
+ */
+export interface CandidateRefusedError {
+  /** The discriminant. */
+  readonly code: 'candidateRefused';
+  /** Why the candidate could not be judged, exactly as the core reports it. */
+  readonly error: SaveError;
+}
+
 /** Everything a command may reject with. */
 export type CommandError =
   | NoWorkspaceOpenError
@@ -557,7 +573,8 @@ export type CommandError =
   | BackupEntryIsNotThisDocumentError
   | BackupReadFailedError
   | ItemTextRefusedError
-  | BulkRefusedError;
+  | BulkRefusedError
+  | CandidateRefusedError;
 
 /**
  * Where the developer string of an unexpected failure is kept.
@@ -751,7 +768,8 @@ export const COMMAND_ERROR_OPERANDS = {
   backupEntryIsNotThisDocument: { document: 'number' },
   backupReadFailed: { error: 'object' },
   itemTextRefused: { error: 'object' },
-  bulkRefused: { error: 'object' }
+  bulkRefused: { error: 'object' },
+  candidateRefused: { error: 'object' }
 } as const;
 
 /**
@@ -962,6 +980,10 @@ export function identityRecovery(error: CommandError): SelectionRecovery {
     // `Identity` refusal, which the bulk inspector handles, and nothing was
     // written.
     case 'bulkRefused':
+    // A candidate the preflight could not judge names a batch, never a changed
+    // identity: a stale one is refused as `identityStaleRevision` first, and
+    // nothing was written.
+    case 'candidateRefused':
       return { action: 'none' };
   }
   // Every member of CommandError has an arm above, so `error` is `never` here.

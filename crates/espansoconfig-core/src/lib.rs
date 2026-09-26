@@ -148,6 +148,13 @@
 //!   [`watch::self_write_suppresses`] and **no ledger**: recording committed
 //!   revisions is the command layer's (2d-3), beside the open session.
 //!
+//! - **4-8** — [`authoring`]: revision-bound authoring snapshots of one match
+//!   (its whole `vars` and `form_fields` containers cut in Rust, with a content
+//!   fingerprint each, and a span-free summary of its [`analysis`]) and the
+//!   candidate analysis of one drafted operation — the save gate's findings over
+//!   the candidate plus the match's analysis in it. Pure: no lock, no I/O, and
+//!   nothing in it is accepted back as an address.
+//!
 //! [`persist`] holds the write primitive, the transaction around it and the
 //! backup step.
 
@@ -160,6 +167,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 pub mod analysis;
+pub mod authoring;
 pub mod discovery;
 pub mod draft;
 pub mod emit;

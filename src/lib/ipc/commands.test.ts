@@ -68,6 +68,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 const commands = await import('./commands');
 const {
   COMMAND_NAMES,
+  analyzeMatchCandidate,
   applyBulkOptions,
   createMatch,
   deleteMatch,
@@ -80,9 +81,11 @@ const {
   listBackupEntries,
   listDocuments,
   loadSidecar,
+  matchAuthoringSnapshot,
   matchItemText,
   matchOptionSpellings,
   moveMatch,
+  moveVariable,
   openWorkspace,
   readBackupText,
   reloadDocument,
@@ -186,7 +189,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the twenty-two wire names, in order, and export no twenty-third wrapper', async () => {
+  it('call the twenty-five wire names, in order, and export no twenty-sixth wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -214,10 +217,19 @@ describe('the command wrappers', () => {
     await saveMatchItemText(IDENTITY, 'a'.repeat(64), '  - trigger: a\n', { accepted: [] });
     await applyBulkOptions(BULK_REQUEST);
     await matchOptionSpellings(IDENTITY);
+    await matchAuthoringSnapshot(IDENTITY);
+    await analyzeMatchCandidate(
+      IDENTITY,
+      { Draft: { draft: UNCHANGED_DRAFT } },
+      'a'.repeat(64),
+      { accepted: [] }
+    );
+    await moveVariable(IDENTITY, 1, { Front: {} }, 'a'.repeat(64), { accepted: [] });
     await loadSidecar();
     await updateSidecar(SIDECAR_REQUEST);
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
+      'analyzeMatchCandidate',
       'applyBulkOptions',
       'createMatch',
       'deleteMatch',
@@ -230,9 +242,11 @@ describe('the command wrappers', () => {
       'listBackupEntries',
       'listDocuments',
       'loadSidecar',
+      'matchAuthoringSnapshot',
       'matchItemText',
       'matchOptionSpellings',
       'moveMatch',
+      'moveVariable',
       'openWorkspace',
       'readBackupText',
       'reloadDocument',
@@ -241,7 +255,40 @@ describe('the command wrappers', () => {
       'saveRawDocument',
       'updateSidecar'
     ]);
-  }); // End of the "call the twenty-two wire names" case
+  }); // End of the "call the twenty-five wire names" case
+
+  it('sends a variable reorder as an identity, a position, a placement, a base revision and an acknowledgement', async () => {
+    // Phase 4-8's writer. Every address is a position in the revision sent
+    // beside it — never a name, never a byte offset — and there is no force flag.
+    await moveVariable(IDENTITY, 2, { After: { index: 0 } }, 'c'.repeat(64), { accepted: [] });
+    expect(calls[0]?.command).toBe('move_variable');
+    expect(calls[0]?.args).toEqual({
+      id: IDENTITY,
+      variable: 2,
+      to: { After: { index: 0 } },
+      baseRevision: 'c'.repeat(64),
+      acknowledgement: { accepted: [] }
+    });
+    expect(JSON.stringify(calls[0]?.args)).not.toContain('"force"');
+    expect(JSON.stringify(calls[0]?.args)).not.toContain('"span"');
+  }); // End of the "sends a variable reorder" case
+
+  it('sends a candidate analysis with a writer\'s arguments and a closed operation', async () => {
+    // Phase 4-8's analysis reader: the same identity, base revision and
+    // acknowledgement a save takes, and an operation that is a whole draft or a
+    // variable move — nothing that could be trusted as a span.
+    const operation = { VariableMove: { variable: 1, to: { End: {} } } } as const;
+    await analyzeMatchCandidate(IDENTITY, operation, 'd'.repeat(64), { accepted: [] });
+    expect(calls[0]?.command).toBe('analyze_match_candidate');
+    expect(calls[0]?.args).toEqual({
+      id: IDENTITY,
+      operation,
+      baseRevision: 'd'.repeat(64),
+      acknowledgement: { accepted: [] }
+    });
+    await matchAuthoringSnapshot(IDENTITY);
+    expect(calls[1]).toEqual({ command: 'match_authoring_snapshot', args: { id: IDENTITY } });
+  }); // End of the "sends a candidate analysis" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence

@@ -11,7 +11,9 @@
 //! 3-11-1 that one's reader, `match_option_spellings`. Phase 3-12 adds the
 //! sidecar pair, `load_sidecar` and `update_sidecar`, which read the open
 //! workspace's file list and hand it to `crate::sidecar`; neither writes a user
-//! file. Each is
+//! file. Phase 4-8 adds a ninth writer, `move_variable`, and two readers,
+//! `match_authoring_snapshot` and `analyze_match_candidate`, over
+//! [`espansoconfig_core::authoring`]. Each is
 //! one line over a [`WorkspaceSession`] method; each of the original six readers
 //! is one call into `crate::workspace`, which Phase 1a built to be wrapped this
 //! way, and each of the three backup readers is one call into `crate::backup`.
@@ -33,25 +35,27 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Eight of the twenty commands write, and they write the same way
+//! # Nine of the twenty-five workspace commands write, and they write the same way
 //!
 //! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, 2b-2c-2 `create_match`
 //! and `delete_match`, 2b-2c-3b `save_raw_document`, 2c-3c-2
-//! `duplicate_match`, 3-7 `save_match_item_text`, and 3-10
+//! `duplicate_match`, 3-7 `save_match_item_text`, 3-10
 //! `apply_bulk_options`, which saves several files, one [`run_one_save`] per
-//! file. All eight go through
+//! file, and 4-8 `move_variable`. All nine go through
 //! [`espansoconfig_core::persist::save_document`] and through nothing else:
 //! `replace_file_atomically` and `replace_locked_file` take finished bytes,
 //! validate nothing, and the second one deadlocks if the lock is taken twice, so
 //! **no command in this crate calls either**. They also share [`run_one_save`],
-//! which is this layer's one cache-coherency policy rather than eight agreeing
+//! which is this layer's one cache-coherency policy rather than nine agreeing
 //! copies of it.
 //!
-//! Six of them differ only in **who derives the edits**. `move_match`,
+//! Seven of them differ only in **who derives the edits**. `move_match`,
 //! `create_match`, `delete_match`, `duplicate_match` and `save_match_item_text`
 //! each build their own single primitive — an [`ItemMove`], an [`InsertItem`], a
 //! [`RemoveItem`], a [`DuplicateItem`], an [`ItemTextReplacement`] — because each
-//! is one operation with nothing to diff.
+//! is one operation with nothing to diff; `move_variable` hands a position and a
+//! placement to [`plan_variable_move`], which derives one [`ItemMove`] inside
+//! the match's `vars` and checks that it is alone.
 //! `save_match` hands a [`MatchDraft`] to [`plan_match_edits`], which derives
 //! the **smallest** batch that realises it — or refuses by name, in which case
 //! nothing is attempted and the caller gets [`CommandError::DraftRefused`].
@@ -270,9 +274,13 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use espansoconfig_core::authoring::{
+    analyze_candidate, authoring_snapshot, AuthoringSnapshot, CandidateOperation, MatchCandidate,
+};
 use espansoconfig_core::draft::{
     check_bulk_changes, check_bulk_documents, option_spellings, plan_bulk_option_edits,
-    plan_match_edits, BulkOptionChange, BulkOptionSpellings, MatchDraft, NewMatch,
+    plan_match_edits, plan_variable_move, BulkOptionChange, BulkOptionSpellings, ListPlacement,
+    MatchDraft, NewMatch,
 };
 use espansoconfig_core::model::{DocumentView, MatchId, MatchView};
 use espansoconfig_core::patch::{
@@ -1088,6 +1096,7 @@ impl WorkspaceSession {
                 draft,
                 base_revision,
                 acknowledgement,
+                &mut run_one_save,
             )
         })
     } // End of function save_match()
@@ -1448,6 +1457,78 @@ impl WorkspaceSession {
             Ok(option_spellings(snapshot, found))
         })
     } // End of function match_option_spellings()
+
+    /// Hands out one match's revision-bound authoring snapshot (Phase 4-8).
+    ///
+    /// **A reader, and it reads nothing from disk**: the whole `vars` and
+    /// `form_fields` containers are cut out of the same cached source
+    /// [`WorkspaceSession::text`] serves, by
+    /// [`espansoconfig_core::authoring::authoring_snapshot`], beside a
+    /// span-free summary of the match's analysis. The frontend never slices a
+    /// byte span out of a JavaScript string (`CLAUDE.md` section 6).
+    ///
+    /// # What it refuses
+    ///
+    /// A stale identity — [`CommandError::IdentityStaleRevision`] from
+    /// [`DocumentView::match_by_id`], because a `MatchId` carries the revision
+    /// it was minted from (D2v) and containers cut from a newer parse would be
+    /// another revision's — and the other identity refusals, unchanged.
+    pub fn match_authoring_snapshot(&self, id: MatchId) -> Result<AuthoringSnapshot, CommandError> {
+        self.with_workspace(|workspace| {
+            let snapshot = workspace.get_document(id.document)?;
+            let found = snapshot.view.match_by_id(id)?;
+            Ok(authoring_snapshot(snapshot, found))
+        })
+    } // End of function match_authoring_snapshot()
+
+    /// Judges and analyses one drafted operation against the parse this
+    /// session holds, and writes nothing (Phase 4-8).
+    ///
+    /// **A reader**: no lock is taken beyond the session's own and no byte is
+    /// written — see [`analyze_one_candidate`] for the order of the steps. The
+    /// answer is a prediction about one candidate; the save that follows
+    /// re-reads the file under its lock and re-runs the gate.
+    pub fn analyze_match_candidate(
+        &self,
+        id: MatchId,
+        operation: &CandidateOperation,
+        base_revision: ContentRevision,
+        acknowledgement: &Acknowledgement,
+    ) -> Result<MatchCandidate, CommandError> {
+        self.with_workspace(|workspace| {
+            analyze_one_candidate(workspace, id, operation, base_revision, acknowledgement)
+        })
+    } // End of function analyze_match_candidate()
+
+    /// Moves one local variable within its own `vars` list and saves the file
+    /// (Phase 4-8; `docs/decisions/4-split-notes.md` ruling 10).
+    ///
+    /// **The ninth method in this crate that can write a user's file**, and it
+    /// writes it the same one way: through [`run_one_save`], with exactly the
+    /// one [`DocumentEdit::MoveItem`]
+    /// [`espansoconfig_core::draft::plan_variable_move`] derives and nothing
+    /// beside it — R25, a reorder is alone in its save; D2r, same sequence
+    /// only. See [`move_one_variable`].
+    pub fn move_variable(
+        &self,
+        id: MatchId,
+        variable: usize,
+        to: ListPlacement,
+        base_revision: ContentRevision,
+        acknowledgement: &Acknowledgement,
+    ) -> Result<SaveResult, CommandError> {
+        self.with_open(|workspace, session_side| {
+            move_one_variable(
+                workspace,
+                session_side,
+                id,
+                (variable, to),
+                base_revision,
+                acknowledgement,
+                &mut run_one_save,
+            )
+        })
+    } // End of function move_variable()
 
     /// The open workspace's root and listed files, as the sidecar store keys
     /// them (Phase 3-12).
@@ -2294,6 +2375,7 @@ fn save_one_match(
     draft: &MatchDraft,
     base_revision: ContentRevision,
     acknowledgement: &Acknowledgement,
+    save: &mut SaveTail<'_>,
 ) -> Result<SaveResult, CommandError> {
     // A caller that drafted against a parse this session no longer holds is
     // refused here. See `WorkspaceSession::save_match`: a stale index names a
@@ -2319,7 +2401,7 @@ fn save_one_match(
     };
     let edits =
         plan_match_edits(found, draft).map_err(|error| CommandError::DraftRefused { error })?;
-    run_one_save(
+    save(
         workspace,
         session_side,
         OneSave {
@@ -2332,6 +2414,123 @@ fn save_one_match(
         },
     )
 } // End of function save_one_match()
+
+/// The one save a single-save writer performs — [`run_one_save`] in production.
+///
+/// **The test seam of [`save_one_match`] and [`move_one_variable`], and
+/// nothing else** (Phase 4-8), the single-save sibling of [`BulkSave`]: a test
+/// passes a closure that answers with an injected failure — an uncertain write
+/// among them — and production passes [`run_one_save`] itself, from
+/// [`WorkspaceSession::save_match`] and [`WorkspaceSession::move_variable`],
+/// the only production callers. Nothing in the type forces a production caller
+/// to pass that function rather than another; those two call sites, and
+/// `the_variable_reorder_writer_reaches_the_one_tail_and_no_lock` in
+/// `crate::wire_contract`, are what keep both writers on the shared tail.
+type SaveTail<'s> = dyn FnMut(&mut Workspace, SessionSideOfASave<'_>, OneSave<'_>) -> Result<SaveResult, CommandError>
+    + 's;
+
+/// Plans and runs one variable reorder against an open workspace (Phase 4-8).
+///
+/// # The order of the steps is [`save_one_match`]'s
+///
+/// 1. **refuse a `base_revision` that is not this session's parse**
+///    ([`document_at`]) and a stale or foreign identity
+///    ([`DocumentView::match_by_id`]) — D2v: `variable` and `to` are
+///    **positions** in that parse, and a position resolved against another one
+///    names a different variable and succeeds;
+/// 2. **capture the reapply request** from that snapshot, before anything
+///    else: the subject is the match at exact item correspondence (no trigger
+///    fallback — a reorder rewrites the order of a whole container, and ruling
+///    22 keys variable correspondence on that container, never on a trigger)
+///    and there is no placement anchor, because the match itself does not move;
+/// 3. **derive the batch** with
+///    [`espansoconfig_core::draft::plan_variable_move`], or refuse by name as
+///    [`CommandError::DraftRefused`] — a match without a block `vars`, a
+///    variable or destination that does not exist, a move that changes
+///    nothing. The planner checks its own one-edit batch
+///    (`check_variable_move`), so R25 holds by construction;
+/// 4. **hand it to `save`** — [`run_one_save`] in production — which takes the
+///    per-path lock inside `save_document` and nowhere else. This function
+///    takes no lock of its own: the lock is not reentrant.
+///
+/// A move carries bytes rather than writing them, so no new spelling reaches
+/// the file; the save gate still runs, and a reorder that introduces a
+/// dependency condition is refused until acknowledged, like any variable
+/// operation (Phase 4-7).
+fn move_one_variable(
+    workspace: &mut Workspace,
+    session_side: SessionSideOfASave<'_>,
+    id: MatchId,
+    (variable, to): (usize, ListPlacement),
+    base_revision: ContentRevision,
+    acknowledgement: &Acknowledgement,
+    save: &mut SaveTail<'_>,
+) -> Result<SaveResult, CommandError> {
+    let base = document_at(workspace, id.document, base_revision)?;
+    let found = base.view.match_by_id(id)?;
+    // The match does not move, so its own path is where it is afterwards.
+    let at = found.path.clone();
+    let reapply = ReapplyRequest {
+        subject: ReapplyMode::anchored(base, found, ReapplyConfidence::ExactItem),
+        placement: PlacementMode::NotAnchored,
+    };
+    let edits = plan_variable_move(found, variable, to)
+        .map_err(|error| CommandError::DraftRefused { error })?;
+    save(
+        workspace,
+        session_side,
+        OneSave {
+            document: id.document,
+            base_revision,
+            content: SaveContent::Edits(&edits),
+            acknowledgement,
+            at: at.as_ref(),
+            reapply,
+        },
+    )
+} // End of function move_one_variable()
+
+/// Judges and analyses one drafted operation against the session's cached
+/// parse, and writes nothing (Phase 4-8).
+///
+/// # The order of the steps
+///
+/// 1. **refuse a stale base revision or identity** ([`document_at`],
+///    [`DocumentView::match_by_id`]) — D2v, exactly as the writers do, because
+///    the operation's addresses are positions in that parse;
+/// 2. **plan it** with the writer's own planner
+///    ([`CandidateOperation::plan`]), or refuse as
+///    [`CommandError::DraftRefused`];
+/// 3. **preflight and analyse the candidate**
+///    ([`espansoconfig_core::authoring::analyze_candidate`]): the save gate's
+///    own findings pass and verdict, and the match's analysis in the candidate
+///    — or [`CommandError::CandidateRefused`] carrying the core's refusal.
+///
+/// **No path lock, no read, no write, no backup.** Consent collected from the
+/// answer's findings is bound to the answer's candidate only for the five
+/// finding codes that carry a candidate revision (see
+/// [`espansoconfig_core::authoring::MatchCandidate`]); consent for any other
+/// finding — `ReferenceHasNoDeclaration` among them — is accepted by any later
+/// candidate that produces an equal finding. The caller must discard consent
+/// whenever the draft changes, and nothing in this layer forces it to.
+fn analyze_one_candidate(
+    workspace: &mut Workspace,
+    id: MatchId,
+    operation: &CandidateOperation,
+    base_revision: ContentRevision,
+    acknowledgement: &Acknowledgement,
+) -> Result<MatchCandidate, CommandError> {
+    // Cloned so that the immutable borrow ends before the snapshot is taken;
+    // `run_one_save` and the bulk preflight do the same.
+    let context = workspace.document_context(id.document)?.clone();
+    let base = document_at(workspace, id.document, base_revision)?;
+    let found = base.view.match_by_id(id)?;
+    let edits = operation
+        .plan(found)
+        .map_err(|error| CommandError::DraftRefused { error })?;
+    analyze_candidate(&context, &base.source, found, &edits, acknowledgement)
+        .map_err(|error| CommandError::CandidateRefused { error })
+} // End of function analyze_one_candidate()
 
 /// The document's top-level `matches` list, or the refusal that it has none.
 ///
@@ -3669,7 +3868,13 @@ pub fn move_match(
 ///   [`espansoconfig_core::draft::DraftField::Unchanged`] contributes no edit and
 ///   so cannot rewrite bytes nobody touched. Everything below the match mapping
 ///   is addressed by **index** — a variable, a `params` entry, a `form_fields`
-///   entry, one of its options — and never by a key the caller composed.
+///   entry, one of its options — and never by a key the caller composed, nor by
+///   a byte offset (R28). Since Phases 4-3 … 4-6 a draft may also carry typed
+///   structural intents — a new variable or a whole new `vars:` subtree,
+///   removals, list items, choice records, form field definitions — and **all
+///   of it is one batch and one save**, so a content edit and the variable it
+///   references commit together or not at all (tested through this command
+///   since Phase 4-8).
 /// - `base_revision` — the optimistic-concurrency token, checked twice for
 ///   [`move_match`]'s reason and load-bearing here in a further one: a draft's
 ///   indices are positions in the projection it was built against, so a stale
@@ -3678,15 +3883,19 @@ pub fn move_match(
 /// - `acknowledgement` — the suspicions the caller has already shown someone, by
 ///   content, exactly as for a move. There is deliberately **no `force` flag**.
 ///
-/// # This command inserts nothing below the match mapping
+/// # What it inserts below the match mapping, and what it refuses
 ///
-/// A drafted variable, `params` entry, `form_fields` entry, option or sequence
-/// element the projection cannot resolve is **refused by name**, never created
-/// (`docs/decisions/2b-2b-2-notes.md` decision D1). Writing an author-chosen key
-/// would be the first key string this engine emits that no schema fixes, and it
-/// needs its own anchor machinery and its own review. Inserting a *schema-known
-/// scalar key into the match's own mapping* is the one insertion that does
-/// happen, and the closed-surface guard is what keeps that the only one.
+/// Only what a typed intent names: a new variable, a `params` entry, a list
+/// item, a choice record or a form field definition, each through its own
+/// closed description and never through caller-written YAML (Phase 4 ruling 6),
+/// with author-chosen keys spelled by the codec and refused by position when
+/// they cannot be (ruling 7). A **positional** draft entry the projection
+/// cannot resolve — a variable, a `params` entry, an option or a sequence
+/// element that is not there — is still **refused by name**, never created
+/// (`docs/decisions/2b-2b-2-notes.md` decision D1). The closed-surface guard is
+/// what keeps the derived batch inside those named shapes. A variable
+/// **reorder** is not a draft: it is [`move_variable`], alone in its save
+/// (R25).
 ///
 /// # Errors
 ///
@@ -4016,6 +4225,95 @@ pub fn match_option_spellings(
     session.match_option_spellings(id)
 } // End of function match_option_spellings()
 
+/// Returns one match's revision-bound authoring snapshot — its whole `vars`
+/// and `form_fields` containers cut in Rust, each with a fingerprint, and a
+/// span-free summary of its analysis (Phase 4-8).
+///
+/// **The twenty-third workspace command, and a reader**: it writes nothing and
+/// reads nothing from disk that [`document_text`] would not. See
+/// [`WorkspaceSession::match_authoring_snapshot`].
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`] and the identity codes — a stale identity
+/// among them (D2v).
+#[tauri::command]
+pub fn match_authoring_snapshot(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+) -> Result<AuthoringSnapshot, CommandError> {
+    session.match_authoring_snapshot(id)
+} // End of function match_authoring_snapshot()
+
+/// Judges and analyses one drafted operation — a match draft or a variable
+/// reorder — against the parse this session holds, and writes nothing (Phase
+/// 4-8).
+///
+/// **The twenty-fourth workspace command, and a reader.** Its arguments are a
+/// writer's, minus nothing: `id` and `base_revision` for the reason every
+/// writer takes them (the operation's addresses are positions in that parse),
+/// `operation` — a [`CandidateOperation`], which carries no byte offset (R28)
+/// — and `acknowledgement`, which decides the verdict the answer reports. There
+/// is deliberately **no `force` flag** here either.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`], the identity codes (a stale base
+/// revision or identity among them), [`CommandError::DraftRefused`] when the
+/// operation cannot be planned, and [`CommandError::CandidateRefused`] when
+/// the planned batch cannot be judged. A candidate the gate would refuse is
+/// **not** an error: that is the answer's `verdict`.
+#[tauri::command]
+pub fn analyze_match_candidate(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+    operation: CandidateOperation,
+    base_revision: ContentRevision,
+    acknowledgement: Acknowledgement,
+) -> Result<MatchCandidate, CommandError> {
+    session.analyze_match_candidate(id, &operation, base_revision, &acknowledgement)
+} // End of function analyze_match_candidate()
+
+/// Moves one local variable within its own `vars` list and saves the file
+/// (Phase 4-8, ruling 10).
+///
+/// **The twenty-fifth workspace command, and the ninth that can write a user's
+/// file** — through [`run_one_save`] and through nothing else, with the one
+/// [`ItemMove`] the planner derives and nothing beside it (R25, D2r).
+///
+/// # Its arguments
+///
+/// - `id` — the match, by identity (D2v).
+/// - `variable` — the variable's position in that match's `vars`, in the
+///   revision `base_revision` names. A position, not a name: names are editable
+///   and may repeat (ruling 22), and never a byte offset (R28).
+/// - `to` — a [`ListPlacement`]: `Front`, `After { index }` naming a position in
+///   the **original** list, or `End`.
+/// - `base_revision` — the optimistic-concurrency token, checked here against
+///   the session's parse and again under the write lock.
+/// - `acknowledgement` — the suspicions already shown to a person, by content.
+///   There is deliberately **no `force` flag**.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`] and the identity codes before anything is
+/// attempted; [`CommandError::DraftRefused`] for a move the planner will not
+/// derive (no block `vars`, a missing variable or destination, a move that
+/// changes nothing), in which case **no transaction ran**;
+/// [`CommandError::SaveFailed`] for the transaction's own typed failures. A
+/// conflict and a refusal are **not** errors — see [`SaveResult`].
+#[tauri::command]
+pub fn move_variable(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+    variable: usize,
+    to: ListPlacement,
+    base_revision: ContentRevision,
+    acknowledgement: Acknowledgement,
+) -> Result<SaveResult, CommandError> {
+    session.move_variable(id, variable, to, base_revision, &acknowledgement)
+} // End of function move_variable()
+
 /// Reads the open workspace's application sidecar: display names, ordering and
 /// new-snippet defaults (Phase 3-12, rulings 25-28).
 ///
@@ -4194,6 +4492,9 @@ pub fn drain_external_changes(
 ) -> Result<ReconciliationBatch, CommandError> {
     session.drain_external_changes(after_sequence)
 } // End of function drain_external_changes()
+
+#[cfg(test)]
+mod authoring_check;
 
 #[cfg(test)]
 mod bulk_check;
@@ -4502,10 +4803,36 @@ mod tests {
                 )
                 .err()
                 .map(|error| error.code()),
+            // Phase 4-8's two readers and its writer.
+            session
+                .match_authoring_snapshot(identity)
+                .err()
+                .map(|error| error.code()),
+            session
+                .analyze_match_candidate(
+                    identity,
+                    &espansoconfig_core::authoring::CandidateOperation::Draft {
+                        draft: Box::new(MatchDraft::default()),
+                    },
+                    ContentRevision::of_bytes(b""),
+                    &Acknowledgement::none(),
+                )
+                .err()
+                .map(|error| error.code()),
+            session
+                .move_variable(
+                    identity,
+                    0,
+                    espansoconfig_core::draft::ListPlacement::Front {},
+                    ContentRevision::of_bytes(b""),
+                    &Acknowledgement::none(),
+                )
+                .err()
+                .map(|error| error.code()),
         ];
         assert_eq!(
             refusals,
-            [Some("noWorkspaceOpen"); 11],
+            [Some("noWorkspaceOpen"); 14],
             "every session method that needs a workspace must refuse before one is open"
         );
     } // End of function every_command_refuses_before_a_workspace_is_open()

@@ -230,7 +230,11 @@ import type {
   WriteError,
   WriteStep,
   SidecarStatus,
-  SidecarUpdateOutcome
+  SidecarUpdateOutcome,
+  EdgeKind,
+  IncompleteReason,
+  Injection,
+  MalformedPlaceholder
 } from '../ipc/types';
 import { locale } from '../stores/locale.svelte';
 import type { Locale } from './locale';
@@ -309,7 +313,11 @@ import {
   describeDisplayNameRefusal,
   describeWithdrawnPreferenceSave,
   describeSidecarStatus,
-  describeSidecarUpdateOutcome
+  describeSidecarUpdateOutcome,
+  describeEdgeKind,
+  describeIncompleteReason,
+  describeInjection,
+  describeMalformedPlaceholder
 } from './codes';
 import type { DefaultRefusal, DisplayNameRefusal } from '../browser/preferences';
 import { translate, type TranslationKey, type TranslationParams } from './dictionaries';
@@ -366,6 +374,7 @@ export {
   describeDiagnostic,
   describeDraftError,
   describeDuplicateSeam,
+  describeEdgeKind,
   describeEditError,
   describeEntrySkipped,
   describeExternalConflictAction,
@@ -376,9 +385,12 @@ export {
   describeFindingCode,
   describeHazard,
   describeIdentityError,
+  describeIncompleteReason,
+  describeInjection,
   describeInvariantViolation,
   describeIpcFailure,
   describeLineEnding,
+  describeMalformedPlaceholder,
   describeMatchBadge,
   describeMoveSeam,
   describeNodeKind,
@@ -414,6 +426,7 @@ export {
   documentShapeKey,
   draftErrorKey,
   duplicateSeamKey,
+  edgeKindKey,
   editErrorKey,
   entrySkippedKey,
   externalObservationKey,
@@ -422,8 +435,11 @@ export {
   findingCodeKey,
   hazardKindKey,
   identityErrorKey,
+  incompleteReasonKey,
+  injectionKey,
   invariantViolationKey,
   lineEndingKey,
+  malformedPlaceholderKey,
   matchBadgeKey,
   moveSeamKey,
   nodeKindKey,
@@ -635,6 +651,50 @@ export function tContentKind(kind: ContentKind): string {
 export function tVariableKind(kind: VariableKind): string {
   return describeVariableKind(locale.current, kind);
 } // End of function tVariableKind()
+
+/**
+ * Renders why a variable analysis is not definitive, in the current language
+ * (Phase 4-8).
+ *
+ * @param reason - An incomplete-analysis reason as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tIncompleteReason(reason: IncompleteReason): string {
+  return describeIncompleteReason(locale.current, reason);
+} // End of function tIncompleteReason()
+
+/**
+ * Renders whether a variable's parameters take references, in the current
+ * language (Phase 4-8).
+ *
+ * @param injection - An injection state as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tInjection(injection: Injection): string {
+  return describeInjection(locale.current, injection);
+} // End of function tInjection()
+
+/**
+ * Renders how a dependency edge was learnt, in the current language (Phase
+ * 4-8).
+ *
+ * @param kind - An edge kind as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tEdgeKind(kind: EdgeKind): string {
+  return describeEdgeKind(locale.current, kind);
+} // End of function tEdgeKind()
+
+/**
+ * Renders why a `[[` region is not a supported placeholder, in the current
+ * language (Phase 4-8).
+ *
+ * @param reason - A malformed-placeholder reason as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function tMalformedPlaceholder(reason: MalformedPlaceholder): string {
+  return describeMalformedPlaceholder(locale.current, reason);
+} // End of function tMalformedPlaceholder()
 
 /**
  * Renders what became of a selection whose document moved on.

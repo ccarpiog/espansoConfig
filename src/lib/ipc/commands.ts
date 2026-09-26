@@ -82,6 +82,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { classifyFailure, type IpcFailure } from './errors';
 import type {
   Acknowledgement,
+  AuthoringSnapshot,
   BackupBatchId,
   BackupBatchListing,
   BackupEntryId,
@@ -90,10 +91,13 @@ import type {
   BulkOptionSpellings,
   BulkOptionsRequest,
   BulkResult,
+  CandidateOperation,
   ContentRevision,
   DocumentId,
   DocumentSummary,
   DocumentView,
+  ListPlacement,
+  MatchCandidate,
   MatchDraft,
   MatchId,
   MatchView,
@@ -142,6 +146,9 @@ export const COMMAND_NAMES = [
   'save_match_item_text',
   'apply_bulk_options',
   'match_option_spellings',
+  'match_authoring_snapshot',
+  'analyze_match_candidate',
+  'move_variable',
   'load_sidecar',
   'update_sidecar'
 ] as const;
@@ -908,6 +915,110 @@ export async function applyBulkOptions(
 export async function matchOptionSpellings(id: MatchId): Promise<CommandResult<BulkOptionSpellings>> {
   return call<BulkOptionSpellings>('match_option_spellings', { id });
 } // End of function matchOptionSpellings()
+
+/**
+ * Reads one snippet's revision-bound authoring snapshot (Phase 4-8).
+ *
+ * **A reader.** Rust cuts the snippet's whole `vars` and `form_fields`
+ * containers out of the file — each with a fingerprint — and summarises its
+ * placeholder, reference and dependency analysis without a single byte span,
+ * so nothing here slices a string. The snapshot is a **baseline to compare
+ * against**, never an address: no command accepts it, or any part of it, back.
+ * A container's text may hold a carriage return and must not be put into a
+ * text box.
+ *
+ * @param id - The snippet, by identity. Its revision is the one the snapshot
+ *   describes.
+ * @returns The snapshot, or a failure — `noWorkspaceOpen` or an identity code,
+ *   `identityStaleRevision` among them.
+ */
+export async function matchAuthoringSnapshot(
+  id: MatchId
+): Promise<CommandResult<AuthoringSnapshot>> {
+  return call<AuthoringSnapshot>('match_authoring_snapshot', { id });
+} // End of function matchAuthoringSnapshot()
+
+/**
+ * Judges and analyses one drafted operation without writing anything (Phase
+ * 4-8).
+ *
+ * **A reader, with a writer's arguments.** Rust plans the operation with the
+ * writer's own planner, runs the save gate's own findings pass over the
+ * candidate in memory — no lock, no write — and analyses the snippet in that
+ * candidate. A refusing `verdict` is an answer: show the findings. Consent
+ * built from them is bound to **this** candidate only for the five
+ * revision-carrying finding codes (see {@link MatchCandidate}); consent for any
+ * other finding is accepted by any later candidate with an equal finding, so a
+ * caller must discard it whenever the draft changes — nothing here forces
+ * that. A rejection
+ * with `draftRefused` means the operation cannot be planned; with
+ * `candidateRefused`, that the planned batch cannot be judged (a package file,
+ * a batch the engine refuses). There is deliberately **no force flag**.
+ *
+ * @param id - The snippet, by identity.
+ * @param operation - A whole draft, or a variable position and placement.
+ * @param baseRevision - The revision the operation's positions belong to.
+ * @param acknowledgement - The suspicions already shown to a person, by
+ *   content; it decides the verdict reported. Pass `{ accepted: [] }` first.
+ * @returns The judged candidate, or a failure — `noWorkspaceOpen`, an identity
+ *   code, `draftRefused` or `candidateRefused`.
+ */
+export async function analyzeMatchCandidate(
+  id: MatchId,
+  operation: CandidateOperation,
+  baseRevision: ContentRevision,
+  acknowledgement: Acknowledgement
+): Promise<CommandResult<MatchCandidate>> {
+  return call<MatchCandidate>('analyze_match_candidate', {
+    id,
+    operation,
+    baseRevision,
+    acknowledgement
+  });
+} // End of function analyzeMatchCandidate()
+
+/**
+ * Moves one local variable within its snippet's own `vars` list, and saves the
+ * file (Phase 4-8).
+ *
+ * **The ninth function in this application that writes a user's file**, through
+ * the same one save transaction as every other. A reorder is **alone in its
+ * save** (R25) and stays in its own list (D2r); the variable's own lines and the
+ * comments it owns travel with it, and every other byte stays. A move that
+ * changes nothing, a variable or destination that does not exist, and a flow
+ * `vars` are `draftRefused` before anything is attempted. The analysis may
+ * report that the new order puts a consumer before its dependency; that is
+ * advisory and does not block the move. There is deliberately **no force
+ * flag**.
+ *
+ * Every {@link MatchId} held for this file is stale after a commit;
+ * `saved.moved` is the snippet's identity in the new revision.
+ *
+ * @param id - The snippet, by identity.
+ * @param variable - The variable's position in `vars`, in `baseRevision`.
+ * @param to - Where it goes: `{ Front: {} }`, `{ After: { index } }` naming a
+ *   position in the original list, or `{ End: {} }`.
+ * @param baseRevision - The revision the positions belong to.
+ * @param acknowledgement - The suspicions already shown to a person, by
+ *   content. Pass `{ accepted: [] }` on a first attempt.
+ * @returns How the save ended, or a failure — `noWorkspaceOpen`, an identity
+ *   code, `draftRefused`, or `saveFailed`.
+ */
+export async function moveVariable(
+  id: MatchId,
+  variable: number,
+  to: ListPlacement,
+  baseRevision: ContentRevision,
+  acknowledgement: Acknowledgement
+): Promise<CommandResult<SaveResult>> {
+  return call<SaveResult>('move_variable', {
+    id,
+    variable,
+    to,
+    baseRevision,
+    acknowledgement
+  });
+} // End of function moveVariable()
 
 /**
  * Reads the open workspace's sidecar preferences (Phase 3-12, rulings 25-28).

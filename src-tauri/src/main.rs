@@ -37,7 +37,13 @@
 //! whole first; its request and result types are `bulk`. Phase 3-11-1 adds its
 //! reader, `commands::match_option_spellings`, which cuts each option's exact
 //! source spelling out in Rust so a bulk inspector compares spellings rather
-//! than decoded text.
+//! than decoded text. Phase 4-8 adds a ninth through the same entry point,
+//! `commands::move_variable` — a same-sequence reorder of one local variable,
+//! alone in its save — and two readers, `commands::match_authoring_snapshot`
+//! (a match's whole `vars` and `form_fields` containers cut in Rust, with its
+//! analysis summarised) and `commands::analyze_match_candidate` (one drafted
+//! operation judged by the save gate's own findings pass and analysed, with no
+//! lock and no write).
 //!
 //! Phase 3-12 adds `commands::load_sidecar` and `commands::update_sidecar`,
 //! and **neither writes a user file**: `sidecar` is the application-owned
@@ -207,8 +213,9 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
-/// Registers the twelve read-only workspace commands, the eight commands that
-/// write, the menu command, and the state they share.
+/// Registers the fourteen read-only workspace commands, the nine commands that
+/// write a user's file, the two sidecar commands, the menu command, and the
+/// state they share.
 ///
 /// Shared with `dispatch_check.rs` so that the tested application is the built
 /// application: a command registered in `main` and absent from the test's
@@ -219,10 +226,12 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// project one, project one match, read one's bytes, re-read one — the three
 /// backup-catalogue commands `list_backup_batches`, `list_backup_entries` and
 /// `read_backup_text`, Phase 2d-4a's `drain_external_changes`, Phase 3-7's
-/// `match_item_text` and Phase 3-11-1's `match_option_spellings` are read-only. The eight save commands `move_match`,
-/// `save_match`, `create_match`, `delete_match`, `save_raw_document`,
-/// `duplicate_match`, Phase 3-7's `save_match_item_text` and Phase 3-10's
-/// `apply_bulk_options` write, and every one of them does it through
+/// `match_item_text`, Phase 3-11-1's `match_option_spellings` and Phase 4-8's
+/// `match_authoring_snapshot` and `analyze_match_candidate` are read-only. The
+/// nine save commands `move_match`, `save_match`, `create_match`,
+/// `delete_match`, `save_raw_document`, `duplicate_match`, Phase 3-7's
+/// `save_match_item_text`, Phase 3-10's `apply_bulk_options` and Phase 4-8's
+/// `move_variable` write, and every one of them does it through
 /// `espansoconfig_core::persist::save_document` and through nothing else.
 /// Phase 3-12's `load_sidecar` and `update_sidecar` write no user file: the
 /// second writes only the application-owned sidecar store, through
@@ -240,7 +249,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// the application publishes an ACL manifest of its own (`tauri::webview`'s
 /// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
 /// !is_local`). This crate publishes none, the webview's origin is local, and
-/// none of the twenty-three commands is a plugin command, so none of them needs a
+/// none of the twenty-six commands is a plugin command, so none of them needs a
 /// permission. The two event permissions are for the frontend's one event
 /// listener: Tauri's `listen` invokes the plugin command `plugin:event|listen`,
 /// and the unlisten function it resolves with invokes `plugin:event|unlisten`.
@@ -301,6 +310,9 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::save_match_item_text,
             commands::apply_bulk_options,
             commands::match_option_spellings,
+            commands::match_authoring_snapshot,
+            commands::analyze_match_candidate,
+            commands::move_variable,
             commands::load_sidecar,
             commands::update_sidecar,
             menu::set_menu_labels,

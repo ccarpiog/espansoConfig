@@ -76,6 +76,11 @@
 
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
+  EdgeKind,
+  IncompleteReason,
+  IncompleteReasonName,
+  Injection,
+  MalformedPlaceholder,
   BulkFileOutcome,
   BulkFileOutcomeName,
   BulkPlanError,
@@ -1970,6 +1975,107 @@ export function describeChangedContent(locale: Locale, content: ChangedContent):
 } // End of function describeChangedContent()
 
 // ---------------------------------------------------------------------------
+// The variable analysis on the wire — Phase 4-8
+// ---------------------------------------------------------------------------
+//
+// Four namespaces whose enums an authoring snapshot and a candidate analysis
+// carry (`match_authoring_snapshot`, `analyze_match_candidate`). No sentence
+// interpolates an operand: a reason's operands are positions, which a screen
+// shows by placing the sentence beside the declaration, never by printing an
+// index. None of these sentences claims anything about how espanso evaluates a
+// variable; each describes what this application's analysis could or could not
+// read (Phase 4 rulings 12, 13 and 16).
+
+/**
+ * The dictionary key for one reason an analysis is not definitive.
+ *
+ * @param name - The variant name of an `IncompleteReason`.
+ * @returns The key holding that reason's sentence.
+ */
+export function incompleteReasonKey(name: IncompleteReasonName): TranslationKey {
+  return `code.incompleteReason.${uncapitalize(name)}`;
+} // End of function incompleteReasonKey()
+
+/**
+ * The sentence one incomplete-analysis reason reads as. No operand is
+ * interpolated: they are positions.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - A reason as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeIncompleteReason(locale: Locale, reason: IncompleteReason): string {
+  return translate(locale, incompleteReasonKey(wireVariantName<IncompleteReasonName>(reason)));
+} // End of function describeIncompleteReason()
+
+/**
+ * The dictionary key for whether a variable's parameters take references.
+ *
+ * @param injection - An `Injection` as it crossed the boundary.
+ * @returns The key holding that state's phrase.
+ */
+export function injectionKey(injection: Injection): TranslationKey {
+  return `code.injection.${uncapitalize(injection)}`;
+} // End of function injectionKey()
+
+/**
+ * The phrase for whether a variable's parameters take references.
+ *
+ * @param locale - The dictionary to read from.
+ * @param injection - An `Injection` as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeInjection(locale: Locale, injection: Injection): string {
+  return translate(locale, injectionKey(injection));
+} // End of function describeInjection()
+
+/**
+ * The dictionary key for how a dependency edge was learnt.
+ *
+ * @param kind - An `EdgeKind` as it crossed the boundary.
+ * @returns The key holding that kind's phrase.
+ */
+export function edgeKindKey(kind: EdgeKind): TranslationKey {
+  return `code.edgeKind.${uncapitalize(kind)}`;
+} // End of function edgeKindKey()
+
+/**
+ * The phrase for how a dependency edge was learnt.
+ *
+ * @param locale - The dictionary to read from.
+ * @param kind - An `EdgeKind` as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeEdgeKind(locale: Locale, kind: EdgeKind): string {
+  return translate(locale, edgeKindKey(kind));
+} // End of function describeEdgeKind()
+
+/**
+ * The dictionary key for why a `[[` region is not a supported placeholder.
+ *
+ * @param reason - A `MalformedPlaceholder` as it crossed the boundary.
+ * @returns The key holding that reason's phrase.
+ */
+export function malformedPlaceholderKey(reason: MalformedPlaceholder): TranslationKey {
+  return `code.malformedPlaceholder.${uncapitalize(reason)}`;
+} // End of function malformedPlaceholderKey()
+
+/**
+ * The phrase for why a `[[` region is not a supported placeholder. The
+ * supported subset is named, never espanso-compatible (Phase 4 ruling 16).
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - A `MalformedPlaceholder` as it crossed the boundary.
+ * @returns The translated phrase.
+ */
+export function describeMalformedPlaceholder(
+  locale: Locale,
+  reason: MalformedPlaceholder
+): string {
+  return translate(locale, malformedPlaceholderKey(reason));
+} // End of function describeMalformedPlaceholder()
+
+// ---------------------------------------------------------------------------
 // Every `code.` namespace, and the builder that reaches it — Phase 2d-4b
 // ---------------------------------------------------------------------------
 
@@ -2036,6 +2142,7 @@ export const CODE_NAMESPACE_KEY_BUILDERS = {
   documentShape: documentShapeKey,
   draftError: draftErrorKey,
   duplicateSeam: duplicateSeamKey,
+  edgeKind: edgeKindKey,
   editError: editErrorKey,
   entrySkipped: entrySkippedKey,
   externalObservation: externalObservationKey,
@@ -2044,8 +2151,11 @@ export const CODE_NAMESPACE_KEY_BUILDERS = {
   findingCode: findingCodeKey,
   hazardKind: hazardKindKey,
   identityError: identityErrorKey,
+  incompleteReason: incompleteReasonKey,
+  injection: injectionKey,
   invariantViolation: invariantViolationKey,
   lineEnding: lineEndingKey,
+  malformedPlaceholder: malformedPlaceholderKey,
   matchBadge: matchBadgeKey,
   moveSeam: moveSeamKey,
   nodeKind: nodeKindKey,

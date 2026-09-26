@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T15:50:42Z",
+  "updated": "2026-09-26T16:43:32Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 4, variables and forms, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1282,13 +1282,17 @@
       "summary": "Core parses supported placeholders, scans references, builds the variable dependency graph and adds two cycle and missing-declaration findings.",
       "risk": "high",
       "review": "ship-with-fixes (Codex), docs/reviews/4-7.md",
-      "narrative": "docs/decisions/4-7-notes.md"
+      "narrative": "docs/decisions/4-7-notes.md",
+      "commit": "250f1be"
     },
     {
       "id": "4-8",
       "title": "Revision-bound snapshots and command integration",
-      "status": "queued",
-      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "status": "done",
+      "summary": "Core cuts authoring snapshots and analyses candidate drafts over the wire; a variable-reorder writer ends in the one shared save path.",
+      "risk": "high",
+      "review": "ship-with-fixes (Codex), docs/reviews/4-8.md",
+      "narrative": "docs/decisions/4-8-notes.md"
     },
     {
       "id": "4-9",

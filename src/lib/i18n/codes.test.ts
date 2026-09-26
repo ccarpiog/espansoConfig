@@ -349,7 +349,13 @@ const COMMAND_ERRORS = [
   },
   // Phase 3-10's, sampled with the request-level refusal Rust's own
   // `every_command_error()` samples.
-  { code: 'bulkRefused', error: { NoOptionChanges: {} } }
+  { code: 'bulkRefused', error: { NoOptionChanges: {} } },
+  // Phase 4-8's, sampled with the refusal Rust's own `every_command_error()`
+  // samples: a package file's candidate cannot be judged.
+  {
+    code: 'candidateRefused',
+    error: { DocumentIsReadOnly: { path: '/nowhere/match/packages/one/package.yml' } }
+  }
 ] as const satisfies readonly CommandError[];
 
 // ---------------------------------------------------------------------------
@@ -575,7 +581,7 @@ describe('the sample tables', () => {
       valueKinds: 5,
       documentShapes: 3,
       matchBadges: 10,
-      commandErrors: 23,
+      commandErrors: 24,
       scalarStyles: 5,
       lineEndings: 2,
       fileKinds: 3,
@@ -1054,6 +1060,7 @@ const CODE_NAMESPACE_SAMPLES: {
   documentShape: DOCUMENT_SHAPES[0],
   draftError: 'MatchHasNoPath',
   duplicateSeam: 'ArrivalLands',
+  edgeKind: 'Explicit',
   editError: 'SourceDoesNotParse',
   entrySkipped: 'Marker',
   externalObservation: EXTERNAL_OBSERVATION_NAMES[0],
@@ -1062,8 +1069,11 @@ const CODE_NAMESPACE_SAMPLES: {
   findingCode: 'MatchHasNoContentField',
   hazardKind: HAZARD_KINDS[0],
   identityError: 'StaleRevision',
+  incompleteReason: 'ImportsOpenScope',
+  injection: 'Uncertain',
   invariantViolation: 'InvertedSpan',
   lineEnding: LINE_ENDINGS[0],
+  malformedPlaceholder: 'Unterminated',
   matchBadge: MATCH_BADGES[0],
   moveSeam: 'SourceCloses',
   nodeKind: 'Document',

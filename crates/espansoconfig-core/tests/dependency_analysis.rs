@@ -286,12 +286,12 @@ matches:
     let advisories = &analysis.scope.form_advisories;
     assert_eq!(advisories.len(), 1);
     assert_eq!(advisories[0].field, "nope");
-    assert_eq!(advisories[0].form, FormSource::Variable(0));
+    assert_eq!(advisories[0].form, FormSource::Variable { index: 0 });
     assert!(analysis
         .scope
         .incomplete
         .contains(&IncompleteReason::LayoutUnsupported {
-            form: FormSource::Variable(1)
+            form: FormSource::Variable { index: 1 }
         }));
     // The body references still count as usage of both forms.
     assert_eq!(analysis.scope.declarations[0].usage.body, 2);
@@ -366,7 +366,7 @@ matches:
     let analysis = first_analysis(source);
     let advisories = &analysis.scope.form_advisories;
     assert_eq!(advisories.len(), 1);
-    assert_eq!(advisories[0].form, FormSource::Shorthand);
+    assert_eq!(advisories[0].form, FormSource::Shorthand {});
     assert_eq!(advisories[0].field, "nobody");
 } // End of function the_synthesised_form_answers_sub_references_against_the_shorthand_layout()
 
@@ -509,7 +509,7 @@ matches:
     assert!(broken
         .scope
         .incomplete
-        .contains(&IncompleteReason::RegexCapturesUnknown));
+        .contains(&IncompleteReason::RegexCapturesUnknown {}));
     assert!(broken.scope.missing_dependencies.is_empty());
 } // End of function regex_captures_take_part_in_resolution()
 
@@ -606,7 +606,7 @@ fn imports_keep_the_scope_open() {
     assert!(analysis
         .scope
         .incomplete
-        .contains(&IncompleteReason::ImportsOpenScope));
+        .contains(&IncompleteReason::ImportsOpenScope {}));
     let findings = findings_for(WITH_IMPORTS, &[rename_dependency(0, 0, "ghost")]);
     assert!(summary(&findings).is_empty(), "{findings:?}");
     let findings = findings_for(WITH_IMPORTS, &[set_echo(1, "{{b}}")]);

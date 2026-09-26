@@ -446,6 +446,24 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "src-tauri/src/sidecar.rs",
         name: "SidecarUpdateOutcome",
     },
+    // Phase 4-8's four: the analysis enums an authoring snapshot and a
+    // candidate analysis put on the wire, each of which a screen shows.
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/analysis/dependency.rs",
+        name: "IncompleteReason",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/analysis/dependency.rs",
+        name: "Injection",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/analysis/dependency.rs",
+        name: "EdgeKind",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/analysis/placeholder.rs",
+        name: "MalformedPlaceholder",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -465,7 +483,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("identityError", 3),
     ("workspaceError", 5),
     ("discoveryError", 3),
-    ("commandError", 23),
+    ("commandError", 24),
     ("scalarStyle", 5),
     ("lineEnding", 2),
     ("fileKind", 3),
@@ -513,6 +531,10 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("bulkFileOutcome", 10),
     ("sidecarStatus", 8),
     ("sidecarUpdateOutcome", 4),
+    ("incompleteReason", 13),
+    ("injection", 3),
+    ("edgeKind", 2),
+    ("malformedPlaceholder", 3),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.
@@ -769,6 +791,27 @@ const NOT_A_CODE: &[(&str, &str)] = &[
         "a protocol tag, not a code, exactly as `VariableListIntent` is: \
          `InsertItems` and `RemoveItem` travel *into* the planner as \
          `FormFieldDraft::values` (Phase 4-6) and are never rendered",
+    ),
+    (
+        "FormSource",
+        "an address, not a code, exactly as `FormOwner` is: `Variable` and \
+         `Shorthand` say which form an analysis reason or advisory is about \
+         (Phase 4-7, on the wire since 4-8), by position and never by name, and a \
+         screen resolves them against what it shows",
+    ),
+    (
+        "ContainerBaseline",
+        "a value shape, not a code, exactly as `MappingPresence` is: `Absent`, \
+         `Present` and `Uncut` carry a container's exact source text and its \
+         fingerprint *out of* an authoring snapshot (Phase 4-8) as a baseline to \
+         compare against, and are never rendered by name",
+    ),
+    (
+        "LayoutPiece",
+        "a value shape, not a code: `Text`, `Placeholder`, `Malformed` and \
+         `Uncut` carry a form layout's Rust-cut pieces *out of* an analysis \
+         summary (Phase 4-8); what a screen shows of a malformed piece is its \
+         `MalformedPlaceholder` reason, which owns a namespace",
     ),
     (
         "NewParamValue",

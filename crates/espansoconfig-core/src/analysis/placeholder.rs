@@ -22,10 +22,12 @@
 //! the supported subset" ([`PlaceholderLayout::is_fully_supported`]) from "this
 //! layout holds syntax the subset does not read".
 
+use serde::Serialize;
+
 use crate::syntax::ByteSpan;
 
 /// Why a region that opens with `[[` is not a supported placeholder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum MalformedPlaceholder {
     /// `[[]]` — nothing between the brackets.
     Empty,

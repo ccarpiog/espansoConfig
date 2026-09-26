@@ -15,8 +15,9 @@
 //!   transaction owes a variable operation that introduces or worsens a cycle
 //!   or a missing explicit dependency, bound to the candidate revision.
 //!
-//! Core-first: nothing outside this crate calls it yet (4-8 puts candidate
-//! analysis on the wire).
+//! Since Phase 4-8, [`crate::authoring`] summarises a match's analysis — of the
+//! cached projection and of a candidate — into a Rust-cut, span-free wire shape;
+//! the analysis types themselves carry byte spans and stay off the wire.
 
 pub mod dependency;
 pub mod findings;

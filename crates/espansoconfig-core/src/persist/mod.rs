@@ -157,8 +157,9 @@ pub use backup::{
     BATCH_MARKER_FORMAT, BATCH_MARKER_NAME, OUTSIDE_CONFIG_ROOT,
 };
 pub use save::{
-    preflight_edits, save_document, verdict, Acknowledgement, SaveContent, SaveError,
-    SavePreflight, SaveRefusal, SaveRequest, SaveVerdict, SavedDocument,
+    preflight_candidate, preflight_edits, save_document, verdict, Acknowledgement,
+    CandidatePreflight, SaveContent, SaveError, SavePreflight, SaveRefusal, SaveRequest,
+    SaveVerdict, SavedDocument,
 };
 pub use write::{
     lock_path, replace_file_atomically, replace_locked_file, temp_file_name, PathWriteLock,

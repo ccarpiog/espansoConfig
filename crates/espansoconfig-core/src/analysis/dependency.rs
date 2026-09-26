@@ -48,6 +48,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use serde::Serialize;
+
 use super::placeholder::PlaceholderLayout;
 use super::reference::{scan_references, ReferenceToken};
 use crate::model::{
@@ -65,28 +67,35 @@ use crate::validate::{
 pub const SYNTHESIZED_FORM_NAME: &str = "form1";
 
 /// Which form a sub-reference or a layout reason is about.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Struct variants, so it crosses the wire as a uniform one-key object
+/// (Phase 4-8 puts it there inside an analysis summary).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum FormSource {
     /// The `type: form` variable at this position of the scope.
-    Variable(usize),
+    Variable {
+        /// Its position in the scope's sequence.
+        index: usize,
+    },
     /// The match's shorthand `form:` layout, as the synthesised form.
-    Shorthand,
+    Shorthand {},
 }
 
 /// Why some part of an analysis is not definitive.
 ///
 /// Positions, never file text: a reason names a declaration by its index in
-/// its own sequence.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// its own sequence. Every variant is a struct variant, so the enum crosses the
+/// wire as a uniform one-key object (Phase 4-8).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum IncompleteReason {
     /// The document has `imports`, which may bring more global names in.
-    ImportsOpenScope,
+    ImportsOpenScope {},
     /// `global_vars` was not projected, so its names were never read.
-    GlobalVarsUnreadable,
+    GlobalVarsUnreadable {},
     /// The match's `vars` was not projected, so its names were never read.
-    LocalVarsUnreadable,
+    LocalVarsUnreadable {},
     /// The match's `regex` did not compile here, so its captures are unknown.
-    RegexCapturesUnknown,
+    RegexCapturesUnknown {},
     /// Several declarations of this sequence share one name; a reference to
     /// it resolves to none of them.
     DuplicateDeclaration {
@@ -144,7 +153,7 @@ pub enum IncompleteReason {
 }
 
 /// Whether a declaration's parameters take `{{references}}`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum Injection {
     /// Absent `inject_vars`, or a recognised true spelling.
     Enabled,
@@ -155,7 +164,7 @@ pub enum Injection {
 }
 
 /// How often a declaration is referenced, by where the reference is.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize)]
 pub struct Usage {
     /// References in `replace`, `markdown` or `html`.
     pub body: usize,
@@ -181,6 +190,10 @@ impl Usage {
 /// does not mention.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormLayoutAnalysis {
+    /// The layout text that was parsed — the scalar's decoded text. Every span
+    /// in [`FormLayoutAnalysis::layout`] indexes into it, so a caller that must
+    /// hand a segment's text across the wire cuts it here, in Rust (Phase 4-8).
+    pub text: String,
     /// The parsed layout.
     pub layout: PlaceholderLayout,
     /// Every field definition key with no supported placeholder of its name,
@@ -206,7 +219,7 @@ pub struct Declaration {
 }
 
 /// Which way an edge was learnt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum EdgeKind {
     /// A `depends_on` entry.
     Explicit,
@@ -229,7 +242,7 @@ pub struct DependencyEdge {
 
 /// A set of declarations that depend on each other, directly or through one
 /// another.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DependencyCycle {
     /// The positions, ascending. One member means a self-dependency.
     pub members: Vec<usize>,
@@ -258,7 +271,7 @@ pub struct MissingDependency {
 ///
 /// Advisory: authored order is never re-sorted, and file order is not claimed
 /// to be espanso's execution order (ruling 11).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct OrderAdvisory {
     /// The consumer's position.
     pub consumer: usize,
@@ -430,10 +443,10 @@ pub(crate) fn scope_openers(
 ) -> Vec<IncompleteReason> {
     let mut reasons = Vec::new();
     if !view.imports.is_empty() || unknown_key(&view.unknown_entries, "imports") {
-        reasons.push(IncompleteReason::ImportsOpenScope);
+        reasons.push(IncompleteReason::ImportsOpenScope {});
     }
     if unknown_key(&view.unknown_entries, "global_vars") {
-        reasons.push(IncompleteReason::GlobalVarsUnreadable);
+        reasons.push(IncompleteReason::GlobalVarsUnreadable {});
     }
     // A declaration whose `name` was written but not read may carry any name,
     // so it opens its scope exactly as an unreadable container does (the 4-7
@@ -443,14 +456,14 @@ pub(crate) fn scope_openers(
     }
     if let Some(entry) = entry {
         if unknown_key(&entry.unknown_entries, "vars") {
-            reasons.push(IncompleteReason::LocalVarsUnreadable);
+            reasons.push(IncompleteReason::LocalVarsUnreadable {});
         }
         for declaration in unreadable_names(&entry.vars) {
             reasons.push(IncompleteReason::LocalNameUnreadable { declaration });
         }
     }
     if !captures_known {
-        reasons.push(IncompleteReason::RegexCapturesUnknown);
+        reasons.push(IncompleteReason::RegexCapturesUnknown {});
     }
     reasons
 } // End of function scope_openers()
@@ -523,13 +536,15 @@ fn form_layout<'a>(
     layout: &ScalarView,
     fields: impl Iterator<Item = &'a FieldView>,
 ) -> FormLayoutAnalysis {
-    let layout = PlaceholderLayout::parse(&layout.text);
+    let text = layout.text.clone();
+    let layout = PlaceholderLayout::parse(&text);
     let definitions_without_occurrence = fields
         .filter_map(|field| field.key.as_ref())
         .map(|key| key.text.clone())
         .filter(|key| !layout.contains(key))
         .collect();
     FormLayoutAnalysis {
+        text,
         layout,
         definitions_without_occurrence,
     }
@@ -848,11 +863,11 @@ impl<'a> ScopeBuilder<'a> {
                 if self.analysis.declarations[*position].kind == VariableKind::Form =>
             {
                 (
-                    FormSource::Variable(*position),
+                    FormSource::Variable { index: *position },
                     self.analysis.declarations[*position].layout.as_ref(),
                 )
             }
-            Resolution::SynthesizedForm => (FormSource::Shorthand, self.shorthand),
+            Resolution::SynthesizedForm => (FormSource::Shorthand {}, self.shorthand),
             _ => return,
         };
         let Some(layout) = layout else {

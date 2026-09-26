@@ -4442,6 +4442,276 @@ export interface ReconciliationBatch {
 }
 
 // ---------------------------------------------------------------------------
+// Authoring snapshots and candidate analysis — Phase 4-8
+// ---------------------------------------------------------------------------
+
+/**
+ * What one whole container of a snippet held — `vars` or `form_fields` —
+ * mirroring Rust's `ContainerBaseline` (Phase 4-8, ruling 22's correspondence
+ * unit).
+ *
+ * `Present.text` is the value's exact source text, **cut in Rust**: from its
+ * first byte to its last, as the projection's value span names them. It may
+ * hold a carriage return, so it must never be put into a text box (a textarea
+ * normalizes line breaks). `fingerprint` is the hash of exactly that text, in
+ * a content revision's encoding; opaque, never rendered, and never sent back —
+ * no command accepts a snapshot, a span or a fingerprint (R28). `Uncut` is a
+ * broken projection invariant reported rather than hidden: it corresponds to
+ * nothing.
+ */
+export type ContainerBaseline =
+  | { readonly Absent: Record<string, never> }
+  | {
+      readonly Present: {
+        /** The container value's exact source text. */
+        readonly text: string;
+        /** The hash of `text`. Opaque. */
+        readonly fingerprint: ContentRevision;
+      };
+    }
+  | { readonly Uncut: Record<string, never> };
+
+/** Whether a variable's parameters take `{{references}}` — Rust's `Injection`. */
+export type Injection = 'Enabled' | 'Disabled' | 'Uncertain';
+
+/** How a dependency edge was learnt — Rust's `EdgeKind`. */
+export type EdgeKind = 'Explicit' | 'Inferred';
+
+/**
+ * Why a region that opens with `[[` is not a supported placeholder — Rust's
+ * `MalformedPlaceholder`. The supported subset is named, never
+ * espanso-compatible (Phase 4 ruling 16).
+ */
+export type MalformedPlaceholder = 'Empty' | 'InvalidIdentifier' | 'Unterminated';
+
+/**
+ * Which form a sub-reference or an analysis reason is about — Rust's
+ * `FormSource`. An address by position, never by name.
+ */
+export type FormSource =
+  | { readonly Variable: { readonly index: number } }
+  | { readonly Shorthand: Record<string, never> };
+
+/** The variant names of {@link IncompleteReason}. */
+export type IncompleteReasonName =
+  | 'ImportsOpenScope'
+  | 'GlobalVarsUnreadable'
+  | 'LocalVarsUnreadable'
+  | 'RegexCapturesUnknown'
+  | 'DuplicateDeclaration'
+  | 'NameUnreadable'
+  | 'LocalNameUnreadable'
+  | 'GlobalNameUnreadable'
+  | 'DependsOnUnreadable'
+  | 'ParamsUnreadable'
+  | 'InjectionUncertain'
+  | 'LayoutUnavailable'
+  | 'LayoutUnsupported';
+
+/**
+ * Why part of an analysis is not definitive — Rust's `IncompleteReason`.
+ * Positions, never file text.
+ */
+export type IncompleteReason =
+  | { readonly ImportsOpenScope: Record<string, never> }
+  | { readonly GlobalVarsUnreadable: Record<string, never> }
+  | { readonly LocalVarsUnreadable: Record<string, never> }
+  | { readonly RegexCapturesUnknown: Record<string, never> }
+  | { readonly DuplicateDeclaration: { readonly declarations: readonly number[] } }
+  | { readonly NameUnreadable: { readonly declaration: number } }
+  | { readonly LocalNameUnreadable: { readonly declaration: number } }
+  | { readonly GlobalNameUnreadable: { readonly declaration: number } }
+  | { readonly DependsOnUnreadable: { readonly declaration: number } }
+  | { readonly ParamsUnreadable: { readonly declaration: number } }
+  | { readonly InjectionUncertain: { readonly declaration: number } }
+  | { readonly LayoutUnavailable: { readonly form: FormSource } }
+  | { readonly LayoutUnsupported: { readonly form: FormSource } };
+
+/** How often a declaration is referenced, by where — Rust's `Usage`. */
+export interface Usage {
+  /** References in `replace`, `markdown` or `html`. */
+  readonly body: number;
+  /** References in parameter values whose injection is enabled. */
+  readonly parameters: number;
+  /** `depends_on` entries naming it. */
+  readonly depends_on: number;
+  /** `{{…}}` occurrences in a shorthand layout — unverified. */
+  readonly unverified_layout: number;
+}
+
+/** One piece of a parsed layout — Rust's `LayoutPiece`, cut in Rust. */
+export type LayoutPiece =
+  | { readonly Text: { readonly text: string } }
+  | { readonly Placeholder: { readonly name: string } }
+  | { readonly Malformed: { readonly text: string; readonly reason: MalformedPlaceholder } }
+  | { readonly Uncut: Record<string, never> };
+
+/** A form layout in the named supported placeholder subset — `LayoutSummary`. */
+export interface LayoutSummary {
+  /** The pieces in text order; together they reproduce the layout exactly. */
+  readonly pieces: readonly LayoutPiece[];
+  /** Whether no malformed region exists. */
+  readonly fully_supported: boolean;
+  /** Definition keys with no supported placeholder of their name. Advisory. */
+  readonly definitions_without_occurrence: readonly string[];
+}
+
+/** One local declaration — Rust's `DeclarationSummary`. */
+export interface DeclarationSummary {
+  /** Its position in `vars`. */
+  readonly index: number;
+  /** Its `name` text, when this app could read one. File text, not prose. */
+  readonly name: string | null;
+  /** Its type. */
+  readonly kind: VariableKind;
+  /** Whether its parameters take references. */
+  readonly injection: Injection;
+  /** How often it is referenced. */
+  readonly usage: Usage;
+  /** Its layout, for a `type: form` whose layout is a scalar. */
+  readonly layout: LayoutSummary | null;
+}
+
+/** A consumer depending on a declaration of the same `vars` — `EdgeSummary`. */
+export interface EdgeSummary {
+  /** The consumer's position. */
+  readonly consumer: number;
+  /** The dependency's position. */
+  readonly dependency: number;
+  /** How the edge was learnt. */
+  readonly kind: EdgeKind;
+}
+
+/** Declarations that depend on each other — Rust's `DependencyCycle`. */
+export interface DependencyCycle {
+  /** The positions, ascending. One member is a self-dependency. */
+  readonly members: readonly number[];
+  /** Whether an explicit edge lies inside the cycle. */
+  readonly explicit: boolean;
+  /** Whether an inferred edge lies inside the cycle. */
+  readonly inferred: boolean;
+}
+
+/** A `depends_on` entry naming nothing visible, by position only. */
+export interface MissingDependencySummary {
+  /** The consumer's position in `vars`. */
+  readonly consumer: number;
+  /** The entry's position in its `depends_on`. */
+  readonly entry: number;
+}
+
+/**
+ * A consumer authored before a dependency — Rust's `OrderAdvisory`. Advisory:
+ * authored order is never re-sorted, and file order is not claimed to be
+ * espanso's execution order (Phase 4 ruling 11).
+ */
+export interface OrderAdvisory {
+  /** The consumer's position. */
+  readonly consumer: number;
+  /** The later dependency's position. */
+  readonly dependency: number;
+}
+
+/** A `{{form.field}}` whose field is not found in the supported layout syntax. */
+export interface FormAdvisorySummary {
+  /** The form the name resolved to. */
+  readonly form: FormSource;
+  /** The field name after the dot, as the reference writes it. */
+  readonly field: string;
+}
+
+/** One `{{reference}}` of a shorthand layout — unverified. */
+export interface ReferenceSummary {
+  /** The referenced name. */
+  readonly name: string;
+  /** The `.subname` after it, when present. */
+  readonly subname: string | null;
+}
+
+/**
+ * A snippet's placeholder, reference and dependency analysis, span-free —
+ * Rust's `AnalysisSummary`. Every text in it was cut in Rust.
+ */
+export interface AnalysisSummary {
+  /** Every local declaration, in authored order. */
+  readonly declarations: readonly DeclarationSummary[];
+  /** Every edge between two local declarations. */
+  readonly edges: readonly EdgeSummary[];
+  /** Every cycle, ordered by first member. */
+  readonly cycles: readonly DependencyCycle[];
+  /** Explicit dependencies naming nothing visible; empty unless the scope is closed. */
+  readonly missing_dependencies: readonly MissingDependencySummary[];
+  /** Consumers authored before a dependency. */
+  readonly order_advisories: readonly OrderAdvisory[];
+  /** Form sub-references whose field is not found. */
+  readonly form_advisories: readonly FormAdvisorySummary[];
+  /** Why parts of the answer are uncertain; empty only for a complete one. */
+  readonly incomplete: readonly IncompleteReason[];
+  /** Whether the set of visible names is closed. */
+  readonly scope_closed: boolean;
+  /** The regex trigger's named captures. */
+  readonly captures: readonly string[];
+  /** The shorthand `form:` layout, when there is one. */
+  readonly shorthand_form: LayoutSummary | null;
+  /** The shorthand layout's `{{…}}` occurrences — never claimed to resolve. */
+  readonly unverified_layout_references: readonly ReferenceSummary[];
+}
+
+/**
+ * One snippet's revision-bound authoring snapshot — `match_authoring_snapshot`'s
+ * answer (Phase 4-8). `id.revision` is the revision every baseline describes.
+ */
+export interface AuthoringSnapshot {
+  /** The snippet, in the revision this snapshot was cut from. */
+  readonly id: MatchId;
+  /** The whole local `vars` container. */
+  readonly vars: ContainerBaseline;
+  /** The whole shorthand `form_fields` container. */
+  readonly form_fields: ContainerBaseline;
+  /** The snippet's analysis. */
+  readonly analysis: AnalysisSummary;
+}
+
+/**
+ * One operation a candidate analysis is asked about — Rust's
+ * `CandidateOperation`. Inbound: a whole draft, or a variable position and a
+ * placement in the **original** list. Never a byte offset (R28).
+ */
+export type CandidateOperation =
+  | { readonly Draft: { readonly draft: MatchDraft } }
+  | { readonly VariableMove: { readonly variable: number; readonly to: ListPlacement } };
+
+/**
+ * What one drafted operation would produce, judged and analysed —
+ * `analyze_match_candidate`'s answer (Phase 4-8).
+ *
+ * `findings` are the save gate's own, over exactly the candidate `candidate`
+ * names. A refusing `verdict` is an answer, not an error.
+ *
+ * **What consent built from them is bound to.** An {@link Acknowledgement} is
+ * matched by finding equality only. Five codes carry the candidate's revision
+ * (`DocumentDoesNotParse`, `DuplicateKeepsTriggerDefinition`,
+ * `NewMatchRepeatsLiteralTrigger`, `VariableDependencyCycle`,
+ * `DependencyHasNoDeclaration`) and cannot be spent on another candidate; every
+ * other finding — `ReferenceHasNoDeclaration` among them — is not bound, and
+ * consent for it is accepted by any later candidate producing an equal finding,
+ * a different draft included. A caller must discard collected consent whenever
+ * the draft changes; neither TypeScript nor Rust forces it to.
+ */
+export interface MatchCandidate {
+  /** The revision the candidate would have. Opaque. */
+  readonly candidate: ContentRevision;
+  /** Whether a save would commit anything. */
+  readonly changes: boolean;
+  /** Every finding the save gate produces for the candidate. */
+  readonly findings: readonly Finding[];
+  /** The gate's answer to those findings and the acknowledgement sent. */
+  readonly verdict: SaveVerdict;
+  /** The snippet's analysis in the candidate, when the candidate holds it. */
+  readonly analysis: AnalysisSummary | null;
+}
+
+// ---------------------------------------------------------------------------
 // Projections onto the name unions
 // ---------------------------------------------------------------------------
 
