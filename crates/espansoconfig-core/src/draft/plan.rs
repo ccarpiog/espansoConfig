@@ -13,7 +13,7 @@ use crate::draft::match_draft::{
     DraftTarget, EntryDraft, FieldSubstitution, ItemDraft, MatchDraft, MatchField, NewParamValue,
     SequenceField, VariableDraft, VariableField, FORM_FIELDS_KEY, PARAMS_KEY, VARS_KEY,
 };
-use crate::draft::new_variable::{NewVariable, VarsIntent};
+use crate::draft::new_variable::{NewVariable, VariableSetting, VarsIntent};
 use crate::draft::sequence::{ListPlacement, MatchStructure, SequenceIntent, TriggerSwitch};
 use crate::draft::variable_list::{
     ChoiceRecordField, NewListItems, VariableList, VariableListIntent, ID_KEY, LABEL_KEY,
@@ -2612,6 +2612,15 @@ fn check_no_key_of_the_variable_is_repeated(
 /// schema does not use, and neither can be honoured: a draft adds no variable
 /// scalar (the Phase 4-3 lift covers new `params` entries only), and no
 /// primitive replaces a collection node with a scalar one.
+///
+/// **`inject_vars` is a typed setting written as plain source** (ruling 4; the
+/// Phase 4-9 review's blocker), exactly as a new variable writes it: a `Set` is
+/// validated with [`is_plain_source`] before any comparison and refused by name
+/// ([`DraftError::NewVariableSettingNotPlainSource`], the target naming the
+/// existing variable's scalar), then compared and written by
+/// `plan_plain_source_scalar` — so `false` becomes `true`, never `'true'`, and a
+/// quoted `'true'` drafted as `true` is rewritten plain. `name` and `type` stay
+/// logical strings spelled by the codec.
 fn plan_variable_scalar(
     variable: &crate::model::VariableView,
     drafted: &VariableDraft,
@@ -2642,6 +2651,17 @@ fn plan_variable_scalar(
     match intent {
         DraftField::Unchanged => {}
         DraftField::Remove => edits.push(FieldRemoval::new(field_path).into()),
+        DraftField::Set(value) if field == VariableField::InjectVars => {
+            if !is_plain_source(value) {
+                return Err(DraftError::NewVariableSettingNotPlainSource {
+                    target,
+                    setting: VariableSetting::InjectVars,
+                });
+            }
+            if let Some(edit) = plan_plain_source_scalar(scalar, value, field_path, target)? {
+                edits.push(edit);
+            }
+        }
         DraftField::Set(value) => {
             if let Some(edit) = plan_scalar(scalar, value, field_path, target)? {
                 edits.push(edit);

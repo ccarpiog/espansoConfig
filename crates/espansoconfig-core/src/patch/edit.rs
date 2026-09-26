@@ -11178,6 +11178,24 @@ pub(crate) fn item_owned_runs(
     entry_owned_runs(source, index, trivia, item, item).map(|(_, runs)| runs)
 } // End of function item_owned_runs()
 
+/// The ordered, disjoint physical-line runs the mapping entry `key`/`value`
+/// owns — [`entry_owned_runs`] exactly, for a caller outside this module.
+///
+/// It exists for the same reason [`item_owned_runs`] does (Phase 4-9 review):
+/// `crate::model`'s container baseline must cover every byte a removal of the
+/// container or of one of its entries can delete, and the only way for the two
+/// to agree about those bytes is for both to read this derivation. `pub(crate)`
+/// for [`item_owned_runs`]'s reason. `None` when the frontier could not be found.
+pub(crate) fn field_owned_runs(
+    source: &str,
+    index: &SyntaxIndex,
+    trivia: &TriviaIndex,
+    key: NodeId,
+    value: NodeId,
+) -> Option<Vec<ByteSpan>> {
+    entry_owned_runs(source, index, trivia, key, value).map(|(_, runs)| runs)
+} // End of function field_owned_runs()
+
 /// Checks that a move wrote the bytes it took, and took nothing but the item.
 ///
 /// **The property the Phase 0c-3b-2a review found missing from production**, in

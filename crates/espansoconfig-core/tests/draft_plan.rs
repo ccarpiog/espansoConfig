@@ -47,7 +47,7 @@ use std::collections::BTreeMap;
 use espansoconfig_core::draft::{
     check_batch_independence, check_closed_surface, plan_match_edits, DraftError, DraftField,
     DraftTarget, EntryDraft, FormFieldDraft, ItemDraft, MatchDraft, MatchField, NestedKeys,
-    SequenceField, VariableDraft, VariableField,
+    SequenceField, VariableDraft, VariableField, VariableSetting,
 };
 use espansoconfig_core::model::{
     DocumentContext, FieldView, MatchView, ScalarView, UnknownReason, ValueKind, ValueView,
@@ -1275,6 +1275,12 @@ fn draft_the_open_half(view: &MatchView, draft: &mut MatchDraft) -> OpenCounts {
 /// `params`, one whose only parameter is a sequence of scalars — and two
 /// `form_fields` entries, one holding a scalar option, a sequence option and a
 /// quoted default, the other a single plain option.
+///
+/// `inject_vars` is written **plain**: it is a typed setting compared as source
+/// (the Phase 4-9 review), so a quoted spelling drafted as its own logical value
+/// is rewritten plain rather than left alone, which is
+/// `an_existing_inject_vars_compares_as_source_and_rewrites_a_quoted_spelling`'s
+/// case and not this fixture's property.
 const OPEN_KEYS: &str = r#"matches:
   - trigger: :report
     form: |
@@ -1292,7 +1298,7 @@ const OPEN_KEYS: &str = r#"matches:
     vars:
       - name: stamp
         type: date
-        inject_vars: 'false'
+        inject_vars: false
         params:
           format: '%Y-%m-%d'
           offset: 0
@@ -3219,3 +3225,95 @@ fn a1_the_single_match_editor_refuses_an_option_that_is_not_plain_source() {
         } // End of the loop over the refused texts
     } // End of the loop over the absent and present fixtures
 } // End of function a1_the_single_match_editor_refuses_an_option_that_is_not_plain_source()
+
+// ---------------------------------------------------------------------------
+// Phase 4-9 review: an existing variable's `inject_vars` is plain source
+// ---------------------------------------------------------------------------
+
+/// A variable whose `inject_vars` is written plain, and one whose is quoted.
+const INJECT_VARS_PLAIN_AND_QUOTED: &str = "matches:\n  - trigger: hello\n    replace: '{{a}} {{b}}'\n    vars:\n      - name: a\n        type: echo\n        inject_vars: false\n        params:\n          echo: one\n      - name: b\n        type: echo\n        inject_vars: 'true'\n        params:\n          echo: two\n";
+
+/// **The blocker, end to end from the wire.** The match editor sends an
+/// existing `inject_vars` edited from `false` to `true` as
+/// `{"inject_vars": {"Set": "true"}}` (`variablesDerivationOf` in
+/// `src/lib/browser/variableEditor.ts`); that draft must write the plain
+/// scalar `true`, never the string `'true'` (ruling 4), and move no other byte.
+#[test]
+fn an_existing_inject_vars_edited_from_false_to_true_writes_plain_true() {
+    let view = one_match(INJECT_VARS_PLAIN_AND_QUOTED);
+    let wire = r#"{"index": 0, "name": "Unchanged", "type": "Unchanged",
+        "inject_vars": {"Set": "true"}, "params": [], "insert_params": [],
+        "depends_on": [], "records": [], "lists": [], "fields": [], "field_intents": []}"#;
+    let variable: VariableDraft =
+        serde_json::from_str(wire).expect("the editor's wire draft reads");
+    let draft = MatchDraft::new().with_variable(variable);
+    let edits = plan_match_edits(&view, &draft).expect("the draft plans");
+    assert_eq!(edits.len(), 1);
+    let DocumentEdit::Scalar(edit) = &edits[0] else {
+        panic!("an existing scalar is rewritten");
+    };
+    assert!(
+        edit.writes_plain_source(),
+        "a plain-source edit, not a logical string"
+    );
+    let patched = apply_edits(INJECT_VARS_PLAIN_AND_QUOTED, &edits).expect("the batch applies");
+    let expected =
+        INJECT_VARS_PLAIN_AND_QUOTED.replacen("inject_vars: false", "inject_vars: true", 1);
+    assert_eq!(
+        patched.text(),
+        expected,
+        "plain `true`, and nothing else moved"
+    );
+    let after = one_match(patched.text());
+    let written = after.vars[0].inject_vars.as_ref().expect("inject_vars");
+    assert_eq!(written.style, ScalarStyle::Plain);
+    assert_eq!(written.text, "true");
+} // End of function an_existing_inject_vars_edited_from_false_to_true_writes_plain_true()
+
+/// A quoted `'true'` drafted as `true` is rewritten plain, as the match options'
+/// quoted spellings are; a plain `false` drafted as `false` derives nothing.
+#[test]
+fn an_existing_inject_vars_compares_as_source_and_rewrites_a_quoted_spelling() {
+    let view = one_match(INJECT_VARS_PLAIN_AND_QUOTED);
+    let same = MatchDraft::new()
+        .with_variable(VariableDraft::new(0).with(VariableField::InjectVars, "false"));
+    assert_eq!(plan_match_edits(&view, &same), Ok(Vec::new()));
+    let quoted = MatchDraft::new()
+        .with_variable(VariableDraft::new(1).with(VariableField::InjectVars, "true"));
+    let edits = plan_match_edits(&view, &quoted).expect("the draft plans");
+    let patched = apply_edits(INJECT_VARS_PLAIN_AND_QUOTED, &edits).expect("the batch applies");
+    assert_eq!(
+        patched.text(),
+        INJECT_VARS_PLAIN_AND_QUOTED.replacen("inject_vars: 'true'", "inject_vars: true", 1)
+    );
+} // End of function an_existing_inject_vars_compares_as_source_and_rewrites_a_quoted_spelling()
+
+/// A text that cannot be written as one plain scalar is refused by name for an
+/// existing `inject_vars`, never quoted; `name` and `type` stay logical strings.
+#[test]
+fn an_existing_inject_vars_refuses_a_text_that_is_not_plain_source() {
+    let view = one_match(INJECT_VARS_PLAIN_AND_QUOTED);
+    for text in [
+        "", "a\nb", "'true'", "\"on\"", "a #b", "[a]", "{a: b}", "*alias",
+    ] {
+        let draft = MatchDraft::new()
+            .with_variable(VariableDraft::new(0).with(VariableField::InjectVars, text));
+        assert_eq!(
+            plan_match_edits(&view, &draft),
+            Err(DraftError::NewVariableSettingNotPlainSource {
+                target: DraftTarget::VariableScalar {
+                    variable: 0,
+                    field: VariableField::InjectVars,
+                },
+                setting: VariableSetting::InjectVars,
+            }),
+            "{text:?}"
+        );
+    } // End of the loop over the refused texts
+    let named =
+        MatchDraft::new().with_variable(VariableDraft::new(0).with(VariableField::Name, "'q'"));
+    assert!(
+        plan_match_edits(&view, &named).is_ok(),
+        "a name is a logical string"
+    );
+} // End of function an_existing_inject_vars_refuses_a_text_that_is_not_plain_source()

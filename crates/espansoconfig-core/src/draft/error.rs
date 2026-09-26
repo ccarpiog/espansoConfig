@@ -873,9 +873,11 @@ pub enum DraftError {
     /// The text drafted for one of a new variable's typed settings cannot be
     /// written verbatim as one plain scalar (Phase 4-4, ruling 4): it is refused
     /// rather than quoted, exactly as [`DraftError::OptionNotPlainSource`] is for
-    /// a match option.
+    /// a match option. Since the Phase 4-9 review it also refuses a `Set` of an
+    /// **existing** variable's `inject_vars`, whose target is then a
+    /// [`DraftTarget::VariableScalar`].
     NewVariableSettingNotPlainSource {
-        /// The new variable, by position.
+        /// The new variable, by position, or the existing variable's scalar.
         target: DraftTarget,
         /// Which setting.
         setting: crate::draft::VariableSetting,

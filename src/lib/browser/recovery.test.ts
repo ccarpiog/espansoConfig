@@ -1455,6 +1455,9 @@ const NOT_A_FORM_TRANSITION: readonly string[] = [
   'startMatchFieldRecovery',
   'startCreationFieldRecovery',
   'recoveryAvailability',
+  // Phase 4-9: the match editor's availability with ruling 21's refusal; it
+  // takes a conflict and a baseline, never a form.
+  'matchRecoveryAvailability',
   // 2c-4c-3b's one new export: a kind and a conflict in, a code or `null` out.
   'recoveryWithoutCreation',
   'recoveryDestinationsOf',

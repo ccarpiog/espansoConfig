@@ -1943,7 +1943,9 @@ fn the_authoring_shapes_declare_exactly_what_rust_writes_and_reads() {
     let tables: [(&str, &str, &str, Vec<Value>); 4] = [
         (
             "ContainerBaseline",
-            "crates/espansoconfig-core/src/authoring.rs",
+            // Declared beside `MatchView` since Phase 4-9, which carries one per
+            // container; `authoring` re-exports it.
+            "crates/espansoconfig-core/src/model/match_view.rs",
             "ContainerBaseline",
             baselines,
         ),

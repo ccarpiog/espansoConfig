@@ -141,4 +141,4 @@ pub use path::{
 /// Crate-visible on purpose: a run is a byte offset into one parse, and the
 /// whole reason `crate::reconcile` exists is that positions do not cross a
 /// revision boundary. What crosses is a digest.
-pub(crate) use edit::item_owned_runs;
+pub(crate) use edit::{field_owned_runs, item_owned_runs};

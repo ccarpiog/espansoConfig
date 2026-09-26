@@ -84,8 +84,8 @@ mod variable;
 pub use diagnostic::{Diagnostic, DiagnosticCode};
 pub use document::{context_of, DocumentContext, DocumentShape, DocumentView};
 pub use match_view::{
-    ContentKind, ContentSpec, IdentityError, MatchBadge, MatchId, MatchOptions, MatchView,
-    TriggerKind, TriggerSpec,
+    ContainerBaseline, ContentKind, ContentSpec, IdentityError, MatchBadge, MatchId, MatchOptions,
+    MatchView, TriggerKind, TriggerSpec,
 };
 pub use profile::{ConfigProfileView, FILTER_KEYS, SCOPING_KEYS};
 pub use scalar::ScalarView;

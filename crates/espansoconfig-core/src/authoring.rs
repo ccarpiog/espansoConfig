@@ -52,9 +52,7 @@ use crate::analysis::{
     Injection, LayoutSegment, MalformedPlaceholder, MatchAnalysis, OrderAdvisory, Usage,
 };
 use crate::draft::{plan_match_edits, plan_variable_move, DraftError, ListPlacement, MatchDraft};
-use crate::model::{
-    DocumentContext, DocumentView, FieldLocation, MatchId, MatchView, VariableKind,
-};
+use crate::model::{DocumentContext, DocumentView, MatchId, MatchView, VariableKind};
 use crate::patch::DocumentEdit;
 use crate::persist::{
     preflight_candidate, Acknowledgement, CandidatePreflight, SaveError, SaveVerdict,
@@ -81,50 +79,10 @@ pub struct AuthoringSnapshot {
 }
 
 /// What one whole container of a match held — the correspondence unit of
-/// ruling 22.
-///
-/// Struct variants, so the enum crosses as a uniform one-key object.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum ContainerBaseline {
-    /// The match holds no such key.
-    Absent {},
-    /// The key is written, and its value's bytes are these.
-    Present {
-        /// The value's exact source text: from its first byte to its last,
-        /// as the projection's value span names them — for a block sequence
-        /// the hull of its items, for a flow collection its brackets. Line
-        /// endings, comments inside the hull and every spelling survive; the
-        /// key itself and trailing comments after the hull are not part of it.
-        text: String,
-        /// The hash of `text`, in the same encoding as a content revision.
-        fingerprint: ContentRevision,
-    },
-    /// The key is written, and its value's bytes could not be cut from the
-    /// source the projection was made from. A projection invariant was broken;
-    /// the variant exists so that a broken invariant is **reported** rather
-    /// than turned into an empty baseline that would compare equal to the
-    /// wrong thing. A caller treats it as a container that corresponds to
-    /// nothing.
-    Uncut {},
-}
-
-impl ContainerBaseline {
-    /// The baseline of the entry `location` names in `source`, or
-    /// [`ContainerBaseline::Absent`] when there is no entry.
-    fn cut(source: &str, location: Option<&FieldLocation>) -> ContainerBaseline {
-        let Some(location) = location else {
-            return ContainerBaseline::Absent {};
-        };
-        let span = location.value_span;
-        match source.get(span.start..span.end) {
-            Some(text) => ContainerBaseline::Present {
-                text: text.to_owned(),
-                fingerprint: ContentRevision::of_bytes(text.as_bytes()),
-            },
-            None => ContainerBaseline::Uncut {},
-        }
-    } // End of function cut()
-} // End of impl ContainerBaseline
+/// ruling 22. Defined beside [`MatchView`] since Phase 4-9, which carries one
+/// per container on every projected match; re-exported here, where Phase 4-8
+/// introduced it, so the snapshot and the projection name one type.
+pub use crate::model::ContainerBaseline;
 
 /// A match's placeholder, reference and dependency analysis, without a byte
 /// span anywhere in it.
@@ -348,11 +306,11 @@ pub struct MatchCandidate {
 pub fn authoring_snapshot(document: &SourceDocument, found: &MatchView) -> AuthoringSnapshot {
     AuthoringSnapshot {
         id: found.id,
-        vars: ContainerBaseline::cut(&document.source, found.vars_presence.location()),
-        form_fields: ContainerBaseline::cut(
-            &document.source,
-            found.form_fields_presence.location(),
-        ),
+        // The projection cut both from the same source when it was made
+        // (Phase 4-9), so the snapshot and the match it describes cannot
+        // disagree about a container.
+        vars: found.vars_container.clone(),
+        form_fields: found.form_fields_container.clone(),
         analysis: summarize(&document.view, found),
     }
 } // End of function authoring_snapshot()

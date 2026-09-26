@@ -637,6 +637,17 @@ export interface MatchView {
   readonly form_fields_presence: MappingPresence;
   /** One shape per entry of `form_fields`, parallel to its entries (Phase 4-3). */
   readonly form_field_shapes: readonly FormFieldShape[];
+  /**
+   * The whole `vars` container's exact source text and fingerprint, cut in Rust
+   * over the owned hull of the entry `vars_presence` names (Phase 4-9 and its
+   * review: every comment a removal would delete is inside it) — what a variable
+   * draft is reapplied against. The same value `match_authoring_snapshot`
+   * answers for this match. Its `text` may hold a carriage return and is never
+   * put into a box.
+   */
+  readonly vars_container: ContainerBaseline;
+  /** The whole shorthand `form_fields` container, cut the same way (Phase 4-9). */
+  readonly form_fields_container: ContainerBaseline;
   /** The markers the snippet list shows, sorted and deduplicated. */
   readonly badges: readonly MatchBadge[];
   /** The hazard that makes this match un-editable, or `null`. */
@@ -3228,8 +3239,8 @@ export type FormValuesIntent =
 /**
  * A new local variable, as a closed description (Phase 4-4). Rust checks what no
  * type here can: a one-line, unique name; plain-source settings; at most sixteen
- * extra parameters under ruling 7's key rules. No production caller sends one
- * yet.
+ * extra parameters under ruling 7's key rules. The match editor sends one since
+ * Phase 4-9 (`./../browser/variableInsertion.ts`), at most one per draft.
  */
 export interface NewVariable {
   /** `name`, a logical string. */
@@ -3453,7 +3464,10 @@ export interface MatchDraft {
   readonly trigger_form: TriggerFormChange | null;
   /** Drafted list intents about `triggers` and `search_terms` — Phase 3-6-1. */
   readonly sequences: readonly SequenceIntent[];
-  /** Drafted intents about `vars` — Phase 4-4. No production caller sends one yet. */
+  /**
+   * Drafted intents about `vars` — Phase 4-4. The match editor sends them since
+   * Phase 4-9 (`variablesDerivationOf` in `../browser/variableEditor.ts`).
+   */
   readonly var_intents: readonly VarsIntent[];
   /**
    * Drafted intents about the shorthand `form_fields` — Phase 4-6. No production
@@ -4450,8 +4464,11 @@ export interface ReconciliationBatch {
  * mirroring Rust's `ContainerBaseline` (Phase 4-8, ruling 22's correspondence
  * unit).
  *
- * `Present.text` is the value's exact source text, **cut in Rust**: from its
- * first byte to its last, as the projection's value span names them. It may
+ * `Present.text` is the container's exact source text, **cut in Rust** over
+ * its owned hull (the Phase 4-9 review): the value's span widened to every
+ * physical-line run the entry owns (its leading comments, its key line) and,
+ * for a block collection, every run each member owns — so every comment a
+ * removal of the container or of one member would delete is part of it. It may
  * hold a carriage return, so it must never be put into a text box (a textarea
  * normalizes line breaks). `fingerprint` is the hash of exactly that text, in
  * a content revision's encoding; opaque, never rendered, and never sent back —
@@ -4463,7 +4480,7 @@ export type ContainerBaseline =
   | { readonly Absent: Record<string, never> }
   | {
       readonly Present: {
-        /** The container value's exact source text. */
+        /** The container's exact source text over its owned hull. */
         readonly text: string;
         /** The hash of `text`. Opaque. */
         readonly fingerprint: ContentRevision;

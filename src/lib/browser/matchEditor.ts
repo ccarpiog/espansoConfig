@@ -18,8 +18,16 @@
  * `right_word`, `propagate_case`, `uppercase_style`, `force_mode`,
  * `force_clipboard`, `paragraph` and `anchor`, each its own textual field and
  * never one control over several. Seventeen `DraftField<string>`s of a
- * {@link MatchDraft}; `vars` and `form_fields` go out empty. Until Phase 3-5-1 it
- * was six: the trigger, `replace`, the label and the three word-boundary keys.
+ * {@link MatchDraft}. Until Phase 3-5-1 it was six: the trigger, `replace`, the
+ * label and the three word-boundary keys.
+ *
+ * **The local `vars`, since Phase 4-9** ({@link MatchBaseline.variables},
+ * {@link MatchBuffers.variables}): each existing variable's `name`, `type` and
+ * `inject_vars`, its removal, one new variable, and the whole container's
+ * removal — a submodel of `./variableEditor.ts` composed into this one buffer
+ * set, this one history, this one save and this one conflict registry (ruling 24
+ * of `docs/decisions/4-split-notes.md`). `./variableInsertion.ts` is the compound
+ * *Insert*. `form_fields` still goes out empty: its editor is Phase 4-10's.
  *
  * **The trigger side and `search_terms`, since Phase 3-6-1**, are drafted beside
  * the fields ({@link TriggerSideBuffer}, and `./matchLists.ts` for the lists):
@@ -271,7 +279,8 @@ import type {
   TriggerFormChange,
   TriggerKind,
   ValueKind,
-  ValueView
+  ValueView,
+  VariableField
 } from '../ipc/types';
 import {
   capturedList,
@@ -346,6 +355,32 @@ import {
 } from './editorSave';
 import type { RawSaveChoice } from './rawSave';
 import type { InvalidationStatus } from './invalidation';
+import {
+  capturedVariables,
+  grantCovers,
+  variableMoveOfferOf,
+  variableRowsOf,
+  variablesBaselineOf,
+  variablesBufferOf,
+  variablesDerivationOf,
+  variablesReapply,
+  variableTextsOf,
+  varsLabelName,
+  withAdditionDiscarded,
+  withInsertionsMoved,
+  withVariableRemoved,
+  withVariableRestored,
+  withVariablesRemoved,
+  withVariablesRestored,
+  withVariableText,
+  type VariableMoveOffer,
+  type VariablesBaseline,
+  type VariablesBuffer,
+  type VariablesProblem,
+  type VariablesReapplyVerdict,
+  type VariableStructureGrant,
+  type VariableStructureRead
+} from './variableEditor';
 import type {
   ConflictSource,
   ExternalChangeConflictSource,
@@ -389,6 +424,7 @@ import {
   type DraftFieldStatus,
   type ExternalConflictModel,
   type RetainedDraftField,
+  type RetainedLabel,
   type SaveOutcomeMessage,
   type SaveOutcomeModel,
   reapplyAuthorizationFor
@@ -818,6 +854,8 @@ export interface StructureBaseline {
 export type MatchBaseline = Readonly<Record<EditableField, FieldBaseline>> & {
   /** The trigger side and `search_terms`. */
   readonly structure: StructureBaseline;
+  /** The local `vars` — Phase 4-9, `./variableEditor.ts`. */
+  readonly variables: VariablesBaseline;
 };
 
 /**
@@ -915,6 +953,8 @@ export type MatchBuffers = Readonly<Record<EditableField, FieldBuffer>> & {
   readonly triggerSide: TriggerSideBuffer;
   /** The drafted `search_terms` list — Phase 3-6-1. */
   readonly searchTerms: ListBuffer;
+  /** The drafted local `vars` — Phase 4-9, `./variableEditor.ts`. */
+  readonly variables: VariablesBuffer;
 };
 
 /** {@link MatchBuffers} with every property writable, for building one. */
@@ -959,10 +999,15 @@ export type TypingGroup = TypingRun<TypingSubject>;
 /**
  * What a run of typing is in — Phase 3-6-1: one of the seventeen fields, the
  * `regex` box, or one item of a list named by its list and its position in the
- * drafted array. A structural action (an item added or removed) ends every run,
+ * drafted array; since Phase 4-9, one scalar box of an existing variable, named
+ * by the variable's position in the file's list. A structural action (an item added or removed) ends every run,
  * so a position cannot come to name another item inside one.
  */
-export type TypingSubject = EditableField | 'regex' | `${SequenceField}#${number}`;
+export type TypingSubject =
+  | EditableField
+  | 'regex'
+  | `${SequenceField}#${number}`
+  | `vars#${number}.${VariableField}`;
 
 /**
  * One editing session over one snippet's seventeen editable fields.
@@ -1167,7 +1212,8 @@ export interface MatchEditorSession {
  * 3-5-1.
  *
  * Spelled as the espanso key, like `MatchField`: `vars` and `form_fields` are
- * collections this editor never drafts, and `paragraph` is an option whose
+ * collections a content switch never touches (the variable editor of Phase 4-9
+ * drafts `vars` beside it, never through it), and `paragraph` is an option whose
  * meaning espanso ties to `markdown`. A switch renames one key and touches none
  * of these; the preview says which of them the snippet holds so that keeping them
  * is never silent.
@@ -1581,9 +1627,15 @@ function structureBaselineOf(match: MatchView): StructureBaseline {
  *   is recorded as having held.
  */
 export function baselineOf(match: MatchView): MatchBaseline {
-  const baseline: Record<EditableField, FieldBaseline> & { structure: StructureBaseline } =
-    {} as Record<EditableField, FieldBaseline> & { structure: StructureBaseline };
+  const baseline: Record<EditableField, FieldBaseline> & {
+    structure: StructureBaseline;
+    variables: VariablesBaseline;
+  } = {} as Record<EditableField, FieldBaseline> & {
+    structure: StructureBaseline;
+    variables: VariablesBaseline;
+  };
   baseline.structure = structureBaselineOf(match);
+  baseline.variables = variablesBaselineOf(match);
   for (const field of EDITABLE_FIELDS) {
     const scalar = projectedScalar(match, field);
     const eligibility = fieldEligibility(match, field);
@@ -1617,7 +1669,8 @@ export function buffersOf(baseline: MatchBaseline): MatchBuffers {
     ...fields,
     contentSwitch: null,
     triggerSide: triggerSideBufferOf(baseline.structure.trigger),
-    searchTerms: listBufferOf(baseline.structure.searchTerms)
+    searchTerms: listBufferOf(baseline.structure.searchTerms),
+    variables: variablesBufferOf(baseline.variables)
   };
 } // End of function buffersOf()
 
@@ -1836,10 +1889,13 @@ function intentsWith(
  * phase breaks this function rather than being silently omitted. A spread over a
  * partial would give both of those away, and what it would buy is six fewer lines.
  *
- * `vars` and `form_fields` go out saying *leave this alone*, which is what
- * makes an unedited field's spelling, quoting and surrounding comments survive a
- * save byte for byte; so does every field whose intent is `'Unchanged'`, and every
- * list and form the draft did not touch. Since Phase 3-5-1 the draft also carries
+ * `form_fields` goes out saying *leave this alone*, which is what makes an
+ * unedited field's spelling, quoting and surrounding comments survive a save byte
+ * for byte; so does every field whose intent is `'Unchanged'`, every list and
+ * form the draft did not touch, and — since Phase 4-9 — every variable the draft
+ * did not touch: `vars` and `var_intents` carry only what
+ * `variablesDerivationOf` in `./variableEditor.ts` derives from the captured
+ * variables buffer, which is nothing for an untouched `vars`. Since Phase 3-5-1 the draft also carries
  * `content_switch`, built from the switch read once and used for both the intents
  * and the wire value; since Phase 3-6-1, `regex`, the `triggers` and
  * `search_terms` item edits, `sequences` and `trigger_form`, built from the trigger
@@ -1872,6 +1928,7 @@ function draftWith(
   const side = triggerSideDerivationOf(baseline, structure);
   const terms = listDerivationOf(baseline.structure.searchTerms, structure.searchTerms);
   const intents = intentsWith(baseline, buffers, contentSwitch, side);
+  const variables = variablesDerivationOf(baseline.variables, structure.variables);
   return {
     trigger: intents.trigger,
     regex: side.regex,
@@ -1893,14 +1950,14 @@ function draftWith(
     anchor: intents.anchor,
     triggers: side.items,
     search_terms: terms.kind === 'changed' ? terms.items : [],
-    vars: [],
+    vars: variables.vars,
     form_fields: [],
     content_switch: contentSwitchOf(contentSwitch),
     trigger_form: side.change,
     sequences: [...side.sequences, ...(terms.kind === 'changed' ? terms.sequences : [])],
-    // Phase 4-4's `vars` intents and Phase 4-6's `form_fields` intents have no
-    // control yet; the editor drafts none.
-    var_intents: [],
+    // Phase 4-9: the variable editor's intents, from the same captured read.
+    // Phase 4-6's `form_fields` intents are the form editor's (4-10); none yet.
+    var_intents: variables.intents,
     form_intents: []
   };
 } // End of function draftWith()
@@ -1935,7 +1992,9 @@ export function contentSwitchOf(
  * - `triggerFormNotOffered` — a form the session does not offer is drafted, which
  *   only a buffer built by hand can express;
  * - `listNotInOrder`, `listEveryItemReplaced`, `listWouldBeEmpty` — a drafted
- *   list's {@link ListProblem}.
+ *   list's {@link ListProblem};
+ * - `varsWouldBeEmpty`, `variableAdditionsCollide` — the drafted `vars`'
+ *   `VariablesProblem` (Phase 4-9, `./variableEditor.ts`).
  */
 export type StructureProblem =
   | 'triggerFormUnconfirmed'
@@ -1943,7 +2002,8 @@ export type StructureProblem =
   | 'triggerFormNotOffered'
   | 'listNotInOrder'
   | 'listEveryItemReplaced'
-  | 'listWouldBeEmpty';
+  | 'listWouldBeEmpty'
+  | VariablesProblem;
 
 /**
  * What the drafted trigger side asks of a save — Phase 3-6-1.
@@ -1988,6 +2048,8 @@ interface CapturedStructure {
   readonly side: TriggerSideBuffer;
   /** `search_terms`. */
   readonly searchTerms: ListBuffer;
+  /** The local `vars` — Phase 4-9. */
+  readonly variables: VariablesBuffer;
 }
 
 /**
@@ -2008,7 +2070,8 @@ function capturedStructure(buffers: MatchBuffers): CapturedStructure {
       regex: { text: regex.text, removed: false },
       triggers: capturedList(side.triggers)
     },
-    searchTerms: capturedList(buffers.searchTerms)
+    searchTerms: capturedList(buffers.searchTerms),
+    variables: capturedVariables(buffers.variables)
   };
 } // End of function capturedStructure()
 
@@ -2273,7 +2336,10 @@ function structureProblemOf(
     return side;
   }
   const terms = listDerivationOf(baseline.structure.searchTerms, captured.searchTerms);
-  return terms.kind === 'refused' ? listStructureProblem(terms.problem) : null;
+  if (terms.kind === 'refused') {
+    return listStructureProblem(terms.problem);
+  }
+  return variablesDerivationOf(baseline.variables, captured.variables).problem;
 } // End of function structureProblemOf()
 
 /**
@@ -2779,6 +2845,217 @@ export function removeList(session: MatchEditorSession, field: SequenceField): M
   return structuralChange(session, list === null ? null : withList(buffers, field, list));
 } // End of function removeList()
 
+// ---------------------------------------------------------------------------
+// The local `vars` — Phase 4-9
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the variable controls accept changes right now — Phase 4-9.
+ *
+ * {@link isEditable}, and not while a committed save that changed `vars` waits
+ * for a re-projection (`VariablesBaseline.reprojectionOwed`). Every variable
+ * transition below asks it.
+ *
+ * @param session - The session to ask about.
+ * @returns `true` when a variable transition could do anything.
+ */
+export function isVariablesEditable(session: MatchEditorSession): boolean {
+  return isEditable(session) && !session.baseline.variables.reprojectionOwed;
+} // End of function isVariablesEditable()
+
+/**
+ * The buffers with the variables part replaced.
+ *
+ * @param buffers - What the controls hold.
+ * @param variables - What the variable controls should hold.
+ * @returns The new buffers.
+ */
+function withVariables(buffers: MatchBuffers, variables: VariablesBuffer): MatchBuffers {
+  return { ...buffers, variables };
+} // End of function withVariables()
+
+/**
+ * The variables part of the live draft, read once into plain values.
+ *
+ * @param session - The session.
+ * @returns A plain copy.
+ */
+function draftedVariables(session: MatchEditorSession): VariablesBuffer {
+  return capturedVariables(session.draft.value.variables);
+} // End of function draftedVariables()
+
+/**
+ * Records whatever one scalar box of an existing variable now holds — Phase
+ * 4-9. Joins the open typing run for the same box, like any field.
+ *
+ * Refused (the same session) for a position the file's list does not have, a
+ * scalar `./variableEditor.ts` calls read-only, a variable or a container drafted
+ * for removal, a carriage return or a line feed (every box here is one line), or
+ * no change.
+ *
+ * @param session - The session being edited.
+ * @param index - The variable's position in the file's list.
+ * @param field - `name`, `type` or `inject_vars`.
+ * @param text - The box's whole value.
+ * @returns The session after the edit, or the same session.
+ */
+export function editVariableField(
+  session: MatchEditorSession,
+  index: number,
+  field: VariableField,
+  text: string
+): MatchEditorSession {
+  if (!isVariablesEditable(session)) {
+    return session;
+  }
+  const next = withVariableText(session.baseline.variables, draftedVariables(session), index, field, text);
+  return next === null
+    ? session
+    : recordStructureTyping(session, `vars#${index}.${field}`, withVariables(session.draft.value, next));
+} // End of function editVariableField()
+
+/**
+ * Drafts the removal of one existing variable — Phase 4-9. A structural action:
+ * its own history step, and it **spends a grant** minted from one read of the
+ * window (R36, R37; `variableStructureGrantOf` in `./variableEditor.ts`). A grant
+ * for another identity, or a refused one, changes nothing.
+ *
+ * @param session - The session being edited.
+ * @param grant - The structure grant, from one read.
+ * @param index - The variable's position in the file's list.
+ * @returns The session with the removal drafted, or the same session.
+ */
+export function removeVariable(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant,
+  index: number
+): MatchEditorSession {
+  if (!isVariablesEditable(session) || !grantCovers(grant, session.match)) {
+    return session;
+  }
+  const next = withVariableRemoved(session.baseline.variables, draftedVariables(session), index);
+  return structuralChange(session, next === null ? null : withVariables(session.draft.value, next));
+} // End of function removeVariable()
+
+/**
+ * Takes back one drafted removal — Phase 4-9. Needs no grant: it moves the
+ * draft back towards what the file holds and changes no target.
+ *
+ * @param session - The session being edited.
+ * @param index - The variable's position in the file's list.
+ * @returns The session with the removal taken back, or the same session.
+ */
+export function restoreVariable(session: MatchEditorSession, index: number): MatchEditorSession {
+  if (!isVariablesEditable(session)) {
+    return session;
+  }
+  const next = withVariableRestored(session.baseline.variables, draftedVariables(session), index);
+  return structuralChange(session, next === null ? null : withVariables(session.draft.value, next));
+} // End of function restoreVariable()
+
+/**
+ * Drafts the removal of the whole `vars` container — Phase 4-9, ruling 8's
+ * explicit container removal. Spends a grant, like {@link removeVariable}.
+ *
+ * @param session - The session being edited.
+ * @param grant - The structure grant, from one read.
+ * @returns The session with the removal drafted, or the same session.
+ */
+export function removeVariables(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant
+): MatchEditorSession {
+  if (!isVariablesEditable(session) || !grantCovers(grant, session.match)) {
+    return session;
+  }
+  const next = withVariablesRemoved(session.baseline.variables, draftedVariables(session));
+  return structuralChange(session, next === null ? null : withVariables(session.draft.value, next));
+} // End of function removeVariables()
+
+/**
+ * Takes back the container's drafted removal — Phase 4-9.
+ *
+ * @param session - The session being edited.
+ * @returns The session with the removal taken back, or the same session.
+ */
+export function restoreVariables(session: MatchEditorSession): MatchEditorSession {
+  if (!isVariablesEditable(session)) {
+    return session;
+  }
+  const next = withVariablesRestored(session.baseline.variables, draftedVariables(session));
+  return structuralChange(session, next === null ? null : withVariables(session.draft.value, next));
+} // End of function restoreVariables()
+
+/**
+ * Drops one drafted new variable — Phase 4-9. The reference a compound *Insert*
+ * put into a content key stays where it is: it is text the person can see and
+ * remove, and removing it here would be this editor deciding which occurrence was
+ * meant. Undo takes back the whole insertion in one step.
+ *
+ * @param session - The session being edited.
+ * @param position - The addition's position in the drafted additions.
+ * @returns The session without it, or the same session.
+ */
+export function discardAddedVariable(session: MatchEditorSession, position: number): MatchEditorSession {
+  if (!isVariablesEditable(session)) {
+    return session;
+  }
+  const next = withAdditionDiscarded(draftedVariables(session), position);
+  return structuralChange(session, next === null ? null : withVariables(session.draft.value, next));
+} // End of function discardAddedVariable()
+
+/**
+ * Records a compound change as **one** history step — Phase 4-9, for
+ * `./variableInsertion.ts`'s *Insert*: the content key's new text and the new
+ * variable land in one `editDraft`, so one undo takes back both.
+ *
+ * It decides nothing: the caller has checked every part. It ends the typing run
+ * and moves the focus to the content key written.
+ *
+ * @param session - The session being edited.
+ * @param buffers - What the controls hold after the whole compound action.
+ * @param focus - The field written, for the focus.
+ * @returns The session after the change, or the same session when nothing changed.
+ */
+export function recordCompoundChange(
+  session: MatchEditorSession,
+  buffers: MatchBuffers,
+  focus: EditableField
+): MatchEditorSession {
+  const changed = structuralChange(session, buffers);
+  return changed === session ? session : { ...changed, focus };
+} // End of function recordCompoundChange()
+
+/**
+ * The reorder offer for this editor, over one read of the window — Phase 4-9.
+ *
+ * R25: a reorder is alone in its save, so none is offered while the draft is
+ * dirty; R36: none while any match draft of the file is stale. **R37 is the
+ * caller's**: the view that draws the offer, the choices and the submission
+ * (`variableMoveSubmissionOf` in `./variableEditor.ts`, which spends only this
+ * offer) come from one read only if the caller reads once — TypeScript cannot
+ * force that, and a caller holding an old read gets a consistent, old answer.
+ *
+ * @param session - The session to ask about.
+ * @param read - One read of the window's projections and open drafts.
+ * @returns The offer.
+ */
+export function variableMoveOffer(
+  session: MatchEditorSession,
+  read: VariableStructureRead
+): VariableMoveOffer {
+  return variableMoveOfferOf(
+    {
+      match: session.match,
+      baseRevision: session.draft.baseRevision,
+      baseline: session.baseline.variables,
+      editable: isEditable(session),
+      dirty: isDirty(session.draft)
+    },
+    read
+  );
+} // End of function variableMoveOffer()
+
 /**
  * Starts an editing session over one snippet's seventeen fields.
  *
@@ -3273,13 +3550,20 @@ export function chooseContentSwitch(
     // companion beside it (ruling 8). Restoring `paragraph` comes first.
     return session;
   }
-  const carried = drafted === null ? buffers[from].text : buffers[drafted.to].text;
+  const carriedFrom = drafted === null ? from : drafted.to;
+  const carried = buffers[carriedFrom].text;
   const next: WritableBuffers = { ...buffers };
   if (drafted !== null) {
     next[drafted.to] = { text: session.baseline[drafted.to].value, removed: false };
   }
   next[to] = { text: carried, removed: false };
-  const value: MatchBuffers = { ...next, contentSwitch: { from, to, confirmed: false } };
+  // A compound Insert's reference travels with the text it was written into
+  // (the Phase 4-9 review), so its ownership moves in the same step.
+  const value: MatchBuffers = {
+    ...next,
+    variables: withInsertionsMoved(buffers.variables, carriedFrom, to),
+    contentSwitch: { from, to, confirmed: false }
+  };
   return { ...session, draft: editDraft(session.draft, value), group: null, sendFailure: null };
 } // End of function chooseContentSwitch()
 
@@ -3328,7 +3612,13 @@ export function cancelContentSwitch(session: MatchEditorSession): MatchEditorSes
   const next: WritableBuffers = { ...buffers };
   next[drafted.from] = { text: buffers[drafted.to].text, removed: false };
   next[drafted.to] = { text: session.baseline[drafted.to].value, removed: false };
-  const value: MatchBuffers = { ...next, contentSwitch: null };
+  // The text goes back to the source, and a compound Insert's reference with it
+  // (the Phase 4-9 review).
+  const value: MatchBuffers = {
+    ...next,
+    variables: withInsertionsMoved(buffers.variables, drafted.to, drafted.from),
+    contentSwitch: null
+  };
   return { ...session, draft: editDraft(session.draft, value), group: null, sendFailure: null };
 } // End of function cancelContentSwitch()
 
@@ -3679,7 +3969,9 @@ export interface StartedMatchSave {
  * ever read it back.
  *
  * Since Phase 3-5-1 it asks the same of a line feed in a `singleLine` field
- * ({@link fieldControlOf}), which its control would have stripped.
+ * ({@link fieldControlOf}), which its control would have stripped; since Phase
+ * 4-9, of every text the drafted `vars` would write (`variableTextsOf` in
+ * `./variableEditor.ts` says which of them are one-line).
  *
  * @param draft - The draft that would be sent.
  * @returns `true` when some field would be written with a carriage return in it,
@@ -3690,7 +3982,13 @@ function writesACarriageReturn(draft: MatchDraft): boolean {
     const intent = draft[field];
     return typeof intent === 'object' && unreadableIn(field, intent.Set);
   });
-  return fields || structureTextsOf(draft).some(unreadableItem);
+  const variables = variableTextsOf(draft.vars, draft.var_intents);
+  return (
+    fields ||
+    structureTextsOf(draft).some(unreadableItem) ||
+    variables.oneLine.some(unreadableItem) ||
+    variables.multiLine.some((text) => text.includes('\r'))
+  );
 } // End of function writesACarriageReturn()
 
 /**
@@ -3863,10 +4161,22 @@ export function beginSave(
  * @returns The baselines to measure the next edit against.
  */
 function committedBaseline(baseline: MatchBaseline, buffers: MatchBuffers): MatchBaseline {
-  const next: Record<EditableField, FieldBaseline> & { structure: StructureBaseline } =
-    {} as Record<EditableField, FieldBaseline> & { structure: StructureBaseline };
+  const next: Record<EditableField, FieldBaseline> & {
+    structure: StructureBaseline;
+    variables: VariablesBaseline;
+  } = {} as Record<EditableField, FieldBaseline> & {
+    structure: StructureBaseline;
+    variables: VariablesBaseline;
+  };
   const contentSwitch = capturedSwitch(buffers);
   const captured = capturedStructure(buffers);
+  // Phase 4-9: a commit that changed `vars` leaves rows that no longer describe
+  // the file, and no new fingerprint is known here. The baseline says so rather
+  // than guessing one, and derives nothing until a re-projection seeds a new one.
+  const variables = baseline.variables;
+  next.variables = variablesDerivationOf(variables, captured.variables).changed
+    ? { ...variables, reprojectionOwed: true }
+    : variables;
   const intents = intentsWith(
     baseline,
     buffers,
@@ -4826,23 +5136,27 @@ function switchReapply(
 
 /**
  * What a reapply's collision names — Phase 3-6-1: one of the seventeen fields,
- * or a part of the trigger side or a list, named by its espanso key.
+ * or a part of the trigger side or a list, named by its espanso key; since Phase
+ * 4-9, `vars`, the whole container (ruling 22).
  */
-export type CollisionSubject = EditableField | 'regex' | 'triggers' | 'search_terms';
+export type CollisionSubject = EditableField | 'regex' | 'triggers' | 'search_terms' | 'vars';
 
 /**
- * The label a collision subject is named by, for `tDetailField`.
+ * The label a collision subject is named by, for `tRetainedLabel` — a
+ * `DetailFieldName` for every subject but `vars` (Phase 4-9).
  *
  * @param subject - What collided.
- * @returns Its `DetailFieldName`.
+ * @returns Its label.
  */
-export function collisionLabelName(subject: CollisionSubject): DetailFieldName {
+export function collisionLabelName(subject: CollisionSubject): RetainedLabel {
   switch (subject) {
     case 'regex':
       return 'regex';
     case 'triggers':
     case 'search_terms':
       return listLabelName(subject);
+    case 'vars':
+      return varsLabelName();
     default:
       return fieldLabelName(subject);
   }
@@ -4976,6 +5290,13 @@ export interface MatchReapplyPlan {
   /** The drafted `search_terms` list's verdict — Phase 3-6-1. */
   readonly searchTerms: ListReapplyVerdict;
   /**
+   * The drafted `vars`' verdict — Phase 4-9, ruling 22: keyed on the whole
+   * container (`variablesReapply` in `./variableEditor.ts`). A new variable
+   * inserted with a reference into a content key ({@link reapplyTogether}) is
+   * applied or satisfied together with that key's edit, or both collide.
+   */
+  readonly variables: VariablesReapplyVerdict;
+  /**
    * The drafted fields the new projection does not hold in the state the draft
    * was built against, in field order, then the trigger side's and the list's
    * subjects (Phase 3-6-1).
@@ -5036,6 +5357,7 @@ export function planMatchReapply(
   const side = triggerSideReapply(was, structure, now);
   const derivedSide = triggerSideDerivationOf(was, structure);
   const terms = listReapply(was.structure.searchTerms, structure.searchTerms, now.structure.searchTerms);
+  const vars = variablesReapply(was.variables, structure.variables, now.variables);
   for (const field of EDITABLE_FIELDS) {
     if (contentSwitch !== null && switched !== null && (field === contentSwitch.from || field === contentSwitch.to)) {
       verdicts[field] = switchedFieldVerdict(was, buffers, contentSwitch, switched, field);
@@ -5078,19 +5400,26 @@ export function planMatchReapply(
         ? { text: verdict.intent.Set, removed: false }
         : { text: now[field].value, removed: verdict.kind === 'applicable' };
   } // End of the loop over the seventeen editable fields
-  writesAnything ||= side.verdict === 'applicable' || terms === 'applicable';
+  writesAnything ||= side.verdict === 'applicable' || terms === 'applicable' || vars.verdict === 'applicable';
+  const together = reapplyTogether(structure.variables, vars.verdict, verdicts);
   const collisions: CollisionSubject[] = EDITABLE_FIELDS.filter(
-    (field) => verdicts[field].kind === 'collision' && !(field === 'trigger' && side.compound)
+    (field) =>
+      (verdicts[field].kind === 'collision' || together.includes(field)) &&
+      !(field === 'trigger' && side.compound)
   );
   collisions.push(...side.subjects);
   if (terms === 'collision') {
     collisions.push('search_terms');
+  }
+  if (vars.verdict === 'collision' || together.length > 0) {
+    collisions.push('vars');
   }
   return {
     verdicts,
     contentSwitch: switched,
     triggerSide: side,
     searchTerms: terms,
+    variables: together.length > 0 ? 'collision' : vars.verdict,
     collisions,
     buffers: {
       ...rebuilt,
@@ -5099,11 +5428,55 @@ export function planMatchReapply(
         side.verdict === 'applicable'
           ? structure.side
           : triggerSideBufferOf(now.structure.trigger),
-      searchTerms: rebuiltList(terms, structure.searchTerms, now.structure.searchTerms)
+      searchTerms: rebuiltList(terms, structure.searchTerms, now.structure.searchTerms),
+      variables: vars.buffer
     },
     writesAnything
   };
 } // End of function planMatchReapply()
+
+/**
+ * The content keys whose edit and a new variable inserted with a reference into
+ * them do not reapply together — Phase 4-9, consult Q9: *for compound Insert
+ * actions, the content edit and the structural edit reapply together or collide
+ * together*.
+ *
+ * A new variable already on disk beside a content edit that is not, or the
+ * content edit on disk beside a variable that is not, is half of one intention:
+ * writing the other half would complete something the disk's author may have
+ * meant differently. Each key returned here is reported as a collision beside
+ * `vars`. Either half colliding on its own is already a collision, which blocks
+ * the whole reapply anyway.
+ *
+ * @param buffer - The retained `vars` draft, captured once.
+ * @param vars - The `vars` verdict.
+ * @param verdicts - The field verdicts.
+ * @returns The content keys that break a compound insertion, possibly none.
+ */
+function reapplyTogether(
+  buffer: VariablesBuffer,
+  vars: VariablesReapplyVerdict,
+  verdicts: Readonly<Record<EditableField, FieldReapplyVerdict>>
+): readonly EditableField[] {
+  const broken: EditableField[] = [];
+  for (const added of buffer.added) {
+    const field = added.insertedInto;
+    if (field === null) {
+      continue;
+    }
+    const content = verdicts[field].kind;
+    // Half written and half already there. A collision of either half is named
+    // by its own verdict, and a content key the draft no longer changes (the
+    // reference typed away again) is no half of anything.
+    if (
+      (content === 'applicable' && vars === 'satisfied') ||
+      (content === 'satisfied' && vars === 'applicable')
+    ) {
+      broken.push(field);
+    }
+  } // End of the loop over the new variables
+  return broken;
+} // End of function reapplyTogether()
 
 /**
  * The verdict one key of a drafted switch reports, from the switch's own.
@@ -5950,6 +6323,10 @@ export function saveWithheldKey(code: SaveWithheld): TranslationKey {
       return 'browser.matchEditor.saveWithheld.listEveryItemReplaced';
     case 'listWouldBeEmpty':
       return 'browser.matchEditor.saveWithheld.listWouldBeEmpty';
+    case 'varsWouldBeEmpty':
+      return 'browser.matchEditor.saveWithheld.varsWouldBeEmpty';
+    case 'variableAdditionsCollide':
+      return 'browser.matchEditor.saveWithheld.variableAdditionsCollide';
   }
 } // End of function saveWithheldKey()
 
@@ -6771,7 +7148,12 @@ function retainedDraftOf(
           : ('triggerFormAway' as const)
         : retainedStatusOf(field, intents[field], contentSwitch)
   }));
-  return [...fields, ...structureRowsOf(session.baseline, structure, side)];
+  return [
+    ...fields,
+    ...structureRowsOf(session.baseline, structure, side),
+    // Phase 4-9: the drafted `vars`, only when the draft says something about it.
+    ...variableRowsOf(session.baseline.variables, structure.variables)
+  ];
 } // End of function retainedDraftOf()
 
 /**

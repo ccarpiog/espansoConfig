@@ -36,6 +36,7 @@
 import type {
   AliasView,
   ConflictResult,
+  ContainerBaseline,
   ContentKind,
   ContentRevision,
   ContentSpec,
@@ -141,6 +142,26 @@ export function fixturePresence(items: readonly unknown[] | undefined): Sequence
   }
   return { Items: { location: ZERO_LOCATION, flow: false, count: items.length } };
 } // End of function fixturePresence()
+
+/**
+ * The container baseline a fixture list reports (Phase 4-9), by
+ * {@link fixturePresence}'s rule: no entries is `Absent`, and entries are
+ * `Present` with a stand-in text and fingerprint. The stand-in is the list's
+ * projection serialized, so two fixtures holding the same entries report the
+ * same baseline and any change to an entry reports another — the one property
+ * the variable editor's whole-container comparison reads. It is **not** the
+ * file's text; a test that needs the real cut projects a document in Rust.
+ *
+ * @param entries - The fixture's entries, if it named any.
+ * @returns The baseline a projection of such a container would carry.
+ */
+export function fixtureContainer(entries: readonly unknown[] | undefined): ContainerBaseline {
+  if (entries === undefined || entries.length === 0) {
+    return { Absent: {} };
+  }
+  const text = `fixture:${JSON.stringify(entries)}`;
+  return { Present: { text, fingerprint: text } };
+} // End of function fixtureContainer()
 
 /** The zero location every fixture presence carries; no fixture slices by it. */
 const ZERO_LOCATION = {
@@ -440,6 +461,11 @@ export interface MatchOverrides {
   readonly vars?: readonly VariableView[];
   /** `form_fields`, shallowly projected, in source order. */
   readonly formFields?: readonly FieldView[];
+  /**
+   * `vars_container`, when a test needs one {@link fixtureContainer} would not
+   * produce — an `Uncut` container, or two lists with one fingerprint.
+   */
+  readonly varsContainer?: ContainerBaseline;
   /** Top-level entries of the match the projection did not model. */
   readonly unknownEntries?: readonly UnknownEntry[];
   /** The badges the core computed. Never derived from the fields above. */
@@ -613,6 +639,8 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
     form_fields: overrides.formFields ?? [],
     form_fields_presence: fixtureMappingPresence(overrides.formFields),
     form_field_shapes: (overrides.formFields ?? []).map(fixtureFieldShape),
+    vars_container: overrides.varsContainer ?? fixtureContainer(overrides.vars),
+    form_fields_container: fixtureContainer(overrides.formFields),
     badges: overrides.badges ?? [],
     blocking_hazard: overrides.blockingHazard ?? null,
     safely_editable: overrides.safelyEditable ?? true,

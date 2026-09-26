@@ -58,7 +58,7 @@
   import { attemptOfReapply, reapplyReveal, reapplyToShow } from '../browser/reapply';
   import type { BindObservationReceiver } from '../browser/surfaceReceivers';
   import {
-    recoveryAvailability,
+    matchRecoveryAvailability,
     startMatchFieldRecovery,
     type CreateARecoveredSnippet
   } from '../browser/recovery';
@@ -81,6 +81,7 @@
     tContentRoleNote,
     tCursorAdvisory,
     tDetailField,
+    tRetainedLabel,
     tDraftCopy,
     tDraftError,
     tDraftFieldStatus,
@@ -489,10 +490,11 @@
    * moment the session is replaced, and recovery's entry condition is a reapply
    * that resolved **nothing** and adopted nothing. The files and the projections
    * are read here rather than captured, so a destination that has stopped being
-   * writable stops being offered.
+   * writable stops being offered. Since Phase 4-9 a draft carrying variables or
+   * form definitions is refused here (ruling 21), by the model's own answer.
    */
   const recovery = $derived(
-    recoveryAvailability('matchFields', reapplyReport, view.conflict, documents(), projections())
+    matchRecoveryAvailability(reapplyReport, view.conflict, session.baseline, documents(), projections())
   );
 
   /** Whether leaving the editor is waiting on a confirmation. */
@@ -1138,7 +1140,7 @@
        is what fails if one is not. -->
   {#each view.retainedDraft as field, index (index)}
     <div class="shownValue">
-      <span class="marker">{tDetailField(field.label)}</span>
+      <span class="marker">{tRetainedLabel(field.label)}</span>
       <span class="marker">{tDraftFieldStatus(field.status)}</span>
       <SourceText text={field.text} />
     </div>

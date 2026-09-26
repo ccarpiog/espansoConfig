@@ -197,6 +197,7 @@ import {
   type RegistrationState
 } from './reconciliationCoordinator';
 import { filterMatches } from './search';
+import { variableStructureReadOf, type VariableStructureRead } from './variableEditor';
 import type { SelectedMatch, SelectionRepair } from './selection';
 import { positionOf, repairSelection, reresolve, selectMatch } from './selection';
 import type { SidebarModel, SidebarSelection } from './sidebar';
@@ -681,7 +682,8 @@ function ownedIdentityOf(id: MatchId | null): MatchId | null {
  * **It copies one level, and `id` one level further.** Every field is read here,
  * once, and written into a plain own-property object; the *values* of those
  * fields — `trigger`, `content`, `options`, `search_terms_presence`,
- * `vars_presence`, `form_fields_presence`, and the
+ * `vars_presence`, `form_fields_presence`, `vars_container`,
+ * `form_fields_container`, and the
  * arrays `search_terms`, `vars`, `form_fields`, `form_field_shapes`, `badges` and
  * `unknown_entries`
  * along with their
@@ -712,6 +714,8 @@ function ownedMatchOf(match: MatchView): MatchView {
     form_fields: match.form_fields,
     form_fields_presence: match.form_fields_presence,
     form_field_shapes: match.form_field_shapes,
+    vars_container: match.vars_container,
+    form_fields_container: match.form_fields_container,
     badges: match.badges,
     blocking_hazard: match.blocking_hazard,
     safely_editable: match.safely_editable,
@@ -2058,6 +2062,24 @@ export interface BrowserState {
    *   it.
    */
   standingConflictFor(document: DocumentId): ConflictSource | null;
+  /**
+   * One read of what a structural variable action is decided over — Phase 4-9,
+   * R36 and R37.
+   *
+   * **The projections are read once, here**, and the answer carries the file's
+   * projection as it was at that read beside the open drafts the caller names; a
+   * component derives the grant, the reorder offer and the submission from this
+   * one value (`variableStructureGrantOf` and `variableMoveOfferOf` in
+   * `./variableEditor.ts`). What no type forces is that a component asks once and
+   * spends the answer, rather than asking again between drawing an offer and
+   * sending it.
+   *
+   * @param document - The snippet's file.
+   * @param drafts - The identity of every snippet this window has a match editor
+   *   open over, as each editor's own projection gave it.
+   * @returns The read.
+   */
+  variableStructureRead(document: DocumentId, drafts: readonly MatchId[]): VariableStructureRead;
   /**
    * Whether a write this state started is still in flight for one file
    * (ruling 27).
@@ -6715,6 +6737,11 @@ export function createBrowserState(
     standingConflictFor(document: DocumentId): ConflictSource | null {
       void holdRevision;
       return standingConflictFor(document);
+    },
+
+    variableStructureRead(document: DocumentId, drafts: readonly MatchId[]): VariableStructureRead {
+      // One read of the projections, handed to the model whole (R37).
+      return variableStructureReadOf(views, document, drafts);
     },
 
     writeInFlight(document: DocumentId): boolean {

@@ -65,6 +65,7 @@ import {
   makeDocument,
   makeMatch,
   makeSummary,
+  makeVariable,
   matchListPath
 } from './fixtures';
 import type {
@@ -143,12 +144,15 @@ import {
   editField,
   matchEditorView,
   reapplyToDiskVersion as reapplyEditorToDiskVersion,
+  removeVariable,
+  variableMoveOffer,
   reloadTheDiskVersion,
   startMatchEditor,
   type AcknowledgeTheUncertainty,
   type MatchBuffers,
   type MatchEditorSession
 } from './matchEditor';
+import { variableMoveSubmissionOf, variableStructureGrantOf } from './variableEditor';
 import {
   acknowledgeRecoverySnapshot,
   applyRecoveryObservation,
@@ -17121,3 +17125,79 @@ describe('the application preferences — Phase 3-13-1', () => {
     state.dispose();
   });
 }); // End of the "application preferences" suite
+
+// ---------------------------------------------------------------------------
+// Phase 4-9 — R36 and R37 through the caller
+// ---------------------------------------------------------------------------
+
+describe('the variable structure read — Phase 4-9, R36 and R37 through the caller', () => {
+  /**
+   * `match/base.yml` holding one snippet with two variables, at a revision.
+   *
+   * @param revision - The file's revision.
+   * @returns The projection.
+   */
+  function withVariables(revision: string): DocumentView {
+    return makeDocument({
+      id: 2,
+      relativePath: 'match/base.yml',
+      revision,
+      matches: [
+        makeMatch({
+          node: 10,
+          document: 2,
+          revision,
+          trigger: ':sig',
+          vars: [
+            makeVariable({ node: 40, name: 'first', declaredType: 'echo', kind: 'Echo' }),
+            makeVariable({ node: 41, name: 'second', declaredType: 'echo', kind: 'Echo' })
+          ]
+        })
+      ]
+    });
+  } // End of function withVariables()
+
+  it('derives the grant, the offer and the submission from one read, and withholds all of them once the draft is stale', async () => {
+    const commands = scriptedCommands({
+      documents: new Map<number, CommandResult<DocumentView>>([
+        [1, { ok: true, value: profileDocument() }],
+        [2, { ok: true, value: withVariables('rev-a') }],
+        [3, { ok: true, value: otherDocument() }]
+      ]),
+      reload: { ok: true, value: withVariables('rev-b') }
+    });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    const match = state.views.find((view) => view.id === 2)?.matches[0];
+    if (match === undefined) {
+      throw new Error('this case needs the snippet');
+    }
+    const editor = startMatchEditor(match, () => 0);
+
+    // **One read**, and everything a component draws or sends comes from it.
+    const read = state.variableStructureRead(2, [editor.match]);
+    expect(read.document?.revision).toBe('rev-a');
+    const grant = variableStructureGrantOf(editor.match, read);
+    expect(grant).toEqual({ kind: 'granted', match: editor.match });
+    expect(removeVariable(editor, grant, 1).draft.value.variables.rows[1]?.removed).toBe(true);
+    const offer = variableMoveOffer(editor, read);
+    const submission = variableMoveSubmissionOf(offer, 1, { Front: {} });
+    expect(submission).toEqual({ match: editor.match, variable: 1, to: { Front: {} }, baseRevision: 'rev-a' });
+
+    // The window re-reads the file under the open editor.
+    expect(await state.rereadDocument(2)).toBeNull();
+    // R36: a fresh read withholds every structural variable action while this
+    // editor's draft is of an older revision.
+    const after = state.variableStructureRead(2, [editor.match]);
+    expect(after.document?.revision).toBe('rev-b');
+    expect(variableStructureGrantOf(editor.match, after)).toEqual({ kind: 'refused', reason: 'staleDraftInDocument' });
+    expect(variableMoveOffer(editor, after)).toMatchObject({ refusal: 'staleDraftInDocument', choices: [] });
+    // R37's limit, stated rather than hidden: the offer a caller kept from the
+    // first read still answers consistently with that read — its old revision —
+    // and it is the command's stale-revision refusal (D2v) that stops it, never
+    // a submission against the new file. TypeScript cannot force a caller to read
+    // again.
+    expect(variableMoveSubmissionOf(offer, 1, { Front: {} })?.baseRevision).toBe('rev-a');
+    state.dispose();
+  });
+}); // End of the "variable structure read" suite

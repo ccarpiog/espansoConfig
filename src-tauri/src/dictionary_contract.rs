@@ -803,8 +803,9 @@ const NOT_A_CODE: &[(&str, &str)] = &[
         "ContainerBaseline",
         "a value shape, not a code, exactly as `MappingPresence` is: `Absent`, \
          `Present` and `Uncut` carry a container's exact source text and its \
-         fingerprint *out of* an authoring snapshot (Phase 4-8) as a baseline to \
-         compare against, and are never rendered by name",
+         fingerprint *out of* an authoring snapshot (Phase 4-8) and every \
+         projected match (Phase 4-9) as a baseline to compare against, and are \
+         never rendered by name",
     ),
     (
         "LayoutPiece",

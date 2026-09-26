@@ -58,9 +58,15 @@
  *   the whole intended list or not carried with its reason — no list is ever
  *   carried in part;
  * - what is **not carried** is everything else the source held: comments, unknown
- *   keys, key order, scalar spelling and quoting, tags, anchors, `vars`,
- *   `form_fields` and any second content key. The projection is read-only and
- *   cannot support a stronger promise (`CLAUDE.md` section 3);
+ *   keys, key order, scalar spelling and quoting, tags, anchors and any second
+ *   content key. The projection is read-only and cannot support a stronger
+ *   promise (`CLAUDE.md` section 3);
+ * - **a snippet that holds `vars` or `form_fields`, or whose draft adds a
+ *   variable, is not recreated at all** (Phase 4-9, ruling 21 of
+ *   `docs/decisions/4-split-notes.md`): creation is variable-free, so the new
+ *   snippet would keep its `{{references}}` and lose their definitions.
+ *   {@link matchRecoveryAvailability} refuses it as `variablesNotCarried`, and the
+ *   conflict's own *Copy my text*, comparison and reload stay the ways out;
  * - what it **writes** is a new snippet at the end of a chosen destination.
  *   Whatever the file now holds is left exactly as it is, and nothing here rebases
  *   the pending change onto it — that is `./reapply.ts`'s transition, and this is
@@ -266,6 +272,7 @@ import {
   type TriggerShape
 } from './matchEditor';
 import { capturedList, intendedTexts, unreadableItem, type ListRefusal } from './matchLists';
+import { capturedVariables, carriesDefinitions } from './variableEditor';
 import type { RawSaveChoice } from './rawSave';
 import {
   enterReapply,
@@ -438,6 +445,13 @@ export type RecoveryUnavailable =
   | 'operationDraft'
   /** The draft is a whole document: keep editing, copy, compare, or reload. */
   | 'wholeDocumentDraft'
+  /**
+   * The match editor's draft carries variables or form definitions a new snippet
+   * could not be born holding — Phase 4-9, ruling 21. Recreating it would keep
+   * its references and drop their definitions, so it is refused; the retained
+   * draft's copy, the comparison with the disk version and the reload remain.
+   */
+  | 'variablesNotCarried'
   /**
    * There is no file this application may write a new snippet into.
    *
@@ -1609,9 +1623,52 @@ function revisionOf(
 } // End of function revisionOf()
 
 /**
+ * Whether recovery offers anything on the **match editor**, and what — Phase
+ * 4-9.
+ *
+ * {@link recoveryAvailability}, then ruling 21: a draft that
+ * `carriesDefinitions` (`./variableEditor.ts`) — the snippet holds `vars` or
+ * `form_fields`, or the draft adds a variable — is refused as
+ * `variablesNotCarried` rather than recreated without them. Asked **after** the
+ * general checks, so a surface with no conflict still answers `noConflict` and
+ * draws nothing, and **before** any destination is offered. The retained draft
+ * is read once, from the conflict.
+ *
+ * `MatchEditor.svelte` draws this answer and {@link startMatchFieldRecovery} opens
+ * from it, so the offer and the opening cannot disagree.
+ *
+ * @typeParam S - The editor's session type.
+ * @typeParam O - The editor's reapply obstacle type.
+ * @param attempt - What the editor's last reapply became, or `null`.
+ * @param conflict - The conflict it is showing, or `null`.
+ * @param baseline - What the file held when the editing session was seeded.
+ * @param documents - Every file the window lists, in window order.
+ * @param views - Every projection this window holds.
+ * @returns The choices and the destinations, or the reason there are none.
+ */
+export function matchRecoveryAvailability<S, O>(
+  attempt: ReapplyOutcome<S, O> | null,
+  conflict: ConflictModel<MatchBuffers> | null,
+  baseline: MatchBaseline,
+  documents: readonly DocumentSummary[],
+  views: readonly DocumentView[]
+): RecoveryAvailability {
+  const offer = recoveryAvailability('matchFields', attempt, conflict, documents, views);
+  if (offer.kind !== 'offered' || conflict === null) {
+    return offer;
+  }
+  const retained = capturedVariables(copyOfDraft(conflict).variables);
+  return carriesDefinitions(baseline.variables, retained)
+    ? { kind: 'unavailable', reason: 'variablesNotCarried' }
+    : offer;
+} // End of function matchRecoveryAvailability()
+
+/**
  * Opens recovery from a **match editor's** conflict.
  *
- * The seventeen transfer decisions are made here, from the baseline the editing session
+ * **Refused for a draft carrying variables or form definitions** (Phase 4-9,
+ * ruling 21) through {@link matchRecoveryAvailability}, the same answer the panel
+ * drew. The seventeen transfer decisions are made here, from the baseline the editing session
  * was seeded with and the buffers the conflict retained — never from the live
  * session's buffers, because what is being recovered is the draft that was
  * refused.
@@ -1639,7 +1696,7 @@ export function startMatchFieldRecovery<S, O>(
   views: readonly DocumentView[],
   clock: Clock
 ): RecoveryStart {
-  const offer = recoveryAvailability('matchFields', attempt, conflict, documents, views);
+  const offer = matchRecoveryAvailability(attempt, conflict, baseline, documents, views);
   if (offer.kind !== 'offered' || conflict === null) {
     return { kind: 'unavailable', reason: offer.kind === 'offered' ? 'noConflict' : offer.reason };
   }
@@ -4031,6 +4088,8 @@ export function recoveryUnavailableKey(reason: RecoveryUnavailable): Translation
       return 'browser.recovery.unavailable.wholeDocumentDraft';
     case 'noEligibleDestination':
       return 'browser.recovery.unavailable.noEligibleDestination';
+    case 'variablesNotCarried':
+      return 'browser.recovery.unavailable.variablesNotCarried';
   }
 } // End of function recoveryUnavailableKey()
 

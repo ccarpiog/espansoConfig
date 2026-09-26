@@ -111,12 +111,14 @@ fn a_snapshot_cuts_each_whole_container_in_rust() {
     let snapshot = authoring_snapshot(&document, first);
     assert_eq!(snapshot.id, first.id);
     let (text, fingerprint) = present(&snapshot.vars);
-    assert!(text.starts_with("- name: a\n"), "{text:?}");
+    // The owned hull (the Phase 4-9 review): the key's whole line comes with it,
+    // because a removal of the container deletes it.
+    assert!(text.starts_with("    vars:\n      - name: a\n"), "{text:?}");
     assert!(
         text.contains("      # a comment the first variable does not own\n"),
         "a comment inside the hull is part of the container text: {text:?}"
     );
-    assert!(text.ends_with("echo: 'y'"), "{text:?}");
+    assert!(text.ends_with("echo: 'y'\n"), "{text:?}");
     assert_eq!(fingerprint, ContentRevision::of_bytes(text.as_bytes()));
     assert!(
         AUTHORED.contains(text),
@@ -127,14 +129,17 @@ fn a_snapshot_cuts_each_whole_container_in_rust() {
     let second = authoring_snapshot(&document, &document.view.matches[1]);
     assert_eq!(second.vars, ContainerBaseline::Absent {});
     let (fields, _) = present(&second.form_fields);
-    assert!(fields.starts_with("name:\n"), "{fields:?}");
-    assert!(fields.ends_with("type: text"), "{fields:?}");
+    assert!(
+        fields.starts_with("    form_fields:\n      name:\n"),
+        "{fields:?}"
+    );
+    assert!(fields.ends_with("type: text\n"), "{fields:?}");
 
     let third = authoring_snapshot(&document, &document.view.matches[2]);
     assert_eq!(
         present(&third.vars).0,
-        "[]",
-        "a flow-empty list is its brackets"
+        "    vars: []\n",
+        "a flow-empty list is its entry's owned line"
     );
 } // End of function a_snapshot_cuts_each_whole_container_in_rust()
 
@@ -406,3 +411,118 @@ fn the_inbound_operation_carries_no_span_and_refuses_unknown_fields() {
         );
     } // End of the loop over the refused shapes
 } // End of function the_inbound_operation_carries_no_span_and_refuses_unknown_fields()
+
+// ---------------------------------------------------------------------------
+// Phase 4-9: every projected match carries the same container baselines
+// ---------------------------------------------------------------------------
+
+#[test]
+fn every_projected_match_carries_the_snapshots_container_baselines() {
+    // Phase 4-9: the variable editor reapplies against the projection a conflict
+    // carries, synchronously, so the projection must hold exactly what the
+    // snapshot would cut — not a second opinion about the same bytes.
+    let document = projected(std::path::Path::new("/nowhere/base.yml"), AUTHORED);
+    for found in &document.view.matches {
+        let snapshot = authoring_snapshot(&document, found);
+        assert_eq!(found.vars_container, snapshot.vars);
+        assert_eq!(found.form_fields_container, snapshot.form_fields);
+    } // End of the loop over the fixture's matches
+    let first = &document.view.matches[0];
+    assert!(matches!(
+        first.vars_container,
+        ContainerBaseline::Present { .. }
+    ));
+    assert_eq!(first.form_fields_container, ContainerBaseline::Absent {});
+    let third = &document.view.matches[2];
+    assert_eq!(present(&third.vars_container).0, "    vars: []\n");
+}
+
+#[test]
+fn a_shift_is_not_a_container_change_and_an_edit_inside_it_is() {
+    // Consult Q9: a shifted byte offset alone is not a content change, but a
+    // changed container text is. Both are facts about the fingerprint a
+    // projection carries.
+    let path = std::path::Path::new("/nowhere/base.yml");
+    let before = projected(path, AUTHORED);
+    let shifted_source = AUTHORED.replacen("matches:\n", "# a new line above\nmatches:\n", 1);
+    let shifted = projected(path, &shifted_source);
+    assert_eq!(
+        before.view.matches[0].vars_container, shifted.view.matches[0].vars_container,
+        "the same container text, moved down a line, is the same baseline"
+    );
+    let edited_source = AUTHORED.replacen("echo: 'y'", "echo: 'z'", 1);
+    let edited = projected(path, &edited_source);
+    assert_ne!(
+        present(&before.view.matches[0].vars_container).1,
+        present(&edited.view.matches[0].vars_container).1,
+        "a changed variable changes the container's fingerprint"
+    );
+    // A change outside the owned hull — the label above `vars` — is not a
+    // container change (`docs/decisions/4-9-notes.md` §3 and §8 record why that
+    // is enough for a positional reapply).
+    let relabelled = projected(path, &AUTHORED.replacen("café", "cafe", 1));
+    assert_eq!(
+        before.view.matches[0].vars_container,
+        relabelled.view.matches[0].vars_container
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4-9 review: the container covers every comment a removal deletes
+// ---------------------------------------------------------------------------
+
+/// A `vars` whose first variable owns a leading comment block and whose last
+/// owns nothing after it, beside a label outside the container.
+const OWNED_COMMENTS: &str = "\
+matches:
+  - trigger: ':one'
+    label: outside
+    replace: '{{a}} {{b}}'
+    vars:
+      # the first variable's own comment
+      - name: a
+        type: echo
+        params:
+          echo: 'x'
+      - name: b
+        type: echo
+        params:
+          echo: 'y'
+";
+
+#[test]
+fn a_change_to_a_comment_a_removal_would_delete_changes_the_container() {
+    // The review's scenario: a draft removes the first variable, and the file
+    // meanwhile changes that variable's owned leading comment. The removal would
+    // delete the changed comment, so the container must not compare equal.
+    let path = std::path::Path::new("/nowhere/base.yml");
+    let before = projected(path, OWNED_COMMENTS);
+    let (text, _) = present(&before.view.matches[0].vars_container);
+    assert!(
+        text.contains("# the first variable's own comment\n"),
+        "the owned leading comment is part of the container: {text:?}"
+    );
+    let commented = OWNED_COMMENTS.replacen("own comment", "own, edited comment", 1);
+    let after = projected(path, &commented);
+    assert_ne!(
+        present(&before.view.matches[0].vars_container).1,
+        present(&after.view.matches[0].vars_container).1,
+        "an edited owned comment is a container change"
+    );
+    // The key line above it is owned by the container entry, and a removal of
+    // the whole container deletes it too.
+    let rekeyed = projected(
+        path,
+        &OWNED_COMMENTS.replacen("    vars:\n", "    'vars':\n", 1),
+    );
+    assert_ne!(
+        present(&before.view.matches[0].vars_container).1,
+        present(&rekeyed.view.matches[0].vars_container).1
+    );
+    // A change to another field of the match is still not one.
+    let relabelled = projected(path, &OWNED_COMMENTS.replacen("outside", "elsewhere", 1));
+    assert_eq!(
+        before.view.matches[0].vars_container,
+        relabelled.view.matches[0].vars_container
+    );
+} // End of function a_change_to_a_comment_a_removal_would_delete_changes_the_container()

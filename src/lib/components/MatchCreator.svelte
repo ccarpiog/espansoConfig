@@ -73,6 +73,7 @@
     tDefaultRefusal,
     tDestinationRefusal,
     tDetailField,
+    tRetainedLabel,
     tDraftCopy,
     tDraftError,
     tDraftFieldStatus,
@@ -1000,7 +1001,7 @@
        type. -->
   {#each view.retainedDraft as field (field.label)}
     <div class="shownValue">
-      <span class="marker">{tDetailField(field.label)}</span>
+      <span class="marker">{tRetainedLabel(field.label)}</span>
       <span class="marker">{tDraftFieldStatus(field.status)}</span>
       <SourceText text={field.text} />
     </div>

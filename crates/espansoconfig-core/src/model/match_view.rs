@@ -28,13 +28,14 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::model::project::{child_index, child_path, Projector};
+use crate::model::value::mapping_entries;
 use crate::model::variable::{first_container_seen_before, skip_repeated_container};
 use crate::model::{
-    DiagnosticCode, FieldView, FormFieldShape, MappingPresence, MappingScan, ScalarView,
-    SequencePresence, UnknownEntry, ValueView, VariableKind, VariableView,
+    DiagnosticCode, FieldLocation, FieldView, FormFieldShape, MappingPresence, MappingScan,
+    ScalarView, SequencePresence, UnknownEntry, ValueView, VariableKind, VariableView,
 };
-use crate::patch::DocumentPath;
-use crate::syntax::{ByteSpan, HazardKind, NodeId};
+use crate::patch::{field_owned_runs, item_owned_runs, DocumentPath};
+use crate::syntax::{ByteSpan, CollectionStyle, HazardKind, NodeId, NodeKind};
 use crate::{ContentRevision, DocumentId};
 
 /// Every key [`MatchView`] models. A key outside this list becomes an
@@ -377,6 +378,114 @@ pub enum MatchBadge {
     NotEditable,
 }
 
+/// What one whole container of a match held — the correspondence unit of
+/// ruling 22 of `docs/decisions/4-split-notes.md`.
+///
+/// Introduced by Phase 4-8 for the authoring snapshot and carried on every
+/// [`MatchView`] since Phase 4-9 ([`MatchView::vars_container`],
+/// [`MatchView::form_fields_container`]), so the frontend's variable editor can
+/// compare a draft's container baseline with a newly parsed disk version
+/// **synchronously**, from the projection a conflict already carries, without
+/// slicing a byte span in JavaScript.
+///
+/// Struct variants, so the enum crosses as a uniform one-key object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum ContainerBaseline {
+    /// The match holds no such key.
+    Absent {},
+    /// The key is written, and the bytes it owns are these.
+    Present {
+        /// The container's exact source text over its **owned hull** (the
+        /// Phase 4-9 review): from the first to the last byte of the union of
+        /// the value's span, the physical-line runs the whole entry owns (its
+        /// leading comment block, its key line, its value) and, for a block
+        /// collection, the runs each item or entry owns — the same derivation a
+        /// removal of the container or of one of its members is bounded by
+        /// (`crate::patch`'s `entry_owned_runs`). So a comment such a removal
+        /// would delete — the first item's leading comment, one after the last
+        /// item that the last item owns — is part of it, and so are the key's
+        /// spelling and line, and anything between two runs. Line endings and
+        /// every spelling survive.
+        text: String,
+        /// The hash of `text`, in the same encoding as a content revision.
+        fingerprint: ContentRevision,
+    },
+    /// The key is written, and its value's bytes could not be cut from the
+    /// source the projection was made from. A projection invariant was broken;
+    /// the variant exists so that a broken invariant is **reported** rather
+    /// than turned into an empty baseline that would compare equal to the
+    /// wrong thing. A caller treats it as a container that corresponds to
+    /// nothing.
+    Uncut {},
+}
+
+impl ContainerBaseline {
+    /// The baseline of the entry `location` names in the projector's source, or
+    /// [`ContainerBaseline::Absent`] when there is no entry.
+    ///
+    /// [`ContainerBaseline::Uncut`] when the owned hull cannot be derived or
+    /// does not slice the source — refused rather than narrowed to the value
+    /// span, which would silently leave out bytes a removal deletes.
+    pub(crate) fn cut(
+        projector: &Projector<'_>,
+        location: Option<&FieldLocation>,
+    ) -> ContainerBaseline {
+        let Some(location) = location else {
+            return ContainerBaseline::Absent {};
+        };
+        let text = owned_hull(projector, location)
+            .and_then(|span| projector.source.get(span.start..span.end));
+        match text {
+            Some(text) => ContainerBaseline::Present {
+                text: text.to_owned(),
+                fingerprint: ContentRevision::of_bytes(text.as_bytes()),
+            },
+            None => ContainerBaseline::Uncut {},
+        }
+    } // End of function cut()
+} // End of impl ContainerBaseline
+
+/// The owned hull of the entry `location` names: the smallest span holding its
+/// value span, every run the entry owns, and — for a **block** collection — every
+/// run each of its items (a sequence) or entries (a mapping) owns.
+///
+/// A flow collection's members are not walked: their bytes, commas and inline
+/// comments lie between its brackets, which the value span already holds.
+/// `None` when any ownership derivation gives up.
+fn owned_hull(projector: &Projector<'_>, location: &FieldLocation) -> Option<ByteSpan> {
+    let (source, index, trivia) = (projector.source, projector.index, projector.trivia);
+    let mut start = location.value_span.start;
+    let mut end = location.value_span.end;
+    let mut runs = field_owned_runs(
+        source,
+        index,
+        trivia,
+        location.key_node,
+        location.value_node,
+    )?;
+    let value = index.node(location.value_node)?;
+    if value.collection_style == Some(CollectionStyle::Block) {
+        match value.kind {
+            NodeKind::Sequence => {
+                for &item in &value.children {
+                    runs.extend(item_owned_runs(source, index, trivia, item)?);
+                } // End of the loop over the sequence's items
+            }
+            NodeKind::Mapping => {
+                for (key, member) in mapping_entries(index, location.value_node) {
+                    runs.extend(field_owned_runs(source, index, trivia, key, member)?);
+                } // End of the loop over the mapping's entries
+            }
+            _ => {}
+        } // End of the match over the collection's kind
+    }
+    for run in runs {
+        start = start.min(run.start);
+        end = end.max(run.end);
+    } // End of the loop that widens the hull over every owned run
+    Some(ByteSpan::new(start, end))
+} // End of function owned_hull()
+
 /// One espanso match.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MatchView {
@@ -447,6 +556,16 @@ pub struct MatchView {
     /// [`MatchView::form_fields`] (Phase 4-3). Empty when `form_fields` is not a
     /// mapping with entries.
     pub form_field_shapes: Vec<FormFieldShape>,
+    /// The whole `vars` container's exact source text and fingerprint (Phase
+    /// 4-9), cut from the value span [`MatchView::vars_presence`] names — the
+    /// correspondence unit a variable draft is reapplied against. Its owned
+    /// hull, not only the value's bytes: every comment a removal of `vars` or
+    /// of one variable can delete is part of it (see
+    /// [`ContainerBaseline::Present`] and `docs/decisions/4-9-notes.md` §8).
+    pub vars_container: ContainerBaseline,
+    /// The whole shorthand `form_fields` container, cut the same way from
+    /// [`MatchView::form_fields_presence`] (Phase 4-9).
+    pub form_fields_container: ContainerBaseline,
     /// The markers the snippet list shows, sorted and deduplicated.
     pub badges: Vec<MatchBadge>,
     /// The hazard that makes this match un-editable, or `None`.
@@ -714,6 +833,11 @@ impl MatchView {
         view.trigger.classify(triggers_present);
         view.content.classify(contents_present);
         report_shape(projector, node, triggers_present, contents_present);
+        // Cut once per match, from the same source every span above names, so a
+        // snapshot and this projection agree about both containers (Phase 4-9).
+        view.vars_container = ContainerBaseline::cut(projector, view.vars_presence.location());
+        view.form_fields_container =
+            ContainerBaseline::cut(projector, view.form_fields_presence.location());
         view.unknown_entries = projector.close(scan);
         view.badges = badges(&view);
         view.search_text = view.build_search_text();
@@ -750,6 +874,8 @@ impl MatchView {
             form_fields: Vec::new(),
             form_fields_presence: MappingPresence::default(),
             form_field_shapes: Vec::new(),
+            vars_container: ContainerBaseline::Absent {},
+            form_fields_container: ContainerBaseline::Absent {},
             badges: Vec::new(),
             blocking_hazard: None,
             safely_editable: false,

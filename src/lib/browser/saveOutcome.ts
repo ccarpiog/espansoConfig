@@ -85,7 +85,7 @@
  */
 
 import type { TranslationKey } from '../i18n/dictionaries';
-import type { DetailFieldName } from './detail';
+import { detailFieldKey, type DetailFieldName } from './detail';
 import type {
   Acknowledgement,
   ConflictResult,
@@ -1619,7 +1619,17 @@ export type DraftFieldStatus =
    * The trigger form a drafted change of form writes, holding this text or this
    * item (Phase 3-6-1).
    */
-  | 'triggerFormTo';
+  | 'triggerFormTo'
+  /** A part of a new variable the save would add to `vars` (Phase 4-9). */
+  | 'variableAdded'
+  /** A variable the save would take out of `vars`, named by its name (Phase 4-9). */
+  | 'variableRemoved'
+  /** The whole `vars` list the save would take out (Phase 4-9). */
+  | 'variablesRemoved'
+  /** The key of a parameter a new variable would be born holding (Phase 4-9). */
+  | 'parameterName'
+  /** One value of the parameter named on the row above it (Phase 4-9). */
+  | 'parameterValue';
 
 /**
  * One labelled piece of a draft a conflict retained.
@@ -1632,8 +1642,12 @@ export type DraftFieldStatus =
  * (consult Q4, and `CLAUDE.md` section 6 on projection-based emission).
  */
 export interface RetainedDraftField {
-  /** The label, as the detail pane's own code, rendered through `tDetailField`. */
-  readonly label: DetailFieldName;
+  /**
+   * The label: the detail pane's own code, or — since Phase 4-9 — one of the two
+   * labels only a retained variable draft needs. Rendered through
+   * `tRetainedLabel`.
+   */
+  readonly label: RetainedLabel;
   /**
    * What the control holds, exactly.
    *
@@ -1644,6 +1658,35 @@ export interface RetainedDraftField {
   /** What a save would do with this key. */
   readonly status: DraftFieldStatus;
 }
+
+/**
+ * What one retained row is labelled by — Phase 4-9.
+ *
+ * Every {@link DetailFieldName}, and two the detail pane never draws as a field
+ * label: `variableName`, the name of a drafted variable (the pane draws a
+ * variable's name as its heading), and `vars`, the whole list of variables (a
+ * container removal, and a reapply collision of the container). Kept out of
+ * `DetailFieldName` because that union is exactly what `describeMatch` emits,
+ * which `detail.test.ts` pins in both directions.
+ */
+export type RetainedLabel = DetailFieldName | 'variableName' | 'vars';
+
+/**
+ * The dictionary key holding one retained label.
+ *
+ * @param label - The label.
+ * @returns The key: the detail pane's own for a field, this phase's for the two.
+ */
+export function retainedLabelKey(label: RetainedLabel): TranslationKey {
+  switch (label) {
+    case 'variableName':
+      return 'browser.saveOutcome.label.variableName';
+    case 'vars':
+      return 'browser.saveOutcome.label.vars';
+    default:
+      return detailFieldKey(label);
+  }
+} // End of function retainedLabelKey()
 
 /**
  * The wording {@link referenceCopyOf} needs, supplied by the i18n layer.
@@ -1657,8 +1700,8 @@ export interface RetainedDraftField {
 export interface DraftCopyWording {
   /** The first line, which says the copy is a reference and not YAML. */
   readonly heading: string;
-  /** Names one field. `tDetailField`. */
-  readonly label: (name: DetailFieldName) => string;
+  /** Names one field. `tRetainedLabel`. */
+  readonly label: (name: RetainedLabel) => string;
   /** Says what a save would do with it. `tDraftFieldStatus`. */
   readonly status: (status: DraftFieldStatus) => string;
 }
@@ -1723,6 +1766,16 @@ export function draftFieldStatusKey(status: DraftFieldStatus): TranslationKey {
       return 'browser.saveOutcome.field.triggerFormAway';
     case 'triggerFormTo':
       return 'browser.saveOutcome.field.triggerFormTo';
+    case 'variableAdded':
+      return 'browser.saveOutcome.field.variableAdded';
+    case 'variableRemoved':
+      return 'browser.saveOutcome.field.variableRemoved';
+    case 'variablesRemoved':
+      return 'browser.saveOutcome.field.variablesRemoved';
+    case 'parameterName':
+      return 'browser.saveOutcome.field.parameterName';
+    case 'parameterValue':
+      return 'browser.saveOutcome.field.parameterValue';
   }
 } // End of function draftFieldStatusKey()
 

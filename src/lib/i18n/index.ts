@@ -166,6 +166,7 @@ import {
   reapplyReadinessKey,
   referenceCopyOf,
   reloadUnavailableKey,
+  retainedLabelKey,
   saveOutcomeMessageKey,
   type ConflictChoice,
   type ConflictDraftKind,
@@ -173,9 +174,24 @@ import {
   type ConflictOperation,
   type DraftFieldStatus,
   type RetainedDraftField,
+  type RetainedLabel,
   type SaveOutcomeMessage
 } from '../browser/saveOutcome';
 import { codePointLabel, invisibleKey, type InvisibleSegment } from '../browser/sourceText';
+import {
+  variableAdditionRefusalKey,
+  variableFieldRefusalKey,
+  variableMoveRefusalKey,
+  type VariableAdditionRefusal,
+  type VariableFieldRefusal,
+  type VariableMoveRefusal
+} from '../browser/variableEditor';
+import {
+  insertRefusalKey,
+  nameVerdictKey,
+  type InsertRefusal,
+  type NameVerdict
+} from '../browser/variableInsertion';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
   AddedContent,
@@ -817,6 +833,59 @@ export function tFieldRefusal(reason: FieldRefusal): string {
 } // End of function tFieldRefusal()
 
 /**
+ * Why one scalar of an existing variable is read-only — Phase 4-9. The five
+ * codes shared with {@link tFieldRefusal} render its sentences.
+ *
+ * @param reason - The code, from `./variableEditor.ts`.
+ * @returns The translated sentence.
+ */
+export function tVariableFieldRefusal(reason: VariableFieldRefusal): string {
+  return translate(locale.current, variableFieldRefusalKey(reason));
+} // End of function tVariableFieldRefusal()
+
+/**
+ * Why a new variable cannot be added to the draft — Phase 4-9.
+ *
+ * @param reason - The code.
+ * @returns The translated sentence.
+ */
+export function tVariableAdditionRefusal(reason: VariableAdditionRefusal): string {
+  return translate(locale.current, variableAdditionRefusalKey(reason));
+} // End of function tVariableAdditionRefusal()
+
+/**
+ * Why a structural variable action or a reorder is withheld — Phase 4-9 (R25,
+ * R36).
+ *
+ * @param reason - The code.
+ * @returns The translated sentence.
+ */
+export function tVariableMoveRefusal(reason: VariableMoveRefusal): string {
+  return translate(locale.current, variableMoveRefusalKey(reason));
+} // End of function tVariableMoveRefusal()
+
+/**
+ * What a name check answered — Phase 4-9. Under an open scope the sentence says
+ * "available among visible names", never "collision-free" (ruling 20).
+ *
+ * @param verdict - The verdict, from `./variableInsertion.ts`.
+ * @returns The translated sentence.
+ */
+export function tNameVerdict(verdict: NameVerdict): string {
+  return translate(locale.current, nameVerdictKey(verdict));
+} // End of function tNameVerdict()
+
+/**
+ * Why an *Insert* or an *Add variable* did nothing — Phase 4-9.
+ *
+ * @param refusal - The refusal, from `./variableInsertion.ts`.
+ * @returns The translated sentence.
+ */
+export function tInsertRefusal(refusal: InsertRefusal): string {
+  return translate(locale.current, insertRefusalKey(refusal));
+} // End of function tInsertRefusal()
+
+/**
  * Renders the cursor action's advisory, in the current language — Phase 3-5-1.
  *
  * The model answers a code with its count (`insertCursorPosition` in
@@ -1351,7 +1420,7 @@ export function tDraftFieldStatus(status: DraftFieldStatus): string {
 export function tDraftCopy(fields: readonly RetainedDraftField[]): string {
   return referenceCopyOf(fields, {
     heading: t('browser.saveOutcome.copyHeading'),
-    label: tDetailField,
+    label: tRetainedLabel,
     status: tDraftFieldStatus
   });
 } // End of function tDraftCopy()
@@ -1385,6 +1454,18 @@ export function tValueKind(kind: ValueKind): string {
 export function tDetailField(field: DetailFieldName): string {
   return translate(locale.current, detailFieldKey(field));
 } // End of function tDetailField()
+
+/**
+ * The label one retained draft row is named by — Phase 4-9: a detail-pane field
+ * label, or one of the two a retained variable draft adds (`variableName`,
+ * `vars`). `retainedLabelKey` in `../browser/saveOutcome.ts` is the key function.
+ *
+ * @param label - The row's label.
+ * @returns The translated label.
+ */
+export function tRetainedLabel(label: RetainedLabel): string {
+  return translate(locale.current, retainedLabelKey(label));
+} // End of function tRetainedLabel()
 
 /**
  * Renders the heading of one group of match options, in the current language.
@@ -1986,7 +2067,7 @@ export function describeEditorReapplyObstacle(
     case 'fieldCollisions':
       return translate(locale, editorReapplyObstacleKey(obstacle), {
         fields: obstacle.fields
-          .map((field) => translate(locale, detailFieldKey(collisionLabelName(field))))
+          .map((field) => translate(locale, retainedLabelKey(collisionLabelName(field))))
           .join(', ')
       });
     case 'targetNotEditable':
