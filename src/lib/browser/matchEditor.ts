@@ -12,8 +12,9 @@
  * ## What it edits: seventeen scalar fields, since Phase 3-5-1
  *
  * The literal **trigger**, the five **content** keys (`replace`, `markdown`,
- * `html`, `image_path`, and `form` as layout text only — ruling 9 of
- * `docs/decisions/3-split-notes.md`; `form_fields` stays read-only), the
+ * `html`, `image_path`, and `form` as layout text — ruling 9 of
+ * `docs/decisions/3-split-notes.md`, whose `form_fields` half Phase 4's rulings
+ * 15–19 superseded: see the forms paragraph below), the
  * **label**, the **comment**, and the nine **options** — `word`, `left_word`,
  * `right_word`, `propagate_case`, `uppercase_style`, `force_mode`,
  * `force_clipboard`, `paragraph` and `anchor`, each its own textual field and
@@ -27,7 +28,15 @@
  * removal — a submodel of `./variableEditor.ts` composed into this one buffer
  * set, this one history, this one save and this one conflict registry (ruling 24
  * of `docs/decisions/4-split-notes.md`). `./variableInsertion.ts` is the compound
- * *Insert*. `form_fields` still goes out empty: its editor is Phase 4-10's.
+ * *Insert*.
+ *
+ * **The forms, since Phase 4-10** ({@link MatchBaseline.forms},
+ * {@link MatchBuffers.forms}): the shorthand `form_fields` and every verbose
+ * form's `params.layout` and `params.fields` — definitions removed, restored and
+ * added, four scalar options per definition, and the compound *Add field*
+ * ({@link addFormField}) — a submodel of `./formEditor.ts` composed into the same
+ * buffer set, history, save and conflict registry. **The shorthand layout is this
+ * module's own `form` field**: `./formEditor.ts` keeps no second draft of it.
  *
  * **The trigger side and `search_terms`, since Phase 3-6-1**, are drafted beside
  * the fields ({@link TriggerSideBuffer}, and `./matchLists.ts` for the lists):
@@ -271,6 +280,7 @@ import type {
   MatchDraft,
   MatchId,
   MatchView,
+  NewFormField,
   PresentationNote,
   SaveResult,
   ScalarView,
@@ -355,6 +365,33 @@ import {
 } from './editorSave';
 import type { RawSaveChoice } from './rawSave';
 import type { InvalidationStatus } from './invalidation';
+import {
+  capturedForms,
+  excludedVariablesOf,
+  formAdditionRefusal,
+  formFieldsLabelName,
+  formRowsOf,
+  formRowsRetained,
+  formsBaselineOf,
+  formsBufferOf,
+  formsDerivationOf,
+  formsReapply,
+  formsWriteUnreadable,
+  shorthandWireOf,
+  withDefinitionAdded,
+  withDefinitionDiscarded,
+  withDefinitionRemoval,
+  withLayoutText,
+  withOptionText,
+  withVerboseForms,
+  type FormAdditionRefusal,
+  type FormOptionKey,
+  type FormRows,
+  type FormsBaseline,
+  type FormsBuffer,
+  type FormsProblem,
+  type FormsReapplyVerdict
+} from './formEditor';
 import {
   capturedVariables,
   grantCovers,
@@ -856,6 +893,8 @@ export type MatchBaseline = Readonly<Record<EditableField, FieldBaseline>> & {
   readonly structure: StructureBaseline;
   /** The local `vars` — Phase 4-9, `./variableEditor.ts`. */
   readonly variables: VariablesBaseline;
+  /** The shorthand and verbose forms — Phase 4-10, `./formEditor.ts`. */
+  readonly forms: FormsBaseline;
 };
 
 /**
@@ -955,6 +994,11 @@ export type MatchBuffers = Readonly<Record<EditableField, FieldBuffer>> & {
   readonly searchTerms: ListBuffer;
   /** The drafted local `vars` — Phase 4-9, `./variableEditor.ts`. */
   readonly variables: VariablesBuffer;
+  /**
+   * The drafted forms — Phase 4-10, `./formEditor.ts`. A shorthand layout is
+   * not in it: that is the `form` field above.
+   */
+  readonly forms: FormsBuffer;
 };
 
 /** {@link MatchBuffers} with every property writable, for building one. */
@@ -1000,14 +1044,18 @@ export type TypingGroup = TypingRun<TypingSubject>;
  * What a run of typing is in — Phase 3-6-1: one of the seventeen fields, the
  * `regex` box, or one item of a list named by its list and its position in the
  * drafted array; since Phase 4-9, one scalar box of an existing variable, named
- * by the variable's position in the file's list. A structural action (an item added or removed) ends every run,
+ * by the variable's position in the file's list; since Phase 4-10, a verbose
+ * form's layout box or one option box of a definition, named by the form's
+ * position in `MatchBaseline.forms` (and the definition's). A structural action (an item added or removed) ends every run,
  * so a position cannot come to name another item inside one.
  */
 export type TypingSubject =
   | EditableField
   | 'regex'
   | `${SequenceField}#${number}`
-  | `vars#${number}.${VariableField}`;
+  | `vars#${number}.${VariableField}`
+  | `forms#${number}.layout`
+  | `forms#${number}.${number}.${FormOptionKey}`;
 
 /**
  * One editing session over one snippet's seventeen editable fields.
@@ -1630,12 +1678,15 @@ export function baselineOf(match: MatchView): MatchBaseline {
   const baseline: Record<EditableField, FieldBaseline> & {
     structure: StructureBaseline;
     variables: VariablesBaseline;
+    forms: FormsBaseline;
   } = {} as Record<EditableField, FieldBaseline> & {
     structure: StructureBaseline;
     variables: VariablesBaseline;
+    forms: FormsBaseline;
   };
   baseline.structure = structureBaselineOf(match);
   baseline.variables = variablesBaselineOf(match);
+  baseline.forms = formsBaselineOf(match);
   for (const field of EDITABLE_FIELDS) {
     const scalar = projectedScalar(match, field);
     const eligibility = fieldEligibility(match, field);
@@ -1670,7 +1721,8 @@ export function buffersOf(baseline: MatchBaseline): MatchBuffers {
     contentSwitch: null,
     triggerSide: triggerSideBufferOf(baseline.structure.trigger),
     searchTerms: listBufferOf(baseline.structure.searchTerms),
-    variables: variablesBufferOf(baseline.variables)
+    variables: variablesBufferOf(baseline.variables),
+    forms: formsBufferOf(baseline.forms)
   };
 } // End of function buffersOf()
 
@@ -1889,13 +1941,16 @@ function intentsWith(
  * phase breaks this function rather than being silently omitted. A spread over a
  * partial would give both of those away, and what it would buy is six fewer lines.
  *
- * `form_fields` goes out saying *leave this alone*, which is what makes an
- * unedited field's spelling, quoting and surrounding comments survive a save byte
- * for byte; so does every field whose intent is `'Unchanged'`, every list and
- * form the draft did not touch, and — since Phase 4-9 — every variable the draft
- * did not touch: `vars` and `var_intents` carry only what
- * `variablesDerivationOf` in `./variableEditor.ts` derives from the captured
- * variables buffer, which is nothing for an untouched `vars`. Since Phase 3-5-1 the draft also carries
+ * Every field whose intent is `'Unchanged'` goes out saying *leave this alone*,
+ * which is what makes an unedited field's spelling, quoting and surrounding
+ * comments survive a save byte for byte; so does every list the draft did not
+ * touch, every variable the draft did not touch (since Phase 4-9: `vars` and
+ * `var_intents` carry only what `variablesDerivationOf` in `./variableEditor.ts`
+ * derives from the captured variables buffer, which is nothing for an untouched
+ * `vars`), and every form the draft did not touch (since Phase 4-10:
+ * `form_fields`, `form_intents` and a verbose form's parts of `vars` carry only
+ * what `formsDerivationOf` in `./formEditor.ts` derives, which is nothing for an
+ * untouched form). Since Phase 3-5-1 the draft also carries
  * `content_switch`, built from the switch read once and used for both the intents
  * and the wire value; since Phase 3-6-1, `regex`, the `triggers` and
  * `search_terms` item edits, `sequences` and `trigger_form`, built from the trigger
@@ -1929,6 +1984,12 @@ function draftWith(
   const terms = listDerivationOf(baseline.structure.searchTerms, structure.searchTerms);
   const intents = intentsWith(baseline, buffers, contentSwitch, side);
   const variables = variablesDerivationOf(baseline.variables, structure.variables);
+  const forms = formsDerivationOf(
+    baseline.forms,
+    structure.forms,
+    excludedVariablesOf(baseline.variables, structure.variables)
+  );
+  const shorthand = shorthandWireOf(forms);
   return {
     trigger: intents.trigger,
     regex: side.regex,
@@ -1950,15 +2011,17 @@ function draftWith(
     anchor: intents.anchor,
     triggers: side.items,
     search_terms: terms.kind === 'changed' ? terms.items : [],
-    vars: variables.vars,
-    form_fields: [],
+    // Phase 4-10: a verbose form's layout and definitions ride its variable's
+    // `VariableDraft`, merged into the variable editor's drafts.
+    vars: withVerboseForms(variables.vars, forms),
+    form_fields: shorthand.form_fields,
     content_switch: contentSwitchOf(contentSwitch),
     trigger_form: side.change,
     sequences: [...side.sequences, ...(terms.kind === 'changed' ? terms.sequences : [])],
     // Phase 4-9: the variable editor's intents, from the same captured read.
-    // Phase 4-6's `form_fields` intents are the form editor's (4-10); none yet.
     var_intents: variables.intents,
-    form_intents: []
+    // Phase 4-10: the shorthand form's intents, from the same captured read.
+    form_intents: shorthand.form_intents
   };
 } // End of function draftWith()
 
@@ -1994,7 +2057,9 @@ export function contentSwitchOf(
  * - `listNotInOrder`, `listEveryItemReplaced`, `listWouldBeEmpty` — a drafted
  *   list's {@link ListProblem};
  * - `varsWouldBeEmpty`, `variableAdditionsCollide` — the drafted `vars`'
- *   `VariablesProblem` (Phase 4-9, `./variableEditor.ts`).
+ *   `VariablesProblem` (Phase 4-9, `./variableEditor.ts`);
+ * - `formFieldsWouldBeEmpty` — a drafted form's `FormsProblem` (Phase 4-10,
+ *   `./formEditor.ts`).
  */
 export type StructureProblem =
   | 'triggerFormUnconfirmed'
@@ -2003,7 +2068,8 @@ export type StructureProblem =
   | 'listNotInOrder'
   | 'listEveryItemReplaced'
   | 'listWouldBeEmpty'
-  | VariablesProblem;
+  | VariablesProblem
+  | FormsProblem;
 
 /**
  * What the drafted trigger side asks of a save — Phase 3-6-1.
@@ -2050,6 +2116,8 @@ interface CapturedStructure {
   readonly searchTerms: ListBuffer;
   /** The local `vars` — Phase 4-9. */
   readonly variables: VariablesBuffer;
+  /** The forms — Phase 4-10. */
+  readonly forms: FormsBuffer;
 }
 
 /**
@@ -2071,7 +2139,8 @@ function capturedStructure(buffers: MatchBuffers): CapturedStructure {
       triggers: capturedList(side.triggers)
     },
     searchTerms: capturedList(buffers.searchTerms),
-    variables: capturedVariables(buffers.variables)
+    variables: capturedVariables(buffers.variables),
+    forms: capturedForms(buffers.forms)
   };
 } // End of function capturedStructure()
 
@@ -2339,7 +2408,15 @@ function structureProblemOf(
   if (terms.kind === 'refused') {
     return listStructureProblem(terms.problem);
   }
-  return variablesDerivationOf(baseline.variables, captured.variables).problem;
+  const variables = variablesDerivationOf(baseline.variables, captured.variables).problem;
+  if (variables !== null) {
+    return variables;
+  }
+  return formsDerivationOf(
+    baseline.forms,
+    captured.forms,
+    excludedVariablesOf(baseline.variables, captured.variables)
+  ).problem;
 } // End of function structureProblemOf()
 
 /**
@@ -3055,6 +3132,344 @@ export function variableMoveOffer(
     read
   );
 } // End of function variableMoveOffer()
+
+// ---------------------------------------------------------------------------
+// The forms — Phase 4-10, over `./formEditor.ts`
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether one form accepts changes now: the session is editable, no commit is
+ * waiting for a re-projection, and — for a verbose form — its variable is not
+ * drafted for removal (nor the whole `vars`) and the variables are draftable.
+ *
+ * @param session - The session to ask about.
+ * @param form - The form's position in `MatchBaseline.forms`.
+ * @returns `true` when the form's transitions would do anything.
+ */
+export function isFormEditable(session: MatchEditorSession, form: number): boolean {
+  const forms = session.baseline.forms;
+  const held = forms.forms[form];
+  if (!isEditable(session) || forms.reprojectionOwed || held === undefined) {
+    return false;
+  }
+  if (held.address.kind === 'shorthand') {
+    return true;
+  }
+  const excluded = excludedVariablesOf(
+    session.baseline.variables,
+    capturedVariables(session.draft.value.variables)
+  );
+  return !excluded.has(held.address.variable);
+} // End of function isFormEditable()
+
+/**
+ * The buffers with the forms part replaced.
+ *
+ * @param buffers - What the controls hold.
+ * @param forms - What the form controls should hold.
+ * @returns The new buffers.
+ */
+function withForms(buffers: MatchBuffers, forms: FormsBuffer): MatchBuffers {
+  return { ...buffers, forms };
+} // End of function withForms()
+
+/**
+ * The forms part of the live draft, read once into plain values.
+ *
+ * @param session - The session.
+ * @returns A plain copy.
+ */
+function draftedForms(session: MatchEditorSession): FormsBuffer {
+  return capturedForms(session.draft.value.forms);
+} // End of function draftedForms()
+
+/**
+ * Records whatever a **verbose** form's layout box now holds — typing, so it
+ * joins the open typing run of that box. A shorthand layout is the `form` field:
+ * {@link editField} is its one transition, and this refuses it. A carriage
+ * return is refused here, at eligibility and at {@link beginSave}.
+ *
+ * **A layout edit creates, deletes and renames no definition** (ruling 15): it
+ * changes the box and nothing else; the rows follow from it
+ * ({@link formRows}).
+ *
+ * @param session - The session being edited.
+ * @param form - The form's position.
+ * @param text - The box's whole value.
+ * @returns The session after the edit, or the same session.
+ */
+export function editFormLayout(session: MatchEditorSession, form: number, text: string): MatchEditorSession {
+  if (!isFormEditable(session, form)) {
+    return session;
+  }
+  const next = withLayoutText(session.baseline.forms, draftedForms(session), form, text);
+  return next === null
+    ? session
+    : recordStructureTyping(session, `forms#${form}.layout`, withForms(session.draft.value, next));
+} // End of function editFormLayout()
+
+/**
+ * Records whatever one option box of an existing definition now holds —
+ * typing. An absent option typed into is inserted; left blank, it is
+ * `'Unchanged'` (`formScalarIntent` in `./formEditor.ts`).
+ *
+ * @param session - The session being edited.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @param key - The option.
+ * @param text - The box's whole value.
+ * @returns The session after the edit, or the same session.
+ */
+export function editFormOption(
+  session: MatchEditorSession,
+  form: number,
+  definition: number,
+  key: FormOptionKey,
+  text: string
+): MatchEditorSession {
+  if (!isFormEditable(session, form)) {
+    return session;
+  }
+  const next = withOptionText(session.baseline.forms, draftedForms(session), form, definition, key, text);
+  return next === null
+    ? session
+    : recordStructureTyping(
+        session,
+        `forms#${form}.${definition}.${key}`,
+        withForms(session.draft.value, next)
+      );
+} // End of function editFormOption()
+
+/**
+ * Drafts one existing definition's removal — explicit, structural, its own
+ * history step, and only under a grant for this snippet (R36, ruling 23). The
+ * layout is not touched: every `[[name]]` stays, and its row then says it has no
+ * definition. {@link formFieldRemovalPreview} is what a screen shows first.
+ *
+ * @param session - The session being edited.
+ * @param grant - The structure grant, from one read of the window.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @returns The session with the removal drafted, or the same session.
+ */
+export function removeFormField(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant,
+  form: number,
+  definition: number
+): MatchEditorSession {
+  if (!isFormEditable(session, form) || !grantCovers(grant, session.match)) {
+    return session;
+  }
+  const next = withDefinitionRemoval(session.baseline.forms, draftedForms(session), form, definition, true);
+  return structuralChange(session, next === null ? null : withForms(session.draft.value, next));
+} // End of function removeFormField()
+
+/**
+ * Takes back one drafted definition removal. Needs no grant: it moves the draft
+ * back towards the file.
+ *
+ * @param session - The session being edited.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @returns The session, or the same session.
+ */
+export function restoreFormField(session: MatchEditorSession, form: number, definition: number): MatchEditorSession {
+  if (!isFormEditable(session, form)) {
+    return session;
+  }
+  const next = withDefinitionRemoval(session.baseline.forms, draftedForms(session), form, definition, false);
+  return structuralChange(session, next === null ? null : withForms(session.draft.value, next));
+} // End of function restoreFormField()
+
+/**
+ * Drops one drafted new definition. A `[[name]]` *Add field* put into the layout
+ * stays — text the person can see; undo takes back the whole compound action.
+ *
+ * @param session - The session being edited.
+ * @param form - The form's position.
+ * @param position - The addition's position.
+ * @returns The session, or the same session.
+ */
+export function discardAddedFormField(session: MatchEditorSession, form: number, position: number): MatchEditorSession {
+  if (!isFormEditable(session, form)) {
+    return session;
+  }
+  const next = withDefinitionDiscarded(draftedForms(session), form, position);
+  return structuralChange(session, next === null ? null : withForms(session.draft.value, next));
+} // End of function discardAddedFormField()
+
+/** What *Add field* did. */
+export type FormFieldOutcome =
+  | {
+      /** Drafted, as one history step. */
+      readonly kind: 'added';
+      /** The session holding it. */
+      readonly session: MatchEditorSession;
+      /**
+       * Where the caret goes: just after the inserted `[[name]]`, in UTF-16 code
+       * units of the layout's new text; the empty selection at 0 for a
+       * definition added with no placeholder.
+       */
+      readonly selection: TextSelection;
+    }
+  | {
+      /** Nothing was drafted. */
+      readonly kind: 'refused';
+      /** The same session. */
+      readonly session: MatchEditorSession;
+      /** Why. */
+      readonly refusal: FormAdditionRefusal;
+    };
+
+/**
+ * *Add field* — Phase 4-10's explicit compound action (ruling 15): `[[name]]` in
+ * place of the layout's selection **and** a new definition of that name, as
+ * **one** history step, so one undo takes back both. The name is one value: the
+ * placeholder is built from the definition's own `name`.
+ *
+ * With `selection: null` it adds the definition alone — for a row whose
+ * placeholder the layout already holds (a layout-only row), or a definition the
+ * person places later; nothing is written into the layout.
+ *
+ * The layout is the shorthand form's `form` field — this module's own box, whose
+ * `editField` rules it meets — or a verbose form's layout box. Refused, with the
+ * same session, when the form or the layout does not accept changes, the grant
+ * does not cover this snippet, or `formAdditionRefusal` in `./formEditor.ts`
+ * refuses the definition.
+ *
+ * @param session - The session being edited.
+ * @param grant - The structure grant, minted from one read of the window
+ *   (`variableStructureGrantOf` in `./variableEditor.ts`; R36 and R37).
+ * @param form - The form's position.
+ * @param request - The new definition, and the layout control's selection in
+ *   UTF-16 code units or `null`.
+ * @returns What happened.
+ */
+export function addFormField(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant,
+  form: number,
+  request: { readonly field: NewFormField; readonly selection: TextSelection | null }
+): FormFieldOutcome {
+  const field: NewFormField = JSON.parse(JSON.stringify(request.field));
+  const selection = request.selection === null ? null : { ...request.selection };
+  /**
+   * The refusal answer.
+   *
+   * @param refusal - Why.
+   * @returns The outcome.
+   */
+  const refused = (refusal: FormAdditionRefusal): FormFieldOutcome => ({ kind: 'refused', session, refusal });
+  const held = session.baseline.forms.forms[form];
+  if (held === undefined || !isFormEditable(session, form)) {
+    return refused({ kind: 'formNotEditable' });
+  }
+  if (!grantCovers(grant, session.match)) {
+    return refused({ kind: 'structure', reason: grant.kind === 'refused' ? grant.reason : 'notInDocument' });
+  }
+  const buffers = session.draft.value;
+  const forms = capturedForms(buffers.forms);
+  const refusal = formAdditionRefusal(session.baseline.forms, forms, form, field);
+  if (refusal !== null) {
+    return refused(refusal);
+  }
+  const layoutEditable =
+    held.layout === null
+      ? isFieldEditable(session, 'form')
+      : held.layout.eligibility.kind === 'editable' && forms.forms[form]?.layout !== null;
+  if (selection !== null && !layoutEditable) {
+    return refused({ kind: 'layoutNotEditable' });
+  }
+  const added = withDefinitionAdded(session.baseline.forms, forms, form, field, selection !== null);
+  if (added === null) {
+    return refused({ kind: 'formNotEditable' });
+  }
+  if (selection === null) {
+    return {
+      kind: 'added',
+      session: structuralChange(session, withForms(buffers, added)),
+      selection: { start: 0, end: 0 }
+    };
+  }
+  const text = held.layout === null ? buffers.form.text : (forms.forms[form]?.layout?.text ?? '');
+  /**
+   * A reported position clamped into the layout, or its end when not an integer.
+   *
+   * @param position - What the control reported.
+   * @returns A usable index.
+   */
+  const bound = (position: number): number =>
+    Number.isInteger(position) ? Math.min(Math.max(position, 0), text.length) : text.length;
+  const start = Math.min(bound(selection.start), bound(selection.end));
+  const end = Math.max(bound(selection.start), bound(selection.end));
+  const placeholder = `[[${field.name}]]`;
+  const layout = `${text.slice(0, start)}${placeholder}${text.slice(end)}`;
+  const next: MatchBuffers =
+    held.layout === null
+      ? { ...buffers, form: { text: layout, removed: false }, forms: added }
+      : {
+          ...buffers,
+          forms: {
+            forms: added.forms.map((one, at) => (at === form ? { ...one, layout: { text: layout } } : one))
+          }
+        };
+  const after = structuralChange(session, next);
+  const caret = start + placeholder.length;
+  return {
+    kind: 'added',
+    session: held.layout === null && after !== session ? { ...after, focus: 'form' } : after,
+    selection: { start: caret, end: caret }
+  };
+} // End of function addFormField()
+
+/**
+ * The rows one form shows now, from the drafted layout and definitions —
+ * repeated placeholders one row, definition-only rows with their advisory
+ * (`formRowsOf` in `./formEditor.ts`). Derived on every read: a layout edit
+ * changes this answer and writes no definition.
+ *
+ * @param session - The session.
+ * @param form - The form's position.
+ * @returns The rows, or `null` for no such form.
+ */
+export function formRows(session: MatchEditorSession, form: number): FormRows | null {
+  const held = session.baseline.forms.forms[form];
+  const buffers = session.draft.value;
+  const drafted = buffers.forms.forms[form];
+  if (held === undefined || drafted === undefined) {
+    return null;
+  }
+  const layout =
+    held.layout === null
+      ? buffers.form.removed
+        ? ''
+        : buffers.form.text
+      : (drafted.layout?.text ?? '');
+  return formRowsOf(held, drafted, layout);
+} // End of function formRows()
+
+/**
+ * What removing one definition leaves behind, for the preview ruling 15 asks
+ * for: its name and how many `[[name]]` the drafted layout still holds (none of
+ * which the removal touches).
+ *
+ * @param session - The session.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @returns The preview, or `null` for no such definition.
+ */
+export function formFieldRemovalPreview(
+  session: MatchEditorSession,
+  form: number,
+  definition: number
+): { readonly name: string | null; readonly occurrencesKept: number } | null {
+  const rows = formRows(session, form);
+  const row = rows?.rows.find(
+    (one) => one.definition !== null && one.definition.kind === 'existing' && one.definition.index === definition
+  );
+  return row === undefined ? null : { name: row.name, occurrencesKept: row.occurrences };
+} // End of function formFieldRemovalPreview()
 
 /**
  * Starts an editing session over one snippet's seventeen fields.
@@ -4126,7 +4541,13 @@ export function beginSave(
     return null;
   }
   const draft = draftWith(session.baseline, submission.candidate, captured, structure);
-  if (writesACarriageReturn(draft) || removesACompanion(draft)) {
+  // Phase 4-10: the form texts, classified by the baseline's keys — a verbose
+  // layout, an option, a new definition — over the draft that is sent.
+  if (
+    writesACarriageReturn(draft) ||
+    formsWriteUnreadable(session.baseline.forms, draft) ||
+    removesACompanion(draft)
+  ) {
     return null;
   }
   const started: StartedMatchSave = {
@@ -4164,19 +4585,30 @@ function committedBaseline(baseline: MatchBaseline, buffers: MatchBuffers): Matc
   const next: Record<EditableField, FieldBaseline> & {
     structure: StructureBaseline;
     variables: VariablesBaseline;
+    forms: FormsBaseline;
   } = {} as Record<EditableField, FieldBaseline> & {
     structure: StructureBaseline;
     variables: VariablesBaseline;
+    forms: FormsBaseline;
   };
   const contentSwitch = capturedSwitch(buffers);
   const captured = capturedStructure(buffers);
   // Phase 4-9: a commit that changed `vars` leaves rows that no longer describe
   // the file, and no new fingerprint is known here. The baseline says so rather
   // than guessing one, and derives nothing until a re-projection seeds a new one.
+  // Phase 4-10: the same for the forms — and a verbose form lives inside `vars`,
+  // so a commit that changed either owes both a re-projection.
   const variables = baseline.variables;
-  next.variables = variablesDerivationOf(variables, captured.variables).changed
-    ? { ...variables, reprojectionOwed: true }
-    : variables;
+  const varsChanged = variablesDerivationOf(variables, captured.variables).changed;
+  const formsDerived = formsDerivationOf(
+    baseline.forms,
+    captured.forms,
+    excludedVariablesOf(variables, captured.variables)
+  );
+  next.variables =
+    varsChanged || formsDerived.verboseChanged ? { ...variables, reprojectionOwed: true } : variables;
+  next.forms =
+    varsChanged || formsDerived.changed ? { ...baseline.forms, reprojectionOwed: true } : baseline.forms;
   const intents = intentsWith(
     baseline,
     buffers,
@@ -5137,9 +5569,11 @@ function switchReapply(
 /**
  * What a reapply's collision names — Phase 3-6-1: one of the seventeen fields,
  * or a part of the trigger side or a list, named by its espanso key; since Phase
- * 4-9, `vars`, the whole container (ruling 22).
+ * 4-9, `vars`, the whole container (ruling 22) — which since Phase 4-10 is also
+ * what a verbose form's collision names, its layout and definitions living in
+ * it; and since Phase 4-10, `form_fields`, the shorthand form's whole container.
  */
-export type CollisionSubject = EditableField | 'regex' | 'triggers' | 'search_terms' | 'vars';
+export type CollisionSubject = EditableField | 'regex' | 'triggers' | 'search_terms' | 'vars' | 'form_fields';
 
 /**
  * The label a collision subject is named by, for `tRetainedLabel` — a
@@ -5157,6 +5591,8 @@ export function collisionLabelName(subject: CollisionSubject): RetainedLabel {
       return listLabelName(subject);
     case 'vars':
       return varsLabelName();
+    case 'form_fields':
+      return formFieldsLabelName();
     default:
       return fieldLabelName(subject);
   }
@@ -5297,6 +5733,14 @@ export interface MatchReapplyPlan {
    */
   readonly variables: VariablesReapplyVerdict;
   /**
+   * The drafted forms' verdict — Phase 4-10, ruling 22: keyed on the whole
+   * `form_fields` container for the shorthand form and on the whole `vars`
+   * container for a verbose one (`formsReapply` in `./formEditor.ts`). A
+   * shorthand *Add field* whose `[[name]]` went into the `form` layout reapplies
+   * together with that field's edit, or both collide.
+   */
+  readonly forms: FormsReapplyVerdict;
+  /**
    * The drafted fields the new projection does not hold in the state the draft
    * was built against, in field order, then the trigger side's and the list's
    * subjects (Phase 3-6-1).
@@ -5358,6 +5802,12 @@ export function planMatchReapply(
   const derivedSide = triggerSideDerivationOf(was, structure);
   const terms = listReapply(was.structure.searchTerms, structure.searchTerms, now.structure.searchTerms);
   const vars = variablesReapply(was.variables, structure.variables, now.variables);
+  const forms = formsReapply(
+    was.forms,
+    structure.forms,
+    now.forms,
+    excludedVariablesOf(was.variables, structure.variables)
+  );
   for (const field of EDITABLE_FIELDS) {
     if (contentSwitch !== null && switched !== null && (field === contentSwitch.from || field === contentSwitch.to)) {
       verdicts[field] = switchedFieldVerdict(was, buffers, contentSwitch, switched, field);
@@ -5400,11 +5850,20 @@ export function planMatchReapply(
         ? { text: verdict.intent.Set, removed: false }
         : { text: now[field].value, removed: verdict.kind === 'applicable' };
   } // End of the loop over the seventeen editable fields
-  writesAnything ||= side.verdict === 'applicable' || terms === 'applicable' || vars.verdict === 'applicable';
+  writesAnything ||=
+    side.verdict === 'applicable' ||
+    terms === 'applicable' ||
+    vars.verdict === 'applicable' ||
+    forms.verdict === 'applicable';
   const together = reapplyTogether(structure.variables, vars.verdict, verdicts);
+  // Phase 4-10: a shorthand *Add field* is half layout (the `form` field, walked
+  // above) and half definition. Its layout already on disk beside a definition
+  // still to write is half of one intention, as for a compound *Insert*.
+  const formApart =
+    forms.placeholderInserted && forms.verdict === 'applicable' && verdicts.form.kind === 'satisfied';
   const collisions: CollisionSubject[] = EDITABLE_FIELDS.filter(
     (field) =>
-      (verdicts[field].kind === 'collision' || together.includes(field)) &&
+      (verdicts[field].kind === 'collision' || together.includes(field) || (formApart && field === 'form')) &&
       !(field === 'trigger' && side.compound)
   );
   collisions.push(...side.subjects);
@@ -5414,12 +5873,18 @@ export function planMatchReapply(
   if (vars.verdict === 'collision' || together.length > 0) {
     collisions.push('vars');
   }
+  for (const subject of formApart ? ['form_fields' as const] : forms.subjects) {
+    if (!collisions.includes(subject)) {
+      collisions.push(subject);
+    }
+  } // End of the loop over the forms' collided containers
   return {
     verdicts,
     contentSwitch: switched,
     triggerSide: side,
     searchTerms: terms,
     variables: together.length > 0 ? 'collision' : vars.verdict,
+    forms: formApart ? 'collision' : forms.verdict,
     collisions,
     buffers: {
       ...rebuilt,
@@ -5429,7 +5894,8 @@ export function planMatchReapply(
           ? structure.side
           : triggerSideBufferOf(now.structure.trigger),
       searchTerms: rebuiltList(terms, structure.searchTerms, now.structure.searchTerms),
-      variables: vars.buffer
+      variables: vars.buffer,
+      forms: forms.buffer
     },
     writesAnything
   };
@@ -6327,6 +6793,8 @@ export function saveWithheldKey(code: SaveWithheld): TranslationKey {
       return 'browser.matchEditor.saveWithheld.varsWouldBeEmpty';
     case 'variableAdditionsCollide':
       return 'browser.matchEditor.saveWithheld.variableAdditionsCollide';
+    case 'formFieldsWouldBeEmpty':
+      return 'browser.matchEditor.saveWithheld.formFieldsWouldBeEmpty';
   }
 } // End of function saveWithheldKey()
 
@@ -7152,7 +7620,13 @@ function retainedDraftOf(
     ...fields,
     ...structureRowsOf(session.baseline, structure, side),
     // Phase 4-9: the drafted `vars`, only when the draft says something about it.
-    ...variableRowsOf(session.baseline.variables, structure.variables)
+    ...variableRowsOf(session.baseline.variables, structure.variables),
+    // Phase 4-10: the drafted forms, likewise.
+    ...formRowsRetained(
+      session.baseline.forms,
+      structure.forms,
+      excludedVariablesOf(session.baseline.variables, structure.variables)
+    )
   ];
 } // End of function retainedDraftOf()
 

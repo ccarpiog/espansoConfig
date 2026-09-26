@@ -62,7 +62,8 @@
  *   content key. The projection is read-only and cannot support a stronger
  *   promise (`CLAUDE.md` section 3);
  * - **a snippet that holds `vars` or `form_fields`, or whose draft adds a
- *   variable, is not recreated at all** (Phase 4-9, ruling 21 of
+ *   variable or (since Phase 4-10) a form field definition, is not recreated at
+ *   all** (Phase 4-9, ruling 21 of
  *   `docs/decisions/4-split-notes.md`): creation is variable-free, so the new
  *   snippet would keep its `{{references}}` and lose their definitions.
  *   {@link matchRecoveryAvailability} refuses it as `variablesNotCarried`, and the
@@ -273,6 +274,7 @@ import {
 } from './matchEditor';
 import { capturedList, intendedTexts, unreadableItem, type ListRefusal } from './matchLists';
 import { capturedVariables, carriesDefinitions } from './variableEditor';
+import { capturedForms, formsCarryDefinitions } from './formEditor';
 import type { RawSaveChoice } from './rawSave';
 import {
   enterReapply,
@@ -1628,7 +1630,9 @@ function revisionOf(
  *
  * {@link recoveryAvailability}, then ruling 21: a draft that
  * `carriesDefinitions` (`./variableEditor.ts`) — the snippet holds `vars` or
- * `form_fields`, or the draft adds a variable — is refused as
+ * `form_fields`, or the draft adds a variable — or, since Phase 4-10,
+ * `formsCarryDefinitions` (`./formEditor.ts`: the draft adds a form field
+ * definition) is refused as
  * `variablesNotCarried` rather than recreated without them. Asked **after** the
  * general checks, so a surface with no conflict still answers `noConflict` and
  * draws nothing, and **before** any destination is offered. The retained draft
@@ -1657,8 +1661,9 @@ export function matchRecoveryAvailability<S, O>(
   if (offer.kind !== 'offered' || conflict === null) {
     return offer;
   }
-  const retained = capturedVariables(copyOfDraft(conflict).variables);
-  return carriesDefinitions(baseline.variables, retained)
+  const draft = copyOfDraft(conflict);
+  const retained = capturedVariables(draft.variables);
+  return carriesDefinitions(baseline.variables, retained) || formsCarryDefinitions(capturedForms(draft.forms))
     ? { kind: 'unavailable', reason: 'variablesNotCarried' }
     : offer;
 } // End of function matchRecoveryAvailability()

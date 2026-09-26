@@ -1516,3 +1516,58 @@ fn an_existing_typed_form_setting_is_rewritten_as_plain_source() {
     );
     assert_no_text(&refused(FORMS, 0, &draft(&format!("{PRIVATE}: x"))));
 } // End of function an_existing_typed_form_setting_is_rewritten_as_plain_source()
+
+/// Phase 4-10: the form editor's exact wire draft for *Add field* on a CRLF
+/// file — the `CRLF_WIRE` literal of `src/lib/browser/formEditor.test.ts`,
+/// which that test pins as what the model emits — changes the `form` layout and
+/// adds the definition, and **every byte it did not ask to change** comes out
+/// identical: the lines before the layout, the existing definition, the next
+/// snippet and every one of their `\r\n` endings. The `\r` refusals of the
+/// layout box are the frontend's (load, edit, send); this is the separate check
+/// of the untouched bytes.
+#[test]
+fn the_form_editors_wire_draft_keeps_a_crlf_files_untouched_bytes() {
+    let head = "# CRLF forms (Phase 4-10). Neutral content only.\r\nmatches:\r\n  - trigger: ':crlf'\r\n    form: |\r\n";
+    let layout = "      Name: [[name]]\r\n";
+    let definitions = "    form_fields:\r\n      name:\r\n        type: text\r\n";
+    let tail = "  - trigger: ':after'\r\n    replace: 'kept'\r\n";
+    let source = format!("{head}{layout}{definitions}{tail}");
+    let view = the_match(&source, 0);
+    assert_eq!(
+        view.content.form.as_ref().map(|form| form.text.as_str()),
+        Some("Name: [[name]]\n"),
+        "the literal block decodes with a line feed, so the layout box may hold it"
+    );
+    let wire = r#"{"form":{"Set":"Name: [[name]][[when]]\n"},"form_intents":[{"InsertField":{"after":null,"field":{"name":"when","options":{"type":"text","default":null,"multiline":null,"values":null,"trim_string_values":null,"extra":[]}}}}],"form_fields":[]}"#;
+    let draft: MatchDraft = serde_json::from_str(wire).expect("the editor's draft reads");
+    let (_, patched) = planned(&source, 0, &draft);
+    // Untouched: everything before the layout's value, the existing definition
+    // and the next snippet, every line still ending `\r\n`.
+    assert!(patched.starts_with(head), "{patched:?}");
+    assert!(patched.ends_with(tail), "{patched:?}");
+    assert!(patched.contains(definitions), "{patched:?}");
+    // Exactly the two asked-for changes, and the new lines follow the file's
+    // own `\r\n` convention.
+    assert_eq!(
+        patched,
+        format!(
+            "{head}      Name: [[name]][[when]]\r\n{definitions}      when:\r\n        type: text\r\n{tail}"
+        )
+    );
+    assert_eq!(
+        shorthand_names(&patched, 0),
+        vec!["name".to_owned(), "when".to_owned()]
+    );
+    assert_eq!(
+        the_match(&patched, 0)
+            .content
+            .form
+            .as_ref()
+            .map(|form| form.text.clone()),
+        Some("Name: [[name]][[when]]\n".to_owned())
+    );
+    assert_eq!(
+        the_match(&patched, 1).source_text,
+        "trigger: ':after'\r\n    replace: 'kept'"
+    );
+} // End of function the_form_editors_wire_draft_keeps_a_crlf_files_untouched_bytes()

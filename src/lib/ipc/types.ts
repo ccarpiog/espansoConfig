@@ -3470,8 +3470,10 @@ export interface MatchDraft {
    */
   readonly var_intents: readonly VarsIntent[];
   /**
-   * Drafted intents about the shorthand `form_fields` — Phase 4-6. No production
-   * caller sends one yet.
+   * Drafted intents about the shorthand `form_fields` — Phase 4-6. The match
+   * editor sends them since Phase 4-10 (`formsDerivationOf` in
+   * `../browser/formEditor.ts`), as it does `form_fields` and a verbose form's
+   * `VariableDraft.params`, `fields` and `field_intents`.
    */
   readonly form_intents: readonly FormFieldIntent[];
 }

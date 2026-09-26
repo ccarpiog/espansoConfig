@@ -1629,7 +1629,17 @@ export type DraftFieldStatus =
   /** The key of a parameter a new variable would be born holding (Phase 4-9). */
   | 'parameterName'
   /** One value of the parameter named on the row above it (Phase 4-9). */
-  | 'parameterValue';
+  | 'parameterValue'
+  /** The name of a form field definition the save would add (Phase 4-10). */
+  | 'fieldAdded'
+  /** The name of a form field definition the save would take out (Phase 4-10). */
+  | 'fieldRemoved'
+  /** The name of a form field definition whose options the rows below change (Phase 4-10). */
+  | 'fieldEdited'
+  /** The key of a form field option the save would write (Phase 4-10). */
+  | 'optionName'
+  /** The value of the option named on the row above it (Phase 4-10). */
+  | 'optionValue';
 
 /**
  * One labelled piece of a draft a conflict retained.
@@ -1662,20 +1672,30 @@ export interface RetainedDraftField {
 /**
  * What one retained row is labelled by — Phase 4-9.
  *
- * Every {@link DetailFieldName}, and two the detail pane never draws as a field
- * label: `variableName`, the name of a drafted variable (the pane draws a
+ * Every {@link DetailFieldName}, and labels the detail pane never draws as a
+ * field label: `variableName`, the name of a drafted variable (the pane draws a
  * variable's name as its heading), and `vars`, the whole list of variables (a
- * container removal, and a reapply collision of the container). Kept out of
+ * container removal, and a reapply collision of the container); since Phase
+ * 4-10, `formFields` (a shorthand form's whole definitions container, in a
+ * collision), `formField` (one definition's name), `formOption` (one option's
+ * key or value) and `layout` (a verbose form's layout). Kept out of
  * `DetailFieldName` because that union is exactly what `describeMatch` emits,
  * which `detail.test.ts` pins in both directions.
  */
-export type RetainedLabel = DetailFieldName | 'variableName' | 'vars';
+export type RetainedLabel =
+  | DetailFieldName
+  | 'variableName'
+  | 'vars'
+  | 'formFields'
+  | 'formField'
+  | 'formOption'
+  | 'layout';
 
 /**
  * The dictionary key holding one retained label.
  *
  * @param label - The label.
- * @returns The key: the detail pane's own for a field, this phase's for the two.
+ * @returns The key: the detail pane's own for a field, a retained label's own otherwise.
  */
 export function retainedLabelKey(label: RetainedLabel): TranslationKey {
   switch (label) {
@@ -1683,6 +1703,14 @@ export function retainedLabelKey(label: RetainedLabel): TranslationKey {
       return 'browser.saveOutcome.label.variableName';
     case 'vars':
       return 'browser.saveOutcome.label.vars';
+    case 'formFields':
+      return 'browser.saveOutcome.label.formFields';
+    case 'formField':
+      return 'browser.saveOutcome.label.formField';
+    case 'formOption':
+      return 'browser.saveOutcome.label.formOption';
+    case 'layout':
+      return 'browser.saveOutcome.label.layout';
     default:
       return detailFieldKey(label);
   }
@@ -1776,6 +1804,16 @@ export function draftFieldStatusKey(status: DraftFieldStatus): TranslationKey {
       return 'browser.saveOutcome.field.parameterName';
     case 'parameterValue':
       return 'browser.saveOutcome.field.parameterValue';
+    case 'fieldAdded':
+      return 'browser.saveOutcome.field.fieldAdded';
+    case 'fieldRemoved':
+      return 'browser.saveOutcome.field.fieldRemoved';
+    case 'fieldEdited':
+      return 'browser.saveOutcome.field.fieldEdited';
+    case 'optionName':
+      return 'browser.saveOutcome.field.optionName';
+    case 'optionValue':
+      return 'browser.saveOutcome.field.optionValue';
   }
 } // End of function draftFieldStatusKey()
 

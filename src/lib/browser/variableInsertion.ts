@@ -64,8 +64,8 @@ import {
 /**
  * The content keys a `{{reference}}` is inserted into: the three bodies whose
  * references the Rust analysis counts (`Usage.body`). `image_path` and the
- * shorthand `form` layout are not offered — a layout's placeholders are `[[…]]`
- * and are Phase 4-10's.
+ * shorthand `form` layout are not offered — a layout's placeholders are `[[…]]`,
+ * put there by *Add field* (`addFormField` in `./matchEditor.ts`, Phase 4-10).
  */
 export type ReferenceField = 'replace' | 'markdown' | 'html';
 

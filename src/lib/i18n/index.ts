@@ -179,6 +179,14 @@ import {
 } from '../browser/saveOutcome';
 import { codePointLabel, invisibleKey, type InvisibleSegment } from '../browser/sourceText';
 import {
+  formAdditionRefusalKey,
+  formFieldRefusalKey,
+  formRowAdvisoryKey,
+  type FormAdditionRefusal,
+  type FormFieldRefusal,
+  type FormRowAdvisory
+} from '../browser/formEditor';
+import {
   variableAdditionRefusalKey,
   variableFieldRefusalKey,
   variableMoveRefusalKey,
@@ -884,6 +892,38 @@ export function tNameVerdict(verdict: NameVerdict): string {
 export function tInsertRefusal(refusal: InsertRefusal): string {
   return translate(locale.current, insertRefusalKey(refusal));
 } // End of function tInsertRefusal()
+
+/**
+ * Why a form's layout box or a definition's option box is shown and not edited —
+ * Phase 4-10.
+ *
+ * @param reason - The code, from `../browser/formEditor.ts`.
+ * @returns The translated sentence.
+ */
+export function tFormFieldRefusal(reason: FormFieldRefusal): string {
+  return translate(locale.current, formFieldRefusalKey(reason));
+} // End of function tFormFieldRefusal()
+
+/**
+ * Why *Add field* did nothing — Phase 4-10.
+ *
+ * @param refusal - The refusal, from `../browser/formEditor.ts`.
+ * @returns The translated sentence.
+ */
+export function tFormAdditionRefusal(refusal: FormAdditionRefusal): string {
+  return translate(locale.current, formAdditionRefusalKey(refusal));
+} // End of function tFormAdditionRefusal()
+
+/**
+ * What a form row says beside itself — Phase 4-10: a placeholder with no
+ * definition, or a definition-only row.
+ *
+ * @param advisory - The code, from `../browser/formEditor.ts`.
+ * @returns The translated sentence.
+ */
+export function tFormRowAdvisory(advisory: FormRowAdvisory): string {
+  return translate(locale.current, formRowAdvisoryKey(advisory));
+} // End of function tFormRowAdvisory()
 
 /**
  * Renders the cursor action's advisory, in the current language — Phase 3-5-1.
