@@ -113,6 +113,7 @@ fn candidate_through(
     }
     let mut touched = rewritten.clone();
     touched.extend(expectations.iter().map(|claim| claim.mapping_id));
+    touched.extend(sequences.iter().map(|claim| claim.sequence_id));
     let mut changed = rewritten.clone();
     changed.extend(sequences.iter().map(|claim| claim.sequence_id));
     let mut expectations = fold_expectations(&index, expectations, &changed)?;
@@ -785,3 +786,234 @@ fn a_removed_ambiguous_scalar_does_not_pay_for_a_corrupted_new_param() {
     assert!(rewrote, "the planned text quotes the new value");
     assert!(refused_as_ambiguous(&result), "{result:?}");
 } // End of function a_removed_ambiguous_scalar_does_not_pay_for_a_corrupted_new_param()
+
+// ---------------------------------------------------------------------------
+// Phase 4-5: a variable's nested lists — several new records at one boundary,
+// strings in a nested block list and in a nested flow list, and a record's
+// rewritten label — are verified by expectations, not by trusting the renderer
+// ---------------------------------------------------------------------------
+
+/// A neutral file with a `choice` variable holding a block `depends_on` and a
+/// block list of records, and a `random` one holding flow lists.
+const LIST_SOURCE: &str = concat!(
+    "matches:\n",
+    "  - trigger: ':l'\n",
+    "    replace: x\n",
+    "    vars:\n",
+    "      - name: c\n",
+    "        type: choice\n",
+    "        depends_on:\n",
+    "          - a\n",
+    "        params:\n",
+    "          values:\n",
+    "            - label: One\n",
+    "              id: one\n",
+    "      - name: r\n",
+    "        type: random\n",
+    "        depends_on: [c]\n",
+    "        params:\n",
+    "          choices: [p, q]\n",
+);
+
+/// The path of variable `index` of the one match of [`LIST_SOURCE`].
+fn list_variable(index: usize) -> DocumentPath {
+    item(0).with_key("vars").with_index(index)
+}
+
+/// One new `{label, id}` record.
+fn new_record(label: &str, id: &str) -> Vec<(String, ItemValue)> {
+    vec![
+        (
+            "label".to_owned(),
+            ItemValue::Entry(EntryValue::Scalar(label.to_owned())),
+        ),
+        (
+            "id".to_owned(),
+            ItemValue::Entry(EntryValue::Scalar(id.to_owned())),
+        ),
+    ]
+} // End of function new_record()
+
+/// The Phase 4-5 batches, labelled.
+fn phase_four_five_batches() -> Vec<(&'static str, Vec<DocumentEdit>)> {
+    let values = list_variable(0).with_key("params").with_key("values");
+    let records = InsertItem::several(
+        values.clone(),
+        ItemPlacement::End,
+        vec![new_record("Two", "true"), new_record("Three", "three")],
+    )
+    .expect("two records");
+    let depends_on = ScalarItemInsert::new(
+        list_variable(0).with_key("depends_on"),
+        ItemPlacement::End,
+        vec!["b".to_owned(), "true".to_owned()],
+    )
+    .expect("two values");
+    let flow = ScalarItemInsert::new(
+        list_variable(1).with_key("params").with_key("choices"),
+        ItemPlacement::End,
+        vec!["yes".to_owned()],
+    )
+    .expect("one value");
+    let label = ScalarEdit::new(values.with_index(0).with_key("label"), "Uno");
+    vec![
+        ("several records", vec![records.into()]),
+        ("nested block strings", vec![depends_on.into()]),
+        ("nested flow strings", vec![flow.into()]),
+        ("a record's label", vec![label.into()]),
+    ]
+} // End of function phase_four_five_batches()
+
+/// Runs `edits` over [`LIST_SOURCE`] with the planned text holding `from`
+/// rewritten once to `to`; answers whether one did, and the result.
+fn rewritten_over_lists(
+    edits: &[DocumentEdit],
+    from: &str,
+    to: &str,
+) -> (bool, Result<String, EditError>) {
+    let mut rewrote = false;
+    let result = candidate_through(
+        LIST_SOURCE,
+        edits,
+        |replacements| {
+            for replacement in replacements.iter_mut() {
+                if replacement.text.contains(from) {
+                    replacement.text = replacement.text.replacen(from, to, 1);
+                    rewrote = true;
+                }
+            }
+        },
+        |_| {},
+    );
+    (rewrote, result)
+} // End of function rewritten_over_lists()
+
+/// The honest runs verify and are `apply_edits`' own candidates.
+#[test]
+fn a_nested_lists_honest_candidate_verifies() {
+    for (what, edits) in phase_four_five_batches() {
+        let honest = candidate_through(LIST_SOURCE, &edits, |_| {}, |_| {});
+        let applied = apply_edits(LIST_SOURCE, &edits).map(|patched| patched.text);
+        assert_eq!(honest, applied, "{what}: the honest run is apply_edits'");
+        let honest = honest.unwrap_or_else(|error| panic!("{what}: verifies: {error:?}"));
+        assert_ne!(honest, LIST_SOURCE, "{what}: the batch changes something");
+    } // End of the loop over the Phase 4-5 batches
+    let records = &phase_four_five_batches()[0].1;
+    let text = apply_edits(LIST_SOURCE, records).expect("applies").text;
+    assert!(
+        text.contains(concat!(
+            "            - label: One\n",
+            "              id: one\n",
+            "            - label: Two\n",
+            "              id: 'true'\n",
+            "            - label: Three\n",
+            "              id: three\n",
+        )),
+        "{text}"
+    );
+} // End of function a_nested_lists_honest_candidate_verifies()
+
+/// Each corruption changes only bytes inside the planned replacement, so the
+/// byte oracle cannot see it; the item expectations, the scalar expectation or
+/// the inserted-text ambiguity property must.
+#[test]
+fn a_corrupted_nested_list_item_is_refused_by_verification() {
+    let cases: [(usize, &str, &str, &str); 12] = [
+        // Several records.
+        (
+            0,
+            "record as a flow mapping",
+            "            - label: Three\n              id: three\n",
+            "            - {label: Three, id: three}\n",
+        ),
+        (0, "ambiguous id", "id: 'true'", "id: true"),
+        (0, "wrong label", "label: Three", "label: Tres"),
+        (
+            0,
+            "second record dropped",
+            "            - label: Three\n              id: three\n",
+            "",
+        ),
+        (
+            0,
+            "record gains an entry",
+            "              id: three\n",
+            "              id: three\n              more: m\n",
+        ),
+        (
+            0,
+            "records swapped",
+            "label: Two\n              id: 'true'\n            - label: Three\n              id: three",
+            "label: Three\n              id: three\n            - label: Two\n              id: 'true'",
+        ),
+        (
+            0,
+            "record as a string",
+            "            - label: Three\n              id: three\n",
+            "            - Three\n",
+        ),
+        // Strings in a nested block list.
+        (1, "ambiguous string", "- 'true'", "- true"),
+        (1, "wrong string", "- b\n", "- d\n"),
+        // A string in a nested flow list.
+        (2, "ambiguous flow string", "'yes'", "yes"),
+        // A record's rewritten label.
+        (3, "wrong label value", "Uno", "Una"),
+        (3, "ambiguous label value", "Uno", "yes"),
+    ];
+    let batches = phase_four_five_batches();
+    for (batch, what, from, to) in cases {
+        let (label, edits) = &batches[batch];
+        let (rewrote, result) = rewritten_over_lists(edits, from, to);
+        assert!(rewrote, "{label}, {what}: the planned text holds {from:?}");
+        assert!(
+            matches!(result, Err(EditError::Verification(_))),
+            "{label}, {what}: refused by verification, got {result:?}"
+        );
+    } // End of the loop over the corruptions
+} // End of function a_corrupted_nested_list_item_is_refused_by_verification()
+
+/// **Regression (Phase 4-5): a new item's own mapping must be block style.**
+/// Ruling 8 writes a new non-empty collection in block style, and
+/// `verify_item_value` already held a nested mapping to it, but the item
+/// mapping itself was checked for its keys and values only: a candidate whose
+/// new item was rewritten as a flow mapping, saying the same thing, verified.
+/// Pre-existing API only — one new snippet in `matches` — so the test runs
+/// unchanged against the tree before the fix.
+#[test]
+fn a_new_item_rewritten_as_a_flow_mapping_is_refused() {
+    let edits: Vec<DocumentEdit> = vec![InsertItem::at(
+        DocumentPath::root(0).with_key("matches"),
+        ItemPlacement::End,
+        vec![
+            ("trigger".to_owned(), ":n".to_owned()),
+            ("replace".to_owned(), "new".to_owned()),
+        ],
+    )
+    .into()];
+    let honest = candidate_through(SOURCE, &edits, |_| {}, |_| {});
+    assert!(honest.is_ok(), "the honest run verifies: {honest:?}");
+    let mut rewrote = false;
+    let result = candidate_through(
+        SOURCE,
+        &edits,
+        |replacements| {
+            for replacement in replacements.iter_mut() {
+                let from = "  - trigger: ':n'\n    replace: new\n";
+                if replacement.text.contains(from) {
+                    replacement.text =
+                        replacement
+                            .text
+                            .replacen(from, "  - {trigger: ':n', replace: new}\n", 1);
+                    rewrote = true;
+                }
+            }
+        },
+        |_| {},
+    );
+    assert!(rewrote, "the planned text holds the new item");
+    assert!(
+        matches!(result, Err(EditError::Verification(_))),
+        "a flow-style new item is refused by verification, got {result:?}"
+    );
+} // End of function a_new_item_rewritten_as_a_flow_mapping_is_refused()

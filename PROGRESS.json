@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T13:12:52Z",
+  "updated": "2026-09-26T14:10:01Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 4, variables and forms, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1254,13 +1254,17 @@
       "status": "done",
       "summary": "Core inserts, removes and reorders local variables of all nine kinds, with verifiers that refuse corrupted nested renderings.",
       "risk": "high",
-      "review": "docs/reviews/4-4.md"
+      "review": "docs/reviews/4-4.md",
+      "commit": "d028708"
     },
     {
       "id": "4-5",
       "title": "Variable lists and labelled choices",
-      "status": "queued",
-      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "status": "done",
+      "summary": "Core adds, removes and edits items in variable lists and choice label/id records, keeping list style and shape.",
+      "risk": "high",
+      "review": "ship-with-fixes (Codex), docs/reviews/4-5.md",
+      "narrative": "docs/decisions/4-5-notes.md"
     },
     {
       "id": "4-6",

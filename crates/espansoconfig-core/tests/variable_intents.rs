@@ -988,11 +988,13 @@ fn the_closed_surface_admits_a_new_variable_and_nothing_near_it() {
             variable_fields("echo"),
         )
         .into(),
-        // One segment deeper than a variable.
+        // One segment deeper than a variable, in a list that is not one of the
+        // four Phase 4-5 admits (`depends_on[0]` is inside since then).
         RemoveItem::new(
             vars.clone()
                 .with_index(0)
-                .with_key("depends_on")
+                .with_key("params")
+                .with_key("layout")
                 .with_index(0),
         )
         .into(),

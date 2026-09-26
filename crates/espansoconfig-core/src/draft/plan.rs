@@ -11,6 +11,9 @@ use crate::draft::match_draft::{
 };
 use crate::draft::new_variable::{NewVariable, VarsIntent};
 use crate::draft::sequence::{ListPlacement, MatchStructure, SequenceIntent, TriggerSwitch};
+use crate::draft::variable_list::{
+    ChoiceRecordField, NewListItems, VariableList, VariableListIntent, ID_KEY, LABEL_KEY,
+};
 use crate::model::{
     FieldView, MappingPresence, MatchView, ScalarView, SequencePresence, UnknownReason, ValueKind,
     ValueView, VariableView,
@@ -102,6 +105,16 @@ use crate::patch::{
 /// scalars is lifted in the same step — the list was shown in full — and a draft
 /// that would leave `params:` with no entry is refused rather than turned into a
 /// null ([`DraftError::ParamsWouldBeEmpty`], ruling 8).
+///
+/// # A variable's lists (Phase 4-5)
+///
+/// [`VariableDraft::lists`], [`VariableDraft::depends_on`] and
+/// [`VariableDraft::records`] add, remove and rewrite items of an existing
+/// variable's `depends_on`, `values`, `choices` and `args` — strings, and flat
+/// `{label, id}` records in a `choice`'s `values`. They are planned per drafted
+/// variable, after its scalars, by `plan_variable_lists`; their contradictions
+/// are refused at intent level beside step 5's
+/// ([`DraftError::VariableListIntentsConflict`]).
 ///
 /// # The order of the checks is the contract
 ///
@@ -307,6 +320,7 @@ pub fn plan_match_edits_with(
     check_new_keys_are_admissible(draft)?;
     check_vars_intents_are_coherent(view, draft)?;
     check_new_variables_are_admissible(view, draft)?;
+    check_variable_lists_are_coherent(view, draft)?;
 
     let entries = visible_entries(view);
     let mut edits: Vec<DocumentEdit> = Vec::new();
@@ -1312,6 +1326,35 @@ fn check_no_index_is_drafted_twice(draft: &MatchDraft) -> Result<(), DraftError>
                 variable: variable.index,
             },
         )?;
+        // Phase 4-5: a `depends_on` item and a `{label, id}` record are
+        // addresses too, and a record saying nothing is not an intent.
+        let target = |list: VariableList, item: usize| DraftTarget::VariableListItem {
+            variable: variable.index,
+            list,
+            item,
+        };
+        if let Some((item, first, second)) = repeated_item_index(&variable.depends_on) {
+            return Err(DraftError::TargetDraftedTwice {
+                target: target(VariableList::DependsOn, item),
+                first,
+                second,
+            });
+        }
+        let records: Vec<(usize, usize)> = variable
+            .records
+            .iter()
+            .enumerate()
+            .filter(|(_, record)| !record.is_unchanged())
+            .map(|(position, record)| (position, record.index))
+            .collect();
+        let indices: Vec<usize> = records.iter().map(|(_, index)| *index).collect();
+        if let Some((item, first, second)) = repeated_index(&indices) {
+            return Err(DraftError::TargetDraftedTwice {
+                target: target(VariableList::Values, item),
+                first: records[first].0,
+                second: records[second].0,
+            });
+        }
     } // End of the loop over the drafted variables
 
     let fields: Vec<usize> = draft.form_fields.iter().map(|field| field.index).collect();
@@ -1636,6 +1679,7 @@ fn plan_vars(
         for field in VariableField::ALL {
             plan_variable_scalar(variable, drafted, &at, field, edits)?;
         } // End of the loop over the variable's schema-known scalars
+        plan_variable_lists(variable, drafted, &at, edits, nested)?;
         if drafted.params.is_empty() && drafted.insert_params.is_empty() {
             continue;
         }
@@ -1744,9 +1788,19 @@ fn plan_new_params(
             .iter()
             .any(|drafted| drafted.index == entry && drafted.value == DraftField::Remove)
     };
+    // A kind list whose items the draft adds or removes is not an anchor either
+    // (Phase 4-5), for `plan_insertions`' reason one level down: an insertion
+    // after its last item and an insertion after the whole entry are the same
+    // offset, and a removal of its last item ends there.
+    let items_change = |entry: usize| {
+        drafted.lists.iter().any(|intent| {
+            intent.list().kind() == Some(variable.kind)
+                && list_entry(variable, intent.list()) == Some(entry)
+        })
+    };
     let anchor = (0..variable.params.len())
         .rev()
-        .find(|&entry| !removed(entry) && !removed(entry + 1))
+        .find(|&entry| !removed(entry) && !removed(entry + 1) && !items_change(entry))
         .ok_or(DraftError::NoParamInsertionAnchor { variable: index })?;
     let sibling = nameable_key(
         &variable.params,
@@ -1773,6 +1827,504 @@ fn plan_new_params(
     }
     Ok(())
 } // End of function plan_new_params()
+
+/// One list of one existing variable, resolved against the projection (Phase
+/// 4-5).
+struct ResolvedList<'view> {
+    /// The path of the sequence node itself.
+    path: DocumentPath,
+    /// Its projected items, in source order.
+    items: &'view [ValueView],
+    /// Whether it is written between brackets (`[]` included).
+    flow: bool,
+    /// The index of the `params` entry holding a kind list; `None` for
+    /// `depends_on`.
+    entry: Option<usize>,
+}
+
+/// The index of the `params` entry whose decoded key is `list`'s, when there
+/// is one — the first such entry, which is the one the projection describes.
+fn list_entry(variable: &VariableView, list: VariableList) -> Option<usize> {
+    list.kind()?;
+    variable.params.iter().position(|field| {
+        field
+            .key
+            .as_ref()
+            .is_some_and(|key| key.decoded && key.text == list.key())
+    })
+} // End of function list_entry()
+
+/// Resolves one of a variable's four lists, or refuses by name (Phase 4-5).
+///
+/// In order: a kind list on a variable of another kind
+/// ([`DraftError::VariableListIsNotOfItsKind`]); a kind list inside a `params`
+/// written between braces ([`DraftError::ParamsIsAFlowMapping`] — the list is
+/// then inside a flow collection, which this engine never edits by item); no
+/// such list ([`DraftError::VariableListAbsent`], also when `params` is absent,
+/// empty or not a mapping); a key two entries of `params` share
+/// ([`DraftError::TargetKeyIsAmbiguous`], through [`nameable_key`]); and a key
+/// holding something that is not a list
+/// ([`DraftError::VariableListHasAnUnsupportedShape`]).
+fn resolve_variable_list<'view>(
+    variable: &'view VariableView,
+    index: usize,
+    at: &DocumentPath,
+    list: VariableList,
+) -> Result<ResolvedList<'view>, DraftError> {
+    let absent = DraftError::VariableListAbsent {
+        variable: index,
+        list,
+    };
+    let (presence, items, path, entry) = match list.kind() {
+        None => (
+            &variable.depends_on_presence,
+            variable.depends_on.as_slice(),
+            at.clone().with_key(list.key()),
+            None,
+        ),
+        Some(kind) => {
+            if kind != variable.kind {
+                return Err(DraftError::VariableListIsNotOfItsKind {
+                    variable: index,
+                    list,
+                });
+            }
+            if let MappingPresence::Entries { flow: true, .. } = variable.params_presence {
+                return Err(DraftError::ParamsIsAFlowMapping { variable: index });
+            }
+            let entry = list_entry(variable, list).ok_or(absent.clone())?;
+            let target = DraftTarget::Param {
+                variable: index,
+                entry,
+            };
+            let key = nameable_key(&variable.params, entry, target)?;
+            let presence = variable
+                .list_param_presence
+                .as_ref()
+                .ok_or(absent.clone())?;
+            let items = variable.params[entry]
+                .value
+                .as_sequence()
+                .unwrap_or_default();
+            let path = at.clone().with_key(PARAMS_KEY).with_key(key);
+            (presence, items, path, Some(entry))
+        }
+    };
+    let flow = match presence {
+        SequencePresence::Absent {} => return Err(absent),
+        SequencePresence::UnsupportedShape { found, .. } => {
+            return Err(DraftError::VariableListHasAnUnsupportedShape {
+                variable: index,
+                list,
+                found: *found,
+            })
+        }
+        SequencePresence::Empty { .. } => true,
+        SequencePresence::Items { flow, .. } => *flow,
+    };
+    Ok(ResolvedList {
+        path,
+        items,
+        flow,
+        entry,
+    })
+} // End of function resolve_variable_list()
+
+/// The shapes a list's existing items have (Phase 4-5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ItemShapes {
+    /// No item at all.
+    None,
+    /// Every item is a scalar.
+    Strings,
+    /// Every item is a mapping — a `{label, id}` record, or something like one.
+    Records,
+    /// Anything else: shapes mixed, or an item that is neither.
+    Mixed,
+}
+
+/// Classifies `items` ([`ItemShapes`]).
+fn item_shapes(items: &[ValueView]) -> ItemShapes {
+    if items.is_empty() {
+        ItemShapes::None
+    } else if items
+        .iter()
+        .all(|item| matches!(item, ValueView::Scalar(_)))
+    {
+        ItemShapes::Strings
+    } else if items
+        .iter()
+        .all(|item| matches!(item, ValueView::Mapping(_)))
+    {
+        ItemShapes::Records
+    } else {
+        ItemShapes::Mixed
+    }
+} // End of function item_shapes()
+
+/// Whether an item of `drafted`'s `list` at `item` is also **rewritten** by the
+/// draft (Phase 4-5): a `depends_on` item through
+/// [`VariableDraft::depends_on`], a record through [`VariableDraft::records`],
+/// and a string of a kind list through its `params` entry's
+/// [`EntryDraft::items`].
+fn list_item_is_rewritten(
+    drafted: &VariableDraft,
+    list: VariableList,
+    entry: Option<usize>,
+    item: usize,
+) -> bool {
+    let by_item = |items: &[ItemDraft]| {
+        items
+            .iter()
+            .any(|drafted| drafted.index == item && !drafted.value.is_unchanged())
+    };
+    let by_entry = entry.is_some_and(|entry| {
+        drafted
+            .params
+            .iter()
+            .any(|drafted| drafted.index == entry && by_item(&drafted.items))
+    });
+    let by_record = list.takes_records()
+        && drafted
+            .records
+            .iter()
+            .any(|record| record.index == item && !record.is_unchanged());
+    match list {
+        VariableList::DependsOn => by_item(&drafted.depends_on),
+        _ => by_entry || by_record,
+    }
+} // End of function list_item_is_rewritten()
+
+/// Refuses list intents of one drafted variable that contradict each other or
+/// another intent of the draft (Phase 4-5).
+///
+/// **Intent level, and before any diffing**, for
+/// [`check_no_index_is_drafted_twice`]'s reason. It reads the view for the list
+/// lengths only, so that two insertions landing at one place are recognised
+/// however they were spelled; a list the view cannot resolve is left to the
+/// planner, which refuses it by name.
+///
+/// The rules, each a [`DraftError::VariableListIntentsConflict`] naming the
+/// variable and the list:
+///
+/// 1. a kind list carries no list intent while its own `params` entry is `Set`
+///    or removed;
+/// 2. one item is removed at most once, and a removed item is not also
+///    rewritten ([`list_item_is_rewritten`]);
+/// 3. two insertions into one list do not land at one place;
+/// 4. an insertion does not land exactly where the same draft removes an item.
+fn check_variable_lists_are_coherent(
+    view: &MatchView,
+    draft: &MatchDraft,
+) -> Result<(), DraftError> {
+    for drafted in &draft.vars {
+        let index = drafted.index;
+        let (Some(variable), Some(at)) = (
+            view.vars.get(index),
+            view.vars
+                .get(index)
+                .and_then(|variable| variable.path.clone()),
+        ) else {
+            continue;
+        };
+        for (position, intent) in drafted.lists.iter().enumerate() {
+            let list = intent.list();
+            let conflict = DraftError::VariableListIntentsConflict {
+                variable: index,
+                list,
+            };
+            let Ok(resolved) = resolve_variable_list(variable, index, &at, list) else {
+                continue;
+            };
+            if let Some(entry) = resolved.entry {
+                let entry_drafted = drafted
+                    .params
+                    .iter()
+                    .any(|held| held.index == entry && !held.value.is_unchanged());
+                if entry_drafted {
+                    return Err(conflict);
+                }
+            }
+            let length = resolved.items.len();
+            let before = &drafted.lists[..position];
+            match intent {
+                VariableListIntent::RemoveItem { index: item, .. } => {
+                    let removed_twice = before.iter().any(|earlier| {
+                        matches!(earlier, VariableListIntent::RemoveItem { list: held, index: at }
+                            if *held == list && at == item)
+                    });
+                    if removed_twice || list_item_is_rewritten(drafted, list, resolved.entry, *item)
+                    {
+                        return Err(conflict);
+                    }
+                }
+                VariableListIntent::InsertItems { at: placement, .. } => {
+                    let landing = |at: &ListPlacement| ItemPlacement::from(*at).items_above(length);
+                    let lands = landing(placement);
+                    let shares_a_landing = before.iter().any(|earlier| {
+                        matches!(earlier, VariableListIntent::InsertItems { list: held, at: other, .. }
+                            if *held == list && landing(other) == lands)
+                    });
+                    let lands_on_a_removal = lands.is_some_and(|lands| {
+                        drafted.lists.iter().any(|other| {
+                            matches!(other, VariableListIntent::RemoveItem { list: held, index }
+                                if *held == list && *index == lands)
+                        })
+                    });
+                    if shares_a_landing || lands_on_a_removal {
+                        return Err(conflict);
+                    }
+                }
+            } // End of the match over what this intent does
+        } // End of the loop over this variable's list intents
+    } // End of the loop over the drafted variables
+    Ok(())
+} // End of function check_variable_lists_are_coherent()
+
+/// Plans everything one drafted variable says about its four lists (Phase 4-5):
+/// rewritten `depends_on` items, rewritten `{label, id}` records, and items
+/// added or removed.
+///
+/// | Draft | Edit |
+/// |---|---|
+/// | a `depends_on` [`ItemDraft`] | one [`ScalarEdit`] when the value differs |
+/// | a [`crate::draft::ChoiceRecordDraft`] | one [`ScalarEdit`] per entry that differs; every other entry of the record is untouched |
+/// | [`VariableListIntent::InsertItems`] of strings | one [`ScalarItemInsert`] — block, or between a flow list's brackets |
+/// | [`VariableListIntent::InsertItems`] of records | one [`InsertItem::several`], block lists only |
+/// | [`VariableListIntent::RemoveItem`] | one [`RemoveItem`], which takes the item's own comments with it |
+///
+/// String and record shapes stay distinct: new items must have the shape every
+/// existing item has, records only in a `choice`'s `values`
+/// ([`DraftError::VariableListItemShapeMismatch`]); a record is never written
+/// into or taken out of a flow list, and nothing is taken out of a flow list
+/// holding anything but strings ([`DraftError::VariableListIsAFlowList`]); a
+/// removed item is a string or a **flat** record, never one holding a
+/// collection ([`DraftError::NestedRemovalWouldDiscardUnshownStructure`]); and
+/// removing every item is [`DraftError::VariableListWouldBeEmpty`].
+fn plan_variable_lists(
+    variable: &VariableView,
+    drafted: &VariableDraft,
+    at: &DocumentPath,
+    edits: &mut Vec<DocumentEdit>,
+    nested: &mut Vec<NestedKeys>,
+) -> Result<(), DraftError> {
+    let index = drafted.index;
+    let item_target = |list: VariableList, item: usize| DraftTarget::VariableListItem {
+        variable: index,
+        list,
+        item,
+    };
+    // Rewritten `depends_on` items.
+    for item in &drafted.depends_on {
+        let target = item_target(VariableList::DependsOn, item.index);
+        let value = match &item.value {
+            DraftField::Unchanged => continue,
+            DraftField::Remove => return Err(DraftError::NestedItemRemoval { target }),
+            DraftField::Set(value) => value,
+        };
+        let resolved = resolve_variable_list(variable, index, at, VariableList::DependsOn)?;
+        let existing = resolved
+            .items
+            .get(item.index)
+            .ok_or(DraftError::TargetDoesNotExist {
+                target,
+                length: resolved.items.len(),
+            })?;
+        let scalar = existing
+            .as_scalar()
+            .ok_or(DraftError::NotAScalar { target })?;
+        let path = resolved.path.with_index(item.index);
+        if let Some(edit) = plan_scalar(scalar, value, path, target)? {
+            edits.push(edit);
+        }
+    } // End of the loop over the drafted `depends_on` items
+
+    // Rewritten `{label, id}` records.
+    for record in drafted
+        .records
+        .iter()
+        .filter(|record| !record.is_unchanged())
+    {
+        let list = VariableList::Values;
+        let resolved = resolve_variable_list(variable, index, at, list)?;
+        let target = item_target(list, record.index);
+        let existing = resolved
+            .items
+            .get(record.index)
+            .ok_or(DraftError::TargetDoesNotExist {
+                target,
+                length: resolved.items.len(),
+            })?;
+        let ValueView::Mapping(fields) = existing else {
+            return Err(DraftError::NotAChoiceRecord {
+                target,
+                found: kind_of(existing),
+            });
+        };
+        let record_path = resolved.path.clone().with_index(record.index);
+        for field in ChoiceRecordField::ALL {
+            let Some(value) = record.field(field) else {
+                continue;
+            };
+            let target = DraftTarget::ChoiceRecordField {
+                variable: index,
+                record: record.index,
+                field,
+            };
+            let entry = fields
+                .iter()
+                .position(|held| {
+                    held.key
+                        .as_ref()
+                        .is_some_and(|key| key.decoded && key.text == field.key())
+                })
+                .ok_or(DraftError::ChoiceRecordFieldHasNoScalar { target })?;
+            let key = nameable_key(fields, entry, target)?;
+            let scalar = fields[entry]
+                .value
+                .as_scalar()
+                .ok_or(DraftError::ChoiceRecordFieldHasNoScalar { target })?;
+            let path = record_path.clone().with_key(key);
+            if let Some(edit) = plan_scalar(scalar, value, path, target)? {
+                edits.push(edit);
+            }
+        } // End of the loop over the record's two entries
+        nested.push(NestedKeys::new(record_path, nameable_keys(fields)));
+    } // End of the loop over the drafted records
+
+    // Items added and removed.
+    let mut removals: Vec<(VariableList, usize)> = Vec::new();
+    for intent in &drafted.lists {
+        let list = intent.list();
+        let resolved = resolve_variable_list(variable, index, at, list)?;
+        if resolved.entry.is_some() {
+            let params = at.clone().with_key(PARAMS_KEY);
+            nested.push(NestedKeys::new(params, nameable_keys(&variable.params)));
+        }
+        let length = resolved.items.len();
+        match intent {
+            VariableListIntent::InsertItems {
+                at: placement,
+                items,
+                ..
+            } => {
+                if let ListPlacement::After { index: after } = placement {
+                    if *after >= length {
+                        return Err(DraftError::TargetDoesNotExist {
+                            target: item_target(list, *after),
+                            length,
+                        });
+                    }
+                }
+                let mismatch = DraftError::VariableListItemShapeMismatch {
+                    variable: index,
+                    list,
+                };
+                let shapes = item_shapes(resolved.items);
+                let fits = match items {
+                    NewListItems::Strings(_) => {
+                        matches!(shapes, ItemShapes::None | ItemShapes::Strings)
+                    }
+                    NewListItems::Records(_) => {
+                        list.takes_records()
+                            && matches!(shapes, ItemShapes::None | ItemShapes::Records)
+                    }
+                };
+                if !fits {
+                    return Err(mismatch);
+                }
+                let placement = ItemPlacement::from(*placement);
+                let edit: DocumentEdit = match items {
+                    NewListItems::Strings(strings) => {
+                        ScalarItemInsert::new(resolved.path, placement, strings.to_vec())
+                            .ok_or(mismatch)?
+                            .into()
+                    }
+                    NewListItems::Records(_) if resolved.flow => {
+                        return Err(DraftError::VariableListIsAFlowList {
+                            variable: index,
+                            list,
+                        })
+                    }
+                    NewListItems::Records(records) => {
+                        let items = records
+                            .to_vec()
+                            .into_iter()
+                            .map(|record| {
+                                vec![
+                                    (
+                                        LABEL_KEY.to_owned(),
+                                        ItemValue::Entry(EntryValue::Scalar(record.label)),
+                                    ),
+                                    (
+                                        ID_KEY.to_owned(),
+                                        ItemValue::Entry(EntryValue::Scalar(record.id)),
+                                    ),
+                                ]
+                            })
+                            .collect();
+                        InsertItem::several(resolved.path, placement, items)
+                            .ok_or(mismatch)?
+                            .into()
+                    }
+                };
+                edits.push(edit);
+            }
+            VariableListIntent::RemoveItem { index: item, .. } => {
+                let target = item_target(list, *item);
+                let existing = resolved
+                    .items
+                    .get(*item)
+                    .ok_or(DraftError::TargetDoesNotExist { target, length })?;
+                let flow_refusal = DraftError::VariableListIsAFlowList {
+                    variable: index,
+                    list,
+                };
+                // A flow list loses an item between its brackets only while
+                // every item is a string (Phase 3-3's engine).
+                if resolved.flow && item_shapes(resolved.items) != ItemShapes::Strings {
+                    return Err(flow_refusal);
+                }
+                match existing {
+                    ValueView::Scalar(_) => {}
+                    ValueView::Mapping(fields) if list.takes_records() => {
+                        let flat = fields
+                            .iter()
+                            .all(|field| field.key.is_some() && field.value.as_scalar().is_some());
+                        if !flat {
+                            return Err(DraftError::NestedRemovalWouldDiscardUnshownStructure {
+                                target,
+                                found: ValueKind::Mapping,
+                            });
+                        }
+                    }
+                    _ => return Err(DraftError::NotAScalar { target }),
+                }
+                edits.push(RemoveItem::new(resolved.path.with_index(*item)).into());
+                removals.push((list, length));
+            }
+        } // End of the match over what the intent asks for
+    } // End of the loop over the drafted list intents
+
+    // Removing the last item is explicit (ruling 8): the removals are resolved
+    // and distinct by now, so counting them is counting items.
+    for list in VariableList::ALL {
+        let taken: Vec<usize> = removals
+            .iter()
+            .filter(|(held, _)| *held == list)
+            .map(|(_, length)| *length)
+            .collect();
+        if let Some(length) = taken.first() {
+            if taken.len() >= *length {
+                return Err(DraftError::VariableListWouldBeEmpty {
+                    variable: index,
+                    list,
+                });
+            }
+        }
+    } // End of the loop over the four lists
+    Ok(())
+} // End of function plan_variable_lists()
 
 /// Refuses a new author-named key whose **text** breaks ruling 7 or names one of
 /// ruling 4's typed settings, and two new keys of one variable draft that decode

@@ -687,9 +687,11 @@ fn the_engine_refuses_a_switch_it_does_not_reshape() {
 // ---------------------------------------------------------------------------
 
 /// **Acceptance: a request outside `triggers`/`search_terms` is refused by the
-/// closed-surface audit** — a `vars` item, a `depends_on` item, a `params`
-/// list item and a `matches` item, whether inserted or removed, and a list
-/// field or a switch under any other key.
+/// closed-surface audit** — a `params` list item that is not a kind list, a
+/// form field's list item and a `matches` item, whether inserted or removed,
+/// and a list field or a switch under any other key. Since Phase 4-5 the items
+/// of a variable's four lists (`depends_on`, `values`, `choices`, `args`) are
+/// inside, and asserted below beside the two match-level lists.
 #[test]
 fn a_list_edit_outside_the_two_lists_is_refused_by_the_audit() {
     let here = mapping(0);
@@ -699,11 +701,18 @@ fn a_list_edit_outside_the_two_lists_is_refused_by_the_audit() {
     // removable since then, and `variable_intents.rs` pins that shape. Every
     // other edit here is still outside.
     let outside: Vec<DocumentEdit> = vec![
-        RemoveItem::new(variable.clone().with_key("depends_on").with_index(0)).into(),
         RemoveItem::new(
             variable
                 .clone()
                 .with_key("params")
+                .with_key("layout")
+                .with_index(0),
+        )
+        .into(),
+        RemoveItem::new(
+            here.clone()
+                .with_key("form_fields")
+                .with_key("f")
                 .with_key("values")
                 .with_index(0),
         )
@@ -713,14 +722,17 @@ fn a_list_edit_outside_the_two_lists_is_refused_by_the_audit() {
             .expect("one value")
             .into(),
         ScalarItemInsert::new(
-            variable.clone().with_key("depends_on"),
+            variable.clone().with_key("params").with_key("layout"),
             ItemPlacement::End,
             one("x"),
         )
         .expect("one value")
         .into(),
         ScalarItemInsert::new(
-            variable.clone().with_key("params").with_key("values"),
+            here.clone()
+                .with_key("form_fields")
+                .with_key("f")
+                .with_key("values"),
             ItemPlacement::End,
             one("x"),
         )
@@ -783,6 +795,30 @@ fn a_list_edit_outside_the_two_lists_is_refused_by_the_audit() {
             "triggers",
             EntryValue::ScalarList(one("x")),
         )
+        .into(),
+        // Phase 4-5: a variable's four lists.
+        RemoveItem::new(variable.clone().with_key("depends_on").with_index(0)).into(),
+        RemoveItem::new(
+            variable
+                .clone()
+                .with_key("params")
+                .with_key("values")
+                .with_index(0),
+        )
+        .into(),
+        ScalarItemInsert::new(
+            variable.clone().with_key("depends_on"),
+            ItemPlacement::End,
+            one("x"),
+        )
+        .expect("one value")
+        .into(),
+        ScalarItemInsert::new(
+            variable.clone().with_key("params").with_key("args"),
+            ItemPlacement::End,
+            one("x"),
+        )
+        .expect("one value")
         .into(),
     ];
     for edit in inside {

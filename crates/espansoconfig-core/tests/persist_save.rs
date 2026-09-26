@@ -55,7 +55,7 @@ use espansoconfig_core::draft::{NewContent, NewMatch, NewTrigger};
 use espansoconfig_core::model::DocumentContext;
 use espansoconfig_core::patch::{
     apply_scalar_edit, path_to, DocumentEdit, DocumentPath, DuplicateItem, EditError, InsertItem,
-    ItemPlacement, RemoveItem, ScalarEdit,
+    ItemPlacement, ItemValue, RemoveItem, ScalarEdit,
 };
 use espansoconfig_core::persist::{
     lock_path, save_document, Acknowledgement, SaveContent, SaveError, SaveRequest, SaveVerdict,
@@ -1283,6 +1283,46 @@ fn the_finding_names_the_slot_the_insertion_landed_for_every_placement() {
         );
     } // End of the loop over the three placements
 } // End of function the_finding_names_the_slot_the_insertion_landed_for_every_placement()
+
+/// **Regression (Phase 4-5 review):** one insertion writing several matches is
+/// judged item by item. `InsertItem::several` can write a run of new snippets,
+/// and the suspicion used to be computed for the run's first item only, so a
+/// unique first item hid a later one repeating a trigger of the file.
+#[test]
+fn every_item_of_a_several_item_insertion_is_checked_for_a_repeated_trigger() {
+    let (_directory, target) = fixture(CLEAN);
+    let before = revision_on_disk(&target);
+    let fields = |trigger: &str| {
+        new_match(trigger, "a body")
+            .entries()
+            .expect("no option that is not plain source")
+            .into_iter()
+            .map(|(key, value)| (key, ItemValue::Entry(value)))
+            .collect::<Vec<_>>()
+    };
+    let edits = [DocumentEdit::InsertItem(
+        InsertItem::several(
+            DocumentPath::parse("matches").expect("the test's own path parses"),
+            ItemPlacement::End,
+            vec![fields(":fresh"), fields(":one")],
+        )
+        .expect("two items"),
+    )];
+    let refused = save(&target, before, &edits, &Acknowledgement::none())
+        .expect_err("the second new item repeats `:one`");
+    let refusal = match &refused {
+        SaveError::Refused(refusal) => refusal,
+        other => panic!("expected the semantic gate, got {other}"),
+    };
+    let found = repetitions(&refusal.findings);
+    assert_eq!(found.len(), 1, "{:?}", refusal.findings);
+    assert_eq!(
+        found[0].path,
+        Some(DocumentPath::parse("matches[3]").expect("the test's own path parses")),
+        "the finding names the second new item, where it landed"
+    );
+    assert_refused_without_writing(&target, before, &refused, "a later repeated item");
+} // End of function every_item_of_a_several_item_insertion_is_checked_for_a_repeated_trigger()
 
 /// Four matches, the last of which repeats no trigger — the fixture the mixed
 /// insert/remove batches below shift around.

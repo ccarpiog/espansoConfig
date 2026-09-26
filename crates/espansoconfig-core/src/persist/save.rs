@@ -1563,8 +1563,8 @@ fn findings_of(
             ));
         }
     } // End of the loop over the batch's edits, of which at most one duplicates
-      // The insertion's own suspicion, for **every** insertion in the batch and
-      // in batch order. The address each new item took is
+      // The insertion's own suspicion, for **every** new item of every insertion
+      // in the batch, in batch order. The address each new item took is
       // `crate::patch::insertion_landings`, which reads the whole batch: a
       // removal above the anchor shifts the arrival left and a second insertion
       // above it shifts it right, so the placement and the candidate's own length
@@ -1574,13 +1574,15 @@ fn findings_of(
             continue;
         };
         let items = matches_directly_in(&view, insertion.sequence());
-        let landed = insertion_landings(edits, insertion.sequence(), items.len())
+        // Every item of the insertion, not its first alone: since Phase 4-5 one
+        // insertion may write several (`InsertItem::several`), and each new item
+        // owes its own suspicion (the 4-5 review's first finding).
+        let landings = insertion_landings(edits, insertion.sequence(), items.len())
             .into_iter()
-            .find_map(|(at, landed)| (at == position).then_some(landed));
-        let Some(landed) = landed else {
-            continue;
-        };
-        findings.extend(new_match_repeats_literal_trigger(&items, landed, revision));
+            .filter_map(|(at, landed)| (at == position).then_some(landed));
+        for landed in landings {
+            findings.extend(new_match_repeats_literal_trigger(&items, landed, revision));
+        } // End of the loop over the items this insertion wrote
     } // End of the loop over the batch's insertions
     Ok(findings)
 } // End of function findings_of()

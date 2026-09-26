@@ -1415,10 +1415,13 @@ export function draftErrorKey(name: DraftErrorName): TranslationKey {
  * omission.** Every address below the match mapping is an index into the
  * projection this window already holds (CLAUDE.md section 1), and a caller that
  * wants to name the failing variable, parameter or list item resolves that index
- * against what it is showing. Two messages do name an operand: `{items}`, a
- * count, in `switchWouldDiscardItems`, and `{field}`, an option's espanso key —
- * a schema-fixed name, never owner text — in `optionNotPlainSource` (Phase 4-1),
- * so a refused creation says which of its options was refused.
+ * against what it is showing. Some messages do name an operand, each a count
+ * or a schema-fixed espanso key and never owner text: `{items}`, a count, in
+ * `switchWouldDiscardItems`; `{field}`, an option's key, in
+ * `optionNotPlainSource` (Phase 4-1), so a refused creation says which of its
+ * options was refused; `{setting}` and `{limit}` in two Phase 4-4 refusals about
+ * a new variable; and `{list}` — `depends_on`, `values`, `choices` or `args` —
+ * in the Phase 4-5 refusals about a variable's lists.
  * {@link scalarOperands} is what feeds the substitution, so such a message gets a
  * string or a number and never a `DraftTarget` rendered as `[object Object]`.
  *

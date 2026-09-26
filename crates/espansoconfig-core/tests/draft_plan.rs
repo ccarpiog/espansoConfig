@@ -2314,12 +2314,25 @@ fn a_path_one_segment_deeper_than_the_surface_is_refused() {
             .with_key("params")
             .with_key("fields")
             .with_key("one"),
-        // one past `<match>.vars[i].params.<key>[j]`
+        // one past `<match>.vars[i].params.<key>[j]`, for a list that holds no
+        // records (Phase 4-5 admits `label`/`id` under `values` only)
+        vars.clone()
+            .with_key("params")
+            .with_key("choices")
+            .with_index(0)
+            .with_key("id"),
+        // one past `<match>.vars[i].params.values[j].<label|id>` (Phase 4-5)
         vars.clone()
             .with_key("params")
             .with_key("values")
             .with_index(0)
-            .with_key("id"),
+            .with_key("id")
+            .with_key("deeper"),
+        // one past `<match>.vars[i].depends_on[j]` (Phase 4-5)
+        vars.clone()
+            .with_key("depends_on")
+            .with_index(0)
+            .with_key("deeper"),
         // one past `<match>.form_fields.<key>.<key>`
         form_field.clone().with_key("values").with_key("deeper"),
         // one past `<match>.form_fields.<key>.<key>[j]`
@@ -2348,7 +2361,7 @@ fn a_path_one_segment_deeper_than_the_surface_is_refused() {
             Err(DraftError::OutsideTheClosedSurface { edit: 0 }),
             "and so is a removal at {path}"
         );
-    } // End of the loop over the six over-deep paths
+    } // End of the loop over the over-deep paths
 } // End of function a_path_one_segment_deeper_than_the_surface_is_refused()
 
 /// D1 as a shape: an insertion below the match mapping is refused by the guard,

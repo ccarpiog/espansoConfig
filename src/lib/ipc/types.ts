@@ -3145,15 +3145,83 @@ export type VarsIntent =
   | { readonly RemoveVars: Record<string, never> };
 
 /**
+ * One of the four lists of a variable a draft edits by item (Phase 4-5):
+ * `depends_on`, and the kind's own list parameter — `values` of a `choice`,
+ * `choices` of a `random`, `args` of a `script`. Spelled as the espanso key, so a
+ * screen can put the key itself beside a refusal about it.
+ */
+export type VariableList = 'depends_on' | 'values' | 'choices' | 'args';
+
+/**
+ * One of the two entries of a `choice` record a draft rewrites (Phase 4-5),
+ * spelled as the espanso key.
+ */
+export type ChoiceRecordField = 'label' | 'id';
+
+/**
+ * One new `{label, id}` record of a `choice` variable's `values` (Phase 4-5).
+ * Both are logical strings spelled by the codec in Rust; a new record holds
+ * exactly these two entries.
+ */
+export interface ChoiceRecord {
+  /** `label` — the text the choice dialog shows. */
+  readonly label: string;
+  /** `id` — the text the variable expands to. */
+  readonly id: string;
+}
+
+/**
+ * The new items of one list insertion (Phase 4-5): strings, or records — one
+ * shape per insertion. Rust refuses an empty array of either while reading the
+ * arguments; TypeScript does not force that.
+ */
+export type NewListItems =
+  | { readonly Strings: readonly string[] }
+  | { readonly Records: readonly ChoiceRecord[] };
+
+/**
+ * One intent about the cardinality of one list of an existing variable (Phase
+ * 4-5). An index is a position in the **original** list.
+ */
+export type VariableListIntent =
+  | {
+      readonly InsertItems: {
+        readonly list: VariableList;
+        readonly at: ListPlacement;
+        readonly items: NewListItems;
+      };
+    }
+  | { readonly RemoveItem: { readonly list: VariableList; readonly index: number } };
+
+/**
+ * A drafted rewrite of one existing `{label, id}` record, by its index in the
+ * original `values` list (Phase 4-5). `null` leaves that entry alone; there is no
+ * spelling of removing one, and every other entry of the record is never named.
+ */
+export interface ChoiceRecordDraft {
+  /** The record's index in the original `values` list. */
+  readonly index: number;
+  /** The new `label`, or `null` for unchanged. */
+  readonly label: string | null;
+  /** The new `id`, or `null` for unchanged. */
+  readonly id: string | null;
+}
+
+/**
  * One drafted variable of `vars`, addressed by its index in the projection.
  *
  * The three schema-known scalars are named; everything else a variable holds is
- * addressed positionally through {@link VariableDraft.params}. `depends_on` is
- * deliberately absent — it is a sequence this surface does not draft.
+ * addressed positionally through {@link VariableDraft.params}. Since Phase 4-5
+ * its four lists are drafted too: existing `depends_on` items
+ * ({@link VariableDraft.depends_on}), existing records
+ * ({@link VariableDraft.records}) and items added or removed
+ * ({@link VariableDraft.lists}).
  *
- * **An absent field is refused, never inserted**, with one exception since Phase
- * 4-3: {@link VariableDraft.insert_params} adds new author-named entries to an
- * existing block `params` mapping. No production caller sends one yet.
+ * **An absent field is refused, never inserted**, with two exceptions:
+ * {@link VariableDraft.insert_params} adds new author-named entries to an
+ * existing block `params` mapping (Phase 4-3), and {@link VariableDraft.lists}
+ * adds items to an existing list (Phase 4-5). No production caller sends either
+ * yet.
  */
 export interface VariableDraft {
   /** The variable's index in the projected `vars` list. */
@@ -3168,6 +3236,12 @@ export interface VariableDraft {
   readonly params: readonly EntryDraft[];
   /** New author-named `params` entries, in the order they are written (Phase 4-3). */
   readonly insert_params: readonly NewParam[];
+  /** Drafted `depends_on` items, by original index (Phase 4-5). */
+  readonly depends_on: readonly ItemDraft[];
+  /** Drafted rewrites of existing `choice` records (Phase 4-5). */
+  readonly records: readonly ChoiceRecordDraft[];
+  /** Items added to or removed from the variable's four lists (Phase 4-5). */
+  readonly lists: readonly VariableListIntent[];
 }
 
 /**
@@ -3418,6 +3492,20 @@ export type DraftTarget =
   | { readonly NewParam: { readonly variable: number; readonly insertion: number } }
   | { readonly NewVariable: { readonly insertion: number } }
   | { readonly NewVariableParam: { readonly insertion: number; readonly param: number } }
+  | {
+      readonly VariableListItem: {
+        readonly variable: number;
+        readonly list: VariableList;
+        readonly item: number;
+      };
+    }
+  | {
+      readonly ChoiceRecordField: {
+        readonly variable: number;
+        readonly record: number;
+        readonly field: ChoiceRecordField;
+      };
+    }
   | { readonly FormField: { readonly index: number } }
   | { readonly FormFieldOption: { readonly field: number; readonly option: number } }
   | {
@@ -3502,7 +3590,16 @@ export type DraftErrorName =
   | 'NewVariableHasTooManyParams'
   | 'NewKeyIsAKindParameter'
   | 'InsertionLandsOnARemoval'
-  | 'VariableMoveChangesNothing';
+  | 'VariableMoveChangesNothing'
+  | 'VariableListIntentsConflict'
+  | 'VariableListAbsent'
+  | 'VariableListHasAnUnsupportedShape'
+  | 'VariableListIsAFlowList'
+  | 'VariableListIsNotOfItsKind'
+  | 'VariableListWouldBeEmpty'
+  | 'VariableListItemShapeMismatch'
+  | 'NotAChoiceRecord'
+  | 'ChoiceRecordFieldHasNoScalar';
 
 /**
  * Why a draft could not be turned into an edit batch.
@@ -3688,7 +3785,41 @@ export type DraftError =
   | {
       readonly InsertionLandsOnARemoval: { readonly insertion: number; readonly removal: number };
     }
-  | { readonly VariableMoveChangesNothing: { readonly variable: number } };
+  | { readonly VariableMoveChangesNothing: { readonly variable: number } }
+  | {
+      readonly VariableListIntentsConflict: {
+        readonly variable: number;
+        readonly list: VariableList;
+      };
+    }
+  | { readonly VariableListAbsent: { readonly variable: number; readonly list: VariableList } }
+  | {
+      readonly VariableListHasAnUnsupportedShape: {
+        readonly variable: number;
+        readonly list: VariableList;
+        readonly found: ValueKind;
+      };
+    }
+  | {
+      readonly VariableListIsAFlowList: { readonly variable: number; readonly list: VariableList };
+    }
+  | {
+      readonly VariableListIsNotOfItsKind: {
+        readonly variable: number;
+        readonly list: VariableList;
+      };
+    }
+  | {
+      readonly VariableListWouldBeEmpty: { readonly variable: number; readonly list: VariableList };
+    }
+  | {
+      readonly VariableListItemShapeMismatch: {
+        readonly variable: number;
+        readonly list: VariableList;
+      };
+    }
+  | { readonly NotAChoiceRecord: { readonly target: DraftTarget; readonly found: ValueKind } }
+  | { readonly ChoiceRecordFieldHasNoScalar: { readonly target: DraftTarget } };
 
 // ---------------------------------------------------------------------------
 // The external-change reconciliation wire — Phase 2d-4b

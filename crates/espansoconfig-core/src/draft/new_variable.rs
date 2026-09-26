@@ -22,7 +22,9 @@
 //!   still be written without caller YAML.
 //!
 //! Choice records (`{label, id}`) and form field definitions are **not** here:
-//! they are steps 4-5 and 4-6.
+//! a new `choice` is born holding strings, and records are added to an existing
+//! one's `values` afterwards ([`crate::draft::VariableListIntent`], Phase 4-5);
+//! form field definitions are step 4-6's.
 //!
 //! # Typed settings are plain source
 //!

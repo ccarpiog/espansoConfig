@@ -38,7 +38,7 @@ pub enum DraftError {
     /// invented, because the alternative is a path that names something else.
     ///
     /// **The empty braces are load-bearing.** Written as a unit variant this
-    /// would be the one variant of seventy-three that `serde` writes as a bare
+    /// would be the one variant of eighty-two that `serde` writes as a bare
     /// JSON string rather than as a one-key object, and the frontend's
     /// `COMMAND_ERROR_OPERANDS` table in `src/lib/ipc/errors.ts` can pin exactly
     /// one shape for the `error` operand of `CommandError::DraftRefused`. A
@@ -46,8 +46,8 @@ pub enum DraftError {
     /// *unexpected* failure, losing its typed code and rendering a generic
     /// sentence instead of `code.draftError.matchHasNoPath`. As an empty struct
     /// variant it writes `{"MatchHasNoPath": {}}`, so "a `DraftError` is always
-    /// an object" is true by construction rather than true of seventy-two cases
-    /// out of seventy-three. `every_draft_error_variant_crosses_as_an_object` in
+    /// an object" is true by construction rather than true of eighty-one cases
+    /// out of eighty-two. `every_draft_error_variant_crosses_as_an_object` in
     /// `src-tauri/src/wire_contract.rs` fails the build if a unit variant is
     /// ever added here.
     MatchHasNoPath {},
@@ -912,6 +912,99 @@ pub enum DraftError {
         /// The variable's index in the projected `vars` list.
         variable: usize,
     },
+    /// Two intents about one list of one variable contradict each other
+    /// (Phase 4-5): one item removed twice; an item removed and also rewritten
+    /// (a `depends_on` item, a string through its `params` entry, or a record);
+    /// two insertions landing at one place; an insertion landing exactly where
+    /// the same draft removes an item; or a list intent beside a `Set` or a
+    /// `Remove` of the kind list's own `params` entry. Checked at intent level,
+    /// before any diffing.
+    ///
+    /// This and the eight variants after it are the refusals Phase 4-5 added for
+    /// a variable's lists and labelled choices, and **none of them carries a
+    /// name, a key or a value**: every operand is an index, a
+    /// [`crate::draft::VariableList`], a [`DraftTarget`] or a [`ValueKind`],
+    /// none of which holds a string, so the types force it (`CLAUDE.md` §1).
+    VariableListIntentsConflict {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// Which list.
+        list: crate::draft::VariableList,
+    },
+    /// The variable holds no such list (Phase 4-5). Nothing is inserted into a
+    /// list that is not there; a kind list is added as a new `params` entry
+    /// ([`crate::draft::VariableDraft::insert_params`]).
+    VariableListAbsent {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// Which list.
+        list: crate::draft::VariableList,
+    },
+    /// The key is there but holds something that is not a list (Phase 4-5).
+    VariableListHasAnUnsupportedShape {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// Which list.
+        list: crate::draft::VariableList,
+        /// What the key actually holds.
+        found: ValueKind,
+    },
+    /// The list is written between brackets and the request would need a
+    /// record, or an item that is not a string, written into or taken out of it
+    /// (Phase 4-5; Phase 3 ruling 5). A flow list is never converted to block
+    /// style; strings are still added to and removed from a flow list of
+    /// strings in place.
+    VariableListIsAFlowList {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// Which list.
+        list: crate::draft::VariableList,
+    },
+    /// A kind list was named on a variable of another kind — `values` on
+    /// anything but a `choice`, `choices` on anything but a `random`, `args` on
+    /// anything but a `script` (Phase 4-5).
+    VariableListIsNotOfItsKind {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// Which list.
+        list: crate::draft::VariableList,
+    },
+    /// The draft removes every item of the list (Phase 4-5, ruling 8). A list
+    /// with nothing left would be a null or an unasked `[]`; insertions in the
+    /// same draft do not rescue it, for [`DraftError::SequenceWouldBeEmpty`]'s
+    /// reason.
+    VariableListWouldBeEmpty {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// Which list.
+        list: crate::draft::VariableList,
+    },
+    /// The new items are not of the shape the list holds (Phase 4-5): records
+    /// into a list of strings, into a list that mixes shapes or into any list
+    /// but a `choice`'s `values`; or strings into a list of records or a list
+    /// that mixes shapes. String and record shapes stay distinct.
+    VariableListItemShapeMismatch {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// Which list.
+        list: crate::draft::VariableList,
+    },
+    /// A record rewrite names an item of `values` that is not a mapping (Phase
+    /// 4-5): a string, or an alias. A string of the list is rewritten through
+    /// its `params` entry instead.
+    NotAChoiceRecord {
+        /// The item, by position.
+        target: DraftTarget,
+        /// What the item actually is.
+        found: ValueKind,
+    },
+    /// A record rewrite names `label` or `id` of a record that holds no single
+    /// value under that key — the key is absent, or holds a collection (Phase
+    /// 4-5). Nothing is added inside a record.
+    ChoiceRecordFieldHasNoScalar {
+        /// The record's entry, by position.
+        target: DraftTarget,
+    },
 }
 
 impl fmt::Display for DraftError {
@@ -1159,6 +1252,49 @@ impl fmt::Display for DraftError {
             }
             DraftError::VariableMoveChangesNothing { variable } => {
                 write!(formatter, "moving variable {variable} changes nothing")
+            }
+            DraftError::VariableListIntentsConflict { variable, list } => write!(
+                formatter,
+                "two intents about variable {variable}'s {} conflict",
+                list.key()
+            ),
+            DraftError::VariableListAbsent { variable, list } => {
+                write!(formatter, "variable {variable} has no {}", list.key())
+            }
+            DraftError::VariableListHasAnUnsupportedShape {
+                variable,
+                list,
+                found,
+            } => write!(
+                formatter,
+                "variable {variable}'s {} holds a {found:?}",
+                list.key()
+            ),
+            DraftError::VariableListIsAFlowList { variable, list } => write!(
+                formatter,
+                "variable {variable}'s {} is a flow list",
+                list.key()
+            ),
+            DraftError::VariableListIsNotOfItsKind { variable, list } => write!(
+                formatter,
+                "variable {variable} is not of the kind that holds {}",
+                list.key()
+            ),
+            DraftError::VariableListWouldBeEmpty { variable, list } => write!(
+                formatter,
+                "variable {variable}'s {} would be left with no items",
+                list.key()
+            ),
+            DraftError::VariableListItemShapeMismatch { variable, list } => write!(
+                formatter,
+                "the new items do not have the shape of variable {variable}'s {}",
+                list.key()
+            ),
+            DraftError::NotAChoiceRecord { found, .. } => {
+                write!(formatter, "the item is a {found:?}, not a record")
+            }
+            DraftError::ChoiceRecordFieldHasNoScalar { .. } => {
+                formatter.write_str("the record holds no such single value")
             }
         } // End of the match over every refusal
     } // End of function fmt() for DraftError

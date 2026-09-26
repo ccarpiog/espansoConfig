@@ -494,7 +494,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("decodeError", 5),
     ("notReencodable", 8),
     ("saveResult", 3),
-    ("draftError", 73),
+    ("draftError", 82),
     ("presentationNote", 2),
     ("reapplyResolution", 4),
     ("reapplyRefusal", 9),
@@ -715,6 +715,32 @@ const NOT_A_CODE: &[(&str, &str)] = &[
         "a protocol tag, not a code, exactly as `SequenceIntent` is: \
          `InsertVariable`, `RemoveVariable` and `RemoveVars` travel *into* the \
          planner as `MatchDraft::var_intents` (Phase 4-4) and are never rendered",
+    ),
+    (
+        "VariableList",
+        "a field identifier, not a code, for the same reason as `SequenceField` \
+         and with the same spelling on the wire: it names `depends_on`, \
+         `values`, `choices` or `args`, the four lists of a variable a draft edits \
+         by item (Phase 4-5), which espanso spells one way and which \
+         `every_kind_list_is_its_kinds_list_parameter` pins",
+    ),
+    (
+        "ChoiceRecordField",
+        "a field identifier, not a code, for the same reason as `VariableField` \
+         and with the same spelling on the wire: it names `label` or `id`, the two \
+         entries of a `choice` record a draft rewrites (Phase 4-5)",
+    ),
+    (
+        "NewListItems",
+        "a protocol tag, not a code, exactly as `NewParamValue` is: `Strings` and \
+         `Records` travel *into* the planner as the shape of one list insertion \
+         (Phase 4-5) and are never rendered",
+    ),
+    (
+        "VariableListIntent",
+        "a protocol tag, not a code, exactly as `SequenceIntent` is: \
+         `InsertItems` and `RemoveItem` travel *into* the planner as \
+         `VariableDraft::lists` (Phase 4-5) and are never rendered",
     ),
     (
         "NewParamValue",
@@ -1347,6 +1373,8 @@ fn every_typescript_wire_union_has_a_namespace() {
             "TriggerForm".to_owned(),
             "VariableField".to_owned(),
             "VariableSetting".to_owned(),
+            "VariableList".to_owned(),
+            "ChoiceRecordField".to_owned(),
             "ObservedDocumentName".to_owned()
         ],
         "the unions exempted by NOT_A_CODE changed, listed in the file's order. The \
@@ -1355,7 +1383,8 @@ fn every_typescript_wire_union_has_a_namespace() {
          bare member is `Remove`. Of the rest, the first five are field \
          identifiers that serialize as espanso keys (`ContentForm` since Phase \
          3-5-1, `TriggerForm` since Phase 3-6-1), and so is the sixth, \
-         `VariableSetting` (Phase 4-4); the seventh is Phase 2d-4b's \
+         `VariableSetting` (Phase 4-4), and so are the seventh and eighth, \
+         `VariableList` and `ChoiceRecordField` (Phase 4-5); the ninth is Phase 2d-4b's \
          mirror of the one reconciliation enum this table already classifies as an \
          address rather than a code, and it appears here — as the `…Name` twin \
          rather than as the value union — because the value union has no \

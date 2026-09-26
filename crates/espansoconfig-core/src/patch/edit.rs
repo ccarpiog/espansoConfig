@@ -1170,10 +1170,15 @@ impl ItemMove {
 /// [`EntryValue::ScalarList`] is a flat list of scalars, and nothing deeper.
 /// **Phase 3-4 lets a new item's field be one**, for `triggers` and
 /// `search_terms`. **Phase 4-4 lets a field be one flat mapping** of those —
-/// [`ItemValue::Mapping`], a new variable's `params` — and nothing deeper.)
+/// [`ItemValue::Mapping`], a new variable's `params` — and nothing deeper.
+/// **Phase 4-5 lets one insertion write several such items** at one boundary
+/// ([`InsertItem::several`]), in a stated order, for [`ScalarItemInsert`]'s
+/// reason: two insertions at one offset state no order, and a `choice`'s new
+/// `{label, id}` records are several items at one place.)
 ///
 /// That sentence is the whole licence, and every word of it is load-bearing.
-/// **One** item, so a caller cannot ask for a list of items. A **block mapping
+/// **One** item per slot — each a mapping, never a list of items inside an
+/// item, and since Phase 4-5 several slots only at one boundary. A **block mapping
 /// at most two levels deep**, so nesting is bounded by construction —
 /// [`InsertItem::fields`] is a list of `(key, value)` pairs whose value is an
 /// [`ItemValue`]: an [`EntryValue`], which can hold no mapping and no nested
@@ -1253,6 +1258,10 @@ pub struct InsertItem {
     /// The new item's fields, as decoded keys and typed values, in write order.
     /// Since Phase 4-4 a value may be one flat mapping ([`ItemValue`]).
     fields: Vec<(String, ItemValue)>,
+    /// Further new items written right after the first, at the same boundary,
+    /// in order (Phase 4-5, [`InsertItem::several`]). Empty for every other
+    /// constructor.
+    following: Vec<ItemFields>,
 }
 
 /// Where a new sequence item is written.
@@ -1371,8 +1380,34 @@ impl InsertItem {
             sequence,
             at: placement,
             fields,
+            following: Vec::new(),
         }
     } // End of function nested()
+
+    /// Builds an insertion of **several** new items at one `placement`, written
+    /// as one run in the order given (Phase 4-5), or `None` when `items` is
+    /// empty — the type has no spelling of "insert nothing".
+    ///
+    /// Each item is what [`InsertItem::nested`] writes; one item is exactly that
+    /// insertion. The items are one edit for [`ScalarItemInsert`]'s reason: two
+    /// zero-width replacements at one offset state no order, and
+    /// [`apply_edits`] refuses them.
+    pub fn several(
+        sequence: DocumentPath,
+        placement: ItemPlacement,
+        mut items: Vec<ItemFields>,
+    ) -> Option<InsertItem> {
+        if items.is_empty() {
+            return None;
+        }
+        let fields = items.remove(0);
+        Some(InsertItem {
+            sequence,
+            at: placement,
+            fields,
+            following: items,
+        })
+    } // End of function several()
 
     /// Builds an insertion that appends the item after the sequence's last item.
     pub fn new(sequence: DocumentPath, fields: Vec<(String, String)>) -> InsertItem {
@@ -1408,8 +1443,24 @@ impl InsertItem {
     }
 
     /// The new item's fields, as decoded keys and typed values, in write order.
+    ///
+    /// The **first** item's, when the insertion writes several
+    /// ([`InsertItem::items`]).
     pub fn fields(&self) -> &[(String, ItemValue)] {
         &self.fields
+    }
+
+    /// Every new item's fields, in write order (Phase 4-5). One entry for every
+    /// constructor but [`InsertItem::several`].
+    pub fn items(&self) -> Vec<&[(String, ItemValue)]> {
+        std::iter::once(self.fields.as_slice())
+            .chain(self.following.iter().map(Vec::as_slice))
+            .collect()
+    }
+
+    /// How many new items the insertion writes. Never zero.
+    pub fn item_count(&self) -> usize {
+        1 + self.following.len()
     }
 } // End of impl InsertItem
 
@@ -4296,10 +4347,16 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
         guard.check(source, &index, &trivia)?;
     }
     // The nodes a **kept** sequence item may legitimately differ at. A scalar
-    // edit rewrites one; a structural edit rewrites a whole mapping. Collected
-    // before the field claims are folded, because folding consumes them.
+    // edit rewrites one; a structural edit rewrites a whole mapping; and, since
+    // Phase 4-5, an item edit changes a whole **sequence** — a variable's nested
+    // list beside the insertion or removal of another variable (the 4-5
+    // review's second finding). Only the kept item's digest is dropped: its
+    // position is still compared, and the nested sequence's own folded item
+    // expectation still checks every kept and new item. Collected before the
+    // claims are folded, because folding consumes them.
     let mut touched = rewritten.clone();
     touched.extend(expectations.iter().map(|claim| claim.mapping_id));
+    touched.extend(sequences.iter().map(|claim| claim.sequence_id));
     // The nodes a **kept mapping entry** may legitimately differ at: every node a
     // scalar edit rewrites, and every sequence an item edit in the same batch
     // changes (a promotion's zero-width scalar included). Without the second, a
@@ -5952,9 +6009,12 @@ fn replay_item_positions(
 
 /// The index each of `edits`' insertions into `sequence` takes in the candidate.
 ///
-/// One pair per [`DocumentEdit::InsertItem`] whose destination is `sequence`, in
-/// batch order: the edit's position in `edits`, and the index the item it writes
-/// occupies **after** the whole batch has been applied.
+/// One pair per **item** a [`DocumentEdit::InsertItem`] whose destination is
+/// `sequence` writes, in batch order and, within one insertion, in write order:
+/// the edit's position in `edits`, and the index that item occupies **after**
+/// the whole batch has been applied. An insertion of several items
+/// ([`InsertItem::several`], Phase 4-5) yields one pair per item, all carrying
+/// the same position.
 ///
 /// # Why the whole batch, and not the insertion alone
 ///
@@ -6026,8 +6086,11 @@ pub fn insertion_landings(
         .iter()
         .enumerate()
         .flat_map(|(position, edit)| match edit {
+            // Several items of one insertion (Phase 4-5) take one slot each,
+            // and every one of them is reported (the 4-5 review's first
+            // finding): a caller judging new items must see each of them.
             DocumentEdit::InsertItem(insert) if insert.sequence() == sequence => {
-                vec![(position, insert.placement(), true)]
+                vec![(position, insert.placement(), true); insert.item_count()]
             }
             DocumentEdit::InsertScalarItems(insert) if insert.sequence() == sequence => {
                 vec![(position, insert.placement(), false); insert.values().len()]
@@ -6100,7 +6163,8 @@ pub fn item_positions(
     for edit in edits {
         match edit {
             DocumentEdit::InsertItem(insert) if insert.sequence() == sequence => {
-                anchors.push(insert.placement().items_above(items)?);
+                let above = insert.placement().items_above(items)?;
+                anchors.extend(std::iter::repeat_n(above, insert.item_count()));
             }
             DocumentEdit::InsertScalarItems(insert) if insert.sequence() == sequence => {
                 let above = insert.placement().items_above(items)?;
@@ -7244,7 +7308,9 @@ fn plan_item_insertion(
             at: hazard.span,
         });
     }
-    check_inserted_fields(position, edit.fields())?;
+    for fields in edit.items() {
+        check_inserted_fields(position, fields)?;
+    } // End of the loop over the new items' fields
 
     let body_offset = index.preamble().body_offset;
     let (marker, point, at_end_of_file, items) = match target.kind {
@@ -7304,7 +7370,10 @@ fn plan_item_insertion(
     // items or a mapping with entries to place. `target.id` is passed as the
     // excluded key because no key is being promoted here; it is a sequence or
     // an implicit-null value, never a mapping key, so it excludes nothing.
-    let holds_items = edit.fields().iter().any(|(_, value)| value.needs_a_step());
+    let holds_items = edit
+        .items()
+        .iter()
+        .any(|fields| fields.iter().any(|(_, value)| value.needs_a_step()));
     let steps = if holds_items {
         ItemSteps::observed(source, index, trivia, target.id)
     } else {
@@ -7313,7 +7382,7 @@ fn plan_item_insertion(
             mapping: 0,
         }
     };
-    let text = render_item(edit.fields(), marker, steps, line_ending, at_end_of_file);
+    let text = render_item(&edit.items(), marker, steps, line_ending, at_end_of_file);
 
     Ok(PlannedEdit {
         replacements: vec![Replacement {
@@ -7332,7 +7401,13 @@ fn plan_item_insertion(
             sequence_id: target.id,
             items: items.1,
             removed: None,
-            inserted: Some((items.0, vec![NewItem::Mapping(edit.fields().to_vec())])),
+            inserted: Some((
+                items.0,
+                edit.items()
+                    .into_iter()
+                    .map(|fields| NewItem::Mapping(fields.to_vec()))
+                    .collect(),
+            )),
         }),
         moved: None,
         duplicated: None,
@@ -7832,18 +7907,21 @@ fn block_child_column(
 /// scalar terminates itself, and its own trailing break is never taken away —
 /// removing one would silently shorten the user's value. Both halves are
 /// [`join_rendered_lines`]'s, which every multi-line insertion shares.
+///
+/// Since Phase 4-5 it renders **several** items as one run, one after another in
+/// the order given ([`InsertItem::several`]); one item is the common case.
 fn render_item(
-    fields: &[(String, ItemValue)],
+    items: &[&[(String, ItemValue)]],
     marker: usize,
     steps: ItemSteps,
     line_ending: LineEnding,
     at_end_of_file: bool,
 ) -> String {
-    join_rendered_lines(
-        &item_lines(fields, marker, steps, line_ending),
-        line_ending,
-        at_end_of_file,
-    )
+    let lines: Vec<String> = items
+        .iter()
+        .flat_map(|fields| item_lines(fields, marker, steps, line_ending))
+        .collect();
+    join_rendered_lines(&lines, line_ending, at_end_of_file)
 } // End of function render_item()
 
 /// The indentation steps one new item's nested values are written with
@@ -10136,6 +10214,11 @@ fn verify_items(
 /// missing field, and a list must reparse as a sequence of exactly the requested
 /// scalars, in order, in the style it was written in (block, or `[]` when empty).
 ///
+/// The item's own mapping must be **block** style, as every renderer here
+/// writes it (ruling 8): since Phase 4-5 a candidate whose new item says the
+/// right things as a flow mapping (`- {key: value}`) is refused, as
+/// [`verify_item_value`] already refused one nested a level down.
+///
 /// # Errors
 ///
 /// [`VerificationFailure::FieldNotInserted`], carrying the length of a key and
@@ -10152,7 +10235,9 @@ fn verify_inserted_item(
     let first = fields.first().map_or(0, |(key, _)| key.len());
     let mapping = index
         .node(item)
-        .filter(|node| node.kind == NodeKind::Mapping)
+        .filter(|node| {
+            node.kind == NodeKind::Mapping && node.collection_style == Some(CollectionStyle::Block)
+        })
         .ok_or(VerificationFailure::FieldNotInserted {
             edit,
             key_len: first,

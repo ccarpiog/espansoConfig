@@ -26,7 +26,7 @@
 //!   build the [`crate::patch::DocumentPath`], so a caller can only name what it
 //!   was shown, and no refusal has to carry a byte of the owner's configuration
 //!   (`CLAUDE.md` section 1).
-//! - **Two insertions below the match mapping, and only two.** A drafted
+//! - **Three insertions below the match mapping, and only three.** A drafted
 //!   *address* the projection does not hold is still refused by name rather
 //!   than created. Decision D1 of `docs/decisions/2b-2b-2-notes.md` refused
 //!   every insertion below the match mapping; Phase 4-3 lifted one, under ruling
@@ -36,10 +36,14 @@
 //!   of scalars. Phase 4-4 lifts the second: a whole new **variable**
 //!   ([`crate::draft::NewVariable`] in a [`crate::draft::VarsIntent`] of
 //!   [`MatchDraft::var_intents`]) — into an existing block `vars`, or as the
-//!   whole `vars:` subtree when the match has none. Both carry text, both are
-//!   refused by position and code only, and nothing else below the match
-//!   mapping — no `params:` container on an existing variable, no form
-//!   definition, no nested list item — can be inserted by a draft.
+//!   whole `vars:` subtree when the match has none. Phase 4-5 lifts the third:
+//!   new **items** of an existing variable's four schema-known lists
+//!   ([`crate::draft::VariableListIntent`] in [`VariableDraft::lists`]) —
+//!   strings, or `{label, id}` records in a `choice`'s `values`. All three carry
+//!   text, all are refused by position and code only, and nothing else below the
+//!   match mapping — no `params:` container on an existing variable, no
+//!   `depends_on:` where there is none, no form definition — can be inserted by
+//!   a draft.
 //! - **A value is a scalar or a sequence of scalars.** [`EntryDraft`] carries
 //!   both spellings and may use only one of them at a time, and
 //!   [`NewParamValue`] has exactly those two variants; nothing here can express
@@ -50,6 +54,7 @@ use serde::{Deserialize, Serialize};
 use crate::draft::field::DraftField;
 use crate::draft::new_variable::VarsIntent;
 use crate::draft::sequence::{SequenceIntent, TriggerFormChange};
+use crate::draft::variable_list::{ChoiceRecordDraft, VariableListIntent};
 
 /// The key `vars` is written under.
 ///
@@ -497,10 +502,11 @@ impl SequenceField {
 /// One schema-known scalar field of a **variable** of `vars`.
 ///
 /// Espanso fixes these three names and says each holds a string, so they are
-/// the only part of a variable this surface addresses by name rather than by
-/// index. `params` is addressed positionally ([`EntryDraft`]) because its keys
-/// differ per variable type, and `depends_on` is a sequence this phase does not
-/// touch at all.
+/// the only **scalars** of a variable this surface addresses by name rather than
+/// by index. `params` is addressed positionally ([`EntryDraft`]) because its keys
+/// differ per variable type, and `depends_on` is a sequence, drafted since Phase
+/// 4-5 through [`VariableDraft::depends_on`] and
+/// [`crate::draft::VariableList::DependsOn`].
 ///
 /// It serializes as its espanso key, for [`MatchField`]'s reason and pinned by
 /// `every_variable_field_serializes_as_its_espanso_key`.
@@ -640,6 +646,27 @@ pub enum DraftTarget {
         field: usize,
         /// The option's index in that form field's projected mapping.
         option: usize,
+    },
+    /// One item of one of a variable's four schema-known lists (Phase 4-5), by
+    /// its index in the **original** list — also the position an insertion is
+    /// placed after.
+    VariableListItem {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// Which list.
+        list: crate::draft::VariableList,
+        /// The item's index in that list.
+        item: usize,
+    },
+    /// One of the two entries of an existing `{label, id}` record of a `choice`
+    /// variable's `values` (Phase 4-5).
+    ChoiceRecordField {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// The record's index in the original `values` list.
+        record: usize,
+        /// Which of the two entries.
+        field: crate::draft::ChoiceRecordField,
     },
     /// One element of a form-field option whose value is a sequence.
     FormFieldOptionItem {
@@ -793,12 +820,17 @@ impl NewParam {
 ///
 /// The three schema-known scalars are named ([`VariableField`]); everything else
 /// a variable may hold is addressed positionally through
-/// [`VariableDraft::params`]. `depends_on` is deliberately absent: it is a
-/// sequence whose elements this surface does not draft yet.
+/// [`VariableDraft::params`]. Since Phase 4-5 its four schema-known **lists**
+/// are drafted too: existing `depends_on` items ([`VariableDraft::depends_on`]),
+/// existing `{label, id}` records of a `choice`'s `values`
+/// ([`VariableDraft::records`]), and items added to or removed from any of the
+/// four ([`VariableDraft::lists`]). An existing string of a kind list is still
+/// rewritten through its `params` entry's [`EntryDraft::items`].
 ///
-/// **An absent field is refused, never inserted** (decision D1), with one
-/// exception since Phase 4-3: [`VariableDraft::insert_params`] adds new
-/// author-named entries to an existing block `params` mapping.
+/// **An absent field is refused, never inserted** (decision D1), with two
+/// exceptions: since Phase 4-3 [`VariableDraft::insert_params`] adds new
+/// author-named entries to an existing block `params` mapping, and since Phase
+/// 4-5 [`VariableDraft::lists`] adds new items to an existing list.
 ///
 /// `deny_unknown_fields` is deliberate, for [`MatchDraft`]'s reason.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -826,6 +858,19 @@ pub struct VariableDraft {
     /// least one entry; creating `params:` itself is not a draft's to do.
     #[serde(default)]
     pub insert_params: Vec<NewParam>,
+    /// Drafted elements of the variable's `depends_on`, by index in the
+    /// **original** list (Phase 4-5). A `Remove` is refused: taking an item away
+    /// is a [`crate::draft::VariableListIntent::RemoveItem`].
+    #[serde(default)]
+    pub depends_on: Vec<ItemDraft>,
+    /// Drafted rewrites of existing `{label, id}` records of a `choice`'s
+    /// `values`, by index in the **original** list (Phase 4-5).
+    #[serde(default)]
+    pub records: Vec<ChoiceRecordDraft>,
+    /// Drafted items added to or removed from the variable's four schema-known
+    /// lists, in order (Phase 4-5).
+    #[serde(default)]
+    pub lists: Vec<VariableListIntent>,
 }
 
 impl VariableDraft {
@@ -881,6 +926,38 @@ impl VariableDraft {
     pub fn with_new_param(mut self, param: NewParam) -> VariableDraft {
         self.insert_params.push(param);
         self
+    }
+
+    /// Builder: sets one existing `depends_on` item to a logical value (Phase
+    /// 4-5).
+    pub fn with_depends_on_item(mut self, index: usize, value: impl Into<String>) -> VariableDraft {
+        self.depends_on.push(ItemDraft {
+            index,
+            value: DraftField::Set(value.into()),
+        });
+        self
+    }
+
+    /// Builder: adds one drafted record rewrite (Phase 4-5).
+    pub fn with_record(mut self, record: ChoiceRecordDraft) -> VariableDraft {
+        self.records.push(record);
+        self
+    }
+
+    /// Builder: adds one drafted list intent (Phase 4-5).
+    pub fn with_list_intent(mut self, intent: VariableListIntent) -> VariableDraft {
+        self.lists.push(intent);
+        self
+    }
+
+    /// Whether the draft says anything about the variable's four lists.
+    pub fn drafts_lists(&self) -> bool {
+        !self.lists.is_empty()
+            || self.records.iter().any(|record| !record.is_unchanged())
+            || self
+                .depends_on
+                .iter()
+                .any(|item| !item.value.is_unchanged())
     }
 } // End of impl VariableDraft
 

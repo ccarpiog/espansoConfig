@@ -33,8 +33,11 @@
 //! and `search_terms`; since Phase 4-3 it also includes the cardinality of one
 //! open mapping, a variable's `params`, by new author-named entries of a scalar
 //! or a flat list of scalars; and since Phase 4-4 the cardinality and presence
-//! of `vars`, by whole new variables of a closed shape and by removals — and
-//! nothing else's. A variable **reorder** is judged by its own check,
+//! of `vars`, by whole new variables of a closed shape and by removals; and
+//! since Phase 4-5 the cardinality of an existing variable's four schema-known
+//! lists (`depends_on`, `params.values`, `params.choices`, `params.args`), by
+//! strings and — in `values` only — flat `{label, id}` records — and nothing
+//! else's. A variable **reorder** is judged by its own check,
 //! [`check_variable_move`], because a move is never part of a draft's batch.
 
 use crate::draft::author_key::{author_key_fault, TYPED_SETTINGS};
@@ -46,6 +49,7 @@ use crate::draft::match_draft::{
 use crate::draft::new_variable::{
     DEPENDS_ON_KEY, INJECT_VARS_KEY, NAME_KEY, NEW_VARIABLE_KEYS, PLAIN_SOURCE_PARAMS, TYPE_KEY,
 };
+use crate::draft::variable_list::{VariableList, ID_KEY, LABEL_KEY};
 use crate::model::VariableKind;
 use crate::patch::{DocumentEdit, DocumentPath, EntryValue, ItemPlacement, ItemValue, PathSegment};
 
@@ -120,10 +124,11 @@ impl NestedKeys {
 /// - a list-valued insertion ([`EntryValue::ScalarList`] in a group) may only
 ///   name `triggers` or `search_terms` on the match's own mapping;
 /// - a scalar-item insertion may only name `<match>.triggers` /
-///   `<match>.search_terms`, and an item removal an item of one of those or —
-///   since Phase 4-4 — one variable `<match>.vars[i]`. `depends_on`, a `params`
-///   list, `form_fields` options and `matches` itself are refused here, whatever
-///   the engine could do to them;
+///   `<match>.search_terms` or — since Phase 4-5 — one of a variable's four
+///   lists, and an item removal an item of one of those or — since Phase 4-4 —
+///   one variable `<match>.vars[i]`. Any other `params` list, `form_fields`
+///   options and `matches` itself are refused here, whatever the engine could do
+///   to them;
 /// - a shape switch may only turn `trigger` or `regex` into a `triggers` list,
 ///   or a `triggers` list into `trigger` or `regex`;
 /// - since Phase 4-3, one named shape more: an insertion **group** into
@@ -138,7 +143,15 @@ impl NestedKeys {
 ///   ([`is_a_new_variable`]); the same shape as the trailing item list of a
 ///   group on the match's own mapping, under the key `vars` (the whole subtree,
 ///   when the match has none); and the removal of one item `<match>.vars[i]` or
-///   of the whole entry `<match>.vars`.
+///   of the whole entry `<match>.vars`;
+/// - since Phase 4-5, the four lists of a variable
+///   ([`names_a_variable_list`]: `<match>.vars[i].depends_on` and
+///   `<match>.vars[i].params.<values|choices|args>`): a scalar-item insertion
+///   into one, an item removal of one of their items, and a mapping-item
+///   insertion into `…params.values` whose every item is exactly a new
+///   `{label, id}` record ([`is_a_new_choice_record`]); and two more scalar
+///   shapes, an existing `depends_on` item and the `label` or `id` of an
+///   existing item of `…params.values`.
 ///
 /// **Nothing deeper than those shapes passes.** A path one segment longer than
 /// the deepest legal one fails, and
@@ -187,21 +200,29 @@ pub fn check_closed_surface(
             }
             DocumentEdit::InsertScalarItems(insert) => {
                 names_a_surface_list(mapping, insert.sequence())
+                    || names_a_variable_list(mapping, insert.sequence()).is_some()
             }
             DocumentEdit::RemoveItem(removal) => {
                 names_a_surface_list_item(mapping, removal.item())
                     || names_a_variable(mapping, removal.item())
+                    || names_a_variable_list_item(mapping, removal.item())
             }
             DocumentEdit::SwitchShape(switch) => {
                 names_a_trigger_switch(mapping, switch.field(), switch.key(), switch.value())
             }
-            // A mapping-item insert is inside the surface in exactly one shape
-            // (Phase 4-4): a new variable written into `<match>.vars`. Into
-            // `matches` or any other sequence it is a different operation with
-            // a different primitive behind it.
+            // A mapping-item insert is inside the surface in exactly two shapes:
+            // new variables written into `<match>.vars` (Phase 4-4), and new
+            // `{label, id}` records written into a variable's `params.values`
+            // (Phase 4-5). Into `matches` or any other sequence it is a
+            // different operation with a different primitive behind it.
             DocumentEdit::InsertItem(insert) => {
-                insert.sequence() == &mapping.clone().with_key(VARS_KEY)
-                    && is_a_new_variable(insert.fields())
+                let items = insert.items();
+                let variables = insert.sequence() == &mapping.clone().with_key(VARS_KEY)
+                    && items.iter().all(|fields| is_a_new_variable(fields));
+                let records = names_a_variable_list(mapping, insert.sequence())
+                    == Some(VariableList::Values)
+                    && items.iter().all(|fields| is_a_new_choice_record(fields));
+                variables || records
             }
             // A duplicate is a cardinality change the surface has no shape for.
             // Refused as outside the surface rather than by a name of its own,
@@ -727,21 +748,28 @@ fn check_no_insertion_lands_on_a_removal(edits: &[DocumentEdit]) -> Result<(), D
         let Some(landing) = landing else {
             continue;
         };
-        let lands_on_a_removal = edits.iter().any(|other| match other {
+        let removal = edits.iter().position(|other| match other {
             DocumentEdit::RemoveItem(removal) => {
                 removes_item_at(removal.item(), insert.sequence(), landing)
             }
             _ => false,
         });
-        if lands_on_a_removal {
+        if let Some(removal) = removal {
+            // A match-level list names its field; a variable's list (Phase 4-5)
+            // has no `SequenceField`, so it is named by the two positions.
             let field = insert
                 .sequence()
                 .segments()
                 .last()
                 .and_then(PathSegment::as_key)
-                .and_then(SequenceField::from_key)
-                .unwrap_or(SequenceField::Triggers);
-            return Err(DraftError::SequenceIntentsConflict { field });
+                .and_then(SequenceField::from_key);
+            return Err(match field {
+                Some(field) => DraftError::SequenceIntentsConflict { field },
+                None => DraftError::InsertionLandsOnARemoval {
+                    insertion: position,
+                    removal,
+                },
+            });
         }
     } // End of the loop over the batch's item insertions
     Ok(())
@@ -846,6 +874,49 @@ fn is_a_new_variable(fields: &[(String, ItemValue)]) -> bool {
             _ => false,
         })
 } // End of function is_a_new_variable()
+
+/// The list `path` names when it is one of a variable's four lists itself —
+/// `<match>.vars[i].depends_on` or `<match>.vars[i].params.<values|choices|args>`
+/// (Phase 4-5) — or `None`.
+///
+/// Read off the path alone, as everything here is: whether the variable is of
+/// the kind that holds the list is the planner's question
+/// ([`DraftError::VariableListIsNotOfItsKind`]), not this guard's.
+fn names_a_variable_list(mapping: &DocumentPath, path: &DocumentPath) -> Option<VariableList> {
+    match suffix(mapping, path)? {
+        [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(list)]
+            if vars == VARS_KEY && list == DEPENDS_ON_KEY =>
+        {
+            Some(VariableList::DependsOn)
+        }
+        [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(params), PathSegment::Key(list)]
+            if vars == VARS_KEY && params == PARAMS_KEY =>
+        {
+            VariableList::from_param_key(list)
+        }
+        _ => None,
+    }
+} // End of function names_a_variable_list()
+
+/// Whether `path` names one item of one of a variable's four lists (Phase 4-5).
+fn names_a_variable_list_item(mapping: &DocumentPath, path: &DocumentPath) -> bool {
+    match path.segments().split_last() {
+        Some((PathSegment::Index(_), list)) => {
+            let list = DocumentPath::new(path.document_index(), list.to_vec());
+            names_a_variable_list(mapping, &list).is_some()
+        }
+        _ => false,
+    }
+} // End of function names_a_variable_list_item()
+
+/// Whether the fields of a new mapping item are exactly a new `{label, id}`
+/// record as a draft writes one (Phase 4-5): `label` then `id`, each a
+/// logical-string scalar, and nothing else.
+fn is_a_new_choice_record(fields: &[(String, ItemValue)]) -> bool {
+    matches!(fields,
+        [(label, ItemValue::Entry(EntryValue::Scalar(_))), (id, ItemValue::Entry(EntryValue::Scalar(_)))]
+            if label == LABEL_KEY && id == ID_KEY)
+}
 
 /// Whether `path` names one of the match's two lists itself:
 /// `<match>.<triggers|search_terms>`.
@@ -969,15 +1040,17 @@ fn suffix<'a>(mapping: &DocumentPath, path: &'a DocumentPath) -> Option<&'a [Pat
 
 /// Whether `path` names a scalar of the closed surface.
 ///
-/// The seven shapes, and nothing else:
+/// The nine shapes, and nothing else:
 ///
 /// | Shape | What it is |
 /// |---|---|
 /// | `<match>.<scalar key>` | a schema-known scalar field |
 /// | `<match>.<triggers\|search_terms>[i]` | an existing element of a string sequence |
 /// | `<match>.vars[i].<name\|type\|inject_vars>` | a variable's schema-known scalar |
+/// | `<match>.vars[i].depends_on[j]` | an existing `depends_on` item (Phase 4-5) |
 /// | `<match>.vars[i].params.<key>` | one entry of a variable's open `params` mapping |
 /// | `<match>.vars[i].params.<key>[j]` | one element of such an entry's sequence |
+/// | `<match>.vars[i].params.values[j].<label\|id>` | an entry of an existing `choice` record (Phase 4-5) |
 /// | `<match>.form_fields.<key>.<key>` | one option of one form field |
 /// | `<match>.form_fields.<key>.<key>[j]` | one element of such an option's sequence |
 ///
@@ -993,6 +1066,9 @@ fn names_a_surface_scalar(mapping: &DocumentPath, path: &DocumentPath) -> bool {
         [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(field)] => {
             vars == VARS_KEY && VariableField::from_key(field).is_some()
         }
+        [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(list), PathSegment::Index(_)] => {
+            vars == VARS_KEY && list == DEPENDS_ON_KEY
+        }
         [PathSegment::Key(fields), PathSegment::Key(_), PathSegment::Key(_)] => {
             fields == FORM_FIELDS_KEY
         }
@@ -1005,8 +1081,14 @@ fn names_a_surface_scalar(mapping: &DocumentPath, path: &DocumentPath) -> bool {
         [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(params), PathSegment::Key(_), PathSegment::Index(_)] => {
             vars == VARS_KEY && params == PARAMS_KEY
         }
+        [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(params), PathSegment::Key(list), PathSegment::Index(_), PathSegment::Key(field)] => {
+            vars == VARS_KEY
+                && params == PARAMS_KEY
+                && VariableList::from_param_key(list) == Some(VariableList::Values)
+                && (field == LABEL_KEY || field == ID_KEY)
+        }
         _ => false,
-    } // End of the match over the seven shapes a surface scalar takes
+    } // End of the match over the nine shapes a surface scalar takes
 } // End of function names_a_surface_scalar()
 
 /// Whether `path` names a **mapping entry** the closed surface may remove.

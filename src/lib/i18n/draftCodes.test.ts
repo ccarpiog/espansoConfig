@@ -119,7 +119,16 @@ const DRAFT_ERROR_NAMES = [
   'NewVariableHasTooManyParams',
   'NewKeyIsAKindParameter',
   'InsertionLandsOnARemoval',
-  'VariableMoveChangesNothing'
+  'VariableMoveChangesNothing',
+  'VariableListIntentsConflict',
+  'VariableListAbsent',
+  'VariableListHasAnUnsupportedShape',
+  'VariableListIsAFlowList',
+  'VariableListIsNotOfItsKind',
+  'VariableListWouldBeEmpty',
+  'VariableListItemShapeMismatch',
+  'NotAChoiceRecord',
+  'ChoiceRecordFieldHasNoScalar'
 ] as const satisfies readonly DraftErrorName[];
 
 /**
@@ -205,7 +214,25 @@ const DRAFT_ERRORS: readonly DraftError[] = [
   { NewVariableHasTooManyParams: { target: NEW_VARIABLE, limit: 16 } },
   { NewKeyIsAKindParameter: { target: { NewVariableParam: { insertion: 0, param: 2 } } } },
   { InsertionLandsOnARemoval: { insertion: 0, removal: 1 } },
-  { VariableMoveChangesNothing: { variable: 0 } }
+  { VariableMoveChangesNothing: { variable: 0 } },
+  { VariableListIntentsConflict: { variable: 0, list: 'depends_on' } },
+  { VariableListAbsent: { variable: 1, list: 'values' } },
+  { VariableListHasAnUnsupportedShape: { variable: 0, list: 'choices', found: 'Scalar' } },
+  { VariableListIsAFlowList: { variable: 2, list: 'values' } },
+  { VariableListIsNotOfItsKind: { variable: 0, list: 'args' } },
+  { VariableListWouldBeEmpty: { variable: 0, list: 'depends_on' } },
+  { VariableListItemShapeMismatch: { variable: 3, list: 'values' } },
+  {
+    NotAChoiceRecord: {
+      target: { VariableListItem: { variable: 0, list: 'values', item: 1 } },
+      found: 'Scalar'
+    }
+  },
+  {
+    ChoiceRecordFieldHasNoScalar: {
+      target: { ChoiceRecordField: { variable: 0, record: 1, field: 'id' } }
+    }
+  }
 ];
 
 // `never` exactly when the table above names every member of the union, and the
@@ -234,8 +261,8 @@ describe('the draft refusal samples', () => {
     expect(DRAFT_ERRORS.map(nameOf)).toEqual([...DRAFT_ERROR_NAMES]);
   });
 
-  it('hold the seventy-three variants Phase 4-4 measured', () => {
-    expect(DRAFT_ERROR_NAMES.length).toBe(73);
+  it('hold the eighty-two variants Phase 4-5 measured', () => {
+    expect(DRAFT_ERROR_NAMES.length).toBe(82);
   });
 }); // End of the "draft refusal samples" suite
 

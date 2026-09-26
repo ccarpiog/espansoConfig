@@ -26,16 +26,18 @@
 //!   position in the projection; Rust reads the key out of the projection to
 //!   build the path. A caller can only name what it was shown, and no refusal
 //!   carries a byte of the owner's configuration (`CLAUDE.md` section 1);
-//! - **nothing is inserted below the match mapping but two things.** A drafted
-//!   address the projection cannot resolve is refused by name, never created
-//!   (`docs/decisions/2b-2b-2-notes.md` decision D1). The two insertions are
-//!   explicit: since Phase 4-3 a new **author-named** entry of an existing
-//!   variable's block `params` ([`VariableDraft::insert_params`]), under ruling
-//!   7 of `docs/decisions/4-split-notes.md` §3 — its key is decoded text the
-//!   engine spells in key context, and every refusal about it names a position,
-//!   never the text; and since Phase 4-4 a whole new **variable**
+//! - **nothing is inserted below the match mapping but three things.** A
+//!   drafted address the projection cannot resolve is refused by name, never
+//!   created (`docs/decisions/2b-2b-2-notes.md` decision D1). The three
+//!   insertions are explicit: since Phase 4-3 a new **author-named** entry of an
+//!   existing variable's block `params` ([`VariableDraft::insert_params`]),
+//!   under ruling 7 of `docs/decisions/4-split-notes.md` §3 — its key is decoded
+//!   text the engine spells in key context, and every refusal about it names a
+//!   position, never the text; since Phase 4-4 a whole new **variable**
 //!   ([`NewVariable`], through [`VarsIntent`]) — into an existing block `vars`,
-//!   or as the whole `vars:` subtree of a match without one;
+//!   or as the whole `vars:` subtree of a match without one; and since Phase 4-5
+//!   new **items** of an existing variable's `depends_on`, `values`, `choices`
+//!   or `args` ([`VariableListIntent`]) — strings, or `{label, id}` records;
 //! - **an open value is a scalar or a sequence of scalars.** Anything else is
 //!   named and then refused, in both directions: a `Set` cannot replace a
 //!   collection node with a scalar one, and a `Remove` would discard bytes this
@@ -53,8 +55,12 @@
 //! presence of `vars`: insert a new variable of the closed [`NewVariable`] shape
 //! (whose `params` is the one mapping it synthesizes), remove one, or remove the
 //! whole entry explicitly; a variable reorder is a separate, single-edit batch
-//! ([`plan_variable_move`]). It may never change any other sequence's
-//! cardinality and never synthesize any other collection.**
+//! ([`plan_variable_move`]). Since Phase 4-5 it may also change the
+//! cardinality of an existing variable's four schema-known lists
+//! ([`VariableList`]) by strings or, in a `choice`'s `values`, by flat
+//! `{label, id}` records, and rewrite an existing record's `label` and `id`. It
+//! may never change any other sequence's cardinality and never synthesize any
+//! other collection.**
 //!
 //! It is stated three times, and the third statement is over the derived batch
 //! rather than over the draft:
@@ -143,6 +149,20 @@
 //! `[]`. A reorder is [`plan_variable_move`]'s, alone in its batch (R25), and is
 //! guarded by [`check_variable_move`].
 //!
+//! # A variable's lists, since Phase 4-5
+//!
+//! [`VariableDraft::lists`] carries [`VariableListIntent`]s about one existing
+//! variable's `depends_on` and its kind's list parameter — `choice`'s `values`,
+//! `random`'s `choices`, `script`'s `args` ([`VariableList`]): new items at a
+//! [`ListPlacement`], all strings or all `{label, id}` records
+//! ([`NewListItems`]), or one item removed with the comments it owns.
+//! [`VariableDraft::depends_on`] rewrites existing `depends_on` items and
+//! [`VariableDraft::records`] an existing record's `label` and `id`
+//! ([`ChoiceRecordDraft`]), leaving every other entry of the record alone. A
+//! shape the list does not already hold is refused, a flow list of strings
+//! stays flow, a record is never written into or out of a flow list, and
+//! removing the last item is refused rather than leaving `[]` or a null.
+//!
 //! # Several snippets of one file, since Phase 3-10
 //!
 //! [`plan_bulk_option_edits`] applies up to seven option intents
@@ -176,6 +196,7 @@ mod new_match;
 mod new_variable;
 mod plan;
 mod sequence;
+mod variable_list;
 
 pub use audit::{check_batch_independence, check_closed_surface, check_variable_move, NestedKeys};
 pub use bulk::{
@@ -198,4 +219,8 @@ pub use plan::{
 };
 pub use sequence::{
     ListPlacement, MatchStructure, ScalarItems, SequenceIntent, TriggerFormChange, TriggerSwitch,
+};
+pub use variable_list::{
+    ChoiceRecord, ChoiceRecordDraft, ChoiceRecordField, ChoiceRecords, NewListItems, VariableList,
+    VariableListIntent,
 };
