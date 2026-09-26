@@ -666,10 +666,16 @@ fn the_closed_surface_admits_a_group_into_params_and_nothing_near_it() {
         group(params.clone(), "delta", &["a\tb"]),
         // One segment shallower: the variable's own mapping.
         group(variable_path(0), "params", &["k"]),
-        // Another open mapping: a form field's options, and `params.fields`.
+        // Another open mapping: one segment below a form field's options
+        // (the options themselves take new options since Phase 4-6), and
+        // `params.fields` holding scalar entries rather than definitions.
         group(
-            mapping.clone().with_key("form_fields").with_key("f"),
-            "type",
+            mapping
+                .clone()
+                .with_key("form_fields")
+                .with_key("f")
+                .with_key("type"),
+            "a",
             &["k"],
         ),
         group(params.clone().with_key("fields"), "a", &["k"]),

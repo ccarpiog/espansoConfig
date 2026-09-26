@@ -333,12 +333,6 @@ const INVENTORY: &[Judged] = &[
         reason: "false positive: a drafted batch moving nothing, which is `PROGRESS.md` R25",
     },
     Judged {
-        file: "crates/espansoconfig-core/src/draft/match_draft.rs",
-        phrase: "never removed",
-        count: 1,
-        reason: "false positive: an options entry the draft engine replaces rather than removes",
-    },
-    Judged {
         file: "crates/espansoconfig-core/src/draft/plan.rs",
         phrase: "two ways",
         count: 1,

@@ -3076,11 +3076,18 @@ export interface NewParam {
 }
 
 /**
- * One of the typed settings a new variable writes verbatim as plain source
- * (Phase 4-4, ruling 4). Spelled as the espanso key, so a screen can put the key
- * itself beside a refusal about it.
+ * One of the typed settings written verbatim as plain source below the match
+ * mapping (ruling 4): the four a new variable writes (Phase 4-4) and the two a
+ * form field definition writes (Phase 4-6). Spelled as the espanso key, so a
+ * screen can put the key itself beside a refusal about it.
  */
-export type VariableSetting = 'inject_vars' | 'offset' | 'trim' | 'debug';
+export type VariableSetting =
+  | 'inject_vars'
+  | 'offset'
+  | 'trim'
+  | 'debug'
+  | 'multiline'
+  | 'trim_string_values';
 
 /**
  * The kind-specific parameters of a new variable (Phase 4-4): one variant per
@@ -3111,8 +3118,76 @@ export type NewVariableParams =
       };
     }
   | { readonly Script: { readonly args: readonly string[]; readonly trim: string | null } }
-  | { readonly Form: { readonly layout: string } }
+  | {
+      readonly Form: { readonly layout: string; readonly fields: readonly NewFormField[] };
+    }
   | { readonly Match: { readonly trigger: string } };
+
+/**
+ * Which form's definitions an intent or a refusal is about (Phase 4-6): the
+ * match's shorthand `form_fields`, an existing form variable's `params.fields`,
+ * or a new form variable's, by position in `var_intents`. Positions only.
+ */
+export type FormOwner =
+  | { readonly Shorthand: Record<string, never> }
+  | { readonly Variable: { readonly variable: number } }
+  | { readonly NewVariable: { readonly insertion: number } };
+
+/**
+ * The `values` of a new `choice` or `list` definition (Phase 4-6), in one of
+ * espanso's two representations, never converted into the other.
+ */
+export type FormValues = { readonly List: readonly string[] } | { readonly Text: string };
+
+/**
+ * The options a new definition is born holding, or that are added to an existing
+ * one (Phase 4-6). `multiline` and `trim_string_values` are plain source; every
+ * other string is a logical string spelled by the codec. `null` means the option
+ * is not written. Rust checks the plain-source text, the extras' key rules and
+ * their bound (sixteen); TypeScript forces none of it.
+ */
+export interface FormOptions {
+  /** `type`. */
+  readonly type: string | null;
+  /** `default`. */
+  readonly default: string | null;
+  /** `multiline`, as plain source. */
+  readonly multiline: string | null;
+  /** `values`, as a list or as text. */
+  readonly values: FormValues | null;
+  /** `trim_string_values`, as plain source. */
+  readonly trim_string_values: string | null;
+  /** Extra author-named options, each a scalar or a flat list of scalars. */
+  readonly extra: readonly NewParam[];
+}
+
+/** A new form field definition (Phase 4-6): the placeholder's name and its options. */
+export interface NewFormField {
+  /** The name, as decoded text. */
+  readonly name: string;
+  /** The options it is born holding; none at all is written `{}`. */
+  readonly options: FormOptions;
+}
+
+/**
+ * One intent about the cardinality or presence of one form's definitions (Phase
+ * 4-6). The same intent writes the shorthand shape when carried by
+ * {@link MatchDraft.form_intents} and the verbose one when carried by
+ * {@link VariableDraft.field_intents}; nothing converts one into the other.
+ */
+export type FormFieldIntent =
+  | { readonly InsertField: { readonly after: number | null; readonly field: NewFormField } }
+  | { readonly RemoveField: { readonly index: number } }
+  | { readonly RemoveFields: Record<string, never> };
+
+/**
+ * One intent about the items of an existing definition's `values` list (Phase
+ * 4-6). Rust refuses an empty item array while reading the arguments;
+ * TypeScript does not force that.
+ */
+export type FormValuesIntent =
+  | { readonly InsertItems: { readonly at: ListPlacement; readonly items: readonly string[] } }
+  | { readonly RemoveItem: { readonly index: number } };
 
 /**
  * A new local variable, as a closed description (Phase 4-4). Rust checks what no
@@ -3242,21 +3317,30 @@ export interface VariableDraft {
   readonly records: readonly ChoiceRecordDraft[];
   /** Items added to or removed from the variable's four lists (Phase 4-5). */
   readonly lists: readonly VariableListIntent[];
+  /** Drafted definitions of a verbose form's `params.fields` (Phase 4-6). */
+  readonly fields: readonly FormFieldDraft[];
+  /** Intents about a verbose form's definitions (Phase 4-6). */
+  readonly field_intents: readonly FormFieldIntent[];
 }
 
 /**
- * One drafted entry of `form_fields`, addressed by its index in the projection.
+ * One drafted form field definition, addressed by its index in the projection —
+ * of the shorthand `form_fields` in {@link MatchDraft.form_fields}, of a verbose
+ * form's `params.fields` in {@link VariableDraft.fields}.
  *
- * A `form_fields` entry's value is the option mapping espanso reads, so the only
- * thing drafted here is {@link FormFieldDraft.options}. The entry itself is never
- * removed: its value is a mapping, and this surface replaces no collection node
- * and discards no subtree it never displayed.
+ * It drafts the definition's existing options, new options (Phase 4-6) and the
+ * items of its `values` list (Phase 4-6); the definition itself is added and
+ * removed by a {@link FormFieldIntent}.
  */
 export interface FormFieldDraft {
-  /** The form field's index in the projected `form_fields` list. */
+  /** The definition's index in the projected definition list. */
   readonly index: number;
-  /** Drafted entries of that form field's own option mapping. */
+  /** Drafted entries of that definition's own option mapping. */
   readonly options: readonly EntryDraft[];
+  /** New options, written after the last option that stays (Phase 4-6). */
+  readonly insert_options: FormOptions;
+  /** Items added to or removed from its `values` list (Phase 4-6). */
+  readonly values: readonly FormValuesIntent[];
 }
 
 /**
@@ -3335,6 +3419,11 @@ export interface MatchDraft {
   readonly sequences: readonly SequenceIntent[];
   /** Drafted intents about `vars` — Phase 4-4. No production caller sends one yet. */
   readonly var_intents: readonly VarsIntent[];
+  /**
+   * Drafted intents about the shorthand `form_fields` — Phase 4-6. No production
+   * caller sends one yet.
+   */
+  readonly form_intents: readonly FormFieldIntent[];
 }
 
 // ---------------------------------------------------------------------------
@@ -3514,6 +3603,37 @@ export type DraftTarget =
         readonly option: number;
         readonly item: number;
       };
+    }
+  | { readonly VariableFormField: { readonly variable: number; readonly field: number } }
+  | {
+      readonly VariableFormFieldOption: {
+        readonly variable: number;
+        readonly field: number;
+        readonly option: number;
+      };
+    }
+  | {
+      readonly VariableFormFieldOptionItem: {
+        readonly variable: number;
+        readonly field: number;
+        readonly option: number;
+        readonly item: number;
+      };
+    }
+  | { readonly NewFormField: { readonly form: FormOwner; readonly field: number } }
+  | {
+      readonly NewFormFieldOption: {
+        readonly form: FormOwner;
+        readonly field: number;
+        readonly option: number;
+      };
+    }
+  | {
+      readonly NewFormOption: {
+        readonly form: FormOwner;
+        readonly field: number;
+        readonly option: number;
+      };
     };
 
 /** The name of every {@link DraftError} variant. */
@@ -3599,7 +3719,23 @@ export type DraftErrorName =
   | 'VariableListWouldBeEmpty'
   | 'VariableListItemShapeMismatch'
   | 'NotAChoiceRecord'
-  | 'ChoiceRecordFieldHasNoScalar';
+  | 'ChoiceRecordFieldHasNoScalar'
+  | 'FormIntentsConflict'
+  | 'VariableIsNotAForm'
+  | 'FormFieldsIsAFlowMapping'
+  | 'FormFieldsHasAnUnsupportedShape'
+  | 'FormFieldsWouldBeEmpty'
+  | 'NoFormFieldInsertionAnchor'
+  | 'FormFieldOptionsAreNotABlockMapping'
+  | 'FormFieldWouldHaveNoOptions'
+  | 'NoFormOptionInsertionAnchor'
+  | 'NewFormOptionNotPlainSource'
+  | 'NewKeyIsAFormOption'
+  | 'NewFormFieldHasTooManyOptions'
+  | 'FormValuesAbsent'
+  | 'FormValuesIsNotAList'
+  | 'FormValuesWouldBeEmpty'
+  | 'FormValuesIntentsConflict';
 
 /**
  * Why a draft could not be turned into an edit batch.
@@ -3819,7 +3955,43 @@ export type DraftError =
       };
     }
   | { readonly NotAChoiceRecord: { readonly target: DraftTarget; readonly found: ValueKind } }
-  | { readonly ChoiceRecordFieldHasNoScalar: { readonly target: DraftTarget } };
+  | { readonly ChoiceRecordFieldHasNoScalar: { readonly target: DraftTarget } }
+  | { readonly FormIntentsConflict: { readonly form: FormOwner; readonly intent: number } }
+  | { readonly VariableIsNotAForm: { readonly variable: number } }
+  | { readonly FormFieldsIsAFlowMapping: { readonly form: FormOwner } }
+  | {
+      readonly FormFieldsHasAnUnsupportedShape: {
+        readonly form: FormOwner;
+        readonly found: ValueKind;
+      };
+    }
+  | { readonly FormFieldsWouldBeEmpty: { readonly form: FormOwner } }
+  | { readonly NoFormFieldInsertionAnchor: { readonly form: FormOwner } }
+  | {
+      readonly FormFieldOptionsAreNotABlockMapping: {
+        readonly target: DraftTarget;
+        readonly found: ValueKind;
+      };
+    }
+  | { readonly FormFieldWouldHaveNoOptions: { readonly target: DraftTarget } }
+  | { readonly NoFormOptionInsertionAnchor: { readonly target: DraftTarget } }
+  | {
+      readonly NewFormOptionNotPlainSource: {
+        readonly target: DraftTarget;
+        readonly setting: VariableSetting;
+      };
+    }
+  | { readonly NewKeyIsAFormOption: { readonly target: DraftTarget } }
+  | {
+      readonly NewFormFieldHasTooManyOptions: {
+        readonly target: DraftTarget;
+        readonly limit: number;
+      };
+    }
+  | { readonly FormValuesAbsent: { readonly target: DraftTarget } }
+  | { readonly FormValuesIsNotAList: { readonly target: DraftTarget; readonly found: ValueKind } }
+  | { readonly FormValuesWouldBeEmpty: { readonly target: DraftTarget } }
+  | { readonly FormValuesIntentsConflict: { readonly target: DraftTarget } };
 
 // ---------------------------------------------------------------------------
 // The external-change reconciliation wire — Phase 2d-4b

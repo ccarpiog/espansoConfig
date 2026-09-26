@@ -176,7 +176,8 @@ const UNCHANGED_DRAFT: MatchDraft = {
   content_switch: null,
   trigger_form: null,
   sequences: [],
-  var_intents: []
+  var_intents: [],
+  form_intents: []
 };
 
 beforeEach(() => {

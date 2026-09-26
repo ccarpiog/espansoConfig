@@ -902,7 +902,7 @@ fn the_closed_surface_admits_a_new_variable_and_nothing_near_it() {
     let mut with_params = variable_fields("shell");
     with_params.push((
         "params".to_owned(),
-        ItemValue::Mapping(vec![
+        ItemValue::flat(vec![
             ("cmd".to_owned(), EntryValue::Scalar("c".to_owned())),
             (
                 "trim".to_owned(),
@@ -938,7 +938,7 @@ fn the_closed_surface_admits_a_new_variable_and_nothing_near_it() {
     let mut plain_elsewhere = variable_fields("echo");
     plain_elsewhere.push((
         "params".to_owned(),
-        ItemValue::Mapping(vec![(
+        ItemValue::flat(vec![(
             "echo".to_owned(),
             EntryValue::PlainSource("x".to_owned()),
         )]),
@@ -946,7 +946,7 @@ fn the_closed_surface_admits_a_new_variable_and_nothing_near_it() {
     let mut typed_as_string = variable_fields("shell");
     typed_as_string.push((
         "params".to_owned(),
-        ItemValue::Mapping(vec![(
+        ItemValue::flat(vec![(
             "trim".to_owned(),
             EntryValue::Scalar("true".to_owned()),
         )]),
@@ -961,7 +961,7 @@ fn the_closed_surface_admits_a_new_variable_and_nothing_near_it() {
     let mut merge_key = variable_fields("echo");
     merge_key.push((
         "params".to_owned(),
-        ItemValue::Mapping(vec![("<<".to_owned(), EntryValue::Scalar("x".to_owned()))]),
+        ItemValue::flat(vec![("<<".to_owned(), EntryValue::Scalar("x".to_owned()))]),
     ));
     let outside: Vec<DocumentEdit> = vec![
         insert(variable_fields("nonsense")),

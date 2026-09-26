@@ -709,11 +709,13 @@ fn a_list_edit_outside_the_two_lists_is_refused_by_the_audit() {
                 .with_index(0),
         )
         .into(),
+        // A definition's `values` items are inside since Phase 4-6; another
+        // option's are not.
         RemoveItem::new(
             here.clone()
                 .with_key("form_fields")
                 .with_key("f")
-                .with_key("values")
+                .with_key("default")
                 .with_index(0),
         )
         .into(),
@@ -732,7 +734,7 @@ fn a_list_edit_outside_the_two_lists_is_refused_by_the_audit() {
             here.clone()
                 .with_key("form_fields")
                 .with_key("f")
-                .with_key("values"),
+                .with_key("default"),
             ItemPlacement::End,
             one("x"),
         )

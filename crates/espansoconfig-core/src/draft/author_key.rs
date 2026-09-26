@@ -23,9 +23,14 @@
 /// A new author-named entry's value is a logical string spelled by the codec, so
 /// `trim: true` requested that way would be written `trim: 'true'` — A1 one
 /// level down. Ruling 4 gives these keys explicit plain-source policies in the
-/// step that first writes them (4-4 … 4-6); until then a new entry under one of
-/// them is refused by name ([`crate::draft::DraftError::NewKeyIsATypedSetting`])
-/// rather than written as a string. `inject_vars` is ruling 4's sixth setting and
+/// step that first writes them: a new variable writes `offset`, `trim` and
+/// `debug` through its kind's own fields (Phase 4-4), and a form field
+/// definition writes `multiline` and `trim_string_values` through
+/// [`crate::draft::FormOptions`] (Phase 4-6). As a new author-named entry — a
+/// `params` entry, a new variable's extra parameter or a definition's extra
+/// option — every one of the five is refused by name
+/// ([`crate::draft::DraftError::NewKeyIsATypedSetting`]) rather than written as
+/// a string. `inject_vars` is ruling 4's sixth setting and
 /// is absent here because it belongs to the variable's own mapping, never to
 /// `params`. The comparison is exact decoded text; the list is this module's
 /// reading of the ruling, not a schema espanso publishes.

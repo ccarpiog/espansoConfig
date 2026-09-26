@@ -5,6 +5,10 @@ use crate::draft::author_key::{author_key_fault, AuthorKeyFault, TYPED_SETTINGS}
 use crate::draft::bulk::is_plain_source;
 use crate::draft::error::DraftError;
 use crate::draft::field::DraftField;
+use crate::draft::form_definition::{FormOwner, FIELDS_KEY};
+use crate::draft::form_plan::{
+    check_form_intents, check_new_field_name, check_new_options, plan_form, FormAt,
+};
 use crate::draft::match_draft::{
     DraftTarget, EntryDraft, FieldSubstitution, ItemDraft, MatchDraft, MatchField, NewParamValue,
     SequenceField, VariableDraft, VariableField, FORM_FIELDS_KEY, PARAMS_KEY, VARS_KEY,
@@ -20,8 +24,8 @@ use crate::model::{
 };
 use crate::patch::{
     DocumentEdit, DocumentPath, EntryValue, FieldInsert, FieldInsertGroup, FieldRemoval,
-    InsertItem, ItemMove, ItemPlacement, ItemValue, KeySubstitution, RemoveItem, ScalarEdit,
-    ScalarItemInsert, ShapeSwitch,
+    InsertItem, ItemFields, ItemMove, ItemPlacement, ItemValue, KeySubstitution, RemoveItem,
+    ScalarEdit, ScalarItemInsert, ShapeSwitch,
 };
 
 /// Derives the batch a draft asks for, or refuses it by name.
@@ -116,6 +120,18 @@ use crate::patch::{
 /// are refused at intent level beside step 5's
 /// ([`DraftError::VariableListIntentsConflict`]).
 ///
+/// # Form field definitions (Phase 4-6)
+///
+/// [`MatchDraft::form_intents`] and [`MatchDraft::form_fields`] draft the
+/// shorthand `form_fields`; [`VariableDraft::field_intents`] and
+/// [`VariableDraft::fields`] draft a verbose form's `params.fields`. Both go
+/// through the same functions (`crate::draft::form_plan`), so the two shapes
+/// meet the same rules and neither is ever written into the other. Their
+/// contradictions and every new definition's own description are refused at
+/// intent level ([`DraftError::FormIntentsConflict`] and the key and option
+/// refusals); a form with no definitions receives the whole entry as a
+/// mapping-valued entry of the group of the mapping that holds it.
+///
 /// # The order of the checks is the contract
 ///
 /// 1. the match has a path;
@@ -137,9 +153,10 @@ use crate::patch::{
 ///    author-named key meets ruling 7's text rules and no two new keys of one
 ///    variable decode alike ([`check_new_keys_are_admissible`]);
 /// 6. every drafted field is planned, in [`MatchField::ALL`] order, then every
-///    drafted sequence element, then every drafted variable, then every drafted
-///    `form_fields` entry, each in the draft's own order, and last the absent
-///    fields as one insertion after a surviving anchor;
+///    drafted sequence element, then every drafted variable (a verbose form's
+///    definitions among its parts), then the shorthand form's definitions, each
+///    in the draft's own order, and last the absent fields — a new `vars:` or
+///    `form_fields:` among them — as one insertion after a surviving anchor;
 /// 7. the derived batch passes [`check_closed_surface`];
 /// 8. and [`check_batch_independence`], which is now given the keys of every
 ///    open mapping the batch reached into as well as the match's own.
@@ -321,6 +338,8 @@ pub fn plan_match_edits_with(
     check_vars_intents_are_coherent(view, draft)?;
     check_new_variables_are_admissible(view, draft)?;
     check_variable_lists_are_coherent(view, draft)?;
+    let shorthand = FormAt::shorthand(view, path);
+    check_form_intents(&shorthand, &draft.form_intents, &draft.form_fields)?;
 
     let entries = visible_entries(view);
     let mut edits: Vec<DocumentEdit> = Vec::new();
@@ -359,8 +378,19 @@ pub fn plan_match_edits_with(
     }
     plan_vars(view, draft, &mut edits, &mut nested)?;
     let new_vars = plan_vars_intents(view, draft, path, &mut edits)?;
-    plan_form_fields(view, draft, path, &mut edits, &mut nested)?;
-    plan_insertions(path, &entries, insertions, new_vars, structure, &mut edits)?;
+    let new_form_fields = plan_form(
+        &shorthand,
+        &draft.form_intents,
+        &draft.form_fields,
+        &mut edits,
+        &mut nested,
+    )?
+    .created;
+    let created = Created {
+        vars: new_vars,
+        form_fields: new_form_fields,
+    };
+    plan_insertions(path, &entries, insertions, created, structure, &mut edits)?;
 
     check_closed_surface(path, &edits)?;
     check_batch_independence(path, &original_keys(&entries), &nested, &edits)?;
@@ -611,6 +641,22 @@ fn check_new_variables_are_admissible(
                 return Err(DraftError::NewKeyDuplicatesAnInsertion { target, first });
             }
         } // End of the loop over the new variable's extra parameters
+          // A new verbose form's definitions (Phase 4-6): the rules an insertion
+          // into an existing form meets, against no existing definition.
+        let form = FormOwner::NewVariable { insertion };
+        let mut names: Vec<(usize, &str)> = Vec::new();
+        for (field, definition) in variable.form_fields().iter().enumerate() {
+            let target = DraftTarget::NewFormField { form, field };
+            check_new_field_name(&[], definition, target, &names)?;
+            names.push((field, definition.name.as_str()));
+            check_new_options(&definition.options, target, |option| {
+                DraftTarget::NewFormFieldOption {
+                    form,
+                    field,
+                    option,
+                }
+            })?;
+        } // End of the loop over the new variable's definitions
     } // End of the loop over the drafted new variables
     Ok(())
 } // End of function check_new_variables_are_admissible()
@@ -742,6 +788,15 @@ fn plan_vars_intents(
     }
     Ok(subtree)
 } // End of function plan_vars_intents()
+
+/// The whole subtrees a draft creates in the match's own mapping, for
+/// [`plan_insertions`] to write in its one group.
+struct Created {
+    /// The one new variable of a match with no `vars` (Phase 4-4).
+    vars: Option<Vec<(String, ItemValue)>>,
+    /// The new definitions of a shorthand form with no `form_fields` (Phase 4-6).
+    form_fields: Option<ItemFields>,
+}
 
 /// What one entry of the insertion group is, by name.
 ///
@@ -1172,13 +1227,15 @@ fn plan_substitution(
 /// `tests/patch_item.rs`). So a draft that removes the last entry and adds
 /// another writes the new one after the last entry whose successor stays, rather
 /// than being refused as it was before Phase 3-1. Since Phase 4-4 a draft can
-/// take `vars` away ([`VarsIntent::RemoveVars`]), so `vars` is one of the
-/// visible entries for this rule — though never an anchor itself
-/// ([`VisibleEntry::anchorable`]); `form_fields` is not one a draft can remove,
-/// so it never causes a skip.
+/// take `vars` away ([`VarsIntent::RemoveVars`]), and since Phase 4-6
+/// `form_fields` ([`crate::draft::FormFieldIntent::RemoveFields`]), so both are
+/// visible entries for this rule — though never anchors themselves
+/// ([`VisibleEntry::anchorable`]).
 ///
 /// A new `vars:` subtree (Phase 4-4) is written as the group's trailing item
-/// list ([`FieldInsertGroup::with_item_list`]) after the same anchor.
+/// list ([`FieldInsertGroup::with_item_list`]) after the same anchor, and a new
+/// `form_fields:` (Phase 4-6) as one of its mapping-valued entries
+/// ([`FieldInsertGroup::with_mappings`]), after the scalar and list entries.
 ///
 /// One field is a [`FieldInsert`]; two or more are one [`FieldInsertGroup`], in
 /// the order they were collected — [`MatchField::ALL`] order.
@@ -1186,17 +1243,29 @@ fn plan_insertions(
     path: &DocumentPath,
     entries: &[VisibleEntry],
     insertions: Vec<(Inserted, EntryValue)>,
-    new_vars: Option<Vec<(String, ItemValue)>>,
+    created: Created,
     structure: &MatchStructure,
     edits: &mut Vec<DocumentEdit>,
 ) -> Result<(), DraftError> {
+    let Created {
+        vars: new_vars,
+        form_fields: new_form_fields,
+    } = created;
     // The refusal when no anchor survives names the first thing to be written:
-    // a field or list of the group, or else the new `vars:` subtree (Phase 4-4).
+    // a field or list of the group, else the new `form_fields:` (Phase 4-6), else
+    // the new `vars:` subtree (Phase 4-4).
     let no_anchor = match insertions.first() {
         Some((first, _)) => first.no_anchor(),
+        None if new_form_fields.is_some() => DraftError::NoFormFieldInsertionAnchor {
+            form: FormOwner::Shorthand {},
+        },
         None if new_vars.is_some() => DraftError::NoVarsInsertionAnchor {},
         None => return Ok(()),
     };
+    let mappings: Vec<(String, ItemFields)> = new_form_fields
+        .map(|definitions| (FORM_FIELDS_KEY.to_owned(), definitions))
+        .into_iter()
+        .collect();
     let substitutions = structure.substitutions.as_slice();
     let removed = |key: &str| {
         edits.iter().any(|edit| match edit {
@@ -1257,7 +1326,19 @@ fn plan_insertions(
             VARS_KEY,
             vec![variable],
         )
-        .ok_or(no_anchor)?;
+        .ok_or(no_anchor)?
+        .with_mappings(mappings);
+        edits.push(group.into());
+        return Ok(());
+    }
+    // A new `form_fields:` (Phase 4-6) is a mapping-valued entry of the same
+    // group, after the scalar and list entries.
+    if !mappings.is_empty() {
+        let group = match FieldInsertGroup::typed(path.clone(), Some(anchor.clone()), fields) {
+            Some(group) => group.with_mappings(mappings),
+            None => FieldInsertGroup::of_mappings(path.clone(), Some(anchor), mappings)
+                .ok_or(no_anchor)?,
+        };
         edits.push(group.into());
         return Ok(());
     }
@@ -1355,6 +1436,27 @@ fn check_no_index_is_drafted_twice(draft: &MatchDraft) -> Result<(), DraftError>
                 second: records[second].0,
             });
         }
+        // Phase 4-6: a verbose form's definitions, as the shorthand ones below.
+        let fields: Vec<usize> = variable.fields.iter().map(|field| field.index).collect();
+        if let Some((field, first, second)) = repeated_index(&fields) {
+            return Err(DraftError::TargetDraftedTwice {
+                target: DraftTarget::VariableFormField {
+                    variable: variable.index,
+                    field,
+                },
+                first,
+                second,
+            });
+        }
+        for field in &variable.fields {
+            check_open_mapping_is_drafted_once(
+                &field.options,
+                OpenMapping::VariableFormField {
+                    variable: variable.index,
+                    field: field.index,
+                },
+            )?;
+        } // End of the loop over the variable's drafted definitions
     } // End of the loop over the drafted variables
 
     let fields: Vec<usize> = draft.form_fields.iter().map(|field| field.index).collect();
@@ -1455,6 +1557,13 @@ fn check_no_entry_drafts_two_shapes(draft: &MatchDraft) -> Result<(), DraftError
             variable: variable.index,
         };
         check_no_entry_of_one_mapping_drafts_two_shapes(&variable.params, owner)?;
+        for field in &variable.fields {
+            let owner = OpenMapping::VariableFormField {
+                variable: variable.index,
+                field: field.index,
+            };
+            check_no_entry_of_one_mapping_drafts_two_shapes(&field.options, owner)?;
+        } // End of the loop over the variable's drafted definitions
     } // End of the loop over the drafted variables
     for field in &draft.form_fields {
         let owner = OpenMapping::FormField { field: field.index };
@@ -1597,7 +1706,7 @@ fn plan_sequence(
 /// not fix, holding scalars and sequences of scalars — so they are planned by
 /// one function and told apart only where a refusal has to say which it was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OpenMapping {
+pub(super) enum OpenMapping {
     /// One variable's `params`.
     Params {
         /// The variable's index in the projected `vars` list.
@@ -1608,22 +1717,37 @@ enum OpenMapping {
         /// The form field's index in the projected `form_fields` list.
         field: usize,
     },
+    /// One definition's option mapping in a verbose form's `params.fields`
+    /// (Phase 4-6).
+    VariableFormField {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// The definition's index in its projected `params.fields`.
+        field: usize,
+    },
 }
 
 impl OpenMapping {
     /// The address of one entry of this mapping.
-    fn entry(self, entry: usize) -> DraftTarget {
+    pub(super) fn entry(self, entry: usize) -> DraftTarget {
         match self {
             OpenMapping::Params { variable } => DraftTarget::Param { variable, entry },
             OpenMapping::FormField { field } => DraftTarget::FormFieldOption {
                 field,
                 option: entry,
             },
+            OpenMapping::VariableFormField { variable, field } => {
+                DraftTarget::VariableFormFieldOption {
+                    variable,
+                    field,
+                    option: entry,
+                }
+            }
         }
-    }
+    } // End of function entry() for OpenMapping
 
     /// The address of one element of one entry's sequence.
-    fn item(self, entry: usize, item: usize) -> DraftTarget {
+    pub(super) fn item(self, entry: usize, item: usize) -> DraftTarget {
         match self {
             OpenMapping::Params { variable } => DraftTarget::ParamItem {
                 variable,
@@ -1635,6 +1759,14 @@ impl OpenMapping {
                 option: entry,
                 item,
             },
+            OpenMapping::VariableFormField { variable, field } => {
+                DraftTarget::VariableFormFieldOptionItem {
+                    variable,
+                    field,
+                    option: entry,
+                    item,
+                }
+            }
         }
     } // End of function item() for OpenMapping
 } // End of impl OpenMapping
@@ -1680,18 +1812,59 @@ fn plan_vars(
             plan_variable_scalar(variable, drafted, &at, field, edits)?;
         } // End of the loop over the variable's schema-known scalars
         plan_variable_lists(variable, drafted, &at, edits, nested)?;
-        if drafted.params.is_empty() && drafted.insert_params.is_empty() {
+        // A verbose form's definitions (Phase 4-6), planned by the functions the
+        // shorthand `form_fields` goes through, at `params.fields`.
+        let form = if drafted.drafts_form_fields() {
+            let form = FormAt::verbose(variable, index, &at)?;
+            check_form_intents(&form, &drafted.field_intents, &drafted.fields)?;
+            let planned = plan_form(
+                &form,
+                &drafted.field_intents,
+                &drafted.fields,
+                edits,
+                nested,
+            )?;
+            Some(FormParams {
+                entry: fields_entry(variable),
+                created: planned.created,
+                removed: planned.removes_all,
+            })
+        } else {
+            None
+        };
+        if drafted.params.is_empty() && drafted.insert_params.is_empty() && form.is_none() {
             continue;
         }
         let params = at.with_key(PARAMS_KEY);
         let owner = OpenMapping::Params { variable: index };
         plan_open_mapping(&variable.params, &drafted.params, &params, owner, edits)?;
-        check_params_keep_an_entry(variable, drafted)?;
-        plan_new_params(variable, drafted, &params, edits)?;
+        check_params_keep_an_entry(variable, drafted, form.as_ref())?;
+        plan_new_params(variable, drafted, &params, form, edits)?;
         nested.push(NestedKeys::new(params, nameable_keys(&variable.params)));
     } // End of the loop over the drafted variables
     Ok(())
 } // End of function plan_vars()
+
+/// What a verbose form's planning tells the `params` planner (Phase 4-6).
+struct FormParams {
+    /// The index of the `params` entry holding `fields`, when there is one.
+    entry: Option<usize>,
+    /// The definitions of a form with no `fields`, to be written as a new
+    /// `fields:` entry in the `params` group.
+    created: Option<ItemFields>,
+    /// Whether the whole `fields` entry is removed.
+    removed: bool,
+}
+
+/// The index of the first `params` entry whose decoded key is `fields`.
+fn fields_entry(variable: &VariableView) -> Option<usize> {
+    variable.params.iter().position(|field| {
+        field
+            .key
+            .as_ref()
+            .is_some_and(|key| key.decoded && key.text == FIELDS_KEY)
+    })
+}
 
 /// Refuses a draft that removes every entry of a variable's `params` and adds
 /// none (Phase 4-3, ruling 8).
@@ -1705,16 +1878,19 @@ fn plan_vars(
 fn check_params_keep_an_entry(
     variable: &VariableView,
     drafted: &VariableDraft,
+    form: Option<&FormParams>,
 ) -> Result<(), DraftError> {
+    // A verbose form's `RemoveFields` (Phase 4-6) removes one entry too, and a
+    // new `fields:` is one new entry.
     let removed = drafted
         .params
         .iter()
         .filter(|entry| entry.value == DraftField::Remove)
-        .count();
-    if !variable.params.is_empty()
-        && removed == variable.params.len()
-        && drafted.insert_params.is_empty()
-    {
+        .count()
+        + usize::from(form.is_some_and(|form| form.removed));
+    let inserts =
+        !drafted.insert_params.is_empty() || form.is_some_and(|form| form.created.is_some());
+    if !variable.params.is_empty() && removed == variable.params.len() && !inserts {
         return Err(DraftError::ParamsWouldBeEmpty {
             variable: drafted.index,
         });
@@ -1747,9 +1923,14 @@ fn plan_new_params(
     variable: &VariableView,
     drafted: &VariableDraft,
     params: &DocumentPath,
+    form: Option<FormParams>,
     edits: &mut Vec<DocumentEdit>,
 ) -> Result<(), DraftError> {
-    if drafted.insert_params.is_empty() {
+    let (created, fields_entry, fields_removed) = match form {
+        Some(form) => (form.created, form.entry, form.removed),
+        None => (None, None, false),
+    };
+    if drafted.insert_params.is_empty() && created.is_none() {
         return Ok(());
     }
     let index = drafted.index;
@@ -1783,20 +1964,24 @@ fn plan_new_params(
     } // End of the loop over the new entries
 
     let removed = |entry: usize| {
-        drafted
-            .params
-            .iter()
-            .any(|drafted| drafted.index == entry && drafted.value == DraftField::Remove)
+        (fields_removed && fields_entry == Some(entry))
+            || drafted
+                .params
+                .iter()
+                .any(|drafted| drafted.index == entry && drafted.value == DraftField::Remove)
     };
     // A kind list whose items the draft adds or removes is not an anchor either
     // (Phase 4-5), for `plan_insertions`' reason one level down: an insertion
     // after its last item and an insertion after the whole entry are the same
-    // offset, and a removal of its last item ends there.
+    // offset, and a removal of its last item ends there. A verbose form's
+    // `fields` whose definitions the draft touches is not one either (Phase 4-6),
+    // for the same reason.
     let items_change = |entry: usize| {
-        drafted.lists.iter().any(|intent| {
+        let list = drafted.lists.iter().any(|intent| {
             intent.list().kind() == Some(variable.kind)
                 && list_entry(variable, intent.list()) == Some(entry)
-        })
+        });
+        list || (drafted.drafts_form_fields() && fields_entry == Some(entry))
     };
     let anchor = (0..variable.params.len())
         .rev()
@@ -1822,7 +2007,17 @@ fn plan_new_params(
             (new.key.clone(), value)
         })
         .collect();
-    if let Some(group) = FieldInsertGroup::typed(params.clone(), Some(sibling), entries) {
+    // A new `fields:` (Phase 4-6) is a mapping-valued entry of the same group,
+    // written after the new scalar and list entries.
+    let mappings: Vec<(String, ItemFields)> = created
+        .map(|definitions| (FIELDS_KEY.to_owned(), definitions))
+        .into_iter()
+        .collect();
+    let group = match FieldInsertGroup::typed(params.clone(), Some(sibling.clone()), entries) {
+        Some(group) => Some(group.with_mappings(mappings)),
+        None => FieldInsertGroup::of_mappings(params.clone(), Some(sibling), mappings),
+    };
+    if let Some(group) = group {
         edits.push(group.into());
     }
     Ok(())
@@ -2359,7 +2554,7 @@ fn check_new_keys_are_admissible(draft: &MatchDraft) -> Result<(), DraftError> {
 } // End of function check_new_keys_are_admissible()
 
 /// The refusal that names one ruling-7 fault of a new author-named key.
-fn key_fault_refusal(fault: AuthorKeyFault, target: DraftTarget) -> DraftError {
+pub(super) fn key_fault_refusal(fault: AuthorKeyFault, target: DraftTarget) -> DraftError {
     match fault {
         AuthorKeyFault::Empty => DraftError::NewKeyIsEmpty { target },
         AuthorKeyFault::LineBreak => DraftError::NewKeyHasALineBreak { target },
@@ -2456,45 +2651,11 @@ fn plan_variable_scalar(
     Ok(())
 } // End of function plan_variable_scalar()
 
-/// Plans every drafted entry of `form_fields`.
-fn plan_form_fields(
-    view: &MatchView,
-    draft: &MatchDraft,
-    path: &DocumentPath,
-    edits: &mut Vec<DocumentEdit>,
-    nested: &mut Vec<NestedKeys>,
-) -> Result<(), DraftError> {
-    for drafted in &draft.form_fields {
-        let index = drafted.index;
-        let target = DraftTarget::FormField { index };
-        let field = view
-            .form_fields
-            .get(index)
-            .ok_or(DraftError::TargetDoesNotExist {
-                target,
-                length: view.form_fields.len(),
-            })?;
-        if drafted.options.is_empty() {
-            continue;
-        }
-        let key = nameable_key(&view.form_fields, index, target)?;
-        let at = path.clone().with_key(FORM_FIELDS_KEY).with_key(key);
-        // A form field whose value is not a mapping has no options, so every
-        // drafted one is refused by `plan_open_mapping` as an entry that is not
-        // there — the same answer, arrived at once.
-        let options = field.value.as_mapping().unwrap_or_default();
-        let owner = OpenMapping::FormField { field: index };
-        plan_open_mapping(options, &drafted.options, &at, owner, edits)?;
-        nested.push(NestedKeys::new(at, nameable_keys(options)));
-    } // End of the loop over the drafted form fields
-    Ok(())
-} // End of function plan_form_fields()
-
 /// Plans every drafted entry of one open mapping.
 ///
 /// The one function `params` and a form field's options both go through, so the
 /// answers this surface gives to an open key are stated once.
-fn plan_open_mapping(
+pub(super) fn plan_open_mapping(
     fields: &[FieldView],
     drafts: &[EntryDraft],
     mapping: &DocumentPath,
@@ -2511,7 +2672,7 @@ fn plan_open_mapping(
         let at = mapping
             .clone()
             .with_key(nameable_key(fields, entry, target)?);
-        plan_entry_value(field, &drafted.value, &at, target, owner, edits)?;
+        plan_entry_value(field, &drafted.value, &at, target, edits)?;
         plan_entry_items(field, drafted, &at, owner, edits)?;
     } // End of the loop over this mapping's drafted entries
     Ok(())
@@ -2519,22 +2680,20 @@ fn plan_open_mapping(
 
 /// Plans one open entry's scalar value.
 ///
-/// A `Remove` takes a scalar entry away, and — since Phase 4-3, and in a
-/// variable's `params` only — an entry whose value is a **flat list of scalars**
-/// ([`is_a_scalar_list`]): every byte of it was displayed as an item, so removing
-/// it discards nothing the editor never showed. A mapping, a list holding a
-/// collection or an alias, and every list under a form field's options are still
-/// refused as [`DraftError::NestedRemovalWouldDiscardUnshownStructure`].
+/// A `Remove` takes a scalar entry away, and an entry whose value is a **flat
+/// list of scalars** ([`is_a_scalar_list`]) — in a variable's `params` since
+/// Phase 4-3, and in a form field definition's options since Phase 4-6: every
+/// byte of it was displayed as an item, so removing it discards nothing the
+/// editor never showed. A mapping and a list holding a collection or an alias are
+/// still refused as [`DraftError::NestedRemovalWouldDiscardUnshownStructure`].
 fn plan_entry_value(
     field: &FieldView,
     intent: &DraftField<String>,
     at: &DocumentPath,
     target: DraftTarget,
-    owner: OpenMapping,
     edits: &mut Vec<DocumentEdit>,
 ) -> Result<(), DraftError> {
-    let removable_list =
-        matches!(owner, OpenMapping::Params { .. }) && is_a_scalar_list(&field.value);
+    let removable_list = is_a_scalar_list(&field.value);
     match (intent, field.value.as_scalar()) {
         (DraftField::Unchanged, _) => {}
         (DraftField::Remove, Some(_)) => edits.push(FieldRemoval::new(at.clone()).into()),
@@ -2615,7 +2774,7 @@ fn plan_entry_items(
 /// The third is checked over the **whole** mapping and not over the entries the
 /// draft happens to name: a duplicate the draft never mentions still makes the
 /// path of the one it does mention ambiguous.
-fn nameable_key(
+pub(super) fn nameable_key(
     fields: &[FieldView],
     index: usize,
     target: DraftTarget,
@@ -2647,7 +2806,7 @@ fn nameable_key(
 /// and [`check_batch_independence`]'s check 3 rests on it. An entry whose key is
 /// not a scalar or did not decode contributes nothing, because no path segment
 /// could ever collide with it.
-fn nameable_keys(fields: &[FieldView]) -> Vec<String> {
+pub(super) fn nameable_keys(fields: &[FieldView]) -> Vec<String> {
     fields
         .iter()
         .filter_map(|field| field.key.as_ref())
@@ -2658,14 +2817,14 @@ fn nameable_keys(fields: &[FieldView]) -> Vec<String> {
 
 /// Whether a projected value is a sequence whose every item is a scalar — `[]`
 /// included (Phase 4-3).
-fn is_a_scalar_list(value: &ValueView) -> bool {
+pub(super) fn is_a_scalar_list(value: &ValueView) -> bool {
     value
         .as_sequence()
         .is_some_and(|items| items.iter().all(|item| item.as_scalar().is_some()))
 }
 
 /// What kind of node a projected value is.
-fn kind_of(value: &ValueView) -> ValueKind {
+pub(super) fn kind_of(value: &ValueView) -> ValueKind {
     match value {
         ValueView::Scalar(_) => ValueKind::Scalar,
         ValueView::Sequence(_) => ValueKind::Sequence,
@@ -2716,7 +2875,7 @@ fn plan_scalar(
 /// Every other answer is one [`ScalarEdit::plain_source`], so a quoted spelling
 /// of the same text (`'true'` for `true`) is rewritten, exactly as the bulk edit
 /// rewrites it. `value` has already passed [`is_plain_source`].
-fn plan_plain_source_scalar(
+pub(super) fn plan_plain_source_scalar(
     scalar: &ScalarView,
     value: &str,
     at: DocumentPath,
@@ -2768,10 +2927,11 @@ struct VisibleEntry {
     key: Option<String>,
     /// Where it sits, for ordering only.
     at: usize,
-    /// Whether an insertion may be written after it. `false` for `vars` alone
-    /// (Phase 4-4): it is visible so that removing it keeps the entry before it
-    /// from anchoring an insertion at its first byte, but an insertion after it
-    /// would land where an item appended to it lands, so it anchors nothing.
+    /// Whether an insertion may be written after it. `false` for `vars` (Phase
+    /// 4-4) and `form_fields` (Phase 4-6): each is visible so that removing it
+    /// keeps the entry before it from anchoring an insertion at its first byte,
+    /// but an insertion after it would land where something appended to it
+    /// lands, so it anchors nothing.
     anchorable: bool,
 }
 
@@ -2825,6 +2985,18 @@ fn visible_entries(view: &MatchView) -> Vec<VisibleEntry> {
     {
         entries.push(VisibleEntry {
             key: Some(VARS_KEY.to_owned()),
+            at: location.key_span.start,
+            anchorable: false,
+        });
+    }
+    // `form_fields`, likewise since Phase 4-6: a draft may remove it whole, and an
+    // insertion after it would land where a definition appended to it lands. A
+    // `form_fields` that is not a mapping is an unknown entry and is seen below.
+    if let MappingPresence::Empty { location } | MappingPresence::Entries { location, .. } =
+        &view.form_fields_presence
+    {
+        entries.push(VisibleEntry {
+            key: Some(FORM_FIELDS_KEY.to_owned()),
             at: location.key_span.start,
             anchorable: false,
         });

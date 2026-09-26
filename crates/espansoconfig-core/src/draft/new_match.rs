@@ -108,8 +108,10 @@ impl From<TriggerList> for Vec<String> {
 /// The five are the ones [`crate::draft::ContentForm`] names and a
 /// [`crate::draft::FieldSubstitution`] can switch between. `form` is carried as
 /// its **layout text** only (ruling 9 of `docs/decisions/3-split-notes.md`):
-/// creation writes no `form_fields`, because `form_fields` stays read-only until
-/// Phase 4 and would be a nested mapping this type cannot spell.
+/// creation writes no `form_fields`: creation stays free of variables and form
+/// definitions in Phase 4 (ruling 21 of `docs/decisions/4-split-notes.md` §3),
+/// and they would be a nested mapping this type cannot spell. A definition is
+/// added to an existing match by a [`crate::draft::FormFieldIntent`] (Phase 4-6).
 ///
 /// On the wire it is externally tagged: `{"Replace": "..."}`,
 /// `{"ImagePath": "..."}`. The variant names are protocol tags.

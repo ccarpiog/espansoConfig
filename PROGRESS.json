@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T14:10:01Z",
+  "updated": "2026-09-26T15:07:19Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 4, variables and forms, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1269,8 +1269,11 @@
     {
       "id": "4-6",
       "title": "Form-definition structural core",
-      "status": "queued",
-      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "status": "done",
+      "summary": "Core adds and removes form field definitions and their options in shorthand and verbose forms, never converting between them.",
+      "risk": "high",
+      "review": "ship-with-fixes (Codex), docs/reviews/4-6.md",
+      "narrative": "docs/decisions/4-6-notes.md"
     },
     {
       "id": "4-7",

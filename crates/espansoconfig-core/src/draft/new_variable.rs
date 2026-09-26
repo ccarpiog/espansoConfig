@@ -21,10 +21,12 @@
 //!   under ruling 7's key rules, so a parameter this project does not model can
 //!   still be written without caller YAML.
 //!
-//! Choice records (`{label, id}`) and form field definitions are **not** here:
-//! a new `choice` is born holding strings, and records are added to an existing
-//! one's `values` afterwards ([`crate::draft::VariableListIntent`], Phase 4-5);
-//! form field definitions are step 4-6's.
+//! Choice records (`{label, id}`) are **not** here: a new `choice` is born
+//! holding strings, and records are added to an existing one's `values`
+//! afterwards ([`crate::draft::VariableListIntent`], Phase 4-5). Since Phase 4-6
+//! a new `form` may be born holding its field definitions
+//! ([`crate::draft::NewFormField`]), so a complete verbose form is one
+//! description.
 //!
 //! # Typed settings are plain source
 //!
@@ -79,13 +81,14 @@ pub(crate) const NEW_VARIABLE_KEYS: [&str; 5] = [
 /// plain-source parameter under any other key.
 pub(crate) const PLAIN_SOURCE_PARAMS: [&str; 3] = ["offset", "trim", "debug"];
 
-/// One of the typed settings a new variable writes as plain source (Phase 4-4,
-/// ruling 4).
+/// One of the typed settings written as plain source below the match mapping
+/// (ruling 4): the four a new variable writes (Phase 4-4) and, since Phase 4-6,
+/// the two a form field definition writes (`multiline`, `trim_string_values`).
 ///
 /// **It serializes as the espanso key** (`inject_vars`, `offset`, `trim`,
-/// `debug`), for [`crate::draft::MatchField`]'s reason: a refusal names it, and
-/// what a screen puts beside such a setting is that key, spelled the same in
-/// every language.
+/// `debug`, `multiline`, `trim_string_values`), for
+/// [`crate::draft::MatchField`]'s reason: a refusal names it, and what a screen
+/// puts beside such a setting is that key, spelled the same in every language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VariableSetting {
@@ -97,6 +100,10 @@ pub enum VariableSetting {
     Trim,
     /// `params.debug` of a `shell` variable.
     Debug,
+    /// `multiline` of a form field definition (Phase 4-6).
+    Multiline,
+    /// `trim_string_values` of a form field definition (Phase 4-6).
+    TrimStringValues,
 }
 
 impl VariableSetting {
@@ -107,6 +114,8 @@ impl VariableSetting {
             VariableSetting::Offset => "offset",
             VariableSetting::Trim => "trim",
             VariableSetting::Debug => "debug",
+            VariableSetting::Multiline => crate::draft::form_definition::OPTION_MULTILINE_KEY,
+            VariableSetting::TrimStringValues => crate::draft::form_definition::OPTION_TRIM_KEY,
         }
     }
 } // End of impl VariableSetting
@@ -180,10 +189,15 @@ pub enum NewVariableParams {
         #[serde(default)]
         trim: Option<String>,
     },
-    /// `type: form` — `layout`. Field definitions (`fields`) are 4-6's.
+    /// `type: form` — `layout`, and since Phase 4-6 its field definitions
+    /// (`fields`), written as one block mapping of definitions when there is at
+    /// least one and left out when there is none.
     Form {
         /// `layout`.
         layout: String,
+        /// `fields`, in order.
+        #[serde(default)]
+        fields: Vec<crate::draft::NewFormField>,
     },
     /// `type: match` — `trigger`, the nested match reference.
     Match {
@@ -306,7 +320,9 @@ impl NewVariableParams {
                 entries.push(list("args", args));
                 entries.extend(trim.as_deref().map(|text| plain("trim", text)));
             }
-            NewVariableParams::Form { layout } => entries.push(scalar("layout", layout)),
+            // `fields` is a mapping of mappings and is not an `EntryValue`; it
+            // is appended by `NewVariable::fields` (Phase 4-6).
+            NewVariableParams::Form { layout, .. } => entries.push(scalar("layout", layout)),
             NewVariableParams::Match { trigger } => entries.push(scalar("trigger", trigger)),
         } // End of the match over the nine kinds
         entries
@@ -408,14 +424,34 @@ impl NewVariable {
         NewVariable::new(name, NewVariableParams::Script { args, trim: None })
     }
 
-    /// A `form` variable with `layout`.
+    /// A `form` variable with `layout` and no field definition.
     pub fn form(name: impl Into<String>, layout: impl Into<String>) -> NewVariable {
+        NewVariable::form_with_fields(name, layout, Vec::new())
+    }
+
+    /// A `form` variable with `layout` and the field definitions `fields`, in
+    /// order (Phase 4-6) — a complete new verbose form description.
+    pub fn form_with_fields(
+        name: impl Into<String>,
+        layout: impl Into<String>,
+        fields: Vec<crate::draft::NewFormField>,
+    ) -> NewVariable {
         NewVariable::new(
             name,
             NewVariableParams::Form {
                 layout: layout.into(),
+                fields,
             },
         )
+    } // End of function form_with_fields()
+
+    /// The field definitions a new `form` variable is born holding (Phase 4-6);
+    /// empty for every other kind.
+    pub fn form_fields(&self) -> &[crate::draft::NewFormField] {
+        match &self.params {
+            NewVariableParams::Form { fields, .. } => fields,
+            _ => &[],
+        }
     }
 
     /// A `match` variable referring to the match triggered by `trigger`.
@@ -493,6 +529,19 @@ impl NewVariable {
             };
             (param.key.clone(), value)
         }));
+        let mut params: Vec<(String, ItemValue)> = params
+            .into_iter()
+            .map(|(key, value)| (key, ItemValue::Entry(value)))
+            .collect();
+        // A new verbose form's definitions (Phase 4-6): one mapping of
+        // definitions after `layout` and the extras, only when there is one.
+        let definitions = self.form_fields();
+        if !definitions.is_empty() {
+            params.push((
+                crate::draft::form_definition::FIELDS_KEY.to_owned(),
+                ItemValue::Mapping(crate::draft::form_definition::definitions(definitions)),
+            ));
+        }
         if !params.is_empty() {
             fields.push((
                 crate::draft::match_draft::PARAMS_KEY.to_owned(),

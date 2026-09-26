@@ -38,7 +38,7 @@ pub enum DraftError {
     /// invented, because the alternative is a path that names something else.
     ///
     /// **The empty braces are load-bearing.** Written as a unit variant this
-    /// would be the one variant of eighty-two that `serde` writes as a bare
+    /// would be the one variant of ninety-eight that `serde` writes as a bare
     /// JSON string rather than as a one-key object, and the frontend's
     /// `COMMAND_ERROR_OPERANDS` table in `src/lib/ipc/errors.ts` can pin exactly
     /// one shape for the `error` operand of `CommandError::DraftRefused`. A
@@ -46,8 +46,8 @@ pub enum DraftError {
     /// *unexpected* failure, losing its typed code and rendering a generic
     /// sentence instead of `code.draftError.matchHasNoPath`. As an empty struct
     /// variant it writes `{"MatchHasNoPath": {}}`, so "a `DraftError` is always
-    /// an object" is true by construction rather than true of eighty-one cases
-    /// out of eighty-two. `every_draft_error_variant_crosses_as_an_object` in
+    /// an object" is true by construction rather than true of ninety-seven cases
+    /// out of ninety-eight. `every_draft_error_variant_crosses_as_an_object` in
     /// `src-tauri/src/wire_contract.rs` fails the build if a unit variant is
     /// ever added here.
     MatchHasNoPath {},
@@ -771,9 +771,11 @@ pub enum DraftError {
     /// author-named entry's value is a logical string, so writing one would
     /// quote a boolean or a number (Phase 4-3). Since Phase 4-4 a **new
     /// variable** writes `offset`, `trim` and `debug` as plain source through
-    /// its kind's own fields ([`crate::draft::NewVariableParams`]); as a new
-    /// `params` entry of an existing variable, or as a new variable's extra
-    /// parameter, every one of the five stays refused.
+    /// its kind's own fields ([`crate::draft::NewVariableParams`]), and since
+    /// Phase 4-6 a form field definition writes `multiline` and
+    /// `trim_string_values` through [`crate::draft::FormOptions`]; as a new
+    /// `params` entry of an existing variable, a new variable's extra parameter
+    /// or a definition's extra option, every one of the five stays refused.
     NewKeyIsATypedSetting {
         /// The insertion, by position.
         target: DraftTarget,
@@ -1003,6 +1005,135 @@ pub enum DraftError {
     /// 4-5). Nothing is added inside a record.
     ChoiceRecordFieldHasNoScalar {
         /// The record's entry, by position.
+        target: DraftTarget,
+    },
+    /// Two intents about one form's definitions contradict each other (Phase
+    /// 4-6): `RemoveFields` beside any other intent or definition draft of that
+    /// form; one definition removed twice, or removed and also drafted; or an
+    /// insertion written after a definition the same draft removes. Checked at
+    /// intent level, before any diffing.
+    ///
+    /// This and the fifteen variants after it are the refusals Phase 4-6 added
+    /// for form field definitions, and **none of them carries a name, a key or a
+    /// value**: every operand is a [`crate::draft::FormOwner`], an index, a
+    /// count, a [`DraftTarget`], a [`ValueKind`] or a
+    /// [`crate::draft::VariableSetting`], none of which holds a string, so the
+    /// types force it (`CLAUDE.md` §1).
+    FormIntentsConflict {
+        /// Which form.
+        form: crate::draft::FormOwner,
+        /// The intent's position in the owner's intent list.
+        intent: usize,
+    },
+    /// A verbose form's definitions were drafted on a variable that is not of
+    /// `type: form` (Phase 4-6).
+    VariableIsNotAForm {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+    },
+    /// The form's definitions are written between braces — `{}` included — and
+    /// a definition would have to be written into or taken out of them (Phase
+    /// 4-6; ruling 8). A flow mapping is never converted.
+    FormFieldsIsAFlowMapping {
+        /// Which form.
+        form: crate::draft::FormOwner,
+    },
+    /// `form_fields` (or `params.fields`) holds something that is not a mapping
+    /// (Phase 4-6).
+    FormFieldsHasAnUnsupportedShape {
+        /// Which form.
+        form: crate::draft::FormOwner,
+        /// What the key actually holds.
+        found: ValueKind,
+    },
+    /// The draft removes every definition of the form (Phase 4-6, ruling 8).
+    /// Removing the whole entry is its own explicit intent, `RemoveFields`;
+    /// insertions in the same draft do not rescue it.
+    FormFieldsWouldBeEmpty {
+        /// Which form.
+        form: crate::draft::FormOwner,
+    },
+    /// No existing definition survives the draft to write the new ones after
+    /// (Phase 4-6).
+    NoFormFieldInsertionAnchor {
+        /// Which form.
+        form: crate::draft::FormOwner,
+    },
+    /// New options were asked of a definition whose value is not a block
+    /// mapping with at least one option — a flow mapping (`{}` included), a
+    /// scalar or an empty value (Phase 4-6). Nothing converts or creates it.
+    FormFieldOptionsAreNotABlockMapping {
+        /// The definition, by position.
+        target: DraftTarget,
+        /// What the definition's value actually is.
+        found: ValueKind,
+    },
+    /// The draft removes every option of a definition (Phase 4-6, ruling 8). A
+    /// definition with nothing left would be a null; removing the definition is
+    /// its own intent.
+    FormFieldWouldHaveNoOptions {
+        /// The definition, by position.
+        target: DraftTarget,
+    },
+    /// No existing option of the definition survives the draft to write the new
+    /// ones after (Phase 4-6).
+    NoFormOptionInsertionAnchor {
+        /// The definition, by position.
+        target: DraftTarget,
+    },
+    /// A typed form setting — `multiline` or `trim_string_values` — cannot be
+    /// written as one plain scalar (Phase 4-6, ruling 4). It is never quoted into
+    /// a string instead.
+    NewFormOptionNotPlainSource {
+        /// The new definition or the definition given new options, by position.
+        target: DraftTarget,
+        /// Which setting.
+        setting: crate::draft::VariableSetting,
+    },
+    /// An extra option names one of the five options a definition writes by
+    /// name — `type`, `default`, `multiline`, `values`, `trim_string_values`
+    /// (Phase 4-6). The typed field is the only route to each.
+    NewKeyIsAFormOption {
+        /// The extra option, by position.
+        target: DraftTarget,
+    },
+    /// A description carries more extra options than
+    /// [`crate::draft::FormOptions::MAX_EXTRA_OPTIONS`] (Phase 4-6).
+    NewFormFieldHasTooManyOptions {
+        /// The new definition or the definition given new options, by position.
+        target: DraftTarget,
+        /// The bound.
+        limit: usize,
+    },
+    /// A `values` intent names a definition with no `values` option (Phase 4-6).
+    /// Nothing is inserted into a list that is not there; a new `values` is a new
+    /// option.
+    FormValuesAbsent {
+        /// The definition, by position.
+        target: DraftTarget,
+    },
+    /// A `values` intent names a `values` that is not a list — the multi-line
+    /// text representation, or anything else (Phase 4-6, ruling 18). Text is
+    /// never turned into a list.
+    FormValuesIsNotAList {
+        /// The `values` option, by position.
+        target: DraftTarget,
+        /// What it actually holds.
+        found: ValueKind,
+    },
+    /// The draft removes every item of a definition's `values` list (Phase 4-6,
+    /// ruling 8); insertions in the same draft do not rescue it.
+    FormValuesWouldBeEmpty {
+        /// The `values` option, by position.
+        target: DraftTarget,
+    },
+    /// Two intents about one definition's `values` contradict each other (Phase
+    /// 4-6): one item removed twice, or removed and also rewritten; two
+    /// insertions landing at one place; an insertion landing where an item is
+    /// removed; or an item intent beside a rewrite or a removal of the whole
+    /// `values` option.
+    FormValuesIntentsConflict {
+        /// The `values` option, by position.
         target: DraftTarget,
     },
 }
@@ -1295,6 +1426,61 @@ impl fmt::Display for DraftError {
             }
             DraftError::ChoiceRecordFieldHasNoScalar { .. } => {
                 formatter.write_str("the record holds no such single value")
+            }
+            DraftError::FormIntentsConflict { intent, .. } => {
+                write!(formatter, "form intent {intent} conflicts with another")
+            }
+            DraftError::VariableIsNotAForm { variable } => {
+                write!(formatter, "variable {variable} is not a form")
+            }
+            DraftError::FormFieldsIsAFlowMapping { .. } => {
+                formatter.write_str("the form's definitions are a flow mapping")
+            }
+            DraftError::FormFieldsHasAnUnsupportedShape { found, .. } => {
+                write!(formatter, "the form's definitions are a {found:?}")
+            }
+            DraftError::FormFieldsWouldBeEmpty { .. } => {
+                formatter.write_str("the form would be left with no definitions")
+            }
+            DraftError::NoFormFieldInsertionAnchor { .. } => {
+                formatter.write_str("no surviving definition to insert after")
+            }
+            DraftError::FormFieldOptionsAreNotABlockMapping { found, .. } => {
+                write!(
+                    formatter,
+                    "the definition's options are a {found:?}, not a block mapping"
+                )
+            }
+            DraftError::FormFieldWouldHaveNoOptions { .. } => {
+                formatter.write_str("the definition would be left with no options")
+            }
+            DraftError::NoFormOptionInsertionAnchor { .. } => {
+                formatter.write_str("no surviving option to insert after")
+            }
+            DraftError::NewFormOptionNotPlainSource { setting, .. } => {
+                write!(
+                    formatter,
+                    "setting {} is not writable as plain source",
+                    setting.key()
+                )
+            }
+            DraftError::NewKeyIsAFormOption { .. } => {
+                formatter.write_str("an extra option uses a schema-known option key")
+            }
+            DraftError::NewFormFieldHasTooManyOptions { limit, .. } => {
+                write!(formatter, "more than {limit} extra options")
+            }
+            DraftError::FormValuesAbsent { .. } => {
+                formatter.write_str("the definition has no values")
+            }
+            DraftError::FormValuesIsNotAList { found, .. } => {
+                write!(formatter, "the definition's values are a {found:?}")
+            }
+            DraftError::FormValuesWouldBeEmpty { .. } => {
+                formatter.write_str("the values would be left with no items")
+            }
+            DraftError::FormValuesIntentsConflict { .. } => {
+                formatter.write_str("two intents about one values list conflict")
             }
         } // End of the match over every refusal
     } // End of function fmt() for DraftError

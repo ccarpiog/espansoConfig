@@ -1054,15 +1054,15 @@ fn a_drafted_batch_never_changes_sequence_cardinality_and_never_synthesizes_a_co
 /// `vars` and `form_fields` are inside the surface since Phase 2b-2b-2, and
 /// their **containers** are not.
 ///
-/// The three refusals below are the boundary of the widening: a whole `vars`
-/// sequence, a whole `form_fields` mapping and a whole `form_fields` entry are
-/// collection nodes, and nothing here replaces one or deletes one.
+/// The refusals below are the boundary of the widening: a whole variable and a
+/// whole `params` mapping are collection nodes, and nothing here replaces one or
+/// deletes one. The explicit container removals of Phases 4-4 and 4-6 — the
+/// whole `vars`, one `form_fields` definition, the whole `form_fields` — are
+/// removals and nothing else.
 #[test]
 fn the_closed_surface_guard_refuses_an_edit_that_names_a_whole_open_container() {
     let mapping = DocumentPath::root(0).with_key("matches").with_index(0);
     for path in [
-        // The `form_fields` entry itself, whose value is the option mapping.
-        mapping.clone().with_key("form_fields").with_key("choice"),
         // A whole variable of `vars`.
         mapping.clone().with_key("vars").with_index(0),
         // A variable's whole `params` mapping.
@@ -1085,6 +1085,22 @@ fn the_closed_surface_guard_refuses_an_edit_that_names_a_whole_open_container() 
             "and so must a removal of one"
         );
     } // End of the loop over the open containers
+      // Since Phase 4-6 a `form_fields` entry — one definition, whose value is
+      // the option mapping — is removable (`FormFieldIntent::RemoveField`), and
+      // so is the whole `form_fields` (`RemoveFields`); a scalar edit naming
+      // either is still refused.
+    for path in [
+        mapping.clone().with_key("form_fields").with_key("choice"),
+        mapping.clone().with_key("form_fields"),
+    ] {
+        let removal = vec![DocumentEdit::RemoveField(FieldRemoval::new(path.clone()))];
+        assert_eq!(check_closed_surface(&mapping, &removal), Ok(()));
+        let rewrite = vec![DocumentEdit::Scalar(ScalarEdit::new(path, "x"))];
+        assert_eq!(
+            check_closed_surface(&mapping, &rewrite),
+            Err(DraftError::OutsideTheClosedSurface { edit: 0 })
+        );
+    } // End of the loop over the two form containers
       // Since Phase 4-4 the whole `vars` entry is removable, as the explicit
       // container removal of ruling 8 (`VarsIntent::RemoveVars`); a scalar edit
       // naming it is still refused.
@@ -2309,11 +2325,28 @@ fn a_path_one_segment_deeper_than_the_surface_is_refused() {
     let deeper = [
         // one past `<match>.vars[i].name`
         vars.clone().with_key("name").with_key("deeper"),
-        // one past `<match>.vars[i].params.<key>`
+        // one past `<match>.vars[i].params.<key>` (`params.fields.<key>` is a
+        // verbose form's definition since Phase 4-6, so another key stands here)
+        vars.clone()
+            .with_key("params")
+            .with_key("cmd")
+            .with_key("one"),
+        // one past a verbose definition's option,
+        // `<match>.vars[i].params.fields.<key>.<key>` (Phase 4-6)
         vars.clone()
             .with_key("params")
             .with_key("fields")
-            .with_key("one"),
+            .with_key("one")
+            .with_key("type")
+            .with_key("deeper"),
+        // one past `<match>.vars[i].params.fields.<key>.<key>[j]` (Phase 4-6)
+        vars.clone()
+            .with_key("params")
+            .with_key("fields")
+            .with_key("one")
+            .with_key("values")
+            .with_index(0)
+            .with_key("id"),
         // one past `<match>.vars[i].params.<key>[j]`, for a list that holds no
         // records (Phase 4-5 admits `label`/`id` under `values` only)
         vars.clone()

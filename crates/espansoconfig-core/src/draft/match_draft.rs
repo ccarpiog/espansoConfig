@@ -26,7 +26,7 @@
 //!   build the [`crate::patch::DocumentPath`], so a caller can only name what it
 //!   was shown, and no refusal has to carry a byte of the owner's configuration
 //!   (`CLAUDE.md` section 1).
-//! - **Three insertions below the match mapping, and only three.** A drafted
+//! - **Four insertions below the match mapping, and only four.** A drafted
 //!   *address* the projection does not hold is still refused by name rather
 //!   than created. Decision D1 of `docs/decisions/2b-2b-2-notes.md` refused
 //!   every insertion below the match mapping; Phase 4-3 lifted one, under ruling
@@ -39,11 +39,16 @@
 //!   whole `vars:` subtree when the match has none. Phase 4-5 lifts the third:
 //!   new **items** of an existing variable's four schema-known lists
 //!   ([`crate::draft::VariableListIntent`] in [`VariableDraft::lists`]) —
-//!   strings, or `{label, id}` records in a `choice`'s `values`. All three carry
-//!   text, all are refused by position and code only, and nothing else below the
-//!   match mapping — no `params:` container on an existing variable, no
-//!   `depends_on:` where there is none, no form definition — can be inserted by
-//!   a draft.
+//!   strings, or `{label, id}` records in a `choice`'s `values`. Phase 4-6 lifts
+//!   the fourth: form field **definitions** and their options
+//!   ([`crate::draft::FormFieldIntent`] in [`MatchDraft::form_intents`] or
+//!   [`VariableDraft::field_intents`], [`FormFieldDraft::insert_options`]) and
+//!   the items of a definition's `values` list ([`FormFieldDraft::values`]) —
+//!   including the whole `form_fields:` or `params.fields:` of a form that has
+//!   none. All four carry text, all are refused by position and code only, and
+//!   nothing else below the match mapping — no `params:` container on an
+//!   existing variable, no `depends_on:` where there is none — can be inserted
+//!   by a draft.
 //! - **A value is a scalar or a sequence of scalars.** [`EntryDraft`] carries
 //!   both spellings and may use only one of them at a time, and
 //!   [`NewParamValue`] has exactly those two variants; nothing here can express
@@ -52,6 +57,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::draft::field::DraftField;
+use crate::draft::form_definition::{FormFieldIntent, FormOptions, FormOwner, FormValuesIntent};
 use crate::draft::new_variable::VarsIntent;
 use crate::draft::sequence::{SequenceIntent, TriggerFormChange};
 use crate::draft::variable_list::{ChoiceRecordDraft, VariableListIntent};
@@ -677,6 +683,66 @@ pub enum DraftTarget {
         /// The element's index in that option's sequence.
         item: usize,
     },
+    /// One definition of a **verbose** form's `params.fields`, by its index in
+    /// the projected definition list (Phase 4-6). A shorthand definition is
+    /// [`DraftTarget::FormField`].
+    VariableFormField {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// The definition's index in its projected `params.fields`.
+        field: usize,
+    },
+    /// One option of one verbose definition (Phase 4-6).
+    VariableFormFieldOption {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// The definition's index in its projected `params.fields`.
+        field: usize,
+        /// The option's index in that definition's projected mapping.
+        option: usize,
+    },
+    /// One element of a verbose definition's option whose value is a sequence
+    /// (Phase 4-6).
+    VariableFormFieldOptionItem {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// The definition's index in its projected `params.fields`.
+        field: usize,
+        /// The option's index in that definition's projected mapping.
+        option: usize,
+        /// The element's index in that option's sequence.
+        item: usize,
+    },
+    /// One **new** definition (Phase 4-6): by the position of its
+    /// [`FormFieldIntent::InsertField`] in the owner's intent list, or — for a
+    /// new variable — by its position in that variable's `fields`. Never its
+    /// name.
+    NewFormField {
+        /// Which form.
+        form: FormOwner,
+        /// The new definition's position.
+        field: usize,
+    },
+    /// One extra option of a **new** definition, by its position in that
+    /// definition's `extra` list (Phase 4-6). Never its key.
+    NewFormFieldOption {
+        /// Which form.
+        form: FormOwner,
+        /// The new definition's position, as in [`DraftTarget::NewFormField`].
+        field: usize,
+        /// The option's position in `extra`.
+        option: usize,
+    },
+    /// One extra option added to an **existing** definition, by its position in
+    /// that definition draft's `insert_options.extra` (Phase 4-6).
+    NewFormOption {
+        /// Which form: [`FormOwner::Shorthand`] or [`FormOwner::Variable`].
+        form: FormOwner,
+        /// The existing definition's index in the projected list.
+        field: usize,
+        /// The option's position in `insert_options.extra`.
+        option: usize,
+    },
 }
 
 /// One drafted element of a string sequence, addressed by index.
@@ -827,10 +893,13 @@ impl NewParam {
 /// four ([`VariableDraft::lists`]). An existing string of a kind list is still
 /// rewritten through its `params` entry's [`EntryDraft::items`].
 ///
-/// **An absent field is refused, never inserted** (decision D1), with two
+/// **An absent field is refused, never inserted** (decision D1), with three
 /// exceptions: since Phase 4-3 [`VariableDraft::insert_params`] adds new
-/// author-named entries to an existing block `params` mapping, and since Phase
-/// 4-5 [`VariableDraft::lists`] adds new items to an existing list.
+/// author-named entries to an existing block `params` mapping, since Phase 4-5
+/// [`VariableDraft::lists`] adds new items to an existing list, and since Phase
+/// 4-6 [`VariableDraft::field_intents`] and [`VariableDraft::fields`] add a
+/// verbose form's definitions, options and `values` items — `fields:` itself
+/// included, when the form has none.
 ///
 /// `deny_unknown_fields` is deliberate, for [`MatchDraft`]'s reason.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -871,6 +940,16 @@ pub struct VariableDraft {
     /// lists, in order (Phase 4-5).
     #[serde(default)]
     pub lists: Vec<VariableListIntent>,
+    /// Drafted definitions of a verbose form's `params.fields`, by index in the
+    /// projected definition list (Phase 4-6) — each exactly what a
+    /// [`MatchDraft::form_fields`] entry drafts for the shorthand shape.
+    #[serde(default)]
+    pub fields: Vec<FormFieldDraft>,
+    /// Drafted intents about the cardinality and presence of a verbose form's
+    /// `params.fields`, in order (Phase 4-6) — the same intents
+    /// [`MatchDraft::form_intents`] carries for the shorthand shape.
+    #[serde(default)]
+    pub field_intents: Vec<FormFieldIntent>,
 }
 
 impl VariableDraft {
@@ -950,6 +1029,24 @@ impl VariableDraft {
         self
     }
 
+    /// Builder: adds one drafted definition of a verbose form (Phase 4-6).
+    pub fn with_form_field(mut self, field: FormFieldDraft) -> VariableDraft {
+        self.fields.push(field);
+        self
+    }
+
+    /// Builder: adds one drafted intent about a verbose form's definitions
+    /// (Phase 4-6).
+    pub fn with_form_intent(mut self, intent: FormFieldIntent) -> VariableDraft {
+        self.field_intents.push(intent);
+        self
+    }
+
+    /// Whether the draft says anything about a verbose form's definitions.
+    pub fn drafts_form_fields(&self) -> bool {
+        !self.fields.is_empty() || !self.field_intents.is_empty()
+    }
+
     /// Whether the draft says anything about the variable's four lists.
     pub fn drafts_lists(&self) -> bool {
         !self.lists.is_empty()
@@ -961,23 +1058,37 @@ impl VariableDraft {
     }
 } // End of impl VariableDraft
 
-/// One drafted entry of `form_fields`, addressed by its index in the projection.
+/// One drafted form field **definition**, addressed by its index in the
+/// projection — an entry of the shorthand `form_fields` when carried by
+/// [`MatchDraft::form_fields`], an entry of a verbose form's `params.fields`
+/// when carried by [`VariableDraft::fields`].
 ///
-/// A `form_fields` entry's value is the option mapping espanso reads —
-/// `type`, `values`, `default`, `multiline` and whatever else a release adds —
-/// so the only thing this type drafts is [`FormFieldDraft::options`]. The entry
-/// itself is never removed: its value is a mapping, and this engine replaces no
-/// collection node and discards no subtree it never displayed.
+/// A definition's value is the option mapping espanso reads — `type`, `values`,
+/// `default`, `multiline` and whatever else a release adds. This type drafts its
+/// existing options ([`FormFieldDraft::options`]: a scalar rewritten or removed,
+/// a flat list removed since Phase 4-6, a list item rewritten), new options
+/// ([`FormFieldDraft::insert_options`], Phase 4-6) and the items of its `values`
+/// list ([`FormFieldDraft::values`], Phase 4-6). The definition itself is added
+/// and removed by a [`FormFieldIntent`].
 ///
 /// `deny_unknown_fields` is deliberate, for [`MatchDraft`]'s reason.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FormFieldDraft {
-    /// The form field's index in the projected `form_fields` list.
+    /// The definition's index in the projected definition list.
     pub index: usize,
-    /// Drafted entries of that form field's own option mapping.
+    /// Drafted entries of that definition's own option mapping.
     #[serde(default)]
     pub options: Vec<EntryDraft>,
+    /// New options to add to the definition, written as one run after the last
+    /// option the draft leaves in place (Phase 4-6). Empty asks for nothing. The
+    /// option mapping must already be a block mapping with entries.
+    #[serde(default)]
+    pub insert_options: FormOptions,
+    /// Items added to or removed from the definition's `values` list, in order
+    /// (Phase 4-6).
+    #[serde(default)]
+    pub values: Vec<FormValuesIntent>,
 }
 
 impl FormFieldDraft {
@@ -985,13 +1096,25 @@ impl FormFieldDraft {
     pub fn new(index: usize) -> FormFieldDraft {
         FormFieldDraft {
             index,
-            options: Vec::new(),
+            ..FormFieldDraft::default()
         }
     }
 
     /// Builder: adds one drafted option.
     pub fn with_option(mut self, entry: EntryDraft) -> FormFieldDraft {
         self.options.push(entry);
+        self
+    }
+
+    /// Builder: sets the new options to add (Phase 4-6).
+    pub fn with_new_options(mut self, options: FormOptions) -> FormFieldDraft {
+        self.insert_options = options;
+        self
+    }
+
+    /// Builder: adds one drafted `values` intent (Phase 4-6).
+    pub fn with_values_intent(mut self, intent: FormValuesIntent) -> FormFieldDraft {
+        self.values.push(intent);
         self
     }
 } // End of impl FormFieldDraft
@@ -1102,6 +1225,13 @@ pub struct MatchDraft {
     /// [`crate::draft::plan_variable_move`]'s, alone in its batch.
     #[serde(default)]
     pub var_intents: Vec<VarsIntent>,
+    /// Drafted intents about the cardinality and presence of the match's own
+    /// `form_fields` — the shorthand form's definitions — in order (Phase 4-6): a
+    /// new definition inserted, one removed, or the whole entry removed. The same
+    /// intents about a verbose form are carried by
+    /// [`VariableDraft::field_intents`] and write that variable's `params.fields`.
+    #[serde(default)]
+    pub form_intents: Vec<FormFieldIntent>,
 }
 
 impl MatchDraft {
@@ -1233,6 +1363,13 @@ impl MatchDraft {
     /// Builder: adds one drafted `vars` intent (Phase 4-4).
     pub fn with_vars_intent(mut self, intent: VarsIntent) -> MatchDraft {
         self.var_intents.push(intent);
+        self
+    }
+
+    /// Builder: adds one drafted intent about the shorthand `form_fields`
+    /// (Phase 4-6).
+    pub fn with_form_intent(mut self, intent: FormFieldIntent) -> MatchDraft {
+        self.form_intents.push(intent);
         self
     }
 } // End of impl MatchDraft

@@ -72,6 +72,7 @@ fn candidate_through(
                     sibling: group.sibling(),
                     entries: group.entries(),
                     items: group.item_list(),
+                    mappings: group.mappings(),
                 };
                 plan_insertion_group(source, &index, &trivia, position, request)?
             }
@@ -116,6 +117,10 @@ fn candidate_through(
     touched.extend(sequences.iter().map(|claim| claim.sequence_id));
     let mut changed = rewritten.clone();
     changed.extend(sequences.iter().map(|claim| claim.sequence_id));
+    // The Phase 4-3 review fix's line of `apply_edits`, mirrored since Phase
+    // 4-6, whose batches are the first here to change a nested mapping beside
+    // an insertion into its parent.
+    changed.extend(expectations.iter().map(|claim| claim.mapping_id));
     let mut expectations = fold_expectations(&index, expectations, &changed)?;
     let mut sequences = fold_item_expectations(&index, sequences, &touched)?;
     for expectation in &mut expectations {
@@ -538,7 +543,7 @@ fn new_shell_variable() -> Vec<(String, ItemValue)> {
         ),
         (
             "params".to_owned(),
-            ItemValue::Mapping(vec![
+            ItemValue::flat(vec![
                 ("cmd".to_owned(), EntryValue::Scalar("true".to_owned())),
                 (
                     "trim".to_owned(),
@@ -738,7 +743,7 @@ fn a_removed_ambiguous_scalar_does_not_pay_for_a_corrupted_new_variable() {
                 ),
                 (
                     "params".to_owned(),
-                    ItemValue::Mapping(vec![(
+                    ItemValue::flat(vec![(
                         "echo".to_owned(),
                         EntryValue::Scalar("true".to_owned()),
                     )]),
@@ -1017,3 +1022,306 @@ fn a_new_item_rewritten_as_a_flow_mapping_is_refused() {
         "a flow-style new item is refused by verification, got {result:?}"
     );
 } // End of function a_new_item_rewritten_as_a_flow_mapping_is_refused()
+
+// ---------------------------------------------------------------------------
+// Phase 4-6: mapping-valued group entries and nested definitions
+// ---------------------------------------------------------------------------
+
+/// A shorthand form with one definition, a shorthand form with none, and a match
+/// with a `vars` to receive a new verbose form.
+const FORM_SOURCE: &str = concat!(
+    "matches:\n",
+    "  - trigger: ':f'\n",
+    "    form: 'x'\n",
+    "    form_fields:\n",
+    "      a:\n",
+    "        type: text\n",
+    "  - trigger: ':g'\n",
+    "    form: 'y'\n",
+    "  - trigger: ':v'\n",
+    "    replace: z\n",
+    "    vars:\n",
+    "      - name: e\n",
+    "        type: echo\n",
+    "        params:\n",
+    "          echo: b\n",
+);
+
+/// One new definition's options: the logical string `true` under `type`, the
+/// requested plain source `true` under `multiline`, and a one-item list.
+fn new_definition() -> Vec<(String, ItemValue)> {
+    vec![
+        (
+            "type".to_owned(),
+            ItemValue::Entry(EntryValue::Scalar("true".to_owned())),
+        ),
+        (
+            "multiline".to_owned(),
+            ItemValue::Entry(EntryValue::PlainSource("true".to_owned())),
+        ),
+        (
+            "values".to_owned(),
+            ItemValue::Entry(EntryValue::ScalarList(vec!["x".to_owned()])),
+        ),
+    ]
+} // End of function new_definition()
+
+/// The three Phase 4-6 batches: a definition into an existing `form_fields`, a
+/// whole new `form_fields:` as a mapping-valued entry of a match-level group,
+/// and a new verbose form variable whose `params` holds `fields`.
+fn phase_four_six_batches() -> Vec<(&'static str, Vec<DocumentEdit>)> {
+    let into = FieldInsertGroup::of_mappings(
+        item(0).with_key("form_fields"),
+        Some("a".to_owned()),
+        vec![("d".to_owned(), new_definition())],
+    )
+    .expect("one definition");
+    let whole = FieldInsertGroup::of_mappings(
+        item(1),
+        Some("form".to_owned()),
+        vec![(
+            "form_fields".to_owned(),
+            vec![("d".to_owned(), ItemValue::Mapping(new_definition()))],
+        )],
+    )
+    .expect("one entry");
+    let variable = InsertItem::nested(
+        item(2).with_key("vars"),
+        ItemPlacement::End,
+        vec![
+            (
+                "name".to_owned(),
+                ItemValue::Entry(EntryValue::Scalar("f".to_owned())),
+            ),
+            (
+                "type".to_owned(),
+                ItemValue::Entry(EntryValue::Scalar("form".to_owned())),
+            ),
+            (
+                "params".to_owned(),
+                ItemValue::Mapping(vec![
+                    (
+                        "layout".to_owned(),
+                        ItemValue::Entry(EntryValue::Scalar("[[d]]".to_owned())),
+                    ),
+                    (
+                        "fields".to_owned(),
+                        ItemValue::Mapping(vec![(
+                            "d".to_owned(),
+                            ItemValue::Mapping(new_definition()),
+                        )]),
+                    ),
+                ]),
+            ),
+        ],
+    );
+    vec![
+        ("a definition into form_fields", vec![into.into()]),
+        ("a whole new form_fields", vec![whole.into()]),
+        ("a new verbose form", vec![variable.into()]),
+    ]
+} // End of function phase_four_six_batches()
+
+/// Runs `edits` over [`FORM_SOURCE`] with the planned text holding `from`
+/// rewritten once to `to`; answers whether one did, and the result.
+fn rewritten_over_forms(
+    edits: &[DocumentEdit],
+    from: &str,
+    to: &str,
+) -> (bool, Result<String, EditError>) {
+    let mut rewrote = false;
+    let result = candidate_through(
+        FORM_SOURCE,
+        edits,
+        |replacements| {
+            for replacement in replacements.iter_mut() {
+                if replacement.text.contains(from) {
+                    replacement.text = replacement.text.replacen(from, to, 1);
+                    rewrote = true;
+                }
+            }
+        },
+        |_| {},
+    );
+    (rewrote, result)
+} // End of function rewritten_over_forms()
+
+/// The honest runs verify, are `apply_edits`' own candidates, and write the
+/// requested plain source verbatim beside the quoted logical string, at every
+/// depth.
+#[test]
+fn a_new_definitions_honest_candidate_verifies() {
+    for (what, edits) in phase_four_six_batches() {
+        let honest = candidate_through(FORM_SOURCE, &edits, |_| {}, |_| {});
+        let applied = apply_edits(FORM_SOURCE, &edits).map(|patched| patched.text);
+        assert_eq!(honest, applied, "{what}: the honest run is apply_edits'");
+        let honest = honest.expect("the honest run verifies");
+        assert!(
+            honest.contains("  type: 'true'\n") && honest.contains("  multiline: true\n"),
+            "{what}: {honest}"
+        );
+    } // End of the loop over the Phase 4-6 batches
+} // End of function a_new_definitions_honest_candidate_verifies()
+
+/// Each corruption changes only bytes inside the planned replacement, so the
+/// byte oracle cannot see it; the nested expectation of a mapping-valued group
+/// entry, or of a definition nested three mappings deep in a new item, must.
+#[test]
+fn a_corrupted_definition_is_refused_by_its_own_verifier() {
+    let cases: [(&str, &str, &str); 7] = [
+        // A string turned into an ambiguous plain scalar: only the requested
+        // `multiline` node is exempt.
+        ("ambiguous neighbour", "type: 'true'", "type: true"),
+        // A nested value that says something else.
+        ("wrong nested value", "type: 'true'", "type: 'false'"),
+        // The plain-source setting quoted into a string.
+        ("quoted setting", "multiline: true", "multiline: 'true'"),
+        // An option dedented out of the definition, into its parent.
+        (
+            "dedented option",
+            "  multiline: true\n",
+            "multiline: true\n",
+        ),
+        // A list item that says something else.
+        ("wrong list item", "- x\n", "- y\n"),
+        // The definition written between braces, saying the same thing.
+        (
+            "flow definition",
+            "d:\n",
+            "d: {type: 'true', multiline: true, values: [x]}\nzz:\n",
+        ),
+        // An extra option inside the definition.
+        (
+            "extra option",
+            "  multiline: true\n",
+            "  multiline: true\n  more: m\n",
+        ),
+    ];
+    for (batch, edits) in phase_four_six_batches() {
+        for (what, from, to) in cases {
+            let (rewrote, result) = rewritten_over_forms(&edits, from, to);
+            assert!(rewrote, "{batch}, {what}: the planned text holds {from:?}");
+            assert!(
+                matches!(result, Err(EditError::Verification(_))),
+                "{batch}, {what}: refused by verification, got {result:?}"
+            );
+        } // End of the loop over the corruptions
+    } // End of the loop over the Phase 4-6 batches
+} // End of function a_corrupted_definition_is_refused_by_its_own_verifier()
+
+/// A removed ambiguous plain scalar elsewhere in the batch does not pay for a
+/// corrupted one inside a new definition (the Phase 4-4 review's property,
+/// stated for the Phase 4-6 shapes).
+#[test]
+fn a_removed_ambiguous_scalar_does_not_pay_for_a_corrupted_definition() {
+    let source = concat!(
+        "matches:\n",
+        "  - trigger: ':f'\n",
+        "    form: 'x'\n",
+        "    form_fields:\n",
+        "      a:\n",
+        "        type: text\n",
+        "        multiline: true\n",
+    );
+    let edits: Vec<DocumentEdit> = vec![
+        FieldRemoval::new(
+            item(0)
+                .with_key("form_fields")
+                .with_key("a")
+                .with_key("multiline"),
+        )
+        .into(),
+        FieldInsertGroup::of_mappings(
+            item(0).with_key("form_fields"),
+            Some("a".to_owned()),
+            vec![(
+                "d".to_owned(),
+                vec![(
+                    "default".to_owned(),
+                    ItemValue::Entry(EntryValue::Scalar("true".to_owned())),
+                )],
+            )],
+        )
+        .expect("one")
+        .into(),
+    ];
+    let honest = candidate_through(source, &edits, |_| {}, |_| {});
+    assert!(honest.is_ok(), "the honest run verifies: {honest:?}");
+    let mut rewrote = false;
+    let result = candidate_through(
+        source,
+        &edits,
+        |replacements| {
+            for replacement in replacements.iter_mut() {
+                if replacement.text.contains("default: 'true'") {
+                    replacement.text = replacement.text.replacen("'true'", "true", 1);
+                    rewrote = true;
+                }
+            }
+        },
+        |_| {},
+    );
+    assert!(rewrote);
+    assert!(
+        matches!(result, Err(EditError::Verification(_))),
+        "the corrupted definition is refused, got {result:?}"
+    );
+} // End of function a_removed_ambiguous_scalar_does_not_pay_for_a_corrupted_definition()
+
+/// **Regression (Phase 4-6 review, second finding):** a mapping-valued group
+/// entry reached rendering without the inserted-key rules, so a direct core
+/// caller could write a definition holding a duplicate, an empty or a
+/// line-breaking key. Every depth is checked now; an empty mapping stays legal.
+#[test]
+fn a_mapping_valued_group_entry_is_held_to_the_inserted_key_rules() {
+    let scalar = |text: &str| ItemValue::Entry(EntryValue::Scalar(text.to_owned()));
+    let group = |fields: Vec<(String, ItemValue)>| -> Vec<DocumentEdit> {
+        vec![FieldInsertGroup::of_mappings(
+            item(0).with_key("form_fields"),
+            Some("a".to_owned()),
+            vec![("d".to_owned(), fields)],
+        )
+        .expect("one")
+        .into()]
+    };
+    let duplicate = vec![
+        ("type".to_owned(), scalar("x")),
+        ("type".to_owned(), scalar("y")),
+    ];
+    assert_eq!(
+        apply_edits(FORM_SOURCE, &group(duplicate)).map(|patched| patched.text),
+        Err(EditError::DuplicateInsertedField { edit: 0, field: 0 })
+    );
+    for key in ["", "a\nb", "a\rb"] {
+        assert_eq!(
+            apply_edits(FORM_SOURCE, &group(vec![(key.to_owned(), scalar("x"))]))
+                .map(|patched| patched.text),
+            Err(EditError::InvalidInsertedFieldKey { edit: 0, field: 0 }),
+            "{key:?}"
+        );
+    }
+    // One level deeper: a whole `form_fields:` whose definition repeats a key.
+    let deep: Vec<DocumentEdit> = vec![FieldInsertGroup::of_mappings(
+        item(1),
+        Some("form".to_owned()),
+        vec![(
+            "form_fields".to_owned(),
+            vec![(
+                "d".to_owned(),
+                ItemValue::Mapping(vec![
+                    ("type".to_owned(), scalar("x")),
+                    ("type".to_owned(), scalar("y")),
+                ]),
+            )],
+        )],
+    )
+    .expect("one")
+    .into()];
+    assert_eq!(
+        apply_edits(FORM_SOURCE, &deep).map(|patched| patched.text),
+        Err(EditError::DuplicateInsertedField { edit: 0, field: 0 })
+    );
+    // An empty mapping is `{}` and legal.
+    let empty = apply_edits(FORM_SOURCE, &group(Vec::new())).expect("an empty definition");
+    assert!(empty.text().contains("      d: {}\n"), "{}", empty.text());
+} // End of function a_mapping_valued_group_entry_is_held_to_the_inserted_key_rules()

@@ -26,9 +26,9 @@
 //!   position in the projection; Rust reads the key out of the projection to
 //!   build the path. A caller can only name what it was shown, and no refusal
 //!   carries a byte of the owner's configuration (`CLAUDE.md` section 1);
-//! - **nothing is inserted below the match mapping but three things.** A
+//! - **nothing is inserted below the match mapping but four things.** A
 //!   drafted address the projection cannot resolve is refused by name, never
-//!   created (`docs/decisions/2b-2b-2-notes.md` decision D1). The three
+//!   created (`docs/decisions/2b-2b-2-notes.md` decision D1). The four
 //!   insertions are explicit: since Phase 4-3 a new **author-named** entry of an
 //!   existing variable's block `params` ([`VariableDraft::insert_params`]),
 //!   under ruling 7 of `docs/decisions/4-split-notes.md` §3 — its key is decoded
@@ -38,6 +38,9 @@
 //!   or as the whole `vars:` subtree of a match without one; and since Phase 4-5
 //!   new **items** of an existing variable's `depends_on`, `values`, `choices`
 //!   or `args` ([`VariableListIntent`]) — strings, or `{label, id}` records;
+//!   and since Phase 4-6 form field **definitions** ([`NewFormField`], through
+//!   [`FormFieldIntent`]), their options and their `values` items, in the
+//!   shorthand `form_fields` or a verbose form's `params.fields`;
 //! - **an open value is a scalar or a sequence of scalars.** Anything else is
 //!   named and then refused, in both directions: a `Set` cannot replace a
 //!   collection node with a scalar one, and a `Remove` would discard bytes this
@@ -58,9 +61,15 @@
 //! ([`plan_variable_move`]). Since Phase 4-5 it may also change the
 //! cardinality of an existing variable's four schema-known lists
 //! ([`VariableList`]) by strings or, in a `choice`'s `values`, by flat
-//! `{label, id}` records, and rewrite an existing record's `label` and `id`. It
-//! may never change any other sequence's cardinality and never synthesize any
-//! other collection.**
+//! `{label, id}` records, and rewrite an existing record's `label` and `id`.
+//! Since Phase 4-6 it may also change the cardinality and the presence of a
+//! form's definitions — the shorthand `form_fields` or a verbose form's
+//! `params.fields` — by definitions of the closed [`NewFormField`] shape, the
+//! cardinality of one definition's options by options of the closed
+//! [`FormOptions`] shape, and the cardinality of a definition's `values` list by
+//! strings; and a new verbose form variable may be born holding its
+//! definitions. It may never change any other sequence's cardinality and never
+//! synthesize any other collection.**
 //!
 //! It is stated three times, and the third statement is over the derived batch
 //! rather than over the draft:
@@ -163,6 +172,24 @@
 //! stays flow, a record is never written into or out of a flow list, and
 //! removing the last item is refused rather than leaving `[]` or a null.
 //!
+//! # Form field definitions, since Phase 4-6
+//!
+//! [`FormFieldIntent`]s add a definition ([`NewFormField`]: a name and its
+//! [`FormOptions`]), remove one with the comments it owns, or remove the whole
+//! definitions entry explicitly. [`MatchDraft::form_intents`] carries them for
+//! the shorthand `form_fields`; [`VariableDraft::field_intents`] carries the same
+//! type for a verbose form's `params.fields`, so one intention writes the shape
+//! it is sent to and never the other ([`FormOwner`]). A [`FormFieldDraft`] — in
+//! [`MatchDraft::form_fields`] or [`VariableDraft::fields`] — rewrites and
+//! removes a definition's options, adds new ones
+//! ([`FormFieldDraft::insert_options`]) and adds or removes the items of its
+//! `values` list ([`FormValuesIntent`]). `multiline` and `trim_string_values`
+//! are written as plain source (ruling 4); a `values` list stays a list and a
+//! multi-line `values` text stays text ([`FormValues`]); a form without
+//! definitions receives the whole entry, a flow mapping is refused rather than
+//! converted, and a definition or an option holding structure the editor never
+//! showed is not removed.
+//!
 //! # Several snippets of one file, since Phase 3-10
 //!
 //! [`plan_bulk_option_edits`] applies up to seven option intents
@@ -191,6 +218,8 @@ mod author_key;
 mod bulk;
 mod error;
 mod field;
+mod form_definition;
+mod form_plan;
 mod match_draft;
 mod new_match;
 mod new_variable;
@@ -206,6 +235,9 @@ pub use bulk::{
 };
 pub use error::DraftError;
 pub use field::DraftField;
+pub use form_definition::{
+    FormFieldIntent, FormOptions, FormOwner, FormValues, FormValuesIntent, NewFormField,
+};
 pub use match_draft::{
     ContentForm, ContentSwitch, DraftTarget, EntryDraft, FieldSubstitution, FormFieldDraft,
     ItemDraft, MatchDraft, MatchField, NewParam, NewParamValue, SequenceField, TriggerForm,

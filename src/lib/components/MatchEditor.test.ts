@@ -262,7 +262,8 @@ const UNTOUCHED: MatchDraft = {
   content_switch: null,
   trigger_form: null,
   sequences: [],
-  var_intents: []
+  var_intents: [],
+  form_intents: []
 };
 
 /** One call the component made to the boundary. */

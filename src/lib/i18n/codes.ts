@@ -1420,8 +1420,9 @@ export function draftErrorKey(name: DraftErrorName): TranslationKey {
  * `switchWouldDiscardItems`; `{field}`, an option's key, in
  * `optionNotPlainSource` (Phase 4-1), so a refused creation says which of its
  * options was refused; `{setting}` and `{limit}` in two Phase 4-4 refusals about
- * a new variable; and `{list}` — `depends_on`, `values`, `choices` or `args` —
- * in the Phase 4-5 refusals about a variable's lists.
+ * a new variable; `{list}` — `depends_on`, `values`, `choices` or `args` —
+ * in the Phase 4-5 refusals about a variable's lists; and `{setting}` and
+ * `{limit}` again in two Phase 4-6 refusals about form field options.
  * {@link scalarOperands} is what feeds the substitution, so such a message gets a
  * string or a number and never a `DraftTarget` rendered as `[object Object]`.
  *

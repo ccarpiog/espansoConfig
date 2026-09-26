@@ -494,7 +494,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("decodeError", 5),
     ("notReencodable", 8),
     ("saveResult", 3),
-    ("draftError", 82),
+    ("draftError", 98),
     ("presentationNote", 2),
     ("reapplyResolution", 4),
     ("reapplyRefusal", 9),
@@ -700,8 +700,10 @@ const NOT_A_CODE: &[(&str, &str)] = &[
         "a field identifier, not a code, for the same reason as `MatchField` and \
          with the same spelling on the wire: it names `inject_vars`, `offset`, \
          `trim` or `debug`, the typed settings a new variable writes as plain \
-         source (Phase 4-4), which espanso spells one way and which \
-         `vars_intents_cross_the_wire_as_closed_shapes` pins",
+         source (Phase 4-4), or `multiline` or `trim_string_values`, the two a \
+         form field definition writes (Phase 4-6), which espanso spells one way \
+         and which `vars_intents_cross_the_wire_as_closed_shapes` and \
+         `form_drafts_cross_the_wire_as_closed_shapes` pin",
     ),
     (
         "NewVariableParams",
@@ -741,6 +743,32 @@ const NOT_A_CODE: &[(&str, &str)] = &[
         "a protocol tag, not a code, exactly as `SequenceIntent` is: \
          `InsertItems` and `RemoveItem` travel *into* the planner as \
          `VariableDraft::lists` (Phase 4-5) and are never rendered",
+    ),
+    (
+        "FormOwner",
+        "an address, not a code, exactly as `DraftTarget` is: `Shorthand`, \
+         `Variable` and `NewVariable` say which form's definitions an intent or a \
+         refusal is about (Phase 4-6), by position and never by name, and a \
+         screen resolves them against what it shows",
+    ),
+    (
+        "FormValues",
+        "a protocol tag, not a code, exactly as `NewParamValue` is: `List` and \
+         `Text` travel *into* the planner as the representation of a new \
+         definition's `values` (Phase 4-6) and are never rendered",
+    ),
+    (
+        "FormFieldIntent",
+        "a protocol tag, not a code, exactly as `VarsIntent` is: `InsertField`, \
+         `RemoveField` and `RemoveFields` travel *into* the planner as \
+         `MatchDraft::form_intents` and `VariableDraft::field_intents` (Phase \
+         4-6) and are never rendered",
+    ),
+    (
+        "FormValuesIntent",
+        "a protocol tag, not a code, exactly as `VariableListIntent` is: \
+         `InsertItems` and `RemoveItem` travel *into* the planner as \
+         `FormFieldDraft::values` (Phase 4-6) and are never rendered",
     ),
     (
         "NewParamValue",

@@ -30,7 +30,7 @@
 //!   names *and* JSON kinds.
 //! - **That every `DraftError` variant crosses as an object**, read out of the
 //!   core's own declaration rather than out of a sample list. The operand table
-//!   pins one shape per code, and a unit variant among the eighty-two would make
+//!   pins one shape per code, and a unit variant among the ninety-eight would make
 //!   that shape false for exactly one refusal.
 //! - **The registered command list**, parsed independently out of
 //!   `generate_handler!` and compared with the union of `COMMAND_NAMES` and
@@ -1391,7 +1391,7 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
 /// one shape can ever be pinned for `draftRefused.error`, no matter how many
 /// variants `DraftError` has. `serde`'s externally tagged representation writes a
 /// unit variant as a bare string and everything else as a one-key object, so a
-/// single unit variant among the eighty-two would make the pinned `'object'`
+/// single unit variant among the ninety-eight would make the pinned `'object'`
 /// false for that one refusal: `isCommandError` would reject it, and the user
 /// would read the generic fallback instead of the sentence
 /// `code.draftError.matchHasNoPath` that exists for it in both dictionaries.
@@ -1407,8 +1407,8 @@ fn every_draft_error_variant_crosses_as_an_object() {
     let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of("DraftError");
     assert_eq!(
         declared.len(),
-        82,
-        "DraftError declares 82 refusals since Phase 4-5: {declared:?}"
+        98,
+        "DraftError declares 98 refusals since Phase 4-6: {declared:?}"
     );
     assert!(
         bare.is_empty(),

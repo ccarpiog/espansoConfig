@@ -600,6 +600,18 @@ impl FieldRemoval {
 /// is. It is part of the group rather than an edit of its own because two
 /// insertions after one anchor state no order, and a new `vars` beside a new
 /// match field is one intention.
+///
+/// # Mapping-valued entries (Phase 4-6)
+///
+/// A group may also hold entries whose value is a new **mapping**
+/// ([`FieldInsertGroup::with_mappings`]): a new form field definition written
+/// into `form_fields` or `params.fields` (its options, a flat mapping), and the
+/// whole `form_fields:` or `fields:` a form without definitions receives (a
+/// mapping of such definitions). They are written after the scalar and list
+/// entries and before a trailing item list, each exactly as a mapping-valued
+/// field of a new item is ([`ItemValue::Mapping`], block style, `{}` when
+/// empty), and each is verified by [`verify_item_value`], so the new mapping's
+/// style, entries, keys, order and every leaf are the expectation's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldInsertGroup {
     /// The mapping to add the entries to.
@@ -614,6 +626,9 @@ pub struct FieldInsertGroup {
     /// one (Phase 4-4): its decoded key and the items, in order. Never an empty
     /// item list.
     item_list: Option<ItemList>,
+    /// The entries holding a new mapping (Phase 4-6), as decoded keys and the
+    /// mapping's entries, written after `entries` and before `item_list`.
+    mappings: Vec<(String, ItemFields)>,
 }
 
 impl FieldInsertGroup {
@@ -646,8 +661,33 @@ impl FieldInsertGroup {
             after: sibling,
             entries,
             item_list: None,
+            mappings: Vec::new(),
         })
     } // End of function typed() for FieldInsertGroup
+
+    /// Builds a group of mapping-valued entries only (Phase 4-6), written after
+    /// `sibling` (or after the mapping's last entry when it is `None`), or `None`
+    /// when `mappings` is empty.
+    pub fn of_mappings(
+        mapping: DocumentPath,
+        sibling: Option<String>,
+        mappings: Vec<(String, ItemFields)>,
+    ) -> Option<FieldInsertGroup> {
+        (!mappings.is_empty()).then_some(FieldInsertGroup {
+            mapping,
+            after: sibling,
+            entries: Vec::new(),
+            item_list: None,
+            mappings,
+        })
+    } // End of function of_mappings()
+
+    /// Builder: adds mapping-valued entries (Phase 4-6), written after every
+    /// scalar and list entry already in the group and before its item list.
+    pub fn with_mappings(mut self, mappings: Vec<(String, ItemFields)>) -> FieldInsertGroup {
+        self.mappings.extend(mappings);
+        self
+    }
 
     /// Builds a group whose last entry is `key` holding a new block sequence of
     /// `items` (Phase 4-4), after the typed `entries` — which may be empty here —
@@ -664,6 +704,7 @@ impl FieldInsertGroup {
             after: sibling,
             entries,
             item_list: Some((key.into(), items)),
+            mappings: Vec::new(),
         })
     } // End of function with_item_list()
 
@@ -691,12 +732,19 @@ impl FieldInsertGroup {
             .map(|(key, items)| (key.as_str(), items.as_slice()))
     }
 
-    /// Every key the group writes, in the order it writes them — the item list's
-    /// last.
+    /// The entries holding a new mapping (Phase 4-6), in the order they are
+    /// written.
+    pub fn mappings(&self) -> &[(String, ItemFields)] {
+        &self.mappings
+    }
+
+    /// Every key the group writes, in the order it writes them — the scalar and
+    /// list entries, then the mapping-valued ones, then the item list's.
     pub fn keys(&self) -> Vec<&str> {
         self.entries
             .iter()
             .map(|(key, _)| key.as_str())
+            .chain(self.mappings.iter().map(|(key, _)| key.as_str()))
             .chain(self.item_list.iter().map(|(key, _)| key.as_str()))
             .collect()
     }
@@ -749,35 +797,59 @@ impl EntryValue {
     }
 } // End of impl EntryValue
 
-/// The value of one field of a **new sequence item** (Phase 4-4).
+/// The value of one field of a **new sequence item** (Phase 4-4), or of one
+/// mapping-valued entry of a [`FieldInsertGroup`] (Phase 4-6).
 ///
-/// One level deeper than [`EntryValue`], and **no deeper, by its type**: a field
-/// is an [`EntryValue`], or one flat mapping whose every value is an
-/// [`EntryValue`]. [`EntryValue`] itself stays non-recursive (ruling 6 of
-/// `docs/decisions/4-split-notes.md` §3), and nothing here can hold an
-/// `ItemValue`, so a mapping inside a mapping has no spelling.
+/// A field is an [`EntryValue`], or a mapping whose every value is again an
+/// `ItemValue`. [`EntryValue`] itself stays non-recursive (ruling 6 of
+/// `docs/decisions/4-split-notes.md` §3), and no variant holds caller-written
+/// YAML: every key and scalar is a decoded string the engine spells.
 ///
-/// The mapping is the one shape a new variable needs beside its scalars: its
-/// `params`. It is written in **block style** when it has entries — the key alone
-/// on its line, then each entry on its own line one indentation step further in — and
-/// as `key: {}` when it has none (ruling 8). Every key and every value is spelled
-/// by [`crate::emit::choose_scalar`], except an [`EntryValue::PlainSource`] value,
+/// # How deep it goes, and what bounds it
+///
+/// Phase 4-4 needed one level — a new variable's `params`, a flat mapping — and
+/// the type allowed exactly that. Phase 4-6 needs three: a new verbose form
+/// variable's `params` holds `fields`, a mapping of field definitions, each a
+/// flat mapping of options; and a new `form_fields:` holds definitions the same
+/// way. So `Mapping` now nests. **The type no longer bounds the depth**: what a
+/// draft can produce is bounded by the closed draft types
+/// ([`crate::draft::NewVariable`], [`crate::draft::NewFormField`]) and re-read
+/// by [`crate::draft::check_closed_surface`], which admits exactly the shapes
+/// those write and nothing deeper. A Rust caller building an `ItemValue` by hand
+/// can nest further, and the renderer and verifier follow it; nothing here
+/// refuses it by depth.
+///
+/// A non-empty mapping is written in **block style** — the key alone on its line,
+/// then each entry on its own line one indentation step further in — and an empty
+/// one as `key: {}` (ruling 8). Every key and every value is spelled by
+/// [`crate::emit::choose_scalar`], except an [`EntryValue::PlainSource`] value,
 /// which is written verbatim and verified to read back as written.
 ///
 /// Verification is its own ([`verify_item_value`]): the node must be a mapping of
 /// the requested style holding exactly the requested keys, decoded, in order,
-/// each value checked by [`verify_entry_value`]. It does not inherit a guarantee
-/// by reaching the scalar verifier.
+/// each value checked by the same function one level down, down to
+/// [`verify_entry_value`] for every leaf. It does not inherit a guarantee by
+/// reaching the scalar verifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ItemValue {
     /// A scalar, a plain-source scalar or a flat list of scalars.
     Entry(EntryValue),
-    /// A flat mapping of decoded keys to [`EntryValue`]s, in the order written.
-    /// Empty is `{}`.
-    Mapping(Vec<(String, EntryValue)>),
+    /// A mapping of decoded keys to values, in the order written. Empty is `{}`.
+    Mapping(Vec<(String, ItemValue)>),
 }
 
 impl ItemValue {
+    /// A mapping whose every value is an [`EntryValue`] — the one shape Phase 4-4
+    /// wrote, and still the common one.
+    pub fn flat(entries: Vec<(String, EntryValue)>) -> ItemValue {
+        ItemValue::Mapping(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key, ItemValue::Entry(value)))
+                .collect(),
+        )
+    }
+
     /// The scalar this value is, as [`EntryValue::as_scalar`] answers it, or
     /// `None` for a list or a mapping.
     pub fn as_scalar(&self) -> Option<&str> {
@@ -796,15 +868,23 @@ impl ItemValue {
     }
 
     /// The entries this value holds, or `None` for anything but a mapping.
-    pub fn as_mapping(&self) -> Option<&[(String, EntryValue)]> {
+    pub fn as_mapping(&self) -> Option<&[(String, ItemValue)]> {
         match self {
             ItemValue::Entry(_) => None,
             ItemValue::Mapping(entries) => Some(entries),
         }
     }
 
+    /// The entry value this is, or `None` for a mapping.
+    pub fn as_entry(&self) -> Option<&EntryValue> {
+        match self {
+            ItemValue::Entry(value) => Some(value),
+            ItemValue::Mapping(_) => None,
+        }
+    }
+
     /// Whether rendering this value needs an indentation step: a non-empty list
-    /// or a non-empty mapping, or a mapping holding a non-empty list.
+    /// or a non-empty mapping.
     fn needs_a_step(&self) -> bool {
         match self {
             ItemValue::Entry(value) => value.as_list().is_some_and(|items| !items.is_empty()),
@@ -1170,20 +1250,23 @@ impl ItemMove {
 /// [`EntryValue::ScalarList`] is a flat list of scalars, and nothing deeper.
 /// **Phase 3-4 lets a new item's field be one**, for `triggers` and
 /// `search_terms`. **Phase 4-4 lets a field be one flat mapping** of those —
-/// [`ItemValue::Mapping`], a new variable's `params` — and nothing deeper.
-/// **Phase 4-5 lets one insertion write several such items** at one boundary
+/// [`ItemValue::Mapping`], a new variable's `params`. **Phase 4-5 lets one
+/// insertion write several such items** at one boundary
 /// ([`InsertItem::several`]), in a stated order, for [`ScalarItemInsert`]'s
 /// reason: two insertions at one offset state no order, and a `choice`'s new
-/// `{label, id}` records are several items at one place.)
+/// `{label, id}` records are several items at one place. **Phase 4-6 lets a
+/// mapping hold mappings**: a new verbose form's `params` holds `fields`, a
+/// mapping of field definitions, each a flat mapping of options.)
 ///
 /// That sentence is the whole licence, and every word of it is load-bearing.
 /// **One** item per slot — each a mapping, never a list of items inside an
-/// item, and since Phase 4-5 several slots only at one boundary. A **block mapping
-/// at most two levels deep**, so nesting is bounded by construction —
-/// [`InsertItem::fields`] is a list of `(key, value)` pairs whose value is an
-/// [`ItemValue`]: an [`EntryValue`], which can hold no mapping and no nested
-/// list, or one mapping whose every value is an [`EntryValue`]. The mapping
-/// carries its own verifier ([`verify_item_value`]).
+/// item, and since Phase 4-5 several slots only at one boundary. A **block
+/// mapping** whose fields are [`ItemValue`]s: an [`EntryValue`], which can hold
+/// no mapping and no nested list, or a mapping of further [`ItemValue`]s. Since
+/// Phase 4-6 **the type no longer bounds the depth**; what a draft can ask for
+/// is bounded by the closed draft types and re-read by
+/// [`crate::draft::check_closed_surface`] (see [`ItemValue`]). Every mapping, at
+/// every depth, carries its own verifier ([`verify_item_value`]).
 /// **Scalar** fields and list items, every one of them spelled by
 /// [`crate::emit::choose_scalar`], the codec every other edit in this module
 /// uses; there is deliberately no second speller here, because a second speller
@@ -4228,6 +4311,7 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
                     sibling: group.sibling(),
                     entries: group.entries(),
                     items: group.item_list(),
+                    mappings: group.mappings(),
                 };
                 plan_insertion_group(source, &index, &trivia, position, request)?
             }
@@ -4800,6 +4884,9 @@ struct PendingField {
     /// A group's trailing entry holding a new sequence of new items (Phase
     /// 4-4): its key and the items it must hold, written after `inserted`.
     inserted_items: Option<ItemList>,
+    /// A group's entries holding a new mapping (Phase 4-6): each key and the
+    /// mapping's entries, written after `inserted`.
+    inserted_mappings: Vec<(String, ItemFields)>,
     /// The index, in `entries`, of the entry an insertion is anchored after.
     anchor: Option<usize>,
     /// A substitution or a shape switch: the value node of the renamed entry,
@@ -4823,6 +4910,9 @@ struct FieldExpectation {
     /// these new items (Phase 4-4), verified by [`verify_inserted_item`] item by
     /// item.
     inserted_items: Vec<ItemList>,
+    /// Every key an insertion must find holding a new mapping of exactly these
+    /// entries (Phase 4-6), verified by [`verify_item_value`].
+    inserted_mappings: Vec<(String, ItemFields)>,
     /// Every key a removal must not find.
     removed: Vec<String>,
     /// Every entry no structural edit named, as (decoded key, subtree digest),
@@ -4848,6 +4938,7 @@ impl FieldExpectation {
     fn inserts(&self, key: &str) -> bool {
         self.inserted.iter().any(|(seen, _)| seen == key)
             || self.inserted_items.iter().any(|(seen, _)| seen == key)
+            || self.inserted_mappings.iter().any(|(seen, _)| seen == key)
     }
 } // End of impl FieldExpectation
 
@@ -4896,6 +4987,7 @@ fn fold_expectations(
                         mapping: claim.mapping,
                         inserted: Vec::new(),
                         inserted_items: Vec::new(),
+                        inserted_mappings: Vec::new(),
                         removed: Vec::new(),
                         siblings: Vec::new(),
                         entries: claim.entries.len(),
@@ -4953,6 +5045,19 @@ fn fold_expectations(
             slot.expectation.inserted.push((key, value));
             slot.expectation.entries += 1;
         } // End of the loop over the entries this claim inserts
+          // The group's mapping-valued entries (Phase 4-6) are new entries too,
+          // written after the typed ones, counted and ordered the same way.
+        for (key, fields) in claim.inserted_mappings {
+            if slot.expectation.inserts(&key) {
+                return Err(EditError::KeyAlreadyPresent {
+                    edit: claim.edit,
+                    mapping: claim.mapping_id,
+                });
+            }
+            keys.push(key.clone());
+            slot.expectation.inserted_mappings.push((key, fields));
+            slot.expectation.entries += 1;
+        } // End of the loop over the mapping-valued entries this claim inserts
           // The group's trailing item list (Phase 4-4) is one more new entry,
           // written after the others, so it is counted and ordered the same way.
         if let Some((key, items)) = claim.inserted_items {
@@ -5084,6 +5189,7 @@ fn plan_insertion(
         sibling: edit.sibling(),
         entries: &entries,
         items: None,
+        mappings: &[],
     };
     plan_insertion_group(source, index, trivia, position, group)
 } // End of function plan_insertion()
@@ -5100,8 +5206,11 @@ struct InsertionRequest<'edit> {
     /// present.
     entries: &'edit [(String, EntryValue)],
     /// A group's trailing entry holding a new sequence of new items (Phase
-    /// 4-4), written after `entries`.
+    /// 4-4), written after `entries` and `mappings`.
     items: Option<(&'edit str, &'edit [ItemFields])>,
+    /// A group's entries holding a new mapping (Phase 4-6), written after
+    /// `entries`.
+    mappings: &'edit [(String, ItemFields)],
 }
 
 impl InsertionRequest<'_> {
@@ -5111,11 +5220,13 @@ impl InsertionRequest<'_> {
             .map(|(key, items)| (key.to_owned(), items.to_vec()))
     }
 
-    /// Every key the request writes, in order — the item list's last.
+    /// Every key the request writes, in order — the mapping-valued entries after
+    /// the typed ones, and the item list's last.
     fn keys(&self) -> Vec<&str> {
         self.entries
             .iter()
             .map(|(key, _)| key.as_str())
+            .chain(self.mappings.iter().map(|(key, _)| key.as_str()))
             .chain(self.items.map(|(key, _)| key))
             .collect()
     }
@@ -5155,6 +5266,12 @@ fn plan_insertion_group(
         for item in items {
             check_inserted_fields(position, item)?;
         }
+    }
+    // The same key rules inside every mapping-valued entry, at every depth
+    // (the Phase 4-6 review's second finding: they reached rendering
+    // unchecked). A refusal names the entry's position among them.
+    for (at, (_, fields)) in request.mappings.iter().enumerate() {
+        check_mapping_keys(position, at, fields)?;
     }
     let anchor_index = match request.sibling {
         None => entries.len().checked_sub(1),
@@ -5238,11 +5355,23 @@ fn plan_insertion_group(
             }
         }
     } // End of the loop that renders every entry of the group, in order
-      // The trailing item list (Phase 4-4): the key alone on its line, then every
-      // item exactly as an `InsertItem` writes one, its `-` one step past the
-      // mapping's keys. The step is the mapping's own, then the document's
-      // ([`indentation_step`]); a sequence under a key may sit at the key's own
-      // column, so a step of zero is honoured here as it is for `matches:`.
+      // The mapping-valued entries (Phase 4-6), after the typed ones: each is
+      // written as a mapping-valued field of a new item is, its key at the
+      // mapping's own column and its entries one mapping step further in, with
+      // the steps read off the document ([`ItemSteps`]).
+    if !request.mappings.is_empty() {
+        let steps = ItemSteps::observed(source, index, trivia, mapping.id);
+        for (key, fields) in request.mappings {
+            let key = choose_scalar(key, context.as_key()).render();
+            let value = ItemValue::Mapping(fields.clone());
+            lines.extend(value_lines(&pad, &key, &value, indent, steps, line_ending));
+        } // End of the loop over the group's mapping-valued entries
+    }
+    // The trailing item list (Phase 4-4): the key alone on its line, then every
+    // item exactly as an `InsertItem` writes one, its `-` one step past the
+    // mapping's keys. The step is the mapping's own, then the document's
+    // ([`indentation_step`]); a sequence under a key may sit at the key's own
+    // column, so a step of zero is honoured here as it is for `matches:`.
     if let Some((key, items)) = request.items {
         let key = choose_scalar(key, context.as_key()).render();
         lines.push(format!("{pad}{key}:"));
@@ -5262,6 +5391,7 @@ fn plan_insertion_group(
         removed: None,
         inserted: request.entries.to_vec(),
         inserted_items: request.inserted_items(),
+        inserted_mappings: request.mappings.to_vec(),
         anchor: Some(anchor_index),
         renamed: None,
     };
@@ -5392,6 +5522,7 @@ fn plan_substitution(
         removed: None,
         inserted: Vec::new(),
         inserted_items: None,
+        inserted_mappings: Vec::new(),
         anchor: None,
         renamed: Some((
             resolved.value,
@@ -5661,6 +5792,7 @@ fn plan_shape_switch(
         removed: None,
         inserted: Vec::new(),
         inserted_items: None,
+        inserted_mappings: Vec::new(),
         anchor: None,
         renamed: Some((resolved.value, edit.key().to_owned(), edit.value().clone())),
     };
@@ -7642,24 +7774,55 @@ fn check_inserted_fields(position: usize, fields: &[(String, ItemValue)]) -> Res
                 field: at,
             });
         }
-        let nested = value.as_mapping().unwrap_or_default();
-        for (inner, (key, _)) in nested.iter().enumerate() {
-            if invalid(key) {
-                return Err(EditError::InvalidInsertedFieldKey {
-                    edit: position,
-                    field: at,
-                });
-            }
-            if nested[..inner].iter().any(|(seen, _)| seen == key) {
-                return Err(EditError::DuplicateInsertedField {
-                    edit: position,
-                    field: at,
-                });
-            }
-        } // End of the loop over a mapping-valued field's own keys
+        check_nested_keys(position, at, value)?;
     } // End of the loop that checks every requested field
     Ok(())
 } // End of function check_inserted_fields()
+
+/// [`check_inserted_fields`]'s two key rules applied inside one mapping-valued
+/// field, at every depth (Phase 4-6: a mapping may hold mappings). A refusal
+/// names the top-level field's position `field`, because the field list is the
+/// only list the error's operand indexes.
+///
+/// # Errors
+///
+/// [`EditError::InvalidInsertedFieldKey`] and
+/// [`EditError::DuplicateInsertedField`].
+fn check_nested_keys(position: usize, field: usize, value: &ItemValue) -> Result<(), EditError> {
+    check_mapping_keys(position, field, value.as_mapping().unwrap_or_default())
+} // End of function check_nested_keys()
+
+/// [`check_nested_keys`] over one mapping's entries, given as a slice — the form
+/// a [`FieldInsertGroup`]'s mapping-valued entry holds (Phase 4-6 review fix).
+/// An empty mapping has no key to refuse and passes.
+///
+/// # Errors
+///
+/// [`EditError::InvalidInsertedFieldKey`] and
+/// [`EditError::DuplicateInsertedField`], naming `field`.
+fn check_mapping_keys(
+    position: usize,
+    field: usize,
+    nested: &[(String, ItemValue)],
+) -> Result<(), EditError> {
+    let invalid = |key: &str| key.is_empty() || key.contains(['\n', '\r']);
+    for (inner, (key, value)) in nested.iter().enumerate() {
+        if invalid(key) {
+            return Err(EditError::InvalidInsertedFieldKey {
+                edit: position,
+                field,
+            });
+        }
+        if nested[..inner].iter().any(|(seen, _)| seen == key) {
+            return Err(EditError::DuplicateInsertedField {
+                edit: position,
+                field,
+            });
+        }
+        check_nested_keys(position, field, value)?;
+    } // End of the loop over a mapping-valued field's own keys
+    Ok(())
+} // End of function check_mapping_keys()
 
 /// The column every item of a block sequence puts its `-` at.
 ///
@@ -7980,44 +8143,58 @@ fn item_lines(
             " ".repeat(marker),
             if at == 0 { "- " } else { "  " }
         );
-        match value {
-            ItemValue::Entry(value) => {
-                lines.extend(entry_lines(
-                    &lead,
-                    &key,
-                    value,
-                    key_column,
-                    steps.list,
-                    line_ending,
-                ));
-            }
-            // The one spelling an empty mapping has (ruling 8).
-            ItemValue::Mapping(entries) if entries.is_empty() => {
-                lines.push(format!("{lead}{key}: {{}}"));
-            }
-            // A new non-empty mapping is block style (ruling 8): its entries one
-            // mapping step past this key, each written as a group writes one.
-            ItemValue::Mapping(entries) => {
-                lines.push(format!("{lead}{key}:"));
-                let column = key_column + steps.mapping;
-                let nested = ScalarContext::block(column, line_ending);
-                let pad = " ".repeat(column);
-                for (key, value) in entries {
-                    let key = choose_scalar(key, nested.as_key()).render();
-                    lines.extend(entry_lines(
-                        &pad,
-                        &key,
-                        value,
-                        column,
-                        steps.list,
-                        line_ending,
-                    ));
-                } // End of the loop over the nested mapping's entries
-            }
-        }
+        lines.extend(value_lines(
+            &lead,
+            &key,
+            value,
+            key_column,
+            steps,
+            line_ending,
+        ));
     } // End of the loop that renders every requested field, in order
     lines
 } // End of function item_lines()
+
+/// The lines of one `key: value` entry whose key is already spelled and whose
+/// value is an [`ItemValue`], with `lead` in front of the key and the key at
+/// `column` (Phase 4-6, factored out of [`item_lines`]).
+///
+/// An [`ItemValue::Entry`] is [`entry_lines`]'s. An empty mapping is the one
+/// spelling it has, `key: {}` (ruling 8). A non-empty mapping is block style: the
+/// key alone on its line, and each entry one mapping step past this key, spelled
+/// by this same function — so a mapping of mappings (a form's field definitions)
+/// is written by the code that writes a new variable's `params`.
+fn value_lines(
+    lead: &str,
+    key: &str,
+    value: &ItemValue,
+    column: usize,
+    steps: ItemSteps,
+    line_ending: LineEnding,
+) -> Vec<String> {
+    match value {
+        ItemValue::Entry(value) => entry_lines(lead, key, value, column, steps.list, line_ending),
+        ItemValue::Mapping(entries) if entries.is_empty() => vec![format!("{lead}{key}: {{}}")],
+        ItemValue::Mapping(entries) => {
+            let mut lines = vec![format!("{lead}{key}:")];
+            let nested_column = column + steps.mapping;
+            let nested = ScalarContext::block(nested_column, line_ending);
+            let pad = " ".repeat(nested_column);
+            for (key, value) in entries {
+                let key = choose_scalar(key, nested.as_key()).render();
+                lines.extend(value_lines(
+                    &pad,
+                    &key,
+                    value,
+                    nested_column,
+                    steps,
+                    line_ending,
+                ));
+            } // End of the loop over the nested mapping's entries
+            lines
+        }
+    }
+} // End of function value_lines()
 
 /// The lines of one `key: value` entry whose key is already spelled, with
 /// `lead` in front of the key and the key at `column`.
@@ -8867,6 +9044,7 @@ fn pending_field(
         removed: omit,
         inserted: inserted.into_iter().collect(),
         inserted_items: None,
+        inserted_mappings: Vec::new(),
         anchor: None,
         renamed: None,
     }
@@ -9777,6 +9955,29 @@ fn plain_source_nodes(
             }
         } // End of the loop over this mapping's new item lists
     } // End of the loop over the changed mappings, for their item lists
+      // A group's mapping-valued entries (Phase 4-6): inside each new mapping,
+      // exactly the requested plain-source value nodes, at every depth.
+    for expectation in expectations {
+        if expectation.inserted_mappings.is_empty() {
+            continue;
+        }
+        let Some(mapping) = resolve(candidate, &expectation.mapping)
+            .ok()
+            .and_then(|id| candidate.node(id))
+        else {
+            continue;
+        };
+        for entry in mapping_entries(mapping) {
+            let key = decoded_value(candidate, entry.key).unwrap_or_default();
+            let requested = expectation
+                .inserted_mappings
+                .iter()
+                .find(|(wanted, _)| wanted == key);
+            if let Some((_, fields)) = requested {
+                mapping_plain_source_nodes(candidate, entry.value, fields, &mut nodes);
+            }
+        } // End of the loop over the mapping's entries
+    } // End of the loop over the changed mappings, for their new mappings
     for expectation in sequences {
         nodes.extend(inserted_plain_source_nodes(candidate, expectation));
     } // End of the loop over the changed sequences
@@ -9827,45 +10028,48 @@ fn item_plain_source_nodes(
     fields: &[(String, ItemValue)],
 ) -> Vec<NodeId> {
     let mut nodes = Vec::new();
+    mapping_plain_source_nodes(candidate, item, fields, &mut nodes);
+    nodes
+} // End of function item_plain_source_nodes()
+
+/// The candidate value nodes of the requested [`EntryValue::PlainSource`] entries
+/// of one requested mapping, found at `mapping` in the candidate, and of every
+/// mapping nested inside it (Phase 4-6: a mapping may hold mappings), each
+/// matched by position and decoded key as [`item_plain_source_nodes`] matches an
+/// item's fields.
+///
+/// A node that is not a mapping, or whose entry count disagrees with the request,
+/// names nothing — the verifier reports that by name, and an unnamed node is
+/// charged by the ambiguity property, the safe direction.
+fn mapping_plain_source_nodes(
+    candidate: &SyntaxIndex,
+    mapping: NodeId,
+    requested: &[(String, ItemValue)],
+    nodes: &mut Vec<NodeId>,
+) {
     let Some(mapping) = candidate
-        .node(item)
+        .node(mapping)
         .filter(|node| node.kind == NodeKind::Mapping)
     else {
-        return nodes;
+        return;
     };
     let entries = mapping_entries(mapping);
-    if entries.len() != fields.len() {
-        return nodes;
+    if entries.len() != requested.len() {
+        return;
     }
-    for (entry, (key, value)) in entries.iter().zip(fields) {
+    for (entry, (key, value)) in entries.iter().zip(requested) {
         if decoded_value(candidate, entry.key) != Some(key.as_str()) {
             continue;
         }
         match value {
             ItemValue::Entry(EntryValue::PlainSource(_)) => nodes.push(entry.value),
             ItemValue::Entry(_) => {}
-            ItemValue::Mapping(requested) => {
-                let Some(nested) = candidate
-                    .node(entry.value)
-                    .filter(|node| node.kind == NodeKind::Mapping)
-                else {
-                    continue;
-                };
-                let found = mapping_entries(nested);
-                if found.len() != requested.len() {
-                    continue;
-                }
-                for (inner, (key, value)) in found.iter().zip(requested) {
-                    let plain = matches!(value, EntryValue::PlainSource(_));
-                    if plain && decoded_value(candidate, inner.key) == Some(key.as_str()) {
-                        nodes.push(inner.value);
-                    }
-                } // End of the loop over the nested mapping's requested entries
+            ItemValue::Mapping(nested) => {
+                mapping_plain_source_nodes(candidate, entry.value, nested, nodes)
             }
         }
-    } // End of the loop over the inserted item's requested fields
-    nodes
-} // End of function item_plain_source_nodes()
+    } // End of the loop over the requested entries
+} // End of function mapping_plain_source_nodes()
 
 /// Checks that a plain-source value reads back as written: a plain scalar whose
 /// source bytes are exactly `text` (Phase 3-10). The decoded value is checked
@@ -9957,6 +10161,24 @@ fn verify_field(
             inserted_seen += 1;
             continue;
         }
+        // A group's mapping-valued entry (Phase 4-6), under the nested verifier.
+        if let Some((wanted_key, fields)) = expectation
+            .inserted_mappings
+            .iter()
+            .find(|(wanted, _)| wanted == key)
+        {
+            let wanted = ItemValue::Mapping(fields.clone());
+            verify_item_value(
+                candidate,
+                index,
+                edit,
+                wanted_key.len(),
+                entry.value,
+                &wanted,
+            )?;
+            inserted_seen += 1;
+            continue;
+        }
         // A group's trailing item list (Phase 4-4), under its own verifier.
         if let Some((wanted_key, items)) = expectation
             .inserted_items
@@ -9970,7 +10192,10 @@ fn verify_field(
         siblings.push((key.to_owned(), entry.value));
     } // End of the loop over the candidate mapping's entries
 
-    if inserted_seen != expectation.inserted.len() + expectation.inserted_items.len() {
+    let requested = expectation.inserted.len()
+        + expectation.inserted_items.len()
+        + expectation.inserted_mappings.len();
+    if inserted_seen != requested {
         return Err(VerificationFailure::FieldNotInserted {
             edit,
             key_len: expectation
@@ -10273,8 +10498,9 @@ fn verify_inserted_item(
 /// key, in order; and each entry's value is then checked by
 /// [`verify_entry_value`], so a nested scalar is decoded twice, a nested list must
 /// be exactly the requested scalars in the requested style, and a nested
-/// plain-source value must read back byte for byte. Nothing deeper exists to
-/// check: [`ItemValue`] cannot hold one.
+/// plain-source value must read back byte for byte. Since Phase 4-6 a nested
+/// value may itself be a mapping, and it is checked by this same function, so
+/// every level states its own style, count, keys and order.
 ///
 /// # Errors
 ///
@@ -10315,7 +10541,9 @@ fn verify_item_value(
                 key_len: key.len(),
             });
         }
-        verify_entry_value(candidate, index, edit, key.len(), entry.value, wanted)?;
+        // One level down by the same rule (Phase 4-6): a nested mapping is
+        // checked as this one is, and every leaf by `verify_entry_value`.
+        verify_item_value(candidate, index, edit, key.len(), entry.value, wanted)?;
     } // End of the loop over the nested mapping's requested entries
     Ok(())
 } // End of function verify_item_value()
@@ -13913,6 +14141,7 @@ mod structural_tests {
                     ("y".to_owned(), EntryValue::Scalar("9".to_owned())),
                 ],
                 inserted_items: None,
+                inserted_mappings: Vec::new(),
                 anchor: Some(0),
                 renamed: None,
             },
@@ -13924,6 +14153,7 @@ mod structural_tests {
                 removed: None,
                 inserted: Vec::new(),
                 inserted_items: None,
+                inserted_mappings: Vec::new(),
                 anchor: None,
                 renamed: Some((
                     entries[2].value,

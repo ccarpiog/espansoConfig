@@ -36,12 +36,16 @@
 //! of `vars`, by whole new variables of a closed shape and by removals; and
 //! since Phase 4-5 the cardinality of an existing variable's four schema-known
 //! lists (`depends_on`, `params.values`, `params.choices`, `params.args`), by
-//! strings and — in `values` only — flat `{label, id}` records — and nothing
-//! else's. A variable **reorder** is judged by its own check,
+//! strings and — in `values` only — flat `{label, id}` records; and since Phase
+//! 4-6 the cardinality and presence of a form's definitions (`form_fields`,
+//! `vars[i].params.fields`) by definitions of a closed shape, the cardinality of
+//! one definition's options and of its `values` list, and the definitions a new
+//! verbose form variable is born holding — and nothing else's. A variable **reorder** is judged by its own check,
 //! [`check_variable_move`], because a move is never part of a draft's batch.
 
 use crate::draft::author_key::{author_key_fault, TYPED_SETTINGS};
 use crate::draft::error::DraftError;
+use crate::draft::form_definition::{FIELDS_KEY, FORM_PLAIN_SOURCE_OPTIONS, OPTION_VALUES_KEY};
 use crate::draft::match_draft::{
     FieldSubstitution, MatchField, SequenceField, VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
     VARS_KEY,
@@ -51,7 +55,10 @@ use crate::draft::new_variable::{
 };
 use crate::draft::variable_list::{VariableList, ID_KEY, LABEL_KEY};
 use crate::model::VariableKind;
-use crate::patch::{DocumentEdit, DocumentPath, EntryValue, ItemPlacement, ItemValue, PathSegment};
+use crate::patch::{
+    DocumentEdit, DocumentPath, EntryValue, FieldInsertGroup, ItemFields, ItemPlacement, ItemValue,
+    PathSegment,
+};
 
 /// The keys one **nested** mapping a batch reaches into is known to hold.
 ///
@@ -151,7 +158,21 @@ impl NestedKeys {
 ///   insertion into `…params.values` whose every item is exactly a new
 ///   `{label, id}` record ([`is_a_new_choice_record`]); and two more scalar
 ///   shapes, an existing `depends_on` item and the `label` or `id` of an
-///   existing item of `…params.values`.
+///   existing item of `…params.values`;
+/// - since Phase 4-6, a form's definitions: an insertion **group** of
+///   mapping-valued entries into `<match>.form_fields` or
+///   `<match>.vars[i].params.fields` itself, each a new definition whose options
+///   pass [`is_a_definition`] ([`names_a_definition_insertion`]); a group of
+///   options into one definition ([`names_an_option_insertion`]); the whole
+///   `form_fields:` as a mapping-valued entry of a group on the match's own
+///   mapping, and the whole `fields:` as one of a group into `params`, each a
+///   [`is_a_definition_map`]; the `fields` of a new variable of `type: form`
+///   ([`is_a_new_variable`]); the removal of `<match>.form_fields`, of one
+///   definition and of one option of a verbose definition; scalar edits of a
+///   verbose definition's option and of one element of it; and a scalar-item
+///   insertion into and an item removal from a definition's `values`. In every
+///   one, `multiline` and `trim_string_values` are plain source and only they
+///   are ([`is_a_definition_option`]).
 ///
 /// **Nothing deeper than those shapes passes.** A path one segment longer than
 /// the deepest legal one fails, and
@@ -184,16 +205,30 @@ pub fn check_closed_surface(
                         key == VARS_KEY && items.iter().all(|item| is_a_new_variable(item))
                     }
                 };
+                // A mapping-valued entry on the match's own mapping is a whole
+                // new `form_fields:` of definitions (Phase 4-6), and nothing else.
+                let mappings_fit = group.mappings().iter().all(|(key, definitions)| {
+                    key == FORM_FIELDS_KEY && is_a_definition_map(definitions)
+                });
                 let own = group.mapping() == mapping
                     && items_fit
+                    && mappings_fit
                     && group.entries().iter().all(|(key, value)| match value {
                         EntryValue::Scalar(_) | EntryValue::PlainSource(_) => {
                             MatchField::from_key(key).is_some()
                         }
                         EntryValue::ScalarList(_) => SequenceField::from_key(key).is_some(),
                     });
-                own || (group.item_list().is_none()
-                    && names_a_params_insertion(mapping, group.mapping(), group.entries()))
+                let nested = group.item_list().is_none();
+                own || (nested
+                    && names_a_params_insertion(
+                        mapping,
+                        group.mapping(),
+                        group.entries(),
+                        group.mappings(),
+                    ))
+                    || (nested && names_a_definition_insertion(mapping, group))
+                    || (nested && names_an_option_insertion(mapping, group))
             }
             DocumentEdit::SubstituteKey(substitution) => {
                 names_a_substitution(mapping, substitution.field(), substitution.key())
@@ -201,11 +236,13 @@ pub fn check_closed_surface(
             DocumentEdit::InsertScalarItems(insert) => {
                 names_a_surface_list(mapping, insert.sequence())
                     || names_a_variable_list(mapping, insert.sequence()).is_some()
+                    || names_a_definition_values(mapping, insert.sequence())
             }
             DocumentEdit::RemoveItem(removal) => {
                 names_a_surface_list_item(mapping, removal.item())
                     || names_a_variable(mapping, removal.item())
                     || names_a_variable_list_item(mapping, removal.item())
+                    || names_a_definition_value_item(mapping, removal.item())
             }
             DocumentEdit::SwitchShape(switch) => {
                 names_a_trigger_switch(mapping, switch.field(), switch.key(), switch.value())
@@ -385,6 +422,11 @@ fn check_no_removal_contains_another_edit(edits: &[DocumentEdit]) -> Result<(), 
                 // A new variable written into a `vars` the batch removes whole
                 // is a second answer about that sequence (Phase 4-4).
                 DocumentEdit::InsertItem(nested) => nested.sequence(),
+                // An insertion into a mapping the batch removes — a new option
+                // of a removed definition, a new definition of a removed
+                // `form_fields` (Phase 4-6) — is one too.
+                DocumentEdit::InsertField(nested) => nested.mapping(),
+                DocumentEdit::InsertFields(nested) => nested.mapping(),
                 _ => continue,
             };
             if position != *removal && contains(field, other) {
@@ -864,9 +906,15 @@ fn is_a_new_variable(fields: &[(String, ItemValue)]) -> bool {
                         let plain_key = PLAIN_SOURCE_PARAMS.contains(&key.as_str());
                         author_key_fault(key).is_none()
                             && match value {
-                                EntryValue::PlainSource(_) => plain_key,
-                                EntryValue::Scalar(_) | EntryValue::ScalarList(_) => {
-                                    !TYPED_SETTINGS.contains(&key.as_str())
+                                ItemValue::Entry(EntryValue::PlainSource(_)) => plain_key,
+                                ItemValue::Entry(_) => !TYPED_SETTINGS.contains(&key.as_str()),
+                                // A new verbose form's definitions (Phase 4-6):
+                                // `fields` only, only on a form, and only the
+                                // shape a definition map has.
+                                ItemValue::Mapping(definitions) => {
+                                    is_a_form(fields)
+                                        && key == FIELDS_KEY
+                                        && is_a_definition_map(definitions)
                                 }
                             }
                     })
@@ -874,6 +922,108 @@ fn is_a_new_variable(fields: &[(String, ItemValue)]) -> bool {
             _ => false,
         })
 } // End of function is_a_new_variable()
+
+/// Whether the fields of a new variable declare `type: form` (Phase 4-6).
+fn is_a_form(fields: &[(String, ItemValue)]) -> bool {
+    fields.iter().any(|(key, value)| {
+        key == TYPE_KEY
+            && value
+                .as_scalar()
+                .is_some_and(|text| VariableKind::from_text(text) == VariableKind::Form)
+    })
+}
+
+/// Whether one option of a form field definition has a shape a draft writes
+/// (Phase 4-6): its key passes ruling 7's text rules; its value is plain source
+/// **only** — and always — under `multiline` or `trim_string_values` (ruling 4);
+/// and a scalar or a flat list of scalars is never under one of ruling 4's typed
+/// settings.
+fn is_a_definition_option(key: &str, value: &EntryValue) -> bool {
+    author_key_fault(key).is_none()
+        && match value {
+            EntryValue::PlainSource(_) => FORM_PLAIN_SOURCE_OPTIONS.contains(&key),
+            EntryValue::Scalar(_) | EntryValue::ScalarList(_) => !TYPED_SETTINGS.contains(&key),
+        }
+}
+
+/// Whether a new definition's option mapping has the shape
+/// [`crate::draft::NewFormField`] writes (Phase 4-6): every value an entry — no
+/// mapping inside it — and every option [`is_a_definition_option`]. Empty is `{}`
+/// and passes.
+fn is_a_definition(options: &[(String, ItemValue)]) -> bool {
+    options.iter().all(|(key, value)| match value {
+        ItemValue::Entry(value) => is_a_definition_option(key, value),
+        ItemValue::Mapping(_) => false,
+    })
+}
+
+/// Whether a new mapping is a **definition map** (Phase 4-6): at least one entry,
+/// each named by a key passing ruling 7's text rules and holding a mapping that
+/// [`is_a_definition`].
+fn is_a_definition_map(definitions: &[(String, ItemValue)]) -> bool {
+    !definitions.is_empty()
+        && definitions.iter().all(|(name, value)| {
+            author_key_fault(name).is_none()
+                && matches!(value, ItemValue::Mapping(options) if is_a_definition(options))
+        })
+}
+
+/// Whether `path` names a form's definitions mapping itself — the shorthand
+/// `<match>.form_fields` or a verbose `<match>.vars[i].params.fields` (Phase
+/// 4-6).
+fn names_a_definition_map(mapping: &DocumentPath, path: &DocumentPath) -> bool {
+    match suffix(mapping, path) {
+        Some([PathSegment::Key(fields)]) => fields == FORM_FIELDS_KEY,
+        Some(
+            [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(params), PathSegment::Key(fields)],
+        ) => vars == VARS_KEY && params == PARAMS_KEY && fields == FIELDS_KEY,
+        _ => false,
+    }
+} // End of function names_a_definition_map()
+
+/// The segments below a form's definitions mapping when `path` is inside one —
+/// the shorthand `form_fields` or a verbose `params.fields` — or `None` (Phase
+/// 4-6).
+fn below_a_definition_map<'a>(
+    mapping: &DocumentPath,
+    path: &'a DocumentPath,
+) -> Option<&'a [PathSegment]> {
+    match suffix(mapping, path)? {
+        [PathSegment::Key(fields), rest @ ..] if fields == FORM_FIELDS_KEY => Some(rest),
+        [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(params), PathSegment::Key(fields), rest @ ..]
+            if vars == VARS_KEY && params == PARAMS_KEY && fields == FIELDS_KEY =>
+        {
+            Some(rest)
+        }
+        _ => None,
+    }
+} // End of function below_a_definition_map()
+
+/// Whether `path` names one definition of a form: `<definitions>.<name>`.
+fn names_a_definition(mapping: &DocumentPath, path: &DocumentPath) -> bool {
+    matches!(
+        below_a_definition_map(mapping, path),
+        Some([PathSegment::Key(_)])
+    )
+}
+
+/// Whether `path` names one definition's `values` list:
+/// `<definitions>.<name>.values` (Phase 4-6).
+fn names_a_definition_values(mapping: &DocumentPath, path: &DocumentPath) -> bool {
+    matches!(below_a_definition_map(mapping, path),
+        Some([PathSegment::Key(_), PathSegment::Key(values)]) if values == OPTION_VALUES_KEY)
+}
+
+/// Whether `path` names one item of a definition's `values` list (Phase 4-6).
+fn names_a_definition_value_item(mapping: &DocumentPath, path: &DocumentPath) -> bool {
+    match path.segments().split_last() {
+        Some((PathSegment::Index(_), list)) => {
+            let list = DocumentPath::new(path.document_index(), list.to_vec());
+            names_a_definition_values(mapping, &list)
+        }
+        _ => false,
+    }
+} // End of function names_a_definition_value_item()
 
 /// The list `path` names when it is one of a variable's four lists itself —
 /// `<match>.vars[i].depends_on` or `<match>.vars[i].params.<values|choices|args>`
@@ -974,19 +1124,54 @@ fn names_a_params_insertion(
     mapping: &DocumentPath,
     target: &DocumentPath,
     entries: &[(String, EntryValue)],
+    mappings: &[(String, ItemFields)],
 ) -> bool {
     let is_params = matches!(
         suffix(mapping, target),
         Some([PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(params)])
             if vars == VARS_KEY && params == PARAMS_KEY
     );
+    // Since Phase 4-6 one mapping-valued entry more: a whole new `fields:` of
+    // definitions, for a verbose form that holds none. Whether the variable is
+    // a form is the planner's question (`DraftError::VariableIsNotAForm`).
+    let mappings_fit = mappings
+        .iter()
+        .all(|(key, definitions)| key == FIELDS_KEY && is_a_definition_map(definitions));
     is_params
+        && mappings_fit
         && entries.iter().all(|(key, value)| {
             author_key_fault(key).is_none()
                 && !TYPED_SETTINGS.contains(&key.as_str())
                 && matches!(value, EntryValue::Scalar(_) | EntryValue::ScalarList(_))
         })
 } // End of function names_a_params_insertion()
+
+/// Whether an insertion group writes new **definitions** into an existing form's
+/// definitions mapping (Phase 4-6): into `<match>.form_fields` or
+/// `<match>.vars[i].params.fields` itself, holding mapping-valued entries only,
+/// each named by a key passing ruling 7 and holding what [`is_a_definition`]
+/// admits.
+fn names_a_definition_insertion(mapping: &DocumentPath, group: &FieldInsertGroup) -> bool {
+    names_a_definition_map(mapping, group.mapping())
+        && group.entries().is_empty()
+        && !group.mappings().is_empty()
+        && group
+            .mappings()
+            .iter()
+            .all(|(name, options)| author_key_fault(name).is_none() && is_a_definition(options))
+}
+
+/// Whether an insertion group writes new **options** into one existing
+/// definition (Phase 4-6): into `<definitions>.<name>` itself, scalar and list
+/// entries only, each [`is_a_definition_option`].
+fn names_an_option_insertion(mapping: &DocumentPath, group: &FieldInsertGroup) -> bool {
+    names_a_definition(mapping, group.mapping())
+        && group.mappings().is_empty()
+        && group
+            .entries()
+            .iter()
+            .all(|(key, value)| is_a_definition_option(key, value))
+}
 
 /// Whether a substitution renames a schema-known scalar key of `mapping` itself
 /// to another form of the same family.
@@ -1040,7 +1225,7 @@ fn suffix<'a>(mapping: &DocumentPath, path: &'a DocumentPath) -> Option<&'a [Pat
 
 /// Whether `path` names a scalar of the closed surface.
 ///
-/// The nine shapes, and nothing else:
+/// The eleven shapes, and nothing else:
 ///
 /// | Shape | What it is |
 /// |---|---|
@@ -1053,6 +1238,8 @@ fn suffix<'a>(mapping: &DocumentPath, path: &'a DocumentPath) -> Option<&'a [Pat
 /// | `<match>.vars[i].params.values[j].<label\|id>` | an entry of an existing `choice` record (Phase 4-5) |
 /// | `<match>.form_fields.<key>.<key>` | one option of one form field |
 /// | `<match>.form_fields.<key>.<key>[j]` | one element of such an option's sequence |
+/// | `<match>.vars[i].params.fields.<key>.<key>` | one option of one verbose form field (Phase 4-6) |
+/// | `<match>.vars[i].params.fields.<key>.<key>[j]` | one element of such an option's sequence (Phase 4-6) |
 ///
 /// Every one of them ends at an **existing** node: not one adds an entry or an
 /// element, and none is deeper than the deepest row above.
@@ -1087,8 +1274,16 @@ fn names_a_surface_scalar(mapping: &DocumentPath, path: &DocumentPath) -> bool {
                 && VariableList::from_param_key(list) == Some(VariableList::Values)
                 && (field == LABEL_KEY || field == ID_KEY)
         }
+        // Phase 4-6: one option of a verbose definition, and one element of such
+        // an option's sequence (the shorthand pair is two rows above).
+        [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(params), PathSegment::Key(fields), PathSegment::Key(_), PathSegment::Key(_)] => {
+            vars == VARS_KEY && params == PARAMS_KEY && fields == FIELDS_KEY
+        }
+        [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(params), PathSegment::Key(fields), PathSegment::Key(_), PathSegment::Key(_), PathSegment::Index(_)] => {
+            vars == VARS_KEY && params == PARAMS_KEY && fields == FIELDS_KEY
+        }
         _ => false,
-    } // End of the match over the nine shapes a surface scalar takes
+    } // End of the match over the eleven shapes a surface scalar takes
 } // End of function names_a_surface_scalar()
 
 /// Whether `path` names a **mapping entry** the closed surface may remove.
@@ -1097,7 +1292,8 @@ fn names_a_surface_scalar(mapping: &DocumentPath, path: &DocumentPath) -> bool {
 /// match, one of its two lists as a whole field (Phase 3-2), the whole `vars`
 /// entry as an explicit container removal (Phase 4-4), a variable's
 /// schema-known scalar, one entry of a variable's `params`, and one option of one
-/// form field. A path ending in an index names a sequence element instead, and a
+/// form field; and since Phase 4-6 the whole `form_fields` entry, one definition
+/// of either form shape, and one option of a verbose definition. A path ending in an index names a sequence element instead, and a
 /// [`crate::patch::FieldRemoval`] of one is refused here; an item of the two
 /// lists is removed by a [`crate::patch::RemoveItem`], which
 /// [`check_closed_surface`] judges on its own.
@@ -1110,6 +1306,7 @@ fn names_a_surface_field(mapping: &DocumentPath, path: &DocumentPath) -> bool {
             MatchField::from_key(key).is_some()
                 || SequenceField::from_key(key).is_some()
                 || key == VARS_KEY
+                || key == FORM_FIELDS_KEY
         }
         [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(field)] => {
             vars == VARS_KEY && VariableField::from_key(field).is_some()
@@ -1120,8 +1317,18 @@ fn names_a_surface_field(mapping: &DocumentPath, path: &DocumentPath) -> bool {
         [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(params), PathSegment::Key(_)] => {
             vars == VARS_KEY && params == PARAMS_KEY
         }
-        _ => false,
-    } // End of the match over the six shapes a removable entry takes
+        // Phase 4-6: one definition, shorthand or verbose, and one option of a
+        // verbose definition (a shorthand option is the third row above).
+        _ => {
+            matches!(
+                below_a_definition_map(mapping, path),
+                Some([PathSegment::Key(_)])
+            ) || matches!(
+                below_a_definition_map(mapping, path),
+                Some([PathSegment::Key(_), PathSegment::Key(_)])
+            )
+        }
+    } // End of the match over the shapes a removable entry takes
 } // End of function names_a_surface_field()
 
 /// The mapping an edit names a key **inside**, and that key.

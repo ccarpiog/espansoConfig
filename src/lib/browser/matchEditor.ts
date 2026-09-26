@@ -1898,8 +1898,10 @@ function draftWith(
     content_switch: contentSwitchOf(contentSwitch),
     trigger_form: side.change,
     sequences: [...side.sequences, ...(terms.kind === 'changed' ? terms.sequences : [])],
-    // Phase 4-4's `vars` intents have no control yet; the editor drafts none.
-    var_intents: []
+    // Phase 4-4's `vars` intents and Phase 4-6's `form_fields` intents have no
+    // control yet; the editor drafts none.
+    var_intents: [],
+    form_intents: []
   };
 } // End of function draftWith()
 

@@ -128,7 +128,23 @@ const DRAFT_ERROR_NAMES = [
   'VariableListWouldBeEmpty',
   'VariableListItemShapeMismatch',
   'NotAChoiceRecord',
-  'ChoiceRecordFieldHasNoScalar'
+  'ChoiceRecordFieldHasNoScalar',
+  'FormIntentsConflict',
+  'VariableIsNotAForm',
+  'FormFieldsIsAFlowMapping',
+  'FormFieldsHasAnUnsupportedShape',
+  'FormFieldsWouldBeEmpty',
+  'NoFormFieldInsertionAnchor',
+  'FormFieldOptionsAreNotABlockMapping',
+  'FormFieldWouldHaveNoOptions',
+  'NoFormOptionInsertionAnchor',
+  'NewFormOptionNotPlainSource',
+  'NewKeyIsAFormOption',
+  'NewFormFieldHasTooManyOptions',
+  'FormValuesAbsent',
+  'FormValuesIsNotAList',
+  'FormValuesWouldBeEmpty',
+  'FormValuesIntentsConflict'
 ] as const satisfies readonly DraftErrorName[];
 
 /**
@@ -232,6 +248,54 @@ const DRAFT_ERRORS: readonly DraftError[] = [
     ChoiceRecordFieldHasNoScalar: {
       target: { ChoiceRecordField: { variable: 0, record: 1, field: 'id' } }
     }
+  },
+  { FormIntentsConflict: { form: { Shorthand: {} }, intent: 1 } },
+  { VariableIsNotAForm: { variable: 2 } },
+  { FormFieldsIsAFlowMapping: { form: { Variable: { variable: 0 } } } },
+  { FormFieldsHasAnUnsupportedShape: { form: { Shorthand: {} }, found: 'Scalar' } },
+  { FormFieldsWouldBeEmpty: { form: { Shorthand: {} } } },
+  { NoFormFieldInsertionAnchor: { form: { Variable: { variable: 1 } } } },
+  {
+    FormFieldOptionsAreNotABlockMapping: {
+      target: { VariableFormField: { variable: 0, field: 2 } },
+      found: 'Mapping'
+    }
+  },
+  { FormFieldWouldHaveNoOptions: { target: { FormField: { index: 1 } } } },
+  { NoFormOptionInsertionAnchor: { target: { FormField: { index: 0 } } } },
+  {
+    NewFormOptionNotPlainSource: {
+      target: { NewFormField: { form: { NewVariable: { insertion: 0 } }, field: 1 } },
+      setting: 'trim_string_values'
+    }
+  },
+  {
+    NewKeyIsAFormOption: {
+      target: { NewFormFieldOption: { form: { Shorthand: {} }, field: 0, option: 2 } }
+    }
+  },
+  {
+    NewFormFieldHasTooManyOptions: {
+      target: { NewFormOption: { form: { Variable: { variable: 0 } }, field: 1, option: 0 } },
+      limit: 16
+    }
+  },
+  { FormValuesAbsent: { target: { FormField: { index: 0 } } } },
+  {
+    FormValuesIsNotAList: {
+      target: { VariableFormFieldOption: { variable: 0, field: 2, option: 1 } },
+      found: 'Scalar'
+    }
+  },
+  {
+    FormValuesWouldBeEmpty: {
+      target: { FormFieldOption: { field: 0, option: 1 } }
+    }
+  },
+  {
+    FormValuesIntentsConflict: {
+      target: { VariableFormFieldOptionItem: { variable: 0, field: 0, option: 1, item: 2 } }
+    }
   }
 ];
 
@@ -261,8 +325,8 @@ describe('the draft refusal samples', () => {
     expect(DRAFT_ERRORS.map(nameOf)).toEqual([...DRAFT_ERROR_NAMES]);
   });
 
-  it('hold the eighty-two variants Phase 4-5 measured', () => {
-    expect(DRAFT_ERROR_NAMES.length).toBe(82);
+  it('hold the ninety-eight variants Phase 4-6 measured', () => {
+    expect(DRAFT_ERROR_NAMES.length).toBe(98);
   });
 }); // End of the "draft refusal samples" suite
 
