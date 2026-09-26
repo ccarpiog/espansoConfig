@@ -17,8 +17,9 @@
  *   conflict of both origins with retention and copy, reapply, recovery and
  *   reparse.
  *
- * **Model evidence, never a screen**: nothing here is mounted. Step 4-12 draws
- * the form builder and owes the mounted evidence; 4-13 the window.
+ * **Model evidence, never a screen**: nothing here is mounted. The form
+ * builder's mounted evidence is `../components/MatchEditorForms.test.ts` (Phase
+ * 4-12); the window is owed to 4-13.
  *
  * Per `1b-2a-notes.md` section 14, a `describe`/`it` callback whose sibling
  * argument is already its description carries no JSDoc of its own; ordinary

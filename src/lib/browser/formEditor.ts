@@ -1,11 +1,13 @@
 /**
  * The form editor's model — Phase 4-10: one snippet's forms, shorthand and
  * verbose, drafted beside the seventeen scalar fields and the variables, as a
- * value.
+ * value. Since Phase 4-12 it also drafts an option's removal, a definition's
+ * `values` (item by item for a list, as one text for a text) and the removal of
+ * every definition (`RemoveFields`).
  *
- * **No component and no screen**, for `./matchEditor.ts`'s standing reason: only
- * the files that opt into jsdom mount a Svelte component in a test. Step 4-12
- * draws what this module decides.
+ * **No component**, for `./matchEditor.ts`'s standing reason: only the files that
+ * opt into jsdom mount a Svelte component in a test. `../components/FormBuilder.svelte`
+ * draws what this module decides, through `./formBuilder.ts` (Phase 4-12).
  *
  * ## One form model, two adapters
  *
@@ -48,6 +50,11 @@
  *   line feed, at load (eligibility), at edit (the transitions) and at send
  *   ({@link formsWriteUnreadable}, which `beginSave` asks because `MatchBuffers`
  *   carries no brand). A layout holding a real `\r` is read-only (ruling 19).
+ * - **Removal is explicit, and keeps text** (Phase 4-12): an option, a `values`
+ *   item or every definition is taken out by its own structural action under a
+ *   grant; the boxes keep their text, and a restoration brings the edits back.
+ *   The last option and the last kept `values` item are refused here, as Rust
+ *   refuses them.
  * - **Whole-container reapply** (ruling 22): a drafted shorthand form reapplies
  *   only over the same `form_fields` container (the Rust fingerprint), a drafted
  *   verbose form only over the same `vars` container; anything else collides the
@@ -81,6 +88,8 @@ import type {
   FormFieldIntent,
   FormFieldShape,
   FormOptions,
+  FormValuesIntent,
+  ItemDraft,
   MappingPresence,
   MatchDraft,
   MatchView,
@@ -236,8 +245,9 @@ export type FormAddress =
     };
 
 /**
- * The four schema-known scalar options of one definition this editor drafts.
- * `values` (a list or a text) is not one of them: its items are 4-12's.
+ * The four schema-known scalar options of one definition this editor drafts as
+ * boxes. `values` (a list or a text) is not one of them: it is drafted in its own
+ * representation since Phase 4-12 ({@link ValuesBaseline}).
  */
 export const FORM_OPTION_KEYS = ['type', 'default', 'multiline', 'trim_string_values'] as const;
 
@@ -309,6 +319,44 @@ export interface FormScalarBaseline {
   readonly eligibility: FormFieldEligibility;
 }
 
+/**
+ * What the file held for one definition's `values` option — Phase 4-12, the
+ * Choice/List field case (ruling 18). Both of espanso's representations are kept
+ * as they are, never converted:
+ *
+ * - `absent` — the definition holds no `values`;
+ * - `list` — a list of values: each item is one one-line box (an item that is not
+ *   a scalar, or holds a carriage return or a line feed, is read-only); items are
+ *   added at the end and removed one at a time;
+ * - `text` — one multi-line string, one line per value in espanso's reading, drafted
+ *   as one text box and never split into a list here;
+ * - `unsupported` — a repeated `values` key, or a `values` holding a mapping, an
+ *   alias or an elided node: shown, never drafted.
+ */
+export type ValuesBaseline =
+  | { readonly kind: 'absent' }
+  | {
+      readonly kind: 'list';
+      /** The `values` option's position in the definition's options. */
+      readonly index: number;
+      /** Whether the list is written between brackets. */
+      readonly flow: boolean;
+      /** One baseline per item, by its position. */
+      readonly items: readonly FormScalarBaseline[];
+    }
+  | {
+      readonly kind: 'text';
+      /** The `values` option's position in the definition's options. */
+      readonly index: number;
+      /** The text. */
+      readonly scalar: FormScalarBaseline;
+    }
+  | {
+      readonly kind: 'unsupported';
+      /** The (first) `values` option's position. */
+      readonly index: number;
+    };
+
 /** What the file held for one definition, by its position. Not drafted. */
 export interface DefinitionBaseline {
   /** Its name — the decoded key — or `null` when the key could not be read. */
@@ -319,6 +367,8 @@ export interface DefinitionBaseline {
   readonly options: readonly FieldView[];
   /** The four drafted scalar options. */
   readonly scalars: Readonly<Record<FormOptionKey, FormScalarBaseline>>;
+  /** Its `values` option — Phase 4-12. */
+  readonly values: ValuesBaseline;
 }
 
 /** What the file held for one form. Not drafted. */
@@ -493,9 +543,76 @@ function definitionBaselineOf(entry: FieldView, shape: FormFieldShape | undefine
     name: entry.key !== null && entry.key.decoded ? entry.key.text : null,
     optionsShape,
     options,
-    scalars
+    scalars,
+    values: valuesBaselineOf(options, shape)
   };
 } // End of function definitionBaselineOf()
+
+/**
+ * One definition's `values` baseline — Phase 4-12.
+ *
+ * @param options - The definition's options, projected.
+ * @param shape - Its projected shape, when the projection gave one (its `values`
+ *   presence says whether a list is written between brackets).
+ * @returns The baseline.
+ */
+function valuesBaselineOf(options: readonly FieldView[], shape: FormFieldShape | undefined): ValuesBaseline {
+  const found = entriesNamed(options, 'values');
+  const only = found[0];
+  if (only === undefined) {
+    return { kind: 'absent' };
+  }
+  if (found.length > 1) {
+    return { kind: 'unsupported', index: only.index };
+  }
+  const value = only.entry.value;
+  if ('Scalar' in value) {
+    return {
+      kind: 'text',
+      index: only.index,
+      scalar: {
+        present: true,
+        value: value.Scalar.text,
+        index: only.index,
+        eligibility: scalarEligibility(value.Scalar, false)
+      }
+    };
+  }
+  if (!('Sequence' in value)) {
+    return { kind: 'unsupported', index: only.index };
+  }
+  const presence = shape?.values;
+  const flow = presence !== undefined && 'Items' in presence ? presence.Items.flow : false;
+  const items = value.Sequence.map((item, at): FormScalarBaseline => {
+    if (!('Scalar' in item)) {
+      return { present: true, value: '', index: at, eligibility: { kind: 'readOnly', reason: 'unmodelledShape' } };
+    }
+    return { present: true, value: item.Scalar.text, index: at, eligibility: scalarEligibility(item.Scalar, true) };
+  }); // End of the map over the list's items
+  return { kind: 'list', index: only.index, flow, items };
+} // End of function valuesBaselineOf()
+
+/**
+ * Whether one option of an existing definition may be drafted for removal —
+ * Phase 4-12. Rust removes an option whose value is a scalar or a flat list of
+ * scalars (every byte of which a row shows) from a block option mapping; this
+ * answers the same, plus a key that decoded, so the row can name it.
+ *
+ * @param definition - The definition's baseline.
+ * @param option - The option's position.
+ * @returns `true` when *Take this option out* may be offered.
+ */
+export function optionRemovable(definition: DefinitionBaseline, option: number): boolean {
+  const entry = definition.options[option];
+  if (entry === undefined || definition.optionsShape !== 'block') {
+    return false;
+  }
+  if (entry.key === null || !entry.key.decoded) {
+    return false;
+  }
+  const value = entry.value;
+  return 'Scalar' in value || ('Sequence' in value && value.Sequence.every((item) => 'Scalar' in item));
+} // End of function optionRemovable()
 
 /**
  * A verbose form's baseline, from its variable.
@@ -562,12 +679,39 @@ export interface FormTextBuffer {
   readonly text: string;
 }
 
+/**
+ * What the controls hold for one definition's `values` — Phase 4-12, by the
+ * baseline's representation (`ValuesBaseline`); never another one.
+ *
+ * - `none` — the baseline's `values` is absent or unsupported: nothing drafted;
+ * - `list` — one box and one removal flag per existing item, by position, and the
+ *   new items appended at the end, in order;
+ * - `text` — the one text box of a multi-line `values`.
+ */
+export type ValuesBuffer =
+  | { readonly kind: 'none' }
+  | {
+      readonly kind: 'list';
+      /** One entry per existing item: its box and whether it is drafted for removal. */
+      readonly items: readonly { readonly text: string; readonly removed: boolean }[];
+      /** New items, written at the end of the list in this order. Never empty strings. */
+      readonly added: readonly string[];
+    }
+  | { readonly kind: 'text'; readonly text: string };
+
 /** What the controls hold for one existing definition. */
 export interface DefinitionBuffer {
   /** Whether it is drafted for removal; the boxes keep their text. */
   readonly removed: boolean;
   /** The four option boxes. */
   readonly options: Readonly<Record<FormOptionKey, FormTextBuffer>>;
+  /**
+   * The positions of the options drafted for removal — Phase 4-12, ascending. A
+   * removed option's box keeps its text, and restoring it brings its edit back.
+   */
+  readonly removedOptions: readonly number[];
+  /** Its `values` — Phase 4-12. */
+  readonly values: ValuesBuffer;
 }
 
 /**
@@ -594,6 +738,13 @@ export interface FormBuffer {
   readonly definitions: readonly DefinitionBuffer[];
   /** New definitions, in the order drafted. */
   readonly added: readonly AddedDefinition[];
+  /**
+   * Whether the whole definitions container is drafted for removal — Phase 4-12,
+   * ruling 8's explicit container removal (`RemoveFields`). While `true` it is the
+   * form's only intent: the definitions' boxes keep their text and send nothing,
+   * and no definition can be added.
+   */
+  readonly removeAll: boolean;
 }
 
 /** What the controls hold for every form, by the baseline's positions. */
@@ -613,8 +764,25 @@ function definitionBufferOf(definition: DefinitionBaseline): DefinitionBuffer {
   for (const key of FORM_OPTION_KEYS) {
     options[key] = { text: definition.scalars[key].value };
   } // End of the loop over the drafted options
-  return { removed: false, options };
+  return { removed: false, options, removedOptions: [], values: valuesBufferOf(definition.values) };
 } // End of function definitionBufferOf()
+
+/**
+ * One definition's starting `values` buffer.
+ *
+ * @param values - Its baseline.
+ * @returns Every box holding the file's value, nothing removed and nothing added.
+ */
+function valuesBufferOf(values: ValuesBaseline): ValuesBuffer {
+  switch (values.kind) {
+    case 'list':
+      return { kind: 'list', items: values.items.map((item) => ({ text: item.value, removed: false })), added: [] };
+    case 'text':
+      return { kind: 'text', text: values.scalar.value };
+    default:
+      return { kind: 'none' };
+  }
+} // End of function valuesBufferOf()
 
 /**
  * The buffer a session starts with: every box holding the file's value, nothing
@@ -628,7 +796,8 @@ export function formsBufferOf(baseline: FormsBaseline): FormsBuffer {
     forms: baseline.forms.map((form) => ({
       layout: form.layout === null ? null : { text: form.layout.value },
       definitions: form.definitions.map(definitionBufferOf),
-      added: []
+      added: [],
+      removeAll: false
     }))
   };
 } // End of function formsBufferOf()
@@ -733,8 +902,19 @@ function definitionDraftOf(
     multiline: null,
     trim_string_values: null
   };
+  const removedOptions = new Set(buffer.removedOptions);
+  for (const option of removedOptions) {
+    // Phase 4-12: an explicit removal is the only thing said about its option;
+    // its box's text is kept in the buffer and sent only if it is restored.
+    if (definition.options[option] !== undefined) {
+      options.push({ index: option, value: 'Remove', items: [] });
+    }
+  } // End of the loop over the removed options
   for (const key of FORM_OPTION_KEYS) {
     const scalar = definition.scalars[key];
+    if (scalar.index !== null && removedOptions.has(scalar.index)) {
+      continue;
+    }
     const intent = formScalarIntent(scalar, buffer.options[key]);
     if (intent === 'Unchanged' || intent === 'Remove') {
       continue;
@@ -745,8 +925,12 @@ function definitionDraftOf(
       inserted[key] = intent.Set;
     }
   } // End of the loop over the drafted options
+  const values = valuesDraftOf(definition.values, buffer.values, removedOptions);
+  if (values.entry !== null) {
+    options.push(values.entry);
+  }
   const insertsAny = FORM_OPTION_KEYS.some((key) => inserted[key] !== null);
-  if (options.length === 0 && !insertsAny) {
+  if (options.length === 0 && !insertsAny && values.intents.length === 0) {
     return null;
   }
   options.sort((one, other) => one.index - other.index);
@@ -754,9 +938,74 @@ function definitionDraftOf(
     index,
     options,
     insert_options: insertsAny ? { ...NO_OPTIONS, ...inserted } : NO_OPTIONS,
-    values: []
+    values: values.intents
   };
 } // End of function definitionDraftOf()
+
+/**
+ * Whether the draft changes one existing definition's options or `values` —
+ * Phase 4-12, for a row's marker. Its removal is the row's own state.
+ *
+ * @param definition - The baseline.
+ * @param buffer - Its boxes.
+ * @returns `true` when a save would say something about it.
+ */
+export function definitionIsEdited(definition: DefinitionBaseline, buffer: DefinitionBuffer): boolean {
+  return definitionDraftOf(definition, buffer, 0) !== null;
+} // End of function definitionIsEdited()
+
+/**
+ * What one definition's `values` buffer asks of a save — Phase 4-12: a rewrite
+ * of the text, or rewritten list items by position (an `EntryDraft` over the
+ * `values` option), and the list's removals then one insertion at the end.
+ * Nothing when the option itself is drafted for removal, or the baseline holds
+ * no draftable `values`. A removed item's box is not sent (Rust refuses a
+ * rewrite and a removal of one item together).
+ *
+ * @param baseline - The `values` baseline.
+ * @param buffer - Its buffer.
+ * @param removedOptions - The definition's options drafted for removal.
+ * @returns The entry draft, or `null`, and the item intents.
+ */
+function valuesDraftOf(
+  baseline: ValuesBaseline,
+  buffer: ValuesBuffer,
+  removedOptions: ReadonlySet<number>
+): { readonly entry: EntryDraft | null; readonly intents: readonly FormValuesIntent[] } {
+  if (baseline.kind === 'text' && buffer.kind === 'text' && !removedOptions.has(baseline.index)) {
+    const intent = formScalarIntent(baseline.scalar, { text: buffer.text });
+    return {
+      entry: typeof intent === 'object' ? { index: baseline.index, value: intent, items: [] } : null,
+      intents: []
+    };
+  }
+  if (baseline.kind !== 'list' || buffer.kind !== 'list' || removedOptions.has(baseline.index)) {
+    return { entry: null, intents: [] };
+  }
+  const items: ItemDraft[] = [];
+  const intents: FormValuesIntent[] = [];
+  baseline.items.forEach((item, at) => {
+    const box = buffer.items[at];
+    if (box === undefined) {
+      return;
+    }
+    if (box.removed) {
+      intents.push({ RemoveItem: { index: at } });
+      return;
+    }
+    const intent = formScalarIntent(item, { text: box.text });
+    if (typeof intent === 'object') {
+      items.push({ index: at, value: intent });
+    }
+  }); // End of the walk over the existing items
+  if (buffer.added.length > 0) {
+    intents.push({ InsertItems: { at: { End: {} }, items: [...buffer.added] } });
+  }
+  return {
+    entry: items.length === 0 ? null : { index: baseline.index, value: 'Unchanged', items },
+    intents
+  };
+} // End of function valuesDraftOf()
 
 /**
  * A verbose layout's wire draft: a `params` entry rewrite by its position, or
@@ -844,6 +1093,14 @@ export function formsDerivationOf(
     }
     const fields: FormFieldDraft[] = [];
     const intents: FormFieldIntent[] = [];
+    if (drafted.removeAll && form.definitionsShape !== 'absent') {
+      // Phase 4-12: the container's removal is the form's only intent (Rust
+      // refuses `RemoveFields` beside anything else about the definitions); a
+      // verbose layout is a `params` entry and is still sent beside it.
+      const layout = layoutDraftOf(form.layout, drafted.layout);
+      forms.push({ address: form.address, layout, fields: [], intents: [{ RemoveFields: {} }] });
+      return;
+    }
     form.definitions.forEach((definition, index) => {
       const box = drafted.definitions[index];
       if (box === undefined) {
@@ -1002,7 +1259,8 @@ export function unreadableDefinition(field: NewFormField): boolean {
  * carries no brand and a buffer built by hand type-checks.
  *
  * Every form text is checked for a carriage return; a definition name, a
- * one-line option and an extra option's key for a line feed as well. An
+ * one-line option, a `values` list item (Phase 4-12) and an extra option's key
+ * for a line feed as well. An
  * `EntryDraft` names an option by position, so the baseline says which key it
  * is; one this cannot place is held to the one-line rule, the stricter.
  *
@@ -1028,13 +1286,24 @@ export function formsWriteUnreadable(baseline: FormsBaseline, draft: MatchDraft)
     for (const drafted of fields) {
       const definition = form?.definitions[drafted.index];
       for (const entry of drafted.options) {
+        for (const item of entry.items) {
+          // Phase 4-12: a `values` item is a one-line box.
+          if (typeof item.value === 'object') {
+            oneLine.push(item.value.Set);
+          }
+        } // End of the loop over the rewritten items
         if (typeof entry.value !== 'object') {
           continue;
         }
         const key = definition?.options[entry.index]?.key?.text;
-        const multi = key === 'default';
+        const multi = key === 'default' || key === 'values';
         (multi ? multiLine : oneLine).push(entry.value.Set);
       } // End of the loop over the rewritten options
+      for (const intent of drafted.values) {
+        if ('InsertItems' in intent) {
+          oneLine.push(...intent.InsertItems.items);
+        }
+      } // End of the loop over the `values` intents
       const texts = newDefinitionTexts({ name: '', options: drafted.insert_options });
       oneLine.push(...texts.oneLine);
       multiLine.push(...texts.multiLine);
@@ -1156,7 +1425,8 @@ export function formRowsOf(form: FormBaseline, buffer: FormBuffer, layout: strin
   } // End of the loop over the layout's pieces
   const candidates: { readonly name: string | null; readonly definition: RowDefinition; readonly live: boolean }[] = [
     ...form.definitions.map((definition, index) => {
-      const removed = buffer.definitions[index]?.removed === true;
+      // A drafted container removal (Phase 4-12) removes every definition.
+      const removed = buffer.removeAll || buffer.definitions[index]?.removed === true;
       return { name: definition.name, definition: { kind: 'existing' as const, index, removed }, live: !removed };
     }),
     ...buffer.added.map((added, position) => ({
@@ -1247,8 +1517,9 @@ export function withLayoutText(
 
 /**
  * The buffer with one option box of one existing definition replaced, or `null`
- * when refused: an unknown position, an ineligible option, a definition drafted
- * for removal, a carriage return, a line feed in a one-line box, or no change.
+ * when refused: an unknown position, an ineligible option, a definition, its
+ * option or (Phase 4-12) the whole container drafted for removal, a carriage
+ * return, a line feed in a one-line box, or no change.
  *
  * @param baseline - What the file holds.
  * @param buffer - What the controls hold.
@@ -1272,7 +1543,11 @@ export function withOptionText(
   if (baseline.reprojectionOwed || definition === undefined || drafted === undefined || box === undefined) {
     return null;
   }
-  if (box.removed || definition.scalars[key].eligibility.kind !== 'editable') {
+  const scalar = definition.scalars[key];
+  if (box.removed || drafted.removeAll || scalar.eligibility.kind !== 'editable') {
+    return null;
+  }
+  if (scalar.index !== null && box.removedOptions.includes(scalar.index)) {
     return null;
   }
   if (text.includes('\r') || (isOneLineOption(key) && text.includes('\n')) || box.options[key].text === text) {
@@ -1310,7 +1585,7 @@ export function withDefinitionRemoval(
   if (baseline.reprojectionOwed || form === undefined || drafted === undefined || box === undefined) {
     return null;
   }
-  if (box.removed === removed || (removed && form.definitionsShape !== 'block')) {
+  if (drafted.removeAll || box.removed === removed || (removed && form.definitionsShape !== 'block')) {
     return null;
   }
   const definitions = drafted.definitions.map((one, at) => (at === index ? { ...one, removed } : one));
@@ -1338,6 +1613,8 @@ export type FormNameRefusal = 'empty' | 'notAnIdentifier' | 'takenByDefinition' 
  * - `layoutNotEditable` — the layout the placeholder would go into is read-only
  *   (for instance, it holds a real carriage return);
  * - `structure` — the R36/R37 grant does not cover this snippet;
+ * - `definitionsRemoved` — the draft takes out the whole definitions container
+ *   (Phase 4-12), which Rust refuses beside any other definition intent;
  * - `definitionsNotABlockMapping` — the definitions are written between braces
  *   or are not a mapping, which Rust refuses to insert into;
  * - `definitionsUnreadable` — a definition's key could not be read, so a new
@@ -1350,6 +1627,7 @@ export type FormAdditionRefusal =
   | { readonly kind: 'formNotEditable' }
   | { readonly kind: 'layoutNotEditable' }
   | { readonly kind: 'structure'; readonly reason: VariableStructureRefusal }
+  | { readonly kind: 'definitionsRemoved' }
   | { readonly kind: 'definitionsNotABlockMapping' }
   | { readonly kind: 'definitionsUnreadable' }
   | { readonly kind: 'name'; readonly reason: FormNameRefusal }
@@ -1375,6 +1653,9 @@ export function formAdditionRefusal(
   const drafted = buffer.forms[position];
   if (baseline.reprojectionOwed || form === undefined || drafted === undefined) {
     return { kind: 'formNotEditable' };
+  }
+  if (drafted.removeAll) {
+    return { kind: 'definitionsRemoved' };
   }
   if (form.definitionsShape !== 'absent' && form.definitionsShape !== 'block') {
     return { kind: 'definitionsNotABlockMapping' };
@@ -1443,6 +1724,419 @@ export function withDefinitionDiscarded(buffer: FormsBuffer, position: number, a
   }
   return withForm(buffer, position, { ...drafted, added: drafted.added.filter((_, one) => one !== at) });
 } // End of function withDefinitionDiscarded()
+
+// ---------------------------------------------------------------------------
+// Phase 4-12: options, `values` items and the container
+// ---------------------------------------------------------------------------
+
+/** One existing definition the draft may still change, with its parts. */
+interface ReachableDefinition {
+  /** The form's buffer. */
+  readonly drafted: FormBuffer;
+  /** The definition's baseline. */
+  readonly definition: DefinitionBaseline;
+  /** Its buffer. */
+  readonly box: DefinitionBuffer;
+}
+
+/**
+ * One existing definition the draft may still change, or `null`: no such form or
+ * definition, a commit waiting for a re-projection, the whole container or the
+ * definition itself drafted for removal.
+ *
+ * @param baseline - What the file holds.
+ * @param buffer - What the controls hold.
+ * @param position - The form's position.
+ * @param index - The definition's position.
+ * @returns Its parts, or `null`.
+ */
+function reachableDefinition(
+  baseline: FormsBaseline,
+  buffer: FormsBuffer,
+  position: number,
+  index: number
+): ReachableDefinition | null {
+  const definition = baseline.forms[position]?.definitions[index];
+  const drafted = buffer.forms[position];
+  const box = drafted?.definitions[index];
+  if (baseline.reprojectionOwed || definition === undefined || drafted === undefined || box === undefined) {
+    return null;
+  }
+  return drafted.removeAll || box.removed ? null : { drafted, definition, box };
+} // End of function reachableDefinition()
+
+/**
+ * The buffer with one definition's buffer replaced.
+ *
+ * @param buffer - The forms buffer.
+ * @param position - The form's position.
+ * @param drafted - The form's buffer.
+ * @param index - The definition's position.
+ * @param box - Its new buffer.
+ * @returns The new forms buffer.
+ */
+function withDefinitionBox(
+  buffer: FormsBuffer,
+  position: number,
+  drafted: FormBuffer,
+  index: number,
+  box: DefinitionBuffer
+): FormsBuffer {
+  return withForm(buffer, position, {
+    ...drafted,
+    definitions: drafted.definitions.map((one, at) => (at === index ? box : one))
+  });
+} // End of function withDefinitionBox()
+
+/**
+ * The buffer with one option of an existing definition drafted for removal, or
+ * restored, or `null` when refused — Phase 4-12's explicit option removal. A
+ * removal needs {@link optionRemovable} and must leave the definition at least
+ * one option (Rust refuses `FormFieldWouldHaveNoOptions`; the definition itself
+ * is removed by its own action). The option's box keeps its text.
+ *
+ * @param baseline - What the file holds.
+ * @param buffer - What the controls hold.
+ * @param position - The form's position.
+ * @param index - The definition's position.
+ * @param option - The option's position in the definition's options.
+ * @param removed - `true` to remove, `false` to restore.
+ * @returns The new buffer, or `null`.
+ */
+export function withOptionRemoval(
+  baseline: FormsBaseline,
+  buffer: FormsBuffer,
+  position: number,
+  index: number,
+  option: number,
+  removed: boolean
+): FormsBuffer | null {
+  const found = reachableDefinition(baseline, buffer, position, index);
+  if (found === null) {
+    return null;
+  }
+  const { drafted, definition, box } = found;
+  const held = box.removedOptions.includes(option);
+  if (held === removed) {
+    return null;
+  }
+  if (removed && (!optionRemovable(definition, option) || box.removedOptions.length + 1 >= definition.options.length)) {
+    return null;
+  }
+  const removedOptions = removed
+    ? [...box.removedOptions, option].sort((one, other) => one - other)
+    : box.removedOptions.filter((one) => one !== option);
+  return withDefinitionBox(buffer, position, drafted, index, { ...box, removedOptions });
+} // End of function withOptionRemoval()
+
+/**
+ * The `values` list of one definition the draft may still change: the list
+ * baseline and buffer, or `null` — not a list, or its option drafted for removal.
+ *
+ * @param found - The definition.
+ * @returns The list's parts, or `null`.
+ */
+function reachableList(
+  found: ReachableDefinition | null
+): { readonly list: Extract<ValuesBaseline, { kind: 'list' }>; readonly items: Extract<ValuesBuffer, { kind: 'list' }> } | null {
+  if (found === null) {
+    return null;
+  }
+  const list = found.definition.values;
+  const items = found.box.values;
+  if (list.kind !== 'list' || items.kind !== 'list' || found.box.removedOptions.includes(list.index)) {
+    return null;
+  }
+  return { list, items };
+} // End of function reachableList()
+
+/**
+ * The buffer with one existing `values` item's box replaced, or `null` when
+ * refused: not a list, an ineligible or removed item, a carriage return or a
+ * line feed (an item is one line), or no change — Phase 4-12.
+ *
+ * @param baseline - What the file holds.
+ * @param buffer - What the controls hold.
+ * @param position - The form's position.
+ * @param index - The definition's position.
+ * @param item - The item's position in the list.
+ * @param text - The box's whole value.
+ * @returns The new buffer, or `null`.
+ */
+export function withValuesItemText(
+  baseline: FormsBaseline,
+  buffer: FormsBuffer,
+  position: number,
+  index: number,
+  item: number,
+  text: string
+): FormsBuffer | null {
+  const found = reachableDefinition(baseline, buffer, position, index);
+  const reach = reachableList(found);
+  const held = reach?.list.items[item];
+  const box = reach?.items.items[item];
+  if (found === null || reach === null || held === undefined || box === undefined) {
+    return null;
+  }
+  if (held.eligibility.kind !== 'editable' || box.removed || box.text === text) {
+    return null;
+  }
+  if (text.includes('\r') || text.includes('\n')) {
+    return null;
+  }
+  const items = reach.items.items.map((one, at) => (at === item ? { ...one, text } : one));
+  return withDefinitionBox(buffer, position, found.drafted, index, {
+    ...found.box,
+    values: { ...reach.items, items }
+  });
+} // End of function withValuesItemText()
+
+/**
+ * The buffer with one existing `values` item drafted for removal, or restored,
+ * or `null` when refused — Phase 4-12. An item that is not a scalar is refused
+ * (Rust's `NotAScalar`), and so is the removal that would leave no existing
+ * item: Rust refuses emptying a `values` list (`FormValuesWouldBeEmpty`) whatever
+ * is added beside it.
+ *
+ * @param baseline - What the file holds.
+ * @param buffer - What the controls hold.
+ * @param position - The form's position.
+ * @param index - The definition's position.
+ * @param item - The item's position.
+ * @param removed - `true` to remove, `false` to restore.
+ * @returns The new buffer, or `null`.
+ */
+export function withValuesItemRemoval(
+  baseline: FormsBaseline,
+  buffer: FormsBuffer,
+  position: number,
+  index: number,
+  item: number,
+  removed: boolean
+): FormsBuffer | null {
+  const found = reachableDefinition(baseline, buffer, position, index);
+  const reach = reachableList(found);
+  const held = reach?.list.items[item];
+  const box = reach?.items.items[item];
+  if (found === null || reach === null || held === undefined || box === undefined || box.removed === removed) {
+    return null;
+  }
+  if (removed) {
+    const remaining = reach.items.items.filter((one) => !one.removed).length;
+    const notAScalar = held.eligibility.kind === 'readOnly' && held.eligibility.reason === 'unmodelledShape';
+    if (notAScalar || remaining <= 1) {
+      return null;
+    }
+  }
+  const items = reach.items.items.map((one, at) => (at === item ? { ...one, removed } : one));
+  return withDefinitionBox(buffer, position, found.drafted, index, {
+    ...found.box,
+    values: { ...reach.items, items }
+  });
+} // End of function withValuesItemRemoval()
+
+/**
+ * Why new `values` items cannot be added — a code, Phase 4-12:
+ *
+ * - `notAList` — the definition's `values` is not a list this editor drafts (it
+ *   is absent, a multi-line text, unsupported, or its option is drafted for
+ *   removal), or the definition does not accept changes;
+ * - `noValues` — nothing was given;
+ * - `emptyValue` — a line between two values is empty;
+ * - `unreadableText` — a value holds a carriage return.
+ */
+export type ValuesAdditionProblem = 'notAList' | 'noValues' | 'emptyValue' | 'unreadableText';
+
+/**
+ * The values one text area holds — one value per line, a single final line break
+ * ending the last value — or why they cannot be used. The Choice insertion's rule
+ * (`choiceValuesOf` in `./variableGroup.ts`), kept here so the form builder does
+ * not depend on the variable group.
+ *
+ * @param text - The text area's value.
+ * @returns The values, or the problem.
+ */
+export function valuesOfLines(
+  text: string
+): { readonly values: readonly string[] } | { readonly problem: Exclude<ValuesAdditionProblem, 'notAList'> } {
+  if (text.includes('\r')) {
+    return { problem: 'unreadableText' };
+  }
+  const lines = text.split('\n');
+  if (lines.length > 1 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  if (lines.length === 1 && lines[0] === '') {
+    return { problem: 'noValues' };
+  }
+  if (lines.some((line) => line === '')) {
+    return { problem: 'emptyValue' };
+  }
+  return { values: lines };
+} // End of function valuesOfLines()
+
+/**
+ * The buffer with new `values` items appended at the end of one definition's
+ * list, or the problem — Phase 4-12. Several added in one draft are written
+ * together, in the order added, after the last existing item.
+ *
+ * @param baseline - What the file holds.
+ * @param buffer - What the controls hold.
+ * @param position - The form's position.
+ * @param index - The definition's position.
+ * @param text - The new values, one per line.
+ * @returns The new buffer, or the problem.
+ */
+export function withValuesItemsAdded(
+  baseline: FormsBaseline,
+  buffer: FormsBuffer,
+  position: number,
+  index: number,
+  text: string
+): { readonly buffer: FormsBuffer } | { readonly problem: ValuesAdditionProblem } {
+  const found = reachableDefinition(baseline, buffer, position, index);
+  const reach = reachableList(found);
+  if (found === null || reach === null) {
+    return { problem: 'notAList' };
+  }
+  const read = valuesOfLines(text);
+  if ('problem' in read) {
+    return read;
+  }
+  return {
+    buffer: withDefinitionBox(buffer, position, found.drafted, index, {
+      ...found.box,
+      values: { ...reach.items, added: [...reach.items.added, ...read.values] }
+    })
+  };
+} // End of function withValuesItemsAdded()
+
+/**
+ * The buffer with one drafted new `values` item dropped, or `null` when there is
+ * none at that position — Phase 4-12.
+ *
+ * @param baseline - What the file holds.
+ * @param buffer - What the controls hold.
+ * @param position - The form's position.
+ * @param index - The definition's position.
+ * @param at - The new item's position among the added ones.
+ * @returns The new buffer, or `null`.
+ */
+export function withValuesAddedDiscarded(
+  baseline: FormsBaseline,
+  buffer: FormsBuffer,
+  position: number,
+  index: number,
+  at: number
+): FormsBuffer | null {
+  const found = reachableDefinition(baseline, buffer, position, index);
+  const reach = reachableList(found);
+  if (found === null || reach === null || at < 0 || at >= reach.items.added.length) {
+    return null;
+  }
+  return withDefinitionBox(buffer, position, found.drafted, index, {
+    ...found.box,
+    values: { ...reach.items, added: reach.items.added.filter((_, one) => one !== at) }
+  });
+} // End of function withValuesAddedDiscarded()
+
+/**
+ * The buffer with a multi-line `values` text replaced, or `null` when refused:
+ * not a text, ineligible, its option drafted for removal, a carriage return, or
+ * no change — Phase 4-12. The text stays one scalar: nothing here splits it into
+ * a list (ruling 18).
+ *
+ * @param baseline - What the file holds.
+ * @param buffer - What the controls hold.
+ * @param position - The form's position.
+ * @param index - The definition's position.
+ * @param text - The box's whole value.
+ * @returns The new buffer, or `null`.
+ */
+export function withValuesText(
+  baseline: FormsBaseline,
+  buffer: FormsBuffer,
+  position: number,
+  index: number,
+  text: string
+): FormsBuffer | null {
+  const found = reachableDefinition(baseline, buffer, position, index);
+  if (found === null) {
+    return null;
+  }
+  const held = found.definition.values;
+  const box = found.box.values;
+  if (held.kind !== 'text' || box.kind !== 'text' || found.box.removedOptions.includes(held.index)) {
+    return null;
+  }
+  if (held.scalar.eligibility.kind !== 'editable' || text.includes('\r') || box.text === text) {
+    return null;
+  }
+  return withDefinitionBox(buffer, position, found.drafted, index, { ...found.box, values: { kind: 'text', text } });
+} // End of function withValuesText()
+
+/**
+ * Why the whole definitions container cannot be drafted for removal — a code,
+ * Phase 4-12:
+ *
+ * - `noDefinitions` — the form holds no definitions container, or one that is not
+ *   a mapping (Rust's `FormFieldsHasAnUnsupportedShape`);
+ * - `additionsPending` — the draft adds a definition, which Rust refuses beside
+ *   `RemoveFields`: the new ones are dropped first, explicitly;
+ * - `formNotEditable` — the form does not accept changes now.
+ */
+export type RemoveAllRefusal = 'noDefinitions' | 'additionsPending' | 'formNotEditable';
+
+/**
+ * Why the whole container cannot be drafted for removal now, or `null`.
+ *
+ * @param baseline - What the file holds.
+ * @param buffer - What the controls hold.
+ * @param position - The form's position.
+ * @returns The refusal, or `null`.
+ */
+export function removeAllRefusal(
+  baseline: FormsBaseline,
+  buffer: FormsBuffer,
+  position: number
+): RemoveAllRefusal | null {
+  const form = baseline.forms[position];
+  const drafted = buffer.forms[position];
+  if (baseline.reprojectionOwed || form === undefined || drafted === undefined) {
+    return 'formNotEditable';
+  }
+  if (form.definitionsShape === 'absent' || form.definitionsShape === 'unsupported') {
+    return 'noDefinitions';
+  }
+  return drafted.added.length > 0 ? 'additionsPending' : null;
+} // End of function removeAllRefusal()
+
+/**
+ * The buffer with the whole definitions container drafted for removal, or
+ * restored, or `null` when refused — Phase 4-12 (`RemoveFields`). Every box keeps
+ * its text; a restoration brings every drafted edit back.
+ *
+ * @param baseline - What the file holds.
+ * @param buffer - What the controls hold.
+ * @param position - The form's position.
+ * @param removed - `true` to remove, `false` to restore.
+ * @returns The new buffer, or `null`.
+ */
+export function withAllDefinitionsRemoved(
+  baseline: FormsBaseline,
+  buffer: FormsBuffer,
+  position: number,
+  removed: boolean
+): FormsBuffer | null {
+  const drafted = buffer.forms[position];
+  if (drafted === undefined || drafted.removeAll === removed) {
+    return null;
+  }
+  if (removed ? removeAllRefusal(baseline, buffer, position) !== null : baseline.reprojectionOwed) {
+    return null;
+  }
+  return withForm(buffer, position, { ...drafted, removeAll: removed });
+} // End of function withAllDefinitionsRemoved()
 
 /**
  * Whether a retained draft adds a definition — ruling 21's test for recovery,
@@ -1627,6 +2321,50 @@ function addedDefinitionRows(field: NewFormField): readonly RetainedDraftField[]
 } // End of function addedDefinitionRows()
 
 /**
+ * The retained rows of one definition's drafted `values` — Phase 4-12: nothing
+ * when it drafts nothing; otherwise an `optionName` row holding `values`, then —
+ * for a text — its drafted value, or — for a list — each rewritten item
+ * (`setting`), each removed item as the file holds it (`itemRemoved`) and each new
+ * item (`itemAdded`), in list order.
+ *
+ * @param baseline - The `values` baseline.
+ * @param buffer - Its buffer.
+ * @param removedOptions - The definition's options drafted for removal.
+ * @returns The rows.
+ */
+function valuesRetainedRows(
+  baseline: ValuesBaseline,
+  buffer: ValuesBuffer,
+  removedOptions: ReadonlySet<number>
+): readonly RetainedDraftField[] {
+  const drafted = valuesDraftOf(baseline, buffer, removedOptions);
+  if (drafted.entry === null && drafted.intents.length === 0) {
+    return [];
+  }
+  const rows: RetainedDraftField[] = [{ label: 'formOption', text: 'values', status: 'optionName' }];
+  if (buffer.kind === 'text') {
+    rows.push({ label: 'formOption', text: buffer.text, status: 'optionValue' });
+    return rows;
+  }
+  if (baseline.kind !== 'list' || buffer.kind !== 'list') {
+    return rows;
+  }
+  baseline.items.forEach((item, at) => {
+    const box = buffer.items[at];
+    if (box === undefined) {
+      return;
+    }
+    if (box.removed) {
+      rows.push({ label: 'formOption', text: item.value, status: 'itemRemoved' });
+    } else if (formScalarIntent(item, { text: box.text }) !== 'Unchanged') {
+      rows.push({ label: 'formOption', text: box.text, status: 'setting' });
+    }
+  }); // End of the walk over the existing items
+  rows.push(...buffer.added.map((text) => ({ label: 'formOption' as const, text, status: 'itemAdded' as const })));
+  return rows;
+} // End of function valuesRetainedRows()
+
+/**
  * The retained draft's rows for the forms, **only for a form the draft changes**,
  * so a copy of a draft that touches no form reads exactly as before this phase.
  *
@@ -1634,7 +2372,10 @@ function addedDefinitionRows(field: NewFormField): readonly RetainedDraftField[]
  * layout (`setting`) when drafted — a shorthand layout is the `form` field's own
  * row above. Then per existing definition in file order: a removed one is its
  * name with `fieldRemoved`; an edited one is its name with `fieldEdited`, then
- * each drafted option's key and value. Then each new definition. Labels repeat
+ * each option drafted for removal (`removing`, Phase 4-12), its `values` rows
+ * ({@link valuesRetainedRows}) and each drafted option's key and value. Then each
+ * new definition. A drafted container removal is one `formFields` row with
+ * `removing` instead of all of that. Labels repeat
  * on purpose, so a renderer must not key these rows by label (B1).
  *
  * @param baseline - What the file holds.
@@ -1659,6 +2400,11 @@ export function formRowsRetained(
         rows.push({ label: 'layout', text: drafted.layout.text, status: 'setting' });
       }
     }
+    if (form.intents.some((intent) => 'RemoveFields' in intent)) {
+      // Phase 4-12: the container's removal is the form's only definition intent.
+      rows.push({ label: 'formFields', text: '', status: 'removing' });
+      continue;
+    }
     held.definitions.forEach((definition, index) => {
       const box = drafted.definitions[index];
       if (box === undefined) {
@@ -1668,13 +2414,23 @@ export function formRowsRetained(
         rows.push({ label: 'formField', text: definition.name ?? '', status: 'fieldRemoved' });
         return;
       }
-      const changed = FORM_OPTION_KEYS.filter(
-        (key) => formScalarIntent(definition.scalars[key], box.options[key]) !== 'Unchanged'
-      );
-      if (changed.length === 0) {
+      const removedOptions = new Set(box.removedOptions);
+      const changed = FORM_OPTION_KEYS.filter((key) => {
+        const scalar = definition.scalars[key];
+        if (scalar.index !== null && removedOptions.has(scalar.index)) {
+          return false;
+        }
+        return formScalarIntent(scalar, box.options[key]) !== 'Unchanged';
+      });
+      const values = valuesRetainedRows(definition.values, box.values, removedOptions);
+      if (changed.length === 0 && removedOptions.size === 0 && values.length === 0) {
         return;
       }
       rows.push({ label: 'formField', text: definition.name ?? '', status: 'fieldEdited' });
+      for (const option of box.removedOptions) {
+        rows.push({ label: 'formOption', text: definition.options[option]?.key?.text ?? '', status: 'removing' });
+      } // End of the loop over the removed options
+      rows.push(...values);
       for (const key of changed) {
         rows.push({ label: 'formOption', text: key, status: 'optionName' });
         rows.push({ label: 'formOption', text: box.options[key].text, status: 'optionValue' });
@@ -1760,6 +2516,8 @@ export function formAdditionRefusalKey(refusal: FormAdditionRefusal): Translatio
       return 'browser.formEditor.addition.layoutNotEditable';
     case 'structure':
       return variableMoveRefusalKey(refusal.reason);
+    case 'definitionsRemoved':
+      return 'browser.formEditor.addition.definitionsRemoved';
     case 'definitionsNotABlockMapping':
       return 'browser.formEditor.addition.definitionsNotABlockMapping';
     case 'definitionsUnreadable':

@@ -382,9 +382,16 @@ import {
   shorthandWireOf,
   withDefinitionAdded,
   withDefinitionDiscarded,
+  withAllDefinitionsRemoved,
   withDefinitionRemoval,
   withLayoutText,
+  withOptionRemoval,
   withOptionText,
+  withValuesAddedDiscarded,
+  withValuesItemRemoval,
+  withValuesItemsAdded,
+  withValuesItemText,
+  withValuesText,
   withVerboseForms,
   type FormAdditionRefusal,
   type FormOptionKey,
@@ -392,7 +399,8 @@ import {
   type FormsBaseline,
   type FormsBuffer,
   type FormsProblem,
-  type FormsReapplyVerdict
+  type FormsReapplyVerdict,
+  type ValuesAdditionProblem
 } from './formEditor';
 import {
   capturedVariables,
@@ -1050,7 +1058,9 @@ export type TypingGroup = TypingRun<TypingSubject>;
  * drafted array; since Phase 4-9, one scalar box of an existing variable, named
  * by the variable's position in the file's list; since Phase 4-10, a verbose
  * form's layout box or one option box of a definition, named by the form's
- * position in `MatchBaseline.forms` (and the definition's). A structural action (an item added or removed) ends every run,
+ * position in `MatchBaseline.forms` (and the definition's); since Phase 4-12, a
+ * definition's multi-line `values` box or one `values` item's box, by the item's
+ * position in the file's list. A structural action (an item added or removed) ends every run,
  * so a position cannot come to name another item inside one.
  */
 export type TypingSubject =
@@ -1059,7 +1069,9 @@ export type TypingSubject =
   | `${SequenceField}#${number}`
   | `vars#${number}.${VariableField}`
   | `forms#${number}.layout`
-  | `forms#${number}.${number}.${FormOptionKey}`;
+  | `forms#${number}.${number}.${FormOptionKey}`
+  | `forms#${number}.${number}.values`
+  | `forms#${number}.${number}.values#${number}`;
 
 /**
  * One editing session over one snippet's seventeen editable fields.
@@ -3486,6 +3498,261 @@ export function formFieldRemovalPreview(
   );
   return row === undefined ? null : { name: row.name, occurrencesKept: row.occurrences };
 } // End of function formFieldRemovalPreview()
+
+// ---------------------------------------------------------------------------
+// The form builder's own operations — Phase 4-12, over `./formEditor.ts`
+// ---------------------------------------------------------------------------
+
+/**
+ * Drafts the removal of one option of an existing definition — Phase 4-12's
+ * explicit option removal. Structural: its own history step, and only under a
+ * grant for this snippet (R36, ruling 23), like a definition's removal.
+ *
+ * @param session - The session being edited.
+ * @param grant - The structure grant, from one read of the window.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @param option - The option's position in the definition's options.
+ * @returns The session with the removal drafted, or the same session.
+ */
+export function removeFormOption(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant,
+  form: number,
+  definition: number,
+  option: number
+): MatchEditorSession {
+  if (!isFormEditable(session, form) || !grantCovers(grant, session.match)) {
+    return session;
+  }
+  const next = withOptionRemoval(session.baseline.forms, draftedForms(session), form, definition, option, true);
+  return structuralChange(session, next === null ? null : withForms(session.draft.value, next));
+} // End of function removeFormOption()
+
+/**
+ * Takes back one drafted option removal — Phase 4-12. Needs no grant.
+ *
+ * @param session - The session being edited.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @param option - The option's position.
+ * @returns The session, or the same session.
+ */
+export function restoreFormOption(
+  session: MatchEditorSession,
+  form: number,
+  definition: number,
+  option: number
+): MatchEditorSession {
+  if (!isFormEditable(session, form)) {
+    return session;
+  }
+  const next = withOptionRemoval(session.baseline.forms, draftedForms(session), form, definition, option, false);
+  return structuralChange(session, next === null ? null : withForms(session.draft.value, next));
+} // End of function restoreFormOption()
+
+/**
+ * Records whatever one existing `values` item's box now holds — Phase 4-12,
+ * typing. The box is one line: a carriage return or a line feed is refused here,
+ * at eligibility and at {@link beginSave}.
+ *
+ * @param session - The session being edited.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @param item - The item's position in the file's list.
+ * @param text - The box's whole value.
+ * @returns The session after the edit, or the same session.
+ */
+export function editFormValuesItem(
+  session: MatchEditorSession,
+  form: number,
+  definition: number,
+  item: number,
+  text: string
+): MatchEditorSession {
+  if (!isFormEditable(session, form)) {
+    return session;
+  }
+  const next = withValuesItemText(session.baseline.forms, draftedForms(session), form, definition, item, text);
+  return next === null
+    ? session
+    : recordStructureTyping(
+        session,
+        `forms#${form}.${definition}.values#${item}`,
+        withForms(session.draft.value, next)
+      );
+} // End of function editFormValuesItem()
+
+/**
+ * Drafts the removal of one existing `values` item — Phase 4-12. Structural,
+ * under a grant (R36).
+ *
+ * @param session - The session being edited.
+ * @param grant - The structure grant, from one read of the window.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @param item - The item's position.
+ * @returns The session with the removal drafted, or the same session.
+ */
+export function removeFormValuesItem(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant,
+  form: number,
+  definition: number,
+  item: number
+): MatchEditorSession {
+  if (!isFormEditable(session, form) || !grantCovers(grant, session.match)) {
+    return session;
+  }
+  const next = withValuesItemRemoval(session.baseline.forms, draftedForms(session), form, definition, item, true);
+  return structuralChange(session, next === null ? null : withForms(session.draft.value, next));
+} // End of function removeFormValuesItem()
+
+/**
+ * Takes back one drafted `values` item removal — Phase 4-12. Needs no grant.
+ *
+ * @param session - The session being edited.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @param item - The item's position.
+ * @returns The session, or the same session.
+ */
+export function restoreFormValuesItem(
+  session: MatchEditorSession,
+  form: number,
+  definition: number,
+  item: number
+): MatchEditorSession {
+  if (!isFormEditable(session, form)) {
+    return session;
+  }
+  const next = withValuesItemRemoval(session.baseline.forms, draftedForms(session), form, definition, item, false);
+  return structuralChange(session, next === null ? null : withForms(session.draft.value, next));
+} // End of function restoreFormValuesItem()
+
+/** What *Add values* did — Phase 4-12. */
+export type FormValuesOutcome =
+  | { readonly kind: 'added'; readonly session: MatchEditorSession }
+  | {
+      readonly kind: 'refused';
+      /** The same session. */
+      readonly session: MatchEditorSession;
+      /** Why: the values' own problem, or `structure` for the grant or the editor. */
+      readonly problem: ValuesAdditionProblem | 'structure';
+    };
+
+/**
+ * *Add values* — Phase 4-12: new items at the end of one definition's `values`
+ * list, one per line of the text given, as one history step under a grant (R36).
+ *
+ * @param session - The session being edited.
+ * @param grant - The structure grant, from one read of the window.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @param text - The new values, one per line.
+ * @returns What happened.
+ */
+export function addFormValuesItems(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant,
+  form: number,
+  definition: number,
+  text: string
+): FormValuesOutcome {
+  if (!isFormEditable(session, form) || !grantCovers(grant, session.match)) {
+    return { kind: 'refused', session, problem: 'structure' };
+  }
+  const next = withValuesItemsAdded(session.baseline.forms, draftedForms(session), form, definition, text);
+  if ('problem' in next) {
+    return { kind: 'refused', session, problem: next.problem };
+  }
+  const after = structuralChange(session, withForms(session.draft.value, next.buffer));
+  return after === session ? { kind: 'refused', session, problem: 'notAList' } : { kind: 'added', session: after };
+} // End of function addFormValuesItems()
+
+/**
+ * Drops one drafted new `values` item — Phase 4-12. Needs no grant.
+ *
+ * @param session - The session being edited.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @param at - The new item's position among the added ones.
+ * @returns The session, or the same session.
+ */
+export function discardFormValuesItem(
+  session: MatchEditorSession,
+  form: number,
+  definition: number,
+  at: number
+): MatchEditorSession {
+  if (!isFormEditable(session, form)) {
+    return session;
+  }
+  const next = withValuesAddedDiscarded(session.baseline.forms, draftedForms(session), form, definition, at);
+  return structuralChange(session, next === null ? null : withForms(session.draft.value, next));
+} // End of function discardFormValuesItem()
+
+/**
+ * Records whatever a multi-line `values` box now holds — Phase 4-12, typing. The
+ * text stays one scalar (ruling 18); a carriage return is refused.
+ *
+ * @param session - The session being edited.
+ * @param form - The form's position.
+ * @param definition - The definition's position.
+ * @param text - The box's whole value.
+ * @returns The session after the edit, or the same session.
+ */
+export function editFormValuesText(
+  session: MatchEditorSession,
+  form: number,
+  definition: number,
+  text: string
+): MatchEditorSession {
+  if (!isFormEditable(session, form)) {
+    return session;
+  }
+  const next = withValuesText(session.baseline.forms, draftedForms(session), form, definition, text);
+  return next === null
+    ? session
+    : recordStructureTyping(session, `forms#${form}.${definition}.values`, withForms(session.draft.value, next));
+} // End of function editFormValuesText()
+
+/**
+ * Drafts the removal of a form's whole definitions container — Phase 4-12,
+ * ruling 8's explicit container removal (`RemoveFields`). Structural, under a
+ * grant (R36). The layout is not touched.
+ *
+ * @param session - The session being edited.
+ * @param grant - The structure grant, from one read of the window.
+ * @param form - The form's position.
+ * @returns The session with the removal drafted, or the same session.
+ */
+export function removeFormFields(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant,
+  form: number
+): MatchEditorSession {
+  if (!isFormEditable(session, form) || !grantCovers(grant, session.match)) {
+    return session;
+  }
+  const next = withAllDefinitionsRemoved(session.baseline.forms, draftedForms(session), form, true);
+  return structuralChange(session, next === null ? null : withForms(session.draft.value, next));
+} // End of function removeFormFields()
+
+/**
+ * Takes back a drafted container removal — Phase 4-12. Needs no grant.
+ *
+ * @param session - The session being edited.
+ * @param form - The form's position.
+ * @returns The session, or the same session.
+ */
+export function restoreFormFields(session: MatchEditorSession, form: number): MatchEditorSession {
+  if (!isFormEditable(session, form)) {
+    return session;
+  }
+  const next = withAllDefinitionsRemoved(session.baseline.forms, draftedForms(session), form, false);
+  return structuralChange(session, next === null ? null : withForms(session.draft.value, next));
+} // End of function restoreFormFields()
 
 /**
  * Starts an editing session over one snippet's seventeen fields.

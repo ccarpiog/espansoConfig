@@ -1571,3 +1571,89 @@ fn the_form_editors_wire_draft_keeps_a_crlf_files_untouched_bytes() {
         "trigger: ':after'\r\n    replace: 'kept'"
     );
 } // End of function the_form_editors_wire_draft_keeps_a_crlf_files_untouched_bytes()
+
+/// Phase 4-12: the wire shapes the mounted form builder sends
+/// (`src/lib/components/MatchEditorForms.test.ts` pins them on the TypeScript
+/// side; nothing ties the two files' literals together but this copy) plan and
+/// apply here over one neutral fixture, each changing only what it names: a `values`
+/// item rewritten, one removed and two appended; an option this editor does not
+/// draft taken out beside a multi-line `values` rewritten as one text; every
+/// definition taken out by `RemoveFields`; and a new verbose form inserted with
+/// its `{{name.field}}` references. Neutral content only.
+#[test]
+fn the_form_builders_wire_drafts_apply_and_change_only_what_they_name() {
+    let head = "matches:\n  - trigger: ':fb'\n    form: |\n      P: [[pick]] L: [[lines]]\n    form_fields:\n";
+    let pick = "      pick:\n        type: choice\n        values:\n          - a\n          - b\n          - c\n        hint: kept as written\n";
+    let lines =
+        "      lines:\n        type: list\n        values: |\n          one\n          two\n";
+    let tail = "  - trigger: ':plain'\n    replace: 'Hello '\n";
+    let source = format!("{head}{pick}{lines}{tail}");
+    let none = r#""insert_options":{"type":null,"default":null,"multiline":null,"values":null,"trim_string_values":null,"extra":[]}"#;
+
+    // `values` item by item: the rewrite by position, the removal, the append.
+    let items = format!(
+        r#"{{"form_fields":[{{"index":0,"options":[{{"index":1,"value":"Unchanged","items":[{{"index":0,"value":{{"Set":"A"}}}}]}}],{none},"values":[{{"RemoveItem":{{"index":1}}}},{{"InsertItems":{{"at":{{"End":{{}}}},"items":["d","e"]}}}}]}}]}}"#
+    );
+    let draft: MatchDraft = serde_json::from_str(&items).expect("the builder's draft reads");
+    let (_, patched) = planned(&source, 0, &draft);
+    assert_eq!(
+        patched,
+        format!(
+            "{head}      pick:\n        type: choice\n        values:\n          - A\n          - c\n          - d\n          - e\n        hint: kept as written\n{lines}{tail}"
+        )
+    );
+
+    // An unknown option taken out, and a multi-line `values` kept as one text.
+    let options = format!(
+        r#"{{"form_fields":[{{"index":0,"options":[{{"index":2,"value":"Remove","items":[]}}],{none},"values":[]}},{{"index":1,"options":[{{"index":1,"value":{{"Set":"one\ntwo\nthree"}},"items":[]}}],{none},"values":[]}}]}}"#
+    );
+    let draft: MatchDraft = serde_json::from_str(&options).expect("the builder's draft reads");
+    let (_, patched) = planned(&source, 0, &draft);
+    assert!(patched.starts_with(head), "{patched:?}");
+    assert!(patched.ends_with(tail), "{patched:?}");
+    assert!(!patched.contains("hint"), "{patched:?}");
+    assert!(
+        patched.contains("        values:\n          - a\n          - b\n          - c\n"),
+        "{patched:?}"
+    );
+    let view = the_match(&patched, 0);
+    let lines_values = view.form_fields[1]
+        .value
+        .as_mapping()
+        .and_then(|options| options.get(1))
+        .and_then(|option| option.value.as_scalar())
+        .map(|scalar| scalar.text.clone());
+    assert_eq!(lines_values.as_deref(), Some("one\ntwo\nthree"));
+
+    // Every definition taken out by one explicit intent; the layout stays.
+    let all: MatchDraft =
+        serde_json::from_str(r#"{"form_intents":[{"RemoveFields":{}}],"form_fields":[]}"#)
+            .expect("the builder's draft reads");
+    let (_, patched) = planned(&source, 0, &all);
+    assert_eq!(
+        patched,
+        format!(
+            "matches:\n  - trigger: ':fb'\n    form: |\n      P: [[pick]] L: [[lines]]\n{tail}"
+        )
+    );
+
+    // The Form insertion: the references and the new verbose form, one batch.
+    let insertion = r#"{"replace":{"Set":"Hello {{form.a}} {{form.b}}"},"var_intents":[{"InsertVariable":{"at":{"End":{}},"variable":{"name":"form","params":{"Form":{"layout":"A: [[a]] B: [[b]]","fields":[{"name":"b","options":{"type":"choice","default":null,"multiline":null,"values":{"List":["x","y"]},"trim_string_values":null,"extra":[]}}]}},"inject_vars":null,"depends_on":null,"extra_params":[]}}}]}"#;
+    let draft: MatchDraft = serde_json::from_str(insertion).expect("the builder's draft reads");
+    let (_, patched) = planned(&source, 1, &draft);
+    assert!(
+        patched.starts_with(&format!("{head}{pick}{lines}")),
+        "{patched:?}"
+    );
+    let inserted = the_match(&patched, 1);
+    assert_eq!(
+        inserted
+            .content
+            .replace
+            .as_ref()
+            .map(|one| one.text.as_str()),
+        Some("Hello {{form.a}} {{form.b}}")
+    );
+    assert_eq!(inserted.vars.len(), 1);
+    assert_eq!(verbose_names(&patched, 1, 0), vec!["b".to_owned()]);
+} // End of function the_form_builders_wire_drafts_apply_and_change_only_what_they_name()

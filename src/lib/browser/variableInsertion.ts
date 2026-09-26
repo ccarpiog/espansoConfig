@@ -371,7 +371,8 @@ function admission(
  * the name is refused, or a text could not pass through a control.
  *
  * **The reference is built from the description's own name**, so the name is one
- * value shared by both halves. The body is read once.
+ * value shared by both halves — for a form (Phase 4-12), one `{{name.field}}`
+ * per sub-reference the request names. The body is read once.
  *
  * @param session - The session being edited.
  * @param grant - The structure grant, minted from one read of the window
@@ -389,9 +390,18 @@ export function insertVariable(
     readonly field: ReferenceField;
     readonly selection: TextSelection;
     readonly variable: NewVariable;
+    /**
+     * Phase 4-12, a form's fields: `{{name.field}}` for each, in order and
+     * separated by one space, in place of the aggregate `{{name}}` — the consult's
+     * "selected `{{name.field}}` references, not an unexplained `{{name}}`
+     * aggregate". Absent for every other kind. The caller gives at least one;
+     * nothing here derives them.
+     */
+    readonly subReferences?: readonly string[];
   }
 ): InsertOutcome {
   const { field, selection } = request;
+  const subReferences = request.subReferences === undefined ? null : [...request.subReferences];
   const variable: NewVariable = JSON.parse(JSON.stringify(request.variable));
   if (!isFieldEditable(session, field)) {
     return { kind: 'refused', session, refusal: { kind: 'fieldNotEditable' } };
@@ -406,7 +416,10 @@ export function insertVariable(
   const second = clamped(selection.end, text.length);
   const start = Math.min(first, second);
   const end = Math.max(first, second);
-  const reference = `{{${variable.name}}}`;
+  const reference =
+    subReferences === null
+      ? `{{${variable.name}}}`
+      : subReferences.map((sub) => `{{${variable.name}.${sub}}}`).join(' ');
   const variables = withVariableAdded(
     session.baseline.variables,
     capturedVariables(buffers.variables),

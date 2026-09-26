@@ -141,6 +141,7 @@
   import SnapshotAcknowledgement from './SnapshotAcknowledgement.svelte';
   import SourceText from './SourceText.svelte';
   import VariableGroup from './VariableGroup.svelte';
+  import FormBuilder from './FormBuilder.svelte';
 
   /*
    * The small editor: one snippet's editable fields, drafted and saved — seventeen
@@ -149,7 +150,8 @@
    * Phase 3-6-2 the trigger side (the one control of the drafted trigger form, the
    * choices of form and a change's preview) and `search_terms` as list controls;
    * since Phase 4-11 the *Variables and fill-ins* group (`VariableGroup.svelte`)
-   * under the content keys, and the variable reorder's save (`runVariableMove`).
+   * under the content keys, and the variable reorder's save (`runVariableMove`);
+   * since Phase 4-12 the visual form builder (`FormBuilder.svelte`) beside it.
    *
    * **This file is presentation.** Every decision about what may be edited, what
    * a draft means, when a save may start, what it says and what a commit moves is
@@ -1031,14 +1033,15 @@
   } // End of function runVariableMove()
 
   /**
-   * The selection of one content key's box, for an insertion's reference — the
+   * The selection of one content key's box, for an insertion's reference — or,
+   * since Phase 4-12, of the shorthand layout's `form` box for *Add field* — the
    * box found by the `data-field` it carries; non-integers when it is not drawn,
    * which the insertion reads as the end of the text.
    *
    * @param field - The content key.
    * @returns Its selection, in UTF-16 code units.
    */
-  function selectionOf(field: ReferenceField): TextSelection {
+  function selectionOf(field: ReferenceField | 'form'): TextSelection {
     const box = editorElement?.querySelector(`textarea[data-field="${field}"]`);
     return box instanceof HTMLTextAreaElement
       ? { start: box.selectionStart, end: box.selectionEnd }
@@ -1850,6 +1853,9 @@
         move={(variable, to) => void runVariableMove(variable, to)}
         {selectionOf}
       />
+      <!-- **The visual form builder** (Phase 4-12), beside the group: every form
+           of the snippet, both storage shapes, and the Form insertion. -->
+      <FormBuilder {session} held={heldAnalysis} port={variables} apply={(next) => (session = next)} {selectionOf} />
     {:else if section.group !== null}
       <div class="group" role="group" aria-label={tOptionGroup(section.group)}>
         <h3>{tOptionGroup(section.group)}</h3>

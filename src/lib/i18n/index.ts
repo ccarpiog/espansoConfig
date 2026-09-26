@@ -184,7 +184,10 @@ import {
   formRowAdvisoryKey,
   type FormAdditionRefusal,
   type FormFieldRefusal,
-  type FormRowAdvisory
+  type FormRowAdvisory,
+  type LayoutMalformation,
+  type RemoveAllRefusal,
+  type ValuesAdditionProblem
 } from '../browser/formEditor';
 import {
   variableAdditionRefusalKey,
@@ -210,6 +213,18 @@ import {
   type DeclarationStatus,
   type MoveChoiceView
 } from '../browser/variableGroup';
+import {
+  formInsertionProblemKey,
+  layoutMalformationKey,
+  newFieldKindKey,
+  removeAllRefusalKey,
+  rowStatusKey,
+  valuesProblemKey,
+  type FormInsertionProblem,
+  type InsertedFieldKind,
+  type NewFieldKind,
+  type RowStatus
+} from '../browser/formBuilder';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
   AddedContent,
@@ -979,6 +994,73 @@ export function tFormAdditionRefusal(refusal: FormAdditionRefusal): string {
 export function tFormRowAdvisory(advisory: FormRowAdvisory): string {
   return translate(locale.current, formRowAdvisoryKey(advisory));
 } // End of function tFormRowAdvisory()
+
+/**
+ * A form builder row's status marker — Phase 4-12.
+ *
+ * @param status - The code, from `../browser/formBuilder.ts`.
+ * @returns The translated marker, or `null` for a row the draft leaves alone.
+ */
+export function tFormRowStatus(status: RowStatus): string | null {
+  const key = rowStatusKey(status);
+  return key === null ? null : translate(locale.current, key);
+} // End of function tFormRowStatus()
+
+/**
+ * Why *Take out all the fields* is withheld — Phase 4-12.
+ *
+ * @param refusal - The code, from `../browser/formEditor.ts`.
+ * @returns The translated sentence.
+ */
+export function tRemoveAllRefusal(refusal: RemoveAllRefusal): string {
+  return translate(locale.current, removeAllRefusalKey(refusal));
+} // End of function tRemoveAllRefusal()
+
+/**
+ * Why new `values` could not be used — Phase 4-12.
+ *
+ * @param problem - The code, from `../browser/formEditor.ts`.
+ * @returns The translated sentence.
+ */
+export function tValuesProblem(problem: ValuesAdditionProblem): string {
+  return translate(locale.current, valuesProblemKey(problem));
+} // End of function tValuesProblem()
+
+/**
+ * Why the **Form** insertion cannot insert — Phase 4-12; a values problem names
+ * its field.
+ *
+ * @param problem - The problem, from `../browser/formBuilder.ts`.
+ * @returns The translated sentence.
+ */
+export function tFormInsertionProblem(problem: FormInsertionProblem): string {
+  return translate(
+    locale.current,
+    formInsertionProblemKey(problem),
+    problem.kind === 'values' ? { name: problem.field } : undefined
+  );
+} // End of function tFormInsertionProblem()
+
+/**
+ * What a layout region the supported placeholder subset does not read is —
+ * Phase 4-12.
+ *
+ * @param reason - The code, from `../browser/formEditor.ts`.
+ * @returns The translated sentence.
+ */
+export function tLayoutMalformation(reason: LayoutMalformation): string {
+  return translate(locale.current, layoutMalformationKey(reason));
+} // End of function tLayoutMalformation()
+
+/**
+ * A new field kind's label — Phase 4-12.
+ *
+ * @param kind - The kind, from `../browser/formBuilder.ts`.
+ * @returns The translated label.
+ */
+export function tNewFieldKind(kind: NewFieldKind | InsertedFieldKind): string {
+  return translate(locale.current, newFieldKindKey(kind));
+} // End of function tNewFieldKind()
 
 /**
  * Renders the cursor action's advisory, in the current language — Phase 3-5-1.
