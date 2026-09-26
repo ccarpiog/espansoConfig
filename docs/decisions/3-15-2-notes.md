@@ -14,6 +14,10 @@ No window reading was performed or claimed.
 > attended session"). This record closes **3-15-2 only**, and step 3-15 with it, on this record's
 > review. It does not close Phase 3, and it does not start Phase 4 (§4.8, last bullet).
 
+> **Correction, 2026-09-26:** the banner above was true on 2026-09-24 and is no longer. 3-13-3 closed at
+> `743da1d` and 3-14 at `6744752`, both on 2026-09-26 in an attended session, so step 3-13 is closed and
+> Phase 3 is closed by [`3-closure-notes.md`](3-closure-notes.md) §1. See the corrections under §3 and §7.
+
 ---
 
 ## 1. What changed, and why
@@ -469,6 +473,13 @@ acceptance are reserved to a person. No mounted test and no hidden page counts a
 Two are unread and owed to an attended session.** None of the five readings is complete. Each
 record lists what it did not read, summarised in the last column.
 
+> **Correction, 2026-09-26:** the tally above and the rows **3-13** and **3-14** below are no longer
+> right. Both were read in part by the model's look in the attended session of 2026-09-26 (3-13-3 at
+> `743da1d`, 3-14 at `6744752`), none by the owner, so the tally is now **seven owed, seven read in
+> part, none unread**. The final state of every row is
+> [`3-closure-notes.md`](3-closure-notes.md) §2. The same applies to the 3-13 and 3-14 cells of §4.5
+> (CF-52, CF-54), §5.1 and §5.2: see `3-closure-notes.md` §4.1 and §5.
+
 | Step | Piece | Read? | By whom, and the record | What it did **not** read (per its own record) |
 |---|---|---|---|---|
 | **3-5** | 3-5-2-2 | **Read in part.** Step 3-5 closed. | The **driven model's look**, 2026-09-24 07:13–07:23. Unlocked screen, EN and ES through the picker, 10 launches (L05 void, L08 read in part). [`3-5-2-2-notes.md`](3-5-2-2-notes.md) §1, §3, §4; [`3-5-2-2-window-reading.md`](3-5-2-2-window-reading.md). Review `ship`, 0 findings (`docs/reviews/phase-3-5-2-2.md`). | Real keyboard or pointer input. Pressing a suggestion. The *text edited* switch-preview variant and a removed-companion list. A single-marker `$\|$` insertion and its undo. **Every conflict choice after the block-scalar conflict** (reload, reapply, copy, keep editing). The save-press path of a conflict; the conflict was raised by the watcher, not by a save (§4 row 5, §5 item 6, §6). |
@@ -651,6 +662,13 @@ Each step's notes are the full account. This is the one-line index.
 5. **Nothing here is about espanso's runtime.** R16 and R30 stay open.
 
 ## 7. What is not closed
+
+> **Correction, 2026-09-26:** the first three bullets below were true on 2026-09-24 and are no longer.
+> Neither 3-13-3 nor 3-14 is owed: 3-13-3 closed at `743da1d` and 3-14 at `6744752`, both on 2026-09-26
+> in an attended session. Step 3-13 is closed, and **Phase 3 is closed** by
+> [`3-closure-notes.md`](3-closure-notes.md) §1, which does not start Phase 4. The last bullet (the
+> owner's Phase 2 exit and R35/CF-51) still stands. The open items carried into Phase 4's selection are
+> `3-closure-notes.md` §6.
 
 - **Phase 3 is NOT closed.** Two items are owed to an attended session (`3-split-notes.md` §4.8;
   `PROGRESS.md` *Next action*):

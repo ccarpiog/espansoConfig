@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T09:55:35Z",
+  "updated": "2026-09-26T10:04:24Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -892,8 +892,9 @@
     {
       "id": "3",
       "title": "Complete match editing",
-      "status": "in_progress",
-      "summary": "Complete match editing, split by the design consult into steps 3-1 to 3-15; 3-1 and 3-2 are done."
+      "status": "done",
+      "summary": "Editing breadth: all fifteen steps closed on 2026-09-26, with 47 open items carried into Phase 4.",
+      "narrative": "docs/decisions/3-closure-notes.md"
     },
     {
       "id": "3-1",
