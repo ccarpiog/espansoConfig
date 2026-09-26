@@ -18,7 +18,10 @@
  *
  * Suite 8 is Phase 4-14-1's mounted half: every one of the seven kinds through
  * the *Add a variable* form (`../browser/variableKinds.ts`; the model half is
- * `../browser/variableKinds.test.ts`).
+ * `../browser/variableKinds.test.ts`). Suite 9 is Phase 4-14-2's: an existing
+ * variable's parameters, list items and `depends_on` items
+ * (`../browser/variableParams.ts`; the model half is
+ * `../browser/variableParams.test.ts`).
  *
  * **Mounted evidence, never a screen** (Phase 4 ruling 29): what this proves is
  * which elements jsdom holds after the handlers ran and what reached the
@@ -33,7 +36,7 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveConflictSource, type ConflictSource } from '../browser/conflictSource';
-import { makeConflict, makeDocument, makeMatch, makeSummary, makeVariable, field, scalarItem, scriptedAcknowledgement } from '../browser/fixtures';
+import { makeConflict, makeDocument, makeMatch, makeSummary, makeVariable, field, scalarItem, scriptedAcknowledgement, styledScalar } from '../browser/fixtures';
 import type { CreationBuffers } from '../browser/matchCreation';
 import type { MatchBuffers } from '../browser/matchEditor';
 import type { ConflictModel, DiskAdoptionOutcome } from '../browser/saveOutcome';
@@ -447,7 +450,8 @@ describe('1. controls are not mounted until selected', () => {
     expect(groupBoxes(editor.target)).toHaveLength(0);
     pressChip(editor.target, 'first');
     // `first` has no inject_vars: shown read-only with its reason, never as a box.
-    expect(groupBoxes(editor.target).map((one) => one.value)).toEqual(['first', 'echo']);
+    // Its one parameter, `echo`, is a box since Phase 4-14-2.
+    expect(groupBoxes(editor.target).map((one) => one.value)).toEqual(['first', 'echo', 'one']);
     expect(group(editor.target).textContent).toContain(sentence('browser.variableEditor.readOnly.notInVariable'));
     editor.stop();
   });
@@ -1043,3 +1047,321 @@ describe('8. Phase 4-14-1 — every kind through Add a variable', () => {
     editor.stop();
   });
 }); // End of suite 8
+
+// ---------------------------------------------------------------------------
+// Suite 9 — Phase 4-14-2: an existing variable's parameters and lists
+// ---------------------------------------------------------------------------
+
+/** A block list presence of `count` items, at no location. */
+const BLOCK_OF_TWO = {
+  Items: {
+    location: { key_node: 0, key_span: { start: 0, end: 0 }, value_node: 0, value_span: { start: 0, end: 0 }, path: null },
+    flow: false,
+    count: 2
+  }
+} as const;
+
+/**
+ * Three variables with parameters: `stamp` (a `date` with `format`, a plain
+ * `offset` and `depends_on: [pick]`), `pick` (a `choice` with two values) and
+ * `run` (a `shell` with `cmd`, a plain `trim` and a quoted `debug`).
+ */
+const PARAM_VARS: readonly VariableView[] = [
+  makeVariable({
+    node: 30,
+    name: 'stamp',
+    declaredType: 'date',
+    kind: 'Date',
+    params: [field('format', scalarItem('%H')), field('offset', scalarItem('0'))],
+    dependsOn: [scalarItem('pick')]
+  }),
+  makeVariable({
+    node: 31,
+    name: 'pick',
+    declaredType: 'choice',
+    kind: 'Choice',
+    params: [field('values', { Sequence: [scalarItem('alpha'), scalarItem('beta')] })],
+    listParamPresence: BLOCK_OF_TWO
+  }),
+  makeVariable({
+    node: 32,
+    name: 'run',
+    declaredType: 'shell',
+    kind: 'Shell',
+    params: [
+      field('cmd', scalarItem('echo hi')),
+      field('trim', scalarItem('true')),
+      field('debug', { Scalar: styledScalar('false', 'SingleQuoted') })
+    ]
+  })
+];
+
+/**
+ * The editor over the snippet holding {@link PARAM_VARS}.
+ *
+ * @param script - Whatever else the case scripts.
+ * @returns The mounted editor.
+ */
+function mountParams(script: Script = {}): Mounted {
+  return mountEditor({ match: projection({ vars: PARAM_VARS }), ...script });
+} // End of function mountParams()
+
+/**
+ * The block drawing one `params` entry of the selected variable.
+ *
+ * @param target - Where the editor was mounted.
+ * @param key - The entry's key.
+ * @returns The block.
+ */
+function paramBlock(target: HTMLElement, key: string): HTMLElement {
+  const found = group(target).querySelector(`[data-param="${key}"]`);
+  if (!(found instanceof HTMLElement)) {
+    throw new Error(`this case needs the parameter ${key}`);
+  }
+  return found;
+} // End of function paramBlock()
+
+/**
+ * The block drawing one list of the selected variable.
+ *
+ * @param target - Where the editor was mounted.
+ * @param key - The list's key (`depends_on` for the dependencies).
+ * @returns The block.
+ */
+function listBlock(target: HTMLElement, key: string): HTMLElement {
+  const found = group(target).querySelector(`[data-list="${key}"]`);
+  if (!(found instanceof HTMLElement)) {
+    throw new Error(`this case needs the list ${key}`);
+  }
+  return found;
+} // End of function listBlock()
+
+/**
+ * The one box of a scalar parameter.
+ *
+ * @param target - Where the editor was mounted.
+ * @param key - The entry's key.
+ * @returns The box.
+ */
+function paramBox(target: HTMLElement, key: string): HTMLInputElement | HTMLTextAreaElement {
+  const found = paramBlock(target, key).querySelector('input, textarea');
+  if (!(found instanceof HTMLInputElement) && !(found instanceof HTMLTextAreaElement)) {
+    throw new Error(`this case needs the box of ${key}`);
+  }
+  return found;
+} // End of function paramBox()
+
+/**
+ * The item boxes of one list, in order.
+ *
+ * @param target - Where the editor was mounted.
+ * @param key - The list's key.
+ * @returns The one-line boxes.
+ */
+function itemBoxes(target: HTMLElement, key: string): HTMLInputElement[] {
+  return [...listBlock(target, key).querySelectorAll('.listItem input')].filter(
+    (one): one is HTMLInputElement => one instanceof HTMLInputElement
+  );
+} // End of function itemBoxes()
+
+/**
+ * The *New items* box of one list.
+ *
+ * @param target - Where the editor was mounted.
+ * @param key - The list's key.
+ * @returns The text area.
+ */
+function newItemsBox(target: HTMLElement, key: string): HTMLTextAreaElement {
+  const found = listBlock(target, key).querySelector(`textarea[data-new-items="${key}"]`);
+  if (!(found instanceof HTMLTextAreaElement)) {
+    throw new Error(`this case needs the new items box of ${key}`);
+  }
+  return found;
+} // End of function newItemsBox()
+
+describe('9. Phase 4-14-2 — an existing variable’s parameters, list items and depends_on', () => {
+  it('draws the parameters and depends_on as boxes, the typed setting as one line, and sends an edit as typed', () => {
+    const editor = mountParams();
+    // Not mounted until selected.
+    expect(group(editor.target).querySelectorAll('[data-param]')).toHaveLength(0);
+    pressChip(editor.target, 'stamp');
+    expect(paramBox(editor.target, 'format')).toBeInstanceOf(HTMLTextAreaElement);
+    expect(paramBox(editor.target, 'offset')).toBeInstanceOf(HTMLInputElement);
+    expect(paramBox(editor.target, 'offset').value).toBe('0');
+    expect(paramBlock(editor.target, 'offset').textContent).toContain(sentence('browser.variableKinds.plainSource'));
+    expect(paramBlock(editor.target, 'format').textContent).not.toContain(sentence('browser.variableKinds.plainSource'));
+    expect(itemBoxes(editor.target, 'depends_on').map((one) => one.value)).toEqual(['pick']);
+    type(paramBox(editor.target, 'offset'), '3600');
+    expect(chips(editor.target)[0]?.textContent).toContain(sentence('browser.variableGroup.status.edited'));
+    press(editor.target, 'browser.matchEditor.save');
+    expect(editor.saves).toHaveLength(1);
+    // Exactly the JSON the Rust half writes as plain `offset: 3600`
+    // (`an_existing_offset_and_trim_are_written_as_plain_source`).
+    expect(editor.saves[0]?.vars).toEqual([
+      expect.objectContaining({ index: 0, params: [{ index: 1, value: { Set: '3600' }, items: [] }], depends_on: [], lists: [] })
+    ]);
+    editor.stop();
+  });
+
+  it('says how a quoted typed setting is written and that an edit writes it plain', () => {
+    const editor = mountParams();
+    pressChip(editor.target, 'run');
+    const debug = paramBlock(editor.target, 'debug');
+    expect(paramBox(editor.target, 'debug').value).toBe('false');
+    expect(debug.textContent).toContain(sentence('browser.variableGroup.quotedText'));
+    expect(debug.textContent).toContain(sentence('browser.variableGroup.editWritesPlain'));
+    expect(paramBlock(editor.target, 'trim').textContent).not.toContain(sentence('browser.variableGroup.editWritesPlain'));
+    type(paramBox(editor.target, 'debug'), 'on');
+    press(editor.target, 'browser.matchEditor.save');
+    expect(editor.saves[0]?.vars).toEqual([
+      expect.objectContaining({ index: 2, params: [{ index: 2, value: { Set: 'on' }, items: [] }] })
+    ]);
+    editor.stop();
+  });
+
+  it('edits, takes out, keeps and adds list items, and sends them as one draft', () => {
+    const editor = mountParams();
+    pressChip(editor.target, 'pick');
+    const values = listBlock(editor.target, 'values');
+    expect(itemBoxes(editor.target, 'values').map((one) => one.value)).toEqual(['alpha', 'beta']);
+    type(itemBoxes(editor.target, 'values')[1]!, 'gamma');
+    press(values, 'browser.variableParams.removeItem');
+    // The last item kept cannot be taken out, and the list says why.
+    expect(buttonLabelled(listBlock(editor.target, 'values'), sentence('browser.variableParams.removeItem'))?.disabled).toBe(true);
+    expect(listBlock(editor.target, 'values').textContent).toContain(sentence('browser.variableParams.lastItem'));
+    expect(listBlock(editor.target, 'values').textContent).toContain(sentence('browser.variableParams.removedItem'));
+    type(newItemsBox(editor.target, 'values'), 'delta\nepsilon');
+    press(listBlock(editor.target, 'values'), 'browser.variableParams.addItems');
+    expect(newItemsBox(editor.target, 'values').value).toBe('');
+    expect(listBlock(editor.target, 'values').textContent).toContain('epsilon');
+    press(listBlock(editor.target, 'values'), 'browser.variableParams.restoreItem');
+    press(listBlock(editor.target, 'values'), 'browser.variableParams.removeItem');
+    press(editor.target, 'browser.matchEditor.save');
+    expect(editor.saves[0]?.vars).toEqual([
+      expect.objectContaining({
+        index: 1,
+        params: [{ index: 0, value: 'Unchanged', items: [{ index: 1, value: { Set: 'gamma' } }] }],
+        lists: [
+          { RemoveItem: { list: 'values', index: 0 } },
+          { InsertItems: { list: 'values', at: { End: {} }, items: { Strings: ['delta', 'epsilon'] } } }
+        ]
+      })
+    ]);
+    editor.stop();
+  });
+
+  it('says why new items were not added, and drops a new item', () => {
+    const editor = mountParams();
+    pressChip(editor.target, 'stamp');
+    type(newItemsBox(editor.target, 'depends_on'), 'a\n\nb');
+    press(listBlock(editor.target, 'depends_on'), 'browser.variableParams.addItems');
+    expect(listBlock(editor.target, 'depends_on').textContent).toContain(sentence('browser.variableParams.problem.emptyItem'));
+    type(newItemsBox(editor.target, 'depends_on'), 'run');
+    press(listBlock(editor.target, 'depends_on'), 'browser.variableParams.addItems');
+    expect(listBlock(editor.target, 'depends_on').textContent).toContain(sentence('browser.variableParams.newItem'));
+    press(listBlock(editor.target, 'depends_on'), 'browser.variableParams.discardItem');
+    expect(listBlock(editor.target, 'depends_on').textContent).not.toContain(sentence('browser.variableParams.newItem'));
+    editor.stop();
+  });
+
+  it('never takes a carriage return at edit: a forged one is refused, put back and said', () => {
+    const editor = mountParams();
+    pressChip(editor.target, 'run');
+    const box = paramBox(editor.target, 'cmd');
+    // A text area normalizes a pasted CRLF, as WebKit does (`CLAUDE.md` §6).
+    type(box, 'ls\r\nrm');
+    expect(box.value).toBe('ls\nrm');
+    let held = 'ls\rrm';
+    Object.defineProperty(box, 'value', {
+      configurable: true,
+      get: () => held,
+      set: (next: string) => {
+        held = next;
+      }
+    });
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(held).toBe('ls\nrm');
+    Reflect.deleteProperty(box, 'value');
+    expect(paramBlock(editor.target, 'cmd').textContent).toContain(sentence('browser.variableParams.editRefused'));
+    type(paramBox(editor.target, 'cmd'), 'ls -l');
+    expect(paramBlock(editor.target, 'cmd').textContent).not.toContain(sentence('browser.variableParams.editRefused'));
+    press(editor.target, 'browser.matchEditor.save');
+    expect(JSON.stringify(editor.saves[0]?.vars)).not.toContain('\\r');
+    editor.stop();
+  });
+
+  it('takes a parameter edit back with one undo', () => {
+    const editor = mountParams();
+    pressChip(editor.target, 'stamp');
+    type(paramBox(editor.target, 'format'), '%Y');
+    press(editor.target, 'browser.matchEditor.undo');
+    expect(paramBox(editor.target, 'format').value).toBe('%H');
+    expect(chips(editor.target)[0]?.textContent).not.toContain(sentence('browser.variableGroup.status.edited'));
+    editor.stop();
+  });
+
+  it('retains the drafted parameters under a save conflict, read-only, and draws the recovery refusal after Keep my draft', async () => {
+    const conflict = makeConflict({ disk: fileOf([projection({ vars: PARAM_VARS }, AFTER)], AFTER), expected: BASE, found: AFTER });
+    const editor = mountParams({ saves: [conflict] });
+    pressChip(editor.target, 'pick');
+    type(itemBoxes(editor.target, 'values')[0]!, 'omega');
+    press(editor.target, 'browser.matchEditor.save');
+    await settle();
+    const panel = editor.target.querySelector('.panel[role="status"]');
+    const retained = [...(panel?.querySelectorAll('.shownValue') ?? [])].map((one) => one.textContent ?? '');
+    expect(retained.some((one) => one.includes('values'))).toBe(true);
+    expect(retained.some((one) => one.includes('omega'))).toBe(true);
+    expect(itemBoxes(editor.target, 'values').every((one) => one.readOnly)).toBe(true);
+    expect(buttonLabelled(listBlock(editor.target, 'values'), sentence('browser.variableParams.addItems'))?.disabled).toBe(true);
+    press(editor.target, 'browser.saveOutcome.choice.keepMyDraft');
+    await settle();
+    expect(editor.target.textContent).toContain(sentence('browser.recovery.unavailable.variablesNotCarried'));
+    expect(editor.saves).toHaveLength(1);
+    editor.stop();
+  });
+
+  it('draws the parameter controls in Spanish', () => {
+    locale.setOverride('es');
+    const editor = mountParams();
+    flushSync();
+    const chip = [...group(editor.target, 'es').querySelectorAll('button.chip')].find(
+      (one) => one.querySelector('code')?.textContent === 'pick'
+    );
+    (chip as HTMLButtonElement | undefined)?.click();
+    flushSync();
+    const values = group(editor.target, 'es').querySelector('[data-list="values"]');
+    expect(values?.textContent).toContain(DICTIONARIES.es['browser.variableParams.addItems']);
+    expect(values?.textContent).toContain(DICTIONARIES.es['browser.variableParams.removeItem']);
+    expect(group(editor.target, 'es').textContent).toContain(DICTIONARIES.es['browser.detail.field.params']);
+    editor.stop();
+  });
+
+  it('review fix — pending new items never follow a position across a re-seed into another variable', async () => {
+    // The file after the commit holds another choice, `other`, at position 1,
+    // where `pick` was when its new items were typed.
+    const other = makeVariable({
+      node: 33,
+      name: 'other',
+      declaredType: 'choice',
+      kind: 'Choice',
+      params: [field('values', { Sequence: [scalarItem('x'), scalarItem('y')] })],
+      listParamPresence: BLOCK_OF_TWO
+    });
+    const fresh = projection({ vars: [PARAM_VARS[0]!, other, PARAM_VARS[1]!, PARAM_VARS[2]!] }, AFTER);
+    const editor = mountParams({ saves: [committedToAfter()], fresh });
+    pressChip(editor.target, 'pick');
+    type(newItemsBox(editor.target, 'values'), 'meant for pick');
+    type(itemBoxes(editor.target, 'values')[0]!, 'ALPHA');
+    press(editor.target, 'browser.matchEditor.save');
+    await settle();
+    press(editor.target, 'browser.matchEditor.reload');
+    await settle();
+    pressChip(editor.target, 'other');
+    // The box typed over the old baseline holds nothing now, so no press can
+    // send its text into `other`.
+    expect(newItemsBox(editor.target, 'values').value).toBe('');
+    expect(group(editor.target).textContent).not.toContain('meant for pick');
+    editor.stop();
+  });
+}); // End of suite 9

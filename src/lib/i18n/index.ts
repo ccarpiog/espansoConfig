@@ -198,6 +198,12 @@ import {
   type VariableMoveRefusal
 } from '../browser/variableEditor';
 import {
+  listItemsProblemKey,
+  paramRefusalKey,
+  type ListItemsProblem,
+  type ParamRefusal
+} from '../browser/variableParams';
+import {
   insertRefusalKey,
   nameVerdictKey,
   type InsertRefusal,
@@ -887,6 +893,28 @@ export function tFieldRefusal(reason: FieldRefusal): string {
 export function tVariableFieldRefusal(reason: VariableFieldRefusal): string {
   return translate(locale.current, variableFieldRefusalKey(reason));
 } // End of function tVariableFieldRefusal()
+
+/**
+ * Why one parameter text of an existing variable is shown and not edited —
+ * Phase 4-14-2.
+ *
+ * @param reason - The code, from `../browser/variableParams.ts`.
+ * @returns The translated sentence.
+ */
+export function tParamRefusal(reason: ParamRefusal): string {
+  return translate(locale.current, paramRefusalKey(reason));
+} // End of function tParamRefusal()
+
+/**
+ * Why *Add these items* added nothing to an existing variable's list — Phase
+ * 4-14-2.
+ *
+ * @param problem - The code, from `../browser/variableParams.ts`.
+ * @returns The translated sentence.
+ */
+export function tListItemsProblem(problem: ListItemsProblem): string {
+  return translate(locale.current, listItemsProblemKey(problem));
+} // End of function tListItemsProblem()
 
 /**
  * Why a new variable cannot be added to the draft — Phase 4-9.

@@ -1152,9 +1152,10 @@ export function shorthandWireOf(derived: FormsDerivation): Pick<MatchDraft, 'for
 
 /**
  * `MatchDraft.vars` with every verbose form's parts merged in: a variable the
- * variable editor already drafts gains its `params`, `fields` and
- * `field_intents`; another gets a `VariableDraft` of its own whose three scalars
- * are `'Unchanged'`. Sorted by position.
+ * variable editor already drafts gains its layout's `params` entry beside its own
+ * (Phase 4-14-2), and its `fields` and `field_intents`; another gets a
+ * `VariableDraft` of its own whose three scalars are `'Unchanged'`. Sorted by
+ * position.
  *
  * @param vars - The variable editor's drafts.
  * @param derived - The form derivation.
@@ -1190,7 +1191,12 @@ export function withVerboseForms(vars: MatchDraft['vars'], derived: FormsDerivat
         ...parts
       });
     } else {
-      merged[at] = { ...(merged[at] as MatchDraft['vars'][number]), ...parts };
+      // Phase 4-14-2: the variable editor may already draft other `params`
+      // entries of this variable; the layout's entry joins them. The two never
+      // name one entry: `./variableParams.ts` leaves a form's `layout` and
+      // `fields` to this module.
+      const held = merged[at] as MatchDraft['vars'][number];
+      merged[at] = { ...held, ...parts, params: [...held.params, ...parts.params] };
     }
   } // End of the loop over the verbose forms
   return merged.sort((one, other) => one.index - other.index);
@@ -1329,8 +1335,9 @@ export function formsWriteUnreadable(baseline: FormsBaseline, draft: MatchDraft)
     for (const entry of variable.params) {
       if (typeof entry.value === 'object') {
         // The only `params` entry this editor drafts is a verbose layout, which is
-        // multi-line; anything else a hand-built draft puts here is held to the
-        // carriage-return rule at least.
+        // multi-line; every other entry here — the variable editor's since Phase
+        // 4-14-2, or a hand-built draft's — is held to the carriage-return rule at
+        // least (`variableTextsOf` in `./variableEditor.ts` checks it too).
         multiLine.push(entry.value.Set);
       }
     } // End of the loop over the drafted parameters

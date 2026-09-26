@@ -63,6 +63,7 @@
 import type { TranslationKey } from '../i18n/dictionaries';
 import type { NewVariable, NewVariableParams } from '../ipc/types';
 import { valuesOfLines } from './formEditor';
+import { PLAIN_SOURCE_PARAMS } from './variableParams';
 import type { MatchEditorSession, TextSelection } from './matchEditor';
 import type { VariableStructureGrant } from './variableEditor';
 import { additionWithheldOf, choiceTargetsOf, type AdditionWithheld } from './variableGroup';
@@ -192,9 +193,11 @@ export const PART_SHAPE: Readonly<Record<KindPart, PartShape>> = {
 /**
  * The parts Rust writes verbatim as plain source (ruling 4,
  * `PLAIN_SOURCE_PARAMS` in `crates/espansoconfig-core/src/draft/new_variable.rs`);
- * every other part is a logical string.
+ * every other part is a logical string. The same list an existing variable's
+ * `params` are drafted by (`PLAIN_SOURCE_PARAMS` in `./variableParams.ts`, Phase
+ * 4-14-2), so the two editors cannot disagree about which keys are typed.
  */
-export const PLAIN_SOURCE_PARTS: readonly KindPart[] = ['offset', 'trim', 'debug'];
+export const PLAIN_SOURCE_PARTS: readonly KindPart[] = PLAIN_SOURCE_PARAMS;
 
 /**
  * The `shell` names espanso 2's shell extension accepts, as this project

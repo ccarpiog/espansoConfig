@@ -393,6 +393,7 @@ import {
   withValuesItemText,
   withValuesText,
   withVerboseForms,
+  valuesOfLines,
   type FormAdditionRefusal,
   type FormOptionKey,
   type FormRows,
@@ -416,6 +417,7 @@ import {
   varsLabelName,
   withAdditionDiscarded,
   withInsertionsMoved,
+  withVariableBoxes,
   withVariableRemoved,
   withVariableRestored,
   withVariablesRemoved,
@@ -430,6 +432,15 @@ import {
   type VariableStructureGrant,
   type VariableStructureRead
 } from './variableEditor';
+import {
+  withAppendedItemDiscarded,
+  withListItemRemoval,
+  withListItemsAppended,
+  withListItemText,
+  withParamText,
+  type ListAddress,
+  type ListItemsProblem
+} from './variableParams';
 import type {
   ConflictSource,
   ExternalChangeConflictSource,
@@ -1060,7 +1071,9 @@ export type TypingGroup = TypingRun<TypingSubject>;
  * form's layout box or one option box of a definition, named by the form's
  * position in `MatchBaseline.forms` (and the definition's); since Phase 4-12, a
  * definition's multi-line `values` box or one `values` item's box, by the item's
- * position in the file's list. A structural action (an item added or removed) ends every run,
+ * position in the file's list; since Phase 4-14-2, one `params` box of an existing
+ * variable (by its position among the drafted entries), one item of one of its
+ * lists, or one `depends_on` item. A structural action (an item added or removed) ends every run,
  * so a position cannot come to name another item inside one.
  */
 export type TypingSubject =
@@ -1068,6 +1081,9 @@ export type TypingSubject =
   | 'regex'
   | `${SequenceField}#${number}`
   | `vars#${number}.${VariableField}`
+  | `vars#${number}.params#${number}`
+  | `vars#${number}.params#${number}#${number}`
+  | `vars#${number}.depends_on#${number}`
   | `forms#${number}.layout`
   | `forms#${number}.${number}.${FormOptionKey}`
   | `forms#${number}.${number}.values`
@@ -3108,6 +3124,205 @@ export function discardAddedVariable(session: MatchEditorSession, position: numb
   const next = withAdditionDiscarded(draftedVariables(session), position);
   return structuralChange(session, next === null ? null : withVariables(session.draft.value, next));
 } // End of function discardAddedVariable()
+
+/**
+ * The typing subject of one list item box of an existing variable — Phase 4-14-2.
+ *
+ * @param index - The variable's position.
+ * @param address - Which list.
+ * @param item - The item's position in the file's list.
+ * @returns The subject.
+ */
+function listItemSubject(index: number, address: ListAddress, item: number): TypingSubject {
+  return address.kind === 'dependsOn'
+    ? `vars#${index}.depends_on#${item}`
+    : `vars#${index}.params#${address.position}#${item}`;
+} // End of function listItemSubject()
+
+/**
+ * Records whatever one `params` box of an existing variable now holds — Phase
+ * 4-14-2, typing. Refused (the same session) for a variable or container drafted
+ * for removal, an entry `./variableParams.ts` does not call an editable text, a
+ * carriage return, a line feed in a typed setting's one-line box, or no change.
+ * The text is sent exactly as typed; a typed setting (`offset`, `trim`, `debug`)
+ * is written as plain source by Rust, which refuses by name one that cannot be.
+ *
+ * @param session - The session being edited.
+ * @param index - The variable's position in the file's list.
+ * @param position - The entry's position among the variable's drafted entries.
+ * @param text - The box's whole value.
+ * @returns The session after the edit, or the same session.
+ */
+export function editVariableParam(
+  session: MatchEditorSession,
+  index: number,
+  position: number,
+  text: string
+): MatchEditorSession {
+  if (!isVariablesEditable(session)) {
+    return session;
+  }
+  const next = withVariableBoxes(session.baseline.variables, draftedVariables(session), index, (row, boxes) =>
+    withParamText(row, boxes, position, text)
+  );
+  return next === null
+    ? session
+    : recordStructureTyping(session, `vars#${index}.params#${position}`, withVariables(session.draft.value, next));
+} // End of function editVariableParam()
+
+/**
+ * Records whatever one list item box of an existing variable now holds — Phase
+ * 4-14-2, typing. Every item box is one line; an item drafted for removal is not
+ * edited.
+ *
+ * @param session - The session being edited.
+ * @param index - The variable's position.
+ * @param address - Which list.
+ * @param item - The item's position in the file's list.
+ * @param text - The box's whole value.
+ * @returns The session after the edit, or the same session.
+ */
+export function editVariableListItem(
+  session: MatchEditorSession,
+  index: number,
+  address: ListAddress,
+  item: number,
+  text: string
+): MatchEditorSession {
+  if (!isVariablesEditable(session)) {
+    return session;
+  }
+  const next = withVariableBoxes(session.baseline.variables, draftedVariables(session), index, (row, boxes) =>
+    withListItemText(row, boxes, address, item, text)
+  );
+  return next === null
+    ? session
+    : recordStructureTyping(session, listItemSubject(index, address, item), withVariables(session.draft.value, next));
+} // End of function editVariableListItem()
+
+/**
+ * Drafts the removal of one item of an existing variable's list — Phase 4-14-2.
+ * Structural: its own history step, under a grant (R36), as a form's `values`
+ * item removal is. The last item a list keeps is never taken out.
+ *
+ * @param session - The session being edited.
+ * @param grant - The structure grant, from one read of the window.
+ * @param index - The variable's position.
+ * @param address - Which list.
+ * @param item - The item's position.
+ * @returns The session with the removal drafted, or the same session.
+ */
+export function removeVariableListItem(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant,
+  index: number,
+  address: ListAddress,
+  item: number
+): MatchEditorSession {
+  if (!isVariablesEditable(session) || !grantCovers(grant, session.match)) {
+    return session;
+  }
+  const next = withVariableBoxes(session.baseline.variables, draftedVariables(session), index, (row, boxes) =>
+    withListItemRemoval(row, boxes, address, item, true)
+  );
+  return structuralChange(session, next === null ? null : withVariables(session.draft.value, next));
+} // End of function removeVariableListItem()
+
+/**
+ * Takes back one drafted list item removal — Phase 4-14-2. Needs no grant.
+ *
+ * @param session - The session being edited.
+ * @param index - The variable's position.
+ * @param address - Which list.
+ * @param item - The item's position.
+ * @returns The session, or the same session.
+ */
+export function restoreVariableListItem(
+  session: MatchEditorSession,
+  index: number,
+  address: ListAddress,
+  item: number
+): MatchEditorSession {
+  if (!isVariablesEditable(session)) {
+    return session;
+  }
+  const next = withVariableBoxes(session.baseline.variables, draftedVariables(session), index, (row, boxes) =>
+    withListItemRemoval(row, boxes, address, item, false)
+  );
+  return structuralChange(session, next === null ? null : withVariables(session.draft.value, next));
+} // End of function restoreVariableListItem()
+
+/** What *Add these items* did — Phase 4-14-2. */
+export type ListItemsOutcome =
+  | { readonly kind: 'added'; readonly session: MatchEditorSession }
+  | {
+      readonly kind: 'refused';
+      /** The same session. */
+      readonly session: MatchEditorSession;
+      /** Why. */
+      readonly problem: ListItemsProblem;
+    };
+
+/**
+ * *Add these items* — Phase 4-14-2: new items at the end of one list of an
+ * existing variable, one per line of the text given (`valuesOfLines` in
+ * `./formEditor.ts`, the rule every *one per line* box here follows), as one
+ * history step under a grant (R36).
+ *
+ * @param session - The session being edited.
+ * @param grant - The structure grant, from one read of the window.
+ * @param index - The variable's position.
+ * @param address - Which list.
+ * @param text - The new items, one per line.
+ * @returns What happened.
+ */
+export function appendVariableListItems(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant,
+  index: number,
+  address: ListAddress,
+  text: string
+): ListItemsOutcome {
+  if (!isVariablesEditable(session) || !grantCovers(grant, session.match)) {
+    return { kind: 'refused', session, problem: 'structure' };
+  }
+  const read = valuesOfLines(String(text));
+  if ('problem' in read) {
+    const problem: ListItemsProblem =
+      read.problem === 'noValues' ? 'noItems' : read.problem === 'emptyValue' ? 'emptyItem' : 'carriageReturn';
+    return { kind: 'refused', session, problem };
+  }
+  const next = withVariableBoxes(session.baseline.variables, draftedVariables(session), index, (row, boxes) =>
+    withListItemsAppended(row, boxes, address, read.values)
+  );
+  const after = structuralChange(session, next === null ? null : withVariables(session.draft.value, next));
+  return after === session ? { kind: 'refused', session, problem: 'notAList' } : { kind: 'added', session: after };
+} // End of function appendVariableListItems()
+
+/**
+ * Drops one drafted new item of an existing variable's list — Phase 4-14-2.
+ * Needs no grant.
+ *
+ * @param session - The session being edited.
+ * @param index - The variable's position.
+ * @param address - Which list.
+ * @param at - The new item's position among the added ones.
+ * @returns The session, or the same session.
+ */
+export function discardVariableListItem(
+  session: MatchEditorSession,
+  index: number,
+  address: ListAddress,
+  at: number
+): MatchEditorSession {
+  if (!isVariablesEditable(session)) {
+    return session;
+  }
+  const next = withVariableBoxes(session.baseline.variables, draftedVariables(session), index, (row, boxes) =>
+    withAppendedItemDiscarded(row, boxes, address, at)
+  );
+  return structuralChange(session, next === null ? null : withVariables(session.draft.value, next));
+} // End of function discardVariableListItem()
 
 /**
  * Records a compound change as **one** history step — Phase 4-9, for

@@ -3342,8 +3342,10 @@ export interface ChoiceRecordDraft {
  * **An absent field is refused, never inserted**, with two exceptions:
  * {@link VariableDraft.insert_params} adds new author-named entries to an
  * existing block `params` mapping (Phase 4-3), and {@link VariableDraft.lists}
- * adds items to an existing list (Phase 4-5). No production caller sends either
- * yet.
+ * adds items to an existing list (Phase 4-5). The match editor sends `lists`
+ * since Phase 4-14-2 (items appended at the end of a variable's own list or of
+ * `depends_on`, `paramsDerivationOf` in `../browser/variableParams.ts`); no
+ * production caller sends `insert_params` yet.
  */
 export interface VariableDraft {
   /** The variable's index in the projected `vars` list. */

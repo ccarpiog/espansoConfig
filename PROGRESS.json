@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T20:59:14Z",
+  "updated": "2026-09-26T21:41:52Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 4, variables and forms, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1340,8 +1340,8 @@
     {
       "id": "4-14",
       "title": "Remaining variable-kind authoring models",
-      "status": "queued",
-      "summary": "Cut into 4-14-1 (new-variable kind submodels) and 4-14-2 (existing variables parameters)."
+      "status": "done",
+      "summary": "Cut into 4-14-1 (new-variable kind submodels) and 4-14-2 (existing variables parameters), both closed."
     },
     {
       "id": "4-14-1",
@@ -1355,9 +1355,11 @@
     {
       "id": "4-14-2",
       "title": "Existing variables parameters",
-      "status": "queued",
+      "status": "done",
       "risk": "high",
-      "summary": "Drafting existing params, depends_on and list items; offset/trim/debug written plain."
+      "summary": "Existing variables params, list items and depends_on editable; offset/trim/debug written as plain source.",
+      "review": "docs/reviews/4-14-2.md",
+      "narrative": "docs/decisions/4-14-2-notes.md"
     },
     {
       "id": "4-15",

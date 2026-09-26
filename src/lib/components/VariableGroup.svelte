@@ -1,15 +1,22 @@
 <script lang="ts">
   import {
+    appendVariableListItems,
     discardAddedVariable,
+    discardVariableListItem,
     editVariableField,
+    editVariableListItem,
+    editVariableParam,
     focusField,
     removeVariable,
+    removeVariableListItem,
     removeVariables,
     restoreVariable,
+    restoreVariableListItem,
     restoreVariables,
     type MatchEditorSession,
     type TextSelection
   } from '../browser/matchEditor';
+  import type { ListAddress, ListItemsProblem, ListView } from '../browser/variableParams';
   import {
     analysisOf,
     choiceDraftOf,
@@ -26,7 +33,7 @@
     type SeededSelection,
     type VariableGroupPort
   } from '../browser/variableGroup';
-  import { variableStructureGrantOf } from '../browser/variableEditor';
+  import { variableStructureGrantOf, type VariablesBaseline } from '../browser/variableEditor';
   import {
     addedParamsOf,
     addKindVariable,
@@ -58,7 +65,9 @@
     tKindPart,
     tKindProblem,
     tKindWarning,
+    tListItemsProblem,
     tNewVariableKind,
+    tParamRefusal,
     tMoveChoice,
     tNameVerdict,
     tRetainedLabel,
@@ -102,6 +111,14 @@
    * `<input>`s, and the model refuses a carriage return or a line feed in each.
    * A box of the *Add a variable* form whose edit the model refuses is put back
    * to the form's text, and the refusal is said beside the form.
+   *
+   * **An existing variable's parameters, list items and `depends_on` items**
+   * (Phase 4-14-2) are drawn inside its controls from `paramsViewOf` in
+   * `../browser/variableParams.ts`: a typed setting (`offset`, `trim`, `debug`)
+   * and every item in a one-line `<input>`, any other text in a `<textarea>`,
+   * every refused edit put back to the draft's text with the sentence beside
+   * the box. *Take out* and *Add these items* spend a grant minted from a read
+   * taken at the press (R36, R37), as the variable's own removal does.
    */
 
   const {
@@ -173,6 +190,48 @@
     readonly part: KindPart | 'name';
     readonly reason: KindEditRefusal;
   } | null>(null);
+  /**
+   * The text of every open *New items* box, by the list's box key
+   * ({@link listKey}), **bound to the variables baseline it was typed over** —
+   * the 4-14-2 review's fix, `SeededSelection`'s rule: the keys are positions,
+   * and a commit, a re-seed or a reapply replaces the baseline whole, after
+   * which a position may name another variable. Read through {@link pending},
+   * which answers nothing once the baseline is not the one typed over.
+   * Component state: lost when the editor closes, like the forms' contents.
+   */
+  let pendingItems = $state.raw<{
+    readonly seed: VariablesBaseline | null;
+    readonly texts: Readonly<Record<string, string>>;
+  }>({ seed: null, texts: {} });
+  /** The pending texts that still belong to the session's baseline. */
+  const pending = $derived(
+    pendingItems.seed === session.baseline.variables ? pendingItems.texts : ({} as Readonly<Record<string, string>>)
+  );
+
+  /**
+   * Records one *New items* box's text over the baseline it is typed over,
+   * dropping every text typed over a replaced one.
+   *
+   * @param key - The list's box key.
+   * @param text - The box's whole value.
+   */
+  function setPending(key: string, text: string): void {
+    pendingItems = { seed: session.baseline.variables, texts: { ...pending, [key]: text } };
+  } // End of function setPending()
+  /**
+   * The last *Add these items* the model refused, held with the session it was
+   * refused over and the list it was about.
+   */
+  let itemsRefused = $state.raw<{
+    readonly session: MatchEditorSession;
+    readonly key: string;
+    readonly problem: ListItemsProblem;
+  } | null>(null);
+  /**
+   * The last box edit of an existing variable's parameters the model refused,
+   * held with the session it was refused over and the box it was typed into.
+   */
+  let boxRefused = $state.raw<{ readonly session: MatchEditorSession; readonly box: string } | null>(null);
   /**
    * The last *Insert* the model refused, held with the session it was refused
    * over, so it stops drawing the moment anything changes.
@@ -339,6 +398,106 @@
     apply(editVariableField(session, index, field, text));
   } // End of function typed()
 
+  /**
+   * The key one list's boxes are known by in this component.
+   *
+   * @param index - The variable's position.
+   * @param address - Which list.
+   * @returns The key.
+   */
+  function listKey(index: number, address: ListAddress): string {
+    return address.kind === 'dependsOn' ? `${index}:depends_on` : `${index}:params#${address.position}`;
+  } // End of function listKey()
+
+  /**
+   * Whether the refused box edit is about one box and still current.
+   *
+   * @param box - The box's key.
+   * @returns `true` when its sentence is drawn.
+   */
+  function refusedHere(box: string): boolean {
+    return boxRefused !== null && boxRefused.session === session && boxRefused.box === box;
+  } // End of function refusedHere()
+
+  /**
+   * Installs an edit of an existing variable's parameter or item box; a refused
+   * one puts the box back to what the draft holds and says why beside it.
+   *
+   * @param next - The session the transition answered.
+   * @param box - The element typed into.
+   * @param held - What the draft holds for that box.
+   * @param key - The box's key.
+   */
+  function boxEdited(next: MatchEditorSession, box: HTMLInputElement | HTMLTextAreaElement, held: string, key: string): void {
+    if (next === session) {
+      if (box.value !== held) {
+        box.value = held;
+        boxRefused = { session, box: key };
+      }
+      return;
+    }
+    boxRefused = null;
+    apply(next);
+  } // End of function boxEdited()
+
+  /**
+   * Records whatever one `params` box of an existing variable now holds.
+   *
+   * @param index - The variable's position.
+   * @param position - The entry's position among the drafted entries.
+   * @param held - What the draft holds for it.
+   * @param box - The box.
+   */
+  function typedParam(index: number, position: number, held: string, box: HTMLInputElement | HTMLTextAreaElement): void {
+    boxEdited(editVariableParam(session, index, position, box.value), box, held, `${index}:param#${position}`);
+  } // End of function typedParam()
+
+  /**
+   * Records whatever one list item box of an existing variable now holds.
+   *
+   * @param index - The variable's position.
+   * @param address - Which list.
+   * @param item - The item's position.
+   * @param held - What the draft holds for it.
+   * @param box - The box.
+   */
+  function typedItem(index: number, address: ListAddress, item: number, held: string, box: HTMLInputElement): void {
+    const key = `${listKey(index, address)}#${item}`;
+    boxEdited(editVariableListItem(session, index, address, item, box.value), box, held, key);
+  } // End of function typedItem()
+
+  /**
+   * *Take out* one item: spends a grant minted from a read taken now.
+   *
+   * @param index - The variable's position.
+   * @param address - Which list.
+   * @param item - The item's position.
+   */
+  function removeItem(index: number, address: ListAddress, item: number): void {
+    const grant = variableStructureGrantOf(session.match, port.structureRead(session.match.document));
+    apply(removeVariableListItem(session, grant, index, address, item));
+  } // End of function removeItem()
+
+  /**
+   * *Add these items*: spends a grant minted from a read taken now; the box is
+   * emptied once they are added.
+   *
+   * @param index - The variable's position.
+   * @param address - Which list.
+   */
+  function appendItems(index: number, address: ListAddress): void {
+    const key = listKey(index, address);
+    const grant = variableStructureGrantOf(session.match, port.structureRead(session.match.document));
+    const outcome = appendVariableListItems(session, grant, index, address, pending[key] ?? '');
+    if (outcome.kind === 'refused') {
+      itemsRefused = { session, key, problem: outcome.problem };
+      return;
+    }
+    itemsRefused = null;
+    setPending(key, '');
+    apply(outcome.session);
+  } // End of function appendItems()
+
   /** Ends the open typing run, as leaving any box of the editor does. */
   function blurred(): void {
     apply(focusField(session, null));
@@ -378,6 +537,93 @@
   {:else}
     <code class="source">{name}</code>
   {/if}
+{/snippet}
+
+<!-- One list of an existing variable (Phase 4-14-2): one one-line box per item,
+     its removal and restoration, the drafted new items, and *Add these items*.
+     A value the model does not edit is drawn through `SourceText` with why. -->
+{#snippet listControls(index: number, key: string, list: ListView)}
+  {@const boxKey = listKey(index, list.address)}
+  <div class="itemList" data-list={key}>
+    {#if list.flow}
+      <p class="kind">{t('browser.variableParams.flow')}</p>
+    {/if}
+    {#if !list.changeable}
+      <p class="kind">{t('browser.variableParams.fixed')}</p>
+    {/if}
+    {#each list.items as item (item.item)}
+      <div class="listItem">
+        {#if item.refusal !== null}
+          {#if item.text !== ''}
+            <SourceText text={item.text} />
+          {/if}
+          <p class="kind">{tParamRefusal(item.refusal)}</p>
+        {:else}
+          <input
+            class="text"
+            type="text"
+            spellcheck="false"
+            aria-label={t('browser.variableParams.item', { number: item.item + 1, key })}
+            readonly={!item.editable}
+            value={item.text}
+            oninput={(event) => typedItem(index, list.address, item.item, item.text, event.currentTarget)}
+            onblur={() => blurred()}
+          />
+          {#if refusedHere(`${boxKey}#${item.item}`)}
+            <p class="kind" role="status">{t('browser.variableParams.editRefused')}</p>
+          {/if}
+        {/if}
+        {#if item.style !== null}
+          <p class="kind">{tScalarStyle(item.style)}</p>
+        {/if}
+        {#if item.removed}
+          <p class="kind">{t('browser.variableParams.removedItem')}</p>
+        {/if}
+        {#if item.canRestore}
+          <button type="button" onclick={() => apply(restoreVariableListItem(session, index, list.address, item.item))}>
+            {t('browser.variableParams.restoreItem')}
+          </button>
+        {:else if list.changeable && !item.removed}
+          <button type="button" disabled={!item.canRemove} onclick={() => removeItem(index, list.address, item.item)}>
+            {t('browser.variableParams.removeItem')}
+          </button>
+        {/if}
+      </div>
+    {/each}
+    {#each list.added as added, at (at)}
+      <div class="listItem">
+        <SourceText text={added} />
+        <p class="kind">{t('browser.variableParams.newItem')}</p>
+        <button type="button" onclick={() => apply(discardVariableListItem(session, index, list.address, at))}>
+          {t('browser.variableParams.discardItem')}
+        </button>
+      </div>
+    {/each}
+    {#if list.lastItemKept}
+      <p class="kind">{t('browser.variableParams.lastItem')}</p>
+    {/if}
+    {#if list.changeable}
+      <label>
+        <span class="name">{t('browser.variableParams.newItems', { key })}</span>
+        <textarea
+          class="text"
+          spellcheck="false"
+          data-new-items={key}
+          readonly={!list.canAdd}
+          value={pending[boxKey] ?? ''}
+          oninput={(event) => setPending(boxKey, event.currentTarget.value)}
+        ></textarea>
+      </label>
+      <p class="choices">
+        <button type="button" disabled={!list.canAdd} onclick={() => appendItems(index, list.address)}>
+          {t('browser.variableParams.addItems')}
+        </button>
+      </p>
+      {#if itemsRefused !== null && itemsRefused.session === session && itemsRefused.key === boxKey}
+        <p class="kind" role="status">{tListItemsProblem(itemsRefused.problem)}</p>
+      {/if}
+    {/if}
+  </div>
 {/snippet}
 
 <div class="group variables" role="group" aria-label={t('browser.variableGroup.heading')}>
@@ -572,6 +818,70 @@
           {/if}
         </div>
       {/each}
+      <!-- Phase 4-14-2: the parameters, list items and depends_on items. -->
+      {#if selected.boxes.params.length > 0}
+        <p class="name">{tRetainedLabel('params')}</p>
+        {#each selected.boxes.params as param (param.position)}
+          {@const boxKey = `${selected.index}:param#${param.position}`}
+          <div class="variableField" data-param={param.key}>
+            <p class="rowHead"><code class="source">{param.key}</code></p>
+            {#if param.text !== null}
+              {@const text = param.text}
+              {#if text.refusal !== null}
+                {#if text.text !== ''}
+                  <SourceText text={text.text} />
+                {/if}
+                <p class="kind">{tParamRefusal(text.refusal)}</p>
+              {:else if text.oneLine}
+                <input
+                  class="text"
+                  type="text"
+                  spellcheck="false"
+                  aria-label={t('browser.variableParams.value', { key: param.key })}
+                  readonly={!text.editable}
+                  value={text.text}
+                  oninput={(event) => typedParam(selected.index, param.position, text.text, event.currentTarget)}
+                  onblur={() => blurred()}
+                />
+              {:else}
+                <textarea
+                  class="text"
+                  spellcheck="false"
+                  aria-label={t('browser.variableParams.value', { key: param.key })}
+                  readonly={!text.editable}
+                  value={text.text}
+                  oninput={(event) => typedParam(selected.index, param.position, text.text, event.currentTarget)}
+                  onblur={() => blurred()}
+                ></textarea>
+              {/if}
+              {#if refusedHere(boxKey)}
+                <p class="kind" role="status">{t('browser.variableParams.editRefused')}</p>
+              {/if}
+              <!-- D2u: the file's spelling, said beside the box that holds its text. -->
+              {#if text.style !== null}
+                <p class="kind">{tScalarStyle(text.style)}</p>
+                {#if text.refusal === null && (text.style === 'SingleQuoted' || text.style === 'DoubleQuoted')}
+                  <p class="kind">{t('browser.variableGroup.quotedText')}</p>
+                {/if}
+              {/if}
+              {#if param.plainSource && text.refusal === null}
+                <p class="kind">{t('browser.variableKinds.plainSource')}</p>
+              {/if}
+              {#if param.editWritesPlain}
+                <p class="kind">{t('browser.variableGroup.editWritesPlain')}</p>
+              {/if}
+            {:else if param.list !== null}
+              {@render listControls(selected.index, param.key, param.list)}
+            {:else if param.refusal !== null}
+              <p class="kind">{tParamRefusal(param.refusal)}</p>
+            {/if}
+          </div>
+        {/each}
+      {/if}
+      {#if selected.boxes.dependsOn !== null}
+        <p class="name">{tRetainedLabel('dependsOn')}</p>
+        {@render listControls(selected.index, 'depends_on', selected.boxes.dependsOn)}
+      {/if}
       {#if selected.removed}
         <p class="kind">{t('browser.variableGroup.removedNote')}</p>
       {/if}
@@ -898,6 +1208,18 @@
     display: flex;
     flex-direction: column;
     gap: 0.125rem;
+  }
+
+  /* One list of an existing variable, and one of its items (Phase 4-14-2). */
+  .itemList,
+  .listItem {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .itemList {
+    padding-left: 0.75rem;
   }
 
   label {

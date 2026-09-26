@@ -366,6 +366,12 @@ export interface VariableOverrides {
   readonly injectVars?: string | null;
   /** Entries the projection did not model. */
   readonly unknownEntries?: readonly UnknownEntry[];
+  /**
+   * The kind's list parameter presence (Phase 4-14-2); `null` when absent from
+   * the overrides — the fixtures describe no kind-dependent container unless a
+   * test asks for one.
+   */
+  readonly listParamPresence?: SequencePresence | null;
 }
 
 /**
@@ -387,9 +393,9 @@ export function makeVariable(overrides: VariableOverrides = {}): VariableView {
     params_presence: fixtureMappingPresence(overrides.params),
     depends_on: overrides.dependsOn ?? [],
     depends_on_presence: fixturePresence(overrides.dependsOn),
-    // Fixtures describe no kind-dependent container; a test that needs one
-    // projects a document in Rust.
-    list_param_presence: null,
+    // Fixtures describe no kind-dependent container unless a test names one
+    // (Phase 4-14-2); a test that needs a real one projects a document in Rust.
+    list_param_presence: overrides.listParamPresence ?? null,
     fields_presence: null,
     field_shapes: [],
     inject_vars:

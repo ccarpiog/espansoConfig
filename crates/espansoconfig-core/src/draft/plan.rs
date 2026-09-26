@@ -1769,6 +1769,50 @@ impl OpenMapping {
             }
         }
     } // End of function item() for OpenMapping
+
+    /// The typed setting an entry of this mapping is **by its key**, or `None`
+    /// for an entry whose value is a logical string (ruling 4).
+    ///
+    /// A variable's `params` has three — `offset`, `trim`, `debug`, the keys a
+    /// new variable writes as plain source ([`VariableSetting::Offset`],
+    /// [`VariableSetting::Trim`], [`VariableSetting::Debug`]); a form field
+    /// definition's options have two — `multiline` and `trim_string_values`.
+    /// Decided by the key alone, whatever the variable's `type` says: the key is
+    /// what a new variable and the audit ([`check_closed_surface`]) both read, and
+    /// a typed spelling of an unfamiliar key is never quoted into a string.
+    pub(super) fn typed_setting(self, key: &str) -> Option<VariableSetting> {
+        let settings: &[VariableSetting] = match self {
+            OpenMapping::Params { .. } => &[
+                VariableSetting::Offset,
+                VariableSetting::Trim,
+                VariableSetting::Debug,
+            ],
+            OpenMapping::FormField { .. } | OpenMapping::VariableFormField { .. } => &[
+                VariableSetting::Multiline,
+                VariableSetting::TrimStringValues,
+            ],
+        };
+        settings
+            .iter()
+            .copied()
+            .find(|setting| setting.key() == key)
+    } // End of function typed_setting() for OpenMapping
+
+    /// The refusal of a typed setting of this mapping whose drafted text is not
+    /// plain source: [`DraftError::NewVariableSettingNotPlainSource`] for a
+    /// variable's `params` (Phase 4-14-2), and
+    /// [`DraftError::NewFormOptionNotPlainSource`] for a definition's options
+    /// (Phase 4-6).
+    fn not_plain_source(self, target: DraftTarget, setting: VariableSetting) -> DraftError {
+        match self {
+            OpenMapping::Params { .. } => {
+                DraftError::NewVariableSettingNotPlainSource { target, setting }
+            }
+            OpenMapping::FormField { .. } | OpenMapping::VariableFormField { .. } => {
+                DraftError::NewFormOptionNotPlainSource { target, setting }
+            }
+        }
+    } // End of function not_plain_source() for OpenMapping
 } // End of impl OpenMapping
 
 /// Plans every drafted variable of `vars`.
@@ -2675,6 +2719,19 @@ fn plan_variable_scalar(
 ///
 /// The one function `params` and a form field's options both go through, so the
 /// answers this surface gives to an open key are stated once.
+///
+/// # Typed settings are plain source (ruling 4)
+///
+/// A `Set` of an entry that is one of the mapping's typed settings
+/// ([`OpenMapping::typed_setting`]: a variable's `offset`, `trim` and `debug`
+/// since Phase 4-14-2, a definition's `multiline` and `trim_string_values` since
+/// the Phase 4-6 review) is validated with [`is_plain_source`] **before any
+/// comparison** and refused by name otherwise
+/// ([`OpenMapping::not_plain_source`]), then compared and written by
+/// `plan_plain_source_scalar` — so `0` becomes `3600`, never `'3600'`, and a
+/// quoted `'false'` drafted as `false` is rewritten plain. Only an entry whose
+/// key decoded and whose value is a scalar is a typed setting here; any other is
+/// left to the logical-string rule, which refuses a collection by name.
 pub(super) fn plan_open_mapping(
     fields: &[FieldView],
     drafts: &[EntryDraft],
@@ -2689,10 +2746,21 @@ pub(super) fn plan_open_mapping(
             target,
             length: fields.len(),
         })?;
+        let setting = field
+            .key
+            .as_ref()
+            .filter(|key| key.decoded && field.value.as_scalar().is_some())
+            .and_then(|key| owner.typed_setting(&key.text));
+        if let (Some(setting), DraftField::Set(text)) = (setting, &drafted.value) {
+            if !is_plain_source(text) {
+                return Err(owner.not_plain_source(target, setting));
+            }
+        }
         let at = mapping
             .clone()
             .with_key(nameable_key(fields, entry, target)?);
-        plan_entry_value(field, &drafted.value, &at, target, edits)?;
+        let plain = setting.is_some();
+        plan_entry_value(field, &drafted.value, &at, target, plain, edits)?;
         plan_entry_items(field, drafted, &at, owner, edits)?;
     } // End of the loop over this mapping's drafted entries
     Ok(())
@@ -2706,11 +2774,17 @@ pub(super) fn plan_open_mapping(
 /// byte of it was displayed as an item, so removing it discards nothing the
 /// editor never showed. A mapping and a list holding a collection or an alias are
 /// still refused as [`DraftError::NestedRemovalWouldDiscardUnshownStructure`].
+///
+/// `plain` says the entry is a typed setting whose drafted text has already
+/// passed [`is_plain_source`] ([`plan_open_mapping`]): a `Set` is then compared
+/// and written as source by `plan_plain_source_scalar`, never as a logical
+/// string.
 fn plan_entry_value(
     field: &FieldView,
     intent: &DraftField<String>,
     at: &DocumentPath,
     target: DraftTarget,
+    plain: bool,
     edits: &mut Vec<DocumentEdit>,
 ) -> Result<(), DraftError> {
     let removable_list = is_a_scalar_list(&field.value);
@@ -2727,7 +2801,12 @@ fn plan_entry_value(
             })
         }
         (DraftField::Set(value), Some(scalar)) => {
-            if let Some(edit) = plan_scalar(scalar, value, at.clone(), target)? {
+            let planned = if plain {
+                plan_plain_source_scalar(scalar, value, at.clone(), target)?
+            } else {
+                plan_scalar(scalar, value, at.clone(), target)?
+            };
+            if let Some(edit) = planned {
                 edits.push(edit);
             }
         }

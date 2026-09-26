@@ -81,7 +81,7 @@ import {
   capturedVariables,
   typeTextOf,
   variableAdditionRefusal,
-  variableFieldIntent,
+  variableRowEdited,
   variableStructureGrantOf,
   VARIABLE_FIELDS,
   type VariableAdditionRefusal,
@@ -103,6 +103,7 @@ import {
   type NameVerdict,
   type ReferenceField
 } from './variableInsertion';
+import { paramsViewOf, type ParamsView } from './variableParams';
 import type { MatchSaveAnswer } from './workspace.svelte';
 
 // ---------------------------------------------------------------------------
@@ -510,6 +511,11 @@ export interface SelectedVariable {
   readonly removed: boolean;
   /** The three scalar boxes, in {@link VARIABLE_FIELDS} order. */
   readonly fields: readonly VariableFieldView[];
+  /**
+   * Its `params` entries, list items and `depends_on` items — Phase 4-14-2,
+   * `paramsViewOf` in `./variableParams.ts`.
+   */
+  readonly boxes: ParamsView;
   /** Whether *Take this variable out* does anything. */
   readonly canRemove: boolean;
   /** Whether *Keep this variable* does anything. */
@@ -722,12 +728,7 @@ export function variableGroupViewOf(
   const rows: VariableRow[] = baseline.rows.map((row, index) => {
     const drafted = buffer.rows[index];
     const removed = buffer.removeAll || drafted?.removed === true;
-    const edited =
-      drafted !== undefined &&
-      !removed &&
-      (variableFieldIntent(row.name, drafted.name) !== 'Unchanged' ||
-        variableFieldIntent(row.type, drafted.type) !== 'Unchanged' ||
-        variableFieldIntent(row.inject_vars, drafted.inject_vars) !== 'Unchanged');
+    const edited = drafted !== undefined && !removed && variableRowEdited(row, drafted);
     return {
       index,
       name: drafted === undefined || removed ? row.name.value : drafted.name.text,
@@ -859,6 +860,7 @@ function selectedOf(
     name: drawn.name,
     removed,
     fields,
+    boxes: paramsViewOf(row.boxes, drafted.boxes, editable && !removed, granted),
     canRemove:
       editable && granted && !removed && session.baseline.variables.shape === 'block',
     canRestore: editable && drafted.removed && !containerRemoved,

@@ -19,8 +19,9 @@
  *   baseline (`MatchView.vars_container`, ruling 22), and one row per projected
  *   variable. Not drafted;
  * - {@link VariablesBuffer}, the draft side: what the controls hold — each
- *   existing variable's `name`, `type` and `inject_vars` boxes and whether it is
- *   drafted for removal, the new variables, and whether the whole container is
+ *   existing variable's `name`, `type` and `inject_vars` boxes, its parameter,
+ *   list item and `depends_on` boxes (Phase 4-14-2, `./variableParams.ts`), and
+ *   whether it is drafted for removal, the new variables, and whether the whole container is
  *   drafted for removal. `MatchBuffers.variables` in `./matchEditor.ts`, so the
  *   one `Draft<MatchBuffers>` snapshots, undoes, retains and copies it with the
  *   fields;
@@ -93,6 +94,19 @@ import type {
 } from '../ipc/types';
 import { hasStaleMatchDraft } from './matchMove';
 import type { DraftFieldStatus, RetainedDraftField, RetainedLabel } from './saveOutcome';
+import {
+  capturedParams,
+  intendedItemsOf,
+  intendedParamOf,
+  paramRowsOf,
+  paramsBaselineOf,
+  paramsBufferOf,
+  paramsDerivationOf,
+  type IntendedItem,
+  type ListBaseline,
+  type ParamsBaseline,
+  type ParamsBuffer
+} from './variableParams';
 
 // ---------------------------------------------------------------------------
 // The projection side
@@ -172,6 +186,11 @@ export interface VariableRowBaseline {
    * comparison of scalar spellings. Never drawn and never sent.
    */
   readonly view: VariableView;
+  /**
+   * What the file holds for the `params` entries, list items and `depends_on`
+   * items the editor drafts — Phase 4-14-2, `./variableParams.ts`.
+   */
+  readonly boxes: ParamsBaseline;
 }
 
 /**
@@ -344,7 +363,8 @@ function rowBaselineOf(projected: VariableView): VariableRowBaseline {
     dependsOnPresent: !('Absent' in view.depends_on_presence),
     unknown: view.unknown_entries.map((entry) => `${entry.key ?? ''}=${entry.value_text}`),
     // The owned copy, so freezing the baseline never freezes the window's projection.
-    view
+    view,
+    boxes: paramsBaselineOf(view)
   };
 } // End of function rowBaselineOf()
 
@@ -387,6 +407,11 @@ export interface VariableRowBuffer {
    * restoration gives back what they held.
    */
   readonly removed: boolean;
+  /**
+   * Its `params` entries', list items' and `depends_on` items' boxes — Phase
+   * 4-14-2, `./variableParams.ts`.
+   */
+  readonly boxes: ParamsBuffer;
 }
 
 /**
@@ -430,7 +455,8 @@ export function variablesBufferOf(baseline: VariablesBaseline): VariablesBuffer 
       name: { text: row.name.value },
       type: { text: row.type.value },
       inject_vars: { text: row.inject_vars.value },
-      removed: false
+      removed: false,
+      boxes: paramsBufferOf(row.boxes)
     })),
     added: [],
     removeAll: false
@@ -451,7 +477,8 @@ export function capturedVariables(buffer: VariablesBuffer): VariablesBuffer {
       name: { text: row.name.text },
       type: { text: row.type.text },
       inject_vars: { text: row.inject_vars.text },
-      removed: row.removed
+      removed: row.removed,
+      boxes: capturedParams(row.boxes)
     })),
     added: buffer.added.map((one) => ({
       variable: ownedCopy(one.variable),
@@ -523,8 +550,11 @@ const NOTHING_TO_VARS: VariablesDerivation = Object.freeze({
  *
  * **Read once**: the caller hands a {@link capturedVariables} copy, and every
  * part below is derived from it. A `VariableDraft` is sent only for a variable
- * that is kept and has a drafted scalar; its lists and parameters are left alone
- * (`[]`), which is what keeps their bytes. Removals come before the one
+ * that is kept and has a drafted scalar, parameter, list item or `depends_on`
+ * item (Phase 4-14-2, `paramsDerivationOf` in `./variableParams.ts`); whatever
+ * it does not draft is left alone (`[]`), which is what keeps those bytes.
+ * Records, new parameters and form definitions are never sent from here — a
+ * verbose form's are merged in by `withVerboseForms`. Removals come before the one
  * insertion, which lands at the end of the list (`End`), and a removal of the
  * whole container is sent alone.
  *
@@ -558,7 +588,8 @@ export function variablesDerivationOf(
     const name = variableFieldIntent(row.name, drafted.name);
     const type = variableFieldIntent(row.type, drafted.type);
     const inject = variableFieldIntent(row.inject_vars, drafted.inject_vars);
-    if (name === 'Unchanged' && type === 'Unchanged' && inject === 'Unchanged') {
+    const open = paramsDerivationOf(row.boxes, drafted.boxes);
+    if (name === 'Unchanged' && type === 'Unchanged' && inject === 'Unchanged' && !open.changed) {
       return;
     }
     vars.push({
@@ -566,11 +597,11 @@ export function variablesDerivationOf(
       name,
       type,
       inject_vars: inject,
-      params: [],
+      params: open.params,
       insert_params: [],
-      depends_on: [],
+      depends_on: open.dependsOn,
       records: [],
-      lists: [],
+      lists: open.lists,
       fields: [],
       field_intents: []
     });
@@ -594,10 +625,11 @@ export function variablesDerivationOf(
  * control that drafts it — for the carriage-return gate at `beginSave`.
  *
  * `oneLine` texts come from one-line controls (a name, a `type`, the plain-source
- * settings, a `depends_on` item, a parameter key, a time zone, a locale) and may
- * hold neither a carriage return nor a line feed; `multiLine` texts (an `echo`, a
- * command, a layout, list items, parameter values) may hold a line feed and never
- * a carriage return. Conservative on purpose: a text this cannot classify is
+ * settings, a `depends_on` item, a parameter key, a time zone, a locale, and —
+ * Phase 4-14-2 — every item box of an existing variable's lists) and may hold
+ * neither a carriage return nor a line feed; `multiLine` texts (an `echo`, a
+ * command, a layout, a new variable's list items, an existing variable's
+ * parameter values) may hold a line feed and never a carriage return. Conservative on purpose: a text this cannot classify is
  * `oneLine`'s stricter rule only where the control is certainly one line.
  *
  * @param vars - `MatchDraft.vars`.
@@ -616,6 +648,30 @@ export function variableTextsOf(
         oneLine.push(intent.Set);
       }
     } // End of the loop over the three drafted scalars
+    // Phase 4-14-2: a parameter's value may hold a line feed (a typed setting
+    // cannot, which Rust refuses by name); every item box and every
+    // `depends_on` item is one line. A verbose form's layout rides `params` too.
+    for (const entry of draft.params) {
+      if (typeof entry.value === 'object' && 'Set' in entry.value) {
+        multiLine.push(entry.value.Set);
+      }
+      for (const item of entry.items) {
+        if (typeof item.value === 'object') {
+          oneLine.push(item.value.Set);
+        }
+      } // End of the loop over the entry's drafted items
+    } // End of the loop over the drafted params
+    for (const item of draft.depends_on) {
+      if (typeof item.value === 'object') {
+        oneLine.push(item.value.Set);
+      }
+    } // End of the loop over the drafted depends_on items
+    for (const list of draft.lists) {
+      if ('InsertItems' in list) {
+        const items = list.InsertItems.items;
+        oneLine.push(...('Strings' in items ? items.Strings : items.Records.flatMap((one) => [one.label, one.id])));
+      }
+    } // End of the loop over the list intents
   } // End of the loop over the drafted variables
   for (const intent of intents) {
     if (!('InsertVariable' in intent)) {
@@ -777,6 +833,55 @@ export function withVariableText(
   );
   return { ...buffer, rows };
 } // End of function withVariableText()
+
+/**
+ * The buffer with one existing variable's parameter, list item or `depends_on`
+ * boxes changed by one `./variableParams.ts` transition — Phase 4-14-2 — or
+ * `null` when that is refused: an unknown position, a variable or a container
+ * drafted for removal, a commit awaiting a re-projection, or the transition's
+ * own refusal.
+ *
+ * @param baseline - What the file holds.
+ * @param buffer - What the controls hold.
+ * @param index - The variable's position in the file's list.
+ * @param change - The transition, over the variable's baseline and boxes.
+ * @returns The new buffer, or `null`.
+ */
+export function withVariableBoxes(
+  baseline: VariablesBaseline,
+  buffer: VariablesBuffer,
+  index: number,
+  change: (row: ParamsBaseline, boxes: ParamsBuffer) => ParamsBuffer | null
+): VariablesBuffer | null {
+  const row = baseline.rows[index];
+  const drafted = buffer.rows[index];
+  if (!draftable(baseline) || row === undefined || drafted === undefined || buffer.removeAll || drafted.removed) {
+    return null;
+  }
+  const boxes = change(row.boxes, drafted.boxes);
+  if (boxes === null) {
+    return null;
+  }
+  return { ...buffer, rows: buffer.rows.map((one, at) => (at === index ? { ...one, boxes } : one)) };
+} // End of function withVariableBoxes()
+
+/**
+ * Whether the draft changes anything of one kept existing variable: a scalar, a
+ * parameter, a list item or a `depends_on` item. The one answer the group's
+ * `edited` status and the derivation share.
+ *
+ * @param row - What the file holds for it.
+ * @param drafted - Its boxes, captured once.
+ * @returns `true` when it is edited.
+ */
+export function variableRowEdited(row: VariableRowBaseline, drafted: VariableRowBuffer): boolean {
+  return (
+    variableFieldIntent(row.name, drafted.name) !== 'Unchanged' ||
+    variableFieldIntent(row.type, drafted.type) !== 'Unchanged' ||
+    variableFieldIntent(row.inject_vars, drafted.inject_vars) !== 'Unchanged' ||
+    paramsDerivationOf(row.boxes, drafted.boxes).changed
+  );
+} // End of function variableRowEdited()
 
 /**
  * The buffer with one existing variable drafted for removal, or `null`: only an
@@ -1165,14 +1270,104 @@ function keptRowIntended(
     scalarIntended(was.type, buffer.type, now.type, false, nowView.declared_type) &&
     scalarIntended(was.inject_vars, buffer.inject_vars, now.inject_vars, true, nowView.inject_vars) &&
     was.paramsPresent === now.paramsPresent &&
-    sameFields(was.params, now.params) &&
+    paramsIntended(was, buffer, now) &&
     was.dependsOnPresent === now.dependsOnPresent &&
-    was.dependsOn.length === now.dependsOn.length &&
-    was.dependsOn.every((item, index) => sameValue(item, now.dependsOn[index] as ValueView)) &&
+    dependsOnIntended(was, buffer, now) &&
     was.unknown.length === now.unknown.length &&
     was.unknown.every((entry, index) => entry === now.unknown[index])
   );
 } // End of function keptRowIntended()
+
+/**
+ * Whether a disk list holds exactly the intended items — Phase 4-14-2: a kept
+ * item is the same projected value, a drafted text is that logical string.
+ *
+ * @param was - The baseline's items.
+ * @param intended - The intended items.
+ * @param now - The disk's items.
+ * @returns `true` when they are.
+ */
+function itemsIntended(
+  was: readonly ValueView[],
+  intended: readonly IntendedItem[],
+  now: readonly ValueView[]
+): boolean {
+  return (
+    now.length === intended.length &&
+    intended.every((one, index) => {
+      const disk = now[index] as ValueView;
+      if (one.kind === 'kept') {
+        const held = was[one.index];
+        return held !== undefined && sameValue(held, disk);
+      }
+      return 'Scalar' in disk && holdsLogical(disk.Scalar, one.text);
+    })
+  );
+} // End of function itemsIntended()
+
+/**
+ * Whether the disk's `params` are the baseline's with the drafted parameters and
+ * list items applied (Phase 4-14-2), entry by entry and in order: every key the
+ * same spelling, an undrafted value the same projected value, a drafted typed
+ * setting written plain, any other drafted text as its logical string.
+ *
+ * @param was - The baseline row.
+ * @param buffer - Its drafted boxes.
+ * @param now - The disk's row.
+ * @returns `true` when they are.
+ */
+function paramsIntended(was: VariableRowBaseline, buffer: VariableRowBuffer, now: VariableRowBaseline): boolean {
+  return (
+    was.params.length === now.params.length &&
+    was.params.every((entry, index) => {
+      const twin = now.params[index] as FieldView;
+      if (entry.key === null || twin.key === null) {
+        return false;
+      }
+      if (entry.key.text !== twin.key.text || entry.key.style !== twin.key.style) {
+        return false;
+      }
+      const intended = intendedParamOf(was.boxes, buffer.boxes, index);
+      if (intended.kind === 'unchanged') {
+        return sameValue(entry.value, twin.value);
+      }
+      if (intended.kind === 'text') {
+        if (!('Scalar' in twin.value)) {
+          return false;
+        }
+        return intended.plain
+          ? holdsPlain(twin.value.Scalar, intended.text)
+          : holdsLogical(twin.value.Scalar, intended.text);
+      }
+      return (
+        'Sequence' in entry.value &&
+        'Sequence' in twin.value &&
+        itemsIntended(entry.value.Sequence, intended.items, twin.value.Sequence)
+      );
+    })
+  );
+} // End of function paramsIntended()
+
+/**
+ * Whether the disk's `depends_on` is the baseline's with the drafted items
+ * applied (Phase 4-14-2).
+ *
+ * @param was - The baseline row.
+ * @param buffer - Its drafted boxes.
+ * @param now - The disk's row.
+ * @returns `true` when it is.
+ */
+function dependsOnIntended(was: VariableRowBaseline, buffer: VariableRowBuffer, now: VariableRowBaseline): boolean {
+  const list: ListBaseline | null = was.boxes.dependsOn;
+  const intended = list === null ? null : intendedItemsOf(list, buffer.boxes.dependsOn);
+  if (intended === null) {
+    return (
+      was.dependsOn.length === now.dependsOn.length &&
+      was.dependsOn.every((item, index) => sameValue(item, now.dependsOn[index] as ValueView))
+    );
+  }
+  return itemsIntended(was.dependsOn, intended, now.dependsOn);
+} // End of function dependsOnIntended()
 
 /** One parameter a new variable is written with, as a reapply compares it. */
 type IntendedParam =
@@ -1530,7 +1725,9 @@ function additionRows(added: NewVariable): readonly RetainedDraftField[] {
  * A container removal is one `variablesRemoved` row. Otherwise, per existing
  * variable in file order: a removed one is its name with `variableRemoved`; an
  * edited one is its drafted name (with the name's own status), then each drafted
- * scalar that changes. Then each new variable ({@link additionRows}). Labels
+ * scalar that changes, then its drafted parameters and `depends_on`
+ * (`paramRowsOf` in `./variableParams.ts`, Phase 4-14-2). Then each new variable
+ * ({@link additionRows}). Labels
  * repeat on purpose — one per variable — so a renderer must not key these rows
  * by label (B1, `docs/decisions/4-2-notes.md`).
  *
@@ -1562,7 +1759,8 @@ export function variableRowsOf(
     const name = variableFieldIntent(row.name, drafted.name);
     const type = variableFieldIntent(row.type, drafted.type);
     const inject = variableFieldIntent(row.inject_vars, drafted.inject_vars);
-    if (name === 'Unchanged' && type === 'Unchanged' && inject === 'Unchanged') {
+    const open = paramRowsOf(row.boxes, drafted.boxes);
+    if (name === 'Unchanged' && type === 'Unchanged' && inject === 'Unchanged' && open.length === 0) {
       return;
     }
     rows.push({ label: 'variableName', text: drafted.name.text, status: statusOf(name) });
@@ -1572,6 +1770,7 @@ export function variableRowsOf(
     if (inject !== 'Unchanged') {
       rows.push({ label: 'injectVars', text: drafted.inject_vars.text, status: statusOf(inject) });
     }
+    rows.push(...open);
   }); // End of the walk over the baseline's variables
   for (const one of buffer.added) {
     rows.push(...additionRows(one.variable));

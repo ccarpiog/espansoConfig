@@ -15,15 +15,12 @@ use crate::draft::error::DraftError;
 use crate::draft::field::DraftField;
 use crate::draft::form_definition::{
     definitions, FormFieldIntent, FormOptions, FormOwner, FormValuesIntent, NewFormField,
-    FIELDS_KEY, FORM_OPTION_KEYS, OPTION_MULTILINE_KEY, OPTION_TRIM_KEY, OPTION_VALUES_KEY,
+    FIELDS_KEY, FORM_OPTION_KEYS, OPTION_VALUES_KEY,
 };
-use crate::draft::match_draft::{
-    DraftTarget, EntryDraft, FormFieldDraft, FORM_FIELDS_KEY, PARAMS_KEY,
-};
-use crate::draft::new_variable::VariableSetting;
+use crate::draft::match_draft::{DraftTarget, FormFieldDraft, FORM_FIELDS_KEY, PARAMS_KEY};
 use crate::draft::plan::{
     is_a_scalar_list, key_fault_refusal, kind_of, nameable_key, nameable_keys, plan_open_mapping,
-    plan_plain_source_scalar, OpenMapping,
+    OpenMapping,
 };
 use crate::draft::sequence::ListPlacement;
 use crate::model::{
@@ -529,8 +526,10 @@ fn plan_definition(
     // one is refused by `plan_open_mapping` as an entry that is not there.
     let options = field.value.as_mapping().unwrap_or_default();
     let owner = form.options_of(index);
-    let drafted = plan_typed_settings(options, &draft.options, &at, owner, edits)?;
-    plan_open_mapping(options, &drafted, &at, owner, edits)?;
+    // `multiline` and `trim_string_values` are typed settings, written as plain
+    // source by `plan_open_mapping` (ruling 4; the Phase 4-6 review's first
+    // finding, routed through the shared planner since Phase 4-14-2).
+    plan_open_mapping(options, &draft.options, &at, owner, edits)?;
     let removed = |option: usize| {
         draft
             .options
@@ -546,67 +545,6 @@ fn plan_definition(
     nested.push(NestedKeys::new(at, nameable_keys(options)));
     Ok(())
 } // End of function plan_definition()
-
-/// Plans every `Set` of an existing `multiline` or `trim_string_values` option as
-/// **plain source** (ruling 4; the Phase 4-6 review's first finding), and hands
-/// back the option drafts with those `Set`s taken out, for
-/// [`plan_open_mapping`] to plan the rest by the logical-string rule.
-///
-/// The drafted text is validated **before** any comparison
-/// ([`DraftError::NewFormOptionNotPlainSource`], naming the option by position),
-/// and the comparison is `plan_plain_source_scalar`'s: nothing when the option is
-/// already written as exactly that plain text, otherwise one
-/// [`crate::patch::ScalarEdit::plain_source`] — so `'true'` becomes `true`, and
-/// `true` never becomes `'false'`. An option whose value is not a scalar, and an
-/// option the draft addresses that does not exist, are left for
-/// [`plan_open_mapping`] to refuse as before.
-fn plan_typed_settings(
-    options: &[FieldView],
-    drafts: &[EntryDraft],
-    at: &DocumentPath,
-    owner: OpenMapping,
-    edits: &mut Vec<DocumentEdit>,
-) -> Result<Vec<EntryDraft>, DraftError> {
-    let mut rest = Vec::with_capacity(drafts.len());
-    for drafted in drafts {
-        let DraftField::Set(text) = &drafted.value else {
-            rest.push(drafted.clone());
-            continue;
-        };
-        let option = options.get(drafted.index);
-        let setting = option
-            .and_then(|option| option.key.as_ref())
-            .filter(|key| key.decoded)
-            .and_then(|key| match key.text.as_str() {
-                OPTION_MULTILINE_KEY => Some(VariableSetting::Multiline),
-                OPTION_TRIM_KEY => Some(VariableSetting::TrimStringValues),
-                _ => None,
-            });
-        let (Some(setting), Some(ValueView::Scalar(scalar))) =
-            (setting, option.map(|option| &option.value))
-        else {
-            rest.push(drafted.clone());
-            continue;
-        };
-        let target = owner.entry(drafted.index);
-        if !is_plain_source(text) {
-            return Err(DraftError::NewFormOptionNotPlainSource { target, setting });
-        }
-        let path = at
-            .clone()
-            .with_key(nameable_key(options, drafted.index, target)?);
-        if let Some(edit) = plan_plain_source_scalar(scalar, text, path, target)? {
-            edits.push(edit);
-        }
-        // The `Set` is planned; the entry stays an address with no scalar intent,
-        // so its items (none, for a scalar) and its resolution are unchanged.
-        rest.push(EntryDraft {
-            value: DraftField::Unchanged,
-            ..drafted.clone()
-        });
-    } // End of the loop over the drafted options
-    Ok(rest)
-} // End of function plan_typed_settings()
 
 /// Plans one definition's new options as one [`FieldInsertGroup`] after the last
 /// option the draft leaves in place (Phase 4-6). `values` is the index of the

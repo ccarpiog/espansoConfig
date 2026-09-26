@@ -3317,3 +3317,121 @@ fn an_existing_inject_vars_refuses_a_text_that_is_not_plain_source() {
         "a name is a logical string"
     );
 } // End of function an_existing_inject_vars_refuses_a_text_that_is_not_plain_source()
+
+// ---------------------------------------------------------------------------
+// Phase 4-14-2: an existing variable's `offset`, `trim` and `debug` are plain
+// source
+// ---------------------------------------------------------------------------
+
+/// A `date` variable with a plain `offset`, and a `shell` variable with a plain
+/// `trim` and a quoted `debug`, each beside a logical-string parameter.
+const TYPED_PARAMS: &str = "matches:\n  - trigger: hello\n    replace: '{{a}} {{b}}'\n    vars:\n      - name: a\n        type: date\n        params:\n          format: '%H'\n          offset: 0\n      - name: b\n        type: shell\n        params:\n          cmd: echo hi\n          trim: true\n          debug: 'false'\n";
+
+/// **The failing-first case, end to end from the wire.** The match editor sends
+/// an existing `offset` edited from `0` to `3600` as
+/// `{"index": 1, "value": {"Set": "3600"}, "items": []}`; that draft must write
+/// the plain scalar `3600`, never the string `'3600'` (ruling 4), and move no
+/// other byte. The same for `trim` from `true` to `false`.
+#[test]
+fn an_existing_offset_and_trim_are_written_as_plain_source() {
+    let view = one_match(TYPED_PARAMS);
+    let wire = r#"{"index": 0, "name": "Unchanged", "type": "Unchanged",
+        "inject_vars": "Unchanged",
+        "params": [{"index": 1, "value": {"Set": "3600"}, "items": []}],
+        "insert_params": [], "depends_on": [], "records": [], "lists": [],
+        "fields": [], "field_intents": []}"#;
+    let variable: VariableDraft =
+        serde_json::from_str(wire).expect("the editor's wire draft reads");
+    let draft = MatchDraft::new()
+        .with_variable(variable)
+        .with_variable(VariableDraft::new(1).with_param(EntryDraft::new(1).set("false")));
+    let edits = plan_match_edits(&view, &draft).expect("the draft plans");
+    assert_eq!(edits.len(), 2);
+    for edit in &edits {
+        let DocumentEdit::Scalar(edit) = edit else {
+            panic!("an existing scalar is rewritten");
+        };
+        assert!(
+            edit.writes_plain_source(),
+            "a plain-source edit, not a logical string"
+        );
+    } // End of the loop over the two edits
+    let patched = apply_edits(TYPED_PARAMS, &edits).expect("the batch applies");
+    let expected = TYPED_PARAMS
+        .replacen("offset: 0", "offset: 3600", 1)
+        .replacen("trim: true", "trim: false", 1);
+    assert_eq!(
+        patched.text(),
+        expected,
+        "plain text, and nothing else moved"
+    );
+    let after = one_match(patched.text());
+    for (variable, entry, text) in [(0, 1, "3600"), (1, 1, "false")] {
+        let written = after.vars[variable].params[entry]
+            .value
+            .as_scalar()
+            .expect("a scalar");
+        assert_eq!(written.style, ScalarStyle::Plain);
+        assert_eq!(written.text, text);
+    } // End of the loop over the two written settings
+} // End of function an_existing_offset_and_trim_are_written_as_plain_source()
+
+/// A quoted `debug: 'false'` drafted as `false` is rewritten plain; a plain
+/// `offset: 0` drafted as `0` derives nothing; `format`, which is not a typed
+/// setting, stays a logical string spelled by the codec.
+#[test]
+fn an_existing_typed_param_compares_as_source_and_other_params_stay_logical() {
+    let view = one_match(TYPED_PARAMS);
+    let same = MatchDraft::new()
+        .with_variable(VariableDraft::new(0).with_param(EntryDraft::new(1).set("0")));
+    assert_eq!(plan_match_edits(&view, &same), Ok(Vec::new()));
+    let quoted = MatchDraft::new()
+        .with_variable(VariableDraft::new(1).with_param(EntryDraft::new(2).set("false")));
+    let edits = plan_match_edits(&view, &quoted).expect("the draft plans");
+    let patched = apply_edits(TYPED_PARAMS, &edits).expect("the batch applies");
+    assert_eq!(
+        patched.text(),
+        TYPED_PARAMS.replacen("debug: 'false'", "debug: false", 1)
+    );
+    let format = MatchDraft::new()
+        .with_variable(VariableDraft::new(0).with_param(EntryDraft::new(0).set("30")));
+    let edits = plan_match_edits(&view, &format).expect("the draft plans");
+    let DocumentEdit::Scalar(edit) = &edits[0] else {
+        panic!("an existing scalar is rewritten");
+    };
+    assert!(!edit.writes_plain_source(), "format is a logical string");
+    let after = one_match(apply_edits(TYPED_PARAMS, &edits).expect("applies").text());
+    let written = after.vars[0].params[0].value.as_scalar().expect("a scalar");
+    assert_eq!(written.text, "30");
+    assert_ne!(written.style, ScalarStyle::Plain, "quoted by the codec");
+} // End of function an_existing_typed_param_compares_as_source_and_other_params_stay_logical()
+
+/// A text that cannot be written as one plain scalar is refused by name for an
+/// existing `offset`, `trim` and `debug`, never quoted.
+#[test]
+fn an_existing_typed_param_refuses_a_text_that_is_not_plain_source() {
+    let view = one_match(TYPED_PARAMS);
+    let settings = [
+        (0, 1, VariableSetting::Offset),
+        (1, 1, VariableSetting::Trim),
+        (1, 2, VariableSetting::Debug),
+    ];
+    for text in [
+        "", "a\nb", "'true'", "\"on\"", "a #b", "[a]", "{a: b}", "*alias",
+    ] {
+        for (variable, entry, setting) in settings {
+            let draft = MatchDraft::new().with_variable(
+                VariableDraft::new(variable).with_param(EntryDraft::new(entry).set(text)),
+            );
+            assert_eq!(
+                plan_match_edits(&view, &draft),
+                Err(DraftError::NewVariableSettingNotPlainSource {
+                    target: DraftTarget::Param { variable, entry },
+                    setting,
+                }),
+                "{text:?} in {}",
+                setting.key()
+            );
+        } // End of the loop over the three typed settings
+    } // End of the loop over the refused texts
+} // End of function an_existing_typed_param_refuses_a_text_that_is_not_plain_source()

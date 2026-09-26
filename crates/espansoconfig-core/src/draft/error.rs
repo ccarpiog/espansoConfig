@@ -875,9 +875,12 @@ pub enum DraftError {
     /// rather than quoted, exactly as [`DraftError::OptionNotPlainSource`] is for
     /// a match option. Since the Phase 4-9 review it also refuses a `Set` of an
     /// **existing** variable's `inject_vars`, whose target is then a
-    /// [`DraftTarget::VariableScalar`].
+    /// [`DraftTarget::VariableScalar`], and since Phase 4-14-2 a `Set` of an
+    /// existing variable's `params` entry keyed `offset`, `trim` or `debug`, whose
+    /// target is then a [`DraftTarget::Param`].
     NewVariableSettingNotPlainSource {
-        /// The new variable, by position, or the existing variable's scalar.
+        /// The new variable, by position, the existing variable's scalar, or its
+        /// `params` entry.
         target: DraftTarget,
         /// Which setting.
         setting: crate::draft::VariableSetting,
