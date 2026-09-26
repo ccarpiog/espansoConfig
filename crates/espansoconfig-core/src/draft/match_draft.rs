@@ -26,14 +26,21 @@
 //!   build the [`crate::patch::DocumentPath`], so a caller can only name what it
 //!   was shown, and no refusal has to carry a byte of the owner's configuration
 //!   (`CLAUDE.md` section 1).
-//! - **Nothing is inserted below the match mapping.** A drafted entry the
-//!   projection does not hold is refused by name rather than created (decision
-//!   D1 of `docs/decisions/2b-2b-2-notes.md`): inserting an author-chosen key
-//!   would be the first time this engine writes a key string that no schema
-//!   fixes, and it needs its own anchor machinery and its own review.
+//! - **One insertion below the match mapping, and only one (Phase 4-3).** A
+//!   drafted *address* the projection does not hold is still refused by name
+//!   rather than created. Decision D1 of `docs/decisions/2b-2b-2-notes.md`
+//!   refused every insertion below the match mapping; since Phase 4-3 exactly
+//!   one is lifted, under ruling 7 of `docs/decisions/4-split-notes.md` §3: a
+//!   new **author-named** entry of an existing variable's block `params`
+//!   mapping ([`NewParam`] in [`VariableDraft::insert_params`]), whose value is
+//!   a scalar or a flat list of scalars. It is the one request that carries key
+//!   text, it is refused by position and code only, and nothing else below the
+//!   match mapping — no variable, no `params:` container, no form definition, no
+//!   list item — can be inserted by a draft.
 //! - **A value is a scalar or a sequence of scalars.** [`EntryDraft`] carries
-//!   both spellings and may use only one of them at a time; nothing here can
-//!   express a nested mapping.
+//!   both spellings and may use only one of them at a time, and
+//!   [`NewParamValue`] has exactly those two variants; nothing here can express
+//!   a nested mapping.
 
 use serde::{Deserialize, Serialize};
 
@@ -591,6 +598,17 @@ pub enum DraftTarget {
         /// The element's index in that entry's sequence.
         item: usize,
     },
+    /// One **new** entry of a variable's `params` mapping, by its position in
+    /// that variable draft's [`VariableDraft::insert_params`] list (Phase 4-3).
+    ///
+    /// The only target that names something the file does not hold yet, and
+    /// still an index: the key text the request carries is never echoed back.
+    NewParam {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// The insertion's position in the draft's `insert_params` list.
+        insertion: usize,
+    },
     /// One entry of `form_fields`, by its index in the projected entry list.
     FormField {
         /// The entry's index in the projected `form_fields` list.
@@ -699,15 +717,69 @@ impl EntryDraft {
     }
 } // End of impl EntryDraft
 
+/// The value of one new author-named `params` entry (Phase 4-3).
+///
+/// **Closed at two shapes**, exactly as [`crate::patch::EntryValue`]'s first two
+/// are: one scalar, or a flat list of scalars. Both are **logical strings**
+/// spelled by the scalar codec; neither is plain source, so a typed `true`
+/// becomes the string `'true'` (ruling 7 leaves an unknown parameter's YAML type
+/// uninferred, and a later step that writes a known non-string parameter owes it
+/// an explicit plain-source policy, ruling 4). A new non-empty list is written in
+/// block style and an empty one as `[]` (ruling 8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NewParamValue {
+    /// One scalar, as a decoded string.
+    Scalar(String),
+    /// A flat list of scalars, each a decoded string, in order.
+    List(Vec<String>),
+}
+
+/// One new **author-named** entry of an existing variable's `params` mapping
+/// (Phase 4-3).
+///
+/// The key is **decoded text**, spelled by the codec in key context; the rules
+/// it must meet are ruling 7's (see `crate::draft::author_key` and
+/// [`crate::draft::plan_match_edits`]). Every refusal about it names its
+/// position — [`DraftTarget::NewParam`] — and never its text.
+///
+/// `deny_unknown_fields` is deliberate, for [`MatchDraft`]'s reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewParam {
+    /// The new entry's key, as decoded text.
+    pub key: String,
+    /// The new entry's value.
+    pub value: NewParamValue,
+}
+
+impl NewParam {
+    /// A new entry holding one scalar.
+    pub fn scalar(key: impl Into<String>, value: impl Into<String>) -> NewParam {
+        NewParam {
+            key: key.into(),
+            value: NewParamValue::Scalar(value.into()),
+        }
+    }
+
+    /// A new entry holding a flat list of scalars.
+    pub fn list(key: impl Into<String>, items: Vec<String>) -> NewParam {
+        NewParam {
+            key: key.into(),
+            value: NewParamValue::List(items),
+        }
+    }
+} // End of impl NewParam
+
 /// One drafted variable of `vars`, addressed by its index in the projection.
 ///
 /// The three schema-known scalars are named ([`VariableField`]); everything else
 /// a variable may hold is addressed positionally through
 /// [`VariableDraft::params`]. `depends_on` is deliberately absent: it is a
-/// sequence whose elements this phase does not draft.
+/// sequence whose elements this surface does not draft yet.
 ///
-/// **An absent field is refused, never inserted** (decision D1): this phase adds
-/// no entry below the match mapping.
+/// **An absent field is refused, never inserted** (decision D1), with one
+/// exception since Phase 4-3: [`VariableDraft::insert_params`] adds new
+/// author-named entries to an existing block `params` mapping.
 ///
 /// `deny_unknown_fields` is deliberate, for [`MatchDraft`]'s reason.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -727,6 +799,14 @@ pub struct VariableDraft {
     /// Drafted entries of the variable's `params` mapping.
     #[serde(default)]
     pub params: Vec<EntryDraft>,
+    /// New author-named entries to add to the variable's `params` mapping, in
+    /// the order they are written (Phase 4-3).
+    ///
+    /// They are written as one run after the last existing entry the draft does
+    /// not remove. The mapping must already exist as a block mapping with at
+    /// least one entry; creating `params:` itself is not a draft's to do.
+    #[serde(default)]
+    pub insert_params: Vec<NewParam>,
 }
 
 impl VariableDraft {
@@ -775,6 +855,12 @@ impl VariableDraft {
     /// Builder: adds one drafted `params` entry.
     pub fn with_param(mut self, entry: EntryDraft) -> VariableDraft {
         self.params.push(entry);
+        self
+    }
+
+    /// Builder: adds one new author-named `params` entry (Phase 4-3).
+    pub fn with_new_param(mut self, param: NewParam) -> VariableDraft {
+        self.insert_params.push(param);
         self
     }
 } // End of impl VariableDraft

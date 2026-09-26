@@ -494,7 +494,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("decodeError", 5),
     ("notReencodable", 8),
     ("saveResult", 3),
-    ("draftError", 44),
+    ("draftError", 58),
     ("presentationNote", 2),
     ("reapplyResolution", 4),
     ("reapplyRefusal", 9),
@@ -685,6 +685,21 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          `MatchField`/`SequenceField`/`VariableField` serialize as espanso keys \
          and every other operand is an index, deliberately, because an \
          author-chosen key's text is the owner's private configuration",
+    ),
+    (
+        "MappingPresence",
+        "a value shape, not a code, and read by no screen yet: `Absent`, `Empty`, \
+         `Entries` and `UnsupportedShape` say how a mapping-valued entry below a \
+         match is written (Phase 4-3 — `params`, `params.fields`, `form_fields` \
+         and a form field's options) and travel *out of* the projection as \
+         authority for a later structural edit. The step that first draws one \
+         owes it a namespace, as `SequencePresence` has",
+    ),
+    (
+        "NewParamValue",
+        "a protocol tag, not a code, exactly as `DraftField` is: `Scalar` and \
+         `List` travel *into* the planner inside a new `params` entry (Phase 4-3) \
+         and are never rendered — the value inside either is what a screen shows",
     ),
 ];
 

@@ -1426,7 +1426,12 @@ mod tests {
             declared_type: None,
             kind: VariableKind::Echo,
             params: Vec::new(),
+            params_presence: crate::model::MappingPresence::Absent {},
             depends_on: Vec::new(),
+            depends_on_presence: crate::model::SequencePresence::Absent {},
+            list_param_presence: None,
+            fields_presence: None,
+            field_shapes: Vec::new(),
             inject_vars: written.map(scalar_of),
             unknown_entries: Vec::new(),
         }

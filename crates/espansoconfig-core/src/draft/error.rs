@@ -38,7 +38,7 @@ pub enum DraftError {
     /// invented, because the alternative is a path that names something else.
     ///
     /// **The empty braces are load-bearing.** Written as a unit variant this
-    /// would be the one variant of forty-four that `serde` writes as a bare
+    /// would be the one variant of fifty-eight that `serde` writes as a bare
     /// JSON string rather than as a one-key object, and the frontend's
     /// `COMMAND_ERROR_OPERANDS` table in `src/lib/ipc/errors.ts` can pin exactly
     /// one shape for the `error` operand of `CommandError::DraftRefused`. A
@@ -46,8 +46,8 @@ pub enum DraftError {
     /// *unexpected* failure, losing its typed code and rendering a generic
     /// sentence instead of `code.draftError.matchHasNoPath`. As an empty struct
     /// variant it writes `{"MatchHasNoPath": {}}`, so "a `DraftError` is always
-    /// an object" is true by construction rather than true of forty-three cases
-    /// out of forty-four. `every_draft_error_variant_crosses_as_an_object` in
+    /// an object" is true by construction rather than true of fifty-seven cases
+    /// out of fifty-eight. `every_draft_error_variant_crosses_as_an_object` in
     /// `src-tauri/src/wire_contract.rs` fails the build if a unit variant is
     /// ever added here.
     MatchHasNoPath {},
@@ -315,10 +315,11 @@ pub enum DraftError {
     /// hold.
     ///
     /// **The open half's cardinality refusal, and a decision as much as a
-    /// shape** (2b-2b-2's D1). Below the match mapping this engine inserts
-    /// nothing at all: writing an author-chosen key would be the first time it
-    /// composes a key string that no schema fixes, which needs its own anchor
-    /// machinery, its own emission checks and its own review. So a drafted
+    /// shape** (2b-2b-2's D1). Below the match mapping a drafted *address* is
+    /// never turned into an insertion. The one insertion there since Phase 4-3 —
+    /// a new author-named `params` entry — is requested explicitly through
+    /// [`crate::draft::VariableDraft::insert_params`] under its own rules, and
+    /// is never inferred from an address that did not resolve. So a drafted
     /// address the projection cannot resolve is refused by name rather than
     /// created — and the address is an **index**, never a key text
     /// (`CLAUDE.md` section 1).
@@ -393,9 +394,10 @@ pub enum DraftError {
     /// Two facts reach this refusal and both are refusals for the same reason:
     /// the key is **absent**, or it is present holding a shape espanso's schema
     /// does not use, in which case the projection recorded it as an unknown
-    /// entry rather than as a scalar. Neither can be honoured here — this phase
-    /// inserts nothing below the match mapping (D1), and no primitive replaces a
-    /// collection node with a scalar one.
+    /// entry rather than as a scalar. Neither can be honoured here — a draft
+    /// inserts no variable scalar (D1; the Phase 4-3 lift covers new `params`
+    /// entries only), and no primitive replaces a collection node with a scalar
+    /// one.
     VariableFieldHasNoScalar {
         /// The variable's index in the projected `vars` list.
         variable: usize,
@@ -450,8 +452,9 @@ pub enum DraftError {
     /// inexpressible for the same reason: no primitive replaces a collection
     /// node with a scalar one, and *remove then insert* is not a spelling of it,
     /// because an insertion is planned against the original index where the key
-    /// is still present — and because this phase inserts nothing below the match
-    /// mapping at all (D1).
+    /// is still present — and the one insertion a draft may make below the match
+    /// mapping (a new `params` entry, Phase 4-3) refuses a key the mapping
+    /// already holds ([`DraftError::NewKeyDuplicatesAnEntry`]).
     NestedValueIsACollection {
         /// What the draft named.
         target: DraftTarget,
@@ -656,6 +659,133 @@ pub enum DraftError {
         /// The option whose text was refused.
         field: MatchField,
     },
+    /// A new author-named key is the empty string (Phase 4-3, ruling 7).
+    ///
+    /// This and the thirteen variants after it are the refusals Phase 4-3 added
+    /// for the one insertion a draft may make below the match mapping — a new
+    /// `params` entry — and for the `params` removals lifted beside it, and
+    /// **none of them carries the key's text** (every operand is a
+    /// [`DraftTarget`], an index or a [`ValueKind`], none of which holds a
+    /// string, so the types force it): a new key is named by its
+    /// position in the draft ([`DraftTarget::NewParam`]), an existing entry by
+    /// its index, a batch edit by its position (`CLAUDE.md` §1).
+    NewKeyIsEmpty {
+        /// The insertion, by position.
+        target: DraftTarget,
+    },
+    /// A new author-named key holds a line break — `\n`, `\r`, NEL, LINE
+    /// SEPARATOR or PARAGRAPH SEPARATOR (Phase 4-3, ruling 7).
+    NewKeyHasALineBreak {
+        /// The insertion, by position.
+        target: DraftTarget,
+    },
+    /// A new author-named key holds a control character other than a line
+    /// break — a tab included — or a byte-order mark (Phase 4-3, ruling 7).
+    NewKeyHasAControlCharacter {
+        /// The insertion, by position.
+        target: DraftTarget,
+    },
+    /// A new author-named key is `<<`, the merge-key spelling, which is refused
+    /// however it would be quoted (Phase 4-3, ruling 7).
+    NewKeyIsAMergeKey {
+        /// The insertion, by position.
+        target: DraftTarget,
+    },
+    /// A new author-named key decodes to the same text as an existing entry of
+    /// the mapping it would join — whatever either is quoted as (Phase 4-3).
+    ///
+    /// Compared against **decoded** keys, so `'alpha'`, `"alpha"` and `alpha`
+    /// in the file all refuse a new `alpha`. An entry the same draft removes
+    /// still counts: a removal and an insertion of one key in one batch would
+    /// be two answers about one entry.
+    NewKeyDuplicatesAnEntry {
+        /// The insertion, by position.
+        target: DraftTarget,
+        /// The existing entry's index in the projected mapping.
+        entry: usize,
+    },
+    /// Two new author-named keys of one draft decode to the same text
+    /// (Phase 4-3). Checked at intent level, before any diffing.
+    NewKeyDuplicatesAnInsertion {
+        /// The later insertion, by position.
+        target: DraftTarget,
+        /// The earlier insertion's position in the same list.
+        first: usize,
+    },
+    /// The mapping a new key would join holds an entry whose key is not a
+    /// decoded scalar — an alias, a collection used as a key, or a scalar that
+    /// did not decode — so no comparison can establish that the new key is not
+    /// a duplicate of it (Phase 4-3). Refused rather than assumed.
+    NewKeyCannotBeCompared {
+        /// The insertion, by position.
+        target: DraftTarget,
+        /// The index of the entry whose key cannot be compared.
+        entry: usize,
+    },
+    /// A new `params` entry was drafted for a variable that has no `params` key
+    /// (Phase 4-3). Adding the `params:` container is a separate, later
+    /// operation, and an empty projected list is no authority to create one.
+    ParamsAbsent {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+    },
+    /// A new `params` entry was drafted for a variable whose `params` is written
+    /// between braces — `{}` or `{a: b}` (Phase 4-3). A flow mapping is never
+    /// converted to block style, and structural edits inside one stay refused
+    /// (ruling 8).
+    ParamsIsAFlowMapping {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+    },
+    /// A new `params` entry was drafted for a variable whose `params` holds
+    /// something that is not a mapping (Phase 4-3).
+    ParamsHasAnUnsupportedShape {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+        /// What `params` actually holds.
+        found: ValueKind,
+    },
+    /// The draft removes every entry of a variable's `params` and adds none, so
+    /// the save would leave `params:` holding nothing — a null, not an empty
+    /// mapping (Phase 4-3, ruling 8). A container is removed only by an explicit
+    /// container-removal intent, which a draft cannot express yet.
+    ParamsWouldBeEmpty {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+    },
+    /// New `params` entries were drafted and no existing entry can serve as
+    /// the one they are written after (Phase 4-3).
+    ///
+    /// An anchor must survive the batch, and so must the entry directly after it:
+    /// the new run would begin exactly where that entry's removal begins, and the
+    /// engine refuses two replacements that share a start. So a draft in which
+    /// every surviving entry is directly followed by a removed one reaches this
+    /// refusal — every entry removed, or `a`, `b` with `b` removed — while the
+    /// same intentions saved as two saves do not.
+    NoParamInsertionAnchor {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
+    },
+    /// A new author-named key is one of the known non-string settings of ruling
+    /// 4 (`offset`, `trim`, `debug`, `multiline`, `trim_string_values`), whose
+    /// plain-source policy belongs to a later step; a new entry's value is a
+    /// logical string, so writing it now would quote a boolean or a number
+    /// (Phase 4-3).
+    NewKeyIsATypedSetting {
+        /// The insertion, by position.
+        target: DraftTarget,
+    },
+    /// An insertion of the batch writes a key its nested mapping already holds,
+    /// or one another insertion of the batch also writes there (Phase 4-3).
+    ///
+    /// The guard-level twin of [`DraftError::NewKeyDuplicatesAnEntry`] and
+    /// [`DraftError::NewKeyDuplicatesAnInsertion`], stated over a batch by
+    /// [`crate::draft::check_batch_independence`] and reachable by a batch this
+    /// engine did not build. A position in the batch, never the key.
+    InsertionKeyAlreadyPresent {
+        /// Position of the edit in the batch.
+        edit: usize,
+    },
 }
 
 impl fmt::Display for DraftError {
@@ -803,6 +933,50 @@ impl fmt::Display for DraftError {
                     "option {} is not writable as plain source",
                     field.key()
                 )
+            }
+            DraftError::NewKeyIsEmpty { .. } => formatter.write_str("a new key is empty"),
+            DraftError::NewKeyHasALineBreak { .. } => {
+                formatter.write_str("a new key holds a line break")
+            }
+            DraftError::NewKeyHasAControlCharacter { .. } => {
+                formatter.write_str("a new key holds a control character")
+            }
+            DraftError::NewKeyIsAMergeKey { .. } => formatter.write_str("a new key is a merge key"),
+            DraftError::NewKeyDuplicatesAnEntry { entry, .. } => {
+                write!(formatter, "a new key repeats entry {entry}")
+            }
+            DraftError::NewKeyDuplicatesAnInsertion { first, .. } => {
+                write!(formatter, "a new key repeats insertion {first}")
+            }
+            DraftError::NewKeyCannotBeCompared { entry, .. } => {
+                write!(formatter, "entry {entry}'s key cannot be compared")
+            }
+            DraftError::ParamsAbsent { variable } => {
+                write!(formatter, "variable {variable} has no params")
+            }
+            DraftError::ParamsIsAFlowMapping { variable } => {
+                write!(formatter, "variable {variable}'s params is a flow mapping")
+            }
+            DraftError::ParamsHasAnUnsupportedShape { variable, found } => {
+                write!(formatter, "variable {variable}'s params holds a {found:?}")
+            }
+            DraftError::ParamsWouldBeEmpty { variable } => {
+                write!(
+                    formatter,
+                    "variable {variable}'s params would be left empty"
+                )
+            }
+            DraftError::NoParamInsertionAnchor { variable } => {
+                write!(
+                    formatter,
+                    "variable {variable} has no surviving params entry"
+                )
+            }
+            DraftError::NewKeyIsATypedSetting { .. } => {
+                formatter.write_str("a new key names a typed setting")
+            }
+            DraftError::InsertionKeyAlreadyPresent { edit } => {
+                write!(formatter, "edit {edit} inserts a key already there")
             }
         } // End of the match over every refusal
     } // End of function fmt() for DraftError

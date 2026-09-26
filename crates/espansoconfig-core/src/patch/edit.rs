@@ -4150,8 +4150,18 @@ pub fn apply_edits(source: &str, edits: &[DocumentEdit]) -> Result<PatchedDocume
     // finding). Exempting the list here drops only that digest: its key and
     // position are still compared, and the list's own item expectation, folded
     // below from `sequences`, still checks every kept and new item.
+    //
+    // And, since Phase 4-3, every **mapping** a structural claim of the same
+    // batch changes. A new entry in `<match>.vars[i].params` beside a new field
+    // of the match changed the `vars` sibling's digest, so the match's own claim
+    // refused a disjoint batch (the 4-3 review's first finding); a nested field
+    // removal beside a match-level insertion met the same refusal. Only the
+    // ancestor's digest of that entry is dropped: its key and position are still
+    // compared, and the nested mapping's own folded expectation checks its
+    // inserted, removed and kept entries and their order.
     let mut changed = rewritten.clone();
     changed.extend(sequences.iter().map(|claim| claim.sequence_id));
+    changed.extend(expectations.iter().map(|claim| claim.mapping_id));
     let mut expectations = fold_expectations(&index, expectations, &changed)?;
     let mut sequences = fold_item_expectations(&index, sequences, &touched)?;
     // Every path an expectation is re-resolved by is an **original** path. An

@@ -30,8 +30,11 @@
 //! the batch names something inside one match's closed surface, and no edit of
 //! the batch depends on another edit of the batch.** Since Phase 3-2 that
 //! surface includes the cardinality and the presence of two lists, `triggers`
-//! and `search_terms`, and nothing else's.
+//! and `search_terms`; since Phase 4-3 it also includes the cardinality of one
+//! open mapping, a variable's `params`, by new author-named entries of a scalar
+//! or a flat list of scalars — and nothing else's.
 
+use crate::draft::author_key::{author_key_fault, TYPED_SETTINGS};
 use crate::draft::error::DraftError;
 use crate::draft::match_draft::{
     FieldSubstitution, MatchField, SequenceField, VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
@@ -90,11 +93,12 @@ impl NestedKeys {
 /// - a scalar edit may name one of seven shapes and nothing else, listed in
 ///   [`names_a_surface_scalar`]. Each is a scalar-node replacement at a position
 ///   that already exists, which is why none is a cardinality change;
-/// - an insertion — one entry or an ordered group of them — may only join the
-///   match's **own** mapping under schema-known scalar keys. An insertion into
-///   `<match>.triggers` would be a new sequence item and an insertion into `<match>.vars[0].params` a new
-///   mapping entry under a key no schema fixes; both are refused here, and the
-///   second is 2b-2b-2's D1 stated as a shape. That an insertion's *value* is
+/// - an insertion — one entry or an ordered group of them — may join the
+///   match's **own** mapping under schema-known scalar keys, and one open
+///   mapping under the Phase 4-3 shape listed last. An insertion into
+///   `<match>.triggers` would be a new sequence item and is refused here, and
+///   so is every other insertion under a key no schema fixes — 2b-2b-2's D1
+///   stated as a shape, lifted for that one shape only. That an insertion's *value* is
 ///   always a scalar needs no check — a [`crate::patch::FieldInsert`] carries a
 ///   `String` and renders it through [`crate::emit::choose_scalar`], so there is
 ///   no spelling of it that builds a collection;
@@ -113,12 +117,21 @@ impl NestedKeys {
 ///   `vars`, `depends_on`, a `params` list, `form_fields` options and `matches`
 ///   itself are refused here, whatever the engine could do to them;
 /// - a shape switch may only turn `trigger` or `regex` into a `triggers` list,
-///   or a `triggers` list into `trigger` or `regex`.
+///   or a `triggers` list into `trigger` or `regex`;
+/// - since Phase 4-3, one named shape more: an insertion **group** into
+///   `<match>.vars[i].params` itself ([`names_a_params_insertion`]) — the one
+///   open mapping a draft may add entries to — whose every entry is a scalar or
+///   a flat list of scalars ([`EntryValue::Scalar`], [`EntryValue::ScalarList`];
+///   never plain source) and whose every key passes the text rules of ruling 7
+///   and is not one of ruling 4's typed settings (`crate::draft::author_key`). A single [`crate::patch::FieldInsert`] there,
+///   and any insertion into a deeper or another open mapping, is still refused.
 ///
 /// **Nothing deeper than those shapes passes.** A path one segment longer than
 /// the deepest legal one fails, and
 /// `a_path_one_segment_deeper_than_the_surface_is_refused` is the test that says
-/// so rather than the sentence.
+/// so rather than the sentence, and
+/// `an_insertion_one_segment_deeper_than_params_is_refused` says it for the
+/// Phase 4-3 shape.
 ///
 /// `mapping` is the path of the match's own mapping.
 pub fn check_closed_surface(
@@ -136,13 +149,14 @@ pub fn check_closed_surface(
                 insert.mapping() == mapping && MatchField::from_key(insert.key()).is_some()
             }
             DocumentEdit::InsertFields(group) => {
-                group.mapping() == mapping
+                let own = group.mapping() == mapping
                     && group.entries().iter().all(|(key, value)| match value {
                         EntryValue::Scalar(_) | EntryValue::PlainSource(_) => {
                             MatchField::from_key(key).is_some()
                         }
                         EntryValue::ScalarList(_) => SequenceField::from_key(key).is_some(),
-                    })
+                    });
+                own || names_a_params_insertion(mapping, group.mapping(), group.entries())
             }
             DocumentEdit::SubstituteKey(substitution) => {
                 names_a_substitution(mapping, substitution.field(), substitution.key())
@@ -211,7 +225,13 @@ pub fn check_closed_surface(
 ///    holds;
 /// 9. an item insertion landing exactly where the same batch removes an item of
 ///    the same list (Phase 3-2) — the two replacements would share a start, and
-///    nothing in the batch says which comes first.
+///    nothing in the batch says which comes first;
+/// 10. since Phase 4-3, checks 4 to 7 restated for an insertion into a **nested**
+///     mapping against the key list `nested` gives for it — plus a key that
+///     mapping already holds, or that two insertions of the batch both write
+///     there ([`DraftError::InsertionKeyAlreadyPresent`]). A nested insertion
+///     into a mapping `nested` does not describe is refused, because its anchor
+///     cannot be shown to be original.
 pub fn check_batch_independence(
     mapping: &DocumentPath,
     original_keys: &[String],
@@ -222,6 +242,7 @@ pub fn check_batch_independence(
     check_no_removal_contains_another_edit(edits)?;
     check_every_named_key_is_unique(mapping, original_keys, nested, edits)?;
     check_every_anchor_survives(mapping, original_keys, edits)?;
+    check_every_nested_insertion_is_independent(mapping, nested, edits)?;
     check_no_substitution_duplicates_a_key(original_keys, edits)?;
     check_no_insertion_lands_on_a_removal(edits)?;
     Ok(())
@@ -403,14 +424,12 @@ fn check_every_named_key_is_unique(
 /// Checks 4 to 7: every insertion's anchor is an original sibling the batch
 /// leaves alone, and no two insertion edits share one.
 ///
-/// **It is stated over the match's own mapping only, and Phase 2b-2b-2 did not
-/// need to generalise it**, because that phase derives no insertion below the
-/// match mapping at all (its decision D1). Every [`crate::patch::FieldInsert`]
-/// and [`crate::patch::FieldInsertGroup`] a drafted batch can hold therefore still
-/// names `mapping`, which [`check_closed_surface`] independently refuses
-/// otherwise, and `original_keys` is still the one list an anchor has to be found
-/// in. A later phase that inserts into an open mapping owes this function a
-/// nested key list of its own.
+/// **It is stated over the match's own mapping only.** An insertion into any
+/// other mapping — since Phase 4-3, a variable's `params` — is skipped here, both
+/// as an anchor and as a key it inserts, and is judged instead by
+/// [`check_every_nested_insertion_is_independent`] against the nested key list
+/// the caller gave for that mapping. `original_keys` is the one list an anchor of
+/// the match's own mapping has to be found in.
 ///
 /// # A group is one edit, and states its order (Phase 3-1)
 ///
@@ -433,8 +452,10 @@ fn check_every_anchor_survives(
     let mut removed: Vec<&str> = Vec::new();
     for edit in edits {
         match edit {
-            DocumentEdit::InsertField(insert) => inserted.push(insert.key()),
-            DocumentEdit::InsertFields(group) => {
+            DocumentEdit::InsertField(insert) if insert.mapping() == mapping => {
+                inserted.push(insert.key())
+            }
+            DocumentEdit::InsertFields(group) if group.mapping() == mapping => {
                 inserted.extend(group.entries().iter().map(|(key, _)| key.as_str()));
             }
             DocumentEdit::SubstituteKey(substitution) => {
@@ -453,8 +474,8 @@ fn check_every_anchor_survives(
     let mut anchors: Vec<(usize, &str)> = Vec::new();
     for (position, edit) in edits.iter().enumerate() {
         let sibling = match edit {
-            DocumentEdit::InsertField(insert) => insert.sibling(),
-            DocumentEdit::InsertFields(group) => group.sibling(),
+            DocumentEdit::InsertField(insert) if insert.mapping() == mapping => insert.sibling(),
+            DocumentEdit::InsertFields(group) if group.mapping() == mapping => group.sibling(),
             _ => continue,
         };
         // `None` means "the mapping's last entry", which is what
@@ -486,6 +507,123 @@ fn check_every_anchor_survives(
     } // End of the loop over the batch's insertions
     Ok(())
 } // End of function check_every_anchor_survives()
+
+/// One insertion edit of a batch, whichever primitive spells it: the mapping it
+/// writes into, its anchor's key (`None` for the mapping's last entry) and the
+/// keys it writes, in order.
+fn insertion_of(edit: &DocumentEdit) -> Option<(&DocumentPath, Option<&str>, Vec<&str>)> {
+    match edit {
+        DocumentEdit::InsertField(insert) => {
+            Some((insert.mapping(), insert.sibling(), vec![insert.key()]))
+        }
+        DocumentEdit::InsertFields(group) => Some((
+            group.mapping(),
+            group.sibling(),
+            group
+                .entries()
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect(),
+        )),
+        _ => None,
+    }
+} // End of function insertion_of()
+
+/// Check 10: every insertion into a **nested** mapping is independent of the rest
+/// of the batch (Phase 4-3).
+///
+/// Checks 4 to 7 restated one level down, against the key list `nested` holds for
+/// the insertion's own mapping rather than against `original_keys`, plus the one
+/// check an author-chosen key adds: the key is not one the mapping already holds,
+/// and no two insertions of the batch write the same key into one mapping
+/// ([`DraftError::InsertionKeyAlreadyPresent`]). Keys are compared as the decoded
+/// texts the lists hold; `nested` is the caller's account, as everywhere here.
+///
+/// An anchor counts as **removed** when any removal-like edit of the batch names
+/// it or an ancestor of it ([`contains`]) — exact where the match-level check
+/// over-approximates by first segment, because a nested path has no first
+/// segment of its own to stand for it.
+fn check_every_nested_insertion_is_independent(
+    mapping: &DocumentPath,
+    nested: &[NestedKeys],
+    edits: &[DocumentEdit],
+) -> Result<(), DraftError> {
+    let removals: Vec<&DocumentPath> = edits
+        .iter()
+        .filter_map(|edit| match edit {
+            DocumentEdit::RemoveField(removal) => Some(removal.field()),
+            DocumentEdit::SubstituteKey(substitution) => Some(substitution.field()),
+            DocumentEdit::SwitchShape(switch) => Some(switch.field()),
+            DocumentEdit::RemoveItem(removal) => Some(removal.item()),
+            _ => None,
+        })
+        .collect();
+    let mut written: Vec<(&DocumentPath, &str)> = Vec::new();
+    let mut anchors: Vec<(usize, &DocumentPath, &str)> = Vec::new();
+    for (position, edit) in edits.iter().enumerate() {
+        let Some((target, sibling, keys)) = insertion_of(edit) else {
+            continue;
+        };
+        if target == mapping {
+            continue;
+        }
+        let known = nested
+            .iter()
+            .find(|entry| entry.mapping() == target)
+            .ok_or(DraftError::InsertionAnchorNotInOriginal { edit: position })?;
+        for key in keys {
+            let repeated = written
+                .iter()
+                .any(|(held, seen)| *held == target && *seen == key);
+            if occurrences(known.keys(), key) > 0 || repeated {
+                return Err(DraftError::InsertionKeyAlreadyPresent { edit: position });
+            }
+            written.push((target, key));
+        } // End of the loop over the keys this insertion writes
+        let anchor = match sibling {
+            Some(key) => key,
+            None => known
+                .keys()
+                .last()
+                .map(String::as_str)
+                .ok_or(DraftError::InsertionAnchorNotInOriginal { edit: position })?,
+        };
+        anchors.push((position, target, anchor));
+    } // End of the loop over the batch's nested insertions
+
+    for &(position, target, anchor) in &anchors {
+        let inserted = written
+            .iter()
+            .any(|(held, key)| *held == target && *key == anchor);
+        if inserted {
+            return Err(DraftError::InsertionAnchorIsInserted { edit: position });
+        }
+        let known = nested
+            .iter()
+            .find(|entry| entry.mapping() == target)
+            .map_or(0, |entry| occurrences(entry.keys(), anchor));
+        if known == 0 {
+            return Err(DraftError::InsertionAnchorNotInOriginal { edit: position });
+        }
+        let anchor_path = target.clone().with_key(anchor);
+        if removals
+            .iter()
+            .any(|removal| contains(removal, &anchor_path))
+        {
+            return Err(DraftError::InsertionAnchorRemoved { edit: position });
+        }
+        let shared = anchors
+            .iter()
+            .find(|&&(other, held, key)| other < position && held == target && key == anchor);
+        if let Some(&(first, _, _)) = shared {
+            return Err(DraftError::SharedInsertionAnchor {
+                first,
+                second: position,
+            });
+        }
+    } // End of the loop over the nested insertions' anchors
+    Ok(())
+} // End of function check_every_nested_insertion_is_independent()
 
 /// Check 8: no substitution renames a key to one the original mapping holds.
 ///
@@ -600,6 +738,34 @@ fn names_a_trigger_switch(
         }
     }
 } // End of function names_a_trigger_switch()
+
+/// Whether an insertion group names the one open mapping a draft may add entries
+/// to — `<match>.vars[i].params` itself, never a path below it — with entries
+/// this surface can write there (Phase 4-3).
+///
+/// Every entry must be an [`EntryValue::Scalar`] or an [`EntryValue::ScalarList`]
+/// (an author-named parameter is a logical string or a list of them; plain
+/// source is not offered there), every key must pass the text rules of ruling 7
+/// (`crate::draft::author_key`), and no key may be one of ruling 4's typed
+/// settings, whose policy is a later step's. Duplicates are a batch-dependency
+/// question and are judged by [`check_batch_independence`].
+fn names_a_params_insertion(
+    mapping: &DocumentPath,
+    target: &DocumentPath,
+    entries: &[(String, EntryValue)],
+) -> bool {
+    let is_params = matches!(
+        suffix(mapping, target),
+        Some([PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(params)])
+            if vars == VARS_KEY && params == PARAMS_KEY
+    );
+    is_params
+        && entries.iter().all(|(key, value)| {
+            author_key_fault(key).is_none()
+                && !TYPED_SETTINGS.contains(&key.as_str())
+                && matches!(value, EntryValue::Scalar(_) | EntryValue::ScalarList(_))
+        })
+} // End of function names_a_params_insertion()
 
 /// Whether a substitution renames a schema-known scalar key of `mapping` itself
 /// to another form of the same family.

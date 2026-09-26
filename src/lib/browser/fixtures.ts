@@ -48,7 +48,9 @@ import type {
   ElidedValue,
   FieldView,
   FileKind,
+  FormFieldShape,
   HazardKind,
+  MappingPresence,
   MatchBadge,
   MatchOptions,
   MatchView,
@@ -133,19 +135,53 @@ export function scalarItem(text: string): ValueView {
  * @param items - The fixture's items, if it named any.
  * @returns The presence a projection of such a list would carry.
  */
-export function fixturePresence(items: readonly string[] | undefined): SequencePresence {
+export function fixturePresence(items: readonly unknown[] | undefined): SequencePresence {
   if (items === undefined || items.length === 0) {
     return { Absent: {} };
   }
-  const span = { start: 0, end: 0 };
-  return {
-    Items: {
-      location: { key_node: 0, key_span: span, value_node: 0, value_span: span, path: null },
-      flow: false,
-      count: items.length
-    }
-  };
+  return { Items: { location: ZERO_LOCATION, flow: false, count: items.length } };
 } // End of function fixturePresence()
+
+/** The zero location every fixture presence carries; no fixture slices by it. */
+const ZERO_LOCATION = {
+  key_node: 0,
+  key_span: { start: 0, end: 0 },
+  value_node: 0,
+  value_span: { start: 0, end: 0 },
+  path: null
+} as const;
+
+/**
+ * The presence a fixture mapping reports (Phase 4-3), by {@link fixturePresence}'s
+ * rule: no entries is `Absent`, and entries are a block mapping of that many at a
+ * zero location. A test that needs `Empty`, flow or a real location projects a
+ * document in Rust instead.
+ *
+ * @param entries - The fixture's entries, if it named any.
+ * @returns The presence a projection of such a mapping would carry.
+ */
+export function fixtureMappingPresence(entries: readonly unknown[] | undefined): MappingPresence {
+  if (entries === undefined || entries.length === 0) {
+    return { Absent: {} };
+  }
+  return { Entries: { location: ZERO_LOCATION, flow: false, count: entries.length } };
+} // End of function fixtureMappingPresence()
+
+/**
+ * The shape one fixture form field definition reports (Phase 4-3): its options
+ * are a block mapping when its value is a mapping and an unsupported scalar
+ * otherwise, and no fixture carries a `values` presence.
+ *
+ * @param definition - One entry of a fixture's `form_fields`.
+ * @returns The shape a projection of it would carry.
+ */
+export function fixtureFieldShape(definition: FieldView): FormFieldShape {
+  const options: MappingPresence =
+    'Mapping' in definition.value
+      ? fixtureMappingPresence(definition.value.Mapping)
+      : { UnsupportedShape: { location: ZERO_LOCATION, found: 'Scalar' } };
+  return { options, values: { Absent: {} } };
+} // End of function fixtureFieldShape()
 
 /**
  * One entry of a shallowly projected mapping.
@@ -325,7 +361,14 @@ export function makeVariable(overrides: VariableOverrides = {}): VariableView {
     declared_type: declared === undefined || declared === null ? null : scalar(declared),
     kind: overrides.kind ?? 'Absent',
     params: overrides.params ?? [],
+    params_presence: fixtureMappingPresence(overrides.params),
     depends_on: overrides.dependsOn ?? [],
+    depends_on_presence: fixturePresence(overrides.dependsOn),
+    // Fixtures describe no kind-dependent container; a test that needs one
+    // projects a document in Rust.
+    list_param_presence: null,
+    fields_presence: null,
+    field_shapes: [],
     inject_vars:
       overrides.injectVars === undefined || overrides.injectVars === null
         ? null
@@ -566,7 +609,10 @@ export function makeMatch(overrides: MatchOverrides = {}): MatchView {
       anchor: optionalScalar(optionTexts.anchor)
     },
     vars: overrides.vars ?? [],
+    vars_presence: fixturePresence(overrides.vars),
     form_fields: overrides.formFields ?? [],
+    form_fields_presence: fixtureMappingPresence(overrides.formFields),
+    form_field_shapes: (overrides.formFields ?? []).map(fixtureFieldShape),
     badges: overrides.badges ?? [],
     blocking_hazard: overrides.blockingHazard ?? null,
     safely_editable: overrides.safelyEditable ?? true,

@@ -1750,20 +1750,17 @@ fn removing_an_open_entry_whose_value_was_never_displayed_is_refused_as_a_decisi
         })
     );
 
-    // The same for a sequence, which a user *has* seen — the refusal is about
-    // the whole entry going away, not about the element values.
+    // A flat list of scalars **was** displayed in full, and since Phase 4-3 its
+    // removal is lifted (`tests/draft_params.rs` drives it). This variable's
+    // `values` is its only parameter, so the refusal it now meets is the one
+    // about the container — removing it would leave `params:` holding a null
+    // (ruling 8) — and not a claim that the list was never shown.
     let sequence = one_match(OPEN_KEYS);
     let draft = MatchDraft::new()
         .with_variable(VariableDraft::new(1).with_param(EntryDraft::new(0).removed()));
     assert_eq!(
         plan_match_edits(&sequence, &draft),
-        Err(DraftError::NestedRemovalWouldDiscardUnshownStructure {
-            target: DraftTarget::Param {
-                variable: 1,
-                entry: 0,
-            },
-            found: ValueKind::Sequence,
-        })
+        Err(DraftError::ParamsWouldBeEmpty { variable: 1 })
     );
 } // End of function removing_an_open_entry_whose_value_was_never_displayed_is_refused_as_a_decision()
 

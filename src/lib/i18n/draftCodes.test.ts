@@ -33,6 +33,9 @@ import type { DraftError, DraftErrorName, DraftTarget } from '../ipc/types';
 /** A drafted address, for a sample whose refusal is about one. */
 const TARGET: DraftTarget = { Param: { variable: 0, entry: 1 } };
 
+/** A new author-named entry's address, by position (Phase 4-3). */
+const NEW_PARAM: DraftTarget = { NewParam: { variable: 0, insertion: 1 } };
+
 /**
  * Every `DraftError` variant name, in declaration order.
  *
@@ -84,7 +87,21 @@ const DRAFT_ERROR_NAMES = [
   'SequenceWouldBeEmpty',
   'SwitchWouldDiscardItems',
   'NoSequenceInsertionAnchor',
-  'OptionNotPlainSource'
+  'OptionNotPlainSource',
+  'NewKeyIsEmpty',
+  'NewKeyHasALineBreak',
+  'NewKeyHasAControlCharacter',
+  'NewKeyIsAMergeKey',
+  'NewKeyDuplicatesAnEntry',
+  'NewKeyDuplicatesAnInsertion',
+  'NewKeyCannotBeCompared',
+  'ParamsAbsent',
+  'ParamsIsAFlowMapping',
+  'ParamsHasAnUnsupportedShape',
+  'ParamsWouldBeEmpty',
+  'NoParamInsertionAnchor',
+  'NewKeyIsATypedSetting',
+  'InsertionKeyAlreadyPresent'
 ] as const satisfies readonly DraftErrorName[];
 
 /**
@@ -141,7 +158,21 @@ const DRAFT_ERRORS: readonly DraftError[] = [
   { SequenceWouldBeEmpty: { field: 'search_terms' } },
   { SwitchWouldDiscardItems: { field: 'triggers', items: 3 } },
   { NoSequenceInsertionAnchor: { field: 'search_terms' } },
-  { OptionNotPlainSource: { field: 'word' } }
+  { OptionNotPlainSource: { field: 'word' } },
+  { NewKeyIsEmpty: { target: NEW_PARAM } },
+  { NewKeyHasALineBreak: { target: NEW_PARAM } },
+  { NewKeyHasAControlCharacter: { target: NEW_PARAM } },
+  { NewKeyIsAMergeKey: { target: NEW_PARAM } },
+  { NewKeyDuplicatesAnEntry: { target: NEW_PARAM, entry: 2 } },
+  { NewKeyDuplicatesAnInsertion: { target: NEW_PARAM, first: 0 } },
+  { NewKeyCannotBeCompared: { target: NEW_PARAM, entry: 1 } },
+  { ParamsAbsent: { variable: 0 } },
+  { ParamsIsAFlowMapping: { variable: 0 } },
+  { ParamsHasAnUnsupportedShape: { variable: 0, found: 'Scalar' } },
+  { ParamsWouldBeEmpty: { variable: 0 } },
+  { NoParamInsertionAnchor: { variable: 0 } },
+  { NewKeyIsATypedSetting: { target: NEW_PARAM } },
+  { InsertionKeyAlreadyPresent: { edit: 0 } }
 ];
 
 // `never` exactly when the table above names every member of the union, and the
@@ -170,8 +201,8 @@ describe('the draft refusal samples', () => {
     expect(DRAFT_ERRORS.map(nameOf)).toEqual([...DRAFT_ERROR_NAMES]);
   });
 
-  it('hold the forty-four variants Phase 4-1 measured', () => {
-    expect(DRAFT_ERROR_NAMES.length).toBe(44);
+  it('hold the fifty-eight variants Phase 4-3 measured', () => {
+    expect(DRAFT_ERROR_NAMES.length).toBe(58);
   });
 }); // End of the "draft refusal samples" suite
 

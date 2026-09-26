@@ -1,16 +1,18 @@
 //! From a draft to the smallest batch that realises it.
 
 use crate::draft::audit::{check_batch_independence, check_closed_surface, NestedKeys};
+use crate::draft::author_key::{author_key_fault, AuthorKeyFault, TYPED_SETTINGS};
 use crate::draft::bulk::is_plain_source;
 use crate::draft::error::DraftError;
 use crate::draft::field::DraftField;
 use crate::draft::match_draft::{
-    DraftTarget, EntryDraft, FieldSubstitution, ItemDraft, MatchDraft, MatchField, SequenceField,
-    VariableDraft, VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
+    DraftTarget, EntryDraft, FieldSubstitution, ItemDraft, MatchDraft, MatchField, NewParamValue,
+    SequenceField, VariableDraft, VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
 };
 use crate::draft::sequence::{MatchStructure, SequenceIntent, TriggerSwitch};
 use crate::model::{
-    FieldView, MatchView, ScalarView, SequencePresence, UnknownReason, ValueKind, ValueView,
+    FieldView, MappingPresence, MatchView, ScalarView, SequencePresence, UnknownReason, ValueKind,
+    ValueView, VariableView,
 };
 use crate::patch::{
     DocumentEdit, DocumentPath, EntryValue, FieldInsert, FieldInsertGroup, FieldRemoval,
@@ -77,12 +79,27 @@ use crate::patch::{
 ///
 /// **The third row of that table is the match mapping's alone.** Below it —
 /// inside a variable, a `params` mapping or a `form_fields` entry — an absent
-/// target is *refused*, never inserted, because this engine writes no key string
-/// that no schema fixes (2b-2b-2's decision D1, and
+/// target is *refused*, never inserted (2b-2b-2's decision D1, and
 /// [`DraftError::TargetDoesNotExist`] is where it is written down). The equality
 /// rule itself is unchanged and is applied by the same [`plan_scalar`] at every
 /// depth: **there is one comparison in this module and there will not be a
 /// second.**
+///
+/// # The one insertion below the match mapping (Phase 4-3)
+///
+/// [`VariableDraft::insert_params`] is not a drafted *address* but an explicit
+/// request for new **author-named** `params` entries, and it is the one lift of
+/// D1 (ruling 7 of `docs/decisions/4-split-notes.md` §3). The key is decoded text
+/// the engine spells in key context; it is refused, by position and never by
+/// text, when it is empty, holds a line break or another control character, is
+/// `<<`, or decodes to the same text as an existing entry (however quoted) or an
+/// earlier insertion of the same draft. The variable's `params` must already be a
+/// block mapping with entries ([`crate::model::MappingPresence`]), and the new
+/// entries are one [`FieldInsertGroup`] written after the last entry the draft
+/// leaves in place. A `Remove` of a `params` entry whose value is a flat list of
+/// scalars is lifted in the same step — the list was shown in full — and a draft
+/// that would leave `params:` with no entry is refused rather than turned into a
+/// null ([`DraftError::ParamsWouldBeEmpty`], ruling 8).
 ///
 /// # The order of the checks is the contract
 ///
@@ -101,7 +118,9 @@ use crate::patch::{
 ///    [`MatchDraft::content_switch`] is one more substitution here, since Phase
 ///    3-5-1, so `plan_match_edits` alone plans a switch of content kind; and,
 ///    since Phase 4-1, every `Set` of a plain-source option is plain source
-///    ([`DraftError::OptionNotPlainSource`]);
+///    ([`DraftError::OptionNotPlainSource`]); and, since Phase 4-3, every new
+///    author-named key meets ruling 7's text rules and no two new keys of one
+///    variable decode alike ([`check_new_keys_are_admissible`]);
 /// 6. every drafted field is planned, in [`MatchField::ALL`] order, then every
 ///    drafted sequence element, then every drafted variable, then every drafted
 ///    `form_fields` entry, each in the draft's own order, and last the absent
@@ -300,6 +319,7 @@ pub fn plan_match_edits_with(
     check_substitutions_are_coherent(draft, substitutions)?;
     check_structure_is_coherent(view, draft, structure)?;
     check_options_are_plain_source(draft)?;
+    check_new_keys_are_admissible(draft)?;
 
     let entries = visible_entries(view);
     let mut edits: Vec<DocumentEdit> = Vec::new();
@@ -1227,16 +1247,182 @@ fn plan_vars(
         for field in VariableField::ALL {
             plan_variable_scalar(variable, drafted, &at, field, edits)?;
         } // End of the loop over the variable's schema-known scalars
-        if drafted.params.is_empty() {
+        if drafted.params.is_empty() && drafted.insert_params.is_empty() {
             continue;
         }
         let params = at.with_key(PARAMS_KEY);
         let owner = OpenMapping::Params { variable: index };
         plan_open_mapping(&variable.params, &drafted.params, &params, owner, edits)?;
+        check_params_keep_an_entry(variable, drafted)?;
+        plan_new_params(variable, drafted, &params, edits)?;
         nested.push(NestedKeys::new(params, nameable_keys(&variable.params)));
     } // End of the loop over the drafted variables
     Ok(())
 } // End of function plan_vars()
+
+/// Refuses a draft that removes every entry of a variable's `params` and adds
+/// none (Phase 4-3, ruling 8).
+///
+/// [`crate::patch::FieldRemoval`] would do it, and the file would be left with
+/// `params:` holding nothing — a YAML null, not an empty mapping. A container is
+/// removed only by an explicit container-removal intent, which a draft cannot
+/// express yet, so the state is refused by name instead of arrived at silently.
+/// The drafted removals are already resolved and distinct
+/// ([`check_no_index_is_drafted_twice`]), so counting them is counting entries.
+fn check_params_keep_an_entry(
+    variable: &VariableView,
+    drafted: &VariableDraft,
+) -> Result<(), DraftError> {
+    let removed = drafted
+        .params
+        .iter()
+        .filter(|entry| entry.value == DraftField::Remove)
+        .count();
+    if !variable.params.is_empty()
+        && removed == variable.params.len()
+        && drafted.insert_params.is_empty()
+    {
+        return Err(DraftError::ParamsWouldBeEmpty {
+            variable: drafted.index,
+        });
+    }
+    Ok(())
+} // End of function check_params_keep_an_entry()
+
+/// Plans a variable's new author-named `params` entries as **one**
+/// [`FieldInsertGroup`] (Phase 4-3).
+///
+/// Three things are decided here, each a refusal by name and never by key text:
+///
+/// 1. **the container.** `params` must be a block mapping with at least one
+///    entry ([`MappingPresence::is_block_with_entries`]). Absent, flow (`{}`
+///    included) and non-mapping shapes are three refusals: creating the
+///    container is a later operation, and a flow mapping is never converted;
+/// 2. **duplicates against the file.** Every existing key must be a decoded
+///    scalar, so the comparison can be made at all
+///    ([`DraftError::NewKeyCannotBeCompared`]), and no existing key may decode to
+///    a new key's text ([`DraftError::NewKeyDuplicatesAnEntry`]) — whatever
+///    either is quoted as, and whether or not the draft removes that entry;
+/// 3. **the anchor.** The last entry the draft does not remove and whose
+///    successor it does not remove either — the insertion point would otherwise
+///    be the first byte of that successor's removal, which the engine refuses as
+///    an overlap. It must be nameable ([`nameable_key`]).
+///
+/// The key text rules and duplicates among the draft's own insertions were
+/// checked at intent level ([`check_new_keys_are_admissible`]).
+fn plan_new_params(
+    variable: &VariableView,
+    drafted: &VariableDraft,
+    params: &DocumentPath,
+    edits: &mut Vec<DocumentEdit>,
+) -> Result<(), DraftError> {
+    if drafted.insert_params.is_empty() {
+        return Ok(());
+    }
+    let index = drafted.index;
+    match &variable.params_presence {
+        MappingPresence::Absent {} => return Err(DraftError::ParamsAbsent { variable: index }),
+        MappingPresence::UnsupportedShape { found, .. } => {
+            return Err(DraftError::ParamsHasAnUnsupportedShape {
+                variable: index,
+                found: *found,
+            })
+        }
+        MappingPresence::Empty { .. } | MappingPresence::Entries { flow: true, .. } => {
+            return Err(DraftError::ParamsIsAFlowMapping { variable: index })
+        }
+        MappingPresence::Entries { flow: false, .. } => {}
+    } // End of the match over the shape of `params`
+
+    for (insertion, new) in drafted.insert_params.iter().enumerate() {
+        let target = DraftTarget::NewParam {
+            variable: index,
+            insertion,
+        };
+        for (entry, field) in variable.params.iter().enumerate() {
+            let Some(key) = field.key.as_ref().filter(|key| key.decoded) else {
+                return Err(DraftError::NewKeyCannotBeCompared { target, entry });
+            };
+            if key.text == new.key {
+                return Err(DraftError::NewKeyDuplicatesAnEntry { target, entry });
+            }
+        } // End of the loop over the existing entries
+    } // End of the loop over the new entries
+
+    let removed = |entry: usize| {
+        drafted
+            .params
+            .iter()
+            .any(|drafted| drafted.index == entry && drafted.value == DraftField::Remove)
+    };
+    let anchor = (0..variable.params.len())
+        .rev()
+        .find(|&entry| !removed(entry) && !removed(entry + 1))
+        .ok_or(DraftError::NoParamInsertionAnchor { variable: index })?;
+    let sibling = nameable_key(
+        &variable.params,
+        anchor,
+        DraftTarget::Param {
+            variable: index,
+            entry: anchor,
+        },
+    )?
+    .to_owned();
+    let entries: Vec<(String, EntryValue)> = drafted
+        .insert_params
+        .iter()
+        .map(|new| {
+            let value = match &new.value {
+                NewParamValue::Scalar(value) => EntryValue::Scalar(value.clone()),
+                NewParamValue::List(items) => EntryValue::ScalarList(items.clone()),
+            };
+            (new.key.clone(), value)
+        })
+        .collect();
+    if let Some(group) = FieldInsertGroup::typed(params.clone(), Some(sibling), entries) {
+        edits.push(group.into());
+    }
+    Ok(())
+} // End of function plan_new_params()
+
+/// Refuses a new author-named key whose **text** breaks ruling 7 or names one of
+/// ruling 4's typed settings, and two new keys of one variable draft that decode
+/// alike (Phase 4-3).
+///
+/// **Intent level, and before any diffing**, for
+/// [`check_no_index_is_drafted_twice`]'s reason: none of it depends on the file.
+/// Every refusal names the insertion's position ([`DraftTarget::NewParam`]) and
+/// never its text (`CLAUDE.md` §1).
+fn check_new_keys_are_admissible(draft: &MatchDraft) -> Result<(), DraftError> {
+    for drafted in &draft.vars {
+        for (insertion, new) in drafted.insert_params.iter().enumerate() {
+            let target = DraftTarget::NewParam {
+                variable: drafted.index,
+                insertion,
+            };
+            if let Some(fault) = author_key_fault(&new.key) {
+                return Err(match fault {
+                    AuthorKeyFault::Empty => DraftError::NewKeyIsEmpty { target },
+                    AuthorKeyFault::LineBreak => DraftError::NewKeyHasALineBreak { target },
+                    AuthorKeyFault::ControlCharacter => {
+                        DraftError::NewKeyHasAControlCharacter { target }
+                    }
+                    AuthorKeyFault::MergeKey => DraftError::NewKeyIsAMergeKey { target },
+                });
+            }
+            if TYPED_SETTINGS.contains(&new.key.as_str()) {
+                return Err(DraftError::NewKeyIsATypedSetting { target });
+            }
+            let earlier = drafted.insert_params[..insertion]
+                .iter()
+                .position(|seen| seen.key == new.key);
+            if let Some(first) = earlier {
+                return Err(DraftError::NewKeyDuplicatesAnInsertion { target, first });
+            }
+        } // End of the loop over one variable's new entries
+    } // End of the loop over the drafted variables
+    Ok(())
+} // End of function check_new_keys_are_admissible()
 
 /// Refuses a drafted variable whose own mapping writes a modelled key twice.
 ///
@@ -1284,9 +1470,9 @@ fn check_no_key_of_the_variable_is_repeated(
 ///
 /// **An absent one is refused, never inserted** (D1). The projection reports
 /// `None` both for a key that is not there and for one holding a shape the
-/// schema does not use, and neither can be honoured: this phase adds no entry
-/// below the match mapping, and no primitive replaces a collection node with a
-/// scalar one.
+/// schema does not use, and neither can be honoured: a draft adds no variable
+/// scalar (the Phase 4-3 lift covers new `params` entries only), and no
+/// primitive replaces a collection node with a scalar one.
 fn plan_variable_scalar(
     variable: &crate::model::VariableView,
     drafted: &VariableDraft,
@@ -1381,23 +1567,36 @@ fn plan_open_mapping(
         let at = mapping
             .clone()
             .with_key(nameable_key(fields, entry, target)?);
-        plan_entry_value(field, &drafted.value, &at, target, edits)?;
+        plan_entry_value(field, &drafted.value, &at, target, owner, edits)?;
         plan_entry_items(field, drafted, &at, owner, edits)?;
     } // End of the loop over this mapping's drafted entries
     Ok(())
 } // End of function plan_open_mapping()
 
 /// Plans one open entry's scalar value.
+///
+/// A `Remove` takes a scalar entry away, and — since Phase 4-3, and in a
+/// variable's `params` only — an entry whose value is a **flat list of scalars**
+/// ([`is_a_scalar_list`]): every byte of it was displayed as an item, so removing
+/// it discards nothing the editor never showed. A mapping, a list holding a
+/// collection or an alias, and every list under a form field's options are still
+/// refused as [`DraftError::NestedRemovalWouldDiscardUnshownStructure`].
 fn plan_entry_value(
     field: &FieldView,
     intent: &DraftField<String>,
     at: &DocumentPath,
     target: DraftTarget,
+    owner: OpenMapping,
     edits: &mut Vec<DocumentEdit>,
 ) -> Result<(), DraftError> {
+    let removable_list =
+        matches!(owner, OpenMapping::Params { .. }) && is_a_scalar_list(&field.value);
     match (intent, field.value.as_scalar()) {
         (DraftField::Unchanged, _) => {}
         (DraftField::Remove, Some(_)) => edits.push(FieldRemoval::new(at.clone()).into()),
+        (DraftField::Remove, None) if removable_list => {
+            edits.push(FieldRemoval::new(at.clone()).into())
+        }
         (DraftField::Remove, None) => {
             return Err(DraftError::NestedRemovalWouldDiscardUnshownStructure {
                 target,
@@ -1512,6 +1711,14 @@ fn nameable_keys(fields: &[FieldView]) -> Vec<String> {
         .map(|key| key.text.clone())
         .collect()
 } // End of function nameable_keys()
+
+/// Whether a projected value is a sequence whose every item is a scalar — `[]`
+/// included (Phase 4-3).
+fn is_a_scalar_list(value: &ValueView) -> bool {
+    value
+        .as_sequence()
+        .is_some_and(|items| items.iter().all(|item| item.as_scalar().is_some()))
+}
 
 /// What kind of node a projected value is.
 fn kind_of(value: &ValueView) -> ValueKind {

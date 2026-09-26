@@ -26,11 +26,14 @@
 //!   position in the projection; Rust reads the key out of the projection to
 //!   build the path. A caller can only name what it was shown, and no refusal
 //!   carries a byte of the owner's configuration (`CLAUDE.md` section 1);
-//! - **nothing is inserted below the match mapping.** A drafted address the
-//!   projection cannot resolve is refused by name. Writing an author-chosen key
-//!   would be the first time this engine composes a key string that no schema
-//!   fixes, and that needs its own anchor machinery, its own emission checks and
-//!   its own review — `docs/decisions/2b-2b-2-notes.md` decision D1;
+//! - **nothing is inserted below the match mapping but one thing.** A drafted
+//!   address the projection cannot resolve is refused by name, never created
+//!   (`docs/decisions/2b-2b-2-notes.md` decision D1). The one insertion since
+//!   Phase 4-3 is explicit: a new **author-named** entry of an existing
+//!   variable's block `params` ([`VariableDraft::insert_params`]), under ruling
+//!   7 of `docs/decisions/4-split-notes.md` §3 — its key is decoded text the
+//!   engine spells in key context, and every refusal about it names a position,
+//!   never the text;
 //! - **an open value is a scalar or a sequence of scalars.** Anything else is
 //!   named and then refused, in both directions: a `Set` cannot replace a
 //!   collection node with a scalar one, and a `Remove` would discard bytes this
@@ -148,6 +151,7 @@
 //! crate that may write a user's file.
 
 mod audit;
+mod author_key;
 mod bulk;
 mod error;
 mod field;
@@ -166,7 +170,8 @@ pub use error::DraftError;
 pub use field::DraftField;
 pub use match_draft::{
     ContentForm, ContentSwitch, DraftTarget, EntryDraft, FieldSubstitution, FormFieldDraft,
-    ItemDraft, MatchDraft, MatchField, SequenceField, TriggerForm, VariableDraft, VariableField,
+    ItemDraft, MatchDraft, MatchField, NewParam, NewParamValue, SequenceField, TriggerForm,
+    VariableDraft, VariableField,
 };
 pub use new_match::{NewContent, NewMatch, NewTrigger, TriggerList};
 pub use plan::{plan_match_edits, plan_match_edits_with, plan_match_edits_with_substitutions};

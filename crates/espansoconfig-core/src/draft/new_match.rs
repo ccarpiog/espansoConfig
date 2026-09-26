@@ -158,7 +158,8 @@ impl NewContent {
 /// spell, and the caller would find that out from a refusal rather than from the
 /// type. A raw list of key/value pairs is refused by a rule that predates this
 /// type: `docs/decisions/2b-2b-2-notes.md` decision D1 forbids this engine
-/// emitting a key string that no schema fixes.
+/// emitting a key string that no schema fixes, and its one Phase 4-3 lift — a
+/// new `params` entry of an existing variable — never reaches creation.
 ///
 /// **The trigger and the content are mandatory.** A trigger with no body, or a
 /// body nothing fires, is not a usable espanso match, and this application

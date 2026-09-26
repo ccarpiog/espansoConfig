@@ -91,8 +91,8 @@ pub use profile::{ConfigProfileView, FILTER_KEYS, SCOPING_KEYS};
 pub use scalar::ScalarView;
 pub use unknown::{MappingCoverage, UnknownEntry, UnknownReason};
 pub use value::{
-    mapping_entries, AliasView, FieldLocation, FieldView, SequencePresence, ValueKind,
-    ValueProjection, ValueView, MAX_VALUE_DEPTH,
+    mapping_entries, AliasView, FieldLocation, FieldView, FormFieldShape, MappingPresence,
+    SequencePresence, ValueKind, ValueProjection, ValueView, MAX_VALUE_DEPTH,
 };
 pub use variable::{VariableKind, VariableView};
 

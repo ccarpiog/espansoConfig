@@ -680,8 +680,10 @@ function ownedIdentityOf(id: MatchId | null): MatchId | null {
  *
  * **It copies one level, and `id` one level further.** Every field is read here,
  * once, and written into a plain own-property object; the *values* of those
- * fields — `trigger`, `content`, `options`, `search_terms_presence`, and the
- * arrays `search_terms`, `vars`, `form_fields`, `badges` and `unknown_entries`
+ * fields — `trigger`, `content`, `options`, `search_terms_presence`,
+ * `vars_presence`, `form_fields_presence`, and the
+ * arrays `search_terms`, `vars`, `form_fields`, `form_field_shapes`, `badges` and
+ * `unknown_entries`
  * along with their
  * elements — are still the command's own objects, and a getter or a proxy trap
  * on one of those runs whenever something reads it. **`id` is the one
@@ -706,7 +708,10 @@ function ownedMatchOf(match: MatchView): MatchView {
     search_terms_presence: match.search_terms_presence,
     options: match.options,
     vars: match.vars,
+    vars_presence: match.vars_presence,
     form_fields: match.form_fields,
+    form_fields_presence: match.form_fields_presence,
+    form_field_shapes: match.form_field_shapes,
     badges: match.badges,
     blocking_hazard: match.blocking_hazard,
     safely_editable: match.safely_editable,

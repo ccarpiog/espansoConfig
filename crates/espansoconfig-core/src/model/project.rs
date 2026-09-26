@@ -9,9 +9,9 @@
 //! is how a field quietly stops being recorded.
 
 use crate::model::{
-    mapping_entries, Diagnostic, DiagnosticCode, FieldLocation, MappingCoverage, MappingScan,
-    ScalarView, SequencePresence, UnknownEntry, UnknownReason, ValueKind, ValueView,
-    MAX_VALUE_DEPTH,
+    mapping_entries, Diagnostic, DiagnosticCode, FieldLocation, FormFieldShape, MappingCoverage,
+    MappingPresence, MappingScan, ScalarView, SequencePresence, UnknownEntry, UnknownReason,
+    ValueKind, ValueView, MAX_VALUE_DEPTH,
 };
 use crate::patch::DocumentPath;
 use crate::syntax::{ByteSpan, CollectionStyle, NodeId, NodeKind, SyntaxIndex, TriviaIndex};
@@ -340,41 +340,161 @@ impl<'a> Projector<'a> {
         slot: &mut Vec<ValueView>,
         presence: &mut SequencePresence,
     ) {
+        *presence = self.sequence_presence(key_node, value_node, path);
+        if self.kind_of(value_node) == ValueKind::Sequence {
+            *slot = self.scalar_sequence(value_node, key);
+            scan.model(key_node, key);
+        } else {
+            self.skip_shape(scan, key_node, key, value_node);
+        }
+    } // End of function scalar_sequence_field()
+
+    /// Where the entry `key_node: value_node` sits, read off the index.
+    ///
+    /// `path` is the path that names the value, when the containing mapping has
+    /// one. A node the index does not know contributes an empty span.
+    pub(crate) fn location(
+        &self,
+        key_node: NodeId,
+        value_node: NodeId,
+        path: Option<DocumentPath>,
+    ) -> FieldLocation {
         let span_of = |node: NodeId| {
             self.index
                 .node(node)
                 .map(|found| found.span)
                 .unwrap_or_default()
         };
-        let location = FieldLocation {
+        FieldLocation {
             key_node,
             key_span: span_of(key_node),
             value_node,
             value_span: span_of(value_node),
             path,
-        };
-        let found = self.kind_of(value_node);
-        if found == ValueKind::Sequence {
-            *slot = self.scalar_sequence(value_node, key);
-            let flow = self
-                .index
-                .node(value_node)
-                .is_some_and(|node| node.collection_style == Some(CollectionStyle::Flow));
-            *presence = if slot.is_empty() {
-                SequencePresence::Empty { location }
-            } else {
-                SequencePresence::Items {
-                    location,
-                    flow,
-                    count: slot.len(),
-                }
-            };
-            scan.model(key_node, key);
-        } else {
-            *presence = SequencePresence::UnsupportedShape { location, found };
-            self.skip_shape(scan, key_node, key, value_node);
         }
-    } // End of function scalar_sequence_field()
+    } // End of function location()
+
+    /// Whether and how a **list-valued** entry is written (Phase 3-2; shared
+    /// since Phase 4-3 by every list the projection describes).
+    ///
+    /// A pure reading of the index: it records nothing on any scan, so a caller
+    /// may ask it about an entry that some other walk models.
+    pub(crate) fn sequence_presence(
+        &self,
+        key_node: NodeId,
+        value_node: NodeId,
+        path: Option<DocumentPath>,
+    ) -> SequencePresence {
+        let location = self.location(key_node, value_node, path);
+        match self.index.node(value_node) {
+            Some(node) if node.kind == NodeKind::Sequence => {
+                if node.children.is_empty() {
+                    SequencePresence::Empty { location }
+                } else {
+                    SequencePresence::Items {
+                        location,
+                        flow: node.collection_style == Some(CollectionStyle::Flow),
+                        count: node.children.len(),
+                    }
+                }
+            }
+            _ => SequencePresence::UnsupportedShape {
+                location,
+                found: self.kind_of(value_node),
+            },
+        }
+    } // End of function sequence_presence()
+
+    /// Whether and how a **mapping-valued** entry is written (Phase 4-3).
+    ///
+    /// The mapping twin of [`Projector::sequence_presence`], and as pure.
+    pub(crate) fn mapping_presence(
+        &self,
+        key_node: NodeId,
+        value_node: NodeId,
+        path: Option<DocumentPath>,
+    ) -> MappingPresence {
+        let location = self.location(key_node, value_node, path);
+        match self.index.node(value_node) {
+            Some(node) if node.kind == NodeKind::Mapping => {
+                let count = mapping_entries(self.index, value_node).len();
+                if count == 0 {
+                    MappingPresence::Empty { location }
+                } else {
+                    MappingPresence::Entries {
+                        location,
+                        flow: node.collection_style == Some(CollectionStyle::Flow),
+                        count,
+                    }
+                }
+            }
+            _ => MappingPresence::UnsupportedShape {
+                location,
+                found: self.kind_of(value_node),
+            },
+        }
+    } // End of function mapping_presence()
+
+    /// The **first** entry of the mapping `mapping` whose key is a scalar that
+    /// decodes to `key`, as `(key_node, value_node)`.
+    ///
+    /// First, because that is the occurrence `crate::patch::path::resolve`
+    /// addresses and the one every other presence in this module describes. A
+    /// key that did not decode is never a match: its projected text is a raw
+    /// source slice, not the key.
+    pub(crate) fn first_entry(&self, mapping: NodeId, key: &str) -> Option<(NodeId, NodeId)> {
+        mapping_entries(self.index, mapping)
+            .into_iter()
+            .find(|(key_node, _)| {
+                self.index
+                    .node(*key_node)
+                    .and_then(|node| ScalarView::project(self.source, node))
+                    .is_some_and(|scalar| scalar.decoded && scalar.text == key)
+            })
+    } // End of function first_entry()
+
+    /// The presence of the list `key` inside the mapping `mapping` names, or
+    /// [`SequencePresence::Absent`] when `mapping` is not a mapping or holds no
+    /// such key. `path` is the path of `mapping` itself.
+    pub(crate) fn nested_sequence_presence(
+        &self,
+        mapping: NodeId,
+        key: &str,
+        path: &Option<DocumentPath>,
+    ) -> SequencePresence {
+        match self.first_entry(mapping, key) {
+            Some((key_node, value_node)) => {
+                self.sequence_presence(key_node, value_node, child_path(path, key))
+            }
+            None => SequencePresence::Absent {},
+        }
+    } // End of function nested_sequence_presence()
+
+    /// One [`FormFieldShape`] per entry of the field-definition mapping
+    /// `fields`, in source order — parallel to the entries
+    /// [`Projector::value`] projects for the same node. `path` is the path of
+    /// `fields` itself; an entry whose key is not a decoded scalar gets no path.
+    pub(crate) fn form_field_shapes(
+        &self,
+        fields: NodeId,
+        path: &Option<DocumentPath>,
+    ) -> Vec<FormFieldShape> {
+        let mut shapes = Vec::new();
+        for (key_node, value_node) in mapping_entries(self.index, fields) {
+            let key = self
+                .index
+                .node(key_node)
+                .and_then(|node| ScalarView::project(self.source, node))
+                .filter(|scalar| scalar.decoded);
+            let field_path = key.and_then(|scalar| child_path(path, &scalar.text));
+            let values = self.nested_sequence_presence(value_node, "values", &field_path);
+            shapes.push(FormFieldShape {
+                options: self.mapping_presence(key_node, value_node, field_path),
+                values,
+            });
+        } // End of the loop over the field definitions
+        shapes
+    } // End of function form_field_shapes()
 } // End of impl Projector
 
 /// Extends `base` with `key`, when the base path exists.

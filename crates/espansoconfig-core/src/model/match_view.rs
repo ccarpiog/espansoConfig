@@ -28,9 +28,10 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::model::project::{child_index, child_path, Projector};
+use crate::model::variable::{first_container_seen_before, skip_repeated_container};
 use crate::model::{
-    DiagnosticCode, FieldView, MappingScan, ScalarView, SequencePresence, UnknownEntry, ValueView,
-    VariableKind, VariableView,
+    DiagnosticCode, FieldView, FormFieldShape, MappingPresence, MappingScan, ScalarView,
+    SequencePresence, UnknownEntry, ValueView, VariableKind, VariableView,
 };
 use crate::patch::DocumentPath;
 use crate::syntax::{ByteSpan, HazardKind, NodeId};
@@ -63,6 +64,10 @@ const MODELLED_KEYS: [&str; 22] = [
     "vars",
     "anchor",
 ];
+
+/// The container keys of a match whose presence Phase 4-3 added: `vars` and
+/// `form_fields`. `triggers` and `search_terms` keep their Phase 3-2 handling.
+const MATCH_CONTAINERS: [&str; 2] = ["vars", "form_fields"];
 
 /// Session-local identity of one match, scoped to the parse it came from.
 ///
@@ -427,9 +432,21 @@ pub struct MatchView {
     pub options: MatchOptions,
     /// `vars`.
     pub vars: Vec<VariableView>,
+    /// Whether `vars` is written at all, and in what shape (Phase 4-3).
+    ///
+    /// An empty [`MatchView::vars`] is an absent key, `vars: []` or a `vars`
+    /// holding something that is not a list; only this tells them apart, so only
+    /// this is authority for inserting a container or an item.
+    pub vars_presence: SequencePresence,
     /// `form_fields`, projected shallowly and completely: its keys are the form
     /// author's field names, which no schema fixes.
     pub form_fields: Vec<FieldView>,
+    /// Whether `form_fields` is written at all, and in what shape (Phase 4-3).
+    pub form_fields_presence: MappingPresence,
+    /// One shape per entry of `form_fields`, in source order and parallel to
+    /// [`MatchView::form_fields`] (Phase 4-3). Empty when `form_fields` is not a
+    /// mapping with entries.
+    pub form_field_shapes: Vec<FormFieldShape>,
     /// The markers the snippet list shows, sorted and deduplicated.
     pub badges: Vec<MatchBadge>,
     /// The hazard that makes this match un-editable, or `None`.
@@ -496,9 +513,16 @@ impl MatchView {
         let mut scan = MappingScan::new(node, path.clone());
         let mut triggers_present = 0usize;
         let mut contents_present = 0usize;
+        // Every container key met so far, modelled or not (Phase 4-3 review):
+        // the first occurrence governs presence and entries.
+        let mut containers_seen: Vec<String> = Vec::new();
         for (key_node, key, value_node) in projector.entries(node, &mut scan) {
             if scan.is_claimed(&key) {
                 projector.skip_entry(&mut scan, key_node, &key, value_node, &MODELLED_KEYS);
+                continue;
+            }
+            if first_container_seen_before(&mut containers_seen, &MATCH_CONTAINERS, &key) {
+                skip_repeated_container(projector, &mut scan, key_node, &key, value_node);
                 continue;
             }
             let before = scan.modelled_count();
@@ -640,6 +664,8 @@ impl MatchView {
                     &mut view.options.anchor,
                 ),
                 "vars" => {
+                    view.vars_presence =
+                        projector.sequence_presence(key_node, value_node, child_path(&path, &key));
                     if projector.sequence_items(value_node).is_some() {
                         let vars_path = child_path(&path, &key);
                         view.vars = crate::model::variable::project_sequence(
@@ -651,10 +677,15 @@ impl MatchView {
                     }
                 }
                 "form_fields" => {
+                    let fields_path = child_path(&path, &key);
+                    view.form_fields_presence =
+                        projector.mapping_presence(key_node, value_node, fields_path.clone());
                     if projector.is_mapping(value_node) {
                         if let ValueView::Mapping(fields) = projector.value(value_node) {
                             view.form_fields = fields;
                         }
+                        view.form_field_shapes =
+                            projector.form_field_shapes(value_node, &fields_path);
                         scan.model(key_node, &key);
                     } else {
                         projector.skip_shape(&mut scan, key_node, &key, value_node);
@@ -715,7 +746,10 @@ impl MatchView {
             search_terms_presence: SequencePresence::default(),
             options: MatchOptions::default(),
             vars: Vec::new(),
+            vars_presence: SequencePresence::default(),
             form_fields: Vec::new(),
+            form_fields_presence: MappingPresence::default(),
+            form_field_shapes: Vec::new(),
             badges: Vec::new(),
             blocking_hazard: None,
             safely_editable: false,

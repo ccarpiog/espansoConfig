@@ -464,6 +464,39 @@ export type SequencePresence =
     }
   | { readonly UnsupportedShape: { readonly location: FieldLocation; readonly found: ValueKind } };
 
+/**
+ * Whether a mapping-valued entry below a match — a variable's `params`, a
+ * verbose form's `params.fields`, a match's `form_fields`, one form field's
+ * options — is written at all, and in what shape (Phase 4-3).
+ *
+ * The mapping twin of {@link SequencePresence}: the projected entry array alone
+ * cannot tell an absent key from `key: {}` or from a key holding a scalar. Every
+ * state crosses as a one-key object, `Absent` included. No screen draws it yet.
+ */
+export type MappingPresence =
+  | { readonly Absent: Record<string, never> }
+  | { readonly Empty: { readonly location: FieldLocation } }
+  | {
+      readonly Entries: {
+        readonly location: FieldLocation;
+        readonly flow: boolean;
+        readonly count: number;
+      };
+    }
+  | { readonly UnsupportedShape: { readonly location: FieldLocation; readonly found: ValueKind } };
+
+/**
+ * The container shape of one form field definition (Phase 4-3), one per entry of
+ * `form_fields` or of a verbose form's `params.fields`, parallel to that
+ * mapping's projected entries.
+ */
+export interface FormFieldShape {
+  /** The definition's own value, read as an option mapping. Never `Absent`. */
+  readonly options: MappingPresence;
+  /** The `values` option inside it; `Absent` when there is none. */
+  readonly values: SequencePresence;
+}
+
 /** A match's trigger side. All three fields are carried, never collapsed. */
 export interface TriggerSpec {
   /** `trigger`, as source text. */
@@ -532,8 +565,22 @@ export interface VariableView {
   readonly kind: VariableKind;
   /** `params`, projected shallowly and completely. */
   readonly params: readonly FieldView[];
+  /** Whether `params` is written at all, and in what shape (Phase 4-3). */
+  readonly params_presence: MappingPresence;
   /** `depends_on`, one item per source entry, in source order. */
   readonly depends_on: readonly ValueView[];
+  /** Whether `depends_on` is written at all, and in what shape (Phase 4-3). */
+  readonly depends_on_presence: SequencePresence;
+  /**
+   * The presence of the kind's one list parameter — `values` for `choice`,
+   * `choices` for `random`, `args` for `script` — or `null` for a kind that has
+   * none (Phase 4-3).
+   */
+  readonly list_param_presence: SequencePresence | null;
+  /** The presence of a verbose form's `params.fields`, or `null` when the kind is not `form`. */
+  readonly fields_presence: MappingPresence | null;
+  /** One shape per entry of `params.fields`, parallel to its entries (Phase 4-3). */
+  readonly field_shapes: readonly FormFieldShape[];
   /** `inject_vars`, as source text. */
   readonly inject_vars: ScalarView | null;
   /** Entries this projection did not model, never discarded. */
@@ -579,8 +626,17 @@ export interface MatchView {
   readonly options: MatchOptions;
   /** `vars`. */
   readonly vars: readonly VariableView[];
+  /**
+   * Whether `vars` is written at all, and in what shape (Phase 4-3). An empty
+   * {@link MatchView.vars} is no authority to insert a container or an item.
+   */
+  readonly vars_presence: SequencePresence;
   /** `form_fields`, projected shallowly and completely. */
   readonly form_fields: readonly FieldView[];
+  /** Whether `form_fields` is written at all, and in what shape (Phase 4-3). */
+  readonly form_fields_presence: MappingPresence;
+  /** One shape per entry of `form_fields`, parallel to its entries (Phase 4-3). */
+  readonly form_field_shapes: readonly FormFieldShape[];
   /** The markers the snippet list shows, sorted and deduplicated. */
   readonly badges: readonly MatchBadge[];
   /** The hazard that makes this match un-editable, or `null`. */
@@ -3000,14 +3056,35 @@ export interface EntryDraft {
 }
 
 /**
+ * The value of one new author-named `params` entry (Phase 4-3): one scalar or a
+ * flat list of scalars, each a logical string spelled by the codec in Rust.
+ */
+export type NewParamValue =
+  | { readonly Scalar: string }
+  | { readonly List: readonly string[] };
+
+/**
+ * One new **author-named** entry of an existing variable's block `params`
+ * mapping (Phase 4-3). The key is decoded text, spelled by Rust in key context;
+ * a refusal about it names the insertion's position, never its text.
+ */
+export interface NewParam {
+  /** The new entry's key, as decoded text. */
+  readonly key: string;
+  /** The new entry's value. */
+  readonly value: NewParamValue;
+}
+
+/**
  * One drafted variable of `vars`, addressed by its index in the projection.
  *
  * The three schema-known scalars are named; everything else a variable holds is
  * addressed positionally through {@link VariableDraft.params}. `depends_on` is
  * deliberately absent — it is a sequence this surface does not draft.
  *
- * **An absent field is refused, never inserted.** Nothing below the match
- * mapping is created by a draft.
+ * **An absent field is refused, never inserted**, with one exception since Phase
+ * 4-3: {@link VariableDraft.insert_params} adds new author-named entries to an
+ * existing block `params` mapping. No production caller sends one yet.
  */
 export interface VariableDraft {
   /** The variable's index in the projected `vars` list. */
@@ -3020,6 +3097,8 @@ export interface VariableDraft {
   readonly inject_vars: DraftField<string>;
   /** Drafted entries of the variable's `params` mapping. */
   readonly params: readonly EntryDraft[];
+  /** New author-named `params` entries, in the order they are written (Phase 4-3). */
+  readonly insert_params: readonly NewParam[];
 }
 
 /**
@@ -3265,6 +3344,7 @@ export type DraftTarget =
         readonly item: number;
       };
     }
+  | { readonly NewParam: { readonly variable: number; readonly insertion: number } }
   | { readonly FormField: { readonly index: number } }
   | { readonly FormFieldOption: { readonly field: number; readonly option: number } }
   | {
@@ -3320,7 +3400,21 @@ export type DraftErrorName =
   | 'SequenceWouldBeEmpty'
   | 'SwitchWouldDiscardItems'
   | 'NoSequenceInsertionAnchor'
-  | 'OptionNotPlainSource';
+  | 'OptionNotPlainSource'
+  | 'NewKeyIsEmpty'
+  | 'NewKeyHasALineBreak'
+  | 'NewKeyHasAControlCharacter'
+  | 'NewKeyIsAMergeKey'
+  | 'NewKeyDuplicatesAnEntry'
+  | 'NewKeyDuplicatesAnInsertion'
+  | 'NewKeyCannotBeCompared'
+  | 'ParamsAbsent'
+  | 'ParamsIsAFlowMapping'
+  | 'ParamsHasAnUnsupportedShape'
+  | 'ParamsWouldBeEmpty'
+  | 'NoParamInsertionAnchor'
+  | 'NewKeyIsATypedSetting'
+  | 'InsertionKeyAlreadyPresent';
 
 /**
  * Why a draft could not be turned into an edit batch.
@@ -3449,7 +3543,25 @@ export type DraftError =
    * quoted — by `save_match`'s planner and by `create_match`, before any
    * transaction. `field` is always one of those eight; the text is not carried.
    */
-  | { readonly OptionNotPlainSource: { readonly field: MatchField } };
+  | { readonly OptionNotPlainSource: { readonly field: MatchField } }
+  | { readonly NewKeyIsEmpty: { readonly target: DraftTarget } }
+  | { readonly NewKeyHasALineBreak: { readonly target: DraftTarget } }
+  | { readonly NewKeyHasAControlCharacter: { readonly target: DraftTarget } }
+  | { readonly NewKeyIsAMergeKey: { readonly target: DraftTarget } }
+  | { readonly NewKeyDuplicatesAnEntry: { readonly target: DraftTarget; readonly entry: number } }
+  | {
+      readonly NewKeyDuplicatesAnInsertion: { readonly target: DraftTarget; readonly first: number };
+    }
+  | { readonly NewKeyCannotBeCompared: { readonly target: DraftTarget; readonly entry: number } }
+  | { readonly ParamsAbsent: { readonly variable: number } }
+  | { readonly ParamsIsAFlowMapping: { readonly variable: number } }
+  | {
+      readonly ParamsHasAnUnsupportedShape: { readonly variable: number; readonly found: ValueKind };
+    }
+  | { readonly ParamsWouldBeEmpty: { readonly variable: number } }
+  | { readonly NoParamInsertionAnchor: { readonly variable: number } }
+  | { readonly NewKeyIsATypedSetting: { readonly target: DraftTarget } }
+  | { readonly InsertionKeyAlreadyPresent: { readonly edit: number } };
 
 // ---------------------------------------------------------------------------
 // The external-change reconciliation wire — Phase 2d-4b

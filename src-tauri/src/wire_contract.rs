@@ -30,7 +30,7 @@
 //!   names *and* JSON kinds.
 //! - **That every `DraftError` variant crosses as an object**, read out of the
 //!   core's own declaration rather than out of a sample list. The operand table
-//!   pins one shape per code, and a unit variant among the forty-four would make
+//!   pins one shape per code, and a unit variant among the fifty-eight would make
 //!   that shape false for exactly one refusal.
 //! - **The registered command list**, parsed independently out of
 //!   `generate_handler!` and compared with the union of `COMMAND_NAMES` and
@@ -66,8 +66,8 @@ use espansoconfig_core::emit::DecodeError;
 use espansoconfig_core::emit::NotReencodable;
 use espansoconfig_core::model::{
     ContentKind, Diagnostic, DiagnosticCode, DocumentContext, DocumentShape, DocumentView,
-    MatchBadge, MatchId, SequencePresence, TriggerKind, UnknownReason, ValueKind, ValueView,
-    VariableKind,
+    MappingPresence, MatchBadge, MatchId, SequencePresence, TriggerKind, UnknownReason, ValueKind,
+    ValueView, VariableKind,
 };
 use espansoconfig_core::patch::{
     DocumentPath, DuplicateSeam, EditError, MoveSeam, PathError, PathSegment, PresentationNote,
@@ -889,6 +889,15 @@ fn samples() -> Vec<(&'static str, Value)> {
         ("ContentSpec", json_of(&first.content)),
         ("MatchOptions", json_of(&first.options)),
         ("VariableView", json_of(variable)),
+        (
+            "FormFieldShape",
+            json_of(
+                second
+                    .form_field_shapes
+                    .first()
+                    .expect("the second match writes `form_fields`"),
+            ),
+        ),
         ("MatchView", json_of(first)),
         (
             "ConfigProfileView",
@@ -1075,6 +1084,48 @@ fn sequence_presence_samples() -> Vec<SequencePresence> {
     samples
 } // End of function sequence_presence_samples()
 
+/// One value of every [`MappingPresence`] state (Phase 4-3), each read off a
+/// projection rather than built, as [`sequence_presence_samples`] does.
+fn mapping_presence_samples() -> Vec<MappingPresence> {
+    let view = project(
+        "match/mappings.yml",
+        concat!(
+            "matches:\n",
+            "  - trigger: ':a'\n",
+            "    replace: x\n",
+            "  - trigger: ':b'\n",
+            "    form: '[[f]]'\n",
+            "    form_fields: {}\n",
+            "  - trigger: ':c'\n",
+            "    form: '[[f]]'\n",
+            "    form_fields:\n",
+            "      f:\n",
+            "        type: text\n",
+            "  - trigger: ':d'\n",
+            "    replace: y\n",
+            "    form_fields: not a mapping\n",
+        ),
+    );
+    let samples: Vec<MappingPresence> = view
+        .matches
+        .iter()
+        .map(|found| found.form_fields_presence.clone())
+        .collect();
+    assert!(
+        matches!(
+            samples.as_slice(),
+            [
+                MappingPresence::Absent {},
+                MappingPresence::Empty { .. },
+                MappingPresence::Entries { .. },
+                MappingPresence::UnsupportedShape { .. },
+            ]
+        ),
+        "the mapping presence fixture stopped producing one sample of each state: {samples:?}"
+    );
+    samples
+} // End of function mapping_presence_samples()
+
 /// Every externally tagged variant that carries operands, with its union.
 ///
 /// The three enumerations whose payloads are object types. `ValueView` is
@@ -1094,6 +1145,11 @@ fn tagged_samples() -> Vec<(&'static str, Value)> {
         sequence_presence_samples()
             .iter()
             .map(|presence| ("SequencePresence", json_of(presence))),
+    );
+    samples.extend(
+        mapping_presence_samples()
+            .iter()
+            .map(|presence| ("MappingPresence", json_of(presence))),
     );
     samples
 } // End of function tagged_samples()
@@ -1254,9 +1310,10 @@ fn every_tagged_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the tagged samples
       // Fourteen until Phase 3-2, whose four `SequencePresence` states are four
       // more — `Absent`'s empty payload among them, read as a checked zero-field
-      // payload.
+      // payload — and twenty-two since Phase 4-3, whose four `MappingPresence`
+      // states are four more again.
     assert_eq!(
-        checked, 18,
+        checked, 22,
         "the tagged-variant sample list stopped covering every variant that carries operands"
     );
 } // End of function every_tagged_variant_declares_exactly_the_operands_serde_writes()
@@ -1334,7 +1391,7 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
 /// one shape can ever be pinned for `draftRefused.error`, no matter how many
 /// variants `DraftError` has. `serde`'s externally tagged representation writes a
 /// unit variant as a bare string and everything else as a one-key object, so a
-/// single unit variant among the forty-four would make the pinned `'object'`
+/// single unit variant among the fifty-eight would make the pinned `'object'`
 /// false for that one refusal: `isCommandError` would reject it, and the user
 /// would read the generic fallback instead of the sentence
 /// `code.draftError.matchHasNoPath` that exists for it in both dictionaries.
@@ -1350,13 +1407,13 @@ fn every_draft_error_variant_crosses_as_an_object() {
     let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of("DraftError");
     assert_eq!(
         declared.len(),
-        44,
-        "DraftError declares 44 refusals since Phase 4-1: {declared:?}"
+        58,
+        "DraftError declares 58 refusals since Phase 4-3: {declared:?}"
     );
     assert!(
         bare.is_empty(),
         "a unit variant crosses as a bare string, which COMMAND_ERROR_OPERANDS cannot \
-         declare beside the forty-three objects; give it empty braces: {bare:?}"
+         declare beside the fifty-seven objects; give it empty braces: {bare:?}"
     );
 
     // The `serde` behaviour the assertion above stands on, observed rather than

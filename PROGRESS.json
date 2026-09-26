@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T11:17:50Z",
+  "updated": "2026-09-26T12:13:57Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 4, variables and forms, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1236,13 +1236,16 @@
       "status": "done",
       "summary": "Reproduces the missing external-change panel for list-item drafts (duplicate Svelte keys) and keys the rows by position; reviewed ship.",
       "risk": "high",
-      "review": "ship (Codex), docs/reviews/4-2.md"
+      "review": "ship (Codex), docs/reviews/4-2.md",
+      "commit": "8d2d840"
     },
     {
       "id": "4-3",
       "title": "Nested presence and author-key foundation",
-      "status": "queued",
-      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "status": "done",
+      "summary": "Core projects four-state presence for nested variable and form containers and inserts or removes author-named params entries.",
+      "risk": "high",
+      "review": "ship-with-fixes (Codex) — docs/reviews/4-3.md"
     },
     {
       "id": "4-4",

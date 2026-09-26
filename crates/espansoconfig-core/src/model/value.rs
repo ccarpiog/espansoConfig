@@ -151,7 +151,9 @@ pub struct FieldLocation {
 /// A `Vec<ValueView>` alone cannot tell `triggers:` absent from `triggers: []`:
 /// both project as no items. This is the distinction, stated once for every
 /// list the projection models by name — a match's `triggers` and
-/// `search_terms`, and a document's `imports`.
+/// `search_terms`, and a document's `imports` — and, since Phase 4-3, for
+/// `vars`, a variable's `depends_on`, a kind's list parameter and a form
+/// field's `values`.
 ///
 /// **Four states, spelled as four variants**, each a struct variant so it
 /// crosses the wire as a one-key object:
@@ -234,6 +236,113 @@ impl SequencePresence {
         }
     }
 } // End of impl SequencePresence
+
+/// Whether a **mapping-valued** entry is there, and in what shape (Phase 4-3).
+///
+/// The mapping twin of [`SequencePresence`], for the same reason: an empty
+/// projected entry list cannot tell an absent key from `key: {}`, and neither can
+/// tell those from a key holding a scalar, so an empty list is no authority to
+/// insert a container or an entry (`docs/decisions/4-split-notes.md` §2, 4-3).
+/// It describes a variable's `params`, a verbose form's `params.fields`, a
+/// match's `form_fields`, and one form field's option mapping.
+///
+/// | Variant | The file writes |
+/// |---|---|
+/// | [`MappingPresence::Absent`] | no such key |
+/// | [`MappingPresence::Empty`] | the key with a mapping of no entries (`{}`) |
+/// | [`MappingPresence::Entries`] | the key with a mapping of one entry or more |
+/// | [`MappingPresence::UnsupportedShape`] | the key with something that is not a mapping — a scalar, `~`, an empty value, a sequence or an alias |
+///
+/// A key written twice is described by its first occurrence, exactly as for
+/// [`SequencePresence`]. `Absent` is an empty struct variant for the same reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum MappingPresence {
+    /// The containing mapping holds no such key.
+    Absent {},
+    /// The key is there and its value is a mapping with no entries.
+    ///
+    /// Always a flow mapping: an empty block mapping has no YAML spelling.
+    Empty {
+        /// Where the entry sits.
+        location: FieldLocation,
+    },
+    /// The key is there and its value is a mapping with at least one entry.
+    Entries {
+        /// Where the entry sits.
+        location: FieldLocation,
+        /// Whether the mapping is brace-delimited (`{a: b}`) rather than a block
+        /// of `key:` lines.
+        flow: bool,
+        /// How many entries the mapping holds, whatever their keys are.
+        count: usize,
+    },
+    /// The key is there and its value is not a mapping.
+    UnsupportedShape {
+        /// Where the entry sits.
+        location: FieldLocation,
+        /// What the value actually is.
+        found: ValueKind,
+    },
+}
+
+impl Default for MappingPresence {
+    /// A key the walk never met is absent.
+    fn default() -> MappingPresence {
+        MappingPresence::Absent {}
+    }
+}
+
+impl MappingPresence {
+    /// Whether the key is written in the containing mapping at all.
+    pub fn is_present(&self) -> bool {
+        !matches!(self, MappingPresence::Absent {})
+    }
+
+    /// Where the entry sits, or `None` when it is absent.
+    pub fn location(&self) -> Option<&FieldLocation> {
+        match self {
+            MappingPresence::Absent {} => None,
+            MappingPresence::Empty { location }
+            | MappingPresence::Entries { location, .. }
+            | MappingPresence::UnsupportedShape { location, .. } => Some(location),
+        }
+    }
+
+    /// Whether the value is a brace-delimited mapping. `{}` is one; an absent
+    /// key and a non-mapping value are not.
+    pub fn is_flow(&self) -> bool {
+        match self {
+            MappingPresence::Empty { .. } => true,
+            MappingPresence::Entries { flow, .. } => *flow,
+            MappingPresence::Absent {} | MappingPresence::UnsupportedShape { .. } => false,
+        }
+    }
+
+    /// Whether the value is a **block** mapping holding at least one entry — the
+    /// one shape a new entry can be written into after an existing one.
+    pub fn is_block_with_entries(&self) -> bool {
+        matches!(self, MappingPresence::Entries { flow: false, .. })
+    }
+} // End of impl MappingPresence
+
+/// The container shape of one form field definition (Phase 4-3).
+///
+/// One per entry of a shorthand `form_fields` mapping, and one per entry of a
+/// verbose form's `params.fields`, **in source order and parallel to that
+/// mapping's projected entries**, so position `i` describes entry `i`. Presence
+/// only: what the options hold is the shallow [`ValueView`] beside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FormFieldShape {
+    /// The field definition's own value, which espanso reads as an option
+    /// mapping. Never [`MappingPresence::Absent`]: the entry exists.
+    pub options: MappingPresence,
+    /// The option `values` inside it — a `choice` or `list` field's list —
+    /// [`SequencePresence::Absent`] when the options are not a mapping or hold no
+    /// `values`. A multi-line string `values` is
+    /// [`SequencePresence::UnsupportedShape`] with a scalar found, which is a
+    /// statement about the container, not a judgement of the file.
+    pub values: SequencePresence,
+}
 
 /// How a [`ValueView::project`] call ended, beyond the value itself.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
