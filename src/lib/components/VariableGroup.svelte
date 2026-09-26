@@ -11,12 +11,9 @@
     type TextSelection
   } from '../browser/matchEditor';
   import {
-    addEcho,
     analysisOf,
     choiceDraftOf,
     choiceInsertionViewOf,
-    echoAdditionViewOf,
-    echoDraftOf,
     insertChoice,
     NO_SELECTION,
     sameSelection,
@@ -24,13 +21,24 @@
     selectionOfSeed,
     variableGroupViewOf,
     type ChoiceDraft,
-    type EchoDraft,
     type GroupSelection,
     type HeldAnalysis,
     type SeededSelection,
     type VariableGroupPort
   } from '../browser/variableGroup';
   import { variableStructureGrantOf } from '../browser/variableEditor';
+  import {
+    addedParamsOf,
+    addKindVariable,
+    editKindDraft,
+    kindAdditionViewOf,
+    kindDraftOf,
+    withKind,
+    type KindDraft,
+    type KindEditRefusal,
+    type KindPart,
+    type NewVariableKind
+  } from '../browser/variableKinds';
   import {
     nameContextOf,
     type InsertRefusal,
@@ -46,6 +54,11 @@
     tEdgeKind,
     tIncompleteReason,
     tInsertRefusal,
+    tKindEditRefusal,
+    tKindPart,
+    tKindProblem,
+    tKindWarning,
+    tNewVariableKind,
     tMoveChoice,
     tNameVerdict,
     tRetainedLabel,
@@ -61,7 +74,8 @@
    * The *Variables and fill-ins* group — Phase 4-11: the chip strip, the ordered
    * list with each declaration's dependency state, the controls of the one
    * selection, and the two forms that add a variable (**Choice** insertion and
-   * the `echo` *Add variable*), inside the match editor.
+   * the *Add a variable* form, which since Phase 4-14-1 offers seven kinds —
+   * `../browser/variableKinds.ts`), inside the match editor.
    *
    * **This file is presentation.** What is drawn, what is offered and what a
    * press may change is `../browser/variableGroup.ts`'s, over Phase 4-9's
@@ -86,6 +100,8 @@
    * read-only goes through `SourceText`, which names a carriage return rather than
    * drawing it as a line break (`CLAUDE.md` §6). The one-line boxes are
    * `<input>`s, and the model refuses a carriage return or a line feed in each.
+   * A box of the *Add a variable* form whose edit the model refuses is put back
+   * to the form's text, and the refusal is said beside the form.
    */
 
   const {
@@ -146,8 +162,17 @@
   } // End of function select()
   /** The **Choice** form's value while it is open, or `null`. */
   let choice = $state.raw<ChoiceDraft | null>(null);
-  /** The *Add variable* form's value while it is open, or `null`. */
-  let echo = $state.raw<EchoDraft | null>(null);
+  /** The *Add a variable* form's value while it is open, or `null`. */
+  let adding = $state.raw<KindDraft | null>(null);
+  /**
+   * The last edit of the *Add a variable* form the model refused, with the box it
+   * was typed into, held with the form value it was refused over.
+   */
+  let editRefused = $state.raw<{
+    readonly draft: KindDraft;
+    readonly part: KindPart | 'name';
+    readonly reason: KindEditRefusal;
+  } | null>(null);
   /**
    * The last *Insert* the model refused, held with the session it was refused
    * over, so it stops drawing the moment anything changes.
@@ -167,11 +192,13 @@
       ? null
       : choiceInsertionViewOf(session, context, variableStructureGrantOf(session.match, read), choice)
   );
-  const echoView = $derived(
-    echo === null || view.selection?.kind !== 'echo'
+  const addingView = $derived(
+    adding === null || view.selection?.kind !== 'add'
       ? null
-      : echoAdditionViewOf(session, context, variableStructureGrantOf(session.match, read), echo)
+      : kindAdditionViewOf(session, context, variableStructureGrantOf(session.match, read), adding)
   );
+  /** The refused edit, while the form still holds the value it was refused over. */
+  const editRefusal = $derived(editRefused !== null && editRefused.draft === adding ? editRefused : null);
   const refusal = $derived(refused !== null && refused.session === session ? refused.refusal : null);
   const unnamed = $derived(t('browser.variableGroup.unnamed'));
 
@@ -183,60 +210,86 @@
   function choose(chosen: Exclude<GroupSelection, null>): void {
     select(sameSelection(view.selection, chosen) ? null : chosen);
     choice = null;
-    echo = null;
+    adding = null;
   } // End of function choose()
 
   /** Opens the **Choice** form with a provisional name the visible names do not refuse. */
   function openChoice(): void {
     select({ kind: 'choice' });
     choice = choiceDraftOf(session, context);
-    echo = null;
+    adding = null;
   } // End of function openChoice()
 
-  /** Opens the *Add variable* form with a provisional name. */
-  function openEcho(): void {
-    select({ kind: 'echo' });
-    echo = echoDraftOf(context);
+  /**
+   * Opens the *Add a variable* form on an `echo` variable (ruling 20) with a
+   * provisional name, every part blank.
+   */
+  function openAdding(): void {
+    select({ kind: 'add' });
+    adding = kindDraftOf('echo', context);
+    editRefused = null;
     choice = null;
-  } // End of function openEcho()
+  } // End of function openAdding()
 
   /** Closes whichever form or controls are open. */
   function closeSelection(): void {
     select(null);
     choice = null;
-    echo = null;
+    adding = null;
   } // End of function closeSelection()
 
   /**
-   * Records one part of the *Add variable* form.
+   * Chooses the *Add a variable* form's kind; every typed text is kept.
    *
-   * @param part - Which part.
-   * @param value - Its whole new value.
+   * @param kind - The kind chosen.
    */
-  function editEcho(part: 'name' | 'echo', value: string): void {
-    if (echo !== null) {
-      echo = { ...echo, [part]: value };
+  function chooseKind(kind: NewVariableKind): void {
+    if (adding !== null) {
+      adding = withKind(adding, kind, context);
     }
-  } // End of function editEcho()
+  } // End of function chooseKind()
+
+  /**
+   * Records one box of the *Add a variable* form. A refused edit leaves the form
+   * as it was and puts the box back to the form's text.
+   *
+   * @param part - `'name'` or the part.
+   * @param box - The box that was typed into.
+   */
+  function editAdding(part: KindPart | 'name', box: HTMLInputElement | HTMLTextAreaElement): void {
+    if (adding === null) {
+      return;
+    }
+    const edit = editKindDraft(adding, part, box.value);
+    if (edit.kind === 'refused') {
+      editRefused = { draft: adding, part, reason: edit.reason };
+      box.value = part === 'name' ? adding.name : adding.parts[part];
+      return;
+    }
+    adding = edit.draft;
+    editRefused = null;
+  } // End of function editAdding()
 
   /** *Add*: one history step; the grant and the names come from a read taken now (R37). */
-  function addTheEcho(): void {
-    if (echo === null) {
+  function addTheVariable(): void {
+    if (adding === null) {
       return;
     }
     const now = port.structureRead(session.match.document);
     const grant = variableStructureGrantOf(session.match, now);
     const names = nameContextOf(session, analysisOf(session, held).analysis, now.document);
-    const outcome = addEcho(session, grant, names, echo);
+    const outcome = addKindVariable(session, grant, names, adding);
     if (outcome.kind === 'inserted') {
       apply(outcome.session);
       refused = null;
-      echo = null;
+      adding = null;
       select({ kind: 'added', position: outcome.session.draft.value.variables.added.length - 1 });
       return;
     }
-    refused = { session, refusal: outcome.refusal };
-  } // End of function addTheEcho()
+    if (outcome.kind === 'refused') {
+      refused = { session, refusal: outcome.refusal };
+    }
+  } // End of function addTheVariable()
 
   /**
    * Records one part of the **Choice** form.
@@ -461,8 +514,8 @@
     >
       {t('browser.variableGroup.choice.open')}
     </button>
-    <button type="button" disabled={view.selection?.kind === 'echo'} onclick={() => openEcho()}>
-      {t('browser.variableGroup.echo.open')}
+    <button type="button" disabled={view.selection?.kind === 'add'} onclick={() => openAdding()}>
+      {t('browser.variableGroup.addVariable.open')}
     </button>
     {#if view.canRestoreAll}
       <button type="button" onclick={() => apply(restoreVariables(session))}>
@@ -555,6 +608,7 @@
     </div>
   {:else if view.selected !== null && view.selected.kind === 'added'}
     {@const selected = view.selected}
+    {@const params = addedParamsOf(selected.params)}
     <div class="panel controls" role="group" aria-label={t('browser.variableGroup.selected', { name: selected.name })}>
       <p class="name">{t('browser.variableGroup.selected', { name: selected.name })}</p>
       <p class="rowHead">
@@ -566,6 +620,17 @@
         <p class="name">{t('browser.variableGroup.added.values')}</p>
         {#each selected.values as value, index (index)}
           <SourceText text={value} />
+        {/each}
+      {/if}
+      {#if params.length > 0}
+        <p class="name">{t('browser.variableGroup.added.params')}</p>
+        {#each params as param, index (index)}
+          <div class="addedParam">
+            <code class="source">{param.key}</code>
+            {#each param.texts as text, item (item)}
+              <SourceText {text} />
+            {/each}
+          </div>
         {/each}
       {/if}
       {#if selected.insertedInto !== null}
@@ -651,14 +716,25 @@
         </button>
       </p>
     </div>
-  {:else if echo !== null && echoView !== null}
-    {@const form = echo}
-    {@const said = echoView}
-    <!-- **Add variable** (ruling 20: Echo is authored this way): a provisional
-         name with its live verdict and the text it echoes; nothing is inserted
-         into a content key. One *Add* is one history step. -->
-    <div class="panel controls echoForm" role="group" aria-label={t('browser.variableGroup.echo.heading')}>
-      <p class="name">{t('browser.variableGroup.echo.heading')}</p>
+  {:else if adding !== null && addingView !== null}
+    {@const form = adding}
+    {@const said = addingView}
+    <!-- **Add a variable** (ruling 20: Echo is authored this way; Phase 4-14-1
+         widened it to seven kinds): the kind, a provisional name with its live
+         verdict, and one textual box per parameter the kind owns — each labelled
+         with the espanso key it is written under, required or optional, and
+         said to be written as typed when Rust writes it as plain source (D2u).
+         Nothing is inserted into a content key. One *Add* is one history step. -->
+    <div class="panel controls addForm" role="group" aria-label={t('browser.variableGroup.addVariable.heading')}>
+      <p class="name">{t('browser.variableGroup.addVariable.heading')}</p>
+      <p class="name">{t('browser.variableKinds.kindLabel')}</p>
+      <p class="choices kinds">
+        {#each said.kinds as kind (kind)}
+          <button type="button" aria-pressed={form.kind === kind} onclick={() => chooseKind(kind)}>
+            {tNewVariableKind(kind)}
+          </button>
+        {/each}
+      </p>
       <label>
         <span class="name">{t('browser.variableGroup.name')}</span>
         <input
@@ -666,19 +742,54 @@
           type="text"
           spellcheck="false"
           value={form.name}
-          oninput={(event) => editEcho('name', event.currentTarget.value)}
+          oninput={(event) => editAdding('name', event.currentTarget)}
         />
       </label>
       <p class="kind verdict" role="status">{tNameVerdict(said.verdict)}</p>
-      <label>
-        <span class="name">{t('browser.variableGroup.echo.text')}</span>
-        <textarea
-          class="text"
-          spellcheck="false"
-          value={form.echo}
-          oninput={(event) => editEcho('echo', event.currentTarget.value)}
-        ></textarea>
-      </label>
+      {#if said.executes}
+        <p class="kind note">{t('browser.variableKinds.note.executes')}</p>
+      {/if}
+      {#if said.readsClipboard}
+        <p class="kind note">{t('browser.variableKinds.note.readsClipboard')}</p>
+      {/if}
+      {#each said.parts as part (part.part)}
+        <div class="variableField" data-part={part.part}>
+          <label>
+            <span class="name">{tKindPart(part.part)} <code class="source">{part.part}</code></span>
+            {#if part.shape === 'oneLine'}
+              <input
+                class="text"
+                type="text"
+                spellcheck="false"
+                value={part.text}
+                oninput={(event) => editAdding(part.part, event.currentTarget)}
+              />
+            {:else}
+              <textarea
+                class="text"
+                spellcheck="false"
+                value={part.text}
+                oninput={(event) => editAdding(part.part, event.currentTarget)}
+              ></textarea>
+            {/if}
+          </label>
+          <p class="kind">
+            {part.required ? t('browser.variableKinds.required') : t('browser.variableKinds.optional')}
+          </p>
+          {#if part.plainSource}
+            <p class="kind">{t('browser.variableKinds.plainSource')}</p>
+          {/if}
+          {#each part.warnings as warning (warning.code)}
+            <p class="kind warning">{tKindWarning(warning)}</p>
+          {/each}
+        </div>
+      {/each}
+      {#if editRefusal !== null}
+        <p class="kind" role="status">{tKindEditRefusal(editRefusal.reason, editRefusal.part)}</p>
+      {/if}
+      {#if said.problem !== null}
+        <p class="kind problem">{tKindProblem(said.problem)}</p>
+      {/if}
       {#if said.withheld !== null}
         <p class="kind">
           {said.withheld.kind === 'structure'
@@ -692,8 +803,8 @@
         <p class="kind" role="status">{tInsertRefusal(refusal)}</p>
       {/if}
       <p class="choices">
-        <button type="button" disabled={!said.canAdd} onclick={() => addTheEcho()}>
-          {t('browser.variableGroup.echo.add')}
+        <button type="button" disabled={!said.canAdd} onclick={() => addTheVariable()}>
+          {t('browser.variableGroup.addVariable.add')}
         </button>
         <button type="button" onclick={() => closeSelection()}>
           {t('browser.variableGroup.cancel')}
@@ -775,6 +886,12 @@
 
   .panel p {
     margin: 0;
+  }
+
+  .addedParam {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
   }
 
   .variableField {

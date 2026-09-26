@@ -310,6 +310,19 @@ command in the tree reads the clipboard or spawns a process for a variable).
 
 **Risk `high`. Driven:** yes. **Depends on** 4-9, 4-10.
 
+**Addendum, 2026-09-26 — cut before starting.** 4-14 also inherited existing variables' `params`,
+`depends_on` and list-item drafting and the quoted `offset`/`trim`/`debug` rewrite through
+`plan_open_mapping` (`4-9-notes.md` §5 item 4 and §8 finding 1), which is too much for one worker. It is cut
+into two pieces, each with its own review:
+
+- **4-14-1 — the seven kind submodels for a new variable.** Date, Random, Echo, Clipboard, Shell, Script and
+  Match: closed wire shapes, required-parameter readiness, warning values, unfamiliar text kept, `\r`
+  refused, undo, conflict and recovery; the test that no command reads the clipboard or spawns a process
+  for a variable. Model and wiring only; the popovers stay 4-15's.
+- **4-14-2 — existing variables' parameters.** Drafting an existing variable's `params` values,
+  `depends_on` and list items, and an edited `offset`/`trim`/`debug` written as plain source rather than
+  a quoted logical string (the Rust half, with a failing-first test).
+
 ### 4-15 — Remaining popovers
 
 **Delivers** the remaining `+ Insert` rows (Date/time, Random choice, Clipboard, Shell command, Script,

@@ -7,8 +7,9 @@
  * here, where a test in the `node` environment reaches it (`CLAUDE.md` §6,
  * *Frontend structure*). The transitions it drives are Phase 4-9's
  * (`./matchEditor.ts`, `./variableEditor.ts`, `./variableInsertion.ts`); this
- * module composes them into one view and adds the two forms 4-11 delivers of
- * its own: the **Choice** insertion and the `echo` *Add variable*.
+ * module composes them into one view and adds the **Choice** insertion 4-11
+ * delivers of its own. The *Add a variable* form — 4-11's `echo` *Add variable*,
+ * widened by Phase 4-14-1 to seven kinds — is `./variableKinds.ts`'s.
  *
  * ## What the group is
  *
@@ -62,6 +63,7 @@ import type {
   ListPlacement,
   MatchId,
   NewVariable,
+  NewVariableParams,
   ScalarStyle,
   Usage,
   VariableField
@@ -92,7 +94,6 @@ import {
   type VarsShape
 } from './variableEditor';
 import {
-  addVariable,
   insertVariable,
   nameVerdictOf,
   REFERENCE_FIELDS,
@@ -271,9 +272,9 @@ export function heldAfterReply(
  * - `variable` — an existing variable, by its position in the file's list;
  * - `added` — a new variable of the draft, by its position among the additions;
  * - `choice` — the **Choice** insertion's form;
- * - `echo` — the *Add variable* form, which adds an `echo` variable with no
- *   reference inserted anywhere (ruling 20: Echo is authored through *Add
- *   variable*).
+ * - `add` — the *Add a variable* form (`./variableKinds.ts`), which adds a new
+ *   variable of one of seven kinds with no reference inserted anywhere (ruling
+ *   20: Echo is authored through *Add variable*; Phase 4-14-1 widened it).
  *
  * `null` is nothing selected: no box of the group is mounted.
  */
@@ -281,7 +282,7 @@ export type GroupSelection =
   | { readonly kind: 'variable'; readonly index: number }
   | { readonly kind: 'added'; readonly position: number }
   | { readonly kind: 'choice' }
-  | { readonly kind: 'echo' }
+  | { readonly kind: 'add' }
   | null;
 
 /**
@@ -301,7 +302,7 @@ export function sameSelection(one: GroupSelection, other: GroupSelection): boole
   if (one.kind === 'added' && other.kind === 'added') {
     return one.position === other.position;
   }
-  return one.kind === other.kind && (one.kind === 'choice' || one.kind === 'echo');
+  return one.kind === other.kind && (one.kind === 'choice' || one.kind === 'add');
 } // End of function sameSelection()
 
 /**
@@ -358,7 +359,7 @@ export function selectionOfSeed(session: MatchEditorSession, seeded: SeededSelec
  * @returns The selection, or `null`.
  */
 export function liveSelection(session: MatchEditorSession, selection: GroupSelection): GroupSelection {
-  if (selection === null || selection.kind === 'choice' || selection.kind === 'echo') {
+  if (selection === null || selection.kind === 'choice' || selection.kind === 'add') {
     return selection;
   }
   if (selection.kind === 'variable') {
@@ -529,6 +530,11 @@ export interface SelectedAddition {
   readonly typeText: string;
   /** A `choice`'s values, in order; empty for any other kind. */
   readonly values: readonly string[];
+  /**
+   * The drafted parameters, exactly as they will be sent — Phase 4-14-1: a
+   * renderer lists them through `addedParamsOf` in `./variableKinds.ts`.
+   */
+  readonly params: NewVariableParams;
   /** The content key its compound *Insert* wrote the reference into, or `null`. */
   readonly insertedInto: ContentForm | null;
   /** Whether *Drop this new variable* does anything. */
@@ -803,7 +809,7 @@ function selectedOf(
 ): SelectedVariable | SelectedAddition | null {
   const editable = isVariablesEditable(session);
   const buffer = capturedVariables(session.draft.value.variables);
-  if (selection === null || selection.kind === 'choice' || selection.kind === 'echo') {
+  if (selection === null || selection.kind === 'choice' || selection.kind === 'add') {
     return null;
   }
   if (selection.kind === 'added') {
@@ -818,6 +824,7 @@ function selectedOf(
       name: one.variable.name,
       typeText: typeTextOf(params),
       values: 'Choice' in params ? [...params.Choice.values] : [],
+      params,
       insertedInto: one.insertedInto,
       canDiscard: editable
     };
@@ -990,24 +997,30 @@ export interface ChoiceInsertionView {
   /** Why the values or the target cannot be used, or `null`. */
   readonly problem: ChoiceProblem | null;
   /** Why no variable can be added now (structure or addition), or `null`. */
-  readonly withheld:
-    | { readonly kind: 'structure'; readonly reason: VariableStructureRefusal }
-    | { readonly kind: 'addition'; readonly reason: VariableAdditionRefusal }
-    | { readonly kind: 'notEditable' }
-    | null;
+  readonly withheld: AdditionWithheld;
   /** Whether *Insert* would draft it. */
   readonly canInsert: boolean;
 }
 
 /**
+ * Why no new variable can be drafted now, whatever a form holds, or `null`.
+ */
+export type AdditionWithheld =
+  | { readonly kind: 'structure'; readonly reason: VariableStructureRefusal }
+  | { readonly kind: 'addition'; readonly reason: VariableAdditionRefusal }
+  | { readonly kind: 'notEditable' }
+  | null;
+
+/**
  * Why no new variable can be drafted now, whatever a form holds: the variables
  * accept no change, the structure grant is refused (R36), or the addition is.
+ * Shared by the Choice form and `./variableKinds.ts`'s *Add a variable* form.
  *
  * @param session - The editing session.
  * @param grant - The structure grant.
  * @returns The reason, or `null`.
  */
-function withheldOf(session: MatchEditorSession, grant: VariableStructureGrant): ChoiceInsertionView['withheld'] {
+export function additionWithheldOf(session: MatchEditorSession, grant: VariableStructureGrant): AdditionWithheld {
   const addition = variableAdditionRefusal(
     session.baseline.variables,
     capturedVariables(session.draft.value.variables)
@@ -1019,7 +1032,7 @@ function withheldOf(session: MatchEditorSession, grant: VariableStructureGrant):
       : addition !== null
         ? { kind: 'addition', reason: addition }
         : null;
-} // End of function withheldOf()
+} // End of function additionWithheldOf()
 
 /**
  * What the **Choice** form says about its current value.
@@ -1044,7 +1057,7 @@ export function choiceInsertionViewOf(
     : 'problem' in described
       ? described.problem
       : null;
-  const withheld = withheldOf(session, grant);
+  const withheld = additionWithheldOf(session, grant);
   return {
     targets,
     verdict,
@@ -1100,103 +1113,6 @@ export function insertChoice(
     variable: described.variable
   });
 } // End of function insertChoice()
-
-// ---------------------------------------------------------------------------
-// Add variable (echo)
-// ---------------------------------------------------------------------------
-
-/**
- * What the *Add variable* form holds: the new `echo` variable's name and the
- * text it echoes. Nothing is inserted into a content key (ruling 20).
- */
-export interface EchoDraft {
-  /** The proposed name — provisional until added. */
-  readonly name: string;
-  /** The `echo` text, as its text area holds it. */
-  readonly echo: string;
-}
-
-/**
- * The form *Add variable* opens with: a provisional name the context does not
- * refuse (`echo`, `echo2`, …) and no text.
- *
- * @param context - The names, from `nameContextOf`.
- * @returns The form's starting value.
- */
-export function echoDraftOf(context: NameContext): EchoDraft {
-  return { name: suggestedName('echo', context), echo: '' };
-} // End of function echoDraftOf()
-
-/**
- * The closed description an *Add variable* form asks for.
- *
- * @param draft - The form.
- * @returns An `echo` variable with no `inject_vars`, `depends_on` or extra parameter.
- */
-export function echoVariableOf(draft: EchoDraft): NewVariable {
-  return {
-    name: draft.name,
-    params: { Echo: { echo: draft.echo } },
-    inject_vars: null,
-    depends_on: null,
-    extra_params: []
-  };
-} // End of function echoVariableOf()
-
-/** What the *Add variable* form draws beside its controls. */
-export interface EchoAdditionView {
-  /**
-   * The name check's verdict — not as a reference, since nothing is inserted;
-   * under an open scope `available` reads "available among visible names".
-   */
-  readonly verdict: NameVerdict;
-  /** Why no variable can be added now, or `null` — as for the Choice form. */
-  readonly withheld: ChoiceInsertionView['withheld'];
-  /** Whether *Add* would draft it. */
-  readonly canAdd: boolean;
-}
-
-/**
- * What the *Add variable* form says about its current value. A text holding a
- * carriage return is refused by `addVariable` at the press
- * (`unreadableText`); the form's text area cannot produce one.
- *
- * @param session - The editing session.
- * @param context - The names, from `nameContextOf`.
- * @param grant - The structure grant, from the view's read.
- * @param draft - The form.
- * @returns The view.
- */
-export function echoAdditionViewOf(
-  session: MatchEditorSession,
-  context: NameContext,
-  grant: VariableStructureGrant,
-  draft: EchoDraft
-): EchoAdditionView {
-  const verdict = nameVerdictOf(draft.name, context, false);
-  const withheld = withheldOf(session, grant);
-  return { verdict, withheld, canAdd: withheld === null && verdict.kind === 'available' };
-} // End of function echoAdditionViewOf()
-
-/**
- * *Add* on the *Add variable* form: the new `echo` variable at the end of
- * `vars`, one history step (`addVariable` in `./variableInsertion.ts`, which
- * checks the grant, the addition, the name and every text).
- *
- * @param session - The editing session.
- * @param grant - The structure grant, minted from a read taken at the press.
- * @param context - The names, from `nameContextOf` at the press.
- * @param draft - The form.
- * @returns What happened.
- */
-export function addEcho(
-  session: MatchEditorSession,
-  grant: VariableStructureGrant,
-  context: NameContext,
-  draft: EchoDraft
-): InsertOutcome {
-  return addVariable(session, grant, context, echoVariableOf(draft));
-} // End of function addEcho()
 
 // ---------------------------------------------------------------------------
 // Sentences: codes to keys

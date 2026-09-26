@@ -16,6 +16,10 @@
  * 5. reorder cannot bypass the pending-draft rule or R25;
  * 6. conflict and recovery states draw.
  *
+ * Suite 8 is Phase 4-14-1's mounted half: every one of the seven kinds through
+ * the *Add a variable* form (`../browser/variableKinds.ts`; the model half is
+ * `../browser/variableKinds.test.ts`).
+ *
  * **Mounted evidence, never a screen** (Phase 4 ruling 29): what this proves is
  * which elements jsdom holds after the handlers ran and what reached the
  * injected ports — nothing about layout, wrapping or WebKit's normalisation. The
@@ -52,6 +56,7 @@ import type {
   MatchDraft,
   MatchId,
   MatchView,
+  NewVariableParams,
   SaveResult,
   VariableView
 } from '../ipc/types';
@@ -513,11 +518,11 @@ describe('2. every declaration stays reachable', () => {
   });
   it('adds an echo variable through Add variable, with a chip, sent by one save', () => {
     const editor = mountEditor();
-    press(group(editor.target), 'browser.variableGroup.echo.open');
+    press(group(editor.target), 'browser.variableGroup.addVariable.open');
     const [name, text] = groupBoxes(editor.target);
     expect(name?.value).toBe('echo');
     type(text!, 'hello');
-    press(group(editor.target), 'browser.variableGroup.echo.add');
+    press(group(editor.target), 'browser.variableGroup.addVariable.add');
     expect(chips(editor.target).at(-1)?.querySelector('code')?.textContent).toBe('echo');
     expect(replaceBox(editor.target).value).toBe('Hello ');
     press(editor.target, 'browser.matchEditor.save');
@@ -817,3 +822,224 @@ describe('7. review fixes — the revision boundary after a committed write', ()
     editor.stop();
   });
 }); // End of suite 7
+
+// ---------------------------------------------------------------------------
+// Phase 4-14-1 — the seven kinds through *Add a variable*
+// ---------------------------------------------------------------------------
+
+/**
+ * One part's box inside the *Add a variable* form.
+ *
+ * @param target - Where the editor was mounted.
+ * @param part - The part's espanso key.
+ * @returns The box.
+ */
+function partBox(target: HTMLElement, part: string): HTMLInputElement | HTMLTextAreaElement {
+  const found = group(target).querySelector(`[data-part="${part}"] input, [data-part="${part}"] textarea`);
+  if (!(found instanceof HTMLInputElement || found instanceof HTMLTextAreaElement)) {
+    throw new Error(`this case needs the ${part} box`);
+  }
+  return found;
+} // End of function partBox()
+
+/**
+ * The *Add a variable* form.
+ *
+ * @param target - Where the editor was mounted.
+ * @returns The form's panel.
+ */
+function addForm(target: HTMLElement): HTMLElement {
+  const found = group(target).querySelector('.addForm');
+  if (!(found instanceof HTMLElement)) {
+    throw new Error('this case needs the Add a variable form');
+  }
+  return found;
+} // End of function addForm()
+
+/** One kind's mounted case: what is typed, and the closed shape the save carries. */
+interface MountedKind {
+  /** The kind's label key. */
+  readonly label: TranslationKey;
+  /** The `type` word, which is also the provisional name. */
+  readonly word: string;
+  /** What is typed, by part. */
+  readonly typed: Readonly<Record<string, string>>;
+  /** The `params` keys the selected addition's panel lists, in order. */
+  readonly keys: readonly string[];
+  /** The closed shape sent. */
+  readonly params: NewVariableParams;
+}
+
+/** The seven kinds, as a person fills them in. */
+const MOUNTED_KINDS: readonly MountedKind[] = [
+  { label: 'browser.variableKinds.kind.echo', word: 'echo', typed: { echo: 'hi' }, keys: ['echo'], params: { Echo: { echo: 'hi' } } },
+  {
+    label: 'browser.variableKinds.kind.date',
+    word: 'date',
+    typed: { format: '%H:%M', offset: '60' },
+    keys: ['format', 'offset'],
+    params: { Date: { format: '%H:%M', offset: '60', tz: null, locale: null } }
+  },
+  { label: 'browser.variableKinds.kind.random', word: 'random', typed: { choices: 'a\nb' }, keys: ['choices'], params: { Random: { choices: ['a', 'b'] } } },
+  { label: 'browser.variableKinds.kind.clipboard', word: 'clipboard', typed: {}, keys: [], params: { Clipboard: {} } },
+  {
+    label: 'browser.variableKinds.kind.shell',
+    word: 'shell',
+    typed: { cmd: 'date', trim: 'true' },
+    keys: ['cmd', 'trim'],
+    params: { Shell: { cmd: 'date', shell: null, trim: 'true', debug: null } }
+  },
+  { label: 'browser.variableKinds.kind.script', word: 'script', typed: { args: 'python3\nx.py' }, keys: ['args'], params: { Script: { args: ['python3', 'x.py'], trim: null } } },
+  { label: 'browser.variableKinds.kind.match', word: 'match', typed: { trigger: ':sig' }, keys: ['trigger'], params: { Match: { trigger: ':sig' } } }
+];
+
+describe('8. Phase 4-14-1 — every kind through Add a variable', () => {
+  it.each(MOUNTED_KINDS)('$word: chosen, filled, added with a chip, listed, and sent by one save in its closed shape', (one) => {
+    const editor = mountEditor();
+    press(group(editor.target), 'browser.variableGroup.addVariable.open');
+    press(addForm(editor.target), one.label);
+    expect(groupBoxes(editor.target)[0]?.value).toBe(one.word);
+    for (const [part, text] of Object.entries(one.typed)) {
+      type(partBox(editor.target, part), text);
+    } // End of the loop over the typed parts
+    press(group(editor.target), 'browser.variableGroup.addVariable.add');
+    const chip = chips(editor.target).at(-1);
+    expect(chip?.querySelector('code')?.textContent).toBe(one.word);
+    expect(chip?.getAttribute('aria-pressed')).toBe('true');
+    expect([...group(editor.target).querySelectorAll('.addedParam code')].map((code) => code.textContent)).toEqual(one.keys);
+    press(editor.target, 'browser.matchEditor.save');
+    expect(editor.saves).toHaveLength(1);
+    expect(editor.saves[0]?.replace).toBe('Unchanged');
+    expect(editor.saves[0]?.var_intents).toEqual([
+      {
+        InsertVariable: {
+          at: { End: {} },
+          variable: { name: one.word, params: one.params, inject_vars: null, depends_on: null, extra_params: [] }
+        }
+      }
+    ]);
+    editor.stop();
+  });
+
+  it('keeps Add disabled until the required part is given, says why, and says what espanso may run', () => {
+    const editor = mountEditor();
+    press(group(editor.target), 'browser.variableGroup.addVariable.open');
+    press(addForm(editor.target), 'browser.variableKinds.kind.shell');
+    expect(buttonLabelled(addForm(editor.target), sentence('browser.variableGroup.addVariable.add'))?.disabled).toBe(true);
+    expect(addForm(editor.target).textContent).toContain(sentence('browser.variableKinds.problem.required', { part: 'cmd' }));
+    expect(addForm(editor.target).textContent).toContain(sentence('browser.variableKinds.note.executes'));
+    // `date` requires nothing: Add is enabled on a blank form.
+    press(addForm(editor.target), 'browser.variableKinds.kind.date');
+    expect(buttonLabelled(addForm(editor.target), sentence('browser.variableGroup.addVariable.add'))?.disabled).toBe(false);
+    press(addForm(editor.target), 'browser.variableKinds.kind.clipboard');
+    expect(addForm(editor.target).textContent).toContain(sentence('browser.variableKinds.note.readsClipboard'));
+    expect(addForm(editor.target).querySelectorAll('[data-part]')).toHaveLength(0);
+    editor.stop();
+  });
+
+  it('draws a warning beside an unfamiliar text and sends the text exactly as typed', () => {
+    const editor = mountEditor();
+    press(group(editor.target), 'browser.variableGroup.addVariable.open');
+    press(addForm(editor.target), 'browser.variableKinds.kind.shell');
+    type(partBox(editor.target, 'cmd'), 'ls');
+    type(partBox(editor.target, 'shell'), 'fish');
+    type(partBox(editor.target, 'debug'), 'yes');
+    expect(addForm(editor.target).textContent).toContain(sentence('browser.variableKinds.warning.unfamiliarShell', { part: 'shell' }));
+    expect(addForm(editor.target).textContent).toContain(sentence('browser.variableKinds.warning.notTrueOrFalse', { part: 'debug' }));
+    expect(addForm(editor.target).textContent).toContain(sentence('browser.variableKinds.plainSource'));
+    press(group(editor.target), 'browser.variableGroup.addVariable.add');
+    press(editor.target, 'browser.matchEditor.save');
+    expect(editor.saves[0]?.var_intents).toEqual([
+      {
+        InsertVariable: {
+          at: { End: {} },
+          variable: { name: 'shell', params: { Shell: { cmd: 'ls', shell: 'fish', trim: null, debug: 'yes' } }, inject_vars: null, depends_on: null, extra_params: [] }
+        }
+      }
+    ]);
+    editor.stop();
+  });
+
+  it('never takes a carriage return at edit: the box normalizes it, and a forged one is refused and put back', () => {
+    const editor = mountEditor();
+    press(group(editor.target), 'browser.variableGroup.addVariable.open');
+    press(addForm(editor.target), 'browser.variableKinds.kind.shell');
+    // A text area normalizes a pasted CRLF to LF, as WebKit does (`CLAUDE.md`
+    // §6): through a real box no `\r` reaches the model at all.
+    type(partBox(editor.target, 'cmd'), 'ls\r\nrm');
+    expect(partBox(editor.target, 'cmd').value).toBe('ls\nrm');
+    type(partBox(editor.target, 'cmd'), 'ls');
+    // A box whose value does hold one — forged here by an own `value` property —
+    // is refused: the box is put back to the form's text and the sentence drawn.
+    const box = partBox(editor.target, 'cmd');
+    let held = 'ls\rrm';
+    Object.defineProperty(box, 'value', {
+      configurable: true,
+      get: () => held,
+      set: (next: string) => {
+        held = next;
+      }
+    });
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(held).toBe('ls');
+    Reflect.deleteProperty(box, 'value');
+    expect(addForm(editor.target).textContent).toContain(sentence('browser.variableKinds.problem.carriageReturn', { part: 'cmd' }));
+    // The next accepted edit clears the sentence.
+    type(partBox(editor.target, 'cmd'), 'ls -l');
+    expect(addForm(editor.target).textContent).not.toContain(sentence('browser.variableKinds.problem.carriageReturn', { part: 'cmd' }));
+    press(group(editor.target), 'browser.variableGroup.addVariable.add');
+    press(editor.target, 'browser.matchEditor.save');
+    expect(JSON.stringify(editor.saves[0]?.var_intents)).not.toContain('\\r');
+    editor.stop();
+  });
+
+  it('takes an added shell variable back with one undo', () => {
+    const editor = mountEditor();
+    press(group(editor.target), 'browser.variableGroup.addVariable.open');
+    press(addForm(editor.target), 'browser.variableKinds.kind.shell');
+    type(partBox(editor.target, 'cmd'), 'date');
+    press(group(editor.target), 'browser.variableGroup.addVariable.add');
+    expect(chips(editor.target)).toHaveLength(4);
+    press(editor.target, 'browser.matchEditor.undo');
+    expect(chips(editor.target)).toHaveLength(3);
+    expect(replaceBox(editor.target).value).toBe('Hello ');
+    editor.stop();
+  });
+
+  it('retains a new script variable under a save conflict, and draws the recovery refusal after Keep my draft', async () => {
+    const conflict = makeConflict({ disk: fileOf([projection({}, AFTER)], AFTER), expected: BASE, found: AFTER });
+    const editor = mountEditor({ saves: [conflict] });
+    press(group(editor.target), 'browser.variableGroup.addVariable.open');
+    press(addForm(editor.target), 'browser.variableKinds.kind.script');
+    type(partBox(editor.target, 'args'), 'python3\nrun.py');
+    press(group(editor.target), 'browser.variableGroup.addVariable.add');
+    press(editor.target, 'browser.matchEditor.save');
+    await settle();
+    const panel = editor.target.querySelector('.panel[role="status"]');
+    const retained = [...(panel?.querySelectorAll('.shownValue') ?? [])].map((one) => one.textContent ?? '');
+    expect(retained.some((one) => one.includes('script'))).toBe(true);
+    expect(retained.some((one) => one.includes('run.py'))).toBe(true);
+    press(editor.target, 'browser.saveOutcome.choice.keepMyDraft');
+    await settle();
+    expect(editor.target.textContent).toContain(sentence('browser.recovery.unavailable.variablesNotCarried'));
+    expect(editor.saves).toHaveLength(1);
+    editor.stop();
+  });
+
+  it('draws the kinds in Spanish', () => {
+    locale.setOverride('es');
+    const editor = mountEditor();
+    flushSync();
+    const open = buttonLabelled(group(editor.target, 'es'), DICTIONARIES.es['browser.variableGroup.addVariable.open']);
+    open?.click();
+    flushSync();
+    const labels = [...group(editor.target, 'es').querySelectorAll('.kinds button')].map((one) => one.textContent?.trim());
+    expect(labels).toEqual(
+      (['echo', 'date', 'random', 'clipboard', 'shell', 'script', 'match'] as const).map(
+        (kind) => DICTIONARIES.es[`browser.variableKinds.kind.${kind}`]
+      )
+    );
+    editor.stop();
+  });
+}); // End of suite 8

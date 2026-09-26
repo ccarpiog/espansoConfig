@@ -225,6 +225,18 @@ import {
   type NewFieldKind,
   type RowStatus
 } from '../browser/formBuilder';
+import {
+  kindEditRefusalKey,
+  kindPartKey,
+  kindProblemKey,
+  kindWarningKey,
+  newVariableKindKey,
+  type KindEditRefusal,
+  type KindPart,
+  type KindProblem,
+  type KindWarning,
+  type NewVariableKind
+} from '../browser/variableKinds';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
   AddedContent,
@@ -962,6 +974,60 @@ export function tMoveChoice(choice: MoveChoiceView, unnamed: string): string {
 export function tChoiceProblem(problem: ChoiceProblem): string {
   return translate(locale.current, choiceProblemKey(problem));
 } // End of function tChoiceProblem()
+
+/**
+ * One kind's name in the *Add a variable* form — Phase 4-14-1.
+ *
+ * @param kind - The kind, from `../browser/variableKinds.ts`.
+ * @returns The translated name.
+ */
+export function tNewVariableKind(kind: NewVariableKind): string {
+  return translate(locale.current, newVariableKindKey(kind));
+} // End of function tNewVariableKind()
+
+/**
+ * One part's label in the *Add a variable* form — Phase 4-14-1.
+ *
+ * @param part - The part, from `../browser/variableKinds.ts`.
+ * @returns The translated label.
+ */
+export function tKindPart(part: KindPart): string {
+  return translate(locale.current, kindPartKey(part));
+} // End of function tKindPart()
+
+/**
+ * Why the *Add a variable* form cannot be drafted — Phase 4-14-1. The part's
+ * espanso key (or `name`) fills `{part}`, spelled the same in every language.
+ *
+ * @param problem - The problem, from `../browser/variableKinds.ts`.
+ * @returns The translated sentence.
+ */
+export function tKindProblem(problem: KindProblem): string {
+  return translate(locale.current, kindProblemKey(problem), {
+    part: problem.kind === 'noTarget' ? '' : problem.part
+  });
+} // End of function tKindProblem()
+
+/**
+ * A text the *Add a variable* form keeps but warns about — Phase 4-14-1.
+ *
+ * @param warning - The warning, from `../browser/variableKinds.ts`.
+ * @returns The translated sentence.
+ */
+export function tKindWarning(warning: KindWarning): string {
+  return translate(locale.current, kindWarningKey(warning), { part: warning.part });
+} // End of function tKindWarning()
+
+/**
+ * Why one edit of the *Add a variable* form was not taken — Phase 4-14-1.
+ *
+ * @param reason - The refusal, from `../browser/variableKinds.ts`.
+ * @param part - The box's espanso key, or `name`.
+ * @returns The translated sentence.
+ */
+export function tKindEditRefusal(reason: KindEditRefusal, part: KindPart | 'name'): string {
+  return translate(locale.current, kindEditRefusalKey(reason), { part });
+} // End of function tKindEditRefusal()
 
 /**
  * Why a form's layout box or a definition's option box is shown and not edited —

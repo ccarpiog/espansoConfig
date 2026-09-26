@@ -42,7 +42,9 @@ const IDENTICAL_BY_DESIGN: ReadonlyMap<TranslationKey, string> = new Map([
   ['code.matchBadge.markdown', 'the name of a markup format, a proper noun in both languages'],
   ['code.matchBadge.variables', 'the same word, spelled the same way, in both languages'],
   ['code.matchBadge.shell', 'espanso’s own term for the variable type, kept untranslated in Spanish technical usage'],
-  ['code.matchBadge.script', 'the ordinary Spanish word for this is the same loanword']
+  ['code.matchBadge.script', 'the ordinary Spanish word for this is the same loanword'],
+  ['browser.variableKinds.kind.script', 'the ordinary Spanish word for this is the same loanword (Phase 4-14-1)'],
+  ['browser.variableKinds.part.shell', 'espanso’s own term for the interpreter, kept untranslated in Spanish technical usage (Phase 4-14-1)']
 ] as const);
 
 const englishKeys = Object.keys(en) as TranslationKey[];

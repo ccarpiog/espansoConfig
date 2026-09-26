@@ -77,9 +77,6 @@ import {
   choiceProblemKey,
   choiceValuesOf,
   declarationStatusKey,
-  addEcho,
-  echoAdditionViewOf,
-  echoDraftOf,
   heldAfterReply,
   insertChoice,
   liveSelection,
@@ -96,6 +93,20 @@ import {
   type VariableStructureRead
 } from './variableEditor';
 import { nameContextOf, nameVerdictKey } from './variableInsertion';
+import { addKindVariable, editKindDraft, kindAdditionViewOf, kindDraftOf, type KindDraft } from './variableKinds';
+
+/**
+ * An echo form holding a name and a text, through the model's own edit.
+ *
+ * @param name - The name.
+ * @param echo - The echoed text.
+ * @param context - The names the form was opened over.
+ * @returns The form.
+ */
+function echoForm(name: string, echo: string, context: ReturnType<typeof nameContextOf>): KindDraft {
+  const named = editKindDraft(kindDraftOf('echo', context), 'name', name).draft;
+  return editKindDraft(named, 'echo', echo).draft;
+} // End of function echoForm()
 
 /** The revision every projection below is minted from. */
 const BASE: ContentRevision = 'a'.repeat(64);
@@ -472,19 +483,20 @@ describe('the Choice insertion', () => {
   });
 }); // End of the "Choice insertion" suite
 
-describe('the echo Add variable', () => {
+describe('the echo Add variable (the Add a variable form on its echo kind since Phase 4-14-1)', () => {
   it('proposes a provisional name, checks it as a name rather than a reference, and adds the variable as one step', () => {
     const held = session();
     const grant = variableStructureGrantOf(held.match, readOf());
     const context = nameContextOf(held, null, file([projection()]));
-    const draft = echoDraftOf(context);
-    expect(draft).toEqual({ name: 'echo', echo: '' });
+    const draft = kindDraftOf('echo', context);
+    expect(draft.name).toBe('echo');
+    expect(draft.parts.echo).toBe('');
     // Not inserted as a reference, so a name outside the identifier subset is not refused for it.
-    expect(echoAdditionViewOf(held, context, grant, { name: 'my name', echo: 'x' })).toMatchObject({
+    expect(kindAdditionViewOf(held, context, grant, echoForm('my name', 'x', context))).toMatchObject({
       verdict: { kind: 'available', scope: 'open' },
       canAdd: true
     });
-    const outcome = addEcho(held, grant, context, { name: 'greeting', echo: 'hello' });
+    const outcome = addKindVariable(held, grant, context, echoForm('greeting', 'hello', context));
     if (outcome.kind !== 'inserted') {
       throw new Error('this case needs the addition drafted');
     }
@@ -499,7 +511,7 @@ describe('the echo Add variable', () => {
       }
     ]);
     // A second addition waits for a save.
-    expect(echoAdditionViewOf(outcome.session, context, grant, { name: 'other', echo: '' })).toMatchObject({
+    expect(kindAdditionViewOf(outcome.session, context, grant, echoForm('other', '', context))).toMatchObject({
       withheld: { kind: 'addition', reason: 'additionPending' },
       canAdd: false
     });
