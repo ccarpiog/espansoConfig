@@ -48,6 +48,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveConflictSource, type ConflictSource } from '../browser/conflictSource';
 import { detailFieldKey } from '../browser/detail';
 import {
+  inertVariablePort,
   makeDocument,
   makeMatch,
   makeSummary,
@@ -590,6 +591,7 @@ function mountEditor(
         return inertBinding();
       },
       reportRecovery: inertBinding,
+      variables: inertVariablePort(() => views),
       standingConflictFor: (document: DocumentId): ConflictSource | null =>
         standing.get(document) ?? null,
       close: (): void => {

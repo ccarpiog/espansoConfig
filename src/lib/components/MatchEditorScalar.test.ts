@@ -26,7 +26,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConflictSource } from '../browser/conflictSource';
 import { detailFieldKey, optionGroupKey } from '../browser/detail';
-import { makeMatch, makeSummary, scriptedAcknowledgement } from '../browser/fixtures';
+import { inertVariablePort, makeMatch, makeSummary, scriptedAcknowledgement } from '../browser/fixtures';
 import type { CreationBuffers } from '../browser/matchCreation';
 import {
   CURSOR_MARKER,
@@ -148,6 +148,7 @@ function mountEditor(match: MatchView = projection()): Mounted {
       adoptDiskVersion: (_conflict: ConflictModel<MatchBuffers>): DiskAdoptionOutcome => 'refused',
       reportReceiver: () => inertBinding(),
       reportRecovery: inertBinding,
+      variables: inertVariablePort(),
       standingConflictFor: (): ConflictSource | null => null,
       close: (): void => undefined
     }

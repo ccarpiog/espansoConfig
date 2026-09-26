@@ -42,6 +42,7 @@
  */
 
 import {
+  analyzeMatchCandidate,
   applyBulkOptions,
   createMatch,
   deleteMatch,
@@ -54,9 +55,11 @@ import {
   listBackupEntries,
   listDocuments,
   loadSidecar,
+  matchAuthoringSnapshot,
   matchItemText,
   matchOptionSpellings,
   moveMatch,
+  moveVariable,
   openWorkspace,
   readBackupText,
   reloadDocument,
@@ -84,6 +87,7 @@ import type { IpcFailure } from '../ipc/errors';
 import type { ReconciliationEventSource } from '../ipc/events';
 import type {
   Acknowledgement,
+  AuthoringSnapshot,
   BackupBatchId,
   BackupBatchListing,
   BackupEntryId,
@@ -92,10 +96,13 @@ import type {
   BulkOptionSpellings,
   BulkOptionsRequest,
   BulkResult,
+  CandidateOperation,
   ContentRevision,
   DocumentId,
   DocumentSummary,
   DocumentView,
+  ListPlacement,
+  MatchCandidate,
   MatchDraft,
   MatchId,
   MatchView,
@@ -217,9 +224,10 @@ import {
  * {@link BrowserCommands.saveMatch}, {@link BrowserCommands.createMatch},
  * {@link BrowserCommands.deleteMatch}, {@link BrowserCommands.saveRawDocument},
  * {@link BrowserCommands.duplicateMatch}, (since Phase 3-8-1)
- * {@link BrowserCommands.saveMatchItemText} and (since Phase 3-11-1)
- * {@link BrowserCommands.applyBulkOptions} are the eight members that can change
- * a file on disk, and they are here for the same reason the others are: a test
+ * {@link BrowserCommands.saveMatchItemText}, (since Phase 3-11-1)
+ * {@link BrowserCommands.applyBulkOptions} and (since Phase 4-11)
+ * {@link BrowserCommands.moveVariable} are the nine members that can change a
+ * file on disk, and they are here for the same reason the others are: a test
  * that cannot run Tauri still has to be able to drive a refusal, a conflict and
  * a commit and watch what this state does about each.
  *
@@ -235,7 +243,11 @@ import {
  * {@link BrowserCommands.loadSidecar} and {@link BrowserCommands.updateSidecar}.
  * Neither changes a user file — the second is the application-metadata writer's
  * route (ruling 25) — so the count of members that can change a file on disk
- * stays eight.
+ * stayed eight until Phase 4-11 added the reorder.
+ *
+ * **Since Phase 4-11, two more readers** — the 4-8 commands that 4-9 left
+ * without a wrapper: {@link BrowserCommands.matchAuthoringSnapshot} and
+ * {@link BrowserCommands.analyzeMatchCandidate}. Neither writes anything.
  */
 export interface BrowserCommands {
   /**
@@ -440,6 +452,50 @@ export interface BrowserCommands {
    */
   applyBulkOptions(request: BulkOptionsRequest): Promise<CommandResult<BulkResult>>;
   /**
+   * Reads one snippet's revision-bound authoring snapshot — Phase 4-11, over the
+   * 4-8 command. Writes nothing; the snapshot is a baseline to compare against,
+   * never an address, and no command accepts any part of it back.
+   *
+   * @param id - The snippet, by identity.
+   * @returns The snapshot, or a failure — `identityStaleRevision` among them.
+   */
+  matchAuthoringSnapshot(id: MatchId): Promise<CommandResult<AuthoringSnapshot>>;
+  /**
+   * Judges and analyses one drafted operation without writing anything — Phase
+   * 4-11, over the 4-8 command.
+   *
+   * @param id - The snippet, by identity.
+   * @param operation - A whole draft, or a variable position and placement.
+   * @param baseRevision - The revision the operation's positions belong to.
+   * @param acknowledgement - The suspicions already shown to a person.
+   * @returns The judged candidate, or a failure.
+   */
+  analyzeMatchCandidate(
+    id: MatchId,
+    operation: CandidateOperation,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<CommandResult<MatchCandidate>>;
+  /**
+   * Moves one local variable within its snippet's own `vars` list, and saves the
+   * file — Phase 4-11, over the 4-8 command. Alone in its save (R25).
+   *
+   * @param id - The snippet, by identity.
+   * @param variable - The variable's position in `vars`, in `baseRevision`.
+   * @param to - Where it goes, as a placement in the original list.
+   * @param baseRevision - The revision the positions belong to.
+   * @param acknowledgement - The suspicions already shown to a person.
+   * @returns How the save ended, or a failure. `saved.moved` is the snippet's
+   *   identity in the new revision.
+   */
+  moveVariable(
+    id: MatchId,
+    variable: number,
+    to: ListPlacement,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<CommandResult<SaveResult>>;
+  /**
    * Reads the open workspace's sidecar preferences — Phase 3-13-1, over the
    * 3-12 command. Writes no user file.
    *
@@ -504,6 +560,9 @@ export const REAL_COMMANDS: BrowserCommands = {
   saveMatchItemText,
   matchOptionSpellings,
   applyBulkOptions,
+  matchAuthoringSnapshot,
+  analyzeMatchCandidate,
+  moveVariable,
   loadSidecar,
   updateSidecar,
   drainExternalChanges
@@ -2396,6 +2455,59 @@ export interface BrowserState {
     baseRevision: ContentRevision,
     acknowledgement: Acknowledgement
   ): Promise<MatchSaveAnswer>;
+  /**
+   * Moves one local variable within its snippet's `vars`, saves the file, and
+   * adopts what a commit produced — Phase 4-11, the reorder writer 4-9 decided
+   * and left unsent.
+   *
+   * **{@link BrowserState.saveMatch}'s body, over a different command**: the same
+   * `notAttempted` refusal without a projection, ruling 27's barrier, the re-read
+   * after a failure that may have written, the adoption of `saved.moved` (a
+   * commit is never reported as an error, `PROGRESS.md` D2) and the conflict that
+   * installs nothing. The reorder's arguments come from `beginVariableMove` in
+   * `./matchEditor.ts`, which takes them from the offer the choice was made in;
+   * nothing here reads the projection's revision. What no type forces is that a
+   * component calls this rather than `moveVariable` in `../ipc/commands`.
+   *
+   * @param id - The snippet, by the identity the offer was made for.
+   * @param variable - The variable's position in the file's list.
+   * @param to - Where it goes.
+   * @param baseRevision - The revision the offer was made against. Sent unchanged.
+   * @param acknowledgement - The suspicions already shown to a person.
+   * @returns How the save ended with the adoption's fate; a refusal made before
+   *   any command ran; or a command failure.
+   */
+  moveVariable(
+    id: MatchId,
+    variable: number,
+    to: ListPlacement,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<MatchSaveAnswer>;
+  /**
+   * Reads one snippet's authoring snapshot — Phase 4-11. Reported and answered,
+   * like every read here; it changes nothing on this state.
+   *
+   * @param id - The snippet, by identity.
+   * @returns The snapshot, or a failure.
+   */
+  matchAuthoringSnapshot(id: MatchId): Promise<CommandResult<AuthoringSnapshot>>;
+  /**
+   * Judges one drafted operation without writing — Phase 4-11. Reported and
+   * answered; it changes nothing on this state. No screen calls it yet.
+   *
+   * @param id - The snippet, by identity.
+   * @param operation - A whole draft, or a variable position and placement.
+   * @param baseRevision - The revision the operation's positions belong to.
+   * @param acknowledgement - The suspicions already shown to a person.
+   * @returns The judged candidate, or a failure.
+   */
+  analyzeMatchCandidate(
+    id: MatchId,
+    operation: CandidateOperation,
+    baseRevision: ContentRevision,
+    acknowledgement: Acknowledgement
+  ): Promise<CommandResult<MatchCandidate>>;
   /**
    * Writes one new snippet into a file's snippet list, and saves the file.
    *
@@ -5957,15 +6069,16 @@ export function createBrowserState(
 
   /**
    * Saves one snippet in place through one command, and adopts what a commit
-   * produced — the body {@link BrowserState.saveMatch} and, since Phase 3-8-1,
-   * {@link BrowserState.saveMatchItemText} share.
+   * produced — the body {@link BrowserState.saveMatch}, since Phase 3-8-1
+   * {@link BrowserState.saveMatchItemText} and since Phase 4-11
+   * {@link BrowserState.moveVariable} share.
    *
-   * **One body, so the two writers cannot drift**: both edit one snippet whose
+   * **One body, so the three writers cannot drift**: each edits one snippet whose
    * identity `saved.moved` answers in the new revision, and every rule here — the
    * `notAttempted` refusal without a projection, ruling 27's barrier, the re-read
    * after a failure that may have written, `adoptAfterTheCommit`'s "a commit is
    * never reported as an error", and the conflict that installs nothing — is one
-   * rule for both. What differs is the command and its arguments, which the
+   * rule for all three. What differs is the command and its arguments, which the
    * caller's `send` closes over; what no type forces is that `send` calls a
    * command about `id` at all.
    *
@@ -6071,7 +6184,7 @@ export function createBrowserState(
         }
       } else if (answer.value.outcome === 'conflict') {
         // **A conflict installs nothing here** — `BrowserState.moveMatch`'s own note
-        // says why, and the rule is one rule for all seven writing wrappers. What is
+        // says why, and the rule is one rule for every writing wrapper. What is
         // written down is which projection the conflict describes.
         rememberTheSaveConflict(id.document, saveConflictSource(answer.value));
       }
@@ -7339,6 +7452,35 @@ export function createBrowserState(
     ): Promise<MatchSaveAnswer> {
       return saveOneSnippetInPlace(id, () =>
         commands.saveMatch(id, draft, baseRevision, acknowledgement)
+      );
+    },
+
+    async moveVariable(
+      id: MatchId,
+      variable: number,
+      to: ListPlacement,
+      baseRevision: ContentRevision,
+      acknowledgement: Acknowledgement
+    ): Promise<MatchSaveAnswer> {
+      // `saveMatch`'s one body: the reorder edits one snippet whose identity
+      // `saved.moved` answers in the new revision (Phase 4-11).
+      return saveOneSnippetInPlace(id, () =>
+        commands.moveVariable(id, variable, to, baseRevision, acknowledgement)
+      );
+    },
+
+    async matchAuthoringSnapshot(id: MatchId): Promise<CommandResult<AuthoringSnapshot>> {
+      return reportedRead(await commands.matchAuthoringSnapshot(id));
+    },
+
+    async analyzeMatchCandidate(
+      id: MatchId,
+      operation: CandidateOperation,
+      baseRevision: ContentRevision,
+      acknowledgement: Acknowledgement
+    ): Promise<CommandResult<MatchCandidate>> {
+      return reportedRead(
+        await commands.analyzeMatchCandidate(id, operation, baseRevision, acknowledgement)
       );
     },
 

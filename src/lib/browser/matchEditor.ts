@@ -277,6 +277,7 @@ import type {
   ContentRevision,
   DraftField,
   ItemDraft,
+  ListPlacement,
   MatchDraft,
   MatchId,
   MatchView,
@@ -328,6 +329,7 @@ import {
   canUndo,
   deepFreeze,
   editDraft,
+  EMPTY_ACKNOWLEDGEMENT,
   isDirty,
   redoDraft,
   savedDraft,
@@ -396,6 +398,7 @@ import {
   capturedVariables,
   grantCovers,
   variableMoveOfferOf,
+  variableMoveSubmissionOf,
   variableRowsOf,
   variablesBaselineOf,
   variablesBufferOf,
@@ -411,6 +414,7 @@ import {
   withVariablesRestored,
   withVariableText,
   type VariableMoveOffer,
+  type VariableMoveSubmission,
   type VariablesBaseline,
   type VariablesBuffer,
   type VariablesProblem,
@@ -1092,6 +1096,18 @@ export interface MatchEditorSession {
   readonly group: TypingGroup | null;
   /** What the last save sent, or `null`. Kept so a refusal can be consented to. */
   readonly submitted: DraftSubmission<MatchBuffers> | null;
+  /**
+   * The variable reorder the last submission sent, or `null` when the last
+   * submission was a draft save (or there was none) — Phase 4-11.
+   *
+   * Set by {@link beginVariableMove} and cleared by {@link beginSave}, the two
+   * doors of a submission. It is what lets the view say which writer an outcome
+   * answers: a reorder is not a draft (R25), so *Save anyway*, *Keep my draft* and
+   * *Copy my text* have nothing to act on after one ({@link matchEditorView}), and
+   * a committed reorder owes both the variables and the forms a re-projection
+   * ({@link applySave}).
+   */
+  readonly movedVariable: VariableMoveSubmission | null;
   /** How the last save ended, as the thing a screen draws, or `null`. */
   readonly outcome: SaveOutcomeModel<MatchBuffers> | null;
   /**
@@ -3496,6 +3512,7 @@ export function startMatchEditor(match: MatchView, clock: Clock): MatchEditorSes
     focus: null,
     group: null,
     submitted: null,
+    movedVariable: null,
     outcome: null,
     extraMessages: [],
     sendFailure: null,
@@ -4555,6 +4572,8 @@ export function beginSave(
       ...session,
       phase: 'saving',
       submitted: submission,
+      // A draft save: whatever reorder an earlier outcome answered is history.
+      movedVariable: null,
       group: null,
       sendFailure: null
     },
@@ -4564,6 +4583,116 @@ export function beginSave(
   // **The installed session, read once, after the last caller-controlled read.**
   return current() === session ? started : null;
 } // End of function beginSave()
+
+/** A variable reorder about to be sent — Phase 4-11. */
+export interface StartedVariableMove {
+  /** The session, now in flight, with the reorder recorded on it. */
+  readonly session: MatchEditorSession;
+  /**
+   * What to hand `moveVariable`: the snippet, the variable, the placement and
+   * the base revision, all taken from the offer the choice was made in (R37).
+   */
+  readonly submission: VariableMoveSubmission;
+  /**
+   * The consent sent with it: always `EMPTY_ACKNOWLEDGEMENT`. A reorder is sent
+   * without consent, and its refusal offers no *Save anyway*
+   * ({@link MatchEditorView.reorderAnswered}), so no consent for one is ever
+   * collected.
+   */
+  readonly acknowledgement: Acknowledgement;
+}
+
+/**
+ * Starts a variable reorder — Phase 4-11, the writer Phase 4-9 decided and left
+ * unsent (`docs/decisions/4-9-notes.md` §5 item 2).
+ *
+ * **Alone in its save (R25) and never over a pending draft**: refused while the
+ * draft differs from what the file held, whatever the offer said when it was
+ * drawn, because an offer is a value a caller may have kept. Refused too when
+ * the variables accept no change ({@link isVariablesEditable}: a save in flight,
+ * a conflict, a commit awaiting a re-projection), while an observation is held
+ * undecided (the rule {@link canSave} keeps for a draft save), when the offer
+ * was made for another identity or base revision than this session's, and when
+ * the choice is not one the offer holds (`variableMoveSubmissionOf` in
+ * `./variableEditor.ts`).
+ *
+ * The session goes to `saving` with a submission of its own clean draft, so
+ * {@link applySave} and {@link saveCouldNotBeSent} take the reorder's answer
+ * exactly as they take a draft save's: a commit moves the base and the identity
+ * and owes a re-projection, a conflict installs nothing, a failure that may have
+ * written says so, and **a committed write is never reported as an error**.
+ *
+ * **What it cannot force is that the offer is current** (R37): an offer kept
+ * from an old read yields a submission against its old revision — which is still
+ * this session's revision, or it is refused here — and the command refuses a
+ * stale one (D2v). The installed session is read once, last, as in
+ * {@link beginSave}.
+ *
+ * @param session - The session to reorder a variable of.
+ * @param offer - The offer the choice was made in (`variableMoveOffer`).
+ * @param variable - The variable's position in the file's list.
+ * @param to - Where it goes, as the offer spells it.
+ * @param current - Reads the session the caller holds now. Required.
+ * @returns The waiting session and the submission, or `null`.
+ */
+export function beginVariableMove(
+  session: MatchEditorSession,
+  offer: VariableMoveOffer,
+  variable: number,
+  to: ListPlacement,
+  current: ReadTheInstalledSession
+): StartedVariableMove | null {
+  if (!isVariablesEditable(session) || isDirty(session.draft) || session.awaitingReconciliation !== null) {
+    return null;
+  }
+  const own = session.match;
+  const offered = offer.match;
+  if (
+    offered.document !== own.document ||
+    offered.revision !== own.revision ||
+    offered.node !== own.node ||
+    offer.baseRevision !== session.draft.baseRevision
+  ) {
+    return null;
+  }
+  const submission = variableMoveSubmissionOf(offer, variable, to);
+  if (submission === null) {
+    return null;
+  }
+  const started: StartedVariableMove = {
+    session: {
+      ...session,
+      phase: 'saving',
+      submitted: submissionOf(session.draft),
+      movedVariable: submission,
+      group: null,
+      sendFailure: null
+    },
+    submission,
+    acknowledgement: EMPTY_ACKNOWLEDGEMENT
+  };
+  // **The installed session, read once, after the last caller-controlled read.**
+  return current() === session ? started : null;
+} // End of function beginVariableMove()
+
+/**
+ * The baseline a committed reorder leaves — Phase 4-11.
+ *
+ * A reorder changes no buffer, so {@link committedBaseline} sees nothing to
+ * mark; but every variable position changed, and a verbose form is addressed by
+ * its variable's position. Both baselines therefore owe a re-projection, which
+ * the session owes anyway (`needsReprojection`).
+ *
+ * @param baseline - The baseline {@link committedBaseline} answered.
+ * @returns It, with the variables and the forms marked.
+ */
+function baselineAfterAReorder(baseline: MatchBaseline): MatchBaseline {
+  return deepFreeze({
+    ...baseline,
+    variables: { ...baseline.variables, reprojectionOwed: true },
+    forms: { ...baseline.forms, reprojectionOwed: true }
+  });
+} // End of function baselineAfterAReorder()
 
 /**
  * The baselines a committed save leaves behind.
@@ -4820,7 +4949,11 @@ export function applySave(
       // the session owes a re-projection and stops accepting changes until it has
       // one. A `committed: false` replaced nothing and owes nothing.
       needsReprojection: result.committed,
-      baseline: committedBaseline(session.baseline, submission.candidate),
+      // Phase 4-11: a committed reorder moved every variable position.
+      baseline:
+        session.movedVariable !== null && result.committed
+          ? baselineAfterAReorder(committedBaseline(session.baseline, submission.candidate))
+          : committedBaseline(session.baseline, submission.candidate),
       draft: savedDraft(session.draft, submission, result.revision),
       phase: 'editing',
       group: null,
@@ -6731,7 +6864,36 @@ export type EditorSection =
        * as the detail pane groups them.
        */
       readonly kind: 'searchTerms';
+    }
+  | {
+      /**
+       * The *Variables and fill-ins* group — Phase 4-11: the chip strip and the
+       * ordered list, directly under the content keys and the change of content
+       * kind, always drawn. `./variableGroup.ts` decides what it holds.
+       */
+      readonly kind: 'variables';
     };
+
+/**
+ * A key naming one section for as long as it is drawn — Phase 4-11.
+ *
+ * **Not its position**: the content-switch section comes and goes (it is drawn
+ * only while a switch is offered or drafted, which a save in flight or a
+ * conflict withdraws), so a walk keyed by position hands the block of one
+ * section to the next and destroys what a component inside it held — the
+ * variables group lost its selection that way the first time its mounted suite
+ * ran. Two field runs have no heading, so a field run is named by its heading or
+ * by its first field.
+ *
+ * @param section - The section.
+ * @returns Its key, unique among one view's sections.
+ */
+export function sectionKey(section: EditorSection): string {
+  if (section.kind !== 'fields') {
+    return section.kind;
+  }
+  return `fields:${section.group ?? section.fields[0]?.field ?? 'none'}`;
+} // End of function sectionKey()
 
 /**
  * The editor's sections, from the field models already built.
@@ -6757,6 +6919,7 @@ function sectionsOf(
   if (switchDrawn) {
     sections.push({ kind: 'contentSwitch' });
   }
+  sections.push({ kind: 'variables' });
   sections.push({ kind: 'fields', group: null, fields: pick(['label', 'comment']) });
   sections.push({ kind: 'searchTerms' });
   for (const { group, fields: names } of OPTION_GROUPS) {
@@ -7375,7 +7538,8 @@ export interface MatchEditorView {
   /**
    * The draft that conflict retained, labelled, in {@link EDITABLE_FIELDS} order.
    *
-   * Empty whenever no conflict is showing. The conflict panel draws this **and**
+   * Empty whenever no conflict is showing, and for a variable reorder's own
+   * conflict (Phase 4-11), which retained no draft. The conflict panel draws this **and**
    * the *Copy draft* control builds its text from the same list, so what a person
    * is told they copied is what the panel showed them.
    *
@@ -7445,6 +7609,14 @@ export interface MatchEditorView {
    * model does force is that no draft is built on eligibility it cannot vouch for.
    */
   readonly needsReprojection: boolean;
+  /**
+   * Whether the outcome on screen answers a variable reorder rather than a draft
+   * save — Phase 4-11 ({@link MatchEditorSession.movedVariable}). While it does,
+   * the refusal offers only *Keep editing*, the reorder's own conflict offers no
+   * choice that acts on a draft, and a screen says a reorder retains nothing to
+   * reapply or copy.
+   */
+  readonly reorderAnswered: boolean;
 }
 
 /**
@@ -7747,11 +7919,23 @@ export function matchEditorView(session: MatchEditorSession): MatchEditorView {
   const stale = outcomeIsStale(session);
   const conflict = conflictOf(session);
   const saved = outcome !== null && outcome.kind === 'saved' ? outcome : null;
-  const conflictChoices =
+  // Phase 4-11: an outcome that answers a variable reorder answers no draft — the
+  // reorder was sent from a clean one (R25) — so the choices that act on a draft
+  // are withdrawn from its conflict and its refusal: *Keep my draft* would
+  // reapply nothing, *Copy my text* would copy nothing, and *Save anyway* would
+  // reach `beginSave` with nothing to save. The external conflict is never the
+  // reorder's, so its choices stay as they are.
+  const reorderAnswered = session.movedVariable !== null && outcome !== null;
+  const reorderConflict = reorderAnswered && conflict !== null && conflict === conflictArm(outcome);
+  const offeredConflictChoices =
     conflict === null
       ? []
       : conflictChoicesFor(effectiveCapabilitiesOf(session), offeredReloadStep(session.reload));
-  const externallyBlocked = session.externalConflict !== null || session.awaitingReconciliation !== null;
+  const conflictChoices = reorderConflict
+    ? offeredConflictChoices.filter((choice) => choice !== 'keepMyDraft' && choice !== 'copyDraft')
+    : offeredConflictChoices;
+  const keepEditingOnly =
+    session.externalConflict !== null || session.awaitingReconciliation !== null || reorderAnswered;
   const refusalChoices = offeredRefusalChoices(refused, stale);
   const contentSwitch = capturedSwitch(session.draft.value);
   const structure = capturedStructure(session.draft.value);
@@ -7797,15 +7981,18 @@ export function matchEditorView(session: MatchEditorSession): MatchEditorView {
     externalMessages: session.externalConflict === null ? [] : session.externalConflict.messages,
     externalNotices: externalNoticesOf(session),
     notes: saved === null ? [] : saved.notes,
-    // The one offer a refusal panel may keep under an external block is the
-    // dismissal: `beginSave` would answer `null` to the other, and a control that
-    // does nothing when pressed is the defect `conflictChoicesFor` exists to stop.
-    refusalChoices: externallyBlocked
+    // The one offer a refusal panel may keep under an external block, or over a
+    // reorder's refusal (Phase 4-11), is the dismissal: `beginSave` would answer
+    // `null` to the other, and a control that does nothing when pressed is the
+    // defect `conflictChoicesFor` exists to stop.
+    refusalChoices: keepEditingOnly
       ? refusalChoices.filter((choice) => choice === 'keepEditing')
       : refusalChoices,
     findingsAreStale: refused !== null && stale,
     conflict,
-    retainedDraft: conflict === null ? [] : retainedDraftOf(session, conflict),
+    // A reorder's conflict retained no draft: the reorder was sent from a clean
+    // one, so listing every field as unchanged would describe nothing (4-11).
+    retainedDraft: conflict === null || reorderConflict ? [] : retainedDraftOf(session, conflict),
     conflictChoices,
     awaitingReloadConfirmation: conflict !== null && atTheReloadWarning(session.reload),
     reloadUnavailable: conflict !== null && reloadWasRefused(session.reload),
@@ -7813,7 +8000,8 @@ export function matchEditorView(session: MatchEditorSession): MatchEditorView {
     diskText: conflictDiskText(conflict),
     closed: session.closed,
     identityStale: session.identityStale,
-    needsReprojection: session.needsReprojection
+    needsReprojection: session.needsReprojection,
+    reorderAnswered
   };
 } // End of function matchEditorView()
 

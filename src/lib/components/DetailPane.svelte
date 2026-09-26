@@ -12,6 +12,7 @@
     type ValueLine
   } from '../browser/detail';
   import { documentHasUnsavedDraft } from '../browser/matchDuplication';
+  import type { VariableGroupPort } from '../browser/variableGroup';
   import type { RawDocumentText } from '../browser/rawDocument';
   import { rawEditorRefusal } from '../browser/rawEditor';
   import {
@@ -1147,6 +1148,35 @@
   } // End of function openMatchDrafts()
 
   /**
+   * The match drafts open **beside** the small editor — Phase 4-11, the drafts a
+   * variable structure read hands R36 from inside that editor.
+   *
+   * **The small editor's own identity is left out on purpose**: `editingMatch`
+   * captured the projection the editor opened over, and after a committed save
+   * and a re-seed the editor's session holds a newer identity than that capture,
+   * so listing it would make the editor's own old revision a stale draft that
+   * refuses every structural action forever. The grant adds the session's own
+   * identity itself (`variableStructureGrantOf` in `../browser/variableEditor.ts`).
+   *
+   * @returns The identities, or an empty list.
+   */
+  function draftsBesideTheEditor(): readonly MatchId[] {
+    return editingSnippetText === null ? [] : [editingSnippetText.match.id];
+  } // End of function draftsBesideTheEditor()
+
+  /**
+   * The variables surface's port over this window — Phase 4-11. Each member is
+   * the `BrowserState` method of the same name: the reorder through
+   * `BrowserState.moveVariable`, which adopts what a commit produced.
+   */
+  const variablePort: VariableGroupPort = {
+    snapshot: (id) => browser.matchAuthoringSnapshot(id),
+    structureRead: (document) => browser.variableStructureRead(document, draftsBesideTheEditor()),
+    moveVariable: (id, variable, to, baseRevision, acknowledgement) =>
+      browser.moveVariable(id, variable, to, baseRevision, acknowledgement)
+  };
+
+  /**
    * Whether this window has a match editor open over any snippet of one file.
    *
    * **`duplicationEligibility`'s third argument, and document-wide on purpose**
@@ -1457,6 +1487,7 @@
       acknowledgement={surfaceAcknowledgement}
       reportRecovery={bindReceiver('recovery')}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
+      variables={variablePort}
       close={() => (editingMatch = null)}
     />
   {:else if editingSnippetText !== null}

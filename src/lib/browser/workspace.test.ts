@@ -28,6 +28,7 @@ import type {
 } from '../ipc/commands';
 import type {
   Acknowledgement,
+  AuthoringSnapshot,
   BackupBatchId,
   BackupBatchListing,
   BackupEntry,
@@ -42,6 +43,7 @@ import type {
   DocumentView,
   ExternalObservation,
   Finding,
+  MatchCandidate,
   MatchDraft,
   MatchId,
   MatchView,
@@ -456,6 +458,8 @@ interface Script {
   readonly spellings?: readonly CommandResult<BulkOptionSpellings>[];
   /** What `apply_bulk_options` answers, in order (Phase 3-11-1). */
   readonly bulks?: readonly CommandResult<BulkResult>[];
+  /** What `move_variable` answers, in order (Phase 4-11). */
+  readonly variableMoves?: readonly CommandResult<SaveResult>[];
   /**
    * What `load_sidecar` answers, in order (Phase 3-13-1); a fresh, empty,
    * writable sidecar once the list runs out, so a case that says nothing about
@@ -627,9 +631,10 @@ function createBrowserState(
 } // End of function createBrowserState()
 
 /**
- * The eight members of a surface whose call opens ruling 27's barrier.
+ * The nine members of a surface whose call opens ruling 27's barrier (the
+ * ninth, `moveVariable`, since Phase 4-11).
  *
- * Each of the eight wrappers in `workspace.svelte.ts` opens the barrier on exactly
+ * Each of the nine wrappers in `workspace.svelte.ts` opens the barrier on exactly
  * the file identities it then hands its command — `match.document`, `id.document`
  * or `document`, and for a bulk edit every `request.files[].document` — so the
  * first argument of every recorded call names the files a lease was opened for. Nothing in TypeScript keeps an eighth writer, or a
@@ -644,7 +649,8 @@ const BARRIERED_MEMBERS = [
   'duplicateMatch',
   'saveRawDocument',
   'saveMatchItemText',
-  'applyBulkOptions'
+  'applyBulkOptions',
+  'moveVariable'
 ] as const;
 
 /**
@@ -684,7 +690,7 @@ function filesWrittenThrough(commands: BrowserCommands): ReadonlySet<DocumentId>
         written.add(first.document);
       }
     } // End of the loop over one stub's recorded calls
-  } // End of the loop over the eight barriered members
+  } // End of the loop over the nine barriered members
   return written;
 } // End of function filesWrittenThrough()
 
@@ -741,6 +747,7 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
   let itemSaves = 0;
   let spellingReads = 0;
   let bulks = 0;
+  let variableMoves = 0;
   let sidecarLoads = 0;
   let sidecarUpdates = 0;
   let raws = 0;
@@ -843,6 +850,21 @@ function scriptedCommands(script: Script = {}): BrowserCommands {
     }),
     applyBulkOptions: vi.fn(async (_request: BulkOptionsRequest) => {
       const answer: CommandResult<BulkResult> = script.bulks?.[bulks++] ?? {
+        ok: false,
+        failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+      };
+      return answer;
+    }),
+    matchAuthoringSnapshot: vi.fn(async (): Promise<CommandResult<AuthoringSnapshot>> => ({
+      ok: false,
+      failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+    })),
+    analyzeMatchCandidate: vi.fn(async (): Promise<CommandResult<MatchCandidate>> => ({
+      ok: false,
+      failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
+    })),
+    moveVariable: vi.fn(async () => {
+      const answer: CommandResult<SaveResult> = script.variableMoves?.[variableMoves++] ?? {
         ok: false,
         failure: { kind: 'command', error: { code: 'noWorkspaceOpen' } }
       };
@@ -5023,6 +5045,86 @@ describe('the local raw editor’s read and write (Phase 3-8-1)', () => {
     expect(state.writeOutcomeUncertain(2)).toBe(false);
   }); // End of the "engine refusal" case
 }); // End of the "local raw editor's read and write" suite
+
+describe('the variable reorder’s write and the two authoring readers (Phase 4-11)', () => {
+  it('sends the reorder’s arguments unchanged, and adopts a commit: the selection follows `moved`', async () => {
+    const edited = movedDocument();
+    const committed: CommandResult<SaveResult> = {
+      ok: true,
+      value: {
+        outcome: 'saved',
+        revision: 'rev-b',
+        committed: true,
+        notes: [],
+        backup_taken: false,
+        moved: edited.matches[1]!.id
+      }
+    };
+    const documents = new Map<number, CommandResult<DocumentView>>([
+      [1, { ok: true, value: profileDocument() }],
+      [2, { ok: true, value: baseDocument() }],
+      [3, { ok: true, value: otherDocument() }]
+    ]);
+    const commands = scriptedCommands({ documents, variableMoves: [committed] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    state.show({ kind: 'document', id: 2 });
+    await state.select(baseDocument().matches[0]!);
+    const id = baseDocument().matches[0]!.id;
+
+    documents.set(2, { ok: true, value: edited });
+    const answer = await state.moveVariable(id, 1, { Front: {} }, 'rev-a', NOTHING_ACKNOWLEDGED);
+
+    expect(vi.mocked(commands.moveVariable).mock.calls).toEqual([[id, 1, { Front: {} }, 'rev-a', NOTHING_ACKNOWLEDGED]]);
+    // A commit is an answer, never a failure, and the window adopted it.
+    expect(answer).toMatchObject({ kind: 'answered', adoption: { kind: 'done' } });
+    expect(state.selected?.id).toEqual(edited.matches[1]!.id);
+    expect(state.writeInFlight(2)).toBe(false);
+    expect(commands.saveMatch).not.toHaveBeenCalled();
+  }); // End of the "commit" case
+
+  it('refuses without a projection, and answers a send that may have written as such', async () => {
+    const commands = scriptedCommands({ variableMoves: [WRITE_MAY_HAVE_HAPPENED] });
+    const state = createBrowserState(commands, () => undefined);
+    await state.open(null);
+    const nowhere: MatchId = { document: 99, revision: 'rev-a', node: 1 };
+    expect(await state.moveVariable(nowhere, 1, { End: {} }, 'rev-a', NOTHING_ACKNOWLEDGED)).toEqual({
+      kind: 'notAttempted'
+    });
+    expect(commands.moveVariable).not.toHaveBeenCalled();
+    const answer = await state.moveVariable(baseDocument().matches[0]!.id, 1, { End: {} }, 'rev-a', NOTHING_ACKNOWLEDGED);
+    expect(answer).toEqual({
+      kind: 'failed',
+      mayHaveWritten: true,
+      failure: WRITE_MAY_HAVE_HAPPENED.ok ? null : WRITE_MAY_HAVE_HAPPENED.failure
+    });
+    expect(state.writeOutcomeUncertain(2)).toBe(true);
+  }); // End of the "refusal and uncertainty" case
+
+  it('answers the two readers unchanged, reports a refusal, and changes nothing on the state', async () => {
+    const reported: IpcFailure[] = [];
+    const commands = scriptedCommands();
+    const state = createBrowserState(commands, (failure) => reported.push(failure));
+    await state.open(null);
+    const id = baseDocument().matches[0]!.id;
+    const views = state.views;
+    const snapshot = await state.matchAuthoringSnapshot(id);
+    const candidate = await state.analyzeMatchCandidate(
+      id,
+      { VariableMove: { variable: 1, to: { Front: {} } } },
+      'rev-a',
+      NOTHING_ACKNOWLEDGED
+    );
+    expect(snapshot.ok).toBe(false);
+    expect(candidate.ok).toBe(false);
+    expect(reported).toHaveLength(2);
+    expect(vi.mocked(commands.matchAuthoringSnapshot).mock.calls).toEqual([[id]]);
+    expect(vi.mocked(commands.analyzeMatchCandidate).mock.calls).toEqual([
+      [id, { VariableMove: { variable: 1, to: { Front: {} } } }, 'rev-a', NOTHING_ACKNOWLEDGED]
+    ]);
+    expect(state.views).toBe(views);
+  }); // End of the "readers" case
+}); // End of the "variable reorder" suite
 
 describe('the bulk option edit’s read and write (Phase 3-11-1)', () => {
   /** How `match_option_spellings` answers for a snippet writing `word: 'true'`. */

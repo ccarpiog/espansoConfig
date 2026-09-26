@@ -34,7 +34,7 @@
 
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeDocument, makeMatch, makeSummary, matchListPath } from '../browser/fixtures';
+import { makeDocument, makeMatch, makeSummary, makeVariable, matchListPath } from '../browser/fixtures';
 import { recoveryChoiceKey, recoveryRefusalKey, sourceConflictStateKey } from '../browser/recovery';
 import { externalEvidenceRefusalKey, reapplyOutcomeKey } from '../browser/reapply';
 import { conflictChoiceKey } from '../browser/saveOutcome';
@@ -412,6 +412,9 @@ function scriptedCommands(
     saveMatchItemText: vi.fn(async (): Promise<CommandResult<SaveResult>> => refusal),
     matchOptionSpellings: vi.fn(async () => refusal),
     applyBulkOptions: vi.fn(async () => refusal),
+    matchAuthoringSnapshot: vi.fn(async () => refusal),
+    analyzeMatchCandidate: vi.fn(async () => refusal),
+    moveVariable: vi.fn(async () => refusal),
     loadSidecar: vi.fn(async () => refusal),
     updateSidecar: vi.fn(async () => refusal),
     saveRawDocument: vi.fn(
@@ -4151,3 +4154,102 @@ describe('B1: a draft holding a list-item addition, told of an external change �
     pane.stop();
   }); // End of the B1 case
 }); // End of the B1 suite
+
+/**
+ * The projection of `match/a.yml` the variable-list B1 case opens over: one
+ * snippet holding two local variables.
+ *
+ * @returns The document view.
+ */
+function variableDocumentA(): DocumentView {
+  return makeDocument({
+    id: 1,
+    relativePath: 'match/a.yml',
+    revision: 'a'.repeat(64),
+    matches: [
+      makeMatch({
+        node: 10,
+        document: 1,
+        revision: 'a'.repeat(64),
+        trigger: ':a',
+        replace: 'ay',
+        path: matchListPath(0),
+        vars: [
+          makeVariable({ node: 20, name: 'first', declaredType: 'echo', kind: 'Echo' }),
+          makeVariable({ node: 21, name: 'second', declaredType: 'echo', kind: 'Echo' })
+        ]
+      })
+    ]
+  });
+} // End of function variableDocumentA()
+
+/**
+ * Renames one variable through the variables group's own controls: its chip,
+ * then its name box.
+ *
+ * @param target - Where the pane was mounted.
+ * @param from - The chip's name.
+ * @param to - The new name.
+ */
+function renameVariable(target: HTMLElement, from: string, to: string): void {
+  const chip = [...target.querySelectorAll('.matchEditor button.chip')].find(
+    (one) => one.querySelector('code')?.textContent === from
+  );
+  if (!(chip instanceof HTMLButtonElement)) {
+    throw new Error(`this case needs the chip ${from}`);
+  }
+  chip.click();
+  flushSync();
+  const box = target.querySelector('.matchEditor .controls input');
+  typeIntoBox(box instanceof HTMLInputElement ? box : undefined, to);
+} // End of function renameVariable()
+
+describe('B1, extended to variable lists — the mounted half (Phase 4-11)', () => {
+  // 4-9 notes §5 item 1: a draft holding **two** `variableName` rows, whose
+  // retained comparison repeats the label once per variable, under external
+  // removal and change — delivered, conflicted, drawn, draft kept.
+  it.each(['removal', 'change'] as const)('two renamed variables under external %s', async (move) => {
+    expectedDrainArguments = [0, 0, 0];
+    const events = paneEvents();
+    const pane = await mountPane(
+      false,
+      { views: [variableDocumentA(), documentB()], batches: [batch(0), batch(0), batch(5, [listDiskMove(move)])] },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+    control(pane.target, 'browser.matchEditor.open').click();
+    flushSync();
+    renameVariable(pane.target, 'first', 'renamedFirst');
+    renameVariable(pane.target, 'second', 'renamedSecond');
+    expect(pane.target.querySelector('.matchEditor .panel.external')).toBeNull();
+
+    events.wake(5, 5);
+    await settleWake();
+
+    // Layer 1, delivery.
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['raised']);
+    // Layer 2, model state: the origin stands, the save is withheld, the
+    // selected variable's boxes went read-only.
+    expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+    expect(control(pane.target, 'browser.matchEditor.save').disabled).toBe(true);
+    const boxes = [...pane.target.querySelectorAll('.matchEditor .controls input')];
+    expect(boxes.length).toBeGreaterThan(0);
+    expect(boxes.every((one) => one instanceof HTMLInputElement && one.readOnly)).toBe(true);
+    // Layer 3, rendering: the panel is drawn, with one row per renamed variable
+    // under the repeated label — keyed by position, so no duplicate-key throw.
+    const panel = pane.target.querySelector('.matchEditor .panel.external');
+    expect(panel).not.toBeNull();
+    const label = DICTIONARIES.en['browser.saveOutcome.label.variableName'];
+    const rows = [...(panel?.querySelectorAll('.shownValue') ?? [])]
+      .map((one) => one.textContent ?? '')
+      .filter((one) => one.includes(label));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('renamedFirst');
+    expect(rows[1]).toContain('renamedSecond');
+    expect(pane.commands.saveMatch).not.toHaveBeenCalled();
+    expect(pane.commands.moveVariable).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the variable-list B1 case
+}); // End of the variable-list B1 suite

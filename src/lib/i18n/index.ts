@@ -200,6 +200,16 @@ import {
   type InsertRefusal,
   type NameVerdict
 } from '../browser/variableInsertion';
+import {
+  analysisStateKey,
+  choiceProblemKey,
+  declarationStatusKey,
+  moveChoiceKey,
+  type AnalysisState,
+  type ChoiceProblem,
+  type DeclarationStatus,
+  type MoveChoiceView
+} from '../browser/variableGroup';
 import type { CommandError, IpcFailure } from '../ipc/errors';
 import type {
   AddedContent,
@@ -892,6 +902,51 @@ export function tNameVerdict(verdict: NameVerdict): string {
 export function tInsertRefusal(refusal: InsertRefusal): string {
   return translate(locale.current, insertRefusalKey(refusal));
 } // End of function tInsertRefusal()
+
+/**
+ * Whether the variable analysis shown is current — Phase 4-11.
+ *
+ * @param state - The state, from `../browser/variableGroup.ts`.
+ * @returns The translated sentence.
+ */
+export function tAnalysisState(state: AnalysisState): string {
+  return translate(locale.current, analysisStateKey(state));
+} // End of function tAnalysisState()
+
+/**
+ * What the draft does to one declaration, as a marker — Phase 4-11.
+ *
+ * @param status - The status, from `../browser/variableGroup.ts`.
+ * @returns The translated marker, or `null` for a declaration as the file holds it.
+ */
+export function tDeclarationStatus(status: DeclarationStatus): string | null {
+  const key = declarationStatusKey(status);
+  return key === null ? null : translate(locale.current, key);
+} // End of function tDeclarationStatus()
+
+/**
+ * The label of one reorder choice — Phase 4-11. The anchor's name is file
+ * text, interpolated as it is.
+ *
+ * @param choice - The choice, from `../browser/variableGroup.ts`.
+ * @param unnamed - What to say for an anchor with no readable name.
+ * @returns The translated label.
+ */
+export function tMoveChoice(choice: MoveChoiceView, unnamed: string): string {
+  return translate(locale.current, moveChoiceKey(choice.label), {
+    name: choice.anchor === '' ? unnamed : choice.anchor
+  });
+} // End of function tMoveChoice()
+
+/**
+ * Why the **Choice** insertion cannot insert as its form stands — Phase 4-11.
+ *
+ * @param problem - The code, from `../browser/variableGroup.ts`.
+ * @returns The translated sentence.
+ */
+export function tChoiceProblem(problem: ChoiceProblem): string {
+  return translate(locale.current, choiceProblemKey(problem));
+} // End of function tChoiceProblem()
 
 /**
  * Why a form's layout box or a definition's option box is shown and not edited —

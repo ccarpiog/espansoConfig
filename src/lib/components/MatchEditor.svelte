@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import {
     acknowledgeSnapshot,
     acknowledgeFindings,
@@ -12,6 +12,7 @@
     askToReloadDiskVersion,
     baseRevisionOf,
     beginSave,
+    beginVariableMove,
     cancelContentSwitch,
     cancelTriggerForm,
     chooseContentSwitch,
@@ -35,6 +36,7 @@
     removeListItem,
     restoreField,
     saveCouldNotBeSent,
+    sectionKey,
     startMatchEditor,
     type Clock,
     type CursorAdvisory,
@@ -44,9 +46,13 @@
     type ListModel,
     type MatchEditorSession,
     type Reprojection,
+    type TextSelection,
     type TriggerShape,
-    undoEdit
+    undoEdit,
+    variableMoveOffer
   } from '../browser/matchEditor';
+  import { heldAfterReply, type HeldAnalysis, type VariableGroupPort } from '../browser/variableGroup';
+  import type { ReferenceField } from '../browser/variableInsertion';
   import type { AdoptTheDiskVersion } from '../browser/editorSave';
   import type { CreationBuffers } from '../browser/matchCreation';
   import type { MatchBuffers } from '../browser/matchEditor';
@@ -120,6 +126,7 @@
     DocumentId,
     DocumentSummary,
     DocumentView,
+    ListPlacement,
     MatchDraft,
     MatchId,
     MatchView,
@@ -133,13 +140,16 @@
   } from '../browser/reconciliationStatus';
   import SnapshotAcknowledgement from './SnapshotAcknowledgement.svelte';
   import SourceText from './SourceText.svelte';
+  import VariableGroup from './VariableGroup.svelte';
 
   /*
    * The small editor: one snippet's editable fields, drafted and saved — seventeen
    * since Phase 3-5-1, drawn in the model's sections since Phase 3-5-2-1, with the
    * change of content kind, the option suggestions and the cursor action; since
    * Phase 3-6-2 the trigger side (the one control of the drafted trigger form, the
-   * choices of form and a change's preview) and `search_terms` as list controls.
+   * choices of form and a change's preview) and `search_terms` as list controls;
+   * since Phase 4-11 the *Variables and fill-ins* group (`VariableGroup.svelte`)
+   * under the content keys, and the variable reorder's save (`runVariableMove`).
    *
    * **This file is presentation.** Every decision about what may be edited, what
    * a draft means, when a save may start, what it says and what a commit moves is
@@ -277,6 +287,7 @@
     acknowledgement,
     reportRecovery,
     standingConflictFor,
+    variables,
     close,
     clock = () => Date.now()
   }: {
@@ -422,6 +433,16 @@
      * hand the window's answer rather than a captured one.
      */
     standingConflictFor: (document: DocumentId) => ConflictSource | null;
+    /**
+     * The variables surface's side of the window — Phase 4-11: the authoring
+     * snapshot read, the structure read and the reorder writer
+     * (`VariableGroupPort` in `../browser/variableGroup.ts`), built by
+     * `DetailPane.svelte` over `BrowserState`. **Required, and what that forces is
+     * only that a host supplies one**: nothing in TypeScript forces its
+     * `moveVariable` to be `BrowserState.moveVariable`, which performs the
+     * adoption a committed reorder owes, rather than the bare command.
+     */
+    variables: VariableGroupPort;
     close: () => void;
     /**
      * Where the typing group's boundary readings come from.
@@ -448,6 +469,31 @@
   // svelte-ignore state_referenced_locally
   let session = $state.raw(startMatchEditor(match, clock));
   const view = $derived(matchEditorView(session));
+
+  /**
+   * The authoring snapshot this editor holds for its identity — Phase 4-11: the
+   * Rust analysis the variables group draws its dependency state from, and the
+   * scope and captures a new name is checked against.
+   *
+   * **Asked once per identity**: the effect below depends on the identity's
+   * three fields only (through `identityKey`), so it runs when the editor opens
+   * and again when a re-seed moves the session to a new revision, never on an
+   * ordinary keystroke. A reply is kept only while it answers the read still
+   * awaited (`heldAfterReply`), and the group shows it only for the exact
+   * identity it describes (`analysisOf`).
+   */
+  let heldAnalysis = $state.raw<HeldAnalysis | null>(null);
+  const identityKey = $derived(
+    `${session.match.document}:${session.match.revision}:${session.match.node}`
+  );
+  $effect(() => {
+    void identityKey;
+    const asked = untrack(() => session.match);
+    heldAnalysis = { kind: 'reading', for: asked };
+    void variables.snapshot(asked).then((answer) => {
+      heldAnalysis = heldAfterReply(untrack(() => heldAnalysis), asked, answer);
+    });
+  });
 
   /*
    * **The receiver, reported when this editor starts and withdrawn when it is
@@ -943,6 +989,66 @@
   } // End of function runSave()
 
   /**
+   * Sends one variable reorder — Phase 4-11, over `beginVariableMove` in
+   * `../browser/matchEditor.ts`.
+   *
+   * **Decided again here, over a read taken at the press** (R37): the offer the
+   * group drew from may be older than the window, so the offer is minted now and
+   * `beginVariableMove` refuses anything it does not hold, a dirty draft (R25)
+   * and a stale draft in the file (R36) among them. The answer is taken by the
+   * same two transitions a draft save's is, in the same three arms, so a commit
+   * is never reported as an error and a conflict installs nothing.
+   *
+   * @param variable - The variable's position in the file's list.
+   * @param to - Where it goes.
+   */
+  async function runVariableMove(variable: number, to: ListPlacement): Promise<void> {
+    const held = session;
+    const offer = variableMoveOffer(held, variables.structureRead(held.match.document));
+    const started = beginVariableMove(held, offer, variable, to, () => session);
+    if (started === null) {
+      return;
+    }
+    session = started.session;
+    leaving = false;
+    copied = null;
+    const sent = started.submission;
+    const answer = await variables.moveVariable(
+      sent.match,
+      sent.variable,
+      sent.to,
+      sent.baseRevision,
+      started.acknowledgement
+    );
+    if (answer.kind === 'answered') {
+      session = applySave(session, answer.result, answer.adoption, () => session);
+      return;
+    }
+    session =
+      answer.kind === 'notAttempted'
+        ? saveCouldNotBeSent(session, false, null, () => session)
+        : saveCouldNotBeSent(session, answer.mayHaveWritten, answer.failure, () => session);
+  } // End of function runVariableMove()
+
+  /**
+   * The selection of one content key's box, for an insertion's reference — the
+   * box found by the `data-field` it carries; non-integers when it is not drawn,
+   * which the insertion reads as the end of the text.
+   *
+   * @param field - The content key.
+   * @returns Its selection, in UTF-16 code units.
+   */
+  function selectionOf(field: ReferenceField): TextSelection {
+    const box = editorElement?.querySelector(`textarea[data-field="${field}"]`);
+    return box instanceof HTMLTextAreaElement
+      ? { start: box.selectionStart, end: box.selectionEnd }
+      : { start: Number.NaN, end: Number.NaN };
+  } // End of function selectionOf()
+
+  /** The editor's own element, where `selectionOf` looks for a box. */
+  let editorElement = $state<HTMLElement | null>(null);
+
+  /**
    * Does what one refusal choice says.
    *
    * @param choice - The choice the person picked.
@@ -1269,6 +1375,7 @@
           <textarea
             class="text body"
             spellcheck="false"
+            data-field={field.field}
             readonly={!field.editable}
             value={field.text}
             oninput={(event) => onTyped(field.field, event.currentTarget.value)}
@@ -1671,7 +1778,7 @@
   </div>
 {/snippet}
 
-<section class="matchEditor" aria-label={t('browser.matchEditor.label')}>
+<section class="matchEditor" aria-label={t('browser.matchEditor.label')} bind:this={editorElement}>
   <div class="head">
     {#if file !== null}
       <dl>
@@ -1724,13 +1831,25 @@
        option is a text box and never a checkbox (D2u); the *Insertion* group
        holds `force_mode` and `force_clipboard` as two boxes, each with its own
        label, and nothing here relates one to the other. -->
-  {#each view.sections as section, index (index)}
+  {#each view.sections as section (sectionKey(section))}
     {#if section.kind === 'contentSwitch'}
       {@render contentKind()}
     {:else if section.kind === 'triggerSide'}
       {@render triggerSide(section.literal)}
     {:else if section.kind === 'searchTerms'}
       {@render listBlock(view.structure.searchTerms)}
+    {:else if section.kind === 'variables'}
+      <!-- **The Variables and fill-ins group** (Phase 4-11), under the content
+           keys: the chip strip and the list always, a declaration's controls
+           only once it is selected. Every transition it runs comes back here. -->
+      <VariableGroup
+        {session}
+        held={heldAnalysis}
+        port={variables}
+        apply={(next) => (session = next)}
+        move={(variable, to) => void runVariableMove(variable, to)}
+        {selectionOf}
+      />
     {:else if section.group !== null}
       <div class="group" role="group" aria-label={tOptionGroup(section.group)}>
         <h3>{tOptionGroup(section.group)}</h3>
@@ -1902,6 +2021,11 @@
         </p>
       {:else if outcome.kind === 'refused'}
         <p class="kind">{tSaveVerdict(outcome.verdict)}</p>
+        <!-- A reorder's refusal offers only *Keep editing* (Phase 4-11): the model
+             withdraws *Save anyway*, and this line says why nothing else is here. -->
+        {#if view.reorderAnswered}
+          <p class="kind">{t('browser.variableGroup.reorderRefused')}</p>
+        {/if}
         {#if outcome.findings.length > 0}
           <p class="kind">{t('browser.matchEditor.findings')}</p>
           <ul>
@@ -1931,6 +2055,11 @@
         <p class="kind">
           {t('browser.matchEditor.revisionDisk', { revision: conflict.diskRevision })}
         </p>
+        <!-- A reorder's conflict retains no draft (Phase 4-11): the model withdraws
+             *Keep my draft* and *Copy my text*, and this line says why. -->
+        {#if view.reorderAnswered}
+          <p class="kind">{t('browser.variableGroup.reorderConflict')}</p>
+        {/if}
 
         {@render comparison()}
       {/if}

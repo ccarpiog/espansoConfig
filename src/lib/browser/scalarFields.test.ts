@@ -58,6 +58,7 @@ import {
   reapplyToDiskVersion,
   removeField,
   saveWithheldKey,
+  sectionKey,
   startMatchEditor,
   undoEdit,
   type EditableField,
@@ -763,12 +764,14 @@ describe('the values the components draw — Phase 3-5-2-1', () => {
 
   it('cuts the seventeen fields into sections, with the switch section under the content keys only when offered', () => {
     // Since Phase 3-6-2 the trigger side leads (carrying the literal trigger's
-    // model) and `search_terms` follows the label and the comment.
+    // model) and `search_terms` follows the label and the comment; since Phase
+    // 4-11 the variables group follows the content keys and their switch.
     const offered = matchEditorView(session());
     expect(offered.sections.map((one) => (one.kind === 'fields' ? one.group : one.kind))).toEqual([
       'triggerSide',
       null,
       'contentSwitch',
+      'variables',
       null,
       'searchTerms',
       'matching',
@@ -784,6 +787,8 @@ describe('the values the components draw — Phase 3-5-2-1', () => {
           : []
     );
     expect(walked).toEqual(EDITABLE_FIELDS);
+    // Phase 4-11: every section has its own key, whether or not the switch is drawn.
+    expect(new Set(offered.sections.map(sectionKey)).size).toBe(offered.sections.length);
     // Two content keys: no switch to offer and none drafted, so no section.
     const none = matchEditorView(session(projection({ markdown: 'm' })));
     expect(none.switchTargets).toEqual([]);

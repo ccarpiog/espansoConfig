@@ -1854,7 +1854,11 @@ export function variableMoveOfferOf(
   };
 } // End of function variableMoveOfferOf()
 
-/** A reorder ready to hand `moveVariable` in `../ipc/commands`. */
+/**
+ * A reorder ready to send: `beginVariableMove` in `./matchEditor.ts` starts it
+ * and `BrowserState.moveVariable` in `./workspace.svelte.ts` sends it (Phase
+ * 4-11).
+ */
 export interface VariableMoveSubmission {
   /** The snippet. */
   readonly match: MatchId;

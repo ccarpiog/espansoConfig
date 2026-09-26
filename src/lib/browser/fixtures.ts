@@ -71,6 +71,8 @@ import type {
 } from '../ipc/types';
 import type { ExternalChangeConflictSource } from './conflictSource';
 import type { ReconciliationRefusal, SurfaceAcknowledgementPort } from './reconciliationStatus';
+import { variableStructureReadOf } from './variableEditor';
+import type { VariableGroupPort } from './variableGroup';
 
 /**
  * A plain scalar carrying source text.
@@ -874,3 +876,20 @@ export function scriptedAcknowledgement(): ScriptedAcknowledgement {
   };
   return script;
 } // End of function scriptedAcknowledgement()
+
+/**
+ * A variables port for a mounted editor whose case is not about variables —
+ * Phase 4-11. The snapshot read never answers (the group says it is reading),
+ * the structure read is taken over the projections a case hands in with no
+ * other draft open, and a reorder is refused before any command runs.
+ *
+ * @param views - The window's projections, read on every structure read.
+ * @returns The port.
+ */
+export function inertVariablePort(views: () => readonly DocumentView[] = () => []): VariableGroupPort {
+  return {
+    snapshot: () => new Promise(() => undefined),
+    structureRead: (document) => variableStructureReadOf(views(), document, []),
+    moveVariable: () => Promise.resolve({ kind: 'notAttempted' })
+  };
+} // End of function inertVariablePort()
