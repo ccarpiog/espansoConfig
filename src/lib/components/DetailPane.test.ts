@@ -3905,3 +3905,249 @@ describe('the snippet text editor inside the pane — Phase 3-8-2', () => {
     pane.stop();
   }); // End of the "offer missing" case
 }); // End of the "snippet text editor inside the pane" suite
+
+/*
+ * **Phase 4-2 — B1, the list-item draft that drew no external-change panel.**
+ *
+ * `docs/decisions/3-6-3-notes.md` §4 item 1: in ten exploratory window launches a
+ * single-match editor whose draft added an item to `triggers` or `search_terms`
+ * never drew `.panel.external` after the file changed on disk, while seven
+ * launches whose draft held no list-item edit drew it within seconds. The record
+ * left the layer unknown. Every case below drives the whole chain through the
+ * real `BrowserState`, the real coordinator and the real receiver roster, and
+ * asserts the three layers **separately and in order**, so a failure names which
+ * one broke:
+ *
+ * 1. **delivery** — the envelope reached the editor's registration, `raised`;
+ * 2. **model state** — the window holds the standing external origin, and the
+ *    editor's session took the conflict (its controls went read-only and its save
+ *    was withheld, which only `session.externalConflict` does from here);
+ * 3. **rendering** — `.panel.external` is in the DOM, and the drafted list item is
+ *    still on screen (the draft retained).
+ *
+ * **Mounted evidence, never a window reading** (Phase 4 ruling 29): this proves
+ * what jsdom's DOM holds after the handlers ran, not what a WKWebView draws. The
+ * visible counterpart is owed to step 4-13.
+ */
+
+/** Which list-item draft a B1 case builds before the file changes. */
+type ListDraft = 'triggersItem' | 'triggersBySwitch' | 'searchTermsItem' | 'searchTermsNewList';
+
+/** How the file changed on disk in a B1 case. */
+type DiskMove = 'removal' | 'change';
+
+/**
+ * The projection of `match/a.yml` a B1 case opens over.
+ *
+ * @param draft - Which draft the case builds, which decides the snippet's lists.
+ * @returns The document view.
+ */
+function listDocumentA(draft: ListDraft): DocumentView {
+  const lists =
+    draft === 'triggersItem'
+      ? { trigger: null, triggers: [':a', ':b'], triggerKind: 'Multiple' as const }
+      : draft === 'searchTermsItem'
+        ? { trigger: ':a', searchTerms: ['alpha'] }
+        : { trigger: ':a' };
+  return makeDocument({
+    id: 1,
+    relativePath: 'match/a.yml',
+    revision: 'a'.repeat(64),
+    matches: [
+      makeMatch({
+        node: 10,
+        document: 1,
+        revision: 'a'.repeat(64),
+        replace: 'ay',
+        path: matchListPath(0),
+        ...lists
+      })
+    ]
+  });
+} // End of function listDocumentA()
+
+/**
+ * One `Changed` observation of `match/a.yml` in which the snippet was either taken
+ * out of the file (`removal`) or had its `replace` changed in place (`change`).
+ *
+ * @param move - Which of the two.
+ * @returns The wire observation, admitted under sequence 5.
+ */
+function listDiskMove(move: DiskMove): ExternalObservation {
+  const revision: ContentRevision = 'c'.repeat(64);
+  const text =
+    move === 'removal' ? 'matches: []\n' : 'matches:\n  - trigger: ":a"\n    replace: changed\n';
+  const disk = makeDocument({
+    id: 1,
+    relativePath: 'match/a.yml',
+    revision,
+    matches:
+      move === 'removal'
+        ? []
+        : [
+            makeMatch({
+              node: 10,
+              document: 1,
+              revision,
+              trigger: ':a',
+              replace: 'changed',
+              path: matchListPath(0)
+            })
+          ]
+  });
+  return {
+    Changed: {
+      sequence: 5,
+      document: { Addressable: { document: 1, relative_path: 'match/a.yml' } },
+      previous_revision: 'a'.repeat(64),
+      disk_revision: revision,
+      content: { Projected: { disk_text: text, disk, findings: [], correspondences: null } }
+    }
+  };
+} // End of function listDiskMove()
+
+/**
+ * The editor block whose name is one field label's English sentence.
+ *
+ * @param target - Where the pane was mounted.
+ * @param key - The key holding the field's label.
+ * @returns The block.
+ */
+function fieldBlock(target: HTMLElement, key: TranslationKey): HTMLElement {
+  const label = DICTIONARIES.en[key];
+  for (const element of target.querySelectorAll('.matchEditor .field')) {
+    if (element instanceof HTMLElement && element.querySelector('.name')?.textContent?.trim() === label) {
+      return element;
+    }
+  } // End of the loop over the editor's blocks
+  throw new Error(`this case needs the block named ${key}`);
+} // End of function fieldBlock()
+
+/**
+ * Types a whole value into one box the way a keystroke does.
+ *
+ * @param input - The box, or `undefined` when it was not drawn.
+ * @param text - Its whole new value.
+ */
+function typeIntoBox(input: HTMLInputElement | undefined, text: string): void {
+  if (input === undefined) {
+    throw new Error('this case needs the box drawn');
+  }
+  input.value = text;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+} // End of function typeIntoBox()
+
+/**
+ * Builds one B1 draft through the editor's own controls, and answers the field
+ * whose list holds the added item and the item's text.
+ *
+ * @param target - Where the pane was mounted.
+ * @param draft - Which draft.
+ * @returns The list's label key and the text of the item added.
+ */
+function draftListItem(target: HTMLElement, draft: ListDraft): { field: TranslationKey; item: string } {
+  switch (draft) {
+    case 'triggersItem': {
+      control(fieldBlock(target, 'browser.detail.field.triggers'), 'browser.matchEditor.list.addItem').click();
+      flushSync();
+      const inputs = fieldBlock(target, 'browser.detail.field.triggers').querySelectorAll('input');
+      typeIntoBox(inputs[inputs.length - 1], ':added');
+      return { field: 'browser.detail.field.triggers', item: ':added' };
+    }
+    case 'triggersBySwitch': {
+      control(target, 'browser.matchEditor.triggerForm.to', {
+        form: DICTIONARIES.en['browser.detail.field.triggers']
+      }).click();
+      flushSync();
+      control(target, 'browser.matchEditor.triggerForm.confirm').click();
+      flushSync();
+      control(fieldBlock(target, 'browser.detail.field.triggers'), 'browser.matchEditor.list.addItem').click();
+      flushSync();
+      const inputs = fieldBlock(target, 'browser.detail.field.triggers').querySelectorAll('input');
+      typeIntoBox(inputs[inputs.length - 1], ':added');
+      return { field: 'browser.detail.field.triggers', item: ':added' };
+    }
+    case 'searchTermsItem': {
+      control(fieldBlock(target, 'browser.detail.field.searchTerms'), 'browser.matchEditor.list.addItem').click();
+      flushSync();
+      const inputs = fieldBlock(target, 'browser.detail.field.searchTerms').querySelectorAll('input');
+      typeIntoBox(inputs[inputs.length - 1], 'added');
+      return { field: 'browser.detail.field.searchTerms', item: 'added' };
+    }
+    case 'searchTermsNewList': {
+      control(fieldBlock(target, 'browser.detail.field.searchTerms'), 'browser.matchEditor.list.add').click();
+      flushSync();
+      control(fieldBlock(target, 'browser.detail.field.searchTerms'), 'browser.matchEditor.list.addItem').click();
+      flushSync();
+      const inputs = fieldBlock(target, 'browser.detail.field.searchTerms').querySelectorAll('input');
+      typeIntoBox(inputs[inputs.length - 1], 'added');
+      return { field: 'browser.detail.field.searchTerms', item: 'added' };
+    }
+    default: {
+      const unreachable: never = draft;
+      return unreachable;
+    }
+  } // End of the switch over the draft
+} // End of function draftListItem()
+
+describe('B1: a draft holding a list-item addition, told of an external change — Phase 4-2', () => {
+  // The four combinations step 4-2 names (the two lists × removal and change),
+  // then the two drafts the window reading's L20 and L12 may have held instead: a
+  // literal switched to a list before the item was added, and a `search_terms`
+  // list that was absent until the draft added it.
+  it.each([
+    ['triggersItem', 'removal'],
+    ['triggersItem', 'change'],
+    ['searchTermsItem', 'removal'],
+    ['searchTermsItem', 'change'],
+    ['triggersBySwitch', 'removal'],
+    ['triggersBySwitch', 'change'],
+    ['searchTermsNewList', 'removal'],
+    ['searchTermsNewList', 'change']
+  ] as const)('%s under external %s: delivered, conflicted, drawn, draft kept', async (draft, move) => {
+    expectedDrainArguments = [0, 0, 0];
+    const events = paneEvents();
+    const pane = await mountPane(
+      false,
+      {
+        views: [listDocumentA(draft), documentB()],
+        batches: [batch(0), batch(0), batch(5, [listDiskMove(move)])]
+      },
+      events.source
+    );
+    const log = watchDeliveries(pane.state);
+    await pane.state.select(snippetOf(pane.state, 1));
+    flushSync();
+    control(pane.target, 'browser.matchEditor.open').click();
+    flushSync();
+    const { field, item } = draftListItem(pane.target, draft);
+    const drafted = [...fieldBlock(pane.target, field).querySelectorAll('input')].map((one) => one.value);
+    expect(drafted).toContain(item);
+    expect(log.live()).toEqual([1]);
+    expect(pane.target.querySelector('.matchEditor .panel.external')).toBeNull();
+
+    events.wake(5, 5);
+    await settleWake();
+
+    // Layer 1, delivery: the editor's registration was handed the envelope.
+    expect(log.delivered.map((one) => one.delivery.verdict.kind)).toEqual(['raised']);
+    // Layer 2, model state: the window's origin stands, and the session took the
+    // conflict — the save is withheld and the list's boxes went read-only.
+    expect(pane.state.standingConflictFor(1)?.kind).toBe('externalChange');
+    expect(control(pane.target, 'browser.matchEditor.save').disabled).toBe(true);
+    const boxes = [...fieldBlock(pane.target, field).querySelectorAll('input')];
+    expect(boxes.every((one) => one.readOnly || one.disabled)).toBe(true);
+    // Layer 3, rendering: the external-change panel is drawn, and the drafted
+    // item is still on screen.
+    const panel = pane.target.querySelector('.matchEditor .panel.external');
+    expect(panel).not.toBeNull();
+    expect(boxes.map((one) => one.value)).toEqual(drafted);
+    // The panel's retained-draft comparison draws the added item too.
+    const retained = [...(panel?.querySelectorAll('.shownValue') ?? [])].map((one) => one.textContent ?? '');
+    expect(retained.some((one) => one.includes(item))).toBe(true);
+    expect(pane.commands.reloadDocument).not.toHaveBeenCalled();
+    expect(pane.commands.saveMatch).not.toHaveBeenCalled();
+    pane.stop();
+  }); // End of the B1 case
+}); // End of the B1 suite

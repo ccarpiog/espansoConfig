@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T11:08:36Z",
+  "updated": "2026-09-26T11:17:50Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 4, variables and forms, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1227,13 +1227,16 @@
       "summary": "Writes the eight boolean-like match options as validated plain source on Create and in the single-match editor; reviewed ship.",
       "risk": "high",
       "review": "docs/reviews/4-1.md",
-      "narrative": "docs/decisions/4-1-notes.md"
+      "narrative": "docs/decisions/4-1-notes.md",
+      "commit": "fdb0ab7"
     },
     {
       "id": "4-2",
       "title": "B1 reproduction and bounded repair",
-      "status": "queued",
-      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "status": "done",
+      "summary": "Reproduces the missing external-change panel for list-item drafts (duplicate Svelte keys) and keys the rows by position; reviewed ship.",
+      "risk": "high",
+      "review": "ship (Codex), docs/reviews/4-2.md"
     },
     {
       "id": "4-3",

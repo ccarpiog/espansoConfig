@@ -1129,8 +1129,14 @@
        same list the copy is built from. Through `SourceText` rather than
        into boxes: nothing here is editable while the panel is up, and a
        projected value may hold a real carriage return that a text control
-       would silently draw as an ordinary line break. -->
-  {#each view.retainedDraft as field (field.label)}
+       would silently draw as an ordinary line break.
+       **Keyed by position, not by label** (Phase 4-2, B1): the model repeats a
+       list's label once per drafted item (`triggers`, `searchTerms`), and a
+       duplicate key makes Svelte throw `each_key_duplicate` in production too,
+       which aborted the flush that would have drawn this panel. Nothing in
+       TypeScript forces a key here to be unique; `DetailPane.test.ts` ("B1: …")
+       is what fails if one is not. -->
+  {#each view.retainedDraft as field, index (index)}
     <div class="shownValue">
       <span class="marker">{tDetailField(field.label)}</span>
       <span class="marker">{tDraftFieldStatus(field.status)}</span>

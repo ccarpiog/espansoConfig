@@ -66,6 +66,7 @@ import type { InvalidationStatus } from './invalidation';
 import {
   acknowledgeFindings,
   acknowledgeSnapshot,
+  addListItem,
   applyObservation,
   applySave,
   askToReloadDiskVersion,
@@ -2111,6 +2112,31 @@ describe('the external session — Phase 2d-6-2', () => {
       expect(view.refusalChoices).toEqual(['keepEditing']);
       expect(view.findingsAreStale).toBe(false);
     }); // End of the "beginSave under an external conflict" case
+
+    // **Phase 4-2, B1's model layer.** The mounted suite in
+    // `../components/DetailPane.test.ts` ("B1: …") shows the envelope delivered and
+    // the panel not drawn; this pins that the session between them is right: a
+    // list-item addition is raised over like any other draft, retained whole, and
+    // its retained rows repeat the list's label once per item — which is the
+    // model's settled shape (`triggerLists.test.ts`, "lists the drafted items with
+    // their status"), so a renderer must not key those rows by label.
+    it.each([
+      ['triggers', projection({ trigger: null, triggers: [':a', ':b'], triggerKind: 'Multiple' }), ':added'],
+      ['search_terms', projection({ searchTerms: ['alpha'] }), 'added']
+    ] as const)('raises over a draft holding an item added to %s, and keeps it', (field, match, item) => {
+      const drafted = addListItem(session(match), field, field === 'triggers' ? 2 : 1, item);
+      expect(isDirty(drafted.draft)).toBe(true);
+      const next = applyObservation(drafted, raised(observation()));
+      const conflict = externalOf(next);
+      expect(conflict.draft).toBe(drafted.draft);
+      const view = matchEditorView(next);
+      expect(view.conflict).toBe(conflict);
+      expect(canSave(next)).toBe(false);
+      const label = field === 'triggers' ? 'triggers' : 'searchTerms';
+      const rows = view.retainedDraft.filter((row) => row.label === label);
+      expect(rows.map((row) => row.text)).toContain(item);
+      expect(rows.length).toBeGreaterThan(1);
+    }); // End of the B1 model-layer case
 
     it('takes nothing once closed', () => {
       const closed = ((onHand) => reloadTheDiskVersion(onHand, adopting().adopt, () => onHand))(confirmDiskReload(askToReloadDiskVersion(saveConflicted())));
