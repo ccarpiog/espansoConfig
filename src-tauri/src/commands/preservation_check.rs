@@ -402,7 +402,7 @@ fn a_grouped_insertion_conserves_unknown_bytes_and_coverage_through_save_match()
         DENSE_UNKNOWNS,
         &[(
             "    unknown_scalar: plain\n",
-            "    unknown_scalar: plain\n    label: a label\n    word: 'true'\n",
+            "    unknown_scalar: plain\n    label: a label\n    word: true\n",
         )],
     );
     assert_conserved(
@@ -565,7 +565,7 @@ fn a_wide_creation_conserves_unknown_bytes_and_coverage_through_create_match() {
                 "    replace: five\n",
                 "    search_terms:\n",
                 "      - delta\n",
-                "    word: 'true'\n",
+                "    word: true\n",
             ),
         )],
     );
@@ -798,7 +798,7 @@ fn the_exact_bytes_check_sees_a_change_inside_the_edited_snippet() {
         DENSE_UNKNOWNS,
         &[(
             "    unknown_scalar: plain\n",
-            "    unknown_scalar: plain\n    label: a label\n    word: 'true'\n",
+            "    unknown_scalar: plain\n    label: a label\n    word: true\n",
         )],
     );
     let written = disk(&opened.dir);

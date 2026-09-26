@@ -1087,7 +1087,9 @@ fn creation(new_match: &NewMatch, placement: ItemPlacement) -> DocumentEdit {
     DocumentEdit::InsertItem(InsertItem::typed(
         DocumentPath::parse("matches").expect("the test's own path parses"),
         placement,
-        new_match.entries(),
+        new_match
+            .entries()
+            .expect("these creations carry no option that is not plain source"),
     ))
 } // End of function creation()
 
@@ -1811,10 +1813,10 @@ fn a_six_field_creation_writes_all_six_keys_and_still_reports_the_repetition() {
     assert_eq!(
         written,
         "  - trigger: ':one'\n    replace: a recovered body\n    label: a recovered label\n    \
-         word: 'true'\n    left_word: 'false'\n",
+         word: true\n    left_word: false\n",
         "the four optional keys are written in order, and the absent one is not written at all; \
-         each value's spelling is `choose_scalar`'s decision, which is why `true` is quoted and \
-         a sentence is not"
+         the two options are plain source written as typed (Phase 4-1), and the label's spelling \
+         is `choose_scalar`'s decision"
     );
 } // End of function a_six_field_creation_writes_all_six_keys_and_still_reports_the_repetition()
 

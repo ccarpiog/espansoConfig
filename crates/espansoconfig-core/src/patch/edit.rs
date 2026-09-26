@@ -7604,10 +7604,11 @@ fn render_item(
                     choose_scalar(value, context).render()
                 ));
             }
-            // Verbatim, as a group writes it. Nothing builds one for a new item
-            // today; `verify_entry_value` checks it reads back as written, and
-            // the ambiguity property is not waived for it here, so an ambiguous
-            // spelling in a new item is refused rather than written.
+            // Verbatim, as a group writes it. Creation builds one for each of
+            // the eight plain-source options since Phase 4-1;
+            // `verify_entry_value` checks it reads back as written, and the
+            // ambiguity property waives exactly this value node and nothing else
+            // of the item (`inserted_plain_source_nodes`).
             EntryValue::PlainSource(text) => {
                 lines.push(format!("{lead}{key}: {text}"));
             }
@@ -9161,7 +9162,7 @@ fn verify(
     // A plain-source value (Phase 3-10) is text a person entered and the engine
     // wrote verbatim; no emitter chose it, so it is not charged — exactly the
     // stance the local raw-item edit takes. Its own read-back is checked below.
-    let authored = plain_source_nodes(original, &index, edits, expectations);
+    let authored = plain_source_nodes(original, &index, edits, expectations, sequences);
     no_ambiguous_plain_scalar_is_introduced(original, &index, &copied, &authored)?;
     for relocation in moves {
         the_arrival_is_the_departure(source, original, replacements, relocation)?;
@@ -9247,8 +9248,24 @@ fn verify(
 } // End of function verify()
 
 /// The candidate value nodes a batch wrote as plain source text (Phase 3-10):
-/// every [`ScalarEdit::plain_source`] target, and every
-/// [`EntryValue::PlainSource`] entry of a changed mapping.
+/// every [`ScalarEdit::plain_source`] target, every
+/// [`EntryValue::PlainSource`] entry of a changed mapping, and — since Phase
+/// 4-1 — the value node of every [`EntryValue::PlainSource`] field of an
+/// **inserted item** ([`InsertItem`]).
+///
+/// # An inserted item's exemption is exactly as wide as its requested entries
+///
+/// `docs/decisions/4-split-notes.md` §3 ruling 3. The candidate item is found
+/// by position — the sequence re-resolved by its own path, its children zipped
+/// with the folded [`ItemSlot`]s, so preceding insertions and removals in the
+/// same batch shift nothing — and inside it only the value node at the
+/// **position** of a requested `PlainSource` field whose decoded key is that
+/// field's key is named. No item, subtree, key, sibling item, list element or
+/// spelling is exempted: a key, a logical-string value and a scalar-list element
+/// of the same item stay charged, whatever their text. When the sequence's
+/// child count or an item's entry count disagrees with what was requested,
+/// nothing of that sequence or item is named, and [`verify_items`] reports the
+/// disagreement by name.
 ///
 /// A path that does not resolve is simply skipped: the checks that follow
 /// report a lost target by name, and a node not found here is charged by the
@@ -9258,6 +9275,7 @@ fn plain_source_nodes(
     candidate: &SyntaxIndex,
     edits: &[DocumentEdit],
     expectations: &[FieldExpectation],
+    sequences: &[ItemExpectation],
 ) -> Vec<NodeId> {
     let mut nodes = Vec::new();
     for edit in edits {
@@ -9293,8 +9311,55 @@ fn plain_source_nodes(
             }
         } // End of the loop over the mapping's entries
     } // End of the loop over the changed mappings
+    for expectation in sequences {
+        nodes.extend(inserted_plain_source_nodes(candidate, expectation));
+    } // End of the loop over the changed sequences
     nodes
 } // End of function plain_source_nodes()
+
+/// The candidate value nodes of the [`EntryValue::PlainSource`] fields that the
+/// inserted items of one changed sequence requested (Phase 4-1).
+///
+/// See [`plain_source_nodes`] for why the match is positional and why a count
+/// that disagrees names nothing.
+fn inserted_plain_source_nodes(
+    candidate: &SyntaxIndex,
+    expectation: &ItemExpectation,
+) -> Vec<NodeId> {
+    let mut nodes = Vec::new();
+    let Some(sequence) = resolve(candidate, &expectation.sequence)
+        .ok()
+        .and_then(|id| candidate.node(id))
+        .filter(|node| node.kind == NodeKind::Sequence)
+    else {
+        return nodes;
+    };
+    if sequence.children.len() != expectation.slots.len() {
+        return nodes;
+    }
+    for (slot, item) in expectation.slots.iter().zip(&sequence.children) {
+        let ItemSlot::Inserted(NewItem::Mapping(fields)) = slot else {
+            continue;
+        };
+        let Some(mapping) = candidate
+            .node(*item)
+            .filter(|node| node.kind == NodeKind::Mapping)
+        else {
+            continue;
+        };
+        let entries = mapping_entries(mapping);
+        if entries.len() != fields.len() {
+            continue;
+        }
+        for (entry, (key, value)) in entries.iter().zip(fields) {
+            let requested = matches!(value, EntryValue::PlainSource(_));
+            if requested && decoded_value(candidate, entry.key) == Some(key.as_str()) {
+                nodes.push(entry.value);
+            }
+        } // End of the loop over the inserted item's requested fields
+    } // End of the loop over the sequence's slots
+    nodes
+} // End of function inserted_plain_source_nodes()
 
 /// Checks that a plain-source value reads back as written: a plain scalar whose
 /// source bytes are exactly `text` (Phase 3-10). The decoded value is checked
@@ -9797,6 +9862,10 @@ fn file_comments_survive(
 /// whole-document editor takes the same stance. Every candidate scalar outside
 /// those subtrees is charged exactly as before, so the property still says no
 /// edit introduced an ambiguous plain scalar anywhere it did not author.
+/// [`verify`] also passes the value nodes a batch wrote as plain source text
+/// ([`plain_source_nodes`]: plain-source scalar edits, plain-source entries of a
+/// changed mapping and, since Phase 4-1, the requested plain-source fields of an
+/// inserted item) — each one exact value node, never its item or its siblings.
 ///
 /// # Errors
 ///

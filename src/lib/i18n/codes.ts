@@ -1411,14 +1411,16 @@ export function draftErrorKey(name: DraftErrorName): TranslationKey {
  * field the person was editing, never a generic error toast that offers a retry
  * which can never succeed.
  *
- * **No operand of any of the thirty-two messages is interpolated, and that is
- * the design rather than an omission.** Every address below the match mapping is
- * an index into the projection this window already holds (CLAUDE.md section 1),
- * and a caller that wants to name the failing variable, parameter or list item
- * resolves that index against what it is showing. {@link scalarOperands} is
- * still what feeds the substitution, so a message that ever does name an operand
- * gets a string or a number and never a `DraftTarget` rendered as
- * `[object Object]`.
+ * **No address is interpolated, and that is the design rather than an
+ * omission.** Every address below the match mapping is an index into the
+ * projection this window already holds (CLAUDE.md section 1), and a caller that
+ * wants to name the failing variable, parameter or list item resolves that index
+ * against what it is showing. Two messages do name an operand: `{items}`, a
+ * count, in `switchWouldDiscardItems`, and `{field}`, an option's espanso key —
+ * a schema-fixed name, never owner text — in `optionNotPlainSource` (Phase 4-1),
+ * so a refused creation says which of its options was refused.
+ * {@link scalarOperands} is what feeds the substitution, so such a message gets a
+ * string or a number and never a `DraftTarget` rendered as `[object Object]`.
  *
  * @param locale - The dictionary to read from.
  * @param error - A draft error as it crossed the boundary.

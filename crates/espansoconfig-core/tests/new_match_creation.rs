@@ -24,7 +24,9 @@
 //! None is a corpus file: the committed corpus is swept one row per fixture, so
 //! the fixtures here stay inline, as 3-1 … 3-3's do.
 
-use espansoconfig_core::draft::{NewContent, NewMatch, NewTrigger, TriggerList};
+use espansoconfig_core::draft::{
+    DraftError, MatchField, NewContent, NewMatch, NewTrigger, TriggerList,
+};
 use espansoconfig_core::model::{
     ContentKind, DocumentContext, DocumentView, MatchView, SequencePresence, TriggerKind, ValueView,
 };
@@ -79,7 +81,10 @@ fn create(
     placement: ItemPlacement,
     new_match: &NewMatch,
 ) -> Result<PatchedDocument, EditError> {
-    let edit = InsertItem::typed(sequence(), placement, new_match.entries());
+    let entries = new_match
+        .entries()
+        .expect("every option in these fixtures is plain source");
+    let edit = InsertItem::typed(sequence(), placement, entries);
     apply_edits(source, &[DocumentEdit::InsertItem(edit)])
 }
 
@@ -281,7 +286,7 @@ fn a_full_creation_is_written_exactly_in_crlf_and_without_a_final_newline() {
     whole.search_terms = Some(vec!["second".to_owned(), "first".to_owned()]);
     whole.word = Some("on".to_owned());
     whole.left_word = Some("false".to_owned());
-    whole.right_word = Some(String::new());
+    whole.right_word = Some("no".to_owned());
     whole.propagate_case = Some("yes".to_owned());
     whole.uppercase_style = Some("capitalize_words".to_owned());
     whole.force_mode = Some("clipboard".to_owned());
@@ -300,14 +305,14 @@ fn a_full_creation_is_written_exactly_in_crlf_and_without_a_final_newline() {
     search_terms:
       - second
       - first
-    word: 'on'
-    left_word: 'false'
-    right_word: ''
-    propagate_case: 'yes'
+    word: on
+    left_word: false
+    right_word: no
+    propagate_case: yes
     uppercase_style: capitalize_words
     force_mode: clipboard
-    force_clipboard: 'true'
-    paragraph: '~'
+    force_clipboard: true
+    paragraph: ~
     anchor: '*alias'
 ";
 
@@ -324,18 +329,16 @@ fn a_full_creation_is_written_exactly_in_crlf_and_without_a_final_newline() {
         format!("{source}\n{}", lf_item.strip_suffix('\n').expect("LF"))
     );
 
-    // The independent reading: every ambiguous option reads back as a string,
-    // never a boolean or a null, and both lists keep their order.
+    // The independent reading: every logical-string value reads back as a
+    // string, and both lists keep their order. The eight plain-source options
+    // are pinned by the byte literal above and deliberately not read through
+    // yaml-rust2's own types: which type a plain `on` or `~` resolves to is
+    // exactly the claim D2u forbids this application making (Phase 4-1).
     let item = yaml_item(patched.text(), 2);
     for (key, text) in [
-        ("word", "on"),
-        ("left_word", "false"),
-        ("right_word", ""),
-        ("propagate_case", "yes"),
-        ("force_clipboard", "true"),
-        ("paragraph", "~"),
         ("anchor", "*alias"),
         ("comment", "# not a comment"),
+        ("label", "A label"),
         ("replace", "line one\nline two"),
     ] {
         assert_eq!(item[key].as_str(), Some(text), "{key} reads back as text");
@@ -368,8 +371,11 @@ fn optional_scalars() -> Vec<(&'static str, Setter)> {
     ]
 } // End of function optional_scalars()
 
-/// For each optional field, `None` writes no key and `Some("")` writes the key
-/// holding an empty string — read back by yaml-rust2, not by the engine.
+/// For each optional field, `None` writes no key. For the three logical-string
+/// fields `Some("")` writes the key holding an empty string — read back by
+/// yaml-rust2, not by the engine — and for the eight plain-source options it is
+/// refused by name before any edit exists (Phase 4-1), since an empty plain
+/// scalar is a null rather than the empty text.
 #[test]
 fn none_and_empty_differ_in_the_file_for_every_optional_field() {
     let bare = NewMatch::new(
@@ -385,6 +391,15 @@ fn none_and_empty_differ_in_the_file_for_every_optional_field() {
     for (key, set) in optional_scalars() {
         let mut empty = bare.clone();
         set(&mut empty, Some(String::new()));
+        let field = MatchField::from_key(key).expect("a schema-known key");
+        if field.writes_plain_source() {
+            assert_eq!(
+                empty.entries(),
+                Err(DraftError::OptionNotPlainSource { field }),
+                "{key}: an empty option is refused, never quoted"
+            );
+            continue;
+        }
         let patched = create(BASE, ItemPlacement::End, &empty).expect("empty");
         assert_only_the_item_was_added(BASE, &patched);
         let item = yaml_item(patched.text(), 2);
@@ -554,3 +569,29 @@ fn a_repeated_key_is_refused_even_beside_a_list() {
         "{refused:?}"
     );
 } // End of function a_repeated_key_is_refused_even_beside_a_list()
+
+// ---------------------------------------------------------------------------
+// A1 — the eight options are written as plain source (Phase 4-1)
+// ---------------------------------------------------------------------------
+
+/// **The 4-1 regression, failing first on the unchanged tree.** A seeded `word`
+/// default of text `true` is written verbatim as the plain scalar `true`, never
+/// quoted into the string `'true'` (`docs/decisions/4-split-notes.md` §2, 4-1).
+///
+/// Before 4-1 creation wrote every option as a logical string, so the codec
+/// quoted this value and the file held `word: 'true'`.
+#[test]
+fn a1_a_seeded_true_default_is_written_as_plain_source() {
+    let mut seeded = NewMatch::new(
+        NewTrigger::Single(":new".to_owned()),
+        NewContent::Replace("body".to_owned()),
+    );
+    seeded.word = Some("true".to_owned());
+    let patched = create(BASE, ItemPlacement::End, &seeded).expect("the creation verifies");
+    assert_only_the_item_was_added(BASE, &patched);
+    assert_eq!(
+        patched.text(),
+        format!("{BASE}  - trigger: ':new'\n    replace: body\n    word: true\n"),
+        "the option is written exactly as it was typed"
+    );
+} // End of function a1_a_seeded_true_default_is_written_as_plain_source()

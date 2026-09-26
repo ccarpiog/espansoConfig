@@ -30,7 +30,7 @@
 //!   names *and* JSON kinds.
 //! - **That every `DraftError` variant crosses as an object**, read out of the
 //!   core's own declaration rather than out of a sample list. The operand table
-//!   pins one shape per code, and a unit variant among the forty-three would make
+//!   pins one shape per code, and a unit variant among the forty-four would make
 //!   that shape false for exactly one refusal.
 //! - **The registered command list**, parsed independently out of
 //!   `generate_handler!` and compared with the union of `COMMAND_NAMES` and
@@ -1334,7 +1334,7 @@ fn the_frontend_operand_table_is_the_operands_rust_writes() {
 /// one shape can ever be pinned for `draftRefused.error`, no matter how many
 /// variants `DraftError` has. `serde`'s externally tagged representation writes a
 /// unit variant as a bare string and everything else as a one-key object, so a
-/// single unit variant among the forty-three would make the pinned `'object'`
+/// single unit variant among the forty-four would make the pinned `'object'`
 /// false for that one refusal: `isCommandError` would reject it, and the user
 /// would read the generic fallback instead of the sentence
 /// `code.draftError.matchHasNoPath` that exists for it in both dictionaries.
@@ -1350,13 +1350,13 @@ fn every_draft_error_variant_crosses_as_an_object() {
     let (declared, bare) = crate::dictionary_contract::variants_and_unit_variants_of("DraftError");
     assert_eq!(
         declared.len(),
-        43,
-        "DraftError declares 43 refusals since Phase 3-2: {declared:?}"
+        44,
+        "DraftError declares 44 refusals since Phase 4-1: {declared:?}"
     );
     assert!(
         bare.is_empty(),
         "a unit variant crosses as a bare string, which COMMAND_ERROR_OPERANDS cannot \
-         declare beside the forty-two objects; give it empty braces: {bare:?}"
+         declare beside the forty-three objects; give it empty braces: {bare:?}"
     );
 
     // The `serde` behaviour the assertion above stands on, observed rather than

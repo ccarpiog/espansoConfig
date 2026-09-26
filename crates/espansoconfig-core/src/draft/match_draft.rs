@@ -171,6 +171,31 @@ impl MatchField {
     pub fn from_key(key: &str) -> Option<MatchField> {
         MatchField::ALL.into_iter().find(|field| field.key() == key)
     }
+
+    /// The eight options written **verbatim as plain source** (Phase 4-1,
+    /// `docs/decisions/4-split-notes.md` §3 ruling 2), in [`MatchField::ALL`]'s
+    /// relative order: `word`, `left_word`, `right_word`, `propagate_case`,
+    /// `uppercase_style`, `force_mode`, `force_clipboard`, `paragraph`.
+    ///
+    /// `anchor` is the ninth option and is deliberately absent: it stays a
+    /// logical string spelled by the codec. Every other field is a logical string
+    /// too.
+    pub const PLAIN_SOURCE_OPTIONS: [MatchField; 8] = [
+        MatchField::Word,
+        MatchField::LeftWord,
+        MatchField::RightWord,
+        MatchField::PropagateCase,
+        MatchField::UppercaseStyle,
+        MatchField::ForceMode,
+        MatchField::ForceClipboard,
+        MatchField::Paragraph,
+    ];
+
+    /// Whether this field's text is written verbatim as one plain scalar
+    /// ([`MatchField::PLAIN_SOURCE_OPTIONS`]) rather than spelled by the codec.
+    pub fn writes_plain_source(self) -> bool {
+        MatchField::PLAIN_SOURCE_OPTIONS.contains(&self)
+    }
 } // End of impl MatchField
 
 /// One of the two scalar trigger keys a [`FieldSubstitution`] may switch between.

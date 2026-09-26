@@ -178,7 +178,10 @@ the phase records under `docs/decisions/` hold the details.
 - Every one of the nine options (`word`, `left_word`, `right_word`, `propagate_case`, `uppercase_style`,
   `force_mode`, `force_clipboard`, `paragraph`, `anchor`) is an independent source-text field and stays a
   textual control; a checkbox would have to decide that `word: on` means boolean true, which D2u
-  forbids. Suggestions (`OPTION_SUGGESTIONS` in `matchEditor.ts`) are compared by `===` only.
+  forbids. Suggestions (`OPTION_SUGGESTIONS` in `matchEditor.ts`) are compared by `===` only. The first
+  eight (`MatchField::PLAIN_SOURCE_OPTIONS`) are written verbatim as validated plain source on every
+  writing path — creation, the single-match editor and bulk — and text failing `is_plain_source` is
+  refused by name (`OptionNotPlainSource`), never quoted; `anchor` is a logical string spelled by the codec.
 
 **Text on the wire and on screen**
 

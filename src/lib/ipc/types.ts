@@ -3319,7 +3319,8 @@ export type DraftErrorName =
   | 'SequenceIsAFlowList'
   | 'SequenceWouldBeEmpty'
   | 'SwitchWouldDiscardItems'
-  | 'NoSequenceInsertionAnchor';
+  | 'NoSequenceInsertionAnchor'
+  | 'OptionNotPlainSource';
 
 /**
  * Why a draft could not be turned into an edit batch.
@@ -3441,7 +3442,14 @@ export type DraftError =
   | { readonly SequenceIsAFlowList: { readonly field: SequenceField } }
   | { readonly SequenceWouldBeEmpty: { readonly field: SequenceField } }
   | { readonly SwitchWouldDiscardItems: { readonly field: SequenceField; readonly items: number } }
-  | { readonly NoSequenceInsertionAnchor: { readonly field: SequenceField } };
+  | { readonly NoSequenceInsertionAnchor: { readonly field: SequenceField } }
+  /**
+   * Phase 4-1: the text drafted for one of the eight plain-source options
+   * cannot be written verbatim as one plain scalar, so it is refused rather than
+   * quoted — by `save_match`'s planner and by `create_match`, before any
+   * transaction. `field` is always one of those eight; the text is not carried.
+   */
+  | { readonly OptionNotPlainSource: { readonly field: MatchField } };
 
 // ---------------------------------------------------------------------------
 // The external-change reconciliation wire — Phase 2d-4b

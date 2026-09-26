@@ -83,7 +83,8 @@ const DRAFT_ERROR_NAMES = [
   'SequenceIsAFlowList',
   'SequenceWouldBeEmpty',
   'SwitchWouldDiscardItems',
-  'NoSequenceInsertionAnchor'
+  'NoSequenceInsertionAnchor',
+  'OptionNotPlainSource'
 ] as const satisfies readonly DraftErrorName[];
 
 /**
@@ -139,7 +140,8 @@ const DRAFT_ERRORS: readonly DraftError[] = [
   { SequenceIsAFlowList: { field: 'triggers' } },
   { SequenceWouldBeEmpty: { field: 'search_terms' } },
   { SwitchWouldDiscardItems: { field: 'triggers', items: 3 } },
-  { NoSequenceInsertionAnchor: { field: 'search_terms' } }
+  { NoSequenceInsertionAnchor: { field: 'search_terms' } },
+  { OptionNotPlainSource: { field: 'word' } }
 ];
 
 // `never` exactly when the table above names every member of the union, and the
@@ -168,8 +170,8 @@ describe('the draft refusal samples', () => {
     expect(DRAFT_ERRORS.map(nameOf)).toEqual([...DRAFT_ERROR_NAMES]);
   });
 
-  it('hold the forty-three variants Phase 3-2 measured', () => {
-    expect(DRAFT_ERROR_NAMES.length).toBe(43);
+  it('hold the forty-four variants Phase 4-1 measured', () => {
+    expect(DRAFT_ERROR_NAMES.length).toBe(44);
   });
 }); // End of the "draft refusal samples" suite
 

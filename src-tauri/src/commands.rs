@@ -1109,6 +1109,11 @@ impl WorkspaceSession {
     ///
     /// # What it refuses before it attempts anything
     ///
+    /// - one of the eight plain-source options holding text that cannot be
+    ///   written verbatim as one plain scalar — an empty stored default among
+    ///   them — [`CommandError::DraftRefused`] carrying
+    ///   [`espansoconfig_core::draft::DraftError::OptionNotPlainSource`] and the option's key (Phase 4-1).
+    ///   Checked first, by [`NewMatch::entries`], and never quoted instead;
     /// - a `base_revision` that is not the revision this session's projection
     ///   holds — [`CommandError::IdentityStaleRevision`]. Load-bearing for the
     ///   same reason as a move's: `position` names an **anchor by identity**, and
@@ -2418,6 +2423,12 @@ fn create_one_match(
     base_revision: ContentRevision,
     acknowledgement: &Acknowledgement,
 ) -> Result<SaveResult, CommandError> {
+    // The new item's entries come first (Phase 4-1): an option whose text cannot
+    // be written as one plain scalar is refused here, by name, before any
+    // document is resolved and before a transaction exists — never quoted.
+    let entries = new_match
+        .entries()
+        .map_err(|error| CommandError::DraftRefused { error })?;
     // A caller that chose an anchor in a parse this session no longer holds is
     // refused here: an identity resolved against another parse names a position,
     // and a position is not an identity.
@@ -2466,9 +2477,7 @@ fn create_one_match(
         .items_above(view.matches.len())
         .map(|index| sequence.clone().with_index(index));
     let edits = [DocumentEdit::InsertItem(InsertItem::typed(
-        sequence,
-        placement,
-        new_match.entries(),
+        sequence, placement, entries,
     ))];
     run_one_save(
         workspace,
@@ -3715,7 +3724,8 @@ pub fn save_match(
 ///   typed content alternative** (`replace`, `markdown`, `html`, `image_path` or
 ///   `form`), and twelve optional schema-known fields — `label`, `comment`, the
 ///   `search_terms` list and the nine match options — each written only when it
-///   is present. An absent optional field is a key the new snippet is not born
+///   is present. Eight of the options are written verbatim as plain source and
+///   `anchor` as a string (Phase 4-1; see [`NewMatch`]). An absent optional field is a key the new snippet is not born
 ///   holding, which is a different request from one written with an empty value.
 ///   Not a [`MatchDraft`]: a draft can express `vars` and `form_fields`, and
 ///   creation synthesizes exactly one flat mapping of scalars and scalar lists,
@@ -3735,7 +3745,8 @@ pub fn save_match(
 ///
 /// # Errors
 ///
-/// [`CommandError::NoWorkspaceOpen`], the identity codes,
+/// [`CommandError::NoWorkspaceOpen`], [`CommandError::DraftRefused`] for an
+/// option that is not plain source (Phase 4-1), the identity codes,
 /// [`CommandError::MoveNotWithinOneSequence`] for an anchor that is not an item
 /// of this list, and [`CommandError::DocumentHasNoMatchList`] for a file that
 /// does not name `matches` at all — all before anything is attempted;
@@ -6864,6 +6875,136 @@ mod tests {
         );
     } // End of function a_created_match_is_appended_and_answers_with_its_new_identity()
 
+    /// **The 4-1 regression through the command layer, failing first on the
+    /// unchanged tree.** A creation seeded with a `word` default of text `true`,
+    /// and a single-match save that sets an absent `word` to `true`, both write the
+    /// plain scalar `true` (`docs/decisions/4-split-notes.md` §2, 4-1). Before 4-1
+    /// both wrote the quoted string `'true'`.
+    #[test]
+    fn a1_both_writing_paths_write_an_option_as_plain_source() {
+        let Opened {
+            dir,
+            session,
+            id,
+            before,
+        } = opened_on(TWO_SNIPPETS);
+        let mut seeded = new_snippet();
+        seeded.word = Some("true".to_owned());
+        expect_saved(
+            session
+                .create_match(
+                    id,
+                    &seeded,
+                    &NewMatchPosition::End {},
+                    before.revision,
+                    &Acknowledgement::none(),
+                )
+                .expect("the creation is legal"),
+            "creation",
+        );
+        assert_eq!(
+            base_bytes(&dir),
+            format!(
+                "{TWO_SNIPPETS}  - trigger: ':new'\n    replace: a new snippet\n    word: true\n"
+            ),
+            "creation writes the option exactly as it was typed"
+        );
+
+        let Opened {
+            dir,
+            session,
+            before,
+            ..
+        } = opened_on(TWO_SNIPPETS);
+        let draft = MatchDraft {
+            word: DraftField::Set("true".to_owned()),
+            ..MatchDraft::default()
+        };
+        expect_saved(
+            session
+                .save_match(
+                    before.matches[0].id,
+                    &draft,
+                    before.revision,
+                    &Acknowledgement::none(),
+                )
+                .expect("the draft plans and the save runs"),
+            "option save",
+        );
+        assert_eq!(
+            base_bytes(&dir),
+            TWO_SNIPPETS.replacen(
+                "    replace: first\n",
+                "    replace: first\n    word: true\n",
+                1
+            ),
+            "the single-match editor writes the option exactly as it was typed"
+        );
+    } // End of function a1_both_writing_paths_write_an_option_as_plain_source()
+
+    /// An empty stored default — or any option text that is not one plain scalar
+    /// — is refused **by name, before the transaction**, on both writing paths
+    /// (`docs/decisions/4-split-notes.md` §4.3): the answer is `draftRefused`
+    /// carrying `OptionNotPlainSource` and the option's key, the file keeps every
+    /// byte, and nothing is quoted or silently dropped.
+    #[test]
+    fn a1_an_option_that_is_not_plain_source_is_refused_by_name_on_both_paths() {
+        for text in ["", "a #b", "'true'"] {
+            let Opened {
+                dir,
+                session,
+                id,
+                before,
+            } = opened_on(TWO_SNIPPETS);
+            let mut seeded = new_snippet();
+            seeded.force_mode = Some(text.to_owned());
+            let refused = session
+                .create_match(
+                    id,
+                    &seeded,
+                    &NewMatchPosition::End {},
+                    before.revision,
+                    &Acknowledgement::none(),
+                )
+                .expect_err("the option cannot be written as typed");
+            assert_eq!(refused.code(), "draftRefused", "{text:?}");
+            let json = serde_json::to_value(&refused).expect("the error serializes");
+            assert_eq!(
+                json["error"]["OptionNotPlainSource"]["field"], "force_mode",
+                "{text:?}: the refusal names the option: {json}"
+            );
+            assert_eq!(
+                base_bytes(&dir),
+                TWO_SNIPPETS,
+                "{text:?}: nothing is written"
+            );
+
+            let draft = MatchDraft {
+                force_mode: DraftField::Set(text.to_owned()),
+                ..MatchDraft::default()
+            };
+            let refused = session
+                .save_match(
+                    before.matches[0].id,
+                    &draft,
+                    before.revision,
+                    &Acknowledgement::none(),
+                )
+                .expect_err("the option cannot be written as typed");
+            assert_eq!(refused.code(), "draftRefused", "{text:?}");
+            let json = serde_json::to_value(&refused).expect("the error serializes");
+            assert_eq!(
+                json["error"]["OptionNotPlainSource"]["field"], "force_mode",
+                "{text:?}: the refusal names the option: {json}"
+            );
+            assert_eq!(
+                base_bytes(&dir),
+                TWO_SNIPPETS,
+                "{text:?}: nothing is written"
+            );
+        } // End of the loop over the refused texts
+    } // End of function a1_an_option_that_is_not_plain_source_is_refused_by_name_on_both_paths()
+
     /// A creation at the front lands above the first snippet **and above its own
     /// comment**.
     ///
@@ -7523,13 +7664,13 @@ mod tests {
                 "  - trigger: ':one'\n",
                 "    replace: a recovered body\n",
                 "    label: a recovered label\n",
-                "    word: 'true'\n",
-                "    left_word: 'false'\n",
-                "    right_word: 'on'\n",
+                "    word: true\n",
+                "    left_word: false\n",
+                "    right_word: on\n",
             ),
             "all six keys, in the documented order, and every byte of the two snippets \
-             that were already there unchanged; each value's spelling is the encoder's \
-             decision, which is why `true` is quoted and a sentence is not"
+             that were already there unchanged; the three options are plain source written \
+             as typed (Phase 4-1), and the label's spelling is the encoder's decision"
         );
     } // End of function an_ordinary_creation_carries_six_fields_and_reports_a_repeated_trigger()
 
@@ -7627,10 +7768,10 @@ mod tests {
             "    search_terms:\n",
             "      - zed\n",
             "      - alpha\n",
-            "    propagate_case: 'true'\n",
+            "    propagate_case: true\n",
             "    uppercase_style: uppercase\n",
             "    force_mode: keys\n",
-            "    paragraph: 'off'\n",
+            "    paragraph: off\n",
         );
         let crlf = |text: &str| text.replace('\n', "\r\n");
         let cases = [

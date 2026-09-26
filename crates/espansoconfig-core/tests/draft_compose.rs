@@ -285,7 +285,7 @@ fn one_save_adds_two_absent_options() {
 
     let expected = COMMENTED.replace(
         "    label: greeting\n",
-        "    label: greeting\n    word: 'true'\n    propagate_case: 'true'\n",
+        "    label: greeting\n    word: true\n    propagate_case: true\n",
     );
     assert_eq!(patched.text(), expected);
     assert_independently(
@@ -324,7 +324,7 @@ fn several_absent_fields_are_one_group_in_schema_order() {
 
     let patched = apply_edits(COMMENTED, &edits).expect("the group applies");
     assert!(patched.text().contains(
-        "    label: greeting\n    comment: a note\n    word: 'true'\n    force_mode: clipboard\n  - trigger: ':bye'"
+        "    label: greeting\n    comment: a note\n    word: true\n    force_mode: clipboard\n  - trigger: ':bye'"
     ));
     assert_independently(
         COMMENTED,
@@ -353,7 +353,7 @@ fn a_group_at_the_end_of_a_file_without_a_final_newline() {
     let patched = apply_edits(source, &edits).expect("the group applies");
     assert_eq!(
         patched.text(),
-        "matches:\n  - trigger: ':hi'\n    replace: hello\n    label: greeting\n    word: 'true'"
+        "matches:\n  - trigger: ':hi'\n    replace: hello\n    label: greeting\n    word: true"
     );
     assert_independently(
         source,
@@ -380,7 +380,7 @@ fn a_group_writes_the_anchors_line_ending() {
     let patched = apply_edits(source, &edits).expect("the group applies");
     assert_eq!(
         patched.text(),
-        "matches:\r\n  - trigger: ':hi'\r\n    replace: hello\r\n    label: greeting\r\n    word: 'true'\r\n"
+        "matches:\r\n  - trigger: ':hi'\r\n    replace: hello\r\n    label: greeting\r\n    word: true\r\n"
     );
 } // End of function a_group_writes_the_anchors_line_ending()
 
@@ -600,7 +600,7 @@ fn a_switch_and_two_new_options_are_one_batch() {
         .replacen("    replace: hello there", "    markdown: hello there", 1)
         .replacen(
             "    label: greeting\n",
-            "    label: greeting\n    word: 'true'\n    propagate_case: 'true'\n",
+            "    label: greeting\n    word: true\n    propagate_case: true\n",
             1,
         );
     assert_eq!(patched.text(), expected);
@@ -1208,5 +1208,5 @@ fn a_content_switch_with_a_removed_paragraph_is_refused() {
     .expect("a switch beside a paragraph edit plans");
     let patched = apply_edits(source, &kept).expect("the batch applies");
     assert!(patched.text().contains("markdown: hello"));
-    assert!(patched.text().contains("paragraph: 'false'"));
+    assert!(patched.text().contains("paragraph: false"));
 } // End of function a_content_switch_with_a_removed_paragraph_is_refused()

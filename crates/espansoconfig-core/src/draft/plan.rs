@@ -1,6 +1,7 @@
 //! From a draft to the smallest batch that realises it.
 
 use crate::draft::audit::{check_batch_independence, check_closed_surface, NestedKeys};
+use crate::draft::bulk::is_plain_source;
 use crate::draft::error::DraftError;
 use crate::draft::field::DraftField;
 use crate::draft::match_draft::{
@@ -46,6 +47,23 @@ use crate::patch::{
 /// there, and **nothing** when it is not, because the desired state is already
 /// the actual state.
 ///
+/// # The eight plain-source options compare source, not decoded text (Phase 4-1)
+///
+/// [`MatchField::PLAIN_SOURCE_OPTIONS`] — `word`, `left_word`, `right_word`,
+/// `propagate_case`, `uppercase_style`, `force_mode`, `force_clipboard`,
+/// `paragraph` — are the one exception to the rule above, because what a person
+/// types into their controls is the **source text** the file should hold (D2u;
+/// `docs/decisions/4-split-notes.md` §3 ruling 2). A `Set` of one of them is
+/// written verbatim as a plain scalar ([`ScalarEdit::plain_source`], or an
+/// [`EntryValue::PlainSource`] insertion), and it derives **nothing** only when
+/// the field is already that plain scalar, byte for byte. So `word: 'true'`
+/// drafted as `Set("true")` is rewritten to `word: true`, exactly as the bulk
+/// edit does, while [`DraftField::Unchanged`] leaves `'true'` alone. A drafted
+/// text that cannot be written as one plain scalar
+/// ([`crate::draft::is_plain_source`]) is refused as
+/// [`DraftError::OptionNotPlainSource`] at intent level, before any diffing.
+/// `anchor` stays a logical string under the rule above.
+///
 /// # Every insertion of one draft is one edit (Phase 3-1)
 ///
 /// Every absent field a draft sets is written after **one anchor**: the last
@@ -81,7 +99,9 @@ use crate::patch::{
 ///    substitution contradicts another intent of the draft
 ///    ([`plan_match_edits_with_substitutions`]); a drafted
 ///    [`MatchDraft::content_switch`] is one more substitution here, since Phase
-///    3-5-1, so `plan_match_edits` alone plans a switch of content kind;
+///    3-5-1, so `plan_match_edits` alone plans a switch of content kind; and,
+///    since Phase 4-1, every `Set` of a plain-source option is plain source
+///    ([`DraftError::OptionNotPlainSource`]);
 /// 6. every drafted field is planned, in [`MatchField::ALL`] order, then every
 ///    drafted sequence element, then every drafted variable, then every drafted
 ///    `form_fields` entry, each in the draft's own order, and last the absent
@@ -279,6 +299,7 @@ pub fn plan_match_edits_with(
     check_no_entry_drafts_two_shapes(draft)?;
     check_substitutions_are_coherent(draft, substitutions)?;
     check_structure_is_coherent(view, draft, structure)?;
+    check_options_are_plain_source(draft)?;
 
     let entries = visible_entries(view);
     let mut edits: Vec<DocumentEdit> = Vec::new();
@@ -1048,14 +1069,25 @@ fn plan_field(
         (DraftField::Remove, Some(_)) => {
             edits.push(FieldRemoval::new(path.clone().with_key(field.key())).into());
         }
+        // One of the eight options (Phase 4-1): its text is inserted verbatim,
+        // and `check_options_are_plain_source` has already refused one that
+        // cannot be.
+        (DraftField::Set(value), None) if field.writes_plain_source() => insertions.push((
+            Inserted::Field(field),
+            EntryValue::PlainSource(value.clone()),
+        )),
         (DraftField::Set(value), None) => {
             insertions.push((Inserted::Field(field), EntryValue::Scalar(value.clone())))
         }
         (DraftField::Set(value), Some(scalar)) => {
             let target = DraftTarget::Field(field);
-            if let Some(edit) =
-                plan_scalar(scalar, value, path.clone().with_key(field.key()), target)?
-            {
+            let at = path.clone().with_key(field.key());
+            let planned = if field.writes_plain_source() {
+                plan_plain_source_scalar(scalar, value, at, target)?
+            } else {
+                plan_scalar(scalar, value, at, target)?
+            };
+            if let Some(edit) = planned {
                 edits.push(edit);
             }
         }
@@ -1516,6 +1548,61 @@ fn plan_scalar(
     }
     Ok(Some(ScalarEdit::new(at, value.to_owned()).into()))
 } // End of function plan_scalar()
+
+/// One existing scalar of a plain-source option against one drafted **source
+/// text** (Phase 4-1).
+///
+/// `Ok(None)` only when the scalar is already written as exactly `value`: plain,
+/// decoding to `value`, and spanning exactly `value.len()` bytes. The three
+/// together are the source comparison without the source text, which this
+/// planner is not handed: a plain scalar's decoding differs from its bytes only
+/// by folding a line break and the indentation after it, which always shortens
+/// it, so a plain scalar that decodes to `value` in `value.len()` bytes *is*
+/// `value`. That is an argument about YAML's plain-scalar grammar, not something
+/// a type forces; the engine re-checks the written bytes on the candidate
+/// ([`crate::patch::VerificationFailure::PlainSourceNotReadBack`]).
+///
+/// Every other answer is one [`ScalarEdit::plain_source`], so a quoted spelling
+/// of the same text (`'true'` for `true`) is rewritten, exactly as the bulk edit
+/// rewrites it. `value` has already passed [`is_plain_source`].
+fn plan_plain_source_scalar(
+    scalar: &ScalarView,
+    value: &str,
+    at: DocumentPath,
+    target: DraftTarget,
+) -> Result<Option<DocumentEdit>, DraftError> {
+    let written_as_is = scalar.decoded
+        && scalar.style == crate::ScalarStyle::Plain
+        && scalar.text == value
+        && scalar.span.len() == value.len();
+    if written_as_is {
+        return Ok(None);
+    }
+    if scalar.span.start == scalar.span.end {
+        return Err(DraftError::TargetOwnsNoBytes { target });
+    }
+    Ok(Some(ScalarEdit::plain_source(at, value).into()))
+} // End of function plan_plain_source_scalar()
+
+/// Refuses a `Set` of a plain-source option whose text cannot be written as one
+/// plain scalar (Phase 4-1).
+///
+/// **Intent level, and before any diffing**, for
+/// [`check_no_index_is_drafted_twice`]'s reason: a text refused here must be
+/// refused whether or not the field already holds it, or a quoted `'a #b'`
+/// drafted as `Set("a #b")` would slip through as "unchanged" on one file and be
+/// refused on another. Only the eight [`MatchField::PLAIN_SOURCE_OPTIONS`] are
+/// checked; `anchor` and every other field are logical strings.
+fn check_options_are_plain_source(draft: &MatchDraft) -> Result<(), DraftError> {
+    for field in MatchField::PLAIN_SOURCE_OPTIONS {
+        if let DraftField::Set(text) = draft.field(field) {
+            if !is_plain_source(text) {
+                return Err(DraftError::OptionNotPlainSource { field });
+            }
+        }
+    } // End of the loop over the eight plain-source options
+    Ok(())
+} // End of function check_options_are_plain_source()
 
 /// One entry of the match's mapping that this planner can see.
 ///

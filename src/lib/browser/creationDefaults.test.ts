@@ -24,12 +24,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { IpcFailure } from '../ipc/errors';
 import type {
   BulkOption,
   ContentRevision,
   DocumentId,
   DocumentSummary,
   DocumentView,
+  DraftError,
   NewMatch,
   SidecarState
 } from '../ipc/types';
@@ -45,6 +47,7 @@ import {
   chooseDestination,
   choosePlacement,
   conflictOf,
+  createCouldNotBeSent,
   editCreationField,
   editCreationOption,
   matchCreationView,
@@ -271,6 +274,27 @@ describe('2. empty differs from absent', () => {
     expect(newMatch.word).toBe('');
     expect('left_word' in newMatch).toBe(false);
     expect(matchCreationView(session).options.find((one) => one.option === 'left_word')!.value).toBeNull();
+  });
+
+  it('shows an empty default refused by name at Create, keeps it visible, and lets it be removed (4-1)', () => {
+    // Phase 4-1 (`docs/decisions/4-split-notes.md` §4.3): an empty `word` default
+    // is still seeded and still sent exactly as stored — never dropped or quoted
+    // here — and `create_match` refuses it by name before any transaction.
+    const session = filled(formOverBase());
+    const started = beginCreate(session, () => session);
+    expect(started).not.toBeNull();
+    expect(started!.newMatch.word).toBe('');
+    const refusal: DraftError = { OptionNotPlainSource: { field: 'word' } };
+    const refused: IpcFailure = { kind: 'command', error: { code: 'draftRefused', error: refusal } };
+    const answered = createCouldNotBeSent(started!.session, false, refused, () => started!.session);
+    const view = matchCreationView(answered);
+    expect(view.failureLines).toEqual([
+      { kind: 'failure', failure: refused },
+      { kind: 'draft', error: refusal }
+    ]);
+    expect(view.options.find((one) => one.option === 'word')!.value).toBe('');
+    const removed = removeCreationOption(answered, 'word');
+    expect('word' in sent(removed)).toBe(false);
   });
 
   it('keeps an option set to empty by the person apart from one removed', () => {

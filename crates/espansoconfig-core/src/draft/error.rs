@@ -38,7 +38,7 @@ pub enum DraftError {
     /// invented, because the alternative is a path that names something else.
     ///
     /// **The empty braces are load-bearing.** Written as a unit variant this
-    /// would be the one variant of forty-three that `serde` writes as a bare
+    /// would be the one variant of forty-four that `serde` writes as a bare
     /// JSON string rather than as a one-key object, and the frontend's
     /// `COMMAND_ERROR_OPERANDS` table in `src/lib/ipc/errors.ts` can pin exactly
     /// one shape for the `error` operand of `CommandError::DraftRefused`. A
@@ -46,8 +46,8 @@ pub enum DraftError {
     /// *unexpected* failure, losing its typed code and rendering a generic
     /// sentence instead of `code.draftError.matchHasNoPath`. As an empty struct
     /// variant it writes `{"MatchHasNoPath": {}}`, so "a `DraftError` is always
-    /// an object" is true by construction rather than true of forty-two cases
-    /// out of forty-three. `every_draft_error_variant_crosses_as_an_object` in
+    /// an object" is true by construction rather than true of forty-three cases
+    /// out of forty-four. `every_draft_error_variant_crosses_as_an_object` in
     /// `src-tauri/src/wire_contract.rs` fails the build if a unit variant is
     /// ever added here.
     MatchHasNoPath {},
@@ -641,6 +641,21 @@ pub enum DraftError {
         /// The list that was to be inserted.
         field: SequenceField,
     },
+    /// The text drafted for one of the eight plain-source options cannot be
+    /// written verbatim as one plain scalar holding exactly those bytes — it is
+    /// empty, or holds a line break, a quote, a comment, a flow indicator, an
+    /// alias, a tag or anything else [`crate::draft::is_plain_source`] refuses —
+    /// so it is refused rather than quoted (Phase 4-1,
+    /// `docs/decisions/4-split-notes.md` §3 ruling 2).
+    ///
+    /// Raised **before any transaction** on both writing paths that take an
+    /// option: the single-match planner ([`crate::draft::plan_match_edits`]) and
+    /// creation ([`crate::draft::NewMatch::entries`]). `field` is always one of
+    /// [`MatchField::PLAIN_SOURCE_OPTIONS`]; the text itself is not carried.
+    OptionNotPlainSource {
+        /// The option whose text was refused.
+        field: MatchField,
+    },
 }
 
 impl fmt::Display for DraftError {
@@ -781,6 +796,13 @@ impl fmt::Display for DraftError {
             }
             DraftError::NoSequenceInsertionAnchor { field } => {
                 write!(formatter, "no insertion anchor for {}", field.key())
+            }
+            DraftError::OptionNotPlainSource { field } => {
+                write!(
+                    formatter,
+                    "option {} is not writable as plain source",
+                    field.key()
+                )
             }
         } // End of the match over every refusal
     } // End of function fmt() for DraftError

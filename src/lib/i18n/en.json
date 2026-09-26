@@ -1331,6 +1331,7 @@
   "code.draftError.sequenceWouldBeEmpty": "This would take every item out of the list. To have no list at all, remove the whole list instead.",
   "code.draftError.switchWouldDiscardItems": "The list holds {items} items, and a single value would keep only one. Remove the others first.",
   "code.draftError.noSequenceInsertionAnchor": "The snippet has no entry the new list could be written after.",
+  "code.draftError.optionNotPlainSource": "The text for {field} is empty or cannot be written as it was typed without quotes, so nothing was written. Enter it without quotes, comments or line breaks, or remove the option.",
   "code.bulkPlanError.noOptionChanges": "No option was changed, so there is nothing to apply.",
   "code.bulkPlanError.optionRepeated": "The option {option} was asked for twice, so the edit cannot tell which value to write.",
   "code.bulkPlanError.optionNotPlainSource": "The text for {option} cannot be written as it was typed without quotes, so nothing was written. Enter it without quotes, comments or line breaks.",

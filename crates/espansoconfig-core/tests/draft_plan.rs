@@ -121,12 +121,23 @@ fn one_match(source: &str) -> MatchView {
 /// Built from the view rather than written out, so the test states the property
 /// — *the value that is already there* — instead of a transcription of it that
 /// could drift from the fixture.
+///
+/// **One exception since Phase 4-1**: a plain-source option
+/// ([`MatchField::PLAIN_SOURCE_OPTIONS`]) is `Set` only where the file already
+/// writes it as a plain scalar, because for those eight a `Set` is source text
+/// and `Set("yes")` over `'yes'` is a deliberate rewrite to `yes`. What is
+/// "already there" for a quoted option is expressed by leaving it `Unchanged`,
+/// which is what the editor sends for an untouched control.
 fn every_projected_value(view: &MatchView) -> MatchDraft {
     let mut draft = MatchDraft::new();
     for field in MatchField::ALL {
-        if let Some(text) = projected_text(view, field) {
-            *draft.field_mut(field) = DraftField::Set(text);
+        let Some(scalar) = scalar_of(view, field) else {
+            continue;
+        };
+        if field.writes_plain_source() && scalar.style != ScalarStyle::Plain {
+            continue;
         }
+        *draft.field_mut(field) = DraftField::Set(scalar.text.clone());
     } // End of the loop over the schema-known scalar fields
     for (index, item) in view.trigger.triggers.iter().enumerate() {
         let text = item.as_scalar().expect("a scalar trigger").text.clone();
@@ -325,10 +336,14 @@ fn setting_a_field_to_the_value_it_already_holds_derives_no_edit() {
 
 /// A `Set` of an absent field derives exactly one insertion, anchored on an
 /// original sibling.
+///
+/// The field is `comment`, a logical string: since Phase 4-1 an absent
+/// plain-source option is inserted as a one-entry group instead
+/// (`a1_the_single_match_editor_writes_an_option_as_plain_source`).
 #[test]
 fn setting_an_absent_field_derives_exactly_one_insertion() {
     let view = one_match(SIMPLE);
-    let draft = MatchDraft::new().with(MatchField::Word, "true");
+    let draft = MatchDraft::new().with(MatchField::Comment, "a note");
     let edits = plan_match_edits(&view, &draft).expect("the draft plans");
 
     assert_eq!(edits.len(), 1);
@@ -336,8 +351,8 @@ fn setting_an_absent_field_derives_exactly_one_insertion() {
         panic!("an absent field is inserted, never rewritten");
     };
     assert_eq!(insert.mapping(), &match_path(&view));
-    assert_eq!(insert.key(), "word");
-    assert_eq!(insert.value(), "true");
+    assert_eq!(insert.key(), "comment");
+    assert_eq!(insert.value(), "a note");
     assert_eq!(
         insert.sibling(),
         Some("label"),
@@ -681,14 +696,16 @@ fn the_planner_anchors_an_insertion_on_an_entry_the_batch_leaves_alone() {
         .with(MatchField::Word, "true");
     let edits = plan_match_edits(&view, &draft).expect("the draft plans");
     assert_eq!(edits.len(), 2);
-    let DocumentEdit::InsertField(insert) = &edits[1] else {
-        panic!("one absent field is one insertion");
+    // A plain-source option (Phase 4-1) is one entry of a group, since a lone
+    // `FieldInsert` spells its value through the codec.
+    let DocumentEdit::InsertFields(insert) = &edits[1] else {
+        panic!("one absent option is one insertion");
     };
     assert_eq!(insert.sibling(), Some("trigger"));
     let patched = apply_edits(SIMPLE, &edits).expect("and the batch applies");
     assert_eq!(
         patched.text(),
-        "matches:\n  - trigger: hello\n    word: 'true'\n    replace: world\n"
+        "matches:\n  - trigger: hello\n    word: true\n    replace: world\n"
     );
 } // End of function the_planner_anchors_an_insertion_on_an_entry_the_batch_leaves_alone()
 
@@ -3046,3 +3063,108 @@ fn every_match_of_the_real_configuration_drafts_to_an_empty_batch_or_a_named_ref
     let counts = sweep(&files);
     report("real corpus", files.len(), &counts);
 } // End of function every_match_of_the_real_configuration_drafts_to_an_empty_batch_or_a_named_refusal()
+
+// ---------------------------------------------------------------------------
+// A1 — the single-match editor writes the eight options as plain source (4-1)
+// ---------------------------------------------------------------------------
+
+/// Plans `draft` against the only match of `source` and applies the batch.
+fn planned_text(source: &str, draft: &MatchDraft) -> String {
+    let view = one_match(source);
+    let edits = plan_match_edits(&view, draft).expect("the draft plans");
+    apply_edits(source, &edits)
+        .expect("the batch applies")
+        .text()
+        .to_owned()
+} // End of function planned_text()
+
+/// **The 4-1 regression, failing first on the unchanged tree.** Setting an
+/// absent option, rewriting an existing one and rewriting an existing quoted
+/// spelling of the same text all write the plain scalar `true`
+/// (`docs/decisions/4-split-notes.md` §2, 4-1).
+///
+/// Before 4-1 the planner wrote a logical string, so the first two came out as
+/// `word: 'true'`, and the third derived no edit at all because `'true'` decodes
+/// to the drafted text.
+#[test]
+fn a1_the_single_match_editor_writes_an_option_as_plain_source() {
+    let draft = MatchDraft::new().with(MatchField::Word, "true");
+    let head = "matches:\n  - trigger: hello\n    replace: world\n";
+    let wanted = format!("{head}    word: true\n");
+    // Every starting state is tried before anything is asserted, so a failure
+    // names each state that is wrong rather than only the first.
+    let mut wrong = Vec::new();
+    for (what, source) in [
+        ("absent", head.to_owned()),
+        ("a different value", format!("{head}    word: false\n")),
+        (
+            "a quoted spelling of it",
+            format!("{head}    word: 'true'\n"),
+        ),
+    ] {
+        let written = planned_text(&source, &draft);
+        if written != wanted {
+            wrong.push(format!("{what}: {written:?}"));
+        }
+    } // End of the loop over the three starting states
+    assert!(
+        wrong.is_empty(),
+        "the option must be written exactly as it was typed: {wrong:#?}"
+    );
+} // End of function a1_the_single_match_editor_writes_an_option_as_plain_source()
+
+/// `Unchanged` keeps an existing quoted `'true'` byte-identical, and a `Set` of
+/// the plain text an option already holds derives nothing — the two ways an
+/// untouched or unchanged option reaches the planner (Phase 4-1).
+#[test]
+fn a1_an_untouched_option_keeps_its_bytes() {
+    let quoted = "matches:\n  - trigger: hello\n    replace: world\n    word: 'true'\n";
+    let view = one_match(quoted);
+    let untouched = MatchDraft::new().with(MatchField::Label, "a label");
+    let edits = plan_match_edits(&view, &untouched).expect("the draft plans");
+    let patched = apply_edits(quoted, &edits).expect("the batch applies");
+    assert!(
+        patched.text().contains("    word: 'true'\n"),
+        "an Unchanged option keeps its quotes: {:?}",
+        patched.text()
+    );
+
+    let plain = "matches:\n  - trigger: hello\n    replace: world\n    word: true\n";
+    let view = one_match(plain);
+    let same = MatchDraft::new().with(MatchField::Word, "true");
+    assert_eq!(plan_match_edits(&view, &same), Ok(Vec::new()));
+} // End of function a1_an_untouched_option_keeps_its_bytes()
+
+/// Text that is not one plain scalar is refused by name for each of the eight
+/// options, whether the option is absent or present, before any edit exists;
+/// the same text in `anchor` plans as a string (Phase 4-1).
+#[test]
+fn a1_the_single_match_editor_refuses_an_option_that_is_not_plain_source() {
+    let absent = "matches:\n  - trigger: hello\n    replace: world\n";
+    let mut present = absent.to_owned();
+    for field in MatchField::PLAIN_SOURCE_OPTIONS {
+        present.push_str(&format!("    {}: x\n", field.key()));
+    } // End of the loop that writes every option into the second fixture
+    let refused = [
+        "", "a\nb", "'true'", "\"on\"", "a #b", "[a]", "{a: b}", "*alias", "&a x", "!!str x",
+    ];
+    for source in [absent, present.as_str()] {
+        let view = one_match(source);
+        for text in refused {
+            for field in MatchField::PLAIN_SOURCE_OPTIONS {
+                let draft = MatchDraft::new().with(field, text);
+                assert_eq!(
+                    plan_match_edits(&view, &draft),
+                    Err(DraftError::OptionNotPlainSource { field }),
+                    "{text:?} in {}",
+                    field.key()
+                );
+            } // End of the loop over the eight options
+            let anchored = MatchDraft::new().with(MatchField::Anchor, text);
+            assert!(
+                plan_match_edits(&view, &anchored).is_ok(),
+                "{text:?} is a string in anchor"
+            );
+        } // End of the loop over the refused texts
+    } // End of the loop over the absent and present fixtures
+} // End of function a1_the_single_match_editor_refuses_an_option_that_is_not_plain_source()

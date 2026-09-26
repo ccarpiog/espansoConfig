@@ -53,7 +53,15 @@ import {
   type ObservationVerdict
 } from './conflictSource';
 import { editDraft, isDirty } from './draft';
-import { aliasValue, makeConflict, makeDocument, makeMatch, scalar, unknownEntry } from './fixtures';
+import {
+  aliasValue,
+  makeConflict,
+  makeDocument,
+  makeMatch,
+  scalar,
+  styledScalar,
+  unknownEntry
+} from './fixtures';
 import type { InvalidationStatus } from './invalidation';
 import {
   acknowledgeFindings,
@@ -639,6 +647,20 @@ describe('the round trip, which must be the identity', () => {
     }
     expect(isDirty(editor.draft)).toBe(false);
     expect(canSave(editor)).toBe(false);
+  });
+
+  it('keeps a quoted option Unchanged through typing and undoing back to it (4-1)', () => {
+    // Phase 4-1: an option is written as plain source only on an explicit `Set`,
+    // so an untouched `word: 'true'` must never become one. The baseline is the
+    // decoded text, and `fieldIntent` compares the final buffer with it — visiting
+    // or retyping the value is not an intent.
+    const quoted = withScalar('word', styledScalar('true', 'SingleQuoted', false));
+    const typed = editField(session(quoted), 'word', 'truex');
+    expect(matchDraftOf(typed.baseline, typed.draft.value).word).toEqual({ Set: 'truex' });
+    const undone = undoEdit(typed);
+    expect(matchDraftOf(undone.baseline, undone.draft.value).word).toBe('Unchanged');
+    const retyped = editField(typed, 'word', 'true');
+    expect(matchDraftOf(retyped.baseline, retyped.draft.value).word).toBe('Unchanged');
   });
 
   it('takes its base revision from the identity the projection was minted from', () => {

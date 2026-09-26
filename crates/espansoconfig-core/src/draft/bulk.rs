@@ -20,11 +20,12 @@
 //! # A value is source text, written verbatim (D2u)
 //!
 //! What a person types into an option control is the **source text** the file
-//! should hold — `word: true`, not the string `"true"`. The single-match
-//! planner treats a drafted value as a string and lets the codec quote it
-//! (`word: 'true'`), which espanso reads as a string where it expects a boolean
-//! (Phase 3-10's review). So a bulk `Set` is written **verbatim as a plain
-//! scalar** ([`crate::patch::ScalarEdit::plain_source`],
+//! should hold — `word: true`, not the string `"true"`. Until Phase 4-1 the
+//! single-match planner treated a drafted option as a string and let the codec
+//! quote it (`word: 'true'`) — A1, fixed in 4-1, where the planner and creation
+//! adopted this module's contract for the same seven options plus `paragraph`
+//! ([`MatchField::PLAIN_SOURCE_OPTIONS`]). So a bulk `Set` is written **verbatim
+//! as a plain scalar** ([`crate::patch::ScalarEdit::plain_source`],
 //! [`crate::patch::EntryValue::PlainSource`]), and the engine verifies that the
 //! written scalar is plain and reads back as exactly that text. A text that
 //! cannot be written that way — it would need quotes, holds a line break, a
@@ -38,12 +39,16 @@
 //! [`plan_bulk_option_edits`] builds one [`MatchDraft`] per selected snippet
 //! holding only the options that snippet does not already spell as requested,
 //! hands it to [`plan_match_edits`], and turns every value that planner writes
-//! into plain source text, concatenating the batches. The planner's structural
+//! into plain source text, concatenating the batches. Since Phase 4-1 the
+//! planner already writes the seven options as plain source, so that turn is an
+//! identity for them; it is kept as the statement that nothing else reaches a
+//! bulk batch as a logical string. The planner's structural
 //! rules apply unchanged — the ordered insertion group for several absent
 //! options, the hazard gate, the closed-surface and independence audits. A
 //! snippet whose option decodes to the requested text but is spelled
-//! differently gets a plain-source rewrite of that one value, which the
-//! planner's decoded-equality rule would otherwise skip.
+//! differently gets a plain-source rewrite of that one value, planned here
+//! directly — the same rewrite the single-match planner derives since Phase
+//! 4-1.
 //! The concatenation is not re-audited here: the batches name disjoint match
 //! mappings, and [`crate::patch::apply_edits`] refuses any overlap and reparses
 //! and verifies the whole candidate before a byte is written. Nothing in the type
@@ -603,8 +608,8 @@ pub fn plan_bulk_option_edits(
                     if scalar.style == ScalarStyle::Plain
                         && scalar.span.slice(source) == Some(text.as_str()) => {}
                 // The same decoded text in another spelling (`'true'` for
-                // `true`): the planner's decoded-equality rule would derive
-                // nothing, so the one value is rewritten here, in place.
+                // `true`): the one value is rewritten here, in place — the
+                // rewrite the single-match planner also derives since Phase 4-1.
                 (BulkValue::Set(text), Some(scalar)) if scalar.text == *text => {
                     let path = found
                         .path

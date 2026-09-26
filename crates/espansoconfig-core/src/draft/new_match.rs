@@ -14,7 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::draft::{MatchField, SequenceField};
+use crate::draft::{is_plain_source, DraftError, MatchField, SequenceField};
 use crate::patch::EntryValue;
 
 /// How a new match is triggered: exactly one of espanso's three trigger forms.
@@ -172,22 +172,33 @@ impl NewContent {
 /// those two cases apart, so the caller decides and this type carries the
 /// decision rather than inferring it.
 ///
-/// # The options are text, not booleans
+/// # The options are text, not booleans — and eight of them are source text
 ///
 /// `word`, `propagate_case`, `force_clipboard` and the rest are `Option<String>`
 /// for the reason their controls may not be checkboxes: deciding that `word: on`
 /// means boolean true is a claim about how espanso's YAML resolver reads a plain
-/// scalar, and D2u forbids this application making one. What is written is the
-/// text the caller supplied, spelled by the encoder like every other value — so
-/// a value such as `on` or `yes` is quoted rather than left as a plain scalar a
-/// YAML 1.1 reader could take for a boolean.
+/// scalar, and D2u forbids this application making one.
 ///
-/// # It carries decoded text, never YAML
+/// **The eight options of [`MatchField::PLAIN_SOURCE_OPTIONS`]** — `word`,
+/// `left_word`, `right_word`, `propagate_case`, `uppercase_style`, `force_mode`,
+/// `force_clipboard`, `paragraph` — carry the **source text** the file should
+/// hold, and it is written verbatim as one plain scalar
+/// ([`EntryValue::PlainSource`]): `Some("true")` writes `word: true`, never
+/// `word: 'true'` (Phase 4-1, `docs/decisions/4-split-notes.md` §3 ruling 2). A
+/// text that cannot be written that way — empty, or holding a line break, a
+/// quote, a `#` comment, a flow indicator, an alias or a tag — is refused by name
+/// ([`DraftError::OptionNotPlainSource`]) by [`NewMatch::entries`], before any
+/// transaction, rather than quoted.
 ///
-/// Every value is a logical string. Its spelling — plain, quoted, or a `|`
-/// block — is [`crate::emit::choose_scalar`]'s decision, exactly as it is for
-/// every other value this crate writes, so a value holding a `#`, a line break or
-/// a leading `*` is written correctly rather than injected.
+/// # Everything else carries decoded text, never YAML
+///
+/// The trigger, the content, `label`, `comment`, every `search_terms` item and
+/// `anchor` are logical strings. Their spelling — plain, quoted, or a `|` block
+/// — is [`crate::emit::choose_scalar`]'s decision, exactly as it is for every
+/// other value this crate writes, so a value holding a `#`, a line break or a
+/// leading `*` is written correctly rather than injected. `anchor` is the one
+/// option in this group: forbidding it text that needs quoting would restrict
+/// the field for no gain.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewMatch {
@@ -209,31 +220,32 @@ pub struct NewMatch {
     /// `Some(vec![])` writes `search_terms: []`; `None` writes no key.
     #[serde(default)]
     pub search_terms: Option<Vec<String>>,
-    /// `word`, as source text.
+    /// `word`, as source text written verbatim as one plain scalar.
     #[serde(default)]
     pub word: Option<String>,
-    /// `left_word`, as source text.
+    /// `left_word`, as source text written verbatim as one plain scalar.
     #[serde(default)]
     pub left_word: Option<String>,
-    /// `right_word`, as source text.
+    /// `right_word`, as source text written verbatim as one plain scalar.
     #[serde(default)]
     pub right_word: Option<String>,
-    /// `propagate_case`, as source text.
+    /// `propagate_case`, as source text written verbatim as one plain scalar.
     #[serde(default)]
     pub propagate_case: Option<String>,
-    /// `uppercase_style`, as source text.
+    /// `uppercase_style`, as source text written verbatim as one plain scalar.
     #[serde(default)]
     pub uppercase_style: Option<String>,
-    /// `force_mode`, as source text.
+    /// `force_mode`, as source text written verbatim as one plain scalar.
     #[serde(default)]
     pub force_mode: Option<String>,
-    /// `force_clipboard`, as source text.
+    /// `force_clipboard`, as source text written verbatim as one plain scalar.
     #[serde(default)]
     pub force_clipboard: Option<String>,
-    /// `paragraph`, as source text.
+    /// `paragraph`, as source text written verbatim as one plain scalar.
     #[serde(default)]
     pub paragraph: Option<String>,
-    /// `anchor`, as source text — the espanso key, not YAML `&anchor` syntax.
+    /// `anchor`, as a logical string spelled by the codec — the espanso key, not
+    /// YAML `&anchor` syntax.
     #[serde(default)]
     pub anchor: Option<String>,
 }
@@ -274,10 +286,27 @@ impl NewMatch {
     /// this order, so this vector *is* the item's key order in the file.
     ///
     /// **A field that is `None` is not emitted** — there is no placeholder line,
-    /// no empty value and no key with nothing after it. A field that is
-    /// `Some("")` **is** emitted, with whatever the encoder spells an empty
-    /// string as, and `search_terms: Some(vec![])` is emitted as `[]`.
-    pub fn entries(&self) -> Vec<(String, EntryValue)> {
+    /// no empty value and no key with nothing after it. A logical-string field
+    /// that is `Some("")` **is** emitted, with whatever the encoder spells an
+    /// empty string as, and `search_terms: Some(vec![])` is emitted as `[]`.
+    ///
+    /// # The eight plain-source options (Phase 4-1)
+    ///
+    /// Each of [`MatchField::PLAIN_SOURCE_OPTIONS`] that is present becomes an
+    /// [`EntryValue::PlainSource`], written verbatim; `anchor` stays an
+    /// [`EntryValue::Scalar`]. Because this is the only producer of a new match's
+    /// entries, the check below is what every creation passes through before a
+    /// transaction exists; a caller that built an [`crate::patch::InsertItem`]
+    /// by hand would bypass it, and the engine's own read-back
+    /// ([`crate::patch::VerificationFailure::PlainSourceNotReadBack`]) is what
+    /// refuses such an item then.
+    ///
+    /// # Errors
+    ///
+    /// [`DraftError::OptionNotPlainSource`], naming the first option in write
+    /// order whose text fails [`is_plain_source`] — `Some("")` among them, since
+    /// an empty plain scalar is a null rather than the empty text.
+    pub fn entries(&self) -> Result<Vec<(String, EntryValue)>, DraftError> {
         let (trigger_key, trigger_value) = self.trigger.entry();
         let (content_key, content_text) = self.content.entry();
         let mut entries = vec![
@@ -315,17 +344,26 @@ impl NewMatch {
             (MatchField::Anchor, &self.anchor),
         ];
         for (field, value) in options {
-            if let Some(text) = value {
-                entries.push((field.key().to_owned(), EntryValue::Scalar(text.clone())));
-            }
+            let Some(text) = value else {
+                continue;
+            };
+            let value = if !field.writes_plain_source() {
+                EntryValue::Scalar(text.clone())
+            } else if is_plain_source(text) {
+                EntryValue::PlainSource(text.clone())
+            } else {
+                return Err(DraftError::OptionNotPlainSource { field });
+            };
+            entries.push((field.key().to_owned(), value));
         } // End of the loop over the nine optional match options
-        entries
+        Ok(entries)
     } // End of function entries()
 } // End of impl NewMatch
 
 #[cfg(test)]
 mod tests {
     use super::{NewContent, NewMatch, NewTrigger, TriggerList};
+    use crate::draft::{DraftError, MatchField};
     use crate::patch::EntryValue;
 
     /// Every optional scalar field's key, in write order, paired with a setter.
@@ -360,6 +398,7 @@ mod tests {
     fn keys(new_match: &NewMatch) -> Vec<String> {
         new_match
             .entries()
+            .expect("the entries")
             .into_iter()
             .map(|(key, _)| key)
             .collect()
@@ -370,7 +409,7 @@ mod tests {
     #[test]
     fn a_bare_new_match_is_its_trigger_and_its_content() {
         assert_eq!(
-            bare().entries(),
+            bare().entries().expect("the entries"),
             vec![
                 ("trigger".to_owned(), EntryValue::Scalar(":one".to_owned())),
                 ("replace".to_owned(), EntryValue::Scalar("first".to_owned())),
@@ -403,7 +442,10 @@ mod tests {
         ];
         for (trigger, key, value) in cases {
             let made = NewMatch::new(trigger, NewContent::Replace("x".to_owned()));
-            assert_eq!(made.entries()[0], (key.to_owned(), value));
+            assert_eq!(
+                made.entries().expect("the entries")[0],
+                (key.to_owned(), value)
+            );
         } // End of the loop over the three trigger alternatives
     } // End of function each_trigger_alternative_names_its_own_key()
 
@@ -420,7 +462,7 @@ mod tests {
         for (content, key) in cases {
             let made = NewMatch::new(NewTrigger::Single(":a".to_owned()), content);
             assert_eq!(
-                made.entries()[1],
+                made.entries().expect("the entries")[1],
                 (key.to_owned(), EntryValue::Scalar("t".to_owned()))
             );
         } // End of the loop over the five content alternatives
@@ -456,6 +498,7 @@ mod tests {
         );
         let terms = whole
             .entries()
+            .expect("the entries")
             .into_iter()
             .find(|(key, _)| key == "search_terms")
             .map(|(_, value)| value);
@@ -466,8 +509,11 @@ mod tests {
         );
     } // End of function every_present_field_is_written_in_the_documented_order()
 
-    /// For every optional field, `None` writes no key and `Some("")` writes the
-    /// key with an empty value — and only that key changes.
+    /// For every optional field, `None` writes no key. `Some("")` writes the key
+    /// with an empty value for the three logical-string fields (`label`,
+    /// `comment`, `anchor`) — and only that key changes — and is refused by name
+    /// for each of the eight plain-source options, because an empty plain scalar
+    /// is a null rather than the empty text (Phase 4-1).
     #[test]
     fn none_and_empty_differ_for_every_optional_field() {
         for (key, set) in optional_scalars() {
@@ -477,18 +523,28 @@ mod tests {
 
             let mut empty = bare();
             set(&mut empty, Some(String::new()));
+            let field = MatchField::from_key(key).expect("a schema-known key");
+            if field.writes_plain_source() {
+                assert_eq!(
+                    empty.entries(),
+                    Err(DraftError::OptionNotPlainSource { field }),
+                    "{key}: an empty option is refused, never quoted"
+                );
+                continue;
+            }
+            let entries = empty.entries().expect("the entries");
             assert_eq!(
-                empty.entries().last(),
+                entries.last(),
                 Some(&(key.to_owned(), EntryValue::Scalar(String::new()))),
                 "{key}: an empty value is still a key"
             );
-            assert_eq!(empty.entries().len(), 3, "{key}: only that key is added");
+            assert_eq!(entries.len(), 3, "{key}: only that key is added");
         } // End of the loop over the eleven optional scalar fields
 
         let mut empty_terms = bare();
         empty_terms.search_terms = Some(Vec::new());
         assert_eq!(
-            empty_terms.entries().last(),
+            empty_terms.entries().expect("the entries").last(),
             Some(&(
                 "search_terms".to_owned(),
                 EntryValue::ScalarList(Vec::new())
@@ -496,6 +552,87 @@ mod tests {
         );
         assert!(!keys(&bare()).iter().any(|k| k == "search_terms"));
     } // End of function none_and_empty_differ_for_every_optional_field()
+
+    /// The split of Phase 4-1: the eight plain-source options become
+    /// [`EntryValue::PlainSource`] holding the text as typed, and `anchor`, the
+    /// trigger, the content, `label` and `comment` stay [`EntryValue::Scalar`] —
+    /// even when their text is the same ambiguous `true`.
+    #[test]
+    fn eight_options_are_plain_source_and_every_other_value_is_a_string() {
+        let mut whole = NewMatch::new(
+            NewTrigger::Single("true".to_owned()),
+            NewContent::Replace("true".to_owned()),
+        );
+        for (_, set) in optional_scalars() {
+            set(&mut whole, Some("true".to_owned()));
+        }
+        for (key, value) in whole.entries().expect("the entries") {
+            let field = MatchField::from_key(&key).expect("a schema-known key");
+            let wanted = if field.writes_plain_source() {
+                EntryValue::PlainSource("true".to_owned())
+            } else {
+                EntryValue::Scalar("true".to_owned())
+            };
+            assert_eq!(value, wanted, "{key}");
+        } // End of the loop over the written entries
+        assert_eq!(MatchField::PLAIN_SOURCE_OPTIONS.len(), 8);
+        assert!(!MatchField::Anchor.writes_plain_source());
+    } // End of function eight_options_are_plain_source_and_every_other_value_is_a_string()
+
+    /// Text that is not one plain scalar is refused by name for each of the
+    /// eight options, and the first refused option in write order is the one
+    /// named; the same text in `anchor` is written as a string.
+    #[test]
+    fn an_option_that_is_not_plain_source_is_refused_by_name() {
+        let refused = [
+            "",
+            "a\nb",
+            "a\rb",
+            "'true'",
+            "\"on\"",
+            "a #b",
+            "#b",
+            "[a]",
+            "{a: b}",
+            "*alias",
+            "&anchor x",
+            "!!str x",
+            "a: b",
+            "- a",
+            " a",
+            "a ",
+        ];
+        for text in refused {
+            for field in MatchField::PLAIN_SOURCE_OPTIONS {
+                let mut made = bare();
+                let (_, set) = optional_scalars()
+                    .into_iter()
+                    .find(|(key, _)| *key == field.key())
+                    .expect("every option has a setter");
+                set(&mut made, Some(text.to_owned()));
+                assert_eq!(
+                    made.entries(),
+                    Err(DraftError::OptionNotPlainSource { field }),
+                    "{text:?} in {}",
+                    field.key()
+                );
+            } // End of the loop over the eight options
+            let mut anchored = bare();
+            anchored.anchor = Some(text.to_owned());
+            assert!(anchored.entries().is_ok(), "{text:?} is a string in anchor");
+        } // End of the loop over the refused texts
+
+        let mut two = bare();
+        two.force_mode = Some("a #b".to_owned());
+        two.word = Some(String::new());
+        assert_eq!(
+            two.entries(),
+            Err(DraftError::OptionNotPlainSource {
+                field: MatchField::Word
+            }),
+            "the first refused option in write order is named"
+        );
+    } // End of function an_option_that_is_not_plain_source_is_refused_by_name()
 
     /// An empty `triggers` list cannot be built, in Rust or off the wire.
     #[test]

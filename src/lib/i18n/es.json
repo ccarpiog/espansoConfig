@@ -1331,6 +1331,7 @@
   "code.draftError.sequenceWouldBeEmpty": "Esto quitaría todos los elementos de la lista. Para no tener ninguna lista, quita la lista entera.",
   "code.draftError.switchWouldDiscardItems": "La lista tiene {items} elementos, y un valor único conservaría solo uno. Quita primero los demás.",
   "code.draftError.noSequenceInsertionAnchor": "El fragmento no tiene ninguna entrada después de la cual escribir la nueva lista.",
+  "code.draftError.optionNotPlainSource": "El texto de {field} está vacío o no se puede escribir tal como se tecleó sin comillas, así que no se escribió nada. Escríbelo sin comillas, comentarios ni saltos de línea, o quita la opción.",
   "code.bulkPlanError.noOptionChanges": "No se cambió ninguna opción, así que no hay nada que aplicar.",
   "code.bulkPlanError.optionRepeated": "Se pidió dos veces la opción {option}, así que la edición no puede saber qué valor escribir.",
   "code.bulkPlanError.optionNotPlainSource": "El texto de {option} no se puede escribir tal como se tecleó sin comillas, así que no se escribió nada. Escríbelo sin comillas, comentarios ni saltos de línea.",

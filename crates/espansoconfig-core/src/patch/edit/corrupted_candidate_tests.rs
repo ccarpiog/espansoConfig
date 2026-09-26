@@ -311,3 +311,194 @@ fn a_candidate_that_says_the_wrong_thing_inside_its_span_fails_the_oracle() {
         );
     } // End of the loop over the inside-the-span cases
 } // End of function a_candidate_that_says_the_wrong_thing_inside_its_span_fails_the_oracle()
+
+// ---------------------------------------------------------------------------
+// Phase 4-1: an inserted item's plain-source exemption is exactly as wide as
+// its requested entries
+// ---------------------------------------------------------------------------
+
+/// A new snippet whose `word` is requested as plain source text `true`, beside
+/// the logical-string entries `extra` names.
+fn plain_word_item(placement: ItemPlacement, extra: Vec<(String, EntryValue)>) -> DocumentEdit {
+    let mut fields = vec![("trigger".to_owned(), EntryValue::Scalar(":x".to_owned()))];
+    fields.extend(extra);
+    fields.push((
+        "word".to_owned(),
+        EntryValue::PlainSource("true".to_owned()),
+    ));
+    InsertItem::typed(DocumentPath::root(0).with_key("matches"), placement, fields).into()
+} // End of function plain_word_item()
+
+/// Runs `edits` through the mirror with every planned replacement text that
+/// holds `from` rewritten to hold `to` instead, and says whether one did.
+fn rewritten_through(
+    edits: &[DocumentEdit],
+    from: &str,
+    to: &str,
+) -> (bool, Result<String, EditError>) {
+    let mut rewrote = false;
+    let result = candidate_through(
+        SOURCE,
+        edits,
+        |replacements| {
+            for replacement in replacements.iter_mut() {
+                if replacement.text.contains(from) {
+                    replacement.text = replacement.text.replacen(from, to, 1);
+                    rewrote = true;
+                }
+            }
+        },
+        |_| {},
+    );
+    (rewrote, result)
+} // End of function rewritten_through()
+
+/// Whether `result` is the ambiguity property's refusal.
+fn refused_as_ambiguous(result: &Result<String, EditError>) -> bool {
+    matches!(
+        result,
+        Err(EditError::Verification(
+            VerificationFailure::AmbiguousPlainScalarIntroduced { .. }
+        ))
+    )
+}
+
+/// The honest run: an inserted item whose requested `word` is the ambiguous
+/// plain scalar `true` verifies, is `apply_edits`' own candidate, and holds the
+/// option exactly as typed — the exemption reaches the requested value node.
+#[test]
+fn an_inserted_items_requested_plain_source_is_exempted() {
+    let edits = [plain_word_item(
+        ItemPlacement::End,
+        vec![("replace".to_owned(), EntryValue::Scalar("yes".to_owned()))],
+    )];
+    let honest =
+        candidate_through(SOURCE, &edits, |_| {}, |_| {}).expect("the honest run verifies");
+    let applied = apply_edits(SOURCE, &edits).expect("apply_edits accepts it");
+    assert_eq!(honest, applied.text);
+    assert!(
+        honest.contains("    replace: 'yes'\n    word: true\n"),
+        "{honest}"
+    );
+} // End of function an_inserted_items_requested_plain_source_is_exempted()
+
+/// **The decisive negative test** (`docs/decisions/4-split-notes.md` §3 ruling
+/// 3): the requested option is correct, and a neighbouring ordinary string value
+/// of the same item is corrupted into an ambiguous plain scalar. The candidate is
+/// refused — the exemption covers the requested value node and not its item.
+#[test]
+fn a_corrupted_neighbour_of_an_exempted_option_is_still_refused() {
+    let edits = [plain_word_item(
+        ItemPlacement::End,
+        vec![("replace".to_owned(), EntryValue::Scalar("yes".to_owned()))],
+    )];
+    let (rewrote, result) = rewritten_through(&edits, "replace: 'yes'", "replace: yes");
+    assert!(rewrote, "the planned text quotes the neighbour");
+    assert!(refused_as_ambiguous(&result), "{result:?}");
+} // End of function a_corrupted_neighbour_of_an_exempted_option_is_still_refused()
+
+/// The same text `true` in a **key**, in a **sibling inserted item** and in a
+/// **scalar-list element** receives no exemption: each is requested as a logical
+/// string, corrupted from its quoted spelling into the plain `true`, and refused
+/// by the ambiguity property itself — before any later check could name it —
+/// while the item's own requested `word: true` stays exempt.
+#[test]
+fn equal_text_outside_the_requested_entry_receives_no_exemption() {
+    let sequence = || DocumentPath::root(0).with_key("matches");
+    let cases: [(&str, Vec<DocumentEdit>, &str, &str); 3] = [
+        (
+            "a key",
+            vec![plain_word_item(
+                ItemPlacement::End,
+                vec![("true".to_owned(), EntryValue::Scalar("k".to_owned()))],
+            )],
+            "    'true': k\n",
+            "    true: k\n",
+        ),
+        (
+            "a sibling item",
+            vec![
+                plain_word_item(ItemPlacement::Front, Vec::new()),
+                InsertItem::typed(
+                    sequence(),
+                    ItemPlacement::End,
+                    vec![
+                        ("trigger".to_owned(), EntryValue::Scalar(":y".to_owned())),
+                        ("replace".to_owned(), EntryValue::Scalar("true".to_owned())),
+                    ],
+                )
+                .into(),
+            ],
+            "replace: 'true'",
+            "replace: true",
+        ),
+        (
+            "a scalar-list element",
+            vec![plain_word_item(
+                ItemPlacement::End,
+                vec![(
+                    "search_terms".to_owned(),
+                    EntryValue::ScalarList(vec!["true".to_owned()]),
+                )],
+            )],
+            "- 'true'",
+            "- true",
+        ),
+    ];
+    for (what, edits, from, to) in cases {
+        let honest = candidate_through(SOURCE, &edits, |_| {}, |_| {});
+        let applied = apply_edits(SOURCE, &edits).map(|patched| patched.text);
+        assert_eq!(honest, applied, "{what}: the honest run is apply_edits'");
+        assert!(
+            honest.is_ok(),
+            "{what}: the honest run verifies: {honest:?}"
+        );
+        let (rewrote, result) = rewritten_through(&edits, from, to);
+        assert!(rewrote, "{what}: the planned text holds {from:?}");
+        assert!(refused_as_ambiguous(&result), "{what}: {result:?}");
+    } // End of the loop over the places the same text must not be exempted
+} // End of function equal_text_outside_the_requested_entry_receives_no_exemption()
+
+/// Several inserted items and a removal in one batch shift every candidate
+/// index: each item's requested plain-source values are still found at their
+/// own positions (the honest run verifies), and a corrupted neighbour inside the
+/// **second** inserted item — the one whose candidate index the removal and the
+/// first insertion both moved — is still refused.
+#[test]
+fn several_inserted_items_and_shifted_indices_keep_the_exemption_exact() {
+    let sequence = || DocumentPath::root(0).with_key("matches");
+    let second = InsertItem::typed(
+        sequence(),
+        ItemPlacement::End,
+        vec![
+            ("trigger".to_owned(), EntryValue::Scalar(":z".to_owned())),
+            ("replace".to_owned(), EntryValue::Scalar("no".to_owned())),
+            (
+                "paragraph".to_owned(),
+                EntryValue::PlainSource("false".to_owned()),
+            ),
+            (
+                "force_clipboard".to_owned(),
+                EntryValue::PlainSource("on".to_owned()),
+            ),
+        ],
+    );
+    let edits = [
+        plain_word_item(ItemPlacement::Front, Vec::new()),
+        RemoveItem::new(item(1)).into(),
+        second.into(),
+    ];
+    let honest = candidate_through(SOURCE, &edits, |_| {}, |_| {});
+    let applied = apply_edits(SOURCE, &edits).map(|patched| patched.text);
+    assert_eq!(honest, applied, "the honest run is apply_edits'");
+    let honest = honest.expect("the honest run verifies");
+    assert!(honest.contains("    word: true\n"), "{honest}");
+    assert!(
+        honest.contains("    replace: 'no'\n    paragraph: false\n    force_clipboard: on\n"),
+        "{honest}"
+    );
+
+    let (rewrote, result) = rewritten_through(&edits, "replace: 'no'", "replace: no");
+    assert!(rewrote, "the planned text quotes the neighbour");
+    assert!(refused_as_ambiguous(&result), "{result:?}");
+} // End of function several_inserted_items_and_shifted_indices_keep_the_exemption_exact()

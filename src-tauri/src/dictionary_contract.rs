@@ -494,7 +494,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("decodeError", 5),
     ("notReencodable", 8),
     ("saveResult", 3),
-    ("draftError", 43),
+    ("draftError", 44),
     ("presentationNote", 2),
     ("reapplyResolution", 4),
     ("reapplyRefusal", 9),
