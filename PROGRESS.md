@@ -289,6 +289,7 @@ all of it is in `git log`._
 | **3-15-2 — the Phase 3 closure record, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed) and closed; step 3-15 closed; Phase 3 not closed** | `de08385` (this SHA record is the commit after it) | ✅ pushed, `96f24a1..de08385  main -> main`; tree clean after it |
 | **3-13-3 — display names and creation defaults: the window half, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 2 SHOULD-FIX, fixed) and closed; step 3-13 closed** | `743da1d` (recorded in the next phase's commit) | ✅ pushed, `a301f16..743da1d  main -> main`; tree clean after it |
 | **3-14 — delete-conflict wording and action placement, reviewed (`ship`, Codex, 0 findings) and closed** | `6744752` (recorded in the next phase's commit) | ✅ pushed, `743da1d..6744752  main -> main`; tree clean after it |
+| **The Phase 3 closure — records only, reviewed (`ship-with-fixes`, Codex, 0 BLOCKERS + 1 SHOULD-FIX, fixed); Phase 3 closed** | `3a85326` (this SHA record is the commit after it) | ✅ pushed, `6744752..3a85326  main -> main`; tree clean after it |
 _The round-by-round §7.1 reading for the closed 2d-5-2b chain, the hatch condition C set and D
 applied, what the five rounds bought, and the stale-citation sweep taken while E ran, are in
 [`status-table.md`](docs/progress-archive/status-table.md) under *"The git-state prose of the closed
