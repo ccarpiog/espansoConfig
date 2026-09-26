@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T21:41:52Z",
+  "updated": "2026-09-26T22:13:56Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 4, variables and forms, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1364,8 +1364,11 @@
     {
       "id": "4-15",
       "title": "Remaining popovers",
-      "status": "queued",
-      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "status": "done",
+      "summary": "Six remaining Insert popovers (Date, Random, Clipboard, Shell, Script, Match) plus Echo via Add a variable, mounted.",
+      "risk": "high",
+      "review": "docs/reviews/4-15.md",
+      "narrative": "docs/decisions/4-15-notes.md"
     },
     {
       "id": "4-16",

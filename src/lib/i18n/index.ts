@@ -232,13 +232,17 @@ import {
   type RowStatus
 } from '../browser/formBuilder';
 import {
+  insertRowKey,
   kindEditRefusalKey,
   kindPartKey,
+  kindPreviewKey,
   kindProblemKey,
   kindWarningKey,
   newVariableKindKey,
+  type InsertRowKind,
   type KindEditRefusal,
   type KindPart,
+  type KindPreview,
   type KindProblem,
   type KindWarning,
   type NewVariableKind
@@ -1056,6 +1060,26 @@ export function tKindWarning(warning: KindWarning): string {
 export function tKindEditRefusal(reason: KindEditRefusal, part: KindPart | 'name'): string {
   return translate(locale.current, kindEditRefusalKey(reason), { part });
 } // End of function tKindEditRefusal()
+
+/**
+ * One `+ Insert` row's label, which is also its popover's heading — Phase 4-15.
+ *
+ * @param kind - The row's kind, from `../browser/variableKinds.ts`.
+ * @returns The translated label.
+ */
+export function tInsertRow(kind: InsertRowKind): string {
+  return translate(locale.current, insertRowKey(kind));
+} // End of function tInsertRow()
+
+/**
+ * What a row's popover says in place of a preview — Phase 4-15.
+ *
+ * @param preview - The preview state, from `../browser/variableKinds.ts`.
+ * @returns The translated sentence.
+ */
+export function tKindPreview(preview: KindPreview): string {
+  return translate(locale.current, kindPreviewKey(preview));
+} // End of function tKindPreview()
 
 /**
  * Why a form's layout box or a definition's option box is shown and not edited —

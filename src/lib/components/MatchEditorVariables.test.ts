@@ -21,7 +21,12 @@
  * `../browser/variableKinds.test.ts`). Suite 9 is Phase 4-14-2's: an existing
  * variable's parameters, list items and `depends_on` items
  * (`../browser/variableParams.ts`; the model half is
- * `../browser/variableParams.test.ts`).
+ * `../browser/variableParams.test.ts`). Suite 10 is Phase 4-15's: the six
+ * `+ Insert` rows' popovers (`KindInsertion.svelte`, over
+ * `../browser/variableKinds.ts`'s row model) — caret and selection insertion,
+ * cancellation, name collisions, required values, retained drafts, the command
+ * and its arguments shown as text, no *Run test* and no clipboard-read control,
+ * and an honest preview state.
  *
  * **Mounted evidence, never a screen** (Phase 4 ruling 29): what this proves is
  * which elements jsdom holds after the handlers ran and what reached the
@@ -1365,3 +1370,384 @@ describe('9. Phase 4-14-2 — an existing variable’s parameters, list items an
     editor.stop();
   });
 }); // End of suite 9
+
+// ---------------------------------------------------------------------------
+// Suite 10 — Phase 4-15: the `+ Insert` rows' popovers
+// ---------------------------------------------------------------------------
+
+/** The six rows, in the order drawn. */
+const ROWS = ['date', 'random', 'clipboard', 'shell', 'script', 'match'] as const;
+
+/** One row's kind. */
+type Row = (typeof ROWS)[number];
+
+/**
+ * Presses one `+ Insert` row, insisting it is drawn and enabled.
+ *
+ * @param target - Where the editor was mounted.
+ * @param row - The row's kind.
+ */
+function openRow(target: HTMLElement, row: Row): void {
+  const button = group(target).querySelector(`.insertRows button[data-row="${row}"]`);
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`this case needs the ${row} row`);
+  }
+  expect(button.disabled).toBe(false);
+  button.click();
+  flushSync();
+} // End of function openRow()
+
+/**
+ * One row's open popover.
+ *
+ * @param target - Where the editor was mounted.
+ * @param row - The row's kind.
+ * @returns The popover.
+ */
+function popover(target: HTMLElement, row: Row): HTMLElement {
+  const found = group(target).querySelector(`.insertForm[data-row="${row}"]`);
+  if (!(found instanceof HTMLElement)) {
+    throw new Error(`this case needs the ${row} popover`);
+  }
+  return found;
+} // End of function popover()
+
+/**
+ * One box of an open popover: `name`, or a part.
+ *
+ * @param target - Where the editor was mounted.
+ * @param row - The row's kind.
+ * @param part - `name` or the part's espanso key.
+ * @returns The box.
+ */
+function rowBox(target: HTMLElement, row: Row, part: string): HTMLInputElement | HTMLTextAreaElement {
+  const scope = popover(target, row);
+  const found = part === 'name' ? scope.querySelector('label input') : scope.querySelector(`[data-part="${part}"] input, [data-part="${part}"] textarea`);
+  if (!(found instanceof HTMLInputElement || found instanceof HTMLTextAreaElement)) {
+    throw new Error(`this case needs the ${part} box of the ${row} popover`);
+  }
+  return found;
+} // End of function rowBox()
+
+/**
+ * The popover's *Insert* button.
+ *
+ * @param target - Where the editor was mounted.
+ * @param row - The row's kind.
+ * @returns The button.
+ */
+function insertButton(target: HTMLElement, row: Row): HTMLButtonElement {
+  const found = buttonLabelled(popover(target, row), sentence('browser.variableGroup.choice.insert'));
+  if (found === null) {
+    throw new Error('this case needs the Insert button');
+  }
+  return found;
+} // End of function insertButton()
+
+/** One row's mounted case: what is typed and the closed shape sent. */
+interface MountedRow {
+  /** The row's kind, which is also the provisional name. */
+  readonly row: Row;
+  /** What is typed, by part. */
+  readonly typed: Readonly<Record<string, string>>;
+  /** The closed shape sent. */
+  readonly params: NewVariableParams;
+}
+
+/** The six rows, as a person fills them in. */
+const MOUNTED_ROWS: readonly MountedRow[] = [
+  { row: 'date', typed: { format: '%Y-%m-%d' }, params: { Date: { format: '%Y-%m-%d', offset: null, tz: null, locale: null } } },
+  { row: 'random', typed: { choices: 'one\ntwo' }, params: { Random: { choices: ['one', 'two'] } } },
+  { row: 'clipboard', typed: {}, params: { Clipboard: {} } },
+  { row: 'shell', typed: { cmd: 'date +%F', trim: 'true' }, params: { Shell: { cmd: 'date +%F', shell: null, trim: 'true', debug: null } } },
+  { row: 'script', typed: { args: 'python3\nrun.py' }, params: { Script: { args: ['python3', 'run.py'], trim: null } } },
+  { row: 'match', typed: { trigger: ':sig' }, params: { Match: { trigger: ':sig' } } }
+];
+
+describe('10. Phase 4-15 — the + Insert rows', () => {
+  it('draws six rows after Insert a choice, in ruling 20’s order, and none for echo, which stays in Add a variable', () => {
+    const editor = mountEditor();
+    const rows = [...group(editor.target).querySelectorAll('.insertRows button')].map((one) => one.textContent?.trim());
+    expect(rows).toEqual([
+      sentence('browser.variableGroup.choice.open'),
+      ...ROWS.map((row) => sentence(`browser.kindInsertion.row.${row}`))
+    ]);
+    expect(group(editor.target).querySelector('.insertRows button[data-row="echo"]')).toBeNull();
+    press(group(editor.target), 'browser.variableGroup.addVariable.open');
+    expect(buttonLabelled(addForm(editor.target), sentence('browser.variableKinds.kind.echo'))).not.toBeNull();
+    editor.stop();
+  });
+
+  it.each(MOUNTED_ROWS)('$row: inserts the reference at the caret and the variable, one save in its closed shape', (one) => {
+    const editor = mountEditor();
+    replaceBox(editor.target).setSelectionRange(6, 6);
+    openRow(editor.target, one.row);
+    expect(rowBox(editor.target, one.row, 'name').value).toBe(one.row);
+    for (const [part, text] of Object.entries(one.typed)) {
+      type(rowBox(editor.target, one.row, part), text);
+    } // End of the loop over the typed parts
+    press(popover(editor.target, one.row), 'browser.variableGroup.choice.insert');
+    expect(replaceBox(editor.target).value).toBe(`Hello {{${one.row}}}`);
+    expect(chips(editor.target).at(-1)?.querySelector('code')?.textContent).toBe(one.row);
+    press(editor.target, 'browser.matchEditor.save');
+    expect(editor.saves).toHaveLength(1);
+    expect(editor.saves[0]?.replace).toEqual({ Set: `Hello {{${one.row}}}` });
+    expect(editor.saves[0]?.var_intents).toEqual([
+      {
+        InsertVariable: {
+          at: { End: {} },
+          variable: { name: one.row, params: one.params, inject_vars: null, depends_on: null, extra_params: [] }
+        }
+      }
+    ]);
+    editor.stop();
+  });
+
+  it('replaces the selected text with the reference, and one undo takes both halves back', () => {
+    const editor = mountEditor();
+    replaceBox(editor.target).setSelectionRange(0, 5);
+    openRow(editor.target, 'date');
+    press(popover(editor.target, 'date'), 'browser.variableGroup.choice.insert');
+    expect(replaceBox(editor.target).value).toBe('{{date}} ');
+    expect(chips(editor.target)).toHaveLength(4);
+    press(editor.target, 'browser.matchEditor.undo');
+    expect(replaceBox(editor.target).value).toBe('Hello ');
+    expect(chips(editor.target)).toHaveLength(3);
+    editor.stop();
+  });
+
+  it('cancels without drafting anything, and opens blank again afterwards', () => {
+    const editor = mountEditor();
+    openRow(editor.target, 'shell');
+    type(rowBox(editor.target, 'shell', 'cmd'), 'uptime');
+    press(popover(editor.target, 'shell'), 'browser.variableGroup.cancel');
+    expect(group(editor.target).querySelector('.insertForm')).toBeNull();
+    expect(replaceBox(editor.target).value).toBe('Hello ');
+    expect(chips(editor.target)).toHaveLength(3);
+    expect(buttonLabelled(editor.target, sentence('browser.matchEditor.save'))?.disabled).toBe(true);
+    openRow(editor.target, 'shell');
+    expect(rowBox(editor.target, 'shell', 'cmd').value).toBe('');
+    editor.stop();
+  });
+
+  it('retains each row’s draft while another row, a chip or a form is looked at', () => {
+    const editor = mountEditor();
+    openRow(editor.target, 'date');
+    type(rowBox(editor.target, 'date', 'format'), '%H:%M');
+    type(rowBox(editor.target, 'date', 'name'), 'clock');
+    openRow(editor.target, 'script');
+    type(rowBox(editor.target, 'script', 'args'), 'sh\nx.sh');
+    pressChip(editor.target, 'first');
+    press(group(editor.target), 'browser.variableGroup.choice.open');
+    openRow(editor.target, 'date');
+    expect(rowBox(editor.target, 'date', 'format').value).toBe('%H:%M');
+    expect(rowBox(editor.target, 'date', 'name').value).toBe('clock');
+    openRow(editor.target, 'script');
+    expect(rowBox(editor.target, 'script', 'args').value).toBe('sh\nx.sh');
+    // Nothing was drafted by typing: the draft is the popover's until Insert.
+    expect(chips(editor.target)).toHaveLength(3);
+    // A successful Insert drops the row's draft; the other row keeps its own.
+    press(popover(editor.target, 'script'), 'browser.variableGroup.choice.insert');
+    press(editor.target, 'browser.matchEditor.undo');
+    openRow(editor.target, 'script');
+    expect(rowBox(editor.target, 'script', 'args').value).toBe('');
+    openRow(editor.target, 'date');
+    expect(rowBox(editor.target, 'date', 'format').value).toBe('%H:%M');
+    editor.stop();
+  });
+
+  it('refuses a colliding name by name, says "available among visible names" under an open scope, and says why a draft is withheld', () => {
+    const editor = mountEditor();
+    openRow(editor.target, 'match');
+    type(rowBox(editor.target, 'match', 'trigger'), ':x');
+    expect(popover(editor.target, 'match').textContent).toContain(sentence('browser.variableEditor.name.availableAmongVisibleNames'));
+    expect(insertButton(editor.target, 'match').disabled).toBe(false);
+    type(rowBox(editor.target, 'match', 'name'), 'first');
+    expect(popover(editor.target, 'match').textContent).toContain(sentence('browser.variableEditor.name.takenByLocal'));
+    expect(insertButton(editor.target, 'match').disabled).toBe(true);
+    type(rowBox(editor.target, 'match', 'name'), 'first-name');
+    expect(popover(editor.target, 'match').textContent).toContain(sentence('browser.variableEditor.name.notAnIdentifier'));
+    expect(insertButton(editor.target, 'match').disabled).toBe(true);
+    // A pending addition takes the name too, and one addition per draft holds.
+    type(rowBox(editor.target, 'match', 'name'), 'sig');
+    press(popover(editor.target, 'match'), 'browser.variableGroup.choice.insert');
+    openRow(editor.target, 'match');
+    type(rowBox(editor.target, 'match', 'name'), 'sig');
+    expect(popover(editor.target, 'match').textContent).toContain(sentence('browser.variableEditor.name.takenByAddition'));
+    expect(insertButton(editor.target, 'match').disabled).toBe(true);
+    editor.stop();
+  });
+
+  it('keeps Insert disabled until the required value is given, and says which', () => {
+    const editor = mountEditor();
+    for (const [row, part] of [['random', 'choices'], ['shell', 'cmd'], ['script', 'args'], ['match', 'trigger']] as const) {
+      openRow(editor.target, row);
+      expect(insertButton(editor.target, row).disabled).toBe(true);
+      expect(popover(editor.target, row).textContent).toContain(sentence('browser.variableKinds.problem.required', { part }));
+      expect(popover(editor.target, row).textContent).toContain(sentence('browser.variableKinds.required'));
+    } // End of the loop over the rows with a required value
+    for (const row of ['date', 'clipboard'] as const) {
+      openRow(editor.target, row);
+      expect(insertButton(editor.target, row).disabled).toBe(false);
+    } // End of the loop over the rows that require nothing
+    editor.stop();
+  });
+
+  it('shows a multi-line command and each script argument as text, with the sentence that espanso may run it and this application does not', () => {
+    const editor = mountEditor();
+    openRow(editor.target, 'shell');
+    type(rowBox(editor.target, 'shell', 'cmd'), 'echo one\necho two');
+    const shell = popover(editor.target, 'shell');
+    expect(shell.textContent).toContain(sentence('browser.variableKinds.note.executes'));
+    const cmd = shell.querySelector('[data-written="cmd"] .sourceText');
+    expect(cmd?.textContent).toBe('echo oneecho two');
+    expect(cmd?.querySelectorAll('br')).toHaveLength(1);
+    expect(shell.querySelector('[data-written="reference"] .sourceText')?.textContent).toBe('{{shell}}');
+    expect(shell.querySelector('.preview')?.textContent).toBe(sentence('browser.kindInsertion.preview.commandNotRun'));
+
+    openRow(editor.target, 'script');
+    type(rowBox(editor.target, 'script', 'args'), 'python3\n/tmp/a b.py');
+    const script = popover(editor.target, 'script');
+    expect(script.textContent).toContain(sentence('browser.variableKinds.note.executes'));
+    const args = [...script.querySelectorAll('[data-written="args"] .sourceText')].map((one) => one.textContent);
+    expect(args).toEqual(['python3', '/tmp/a b.py']);
+    expect(script.querySelector('[data-written="args"]')?.textContent).toContain(sentence('browser.kindInsertion.item', { number: 2 }));
+    editor.stop();
+  });
+
+  it.each(ROWS)('%s: offers no Run test and no clipboard-read control — only its targets, Insert and Cancel', (row) => {
+    const editor = mountEditor({ match: projection({ html: '<p>x</p>' }) });
+    openRow(editor.target, row);
+    const labels = [...popover(editor.target, row).querySelectorAll('button')].map((one) => one.textContent?.trim());
+    expect(labels).toEqual([
+      sentence('browser.detail.field.replace'),
+      sentence('browser.detail.field.html'),
+      sentence('browser.variableGroup.choice.insert'),
+      sentence('browser.variableGroup.cancel')
+    ]);
+    editor.stop();
+  });
+
+  it('says no preview is available for every row, and why, rather than inventing one', () => {
+    const editor = mountEditor();
+    const expected: Readonly<Record<Row, TranslationKey>> = {
+      date: 'browser.kindInsertion.preview.notYetAvailable',
+      random: 'browser.kindInsertion.preview.notYetAvailable',
+      clipboard: 'browser.kindInsertion.preview.clipboardNotRead',
+      shell: 'browser.kindInsertion.preview.commandNotRun',
+      script: 'browser.kindInsertion.preview.commandNotRun',
+      match: 'browser.kindInsertion.preview.notYetAvailable'
+    };
+    for (const row of ROWS) {
+      openRow(editor.target, row);
+      expect(popover(editor.target, row).querySelector('.preview')?.textContent).toBe(sentence(expected[row]));
+    } // End of the loop over the rows
+    expect(popover(editor.target, 'match').textContent).not.toContain(sentence('browser.variableKinds.note.readsClipboard'));
+    openRow(editor.target, 'clipboard');
+    expect(popover(editor.target, 'clipboard').textContent).toContain(sentence('browser.variableKinds.note.readsClipboard'));
+    expect(popover(editor.target, 'clipboard').querySelectorAll('[data-part]')).toHaveLength(0);
+    editor.stop();
+  });
+
+  it('inserts into the chosen content key, at its own caret', () => {
+    const editor = mountEditor({ match: projection({ html: '<p>x</p>' }) });
+    openRow(editor.target, 'random');
+    type(rowBox(editor.target, 'random', 'choices'), 'a');
+    press(popover(editor.target, 'random'), 'browser.detail.field.html');
+    const html = editor.target.querySelector('textarea[data-field="html"]');
+    if (!(html instanceof HTMLTextAreaElement)) {
+      throw new Error('this case needs the html box');
+    }
+    html.setSelectionRange(3, 3);
+    press(popover(editor.target, 'random'), 'browser.variableGroup.choice.insert');
+    expect(html.value).toBe('<p>{{random}}x</p>');
+    expect(replaceBox(editor.target).value).toBe('Hello ');
+    editor.stop();
+  });
+
+  it('never takes a carriage return at edit: a forged one is refused, put back and said, and nothing with one is sent', () => {
+    const editor = mountEditor();
+    openRow(editor.target, 'shell');
+    type(rowBox(editor.target, 'shell', 'cmd'), 'ls\r\nrm');
+    expect(rowBox(editor.target, 'shell', 'cmd').value).toBe('ls\nrm');
+    type(rowBox(editor.target, 'shell', 'cmd'), 'ls');
+    const box = rowBox(editor.target, 'shell', 'cmd');
+    let held = 'ls\rrm';
+    Object.defineProperty(box, 'value', {
+      configurable: true,
+      get: () => held,
+      set: (next: string) => {
+        held = next;
+      }
+    });
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(held).toBe('ls');
+    Reflect.deleteProperty(box, 'value');
+    expect(popover(editor.target, 'shell').textContent).toContain(sentence('browser.variableKinds.problem.carriageReturn', { part: 'cmd' }));
+    press(popover(editor.target, 'shell'), 'browser.variableGroup.choice.insert');
+    press(editor.target, 'browser.matchEditor.save');
+    expect(JSON.stringify(editor.saves[0])).not.toContain('\\r');
+    editor.stop();
+  });
+
+  it('retains an inserted shell variable and its reference under a save conflict, and draws the recovery refusal after Keep my draft', async () => {
+    const conflict = makeConflict({ disk: fileOf([projection({}, AFTER)], AFTER), expected: BASE, found: AFTER });
+    const editor = mountEditor({ saves: [conflict] });
+    openRow(editor.target, 'shell');
+    type(rowBox(editor.target, 'shell', 'cmd'), 'uptime');
+    press(popover(editor.target, 'shell'), 'browser.variableGroup.choice.insert');
+    press(editor.target, 'browser.matchEditor.save');
+    await settle();
+    const panel = editor.target.querySelector('.panel[role="status"]');
+    const retained = [...(panel?.querySelectorAll('.shownValue') ?? [])].map((one) => one.textContent ?? '');
+    expect(retained.some((one) => one.includes('uptime'))).toBe(true);
+    expect(retained.some((one) => one.includes('{{shell}}'))).toBe(true);
+    press(editor.target, 'browser.saveOutcome.choice.keepMyDraft');
+    await settle();
+    expect(editor.target.textContent).toContain(sentence('browser.recovery.unavailable.variablesNotCarried'));
+    expect(editor.saves).toHaveLength(1);
+    editor.stop();
+  });
+
+  it('draws the rows and a popover in Spanish', () => {
+    locale.setOverride('es');
+    const editor = mountEditor();
+    flushSync();
+    const rows = [...group(editor.target, 'es').querySelectorAll('.insertRows button[data-row]')].map((one) => one.textContent?.trim());
+    expect(rows).toEqual(ROWS.map((row) => DICTIONARIES.es[`browser.kindInsertion.row.${row}`]));
+    const shell = group(editor.target, 'es').querySelector('.insertRows button[data-row="shell"]');
+    (shell as HTMLButtonElement).click();
+    flushSync();
+    const open = group(editor.target, 'es').querySelector('.insertForm[data-row="shell"]');
+    expect(open?.textContent).toContain(DICTIONARIES.es['browser.variableKinds.note.executes']);
+    expect(open?.textContent).toContain(DICTIONARIES.es['browser.kindInsertion.preview.commandNotRun']);
+    editor.stop();
+  });
+
+  it('review fix — keeps the content field last focused as the target after it blurs, and inserts and saves there', () => {
+    const editor = mountEditor({ match: projection({ html: '<p>x</p>' }) });
+    const html = editor.target.querySelector('textarea[data-field="html"]');
+    if (!(html instanceof HTMLTextAreaElement)) {
+      throw new Error('this case needs the html box');
+    }
+    html.dispatchEvent(new FocusEvent('focus'));
+    flushSync();
+    html.setSelectionRange(3, 3);
+    // Pressing a row takes the focus away from the box first, as a click does.
+    html.dispatchEvent(new FocusEvent('blur'));
+    flushSync();
+    openRow(editor.target, 'date');
+    const pressed = [...popover(editor.target, 'date').querySelectorAll('.targets button')].find(
+      (one) => one.getAttribute('aria-pressed') === 'true'
+    );
+    expect(pressed?.textContent?.trim()).toBe(sentence('browser.detail.field.html'));
+    press(popover(editor.target, 'date'), 'browser.variableGroup.choice.insert');
+    expect(html.value).toBe('<p>{{date}}x</p>');
+    expect(replaceBox(editor.target).value).toBe('Hello ');
+    press(editor.target, 'browser.matchEditor.save');
+    expect(editor.saves[0]?.html).toEqual({ Set: '<p>{{date}}x</p>' });
+    expect(editor.saves[0]?.replace).toBe('Unchanged');
+    editor.stop();
+  });
+}); // End of suite 10

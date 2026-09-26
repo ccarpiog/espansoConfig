@@ -104,6 +104,7 @@ import {
   type ReferenceField
 } from './variableInsertion';
 import { paramsViewOf, type ParamsView } from './variableParams';
+import type { InsertRowKind } from './variableKinds';
 import type { MatchSaveAnswer } from './workspace.svelte';
 
 // ---------------------------------------------------------------------------
@@ -275,7 +276,9 @@ export function heldAfterReply(
  * - `choice` — the **Choice** insertion's form;
  * - `add` — the *Add a variable* form (`./variableKinds.ts`), which adds a new
  *   variable of one of seven kinds with no reference inserted anywhere (ruling
- *   20: Echo is authored through *Add variable*; Phase 4-14-1 widened it).
+ *   20: Echo is authored through *Add variable*; Phase 4-14-1 widened it);
+ * - `insert` — one `+ Insert` row's popover (Phase 4-15,
+ *   `../components/KindInsertion.svelte`), by the row's kind.
  *
  * `null` is nothing selected: no box of the group is mounted.
  */
@@ -284,6 +287,7 @@ export type GroupSelection =
   | { readonly kind: 'added'; readonly position: number }
   | { readonly kind: 'choice' }
   | { readonly kind: 'add' }
+  | { readonly kind: 'insert'; readonly row: InsertRowKind }
   | null;
 
 /**
@@ -302,6 +306,9 @@ export function sameSelection(one: GroupSelection, other: GroupSelection): boole
   }
   if (one.kind === 'added' && other.kind === 'added') {
     return one.position === other.position;
+  }
+  if (one.kind === 'insert' && other.kind === 'insert') {
+    return one.row === other.row;
   }
   return one.kind === other.kind && (one.kind === 'choice' || one.kind === 'add');
 } // End of function sameSelection()
@@ -360,7 +367,7 @@ export function selectionOfSeed(session: MatchEditorSession, seeded: SeededSelec
  * @returns The selection, or `null`.
  */
 export function liveSelection(session: MatchEditorSession, selection: GroupSelection): GroupSelection {
-  if (selection === null || selection.kind === 'choice' || selection.kind === 'add') {
+  if (selection === null || selection.kind === 'choice' || selection.kind === 'add' || selection.kind === 'insert') {
     return selection;
   }
   if (selection.kind === 'variable') {
@@ -810,7 +817,7 @@ function selectedOf(
 ): SelectedVariable | SelectedAddition | null {
   const editable = isVariablesEditable(session);
   const buffer = capturedVariables(session.draft.value.variables);
-  if (selection === null || selection.kind === 'choice' || selection.kind === 'add') {
+  if (selection === null || selection.kind === 'choice' || selection.kind === 'add' || selection.kind === 'insert') {
     return null;
   }
   if (selection.kind === 'added') {

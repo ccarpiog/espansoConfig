@@ -20,7 +20,9 @@
  *   (`navigator.clipboard.read`/`readText`, a paste command) and for a Tauri
  *   shell or clipboard plugin or Node's `child_process`. Writing to the
  *   clipboard is allowed: `src/lib/components/clipboard.ts` copies a text with
- *   `navigator.clipboard.writeText`, and nothing here matches it;
+ *   `navigator.clipboard.writeText`, and nothing here matches it. Phase 4-15's
+ *   `+ Insert` popovers (`src/lib/components/KindInsertion.svelte`) and the
+ *   model they draw are asserted to be among the files read;
  * - the two Cargo manifests and `package.json` for a shell, process or
  *   clipboard dependency, and `src-tauri/capabilities/` for a shell or
  *   clipboard permission.
@@ -257,6 +259,17 @@ describe('no command in the tree runs a process or reads the clipboard for a var
     expect(FRONTEND_SOURCES.some((path) => path.startsWith(join('src', 'lib', 'ipc')))).toBe(true);
     expect(RUST_SOURCES.length).toBeGreaterThan(50);
     expect(FRONTEND_SOURCES.length).toBeGreaterThan(50);
+  });
+
+  it('reads the Phase 4-15 popovers and the model they draw: the + Insert rows are scanned like everything else', () => {
+    for (const source of [
+      join('src', 'lib', 'components', 'KindInsertion.svelte'),
+      join('src', 'lib', 'components', 'VariableGroup.svelte'),
+      join('src', 'lib', 'browser', 'variableKinds.ts')
+    ]) {
+      expect(FRONTEND_SOURCES).toContain(source);
+      expect(scan([source], FRONTEND_FORBIDDEN)).toEqual([]);
+    } // End of the loop over the popover sources
   });
 
   it('finds no process spawn and no clipboard crate in any Rust source but the pinned test fixture', () => {

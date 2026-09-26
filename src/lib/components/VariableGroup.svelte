@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import {
     appendVariableListItems,
     discardAddedVariable,
@@ -38,10 +39,15 @@
     addedParamsOf,
     addKindVariable,
     editKindDraft,
+    INSERT_ROW_KINDS,
     kindAdditionViewOf,
     kindDraftOf,
+    kindInsertionDraftOf,
+    lastContentFocusOf,
     withKind,
+    type InsertRowKind,
     type KindDraft,
+    type KindInsertionDraft,
     type KindEditRefusal,
     type KindPart,
     type NewVariableKind
@@ -61,6 +67,7 @@
     tEdgeKind,
     tIncompleteReason,
     tInsertRefusal,
+    tInsertRow,
     tKindEditRefusal,
     tKindPart,
     tKindProblem,
@@ -78,6 +85,7 @@
   } from '../i18n';
   import type { ListPlacement, VariableField } from '../ipc/types';
   import SourceText from './SourceText.svelte';
+  import KindInsertion from './KindInsertion.svelte';
 
   /*
    * The *Variables and fill-ins* group — Phase 4-11: the chip strip, the ordered
@@ -119,6 +127,13 @@
    * every refused edit put back to the draft's text with the sentence beside
    * the box. *Take out* and *Add these items* spend a grant minted from a read
    * taken at the press (R36, R37), as the variable's own removal does.
+   *
+   * **The six `+ Insert` rows** (Phase 4-15: Date/time, Random choice,
+   * Clipboard, Shell command, Script, Another match — `INSERT_ROW_KINDS`) sit
+   * beside *Insert a choice*; each opens its popover (`KindInsertion.svelte`) as
+   * the selection. Each row's popover value is held here, one per row, so it is
+   * retained while anything else is looked at; *Cancel* and a successful
+   * *Insert* drop it. Echo has no row (ruling 20): it stays in *Add a variable*.
    */
 
   const {
@@ -181,6 +196,25 @@
   let choice = $state.raw<ChoiceDraft | null>(null);
   /** The *Add a variable* form's value while it is open, or `null`. */
   let adding = $state.raw<KindDraft | null>(null);
+  /**
+   * Each `+ Insert` row's popover value, by row — retained while another row, a
+   * chip or a form is looked at, dropped by *Cancel* or a successful *Insert*.
+   * Component state: lost when the editor closes, like the forms' contents.
+   */
+  let rowDrafts = $state.raw<Readonly<Partial<Record<InsertRowKind, KindInsertionDraft>>>>({});
+  /**
+   * The content key the editor's focus last named — the 4-15 review's fix:
+   * pressing a row blurs the content box first, and a blur clears
+   * `session.focus`, so a row opens on this key rather than on the focus alone.
+   * Kept by the effect below on every change of focus.
+   */
+  let lastContent = $state.raw<ReferenceField | null>(null);
+  $effect.pre(() => {
+    const next = lastContentFocusOf(session, untrack(() => lastContent));
+    if (next !== untrack(() => lastContent)) {
+      lastContent = next;
+    }
+  });
   /**
    * The last edit of the *Add a variable* form the model refused, with the box it
    * was typed into, held with the form value it was refused over.
@@ -289,6 +323,66 @@
     editRefused = null;
     choice = null;
   } // End of function openAdding()
+
+  /**
+   * Opens one row's popover: its retained value when it has one, else a blank
+   * form with a provisional name the visible names do not refuse.
+   *
+   * @param row - The row's kind.
+   */
+  function openRow(row: InsertRowKind): void {
+    select({ kind: 'insert', row });
+    if (rowDrafts[row] === undefined) {
+      rowDrafts = { ...rowDrafts, [row]: kindInsertionDraftOf(row, session, context, lastContent) };
+    }
+    choice = null;
+    adding = null;
+  } // End of function openRow()
+
+  /**
+   * Holds one row's new popover value.
+   *
+   * @param row - The row's kind.
+   * @param next - The value.
+   */
+  function keepRow(row: InsertRowKind, next: KindInsertionDraft): void {
+    rowDrafts = { ...rowDrafts, [row]: next };
+  } // End of function keepRow()
+
+  /**
+   * Drops one row's popover value.
+   *
+   * @param row - The row's kind.
+   */
+  function dropRow(row: InsertRowKind): void {
+    const rest = { ...rowDrafts };
+    delete rest[row];
+    rowDrafts = rest;
+  } // End of function dropRow()
+
+  /**
+   * *Cancel* on a row's popover: its value is dropped and nothing is drafted.
+   *
+   * @param row - The row's kind.
+   */
+  function cancelRow(row: InsertRowKind): void {
+    dropRow(row);
+    select(null);
+  } // End of function cancelRow()
+
+  /**
+   * A row's *Insert* answered a session: install it, drop the row's value and
+   * select the new variable.
+   *
+   * @param row - The row's kind.
+   * @param next - The session with the reference and the variable drafted.
+   */
+  function rowInserted(row: InsertRowKind, next: MatchEditorSession): void {
+    apply(next);
+    refused = null;
+    dropRow(row);
+    select({ kind: 'added', position: next.draft.value.variables.added.length - 1 });
+  } // End of function rowInserted()
 
   /** Closes whichever form or controls are open. */
   function closeSelection(): void {
@@ -751,8 +845,11 @@
   {/if}
 
   <!-- The group's own actions. A structural action is withheld with its reason
-       (R36), and the addition's own refusal is said beside the control. -->
-  <p class="choices">
+       (R36), and the addition's own refusal is said beside the control. The
+       insertion rows first: *Insert a choice* (4-11), then the six rows of
+       Phase 4-15 in ruling 20's order. Echo has no row. -->
+  <p class="name">{t('browser.variableGroup.insert.heading')}</p>
+  <p class="choices insertRows" role="group" aria-label={t('browser.variableGroup.insert.heading')}>
     <button
       type="button"
       disabled={view.selection?.kind === 'choice'}
@@ -760,6 +857,18 @@
     >
       {t('browser.variableGroup.choice.open')}
     </button>
+    {#each INSERT_ROW_KINDS as row (row)}
+      <button
+        type="button"
+        data-row={row}
+        disabled={view.selection?.kind === 'insert' && view.selection.row === row}
+        onclick={() => openRow(row)}
+      >
+        {tInsertRow(row)}
+      </button>
+    {/each}
+  </p>
+  <p class="choices">
     <button type="button" disabled={view.selection?.kind === 'add'} onclick={() => openAdding()}>
       {t('browser.variableGroup.addVariable.open')}
     </button>
@@ -1026,6 +1135,24 @@
         </button>
       </p>
     </div>
+  {:else if view.selection?.kind === 'insert' && rowDrafts[view.selection.row] !== undefined}
+    {@const row = view.selection.row}
+    {@const rowDraft = rowDrafts[row]!}
+    <!-- **One `+ Insert` row's popover** (Phase 4-15), keyed by its row so a
+         refusal said in one row's popover never draws in another's. -->
+    {#key row}
+      <KindInsertion
+        {row}
+        {session}
+        {held}
+        {port}
+        draft={rowDraft}
+        keep={(next) => keepRow(row, next)}
+        inserted={(next) => rowInserted(row, next)}
+        cancel={() => cancelRow(row)}
+        {selectionOf}
+      />
+    {/key}
   {:else if adding !== null && addingView !== null}
     {@const form = adding}
     {@const said = addingView}

@@ -44,6 +44,7 @@ import {
   applySave,
   beginSave,
   conflictOf,
+  focusField,
   matchEditorView,
   reapplyToDiskVersion,
   startMatchEditor,
@@ -60,10 +61,18 @@ import {
   addedParamsOf,
   addKindVariable,
   editKindDraft,
+  editKindInsertion,
+  INSERT_ROW_KINDS,
+  insertKindRow,
   insertKindVariable,
+  insertRowKey,
   kindAdditionViewOf,
   kindDraftOf,
   kindEditRefusalKey,
+  kindInsertionDraftOf,
+  kindInsertionViewOf,
+  kindPreviewKey,
+  kindPreviewOf,
   kindPartKey,
   kindProblemKey,
   kindProblemOf,
@@ -77,6 +86,7 @@ import {
   REQUIRED_PART,
   withKind,
   type KindDraft,
+  type KindInsertionDraft,
   type KindPart,
   type KindProblem,
   type KindWarning,
@@ -814,3 +824,172 @@ describe('review fix — one snapshot of the form is validated and spent (the 4-
     expect(JSON.stringify(sent(outcome.session).var_intents)).toContain('valid');
   });
 }); // End of the review-fix suite
+
+// ---------------------------------------------------------------------------
+// Phase 4-15 — the `+ Insert` rows' popovers, as model values
+// ---------------------------------------------------------------------------
+
+/**
+ * A row's popover value with some parts typed through the edit gate.
+ *
+ * @param held - The session.
+ * @param kind - The row's kind.
+ * @param parts - What is typed, by part.
+ * @returns The popover's value.
+ */
+function rowOf(held: MatchEditorSession, kind: (typeof INSERT_ROW_KINDS)[number], parts: Partial<Record<KindPart, string>>): KindInsertionDraft {
+  let draft = kindInsertionDraftOf(kind, held, namesOf(held));
+  for (const [part, text] of Object.entries(parts) as [KindPart, string][]) {
+    const edit = editKindInsertion(draft, part, text);
+    if ('reason' in edit) {
+      throw new Error(`this case needs ${part} taken`);
+    }
+    draft = edit.draft;
+  } // End of the loop over the typed parts
+  return draft;
+} // End of function rowOf()
+
+describe('Phase 4-15 — the + Insert rows', () => {
+  it('offers six rows in ruling 20’s order, and none for echo', () => {
+    expect(INSERT_ROW_KINDS).toEqual(['date', 'random', 'clipboard', 'shell', 'script', 'match']);
+    expect((INSERT_ROW_KINDS as readonly string[]).includes('echo')).toBe(false);
+    expect(new Set(INSERT_ROW_KINDS.map(insertRowKey)).size).toBe(6);
+  });
+
+  it('opens blank, with a provisional name and the focused content key when it can take a reference', () => {
+    const held = session(projection({ html: '<p>x</p>' }));
+    const draft = kindInsertionDraftOf('shell', held, namesOf(held));
+    expect(draft.form.kind).toBe('shell');
+    expect(draft.form.name).toBe('shell');
+    expect(Object.values(draft.form.parts).every((text) => text === '')).toBe(true);
+    expect(draft.target).toBe('replace');
+    expect(kindInsertionDraftOf('date', focusField(held, 'html'), namesOf(held)).target).toBe('html');
+  });
+
+  it('checks the name as a reference: a collision or a non-identifier refuses Insert', () => {
+    const held = session();
+    const context = namesOf(held);
+    const grant = granted(held);
+    const taken = { ...rowOf(held, 'date', {}), form: { ...rowOf(held, 'date', {}).form, name: 'first' } };
+    expect(kindInsertionViewOf(held, context, grant, taken)).toMatchObject({
+      verdict: { kind: 'refused', reason: 'takenByLocal' },
+      reference: null,
+      canInsert: false
+    });
+    const edit = editKindInsertion(rowOf(held, 'date', {}), 'name', 'my-date');
+    if ('reason' in edit) {
+      throw new Error('this case needs the name taken');
+    }
+    expect(kindInsertionViewOf(held, context, grant, edit.draft)).toMatchObject({
+      verdict: { kind: 'refused', reason: 'notAnIdentifier' },
+      canInsert: false
+    });
+    // With no analysis at hand the scope is open: "available among visible names".
+    expect(kindInsertionViewOf(held, context, grant, rowOf(held, 'date', {})).verdict).toEqual({ kind: 'available', scope: 'open' });
+  });
+
+  it('keeps Insert disabled until the required value is given; date and clipboard require nothing', () => {
+    const held = session();
+    const context = namesOf(held);
+    const grant = granted(held);
+    for (const [kind, part] of [['random', 'choices'], ['shell', 'cmd'], ['script', 'args'], ['match', 'trigger']] as const) {
+      const blank = kindInsertionViewOf(held, context, grant, rowOf(held, kind, {}));
+      expect(blank.problem).toEqual({ kind: 'required', part });
+      expect(blank.canInsert).toBe(false);
+      expect(blank.written).toEqual([]);
+    } // End of the loop over the kinds with a required part
+    expect(kindInsertionViewOf(held, context, grant, rowOf(held, 'date', {})).canInsert).toBe(true);
+    expect(kindInsertionViewOf(held, context, grant, rowOf(held, 'clipboard', {})).canInsert).toBe(true);
+  });
+
+  it('shows the command and each argument as text, with no preview invented', () => {
+    const held = session();
+    const context = namesOf(held);
+    const grant = granted(held);
+    const script = kindInsertionViewOf(held, context, grant, rowOf(held, 'script', { args: 'python3\n/tmp/a b.py\n--flag' }));
+    expect(script.written).toEqual([{ key: 'args', texts: ['python3', '/tmp/a b.py', '--flag'], list: true }]);
+    expect(script.reference).toBe('{{script}}');
+    expect(script.executes).toBe(true);
+    const shell = kindInsertionViewOf(held, context, grant, rowOf(held, 'shell', { cmd: 'echo one\necho two', shell: 'bash' }));
+    expect(shell.written).toEqual([
+      { key: 'cmd', texts: ['echo one\necho two'], list: false },
+      { key: 'shell', texts: ['bash'], list: false }
+    ]);
+    expect(shell.preview).toBe('commandNotRun');
+    const clipboard = kindInsertionViewOf(held, context, grant, rowOf(held, 'clipboard', {}));
+    expect(clipboard).toMatchObject({ readsClipboard: true, executes: false, preview: 'clipboardNotRead', written: [] });
+    expect(INSERT_ROW_KINDS.map(kindPreviewOf)).toEqual([
+      'notYetAvailable',
+      'notYetAvailable',
+      'clipboardNotRead',
+      'commandNotRun',
+      'commandNotRun',
+      'notYetAvailable'
+    ]);
+  });
+
+  it('refuses a carriage return at edit, and a line feed in a one-line box, keeping the value and its target', () => {
+    const held = session(projection({ html: '<p>x</p>' }));
+    const draft: KindInsertionDraft = { ...rowOf(held, 'shell', { cmd: 'ls' }), target: 'html' };
+    expect(editKindInsertion(draft, 'cmd', 'ls\rrm')).toEqual({ draft, reason: 'carriageReturn' });
+    expect(editKindInsertion(draft, 'shell', 'ba\nsh')).toEqual({ draft, reason: 'lineBreak' });
+    expect(editKindInsertion(draft, 'name', 'a\rb')).toEqual({ draft, reason: 'carriageReturn' });
+    const taken = editKindInsertion(draft, 'cmd', 'ls\nrm');
+    expect('reason' in taken).toBe(false);
+    expect(taken.draft.target).toBe('html');
+  });
+
+  it('refuses a forged carriage return at send, and inserts nothing', () => {
+    const held = session();
+    const draft = rowOf(held, 'shell', { cmd: 'ls' });
+    const forged: KindInsertionDraft = { ...draft, form: { ...draft.form, parts: { ...draft.form.parts, cmd: 'ls\rrm' } } };
+    expect(insertKindRow(held, granted(held), namesOf(held), forged, { start: 0, end: 0 })).toMatchObject({
+      kind: 'problem',
+      session: held,
+      problem: { kind: 'carriageReturn', part: 'cmd' }
+    });
+  });
+
+  it('replaces the selection with the reference, as one step one undo takes back, in the closed shape', () => {
+    const held = session();
+    const outcome = insertKindRow(held, granted(held), namesOf(held), rowOf(held, 'match', { trigger: ':sig' }), { start: 0, end: 5 });
+    if (outcome.kind !== 'inserted') {
+      throw new Error('this case needs the insertion');
+    }
+    expect(sent(outcome.session).replace).toEqual({ Set: '{{match}} ' });
+    expect(sent(outcome.session).var_intents).toEqual([
+      {
+        InsertVariable: {
+          at: { End: {} },
+          variable: { name: 'match', params: { Match: { trigger: ':sig' } }, inject_vars: null, depends_on: null, extra_params: [] }
+        }
+      }
+    ]);
+    expect(outcome.session.draft.past).toHaveLength(1);
+    expect(undoEdit(outcome.session).draft.value).toEqual(held.draft.value);
+  });
+
+  it('refuses an Insert whose content key cannot take a reference', () => {
+    const held = session();
+    const draft: KindInsertionDraft = { ...rowOf(held, 'date', {}), target: 'markdown' };
+    const view = kindInsertionViewOf(held, namesOf(held), granted(held), draft);
+    expect(view.problem).toEqual({ kind: 'noTarget' });
+    expect(view.canInsert).toBe(false);
+    expect(insertKindRow(held, granted(held), namesOf(held), draft, { start: 0, end: 0 })).toMatchObject({ kind: 'problem', problem: { kind: 'noTarget' } });
+  });
+
+  it('has a sentence for every row and every preview state in both languages', () => {
+    const keys: TranslationKey[] = [
+      ...INSERT_ROW_KINDS.map(insertRowKey),
+      kindPreviewKey('commandNotRun'),
+      kindPreviewKey('clipboardNotRead'),
+      kindPreviewKey('notYetAvailable')
+    ];
+    for (const key of keys) {
+      for (const locale of LOCALES) {
+        expect(DICTIONARIES[locale][key]).toBeTruthy();
+      } // End of the loop over the locales
+    } // End of the loop over the keys
+    expect(DICTIONARIES.en[kindPreviewKey('commandNotRun')]).not.toBe(DICTIONARIES.es[kindPreviewKey('commandNotRun')]);
+  });
+}); // End of the Phase 4-15 suite

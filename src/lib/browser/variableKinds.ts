@@ -3,8 +3,10 @@
  * Echo, Clipboard, Shell, Script and Match, as values.
  *
  * `../components/VariableGroup.svelte` draws what this module answers inside the
- * *Add a variable* form; the popovers of the `+ Insert` rows are step 4-15's and
- * will draw the same values. Every decision — which parameters a kind has, which
+ * *Add a variable* form, and `../components/KindInsertion.svelte` draws the same
+ * values in the popovers of the six `+ Insert` rows Phase 4-15 added
+ * ({@link INSERT_ROW_KINDS}; Echo has no row — ruling 20 — and stays in *Add a
+ * variable*). Every decision — which parameters a kind has, which
  * one it cannot do without, what is only worth a warning, what a press may
  * draft — is here, where a test in the `node` environment reaches it
  * (`CLAUDE.md` §6, *Frontend structure*).
@@ -71,6 +73,7 @@ import {
   addVariable,
   insertVariable,
   nameVerdictOf,
+  REFERENCE_FIELDS,
   suggestedName,
   type InsertOutcome,
   type NameContext,
@@ -671,6 +674,24 @@ export interface KindAdditionView {
 }
 
 /**
+ * The boxes a snapshot's kind owns, in writing order — shared by the *Add a
+ * variable* form and the `+ Insert` rows' popovers (Phase 4-15).
+ *
+ * @param snapshot - The snapshot.
+ * @returns One view per owned part.
+ */
+function partViewsOf(snapshot: KindSnapshot): KindPartView[] {
+  return [...snapshot.texts].map(([part, text]) => ({
+    part,
+    shape: PART_SHAPE[part],
+    required: REQUIRED_PART[snapshot.kind] === part,
+    plainSource: PLAIN_SOURCE_PARTS.includes(part),
+    text,
+    warnings: partWarnings(part, text)
+  }));
+} // End of function partViewsOf()
+
+/**
  * What the *Add a variable* form says about its current value.
  *
  * @param session - The editing session.
@@ -687,14 +708,7 @@ export function kindAdditionViewOf(
 ): KindAdditionView {
   const snapshot = snapshotOf(draft);
   const kind = snapshot.kind;
-  const parts: KindPartView[] = [...snapshot.texts].map(([part, text]) => ({
-    part,
-    shape: PART_SHAPE[part],
-    required: REQUIRED_PART[kind] === part,
-    plainSource: PLAIN_SOURCE_PARTS.includes(part),
-    text,
-    warnings: partWarnings(part, text)
-  }));
+  const parts = partViewsOf(snapshot);
   const verdict = nameVerdictOf(snapshot.name, context, false);
   const problem = snapshotProblem(snapshot);
   const withheld = additionWithheldOf(session, grant);
@@ -758,7 +772,8 @@ export function addKindVariable(
  * variable at the end of `vars`, as **one** history step and one save
  * (`insertVariable` in `./variableInsertion.ts`). The content key must be one
  * `choiceTargetsOf` offers — a reference is never the reason a new content key
- * appears. Step 4-15's `+ Insert` rows press this; no screen does yet.
+ * appears. The `+ Insert` rows' popovers (Phase 4-15) press it through
+ * {@link insertKindRow}.
  *
  * @param session - The editing session.
  * @param grant - The structure grant, minted from a read taken at the press.
@@ -786,6 +801,271 @@ export function insertKindVariable(
   }
   return insertVariable(session, grant, context, { field: target, selection, variable: described.variable });
 } // End of function insertKindVariable()
+
+// ---------------------------------------------------------------------------
+// The `+ Insert` rows (Phase 4-15)
+// ---------------------------------------------------------------------------
+
+/**
+ * One of the six `+ Insert` rows Phase 4-15 added, each opening a popover that
+ * drafts one kind and inserts its `{{reference}}`. Echo has no row: ruling 20
+ * authors it through *Add a variable*, and the plan's ten rows do not include
+ * one.
+ */
+export type InsertRowKind = Exclude<NewVariableKind, 'echo'>;
+
+/**
+ * The six rows, in ruling 20's order (Date/time, Random, Clipboard → Shell,
+ * Script, Another match), after Cursor, Choice and Form.
+ */
+export const INSERT_ROW_KINDS: readonly InsertRowKind[] = ['date', 'random', 'clipboard', 'shell', 'script', 'match'];
+
+/**
+ * What one row's popover holds: the kind's form (fixed to the row's kind) and
+ * the content key the reference goes into. The component holds one per row
+ * while the editor is open — a row's text is **retained** while another row,
+ * a chip or a form is looked at, and dropped only by *Cancel* or by a
+ * successful *Insert*. Nothing here stores it.
+ */
+export interface KindInsertionDraft {
+  /** The kind's form. */
+  readonly form: KindDraft;
+  /** The content key the reference goes into. */
+  readonly target: ReferenceField;
+}
+
+/**
+ * The popover a row opens with: the kind's blank form with a provisional name
+ * the context does not refuse, and as its target the focused content key when
+ * it can take a reference, else **the content key last focused** when it can,
+ * else the first that can.
+ *
+ * The second step is the 4-15 review's fix: pressing a row blurs the content
+ * box first, and a blur clears `session.focus` (`focusField(session, null)`),
+ * so by the time the press opens the popover the focus alone would send the
+ * reference into another field. The caller keeps the last content key the
+ * focus named ({@link lastContentFocusOf}); nothing in TypeScript forces it to.
+ *
+ * @param kind - The row's kind.
+ * @param session - The editing session.
+ * @param context - The names, from `nameContextOf`.
+ * @param lastContent - The content key the focus last named, or `null`.
+ * @returns The popover's starting value.
+ */
+export function kindInsertionDraftOf(
+  kind: InsertRowKind,
+  session: MatchEditorSession,
+  context: NameContext,
+  lastContent: ReferenceField | null = null
+): KindInsertionDraft {
+  const targets: readonly string[] = choiceTargetsOf(session);
+  const focus = session.focus;
+  const target =
+    focus !== null && targets.includes(focus)
+      ? (focus as ReferenceField)
+      : lastContent !== null && targets.includes(lastContent)
+        ? lastContent
+        : ((targets[0] as ReferenceField | undefined) ?? 'replace');
+  return { form: kindDraftOf(kind, context), target };
+} // End of function kindInsertionDraftOf()
+
+/**
+ * The content key the focus names now, or the one kept before when it names
+ * none — what a component holds so a blur does not lose the insertion target
+ * (the 4-15 review's fix).
+ *
+ * @param session - The editing session.
+ * @param kept - The content key kept so far, or `null`.
+ * @returns The content key to keep.
+ */
+export function lastContentFocusOf(session: MatchEditorSession, kept: ReferenceField | null): ReferenceField | null {
+  const focus = session.focus;
+  return focus !== null && (REFERENCE_FIELDS as readonly string[]).includes(focus) ? (focus as ReferenceField) : kept;
+} // End of function lastContentFocusOf()
+
+/**
+ * One box of a popover edited, by {@link editKindDraft}'s gate: a carriage
+ * return is refused, and a line feed in a one-line box.
+ *
+ * @param draft - The popover's value.
+ * @param part - `'name'` or the part.
+ * @param text - The box's whole new value.
+ * @returns The new value, or the refusal with the value unchanged.
+ */
+export function editKindInsertion(
+  draft: KindInsertionDraft,
+  part: KindPart | 'name',
+  text: string
+): { readonly draft: KindInsertionDraft } | { readonly draft: KindInsertionDraft; readonly reason: KindEditRefusal } {
+  const edit = editKindDraft(draft.form, part, text);
+  return edit.kind === 'refused'
+    ? { draft, reason: edit.reason }
+    : { draft: { form: edit.draft, target: draft.target } };
+} // End of function editKindInsertion()
+
+/**
+ * What a popover says in place of a preview. **No preview is ever invented**:
+ * the illustrative preview core is a later step (4-17), and for three kinds no
+ * preview can ever be honest here, because this application never runs a
+ * command and never reads the clipboard (ruling 26).
+ *
+ * - `commandNotRun` — `shell`, `script`: the output is a command's;
+ * - `clipboardNotRead` — `clipboard`: the output is the clipboard's contents;
+ * - `notYetAvailable` — `date`, `random`, `match`: no preview is shown yet.
+ */
+export type KindPreview = 'commandNotRun' | 'clipboardNotRead' | 'notYetAvailable';
+
+/**
+ * The preview state of one kind.
+ *
+ * @param kind - The kind.
+ * @returns What the popover says in place of a preview.
+ */
+export function kindPreviewOf(kind: NewVariableKind): KindPreview {
+  switch (kind) {
+    case 'shell':
+    case 'script':
+      return 'commandNotRun';
+    case 'clipboard':
+      return 'clipboardNotRead';
+    default:
+      return 'notYetAvailable';
+  }
+} // End of function kindPreviewOf()
+
+/**
+ * One parameter a popover's new variable will be written with, and whether it
+ * is a list — whose items are drawn one by one, so a script's argument
+ * boundaries are visible.
+ */
+export interface WrittenParam extends AddedParam {
+  /** Whether the parameter is a list (`choices`, `args`). */
+  readonly list: boolean;
+}
+
+/**
+ * The parameters a validated snapshot will be written with, each marked list
+ * or not.
+ *
+ * @param snapshot - The snapshot, already free of problems.
+ * @returns The parameters, in Rust's writing order.
+ */
+function writtenOf(snapshot: KindSnapshot): WrittenParam[] {
+  const lists = new Set<string>(KIND_PARTS.filter((part) => PART_SHAPE[part] === 'list'));
+  return addedParamsOf(paramsOf(snapshot)).map((param) => ({ ...param, list: lists.has(param.key) }));
+} // End of function writtenOf()
+
+/** What a row's popover draws beside its controls. */
+export interface KindInsertionView {
+  /** The row's kind. */
+  readonly kind: NewVariableKind;
+  /** The kind's own boxes, in writing order. */
+  readonly parts: readonly KindPartView[];
+  /** The content keys offered as targets. */
+  readonly targets: readonly ReferenceField[];
+  /** The content key chosen. */
+  readonly target: ReferenceField;
+  /**
+   * The name check's verdict **as a reference** — an identifier is required;
+   * under an open scope `available` reads "available among visible names".
+   */
+  readonly verdict: NameVerdict;
+  /** Why the popover cannot insert as it stands, or `null`. */
+  readonly problem: KindProblem | null;
+  /** Every warning, in part order. */
+  readonly warnings: readonly KindWarning[];
+  /** Why no variable can be added now, or `null`. */
+  readonly withheld: AdditionWithheld;
+  /** Whether espanso runs a command for this kind when the snippet expands. */
+  readonly executes: boolean;
+  /** Whether espanso reads the clipboard for this kind when the snippet expands. */
+  readonly readsClipboard: boolean;
+  /**
+   * The text that goes into the content key, `{{name}}`, or `null` while the
+   * name is refused.
+   */
+  readonly reference: string | null;
+  /**
+   * What the new variable will be written with, as text — the command and each
+   * argument as its own value — or `[]` while the form has a problem. Drawn as
+   * text, never run.
+   */
+  readonly written: readonly WrittenParam[];
+  /** What is said in place of a preview. */
+  readonly preview: KindPreview;
+  /** Whether *Insert* would draft it. */
+  readonly canInsert: boolean;
+}
+
+/**
+ * What a row's popover says about its current value. The popover's value is
+ * read once (its form through one snapshot, its target once).
+ *
+ * @param session - The editing session.
+ * @param context - The names, from `nameContextOf`.
+ * @param grant - The structure grant, from the view's read.
+ * @param draft - The popover's value.
+ * @returns The view.
+ */
+export function kindInsertionViewOf(
+  session: MatchEditorSession,
+  context: NameContext,
+  grant: VariableStructureGrant,
+  draft: KindInsertionDraft
+): KindInsertionView {
+  const target = draft.target;
+  const snapshot = snapshotOf(draft.form);
+  const kind = snapshot.kind;
+  const parts = partViewsOf(snapshot);
+  const targets = choiceTargetsOf(session);
+  const verdict = nameVerdictOf(snapshot.name, context, true);
+  const own = snapshotProblem(snapshot);
+  const problem: KindProblem | null = !targets.includes(target) ? { kind: 'noTarget' } : own;
+  const withheld = additionWithheldOf(session, grant);
+  return {
+    kind,
+    parts,
+    targets,
+    target,
+    verdict,
+    problem,
+    warnings: parts.flatMap((one) => one.warnings),
+    withheld,
+    executes: kind === 'shell' || kind === 'script',
+    readsClipboard: kind === 'clipboard',
+    reference: verdict.kind === 'available' ? `{{${snapshot.name}}}` : null,
+    written: own === null ? writtenOf(snapshot) : [],
+    preview: kindPreviewOf(kind),
+    canInsert: withheld === null && problem === null && verdict.kind === 'available'
+  };
+} // End of function kindInsertionViewOf()
+
+/**
+ * *Insert* on a row's popover: `{{name}}` in place of the target's selection
+ * and the new variable at the end of `vars`, as **one** history step and one
+ * save, through {@link insertKindVariable} and so `insertVariable` — the same
+ * lifecycle (undo, conflict, reapply, recovery) as every other insertion. The
+ * popover's value is read once.
+ *
+ * @param session - The editing session.
+ * @param grant - The structure grant, minted from a read taken at the press.
+ * @param context - The names, from `nameContextOf` at the press.
+ * @param draft - The popover's value.
+ * @param selection - The target box's selection, in UTF-16 code units; a
+ *   non-integer is the end of the text.
+ * @returns What happened.
+ */
+export function insertKindRow(
+  session: MatchEditorSession,
+  grant: VariableStructureGrant,
+  context: NameContext,
+  draft: KindInsertionDraft,
+  selection: TextSelection
+): KindOutcome {
+  const target = draft.target;
+  const form = draft.form;
+  return insertKindVariable(session, grant, context, form, target, selection);
+} // End of function insertKindRow()
 
 // ---------------------------------------------------------------------------
 // What a drafted new variable holds, for the selected addition's panel
@@ -872,6 +1152,48 @@ export function newVariableKindKey(kind: NewVariableKind): TranslationKey {
       return 'browser.variableKinds.kind.match';
   }
 } // End of function newVariableKindKey()
+
+/**
+ * The dictionary key holding one `+ Insert` row's label, which is also its
+ * popover's heading (Phase 4-15).
+ *
+ * @param kind - The row's kind.
+ * @returns The key.
+ */
+export function insertRowKey(kind: InsertRowKind): TranslationKey {
+  switch (kind) {
+    case 'date':
+      return 'browser.kindInsertion.row.date';
+    case 'random':
+      return 'browser.kindInsertion.row.random';
+    case 'clipboard':
+      return 'browser.kindInsertion.row.clipboard';
+    case 'shell':
+      return 'browser.kindInsertion.row.shell';
+    case 'script':
+      return 'browser.kindInsertion.row.script';
+    case 'match':
+      return 'browser.kindInsertion.row.match';
+  }
+} // End of function insertRowKey()
+
+/**
+ * The dictionary key holding what a popover says in place of a preview (Phase
+ * 4-15).
+ *
+ * @param preview - The preview state.
+ * @returns The key.
+ */
+export function kindPreviewKey(preview: KindPreview): TranslationKey {
+  switch (preview) {
+    case 'commandNotRun':
+      return 'browser.kindInsertion.preview.commandNotRun';
+    case 'clipboardNotRead':
+      return 'browser.kindInsertion.preview.clipboardNotRead';
+    case 'notYetAvailable':
+      return 'browser.kindInsertion.preview.notYetAvailable';
+  }
+} // End of function kindPreviewKey()
 
 /**
  * The dictionary key holding one part's label.
