@@ -71,6 +71,7 @@ fn candidate_through(
                     mapping: group.mapping(),
                     sibling: group.sibling(),
                     entries: group.entries(),
+                    items: group.item_list(),
                 };
                 plan_insertion_group(source, &index, &trivia, position, request)?
             }
@@ -502,3 +503,285 @@ fn several_inserted_items_and_shifted_indices_keep_the_exemption_exact() {
     assert!(rewrote, "the planned text quotes the neighbour");
     assert!(refused_as_ambiguous(&result), "{result:?}");
 } // End of function several_inserted_items_and_shifted_indices_keep_the_exemption_exact()
+
+// ---------------------------------------------------------------------------
+// Phase 4-4: a new variable's nested mapping and a new `vars:` subtree are
+// verified by their own expectations, not by trusting the renderer
+// ---------------------------------------------------------------------------
+
+/// A neutral file with one block `vars` and one match without `vars`.
+const VARS_SOURCE: &str = concat!(
+    "matches:\n",
+    "  - trigger: ':v'\n",
+    "    replace: x\n",
+    "    vars:\n",
+    "      - name: a\n",
+    "        type: echo\n",
+    "        params:\n",
+    "          echo: b\n",
+    "  - trigger: ':w'\n",
+    "    replace: y\n",
+);
+
+/// A new `shell` variable whose `params` holds the logical string `true` under
+/// `cmd` and the requested plain source `true` under `trim`.
+fn new_shell_variable() -> Vec<(String, ItemValue)> {
+    vec![
+        (
+            "name".to_owned(),
+            ItemValue::Entry(EntryValue::Scalar("s".to_owned())),
+        ),
+        (
+            "type".to_owned(),
+            ItemValue::Entry(EntryValue::Scalar("shell".to_owned())),
+        ),
+        (
+            "params".to_owned(),
+            ItemValue::Mapping(vec![
+                ("cmd".to_owned(), EntryValue::Scalar("true".to_owned())),
+                (
+                    "trim".to_owned(),
+                    EntryValue::PlainSource("true".to_owned()),
+                ),
+            ]),
+        ),
+    ]
+} // End of function new_shell_variable()
+
+/// The two Phase 4-4 batches: a new variable in an existing `vars`, and a new
+/// `vars:` subtree as a group's trailing item list.
+fn phase_four_four_batches() -> Vec<(&'static str, Vec<DocumentEdit>)> {
+    let into_vars = InsertItem::nested(
+        item(0).with_key("vars"),
+        ItemPlacement::End,
+        new_shell_variable(),
+    );
+    let subtree = FieldInsertGroup::with_item_list(
+        item(1),
+        Some("replace".to_owned()),
+        Vec::new(),
+        "vars",
+        vec![new_shell_variable()],
+    )
+    .expect("one item");
+    vec![
+        ("a new variable", vec![into_vars.into()]),
+        ("a new vars subtree", vec![subtree.into()]),
+    ]
+} // End of function phase_four_four_batches()
+
+/// Runs `edits` over [`VARS_SOURCE`] with every planned replacement text holding
+/// `from` rewritten once to hold `to`, and says whether one did.
+fn rewritten_over_vars(
+    edits: &[DocumentEdit],
+    from: &str,
+    to: &str,
+) -> (bool, Result<String, EditError>) {
+    let mut rewrote = false;
+    let result = candidate_through(
+        VARS_SOURCE,
+        edits,
+        |replacements| {
+            for replacement in replacements.iter_mut() {
+                if replacement.text.contains(from) {
+                    replacement.text = replacement.text.replacen(from, to, 1);
+                    rewrote = true;
+                }
+            }
+        },
+        |_| {},
+    );
+    (rewrote, result)
+} // End of function rewritten_over_vars()
+
+/// The honest runs verify, are `apply_edits`' own candidates, and write the
+/// requested plain source verbatim beside the quoted logical string.
+#[test]
+fn a_new_variables_honest_candidate_verifies() {
+    for (what, edits) in phase_four_four_batches() {
+        let honest = candidate_through(VARS_SOURCE, &edits, |_| {}, |_| {});
+        let applied = apply_edits(VARS_SOURCE, &edits).map(|patched| patched.text);
+        assert_eq!(honest, applied, "{what}: the honest run is apply_edits'");
+        let honest = honest.expect("the honest run verifies");
+        assert!(
+            honest.contains("        params:\n          cmd: 'true'\n          trim: true\n"),
+            "{what}: {honest}"
+        );
+    } // End of the loop over the Phase 4-4 batches
+} // End of function a_new_variables_honest_candidate_verifies()
+
+/// Each corruption changes only bytes inside the planned replacement, so the
+/// byte oracle cannot see it; the nested expectation must.
+#[test]
+fn a_corrupted_nested_value_or_shape_is_refused_by_its_own_verifier() {
+    let cases: [(&str, &str, &str); 5] = [
+        // A neighbouring string turned into an ambiguous plain scalar: only the
+        // requested `trim` node is exempt.
+        ("ambiguous neighbour", "cmd: 'true'", "cmd: true"),
+        // A nested value that says something else.
+        ("wrong nested value", "cmd: 'true'", "cmd: 'false'"),
+        // A nested entry dedented out of `params`, into the variable itself.
+        (
+            "dedented entry",
+            "          trim: true\n",
+            "        trim: true\n",
+        ),
+        // The nested mapping rewritten in flow style.
+        (
+            "flow mapping",
+            "params:\n          cmd: 'true'\n          trim: true\n",
+            "params: {cmd: 'true', trim: true}\n",
+        ),
+        // The plain-source setting quoted into a string.
+        ("quoted setting", "trim: true", "trim: 'true'"),
+    ];
+    for (batch, edits) in phase_four_four_batches() {
+        for (what, from, to) in cases {
+            let (rewrote, result) = rewritten_over_vars(&edits, from, to);
+            assert!(rewrote, "{batch}, {what}: the planned text holds {from:?}");
+            assert!(
+                matches!(result, Err(EditError::Verification(_))),
+                "{batch}, {what}: refused by verification, got {result:?}"
+            );
+        } // End of the loop over the corruptions
+    } // End of the loop over the Phase 4-4 batches
+} // End of function a_corrupted_nested_value_or_shape_is_refused_by_its_own_verifier()
+
+/// A new `vars:` subtree whose sequence is corrupted — emptied into `[]` with
+/// its item moved under another key, or an item saying something else — is
+/// refused by the item-list verifier.
+#[test]
+fn a_corrupted_new_vars_sequence_is_refused() {
+    let edits = &phase_four_four_batches()[1].1;
+    let (rewrote, result) = rewritten_over_vars(edits, "    vars:\n", "    vars: []\n    other:\n");
+    assert!(rewrote);
+    assert!(
+        matches!(result, Err(EditError::Verification(_))),
+        "{result:?}"
+    );
+    let (rewrote, result) = rewritten_over_vars(edits, "name: s", "name: t");
+    assert!(rewrote);
+    assert!(
+        matches!(result, Err(EditError::Verification(_))),
+        "{result:?}"
+    );
+} // End of function a_corrupted_new_vars_sequence_is_refused()
+
+// ---------------------------------------------------------------------------
+// Phase 4-4 review fix: a removed ambiguous scalar must not pay for a corrupted
+// insertion of one
+// ---------------------------------------------------------------------------
+
+/// Two variables, the first holding the pre-existing plain `trim: true` inside
+/// a `params` whose other entry is `a: one`.
+const BALANCED_SOURCE: &str = concat!(
+    "matches:\n",
+    "  - trigger: ':v'\n",
+    "    replace: x\n",
+    "    vars:\n",
+    "      - name: s\n",
+    "        type: shell\n",
+    "        params:\n",
+    "          trim: true\n",
+    "          a: one\n",
+    "      - name: e\n",
+    "        type: echo\n",
+    "        params:\n",
+    "          echo: b\n",
+);
+
+/// Runs `edits` over [`BALANCED_SOURCE`] with the planned text holding `from`
+/// rewritten once to `to`; answers whether one did, and the result.
+fn rewritten_over_balanced(
+    edits: &[DocumentEdit],
+    from: &str,
+    to: &str,
+) -> (bool, Result<String, EditError>) {
+    let mut rewrote = false;
+    let result = candidate_through(
+        BALANCED_SOURCE,
+        edits,
+        |replacements| {
+            for replacement in replacements.iter_mut() {
+                if replacement.text.contains(from) {
+                    replacement.text = replacement.text.replacen(from, to, 1);
+                    rewrote = true;
+                }
+            }
+        },
+        |_| {},
+    );
+    (rewrote, result)
+} // End of function rewritten_over_balanced()
+
+/// The review's scenario: the variable holding `trim: true` is removed and a new
+/// `echo` variable whose logical string is `true` is appended in the same batch.
+/// Rendered plain, the new `true` is balanced in the whole-document budget by the
+/// removed one, so only a check of the **inserted** text can refuse it.
+#[test]
+fn a_removed_ambiguous_scalar_does_not_pay_for_a_corrupted_new_variable() {
+    let vars = item(0).with_key("vars");
+    let edits: Vec<DocumentEdit> = vec![
+        RemoveItem::new(vars.clone().with_index(0)).into(),
+        InsertItem::nested(
+            vars,
+            ItemPlacement::End,
+            vec![
+                (
+                    "name".to_owned(),
+                    ItemValue::Entry(EntryValue::Scalar("n".to_owned())),
+                ),
+                (
+                    "type".to_owned(),
+                    ItemValue::Entry(EntryValue::Scalar("echo".to_owned())),
+                ),
+                (
+                    "params".to_owned(),
+                    ItemValue::Mapping(vec![(
+                        "echo".to_owned(),
+                        EntryValue::Scalar("true".to_owned()),
+                    )]),
+                ),
+            ],
+        )
+        .into(),
+    ];
+    let honest = candidate_through(BALANCED_SOURCE, &edits, |_| {}, |_| {});
+    assert_eq!(
+        honest,
+        apply_edits(BALANCED_SOURCE, &edits).map(|patched| patched.text),
+        "the honest run is apply_edits'"
+    );
+    assert!(honest.is_ok(), "{honest:?}");
+    let (rewrote, result) = rewritten_over_balanced(&edits, "echo: 'true'", "echo: true");
+    assert!(rewrote, "the planned text quotes the new value");
+    assert!(refused_as_ambiguous(&result), "{result:?}");
+} // End of function a_removed_ambiguous_scalar_does_not_pay_for_a_corrupted_new_variable()
+
+/// The same blind spot on Phase 4-3's path: a new author-named `params` entry
+/// whose logical string is `true`, beside the removal of the existing plain
+/// `trim: true` of the same mapping.
+#[test]
+fn a_removed_ambiguous_scalar_does_not_pay_for_a_corrupted_new_param() {
+    let params = item(0).with_key("vars").with_index(0).with_key("params");
+    let edits: Vec<DocumentEdit> = vec![
+        FieldRemoval::new(params.clone().with_key("trim")).into(),
+        FieldInsertGroup::typed(
+            params,
+            Some("a".to_owned()),
+            vec![("flag".to_owned(), EntryValue::Scalar("true".to_owned()))],
+        )
+        .expect("one entry")
+        .into(),
+    ];
+    let honest = candidate_through(BALANCED_SOURCE, &edits, |_| {}, |_| {});
+    assert_eq!(
+        honest,
+        apply_edits(BALANCED_SOURCE, &edits).map(|patched| patched.text),
+        "the honest run is apply_edits'"
+    );
+    assert!(honest.is_ok(), "{honest:?}");
+    let (rewrote, result) = rewritten_over_balanced(&edits, "flag: 'true'", "flag: true");
+    assert!(rewrote, "the planned text quotes the new value");
+    assert!(refused_as_ambiguous(&result), "{result:?}");
+} // End of function a_removed_ambiguous_scalar_does_not_pay_for_a_corrupted_new_param()

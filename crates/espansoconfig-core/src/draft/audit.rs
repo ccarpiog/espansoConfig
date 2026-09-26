@@ -32,7 +32,10 @@
 //! surface includes the cardinality and the presence of two lists, `triggers`
 //! and `search_terms`; since Phase 4-3 it also includes the cardinality of one
 //! open mapping, a variable's `params`, by new author-named entries of a scalar
-//! or a flat list of scalars — and nothing else's.
+//! or a flat list of scalars; and since Phase 4-4 the cardinality and presence
+//! of `vars`, by whole new variables of a closed shape and by removals — and
+//! nothing else's. A variable **reorder** is judged by its own check,
+//! [`check_variable_move`], because a move is never part of a draft's batch.
 
 use crate::draft::author_key::{author_key_fault, TYPED_SETTINGS};
 use crate::draft::error::DraftError;
@@ -40,7 +43,11 @@ use crate::draft::match_draft::{
     FieldSubstitution, MatchField, SequenceField, VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
     VARS_KEY,
 };
-use crate::patch::{DocumentEdit, DocumentPath, EntryValue, ItemPlacement, PathSegment};
+use crate::draft::new_variable::{
+    DEPENDS_ON_KEY, INJECT_VARS_KEY, NAME_KEY, NEW_VARIABLE_KEYS, PLAIN_SOURCE_PARAMS, TYPE_KEY,
+};
+use crate::model::VariableKind;
+use crate::patch::{DocumentEdit, DocumentPath, EntryValue, ItemPlacement, ItemValue, PathSegment};
 
 /// The keys one **nested** mapping a batch reaches into is known to hold.
 ///
@@ -112,10 +119,11 @@ impl NestedKeys {
 ///   two lists as whole fields;
 /// - a list-valued insertion ([`EntryValue::ScalarList`] in a group) may only
 ///   name `triggers` or `search_terms` on the match's own mapping;
-/// - a scalar-item insertion and an item removal may only name
-///   `<match>.triggers` / `<match>.search_terms` and an item of one of those.
-///   `vars`, `depends_on`, a `params` list, `form_fields` options and `matches`
-///   itself are refused here, whatever the engine could do to them;
+/// - a scalar-item insertion may only name `<match>.triggers` /
+///   `<match>.search_terms`, and an item removal an item of one of those or —
+///   since Phase 4-4 — one variable `<match>.vars[i]`. `depends_on`, a `params`
+///   list, `form_fields` options and `matches` itself are refused here, whatever
+///   the engine could do to them;
 /// - a shape switch may only turn `trigger` or `regex` into a `triggers` list,
 ///   or a `triggers` list into `trigger` or `regex`;
 /// - since Phase 4-3, one named shape more: an insertion **group** into
@@ -124,7 +132,13 @@ impl NestedKeys {
 ///   a flat list of scalars ([`EntryValue::Scalar`], [`EntryValue::ScalarList`];
 ///   never plain source) and whose every key passes the text rules of ruling 7
 ///   and is not one of ruling 4's typed settings (`crate::draft::author_key`). A single [`crate::patch::FieldInsert`] there,
-///   and any insertion into a deeper or another open mapping, is still refused.
+///   and any insertion into a deeper or another open mapping, is still refused;
+/// - since Phase 4-4, three shapes about `vars`: a mapping-item insertion into
+///   `<match>.vars` whose item has a **new variable's shape**
+///   ([`is_a_new_variable`]); the same shape as the trailing item list of a
+///   group on the match's own mapping, under the key `vars` (the whole subtree,
+///   when the match has none); and the removal of one item `<match>.vars[i]` or
+///   of the whole entry `<match>.vars`.
 ///
 /// **Nothing deeper than those shapes passes.** A path one segment longer than
 /// the deepest legal one fails, and
@@ -149,14 +163,24 @@ pub fn check_closed_surface(
                 insert.mapping() == mapping && MatchField::from_key(insert.key()).is_some()
             }
             DocumentEdit::InsertFields(group) => {
+                // A trailing item list is `vars` on the match's own mapping,
+                // every item a new variable (Phase 4-4), and nothing else.
+                let items_fit = match group.item_list() {
+                    None => true,
+                    Some((key, items)) => {
+                        key == VARS_KEY && items.iter().all(|item| is_a_new_variable(item))
+                    }
+                };
                 let own = group.mapping() == mapping
+                    && items_fit
                     && group.entries().iter().all(|(key, value)| match value {
                         EntryValue::Scalar(_) | EntryValue::PlainSource(_) => {
                             MatchField::from_key(key).is_some()
                         }
                         EntryValue::ScalarList(_) => SequenceField::from_key(key).is_some(),
                     });
-                own || names_a_params_insertion(mapping, group.mapping(), group.entries())
+                own || (group.item_list().is_none()
+                    && names_a_params_insertion(mapping, group.mapping(), group.entries()))
             }
             DocumentEdit::SubstituteKey(substitution) => {
                 names_a_substitution(mapping, substitution.field(), substitution.key())
@@ -164,16 +188,25 @@ pub fn check_closed_surface(
             DocumentEdit::InsertScalarItems(insert) => {
                 names_a_surface_list(mapping, insert.sequence())
             }
-            DocumentEdit::RemoveItem(removal) => names_a_surface_list_item(mapping, removal.item()),
+            DocumentEdit::RemoveItem(removal) => {
+                names_a_surface_list_item(mapping, removal.item())
+                    || names_a_variable(mapping, removal.item())
+            }
             DocumentEdit::SwitchShape(switch) => {
                 names_a_trigger_switch(mapping, switch.field(), switch.key(), switch.value())
             }
-            // A mapping-item insert and a duplicate are cardinality changes to a
-            // sequence of **mappings** — `matches`, `vars` — which is a
-            // different operation with a different primitive behind it.
+            // A mapping-item insert is inside the surface in exactly one shape
+            // (Phase 4-4): a new variable written into `<match>.vars`. Into
+            // `matches` or any other sequence it is a different operation with
+            // a different primitive behind it.
+            DocumentEdit::InsertItem(insert) => {
+                insert.sequence() == &mapping.clone().with_key(VARS_KEY)
+                    && is_a_new_variable(insert.fields())
+            }
+            // A duplicate is a cardinality change the surface has no shape for.
             // Refused as outside the surface rather than by a name of its own,
-            // because that is what it is: the surface has no shape for them.
-            DocumentEdit::InsertItem(_) | DocumentEdit::DuplicateItem(_) => false,
+            // because that is what it is.
+            DocumentEdit::DuplicateItem(_) => false,
             // A local raw-item replacement writes a whole item as authored text
             // (Phase 3-7). It is its own command's edit, never a draft's, and a
             // draft batch holding one is outside the surface by construction.
@@ -328,6 +361,9 @@ fn check_no_removal_contains_another_edit(edits: &[DocumentEdit]) -> Result<(), 
                 DocumentEdit::SwitchShape(nested) => nested.field(),
                 DocumentEdit::RemoveItem(nested) => nested.item(),
                 DocumentEdit::InsertScalarItems(nested) => nested.sequence(),
+                // A new variable written into a `vars` the batch removes whole
+                // is a second answer about that sequence (Phase 4-4).
+                DocumentEdit::InsertItem(nested) => nested.sequence(),
                 _ => continue,
             };
             if position != *removal && contains(field, other) {
@@ -456,7 +492,7 @@ fn check_every_anchor_survives(
                 inserted.push(insert.key())
             }
             DocumentEdit::InsertFields(group) if group.mapping() == mapping => {
-                inserted.extend(group.entries().iter().map(|(key, _)| key.as_str()));
+                inserted.extend(group.keys());
             }
             DocumentEdit::SubstituteKey(substitution) => {
                 inserted.push(substitution.key());
@@ -516,15 +552,7 @@ fn insertion_of(edit: &DocumentEdit) -> Option<(&DocumentPath, Option<&str>, Vec
         DocumentEdit::InsertField(insert) => {
             Some((insert.mapping(), insert.sibling(), vec![insert.key()]))
         }
-        DocumentEdit::InsertFields(group) => Some((
-            group.mapping(),
-            group.sibling(),
-            group
-                .entries()
-                .iter()
-                .map(|(key, _)| key.as_str())
-                .collect(),
-        )),
+        DocumentEdit::InsertFields(group) => Some((group.mapping(), group.sibling(), group.keys())),
         _ => None,
     }
 } // End of function insertion_of()
@@ -663,7 +691,31 @@ fn check_no_substitution_duplicates_a_key(
 /// neither order is stated. [`ItemPlacement::End`] lands after every item and
 /// can meet no removal's start.
 fn check_no_insertion_lands_on_a_removal(edits: &[DocumentEdit]) -> Result<(), DraftError> {
-    for edit in edits {
+    for (position, edit) in edits.iter().enumerate() {
+        // A mapping-item insertion (Phase 4-4, a new variable) lands exactly as
+        // a scalar-item insertion with the same placement does, and meets a
+        // removal's start the same way. It has no list field to name, so it is
+        // refused by the two edits' positions.
+        if let DocumentEdit::InsertItem(insert) = edit {
+            let landing = match insert.placement() {
+                ItemPlacement::Front => Some(0),
+                ItemPlacement::After(index) => index.checked_add(1),
+                ItemPlacement::End => None,
+            };
+            let removal = landing.and_then(|landing| {
+                edits.iter().position(|other| {
+                    matches!(other, DocumentEdit::RemoveItem(removal)
+                        if removes_item_at(removal.item(), insert.sequence(), landing))
+                })
+            });
+            if let Some(removal) = removal {
+                return Err(DraftError::InsertionLandsOnARemoval {
+                    insertion: position,
+                    removal,
+                });
+            }
+            continue;
+        }
         let DocumentEdit::InsertScalarItems(insert) = edit else {
             continue;
         };
@@ -677,9 +729,7 @@ fn check_no_insertion_lands_on_a_removal(edits: &[DocumentEdit]) -> Result<(), D
         };
         let lands_on_a_removal = edits.iter().any(|other| match other {
             DocumentEdit::RemoveItem(removal) => {
-                removal.item().segments().split_last()
-                    == Some((&PathSegment::Index(landing), insert.sequence().segments()))
-                    && removal.item().document_index() == insert.sequence().document_index()
+                removes_item_at(removal.item(), insert.sequence(), landing)
             }
             _ => false,
         });
@@ -696,6 +746,106 @@ fn check_no_insertion_lands_on_a_removal(edits: &[DocumentEdit]) -> Result<(), D
     } // End of the loop over the batch's item insertions
     Ok(())
 } // End of function check_no_insertion_lands_on_a_removal()
+
+/// Whether `item` names the item at `landing` of `sequence` itself.
+fn removes_item_at(item: &DocumentPath, sequence: &DocumentPath, landing: usize) -> bool {
+    item.segments().split_last() == Some((&PathSegment::Index(landing), sequence.segments()))
+        && item.document_index() == sequence.document_index()
+}
+
+/// Refuses a batch that is not exactly **one move of one local variable within
+/// its own `vars`** (Phase 4-4).
+///
+/// The guard [`crate::draft::plan_variable_move`] passes its own output through,
+/// and the one a later writer can pass a hand-built batch through: the batch
+/// holds one edit, a [`crate::patch::ItemMove`] whose item is `<match>.vars[i]`.
+/// Anything else is [`DraftError::OutsideTheClosedSurface`] at its position.
+/// Same-sequence is not a separate claim: an [`crate::patch::ItemMove`] names
+/// one item and a destination **index in that item's own sequence**, so it has
+/// no spelling of another sequence (D2r). Whether the move combines with other
+/// edits is the engine's question and answer
+/// ([`crate::patch::EditError::MoveMustBeTheOnlyEditInItsBatch`], R25); a batch
+/// of more than one edit fails here first, at the second edit's position.
+pub fn check_variable_move(
+    mapping: &DocumentPath,
+    edits: &[DocumentEdit],
+) -> Result<(), DraftError> {
+    for (position, edit) in edits.iter().enumerate() {
+        let within = position == 0
+            && matches!(edit, DocumentEdit::MoveItem(movement)
+                if names_a_variable(mapping, movement.item()));
+        if !within {
+            return Err(DraftError::OutsideTheClosedSurface { edit: position });
+        }
+    } // End of the loop over the batch's edits
+    Ok(())
+} // End of function check_variable_move()
+
+/// Whether `path` names one variable of the match's own `vars`:
+/// `<match>.vars[i]` (Phase 4-4).
+fn names_a_variable(mapping: &DocumentPath, path: &DocumentPath) -> bool {
+    matches!(suffix(mapping, path), Some([PathSegment::Key(vars), PathSegment::Index(_)])
+        if vars == VARS_KEY)
+}
+
+/// Whether the fields of a new mapping item have the **shape of a new
+/// variable** as [`crate::draft::NewVariable`] writes one (Phase 4-4).
+///
+/// Read off the fields alone, as every check here is:
+///
+/// - the keys are a subsequence of `name`, `type`, `depends_on`,
+///   `inject_vars`, `params`, **in that order**, each at most once, and `name`
+///   and `type` are both present;
+/// - `name` is a logical-string scalar, and `type` a logical-string scalar
+///   naming one of espanso's nine kinds ([`VariableKind::from_text`]);
+/// - `depends_on` is a flat list of scalars and `inject_vars` a plain-source
+///   scalar (ruling 4);
+/// - `params` is one mapping with at least one entry, every key passing ruling
+///   7's text rules, every value a scalar or a flat list of scalars, and a
+///   plain-source value **only** — and always — under `offset`, `trim` or
+///   `debug`; `multiline` and `trim_string_values` are refused outright, since
+///   no new variable writes them.
+fn is_a_new_variable(fields: &[(String, ItemValue)]) -> bool {
+    let mut next = 0usize;
+    for (key, _) in fields {
+        match NEW_VARIABLE_KEYS[next..]
+            .iter()
+            .position(|held| held == key)
+        {
+            Some(offset) => next += offset + 1,
+            None => return false,
+        }
+    } // End of the loop that checks the keys are in the written order
+    let has = |wanted: &str| fields.iter().any(|(key, _)| key == wanted);
+    if !has(NAME_KEY) || !has(TYPE_KEY) {
+        return false;
+    }
+    fields
+        .iter()
+        .all(|(key, value)| match (key.as_str(), value) {
+            (NAME_KEY, ItemValue::Entry(EntryValue::Scalar(_))) => true,
+            (TYPE_KEY, ItemValue::Entry(EntryValue::Scalar(text))) => !matches!(
+                VariableKind::from_text(text),
+                VariableKind::Unrecognised | VariableKind::Absent
+            ),
+            (DEPENDS_ON_KEY, ItemValue::Entry(EntryValue::ScalarList(_))) => true,
+            (INJECT_VARS_KEY, ItemValue::Entry(EntryValue::PlainSource(_))) => true,
+            (PARAMS_KEY, ItemValue::Mapping(entries)) => {
+                !entries.is_empty()
+                    && entries.iter().all(|(key, value)| {
+                        let plain_key = PLAIN_SOURCE_PARAMS.contains(&key.as_str());
+                        author_key_fault(key).is_none()
+                            && match value {
+                                EntryValue::PlainSource(_) => plain_key,
+                                EntryValue::Scalar(_) | EntryValue::ScalarList(_) => {
+                                    !TYPED_SETTINGS.contains(&key.as_str())
+                                }
+                            }
+                    })
+            }
+            _ => false,
+        })
+} // End of function is_a_new_variable()
 
 /// Whether `path` names one of the match's two lists itself:
 /// `<match>.<triggers|search_terms>`.
@@ -862,7 +1012,8 @@ fn names_a_surface_scalar(mapping: &DocumentPath, path: &DocumentPath) -> bool {
 /// Whether `path` names a **mapping entry** the closed surface may remove.
 ///
 /// The shapes that end in a key segment: a schema-known scalar field of the
-/// match, one of its two lists as a whole field (Phase 3-2), a variable's
+/// match, one of its two lists as a whole field (Phase 3-2), the whole `vars`
+/// entry as an explicit container removal (Phase 4-4), a variable's
 /// schema-known scalar, one entry of a variable's `params`, and one option of one
 /// form field. A path ending in an index names a sequence element instead, and a
 /// [`crate::patch::FieldRemoval`] of one is refused here; an item of the two
@@ -874,7 +1025,9 @@ fn names_a_surface_field(mapping: &DocumentPath, path: &DocumentPath) -> bool {
     };
     match tail {
         [PathSegment::Key(key)] => {
-            MatchField::from_key(key).is_some() || SequenceField::from_key(key).is_some()
+            MatchField::from_key(key).is_some()
+                || SequenceField::from_key(key).is_some()
+                || key == VARS_KEY
         }
         [PathSegment::Key(vars), PathSegment::Index(_), PathSegment::Key(field)] => {
             vars == VARS_KEY && VariableField::from_key(field).is_some()
@@ -886,7 +1039,7 @@ fn names_a_surface_field(mapping: &DocumentPath, path: &DocumentPath) -> bool {
             vars == VARS_KEY && params == PARAMS_KEY
         }
         _ => false,
-    } // End of the match over the five shapes a removable entry takes
+    } // End of the match over the six shapes a removable entry takes
 } // End of function names_a_surface_field()
 
 /// The mapping an edit names a key **inside**, and that key.

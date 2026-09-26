@@ -26,17 +26,20 @@
 //!   build the [`crate::patch::DocumentPath`], so a caller can only name what it
 //!   was shown, and no refusal has to carry a byte of the owner's configuration
 //!   (`CLAUDE.md` section 1).
-//! - **One insertion below the match mapping, and only one (Phase 4-3).** A
-//!   drafted *address* the projection does not hold is still refused by name
-//!   rather than created. Decision D1 of `docs/decisions/2b-2b-2-notes.md`
-//!   refused every insertion below the match mapping; since Phase 4-3 exactly
-//!   one is lifted, under ruling 7 of `docs/decisions/4-split-notes.md` §3: a
-//!   new **author-named** entry of an existing variable's block `params`
-//!   mapping ([`NewParam`] in [`VariableDraft::insert_params`]), whose value is
-//!   a scalar or a flat list of scalars. It is the one request that carries key
-//!   text, it is refused by position and code only, and nothing else below the
-//!   match mapping — no variable, no `params:` container, no form definition, no
-//!   list item — can be inserted by a draft.
+//! - **Two insertions below the match mapping, and only two.** A drafted
+//!   *address* the projection does not hold is still refused by name rather
+//!   than created. Decision D1 of `docs/decisions/2b-2b-2-notes.md` refused
+//!   every insertion below the match mapping; Phase 4-3 lifted one, under ruling
+//!   7 of `docs/decisions/4-split-notes.md` §3: a new **author-named** entry of
+//!   an existing variable's block `params` mapping ([`NewParam`] in
+//!   [`VariableDraft::insert_params`]), whose value is a scalar or a flat list
+//!   of scalars. Phase 4-4 lifts the second: a whole new **variable**
+//!   ([`crate::draft::NewVariable`] in a [`crate::draft::VarsIntent`] of
+//!   [`MatchDraft::var_intents`]) — into an existing block `vars`, or as the
+//!   whole `vars:` subtree when the match has none. Both carry text, both are
+//!   refused by position and code only, and nothing else below the match
+//!   mapping — no `params:` container on an existing variable, no form
+//!   definition, no nested list item — can be inserted by a draft.
 //! - **A value is a scalar or a sequence of scalars.** [`EntryDraft`] carries
 //!   both spellings and may use only one of them at a time, and
 //!   [`NewParamValue`] has exactly those two variants; nothing here can express
@@ -45,6 +48,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::draft::field::DraftField;
+use crate::draft::new_variable::VarsIntent;
 use crate::draft::sequence::{SequenceIntent, TriggerFormChange};
 
 /// The key `vars` is written under.
@@ -609,6 +613,21 @@ pub enum DraftTarget {
         /// The insertion's position in the draft's `insert_params` list.
         insertion: usize,
     },
+    /// One **new** variable, by the position of its
+    /// [`crate::draft::VarsIntent::InsertVariable`] in the draft's
+    /// [`MatchDraft::var_intents`] list (Phase 4-4). Never its name.
+    NewVariable {
+        /// The intent's position in `var_intents`.
+        insertion: usize,
+    },
+    /// One extra author-named parameter of a new variable, by its position in
+    /// that variable's `extra_params` list (Phase 4-4). Never its key.
+    NewVariableParam {
+        /// The intent's position in `var_intents`.
+        insertion: usize,
+        /// The parameter's position in the new variable's `extra_params`.
+        param: usize,
+    },
     /// One entry of `form_fields`, by its index in the projected entry list.
     FormField {
         /// The entry's index in the projected `form_fields` list.
@@ -1000,6 +1019,12 @@ pub struct MatchDraft {
     /// Planned beside a structure's own intents, under the same coherence rules.
     #[serde(default)]
     pub sequences: Vec<SequenceIntent>,
+    /// Drafted intents about the cardinality and presence of `vars`, in order
+    /// (Phase 4-4): a new variable inserted, a variable removed, or the whole
+    /// `vars` removed. A reorder is not among them; it is
+    /// [`crate::draft::plan_variable_move`]'s, alone in its batch.
+    #[serde(default)]
+    pub var_intents: Vec<VarsIntent>,
 }
 
 impl MatchDraft {
@@ -1125,6 +1150,12 @@ impl MatchDraft {
     /// Builder: adds one drafted list intent (Phase 3-6-1).
     pub fn with_sequence(mut self, intent: SequenceIntent) -> MatchDraft {
         self.sequences.push(intent);
+        self
+    }
+
+    /// Builder: adds one drafted `vars` intent (Phase 4-4).
+    pub fn with_vars_intent(mut self, intent: VarsIntent) -> MatchDraft {
+        self.var_intents.push(intent);
         self
     }
 } // End of impl MatchDraft

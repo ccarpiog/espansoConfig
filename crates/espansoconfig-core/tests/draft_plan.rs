@@ -1085,11 +1085,19 @@ fn the_closed_surface_guard_refuses_an_edit_that_names_a_whole_open_container() 
             "and so must a removal of one"
         );
     } // End of the loop over the open containers
+      // Since Phase 4-4 the whole `vars` entry is removable, as the explicit
+      // container removal of ruling 8 (`VarsIntent::RemoveVars`); a scalar edit
+      // naming it is still refused.
     let removal = vec![DocumentEdit::RemoveField(FieldRemoval::new(
         mapping.clone().with_key("vars"),
     ))];
+    assert_eq!(check_closed_surface(&mapping, &removal), Ok(()));
+    let rewrite = vec![DocumentEdit::Scalar(ScalarEdit::new(
+        mapping.clone().with_key("vars"),
+        "x",
+    ))];
     assert_eq!(
-        check_closed_surface(&mapping, &removal),
+        check_closed_surface(&mapping, &rewrite),
         Err(DraftError::OutsideTheClosedSurface { edit: 0 })
     );
 } // End of function the_closed_surface_guard_refuses_an_edit_that_names_a_whole_open_container()

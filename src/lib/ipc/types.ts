@@ -3076,6 +3076,75 @@ export interface NewParam {
 }
 
 /**
+ * One of the typed settings a new variable writes verbatim as plain source
+ * (Phase 4-4, ruling 4). Spelled as the espanso key, so a screen can put the key
+ * itself beside a refusal about it.
+ */
+export type VariableSetting = 'inject_vars' | 'offset' | 'trim' | 'debug';
+
+/**
+ * The kind-specific parameters of a new variable (Phase 4-4): one variant per
+ * kind, nine in all, each naming exactly that kind's parameters. `type` is
+ * derived from the variant in Rust. `offset`, `trim` and `debug` are plain
+ * source; every other string is a logical string spelled by the codec. `null`
+ * means the new variable is not born holding that parameter.
+ */
+export type NewVariableParams =
+  | {
+      readonly Date: {
+        readonly format: string | null;
+        readonly offset: string | null;
+        readonly tz: string | null;
+        readonly locale: string | null;
+      };
+    }
+  | { readonly Choice: { readonly values: readonly string[] } }
+  | { readonly Random: { readonly choices: readonly string[] } }
+  | { readonly Clipboard: Record<string, never> }
+  | { readonly Echo: { readonly echo: string } }
+  | {
+      readonly Shell: {
+        readonly cmd: string;
+        readonly shell: string | null;
+        readonly trim: string | null;
+        readonly debug: string | null;
+      };
+    }
+  | { readonly Script: { readonly args: readonly string[]; readonly trim: string | null } }
+  | { readonly Form: { readonly layout: string } }
+  | { readonly Match: { readonly trigger: string } };
+
+/**
+ * A new local variable, as a closed description (Phase 4-4). Rust checks what no
+ * type here can: a one-line, unique name; plain-source settings; at most sixteen
+ * extra parameters under ruling 7's key rules. No production caller sends one
+ * yet.
+ */
+export interface NewVariable {
+  /** `name`, a logical string. */
+  readonly name: string;
+  /** The kind and its own parameters. */
+  readonly params: NewVariableParams;
+  /** `inject_vars`, as plain source, or `null`. */
+  readonly inject_vars: string | null;
+  /** `depends_on`, or `null`; an empty list is written `[]`. */
+  readonly depends_on: readonly string[] | null;
+  /** Extra author-named parameters, written after the kind's own. */
+  readonly extra_params: readonly NewParam[];
+}
+
+/**
+ * One intent about the cardinality or presence of a match's `vars` (Phase 4-4).
+ * A reorder is not one: it is its own writer's, alone in its batch (R25).
+ */
+export type VarsIntent =
+  | {
+      readonly InsertVariable: { readonly at: ListPlacement; readonly variable: NewVariable };
+    }
+  | { readonly RemoveVariable: { readonly index: number } }
+  | { readonly RemoveVars: Record<string, never> };
+
+/**
  * One drafted variable of `vars`, addressed by its index in the projection.
  *
  * The three schema-known scalars are named; everything else a variable holds is
@@ -3190,6 +3259,8 @@ export interface MatchDraft {
   readonly trigger_form: TriggerFormChange | null;
   /** Drafted list intents about `triggers` and `search_terms` — Phase 3-6-1. */
   readonly sequences: readonly SequenceIntent[];
+  /** Drafted intents about `vars` — Phase 4-4. No production caller sends one yet. */
+  readonly var_intents: readonly VarsIntent[];
 }
 
 // ---------------------------------------------------------------------------
@@ -3345,6 +3416,8 @@ export type DraftTarget =
       };
     }
   | { readonly NewParam: { readonly variable: number; readonly insertion: number } }
+  | { readonly NewVariable: { readonly insertion: number } }
+  | { readonly NewVariableParam: { readonly insertion: number; readonly param: number } }
   | { readonly FormField: { readonly index: number } }
   | { readonly FormFieldOption: { readonly field: number; readonly option: number } }
   | {
@@ -3414,7 +3487,22 @@ export type DraftErrorName =
   | 'ParamsWouldBeEmpty'
   | 'NoParamInsertionAnchor'
   | 'NewKeyIsATypedSetting'
-  | 'InsertionKeyAlreadyPresent';
+  | 'InsertionKeyAlreadyPresent'
+  | 'VarsIntentsConflict'
+  | 'VarsIsAFlowList'
+  | 'VarsHasAnUnsupportedShape'
+  | 'VarsWouldBeEmpty'
+  | 'NoVarsInsertionAnchor'
+  | 'NewVariableNameIsEmpty'
+  | 'NewVariableNameIsNotOneLine'
+  | 'NewVariableNameDuplicatesAVariable'
+  | 'NewVariableNameDuplicatesAnInsertion'
+  | 'NewVariableNameCannotBeCompared'
+  | 'NewVariableSettingNotPlainSource'
+  | 'NewVariableHasTooManyParams'
+  | 'NewKeyIsAKindParameter'
+  | 'InsertionLandsOnARemoval'
+  | 'VariableMoveChangesNothing';
 
 /**
  * Why a draft could not be turned into an edit batch.
@@ -3561,7 +3649,46 @@ export type DraftError =
   | { readonly ParamsWouldBeEmpty: { readonly variable: number } }
   | { readonly NoParamInsertionAnchor: { readonly variable: number } }
   | { readonly NewKeyIsATypedSetting: { readonly target: DraftTarget } }
-  | { readonly InsertionKeyAlreadyPresent: { readonly edit: number } };
+  | { readonly InsertionKeyAlreadyPresent: { readonly edit: number } }
+  | { readonly VarsIntentsConflict: { readonly intent: number } }
+  | { readonly VarsIsAFlowList: Record<string, never> }
+  | { readonly VarsHasAnUnsupportedShape: { readonly found: ValueKind } }
+  | { readonly VarsWouldBeEmpty: Record<string, never> }
+  | { readonly NoVarsInsertionAnchor: Record<string, never> }
+  | { readonly NewVariableNameIsEmpty: { readonly target: DraftTarget } }
+  | { readonly NewVariableNameIsNotOneLine: { readonly target: DraftTarget } }
+  | {
+      readonly NewVariableNameDuplicatesAVariable: {
+        readonly target: DraftTarget;
+        readonly variable: number;
+      };
+    }
+  | {
+      readonly NewVariableNameDuplicatesAnInsertion: {
+        readonly target: DraftTarget;
+        readonly first: number;
+      };
+    }
+  | {
+      readonly NewVariableNameCannotBeCompared: {
+        readonly target: DraftTarget;
+        readonly variable: number;
+      };
+    }
+  | {
+      readonly NewVariableSettingNotPlainSource: {
+        readonly target: DraftTarget;
+        readonly setting: VariableSetting;
+      };
+    }
+  | {
+      readonly NewVariableHasTooManyParams: { readonly target: DraftTarget; readonly limit: number };
+    }
+  | { readonly NewKeyIsAKindParameter: { readonly target: DraftTarget } }
+  | {
+      readonly InsertionLandsOnARemoval: { readonly insertion: number; readonly removal: number };
+    }
+  | { readonly VariableMoveChangesNothing: { readonly variable: number } };
 
 // ---------------------------------------------------------------------------
 // The external-change reconciliation wire — Phase 2d-4b

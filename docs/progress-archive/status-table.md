@@ -1972,3 +1972,7 @@ Records only; rung unchanged **`1555 / 487 / 4074 / 214`**. The orchestrator ran
 
 Records only; no source file changed. The worker ran `npm test` (exit 0, **4074 passed**), `git diff de08385 HEAD -- src/lib/i18n/` and 3-15-2's inventory and producer scripts in `/private/tmp/3-15-2/` for the delta (exit 0). The review fix touched the closure notes only. Rung unchanged **`1555 / 487 / 4074 / 214`**.
 
+
+## Step 4-2's verification block, archived 2026-09-26 at 4-4
+
+Run by the orchestrator after the worker's report, all exit 0, output redirected to `/private/tmp/4-2/orch/` and checked: `npm test` **4086 passed** (88 files); `npm run check` **487 files**, 0 errors, 0 warnings; `npm run build` **214 modules**; bundle oracle: server-only markers absent, client-only present (2). The worker also ran `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` (exit 0); `cargo test` was not run because no Rust file changed. Failing-first evidence: `/private/tmp/4-2/failing-first-final-tests-unrepaired.txt` (6 failed, 2 passed, each failure with `each_key_duplicate`), checked by the orchestrator. The review found nothing; no re-run owed. Rung **`1567 / 487 / 4086 / 214`** (+10 vitest tests; no module change).

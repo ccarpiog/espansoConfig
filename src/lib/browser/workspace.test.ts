@@ -4349,7 +4349,8 @@ function editedDraft(): MatchDraft {
     form_fields: [],
     content_switch: null,
     trigger_form: null,
-    sequences: []
+    sequences: [],
+    var_intents: []
   };
 } // End of function editedDraft()
 

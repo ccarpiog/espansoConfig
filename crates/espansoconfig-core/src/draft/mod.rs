@@ -26,14 +26,16 @@
 //!   position in the projection; Rust reads the key out of the projection to
 //!   build the path. A caller can only name what it was shown, and no refusal
 //!   carries a byte of the owner's configuration (`CLAUDE.md` section 1);
-//! - **nothing is inserted below the match mapping but one thing.** A drafted
+//! - **nothing is inserted below the match mapping but two things.** A drafted
 //!   address the projection cannot resolve is refused by name, never created
-//!   (`docs/decisions/2b-2b-2-notes.md` decision D1). The one insertion since
-//!   Phase 4-3 is explicit: a new **author-named** entry of an existing
+//!   (`docs/decisions/2b-2b-2-notes.md` decision D1). The two insertions are
+//!   explicit: since Phase 4-3 a new **author-named** entry of an existing
 //!   variable's block `params` ([`VariableDraft::insert_params`]), under ruling
 //!   7 of `docs/decisions/4-split-notes.md` §3 — its key is decoded text the
 //!   engine spells in key context, and every refusal about it names a position,
-//!   never the text;
+//!   never the text; and since Phase 4-4 a whole new **variable**
+//!   ([`NewVariable`], through [`VarsIntent`]) — into an existing block `vars`,
+//!   or as the whole `vars:` subtree of a match without one;
 //! - **an open value is a scalar or a sequence of scalars.** Anything else is
 //!   named and then refused, in both directions: a `Set` cannot replace a
 //!   collection node with a scalar one, and a `Remove` would discard bytes this
@@ -47,9 +49,12 @@
 //! Since Phase 3-2 it may also change the cardinality of exactly two lists —
 //! `triggers` and `search_terms` — by scalar items, add or remove either list as
 //! a whole field of scalars, and switch between a scalar trigger form and a block
-//! `triggers` list. It may never change any other sequence's cardinality and
-//! never synthesize a collection other than a flat list of scalars under one of
-//! those two keys.**
+//! `triggers` list. Since Phase 4-4 it may also change the cardinality and the
+//! presence of `vars`: insert a new variable of the closed [`NewVariable`] shape
+//! (whose `params` is the one mapping it synthesizes), remove one, or remove the
+//! whole entry explicitly; a variable reorder is a separate, single-edit batch
+//! ([`plan_variable_move`]). It may never change any other sequence's
+//! cardinality and never synthesize any other collection.**
 //!
 //! It is stated three times, and the third statement is over the derived batch
 //! rather than over the draft:
@@ -127,6 +132,17 @@
 //! born holding at all, which is not the same request as one written with an
 //! empty value.
 //!
+//! # Local variables, since Phase 4-4
+//!
+//! [`MatchDraft::var_intents`] carries [`VarsIntent`]s: a [`NewVariable`] — a
+//! closed description of one of the nine kinds, with its typed settings
+//! (`inject_vars`, `offset`, `trim`, `debug`) written as plain source — inserted
+//! at a [`ListPlacement`], a variable removed with the comments it owns, or the
+//! whole `vars` removed as an explicit container removal. Removing the last
+//! variable any other way is refused rather than leaving a null or an unasked
+//! `[]`. A reorder is [`plan_variable_move`]'s, alone in its batch (R25), and is
+//! guarded by [`check_variable_move`].
+//!
 //! # Several snippets of one file, since Phase 3-10
 //!
 //! [`plan_bulk_option_edits`] applies up to seven option intents
@@ -157,10 +173,11 @@ mod error;
 mod field;
 mod match_draft;
 mod new_match;
+mod new_variable;
 mod plan;
 mod sequence;
 
-pub use audit::{check_batch_independence, check_closed_surface, NestedKeys};
+pub use audit::{check_batch_independence, check_closed_surface, check_variable_move, NestedKeys};
 pub use bulk::{
     check_bulk_changes, check_bulk_documents, is_plain_source, option_spellings,
     plan_bulk_option_edits, BulkOption, BulkOptionChange, BulkOptionSpellings, BulkPlanError,
@@ -174,7 +191,11 @@ pub use match_draft::{
     VariableDraft, VariableField,
 };
 pub use new_match::{NewContent, NewMatch, NewTrigger, TriggerList};
-pub use plan::{plan_match_edits, plan_match_edits_with, plan_match_edits_with_substitutions};
+pub use new_variable::{NewVariable, NewVariableParams, VariableSetting, VarsIntent};
+pub use plan::{
+    plan_match_edits, plan_match_edits_with, plan_match_edits_with_substitutions,
+    plan_variable_move,
+};
 pub use sequence::{
     ListPlacement, MatchStructure, ScalarItems, SequenceIntent, TriggerFormChange, TriggerSwitch,
 };

@@ -38,7 +38,7 @@ pub enum DraftError {
     /// invented, because the alternative is a path that names something else.
     ///
     /// **The empty braces are load-bearing.** Written as a unit variant this
-    /// would be the one variant of fifty-eight that `serde` writes as a bare
+    /// would be the one variant of seventy-three that `serde` writes as a bare
     /// JSON string rather than as a one-key object, and the frontend's
     /// `COMMAND_ERROR_OPERANDS` table in `src/lib/ipc/errors.ts` can pin exactly
     /// one shape for the `error` operand of `CommandError::DraftRefused`. A
@@ -46,8 +46,8 @@ pub enum DraftError {
     /// *unexpected* failure, losing its typed code and rendering a generic
     /// sentence instead of `code.draftError.matchHasNoPath`. As an empty struct
     /// variant it writes `{"MatchHasNoPath": {}}`, so "a `DraftError` is always
-    /// an object" is true by construction rather than true of fifty-seven cases
-    /// out of fifty-eight. `every_draft_error_variant_crosses_as_an_object` in
+    /// an object" is true by construction rather than true of seventy-two cases
+    /// out of seventy-three. `every_draft_error_variant_crosses_as_an_object` in
     /// `src-tauri/src/wire_contract.rs` fails the build if a unit variant is
     /// ever added here.
     MatchHasNoPath {},
@@ -767,10 +767,13 @@ pub enum DraftError {
         variable: usize,
     },
     /// A new author-named key is one of the known non-string settings of ruling
-    /// 4 (`offset`, `trim`, `debug`, `multiline`, `trim_string_values`), whose
-    /// plain-source policy belongs to a later step; a new entry's value is a
-    /// logical string, so writing it now would quote a boolean or a number
-    /// (Phase 4-3).
+    /// 4 (`offset`, `trim`, `debug`, `multiline`, `trim_string_values`); a new
+    /// author-named entry's value is a logical string, so writing one would
+    /// quote a boolean or a number (Phase 4-3). Since Phase 4-4 a **new
+    /// variable** writes `offset`, `trim` and `debug` as plain source through
+    /// its kind's own fields ([`crate::draft::NewVariableParams`]); as a new
+    /// `params` entry of an existing variable, or as a new variable's extra
+    /// parameter, every one of the five stays refused.
     NewKeyIsATypedSetting {
         /// The insertion, by position.
         target: DraftTarget,
@@ -785,6 +788,129 @@ pub enum DraftError {
     InsertionKeyAlreadyPresent {
         /// Position of the edit in the batch.
         edit: usize,
+    },
+    /// Two `vars` intents of one draft contradict each other or another intent
+    /// of the draft (Phase 4-4): the whole `vars` removed beside any other
+    /// `vars` intent or any drafted variable; one variable removed twice, or
+    /// removed and also drafted; two new variables landing at one place; or a
+    /// new variable landing exactly where the same draft removes one. Checked
+    /// at intent level, before any diffing.
+    ///
+    /// This and the fourteen variants after it are the refusals Phase 4-4 added
+    /// for inserting, removing and reordering local variables, and **none of
+    /// them carries a name, a key or a value**: every operand is a
+    /// [`DraftTarget`], an index, a count, a [`ValueKind`] or a
+    /// [`crate::draft::VariableSetting`], none of which holds a string, so the
+    /// types force it (`CLAUDE.md` §1).
+    VarsIntentsConflict {
+        /// The later of the two intents, by its position in `var_intents`.
+        intent: usize,
+    },
+    /// A `vars` intent or a variable move names a `vars` written between
+    /// brackets — `[]` or `[{…}]` (Phase 4-4). A flow sequence is never
+    /// converted to block style and its items are never inserted, removed or
+    /// moved by this engine (ruling 8).
+    VarsIsAFlowList {},
+    /// A `vars` intent or a variable move names a `vars` holding something that
+    /// is not a sequence (Phase 4-4). Removing it would discard bytes no screen
+    /// showed as variables, and nothing can be inserted into it.
+    VarsHasAnUnsupportedShape {
+        /// What `vars` actually holds.
+        found: ValueKind,
+    },
+    /// The draft removes every variable of `vars` (Phase 4-4, ruling 8). A
+    /// sequence with nothing left would be `vars:` holding a null or a `[]` the
+    /// person never asked for; the whole `vars` is removed only by
+    /// [`crate::draft::VarsIntent::RemoveVars`], the explicit container removal.
+    /// A new variable in the same draft does not rescue it, because a list whose
+    /// every original item goes is a rewrite of the list.
+    VarsWouldBeEmpty {},
+    /// A new `vars:` subtree was drafted for a match none of whose entries can
+    /// serve as the one it is written after (Phase 4-4) — the counterpart of
+    /// [`DraftError::NoInsertionAnchor`] for the one collection a draft adds to
+    /// the match mapping.
+    NoVarsInsertionAnchor {},
+    /// A new variable's name is the empty string (Phase 4-4).
+    NewVariableNameIsEmpty {
+        /// The new variable, by position.
+        target: DraftTarget,
+    },
+    /// A new variable's name holds a line break or another control character
+    /// (Phase 4-4). A name is referenced as `{{name}}` on one line; a name
+    /// spanning two cannot be.
+    NewVariableNameIsNotOneLine {
+        /// The new variable, by position.
+        target: DraftTarget,
+    },
+    /// A new variable's name decodes to the same text as an existing
+    /// variable's name in the same `vars` (Phase 4-4). A variable the same
+    /// draft removes, or renames, still counts, for
+    /// [`DraftError::NewKeyDuplicatesAnEntry`]'s reason.
+    NewVariableNameDuplicatesAVariable {
+        /// The new variable, by position.
+        target: DraftTarget,
+        /// The existing variable's index in the projected `vars` list.
+        variable: usize,
+    },
+    /// Two new variables of one draft have the same name (Phase 4-4).
+    NewVariableNameDuplicatesAnInsertion {
+        /// The later new variable, by position.
+        target: DraftTarget,
+        /// The earlier one's position in `var_intents`.
+        first: usize,
+    },
+    /// An existing variable's name is not a decoded scalar, so no comparison can
+    /// establish that a new variable's name does not repeat it (Phase 4-4).
+    /// Refused rather than assumed.
+    NewVariableNameCannotBeCompared {
+        /// The new variable, by position.
+        target: DraftTarget,
+        /// The index of the existing variable whose name cannot be compared.
+        variable: usize,
+    },
+    /// The text drafted for one of a new variable's typed settings cannot be
+    /// written verbatim as one plain scalar (Phase 4-4, ruling 4): it is refused
+    /// rather than quoted, exactly as [`DraftError::OptionNotPlainSource`] is for
+    /// a match option.
+    NewVariableSettingNotPlainSource {
+        /// The new variable, by position.
+        target: DraftTarget,
+        /// Which setting.
+        setting: crate::draft::VariableSetting,
+    },
+    /// A new variable carries more extra author-named parameters than
+    /// [`crate::draft::NewVariable::MAX_EXTRA_PARAMS`] (Phase 4-4).
+    NewVariableHasTooManyParams {
+        /// The new variable, by position.
+        target: DraftTarget,
+        /// The bound.
+        limit: usize,
+    },
+    /// A new variable's extra author-named parameter uses a key the variable's
+    /// own kind owns — `echo` on an `echo` variable, `fields` on a `form` one
+    /// (Phase 4-4). The kind's field is the one route to that parameter.
+    NewKeyIsAKindParameter {
+        /// The extra parameter, by position.
+        target: DraftTarget,
+    },
+    /// An insertion of the batch lands exactly where another edit of the same
+    /// batch removes an item of the same sequence (Phase 4-4, stated for any
+    /// sequence of new mapping items): the two replacements would share a
+    /// start, and nothing in the batch says which comes first. The guard-level
+    /// twin of [`DraftError::VarsIntentsConflict`], reachable by a batch this
+    /// engine did not build.
+    InsertionLandsOnARemoval {
+        /// Position of the insertion in the batch.
+        insertion: usize,
+        /// Position of the removal in the batch.
+        removal: usize,
+    },
+    /// A variable move would leave the variable where it is (Phase 4-4). Refused
+    /// by name rather than written as a batch of nothing, as the engine's own
+    /// [`crate::patch::EditError::MoveChangesNothing`] is.
+    VariableMoveChangesNothing {
+        /// The variable's index in the projected `vars` list.
+        variable: usize,
     },
 }
 
@@ -977,6 +1103,62 @@ impl fmt::Display for DraftError {
             }
             DraftError::InsertionKeyAlreadyPresent { edit } => {
                 write!(formatter, "edit {edit} inserts a key already there")
+            }
+            DraftError::VarsIntentsConflict { intent } => {
+                write!(formatter, "vars intent {intent} conflicts with another")
+            }
+            DraftError::VarsIsAFlowList {} => formatter.write_str("vars is a flow list"),
+            DraftError::VarsHasAnUnsupportedShape { found } => {
+                write!(formatter, "vars holds a {found:?}")
+            }
+            DraftError::VarsWouldBeEmpty {} => {
+                formatter.write_str("vars would be left with no variables")
+            }
+            DraftError::NoVarsInsertionAnchor {} => {
+                formatter.write_str("no insertion anchor for vars")
+            }
+            DraftError::NewVariableNameIsEmpty { .. } => {
+                formatter.write_str("a new variable's name is empty")
+            }
+            DraftError::NewVariableNameIsNotOneLine { .. } => {
+                formatter.write_str("a new variable's name is not one line")
+            }
+            DraftError::NewVariableNameDuplicatesAVariable { variable, .. } => {
+                write!(
+                    formatter,
+                    "a new variable repeats variable {variable}'s name"
+                )
+            }
+            DraftError::NewVariableNameDuplicatesAnInsertion { first, .. } => {
+                write!(formatter, "a new variable repeats intent {first}'s name")
+            }
+            DraftError::NewVariableNameCannotBeCompared { variable, .. } => {
+                write!(formatter, "variable {variable}'s name cannot be compared")
+            }
+            DraftError::NewVariableSettingNotPlainSource { setting, .. } => {
+                write!(
+                    formatter,
+                    "setting {} is not writable as plain source",
+                    setting.key()
+                )
+            }
+            DraftError::NewVariableHasTooManyParams { limit, .. } => {
+                write!(
+                    formatter,
+                    "a new variable carries more than {limit} extra parameters"
+                )
+            }
+            DraftError::NewKeyIsAKindParameter { .. } => {
+                formatter.write_str("an extra parameter uses a key its kind owns")
+            }
+            DraftError::InsertionLandsOnARemoval { insertion, removal } => {
+                write!(
+                    formatter,
+                    "insertion {insertion} lands on removal {removal}"
+                )
+            }
+            DraftError::VariableMoveChangesNothing { variable } => {
+                write!(formatter, "moving variable {variable} changes nothing")
             }
         } // End of the match over every refusal
     } // End of function fmt() for DraftError

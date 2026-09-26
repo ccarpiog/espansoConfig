@@ -36,6 +36,9 @@ const TARGET: DraftTarget = { Param: { variable: 0, entry: 1 } };
 /** A new author-named entry's address, by position (Phase 4-3). */
 const NEW_PARAM: DraftTarget = { NewParam: { variable: 0, insertion: 1 } };
 
+/** A new variable's address, by the position of its intent (Phase 4-4). */
+const NEW_VARIABLE: DraftTarget = { NewVariable: { insertion: 0 } };
+
 /**
  * Every `DraftError` variant name, in declaration order.
  *
@@ -101,7 +104,22 @@ const DRAFT_ERROR_NAMES = [
   'ParamsWouldBeEmpty',
   'NoParamInsertionAnchor',
   'NewKeyIsATypedSetting',
-  'InsertionKeyAlreadyPresent'
+  'InsertionKeyAlreadyPresent',
+  'VarsIntentsConflict',
+  'VarsIsAFlowList',
+  'VarsHasAnUnsupportedShape',
+  'VarsWouldBeEmpty',
+  'NoVarsInsertionAnchor',
+  'NewVariableNameIsEmpty',
+  'NewVariableNameIsNotOneLine',
+  'NewVariableNameDuplicatesAVariable',
+  'NewVariableNameDuplicatesAnInsertion',
+  'NewVariableNameCannotBeCompared',
+  'NewVariableSettingNotPlainSource',
+  'NewVariableHasTooManyParams',
+  'NewKeyIsAKindParameter',
+  'InsertionLandsOnARemoval',
+  'VariableMoveChangesNothing'
 ] as const satisfies readonly DraftErrorName[];
 
 /**
@@ -172,7 +190,22 @@ const DRAFT_ERRORS: readonly DraftError[] = [
   { ParamsWouldBeEmpty: { variable: 0 } },
   { NoParamInsertionAnchor: { variable: 0 } },
   { NewKeyIsATypedSetting: { target: NEW_PARAM } },
-  { InsertionKeyAlreadyPresent: { edit: 0 } }
+  { InsertionKeyAlreadyPresent: { edit: 0 } },
+  { VarsIntentsConflict: { intent: 1 } },
+  { VarsIsAFlowList: {} },
+  { VarsHasAnUnsupportedShape: { found: 'Mapping' } },
+  { VarsWouldBeEmpty: {} },
+  { NoVarsInsertionAnchor: {} },
+  { NewVariableNameIsEmpty: { target: NEW_VARIABLE } },
+  { NewVariableNameIsNotOneLine: { target: NEW_VARIABLE } },
+  { NewVariableNameDuplicatesAVariable: { target: NEW_VARIABLE, variable: 2 } },
+  { NewVariableNameDuplicatesAnInsertion: { target: NEW_VARIABLE, first: 0 } },
+  { NewVariableNameCannotBeCompared: { target: NEW_VARIABLE, variable: 1 } },
+  { NewVariableSettingNotPlainSource: { target: NEW_VARIABLE, setting: 'trim' } },
+  { NewVariableHasTooManyParams: { target: NEW_VARIABLE, limit: 16 } },
+  { NewKeyIsAKindParameter: { target: { NewVariableParam: { insertion: 0, param: 2 } } } },
+  { InsertionLandsOnARemoval: { insertion: 0, removal: 1 } },
+  { VariableMoveChangesNothing: { variable: 0 } }
 ];
 
 // `never` exactly when the table above names every member of the union, and the
@@ -201,8 +234,8 @@ describe('the draft refusal samples', () => {
     expect(DRAFT_ERRORS.map(nameOf)).toEqual([...DRAFT_ERROR_NAMES]);
   });
 
-  it('hold the fifty-eight variants Phase 4-3 measured', () => {
-    expect(DRAFT_ERROR_NAMES.length).toBe(58);
+  it('hold the seventy-three variants Phase 4-4 measured', () => {
+    expect(DRAFT_ERROR_NAMES.length).toBe(73);
   });
 }); // End of the "draft refusal samples" suite
 

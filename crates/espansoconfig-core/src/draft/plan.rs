@@ -7,16 +7,18 @@ use crate::draft::error::DraftError;
 use crate::draft::field::DraftField;
 use crate::draft::match_draft::{
     DraftTarget, EntryDraft, FieldSubstitution, ItemDraft, MatchDraft, MatchField, NewParamValue,
-    SequenceField, VariableDraft, VariableField, FORM_FIELDS_KEY, PARAMS_KEY,
+    SequenceField, VariableDraft, VariableField, FORM_FIELDS_KEY, PARAMS_KEY, VARS_KEY,
 };
-use crate::draft::sequence::{MatchStructure, SequenceIntent, TriggerSwitch};
+use crate::draft::new_variable::{NewVariable, VarsIntent};
+use crate::draft::sequence::{ListPlacement, MatchStructure, SequenceIntent, TriggerSwitch};
 use crate::model::{
     FieldView, MappingPresence, MatchView, ScalarView, SequencePresence, UnknownReason, ValueKind,
     ValueView, VariableView,
 };
 use crate::patch::{
     DocumentEdit, DocumentPath, EntryValue, FieldInsert, FieldInsertGroup, FieldRemoval,
-    ItemPlacement, KeySubstitution, RemoveItem, ScalarEdit, ScalarItemInsert, ShapeSwitch,
+    InsertItem, ItemMove, ItemPlacement, ItemValue, KeySubstitution, RemoveItem, ScalarEdit,
+    ScalarItemInsert, ShapeSwitch,
 };
 
 /// Derives the batch a draft asks for, or refuses it by name.
@@ -289,24 +291,7 @@ pub fn plan_match_edits_with(
         &merged
     };
     let substitutions = structure.substitutions.as_slice();
-    let path = view.path.as_ref().ok_or(DraftError::MatchHasNoPath {})?;
-    if let Some(repeated) = view
-        .unknown_entries
-        .iter()
-        .find(|entry| entry.reason == UnknownReason::RepeatedKey)
-    {
-        return Err(DraftError::AmbiguousKey {
-            field: repeated.key.as_deref().and_then(MatchField::from_key),
-        });
-    }
-    if let Some(hazard) = view.blocking_hazard {
-        return Err(DraftError::MatchNotEditable {
-            hazard: Some(hazard),
-        });
-    }
-    if !view.safely_editable {
-        return Err(DraftError::MatchNotEditable { hazard: None });
-    }
+    let path = editable_match_path(view)?;
     if two_switches {
         // The structure named a switch and the draft names another: two intents
         // about `triggers`, refused at intent level with the list's own code.
@@ -320,6 +305,8 @@ pub fn plan_match_edits_with(
     check_structure_is_coherent(view, draft, structure)?;
     check_options_are_plain_source(draft)?;
     check_new_keys_are_admissible(draft)?;
+    check_vars_intents_are_coherent(view, draft)?;
+    check_new_variables_are_admissible(view, draft)?;
 
     let entries = visible_entries(view);
     let mut edits: Vec<DocumentEdit> = Vec::new();
@@ -357,13 +344,390 @@ pub fn plan_match_edits_with(
         plan_switch(view, path, switch, &mut edits)?;
     }
     plan_vars(view, draft, &mut edits, &mut nested)?;
+    let new_vars = plan_vars_intents(view, draft, path, &mut edits)?;
     plan_form_fields(view, draft, path, &mut edits, &mut nested)?;
-    plan_insertions(path, &entries, insertions, structure, &mut edits)?;
+    plan_insertions(path, &entries, insertions, new_vars, structure, &mut edits)?;
 
     check_closed_surface(path, &edits)?;
     check_batch_independence(path, &original_keys(&entries), &nested, &edits)?;
     Ok(edits)
 } // End of function plan_match_edits_with()
+
+/// The match's own path, when every question about the **match** — not about
+/// any draft of it — allows editing it: it has a path, no key of its mapping is
+/// written twice, and the hazard gate does not refuse it.
+///
+/// Steps 1 to 3 of [`plan_match_edits`], shared since Phase 4-4 with
+/// [`plan_variable_move`] so the two planners cannot come to disagree about
+/// which matches are editable.
+fn editable_match_path(view: &MatchView) -> Result<&DocumentPath, DraftError> {
+    let path = view.path.as_ref().ok_or(DraftError::MatchHasNoPath {})?;
+    if let Some(repeated) = view
+        .unknown_entries
+        .iter()
+        .find(|entry| entry.reason == UnknownReason::RepeatedKey)
+    {
+        return Err(DraftError::AmbiguousKey {
+            field: repeated.key.as_deref().and_then(MatchField::from_key),
+        });
+    }
+    if let Some(hazard) = view.blocking_hazard {
+        return Err(DraftError::MatchNotEditable {
+            hazard: Some(hazard),
+        });
+    }
+    if !view.safely_editable {
+        return Err(DraftError::MatchNotEditable { hazard: None });
+    }
+    Ok(path)
+} // End of function editable_match_path()
+
+/// Derives the one move that reorders a match's local variables, or refuses it
+/// by name (Phase 4-4).
+///
+/// # Alone in its batch, by construction (R25)
+///
+/// A reorder is **not** a draft intent. It has this planner of its own, and the
+/// batch it returns holds **exactly one** [`crate::patch::ItemMove`] — so a
+/// caller that wants to reorder and also edit must make two saves, which is
+/// `PROGRESS.md` R25 and ruling 10 of `docs/decisions/4-split-notes.md` §3. A
+/// batch that puts this move beside any other edit is refused by the engine as
+/// [`crate::patch::EditError::MoveMustBeTheOnlyEditInItsBatch`]; that refusal is
+/// the engine's, stated over every [`DocumentEdit`] category, and this planner
+/// adds nothing that could weaken it.
+///
+/// # What it checks, in order
+///
+/// 1. the match is editable ([`editable_match_path`]: a path, no repeated key,
+///    the hazard gate);
+/// 2. `vars` is an existing **block** list: absent is
+///    [`DraftError::TargetDoesNotExist`], flow (`[]` included) is
+///    [`DraftError::VarsIsAFlowList`], anything else
+///    [`DraftError::VarsHasAnUnsupportedShape`] (D2r: same sequence only, and
+///    never a converted one);
+/// 3. the variable and the destination exist
+///    ([`DraftError::TargetDoesNotExist`], naming the variable or the anchor);
+/// 4. the move changes something ([`DraftError::VariableMoveChangesNothing`]).
+///
+/// `to` is the wire's [`ListPlacement`]: `Front` writes the variable above the
+/// first, `After { index }` after the variable at that index in the
+/// **original** list, and `End` after the last. The engine derives every byte:
+/// the moved item's owned runs travel verbatim, with the comments it owns, and a
+/// comment the file owns stays where it is.
+///
+/// # Errors
+///
+/// See [`DraftError`]. The derived batch is checked by
+/// [`crate::draft::check_variable_move`] before it is returned.
+pub fn plan_variable_move(
+    view: &MatchView,
+    variable: usize,
+    to: ListPlacement,
+) -> Result<Vec<DocumentEdit>, DraftError> {
+    let path = editable_match_path(view)?;
+    let length = view.vars.len();
+    let missing = |index: usize| DraftError::TargetDoesNotExist {
+        target: DraftTarget::Variable { index },
+        length,
+    };
+    require_block_vars(&view.vars_presence, || missing(variable))?;
+    let item = view.vars.get(variable).ok_or(missing(variable))?;
+    let at = item
+        .path
+        .clone()
+        .ok_or(DraftError::VariableHasNoPath { index: variable })?;
+    let movement = match to {
+        ListPlacement::Front {} => ItemMove::to_front(at),
+        ListPlacement::After { index } if index >= length => return Err(missing(index)),
+        ListPlacement::After { index } => ItemMove::after(at, index),
+        ListPlacement::End {} => ItemMove::after(at, length.saturating_sub(1)),
+    };
+    if movement.resulting_index(variable) == variable {
+        return Err(DraftError::VariableMoveChangesNothing { variable });
+    }
+    let edits = vec![DocumentEdit::from(movement)];
+    crate::draft::audit::check_variable_move(path, &edits)?;
+    Ok(edits)
+} // End of function plan_variable_move()
+
+/// Refuses a `vars` that is not an existing **block** list (Phase 4-4).
+///
+/// `absent` builds the refusal for a match with no `vars`, which depends on what
+/// was asked for; every other answer is fixed: a flow list, `[]` included, is
+/// [`DraftError::VarsIsAFlowList`] and a value that is not a list is
+/// [`DraftError::VarsHasAnUnsupportedShape`].
+fn require_block_vars(
+    presence: &SequencePresence,
+    absent: impl FnOnce() -> DraftError,
+) -> Result<(), DraftError> {
+    match presence {
+        SequencePresence::Absent {} => Err(absent()),
+        SequencePresence::UnsupportedShape { found, .. } => {
+            Err(DraftError::VarsHasAnUnsupportedShape { found: *found })
+        }
+        SequencePresence::Empty { .. } | SequencePresence::Items { flow: true, .. } => {
+            Err(DraftError::VarsIsAFlowList {})
+        }
+        SequencePresence::Items { flow: false, .. } => Ok(()),
+    }
+} // End of function require_block_vars()
+
+/// Refuses `vars` intents that contradict each other or another intent of the
+/// draft (Phase 4-4).
+///
+/// **Intent level, and before any diffing**, for
+/// [`check_no_index_is_drafted_twice`]'s reason. It reads the view for one fact
+/// only — how many variables `vars` holds — so that two insertions landing at
+/// one place are recognised however they were spelled (`After(last)` and `End`
+/// are one place, and in a match with no `vars` so are `Front` and `End`).
+///
+/// The rules, each a [`DraftError::VarsIntentsConflict`] naming the intent at
+/// which the conflict is found:
+///
+/// 1. [`VarsIntent::RemoveVars`] is the only `vars` intent, and no variable of
+///    the match is drafted beside it;
+/// 2. one variable is removed at most once, and a removed variable is not also
+///    drafted ([`MatchDraft::vars`]);
+/// 3. two new variables do not land at one place — so a match with no `vars`
+///    receives at most one new variable per draft;
+/// 4. a new variable does not land exactly where the same draft removes one —
+///    the insertion point and the removal's first byte would coincide, and the
+///    engine refuses two replacements that share a start.
+fn check_vars_intents_are_coherent(view: &MatchView, draft: &MatchDraft) -> Result<(), DraftError> {
+    let intents = &draft.var_intents;
+    let length = view.vars.len();
+    let landing = |at: &ListPlacement| ItemPlacement::from(*at).items_above(length);
+    for (position, intent) in intents.iter().enumerate() {
+        let conflict = DraftError::VarsIntentsConflict { intent: position };
+        let before = &intents[..position];
+        match intent {
+            VarsIntent::RemoveVars {} => {
+                if intents.len() > 1 || !draft.vars.is_empty() {
+                    return Err(conflict);
+                }
+            }
+            VarsIntent::RemoveVariable { index } => {
+                let removed_twice = before.iter().any(|earlier| {
+                    matches!(earlier, VarsIntent::RemoveVariable { index: held } if held == index)
+                });
+                let drafted = draft.vars.iter().any(|variable| variable.index == *index);
+                if removed_twice || drafted {
+                    return Err(conflict);
+                }
+            }
+            VarsIntent::InsertVariable { at, .. } => {
+                let lands = landing(at);
+                let shares_a_landing = before.iter().any(|earlier| {
+                    matches!(earlier, VarsIntent::InsertVariable { at: other, .. }
+                        if landing(other) == lands)
+                });
+                let lands_on_a_removal = lands.is_some_and(|lands| {
+                    intents.iter().any(|other| {
+                        matches!(other, VarsIntent::RemoveVariable { index } if *index == lands)
+                    })
+                });
+                if shares_a_landing || lands_on_a_removal {
+                    return Err(conflict);
+                }
+            }
+        } // End of the match over what this intent does
+    } // End of the loop over the drafted `vars` intents
+    Ok(())
+} // End of function check_vars_intents_are_coherent()
+
+/// Refuses a new variable whose own description breaks a rule no type can force
+/// (Phase 4-4).
+///
+/// **Intent level, and before any diffing.** Every refusal names the new
+/// variable by its position in `var_intents` ([`DraftTarget::NewVariable`]) or
+/// an extra parameter by its position in that variable's list
+/// ([`DraftTarget::NewVariableParam`]), never a name, a key or a value
+/// (`CLAUDE.md` §1). In order, per new variable:
+///
+/// 1. the **name** is not empty and is one line
+///    ([`DraftError::NewVariableNameIsEmpty`],
+///    [`DraftError::NewVariableNameIsNotOneLine`]);
+/// 2. the name repeats no existing variable's **decoded** name — an existing
+///    name that did not decode cannot be compared and refuses — and no earlier
+///    new variable's;
+/// 3. every **typed setting** (`inject_vars`, `offset`, `trim`, `debug`) is
+///    plain source ([`DraftError::NewVariableSettingNotPlainSource`], ruling 4);
+/// 4. the **extra parameters** are at most [`NewVariable::MAX_EXTRA_PARAMS`], and
+///    each key meets ruling 7, names none of ruling 4's typed settings, is not a
+///    key the kind itself owns ([`DraftError::NewKeyIsAKindParameter`]) and is
+///    not repeated among the extras.
+fn check_new_variables_are_admissible(
+    view: &MatchView,
+    draft: &MatchDraft,
+) -> Result<(), DraftError> {
+    let mut seen: Vec<(usize, &str)> = Vec::new();
+    for (insertion, intent) in draft.var_intents.iter().enumerate() {
+        let VarsIntent::InsertVariable { variable, .. } = intent else {
+            continue;
+        };
+        let target = DraftTarget::NewVariable { insertion };
+        check_new_variable_name(view, variable, target, &seen)?;
+        seen.push((insertion, variable.name.as_str()));
+        for (setting, text) in variable.settings() {
+            if !is_plain_source(text) {
+                return Err(DraftError::NewVariableSettingNotPlainSource { target, setting });
+            }
+        } // End of the loop over the new variable's typed settings
+        if variable.extra_params.len() > NewVariable::MAX_EXTRA_PARAMS {
+            return Err(DraftError::NewVariableHasTooManyParams {
+                target,
+                limit: NewVariable::MAX_EXTRA_PARAMS,
+            });
+        }
+        for (param, extra) in variable.extra_params.iter().enumerate() {
+            let target = DraftTarget::NewVariableParam { insertion, param };
+            if let Some(fault) = author_key_fault(&extra.key) {
+                return Err(key_fault_refusal(fault, target));
+            }
+            if TYPED_SETTINGS.contains(&extra.key.as_str()) {
+                return Err(DraftError::NewKeyIsATypedSetting { target });
+            }
+            if variable.params.owned_keys().contains(&extra.key.as_str()) {
+                return Err(DraftError::NewKeyIsAKindParameter { target });
+            }
+            let earlier = variable.extra_params[..param]
+                .iter()
+                .position(|held| held.key == extra.key);
+            if let Some(first) = earlier {
+                return Err(DraftError::NewKeyDuplicatesAnInsertion { target, first });
+            }
+        } // End of the loop over the new variable's extra parameters
+    } // End of the loop over the drafted new variables
+    Ok(())
+} // End of function check_new_variables_are_admissible()
+
+/// Rules 1 and 2 of [`check_new_variables_are_admissible`] for one new
+/// variable's name, against the existing variables and the earlier new ones in
+/// `seen` (position in `var_intents`, name).
+fn check_new_variable_name(
+    view: &MatchView,
+    variable: &NewVariable,
+    target: DraftTarget,
+    seen: &[(usize, &str)],
+) -> Result<(), DraftError> {
+    match author_key_fault(&variable.name) {
+        Some(AuthorKeyFault::Empty) => return Err(DraftError::NewVariableNameIsEmpty { target }),
+        Some(AuthorKeyFault::LineBreak | AuthorKeyFault::ControlCharacter) => {
+            return Err(DraftError::NewVariableNameIsNotOneLine { target })
+        }
+        // `<<` is a key rule; as a value, a name may be any one-line text.
+        Some(AuthorKeyFault::MergeKey) | None => {}
+    }
+    for (index, existing) in view.vars.iter().enumerate() {
+        let Some(name) = &existing.name else {
+            continue;
+        };
+        if !name.decoded {
+            return Err(DraftError::NewVariableNameCannotBeCompared {
+                target,
+                variable: index,
+            });
+        }
+        if name.text == variable.name {
+            return Err(DraftError::NewVariableNameDuplicatesAVariable {
+                target,
+                variable: index,
+            });
+        }
+    } // End of the loop over the existing variables
+    if let Some((first, _)) = seen.iter().find(|(_, name)| *name == variable.name) {
+        return Err(DraftError::NewVariableNameDuplicatesAnInsertion {
+            target,
+            first: *first,
+        });
+    }
+    Ok(())
+} // End of function check_new_variable_name()
+
+/// Plans every drafted `vars` intent (Phase 4-4), appending to `edits`, and
+/// answers the fields of the one new variable that becomes a whole new `vars:`
+/// subtree when the match has none — which [`plan_insertions`] writes as the
+/// match-level group's trailing item list.
+///
+/// | Intent | `vars` is | Edit |
+/// |---|---|---|
+/// | [`VarsIntent::InsertVariable`] | a block list | one [`InsertItem`] at the placement |
+/// | [`VarsIntent::InsertVariable`] | absent | the new `vars:` subtree (`Front`/`End` only) |
+/// | [`VarsIntent::RemoveVariable`] | a block list | one [`RemoveItem`], which takes the variable's own comments with it |
+/// | [`VarsIntent::RemoveVars`] | a list of either style | one [`FieldRemoval`] of the whole entry |
+/// | [`VarsIntent::RemoveVars`] | absent | nothing |
+///
+/// A flow `vars` (`[]` included) is refused for an insertion or a removal of a
+/// variable ([`DraftError::VarsIsAFlowList`]); a `vars` that is not a list is
+/// refused for every intent ([`DraftError::VarsHasAnUnsupportedShape`]); and a
+/// draft whose removals would take every variable away is
+/// [`DraftError::VarsWouldBeEmpty`]. Each item path is the projection's own
+/// ([`crate::model::VariableView::path`]), as [`plan_vars`]'s are.
+fn plan_vars_intents(
+    view: &MatchView,
+    draft: &MatchDraft,
+    path: &DocumentPath,
+    edits: &mut Vec<DocumentEdit>,
+) -> Result<Option<Vec<(String, ItemValue)>>, DraftError> {
+    let vars = path.clone().with_key(VARS_KEY);
+    let length = view.vars.len();
+    let missing = |index: usize| DraftError::TargetDoesNotExist {
+        target: DraftTarget::Variable { index },
+        length,
+    };
+    let mut subtree = None;
+    let mut removals = 0usize;
+    for intent in &draft.var_intents {
+        match intent {
+            VarsIntent::InsertVariable { at, variable } => {
+                if let (SequencePresence::Absent {}, ListPlacement::After { index }) =
+                    (&view.vars_presence, at)
+                {
+                    return Err(missing(*index));
+                }
+                if matches!(view.vars_presence, SequencePresence::Absent {}) {
+                    // `check_vars_intents_are_coherent` has already refused a
+                    // second insertion into a match with no `vars`.
+                    subtree = Some(variable.fields());
+                    continue;
+                }
+                require_block_vars(&view.vars_presence, || missing(0))?;
+                if let ListPlacement::After { index } = at {
+                    if *index >= length {
+                        return Err(missing(*index));
+                    }
+                }
+                let insert = InsertItem::nested(vars.clone(), (*at).into(), variable.fields());
+                edits.push(insert.into());
+            }
+            VarsIntent::RemoveVariable { index } => {
+                require_block_vars(&view.vars_presence, || missing(*index))?;
+                let item = view.vars.get(*index).ok_or(missing(*index))?;
+                let at = item
+                    .path
+                    .clone()
+                    .ok_or(DraftError::VariableHasNoPath { index: *index })?;
+                edits.push(RemoveItem::new(at).into());
+                removals += 1;
+            }
+            VarsIntent::RemoveVars {} => match &view.vars_presence {
+                SequencePresence::Absent {} => {}
+                SequencePresence::UnsupportedShape { found, .. } => {
+                    return Err(DraftError::VarsHasAnUnsupportedShape { found: *found })
+                }
+                SequencePresence::Empty { .. } | SequencePresence::Items { .. } => {
+                    edits.push(FieldRemoval::new(vars.clone()).into());
+                }
+            },
+        } // End of the match over what the intent asks for
+    } // End of the loop over the drafted `vars` intents
+      // Removing the last variable is explicit (ruling 8): the removals are
+      // resolved and distinct by now, so counting them is counting variables.
+    if removals > 0 && removals >= length {
+        return Err(DraftError::VarsWouldBeEmpty {});
+    }
+    Ok(subtree)
+} // End of function plan_vars_intents()
 
 /// What one entry of the insertion group is, by name.
 ///
@@ -793,9 +1157,14 @@ fn plan_substitution(
 /// `inserting_at_the_start_of_a_removed_item_is_an_overlap` in
 /// `tests/patch_item.rs`). So a draft that removes the last entry and adds
 /// another writes the new one after the last entry whose successor stays, rather
-/// than being refused as it was before Phase 3-1. The skip is conservative: a
-/// successor this planner cannot see (`vars`, `form_fields`) is not one a draft
-/// can take away, so it never causes one.
+/// than being refused as it was before Phase 3-1. Since Phase 4-4 a draft can
+/// take `vars` away ([`VarsIntent::RemoveVars`]), so `vars` is one of the
+/// visible entries for this rule — though never an anchor itself
+/// ([`VisibleEntry::anchorable`]); `form_fields` is not one a draft can remove,
+/// so it never causes a skip.
+///
+/// A new `vars:` subtree (Phase 4-4) is written as the group's trailing item
+/// list ([`FieldInsertGroup::with_item_list`]) after the same anchor.
 ///
 /// One field is a [`FieldInsert`]; two or more are one [`FieldInsertGroup`], in
 /// the order they were collected — [`MatchField::ALL`] order.
@@ -803,11 +1172,16 @@ fn plan_insertions(
     path: &DocumentPath,
     entries: &[VisibleEntry],
     insertions: Vec<(Inserted, EntryValue)>,
+    new_vars: Option<Vec<(String, ItemValue)>>,
     structure: &MatchStructure,
     edits: &mut Vec<DocumentEdit>,
 ) -> Result<(), DraftError> {
-    let Some(first) = insertions.first().map(|(field, _)| *field) else {
-        return Ok(());
+    // The refusal when no anchor survives names the first thing to be written:
+    // a field or list of the group, or else the new `vars:` subtree (Phase 4-4).
+    let no_anchor = match insertions.first() {
+        Some((first, _)) => first.no_anchor(),
+        None if new_vars.is_some() => DraftError::NoVarsInsertionAnchor {},
+        None => return Ok(()),
     };
     let substitutions = structure.substitutions.as_slice();
     let removed = |key: &str| {
@@ -850,14 +1224,29 @@ fn plan_insertions(
         .iter()
         .enumerate()
         .rev()
+        .filter(|(_, entry)| entry.anchorable)
         .filter_map(|(position, entry)| Some((position, entry.key.as_deref()?)))
         .find(|(position, key)| leaves_alone(key) && successor_stays(*position))
         .map(|(_, key)| key.to_owned())
-        .ok_or(first.no_anchor())?;
+        .ok_or(no_anchor.clone())?;
     let mut fields: Vec<(String, EntryValue)> = insertions
         .into_iter()
         .map(|(field, value)| (field.key().to_owned(), value))
         .collect();
+    // A new `vars:` subtree (Phase 4-4) is the group's trailing item list, so a
+    // new variable beside a new match field is still one run after one anchor.
+    if let Some(variable) = new_vars {
+        let group = FieldInsertGroup::with_item_list(
+            path.clone(),
+            Some(anchor),
+            fields,
+            VARS_KEY,
+            vec![variable],
+        )
+        .ok_or(no_anchor)?;
+        edits.push(group.into());
+        return Ok(());
+    }
     // One scalar field stays a `FieldInsert`, exactly as before Phase 3-1; a
     // list, or two entries or more, is one group.
     let edit: DocumentEdit = match fields.as_slice() {
@@ -867,7 +1256,7 @@ fn plan_insertions(
             FieldInsert::after(path.clone(), anchor, key, value).into()
         }
         _ => FieldInsertGroup::typed(path.clone(), Some(anchor), fields)
-            .ok_or(first.no_anchor())?
+            .ok_or(no_anchor)?
             .into(),
     };
     edits.push(edit);
@@ -1401,14 +1790,7 @@ fn check_new_keys_are_admissible(draft: &MatchDraft) -> Result<(), DraftError> {
                 insertion,
             };
             if let Some(fault) = author_key_fault(&new.key) {
-                return Err(match fault {
-                    AuthorKeyFault::Empty => DraftError::NewKeyIsEmpty { target },
-                    AuthorKeyFault::LineBreak => DraftError::NewKeyHasALineBreak { target },
-                    AuthorKeyFault::ControlCharacter => {
-                        DraftError::NewKeyHasAControlCharacter { target }
-                    }
-                    AuthorKeyFault::MergeKey => DraftError::NewKeyIsAMergeKey { target },
-                });
+                return Err(key_fault_refusal(fault, target));
             }
             if TYPED_SETTINGS.contains(&new.key.as_str()) {
                 return Err(DraftError::NewKeyIsATypedSetting { target });
@@ -1423,6 +1805,16 @@ fn check_new_keys_are_admissible(draft: &MatchDraft) -> Result<(), DraftError> {
     } // End of the loop over the drafted variables
     Ok(())
 } // End of function check_new_keys_are_admissible()
+
+/// The refusal that names one ruling-7 fault of a new author-named key.
+fn key_fault_refusal(fault: AuthorKeyFault, target: DraftTarget) -> DraftError {
+    match fault {
+        AuthorKeyFault::Empty => DraftError::NewKeyIsEmpty { target },
+        AuthorKeyFault::LineBreak => DraftError::NewKeyHasALineBreak { target },
+        AuthorKeyFault::ControlCharacter => DraftError::NewKeyHasAControlCharacter { target },
+        AuthorKeyFault::MergeKey => DraftError::NewKeyIsAMergeKey { target },
+    }
+} // End of function key_fault_refusal()
 
 /// Refuses a drafted variable whose own mapping writes a modelled key twice.
 ///
@@ -1813,16 +2205,22 @@ fn check_options_are_plain_source(draft: &MatchDraft) -> Result<(), DraftError> 
 
 /// One entry of the match's mapping that this planner can see.
 ///
-/// "Can see" is a real limit and a deliberate one: `vars` and `form_fields` are
-/// modelled as their own projections and carry no key span, so a match whose
-/// last entry is one of those two is anchored *before* it. That changes where a
-/// new key lands and nothing else — the entry itself is never named, never
-/// moved and never rewritten.
+/// "Can see" is a real limit and a deliberate one: `form_fields` is modelled as
+/// its own projection and is not listed, so a match whose last entry is
+/// `form_fields` is anchored *before* it. `vars` is listed since Phase 4-4,
+/// through its presence's key span, but is never an anchor, so a match whose
+/// last entry is `vars` is still anchored before it. That changes where a new
+/// key lands and nothing else.
 struct VisibleEntry {
     /// The entry's decoded key, or `None` for a key no path segment can name.
     key: Option<String>,
     /// Where it sits, for ordering only.
     at: usize,
+    /// Whether an insertion may be written after it. `false` for `vars` alone
+    /// (Phase 4-4): it is visible so that removing it keeps the entry before it
+    /// from anchoring an insertion at its first byte, but an insertion after it
+    /// would land where an item appended to it lands, so it anchors nothing.
+    anchorable: bool,
 }
 
 /// Every entry of the match's mapping this planner can see, in source order.
@@ -1849,6 +2247,7 @@ fn visible_entries(view: &MatchView) -> Vec<VisibleEntry> {
             entries.push(VisibleEntry {
                 key: Some(field.key().to_owned()),
                 at: scalar.span.start,
+                anchorable: true,
             });
         }
     } // End of the loop over the schema-known scalar fields
@@ -1862,13 +2261,27 @@ fn visible_entries(view: &MatchView) -> Vec<VisibleEntry> {
             entries.push(VisibleEntry {
                 key: Some(sequence.key().to_owned()),
                 at: location.key_span.start,
+                anchorable: true,
             });
         }
     } // End of the loop over the schema-known string sequences
+      // `vars`, seen through its own key since Phase 4-4, but never an anchor. A
+      // `vars` of a shape the projection does not model is an unknown entry and is
+      // seen below, once, as before.
+    if let SequencePresence::Empty { location } | SequencePresence::Items { location, .. } =
+        &view.vars_presence
+    {
+        entries.push(VisibleEntry {
+            key: Some(VARS_KEY.to_owned()),
+            at: location.key_span.start,
+            anchorable: false,
+        });
+    }
     for unknown in &view.unknown_entries {
         entries.push(VisibleEntry {
             key: unknown.key.clone(),
             at: unknown.key_span.start,
+            anchorable: true,
         });
     } // End of the loop over the entries the projection did not model
     entries.sort_by_key(|entry| entry.at);

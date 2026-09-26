@@ -695,8 +695,10 @@ fn a_list_edit_outside_the_two_lists_is_refused_by_the_audit() {
     let here = mapping(0);
     let variable = here.clone().with_key("vars").with_index(0);
     let one = |value: &str| vec![value.to_owned()];
+    // A whole variable's removal left this list at Phase 4-4: `vars` items are
+    // removable since then, and `variable_intents.rs` pins that shape. Every
+    // other edit here is still outside.
     let outside: Vec<DocumentEdit> = vec![
-        RemoveItem::new(variable.clone()).into(),
         RemoveItem::new(variable.clone().with_key("depends_on").with_index(0)).into(),
         RemoveItem::new(
             variable

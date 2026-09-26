@@ -494,7 +494,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("decodeError", 5),
     ("notReencodable", 8),
     ("saveResult", 3),
-    ("draftError", 58),
+    ("draftError", 73),
     ("presentationNote", 2),
     ("reapplyResolution", 4),
     ("reapplyRefusal", 9),
@@ -694,6 +694,27 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          and a form field's options) and travel *out of* the projection as \
          authority for a later structural edit. The step that first draws one \
          owes it a namespace, as `SequencePresence` has",
+    ),
+    (
+        "VariableSetting",
+        "a field identifier, not a code, for the same reason as `MatchField` and \
+         with the same spelling on the wire: it names `inject_vars`, `offset`, \
+         `trim` or `debug`, the typed settings a new variable writes as plain \
+         source (Phase 4-4), which espanso spells one way and which \
+         `vars_intents_cross_the_wire_as_closed_shapes` pins",
+    ),
+    (
+        "NewVariableParams",
+        "a protocol tag, not a code, exactly as `NewParamValue` is: its nine \
+         variants travel *into* the planner inside a new variable (Phase 4-4) as \
+         which kind it is born as, and are never rendered — a screen shows the \
+         kind through `VariableKind`'s own namespace",
+    ),
+    (
+        "VarsIntent",
+        "a protocol tag, not a code, exactly as `SequenceIntent` is: \
+         `InsertVariable`, `RemoveVariable` and `RemoveVars` travel *into* the \
+         planner as `MatchDraft::var_intents` (Phase 4-4) and are never rendered",
     ),
     (
         "NewParamValue",
@@ -1325,6 +1346,7 @@ fn every_typescript_wire_union_has_a_namespace() {
             "ContentForm".to_owned(),
             "TriggerForm".to_owned(),
             "VariableField".to_owned(),
+            "VariableSetting".to_owned(),
             "ObservedDocumentName".to_owned()
         ],
         "the unions exempted by NOT_A_CODE changed, listed in the file's order. The \
@@ -1332,7 +1354,8 @@ fn every_typescript_wire_union_has_a_namespace() {
          serializes as an espanso key, and `BulkValue` is a protocol tag whose one \
          bare member is `Remove`. Of the rest, the first five are field \
          identifiers that serialize as espanso keys (`ContentForm` since Phase \
-         3-5-1, `TriggerForm` since Phase 3-6-1); the sixth is Phase 2d-4b's \
+         3-5-1, `TriggerForm` since Phase 3-6-1), and so is the sixth, \
+         `VariableSetting` (Phase 4-4); the seventh is Phase 2d-4b's \
          mirror of the one reconciliation enum this table already classifies as an \
          address rather than a code, and it appears here — as the `…Name` twin \
          rather than as the value union — because the value union has no \

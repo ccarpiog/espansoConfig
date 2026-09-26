@@ -126,8 +126,8 @@ pub use edit::{
     apply_edits, apply_scalar_edit, apply_scalar_edits, duplicate_item, insert_field, insert_item,
     insertion_landings, item_owned_text, item_positions, move_item, remove_field, remove_item,
     replace_item_text, DocumentEdit, DuplicateItem, DuplicateSeam, EditError, EntryValue,
-    FieldInsert, FieldInsertGroup, FieldRemoval, InsertItem, ItemMove, ItemPlacement,
-    ItemTextReplacement, KeySubstitution, MoveSeam, OwnedItemText, PatchedDocument,
+    FieldInsert, FieldInsertGroup, FieldRemoval, InsertItem, ItemFields, ItemMove, ItemPlacement,
+    ItemTextReplacement, ItemValue, KeySubstitution, MoveSeam, OwnedItemText, PatchedDocument,
     PresentationNote, RemoveItem, Replacement, ScalarEdit, ScalarItemInsert, ShapeSwitch,
     VerificationFailure,
 };
