@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T10:36:18Z",
+  "updated": "2026-09-26T10:37:11Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 4, variables and forms, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1217,7 +1217,8 @@
       "risk": "high",
       "summary": "Codex consult cut Phase 4 into 24 steps 4-1 to 4-24 and mapped all 48 carried items; records only.",
       "review": "docs/reviews/phase-4-design-record.md",
-      "narrative": "docs/decisions/4-split-notes.md"
+      "narrative": "docs/decisions/4-split-notes.md",
+      "commit": "a1bc4d2"
     },
     {
       "id": "4-1",
