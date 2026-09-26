@@ -43,7 +43,9 @@
 //! (a match's whole `vars` and `form_fields` containers cut in Rust, with its
 //! analysis summarised) and `commands::analyze_match_candidate` (one drafted
 //! operation judged by the save gate's own findings pass and analysed, with no
-//! lock and no write).
+//! lock and no write). Phase 4-17 adds one more reader,
+//! `commands::preview_match`: a pure, bounded illustration of one match for one
+//! example, which runs no command and reads no clipboard.
 //!
 //! Phase 3-12 adds `commands::load_sidecar` and `commands::update_sidecar`,
 //! and **neither writes a user file**: `sidecar` is the application-owned
@@ -227,7 +229,8 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// backup-catalogue commands `list_backup_batches`, `list_backup_entries` and
 /// `read_backup_text`, Phase 2d-4a's `drain_external_changes`, Phase 3-7's
 /// `match_item_text`, Phase 3-11-1's `match_option_spellings` and Phase 4-8's
-/// `match_authoring_snapshot` and `analyze_match_candidate` are read-only. The
+/// `match_authoring_snapshot` and `analyze_match_candidate` and Phase 4-17's
+/// `preview_match` are read-only. The
 /// nine save commands `move_match`, `save_match`, `create_match`,
 /// `delete_match`, `save_raw_document`, `duplicate_match`, Phase 3-7's
 /// `save_match_item_text`, Phase 3-10's `apply_bulk_options` and Phase 4-8's
@@ -249,7 +252,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// the application publishes an ACL manifest of its own (`tauri::webview`'s
 /// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
 /// !is_local`). This crate publishes none, the webview's origin is local, and
-/// none of the twenty-six commands is a plugin command, so none of them needs a
+/// none of the twenty-seven commands is a plugin command, so none of them needs a
 /// permission. The two event permissions are for the frontend's one event
 /// listener: Tauri's `listen` invokes the plugin command `plugin:event|listen`,
 /// and the unlisten function it resolves with invokes `plugin:event|unlisten`.
@@ -313,6 +316,7 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::match_authoring_snapshot,
             commands::analyze_match_candidate,
             commands::move_variable,
+            commands::preview_match,
             commands::load_sidecar,
             commands::update_sidecar,
             menu::set_menu_labels,

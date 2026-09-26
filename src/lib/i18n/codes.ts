@@ -81,6 +81,10 @@ import type {
   IncompleteReasonName,
   Injection,
   MalformedPlaceholder,
+  PreviewLimit,
+  PreviewPlaceholder,
+  PreviewPlaceholderName,
+  PreviewUnresolved,
   BulkFileOutcome,
   BulkFileOutcomeName,
   BulkPlanError,
@@ -2076,6 +2080,87 @@ export function describeMalformedPlaceholder(
 } // End of function describeMalformedPlaceholder()
 
 // ---------------------------------------------------------------------------
+// The illustrative preview on the wire — Phase 4-17
+// ---------------------------------------------------------------------------
+//
+// Three namespaces whose codes `preview_match` answers inside its segments and
+// beside them. No sentence interpolates an operand: a placeholder's authored
+// command, arguments or trigger are display data a screen draws beside the
+// sentence, escaped, never text spliced into it. Every sentence describes what
+// this application's illustration could or could not produce, never how espanso
+// expands a snippet (Phase 4 ruling 26).
+
+/**
+ * The dictionary key for why a preview segment is unresolved.
+ *
+ * @param reason - A `PreviewUnresolved` as it crossed the boundary.
+ * @returns The key holding that reason's sentence.
+ */
+export function previewUnresolvedKey(reason: PreviewUnresolved): TranslationKey {
+  return `code.previewUnresolved.${uncapitalize(reason)}`;
+} // End of function previewUnresolvedKey()
+
+/**
+ * The sentence for why a preview segment is unresolved.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - A `PreviewUnresolved` as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describePreviewUnresolved(locale: Locale, reason: PreviewUnresolved): string {
+  return translate(locale, previewUnresolvedKey(reason));
+} // End of function describePreviewUnresolved()
+
+/**
+ * The dictionary key for what a preview placeholder stands for.
+ *
+ * @param name - The variant name of a `PreviewPlaceholder`.
+ * @returns The key holding that placeholder's sentence.
+ */
+export function previewPlaceholderKey(name: PreviewPlaceholderName): TranslationKey {
+  return `code.previewPlaceholder.${uncapitalize(name)}`;
+} // End of function previewPlaceholderKey()
+
+/**
+ * The sentence for what a preview placeholder stands for. Its operands — the
+ * authored command, arguments or trigger — are not interpolated.
+ *
+ * @param locale - The dictionary to read from.
+ * @param placeholder - A `PreviewPlaceholder` as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describePreviewPlaceholder(
+  locale: Locale,
+  placeholder: PreviewPlaceholder
+): string {
+  return translate(
+    locale,
+    previewPlaceholderKey(wireVariantName<PreviewPlaceholderName>(placeholder))
+  );
+} // End of function describePreviewPlaceholder()
+
+/**
+ * The dictionary key for which limit a preview reached.
+ *
+ * @param limit - A `PreviewLimit` as it crossed the boundary.
+ * @returns The key holding that limit's sentence.
+ */
+export function previewLimitKey(limit: PreviewLimit): TranslationKey {
+  return `code.previewLimit.${uncapitalize(limit)}`;
+} // End of function previewLimitKey()
+
+/**
+ * The sentence for which limit a preview reached.
+ *
+ * @param locale - The dictionary to read from.
+ * @param limit - A `PreviewLimit` as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describePreviewLimit(locale: Locale, limit: PreviewLimit): string {
+  return translate(locale, previewLimitKey(limit));
+} // End of function describePreviewLimit()
+
+// ---------------------------------------------------------------------------
 // Every `code.` namespace, and the builder that reaches it — Phase 2d-4b
 // ---------------------------------------------------------------------------
 
@@ -2162,6 +2247,9 @@ export const CODE_NAMESPACE_KEY_BUILDERS = {
   notReencodable: notReencodableKey,
   pathError: pathErrorKey,
   presentationNote: presentationNoteKey,
+  previewLimit: previewLimitKey,
+  previewPlaceholder: previewPlaceholderKey,
+  previewUnresolved: previewUnresolvedKey,
   reapplyPlacement: reapplyPlacementKey,
   reapplyRefusal: reapplyRefusalKey,
   reapplyResolution: reapplyResolutionKey,

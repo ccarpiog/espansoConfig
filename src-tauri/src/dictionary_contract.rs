@@ -464,6 +464,20 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "crates/espansoconfig-core/src/analysis/placeholder.rs",
         name: "MalformedPlaceholder",
     },
+    // Phase 4-17's three: why a preview segment is unresolved, what a
+    // placeholder stands for, and which limit a preview reached.
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/preview.rs",
+        name: "PreviewUnresolved",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/preview.rs",
+        name: "PreviewPlaceholder",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/preview.rs",
+        name: "PreviewLimit",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -535,6 +549,9 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("injection", 3),
     ("edgeKind", 2),
     ("malformedPlaceholder", 3),
+    ("previewUnresolved", 17),
+    ("previewPlaceholder", 4),
+    ("previewLimit", 3),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.
@@ -559,6 +576,20 @@ const SCANNED_TREES: &[&str] = &["crates/espansoconfig-core/src", "src-tauri/src
 /// reaches a screen, and a claim answered differently depending on which language
 /// asks is not one claim.
 const NOT_A_CODE: &[(&str, &str)] = &[
+    (
+        "PreviewSegment",
+        "a value shape, not a code: `Literal`, `Sample`, `Choice`, `Placeholder` \
+         and `Unresolved` say what one piece of a preview is (Phase 4-17), and a screen \
+         shows the piece — its text, or the sentence of the `PreviewPlaceholder` or \
+         `PreviewUnresolved` code inside it — never the variant's name",
+    ),
+    (
+        "PreviewSource",
+        "an address, not a code, exactly as `PathSegment` is: a variable by \
+         position, the shorthand form, or a capture by its own name (Phase 4-17), \
+         which a screen resolves to the declaration it points at rather than \
+         rendering as a sentence",
+    ),
     (
         "ValueView",
         "a value, not a code: its tags name the node shapes `ValueKind` already \

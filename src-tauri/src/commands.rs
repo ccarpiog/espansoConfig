@@ -13,7 +13,8 @@
 //! workspace's file list and hand it to `crate::sidecar`; neither writes a user
 //! file. Phase 4-8 adds a ninth writer, `move_variable`, and two readers,
 //! `match_authoring_snapshot` and `analyze_match_candidate`, over
-//! [`espansoconfig_core::authoring`]. Each is
+//! [`espansoconfig_core::authoring`], and Phase 4-17 one more reader,
+//! `preview_match`, over [`espansoconfig_core::preview`]. Each is
 //! one line over a [`WorkspaceSession`] method; each of the original six readers
 //! is one call into `crate::workspace`, which Phase 1a built to be wrapped this
 //! way, and each of the three backup readers is one call into `crate::backup`.
@@ -35,7 +36,7 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Nine of the twenty-five workspace commands write, and they write the same way
+//! # Nine of the twenty-six workspace commands write, and they write the same way
 //!
 //! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, 2b-2c-2 `create_match`
 //! and `delete_match`, 2b-2c-3b `save_raw_document`, 2c-3c-2
@@ -290,6 +291,9 @@ use espansoconfig_core::patch::{
 use espansoconfig_core::persist::{
     preflight_edits, save_document, Acknowledgement, BackupSession, SaveContent, SaveError,
     SaveRequest, SavedDocument,
+};
+use espansoconfig_core::preview::{
+    preview_match as preview_one_match, MatchPreview, PreviewSamples,
 };
 use espansoconfig_core::reconcile::{
     reconcile, PlacementMode, ReapplyConfidence, ReapplyMode, ReapplyRequest,
@@ -1480,6 +1484,32 @@ impl WorkspaceSession {
             Ok(authoring_snapshot(snapshot, found))
         })
     } // End of function match_authoring_snapshot()
+
+    /// Previews one match for the example `samples` describe (Phase 4-17).
+    ///
+    /// **A reader, and it reads nothing from disk**: the preview is
+    /// [`espansoconfig_core::preview::preview_match`] over the same cached
+    /// parse [`WorkspaceSession::text`] serves — pure and bounded, with no
+    /// clock, no process and no clipboard read. It takes no lock beyond the
+    /// session's own and writes nothing.
+    ///
+    /// # What it refuses
+    ///
+    /// A stale identity — [`CommandError::IdentityStaleRevision`] from
+    /// [`DocumentView::match_by_id`], because a `MatchId` carries the revision
+    /// it was minted from (D2v) and every position in `samples` belongs to that
+    /// revision — and the other identity refusals, unchanged.
+    pub fn preview_match(
+        &self,
+        id: MatchId,
+        samples: &PreviewSamples,
+    ) -> Result<MatchPreview, CommandError> {
+        self.with_workspace(|workspace| {
+            let snapshot = workspace.get_document(id.document)?;
+            let found = snapshot.view.match_by_id(id)?;
+            Ok(preview_one_match(&snapshot.view, found, samples))
+        })
+    } // End of function preview_match()
 
     /// Judges and analyses one drafted operation against the parse this
     /// session holds, and writes nothing (Phase 4-8).
@@ -4274,6 +4304,31 @@ pub fn analyze_match_candidate(
     session.analyze_match_candidate(id, &operation, base_revision, &acknowledgement)
 } // End of function analyze_match_candidate()
 
+/// Previews one match for one example — the samples a person chose for its
+/// `choice`, `random` and form variables and its regex captures — as an
+/// illustration, never an espanso expansion (Phase 4-17, ruling 26).
+///
+/// **The twenty-sixth workspace command, and a reader**: it writes nothing,
+/// reads nothing from disk, runs no command and reads no clipboard; `shell`,
+/// `script`, `clipboard` and `match` variables come back as placeholders. See
+/// [`WorkspaceSession::preview_match`]. Every text segment carries the file's
+/// or the sample's characters unchanged, markup included: escaping is the
+/// renderer's.
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`] and the identity codes — a stale identity
+/// among them (D2v). What the preview cannot produce is not an error: it is an
+/// unresolved segment with a code, and a limit reached is the answer's `limit`.
+#[tauri::command]
+pub fn preview_match(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+    samples: PreviewSamples,
+) -> Result<MatchPreview, CommandError> {
+    session.preview_match(id, &samples)
+} // End of function preview_match()
+
 /// Moves one local variable within its own `vars` list and saves the file
 /// (Phase 4-8, ruling 10).
 ///
@@ -4501,6 +4556,9 @@ mod bulk_check;
 
 #[cfg(test)]
 mod preservation_check;
+
+#[cfg(test)]
+mod preview_check;
 
 #[cfg(test)]
 mod tests {

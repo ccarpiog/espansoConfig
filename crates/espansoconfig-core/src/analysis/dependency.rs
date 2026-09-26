@@ -345,18 +345,7 @@ pub struct DocumentAnalysis {
 pub fn analyze_document(view: &DocumentView) -> DocumentAnalysis {
     let global_names = names_of(&view.global_vars);
     let mut global_usage = vec![Usage::default(); view.global_vars.len()];
-    let mut globals = {
-        let names = Names {
-            locals: &global_names,
-            captures: HashSet::new(),
-            globals: None,
-            synthesized_form: false,
-        };
-        let openers = scope_openers(view, None, true);
-        let mut builder = ScopeBuilder::new(&view.global_vars, &names, openers, None);
-        builder.variables_pass(&mut global_usage);
-        builder.finish()
-    };
+    let mut globals = global_scope(view, &global_names, &mut global_usage);
     let matches = view
         .matches
         .iter()
@@ -372,6 +361,72 @@ pub fn analyze_document(view: &DocumentView) -> DocumentAnalysis {
     }
     DocumentAnalysis { globals, matches }
 } // End of function analyze_document()
+
+/// The analysis of `global_vars` alone, with the references globals make to
+/// each other added into `global_usage`.
+///
+/// Shared by [`analyze_document`] and [`analyze_global_scope`], so the
+/// preview (Phase 4-17) reads the same global graph and cycles the document
+/// analysis reports.
+fn global_scope(
+    view: &DocumentView,
+    global_names: &HashMap<&str, Vec<usize>>,
+    global_usage: &mut [Usage],
+) -> ScopeAnalysis {
+    let names = global_scope_names(global_names);
+    let openers = scope_openers(view, None, true);
+    let mut builder = ScopeBuilder::new(&view.global_vars, &names, openers, None);
+    builder.variables_pass(global_usage);
+    builder.finish()
+} // End of function global_scope()
+
+/// The analysis of `global_vars` alone (Phase 4-17): the scope
+/// [`analyze_document`] answers as [`DocumentAnalysis::globals`], without
+/// analysing any match and without usage counted from matches.
+pub(crate) fn analyze_global_scope(view: &DocumentView) -> ScopeAnalysis {
+    let global_names = names_of(&view.global_vars);
+    let mut discarded = vec![Usage::default(); view.global_vars.len()];
+    global_scope(view, &global_names, &mut discarded)
+}
+
+/// Name resolution from `global_vars`' own point of view: globals see only
+/// each other — no captures, no synthesised form.
+pub(crate) fn global_scope_names<'a>(global_names: &'a HashMap<&'a str, Vec<usize>>) -> Names<'a> {
+    Names {
+        locals: global_names,
+        captures: HashSet::new(),
+        globals: None,
+        synthesized_form: false,
+    }
+}
+
+/// Name resolution from one match's point of view: its locals, then its regex
+/// captures (`None` when they could not be read), then the globals, then the
+/// synthesised shorthand form. **The one construction** the analysis and the
+/// preview (Phase 4-17) share, so the two cannot resolve a name differently.
+pub(crate) fn match_scope_names<'a>(
+    entry: &MatchView,
+    local_names: &'a HashMap<&'a str, Vec<usize>>,
+    captures: Option<&'a [String]>,
+    global_names: &'a HashMap<&'a str, Vec<usize>>,
+) -> Names<'a> {
+    Names {
+        locals: local_names,
+        captures: captures
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+            .collect::<HashSet<&str>>(),
+        globals: Some(global_names),
+        synthesized_form: synthesizes_form(entry),
+    }
+} // End of function match_scope_names()
+
+/// Whether `entry`'s shorthand `form:` synthesises [`SYNTHESIZED_FORM_NAME`]:
+/// a `form:` is written and no rendered content field is.
+pub(crate) fn synthesizes_form(entry: &MatchView) -> bool {
+    entry.content.form.is_some() && rendered_content(entry).is_empty()
+}
 
 /// Analyses one match of `view`. Usage of globals is not accumulated.
 pub fn analyze_match(view: &DocumentView, entry: &MatchView) -> MatchAnalysis {
@@ -390,17 +445,7 @@ fn analyze_match_into(
     let captures = regex_capture_names(entry).ok();
     let local_names = names_of(&entry.vars);
     let body = rendered_content(entry);
-    let synthesized_form = entry.content.form.is_some() && body.is_empty();
-    let names = Names {
-        locals: &local_names,
-        captures: captures
-            .iter()
-            .flatten()
-            .map(String::as_str)
-            .collect::<HashSet<&str>>(),
-        globals: Some(global_names),
-        synthesized_form,
-    };
+    let names = match_scope_names(entry, &local_names, captures.as_deref(), global_names);
     let openers = scope_openers(view, Some(entry), captures.is_some());
     let shorthand_form = entry
         .content
@@ -492,7 +537,7 @@ fn unknown_key(entries: &[crate::model::UnknownEntry], key: &str) -> bool {
 }
 
 /// Every name of a sequence, with the positions carrying it.
-fn names_of(variables: &[VariableView]) -> HashMap<&str, Vec<usize>> {
+pub(crate) fn names_of(variables: &[VariableView]) -> HashMap<&str, Vec<usize>> {
     let mut names: HashMap<&str, Vec<usize>> = HashMap::new();
     for (index, variable) in variables.iter().enumerate() {
         if let Some(name) = &variable.name {
@@ -572,7 +617,9 @@ fn variable_form_layout(variable: &VariableView) -> Option<FormLayoutAnalysis> {
 } // End of function variable_form_layout()
 
 /// The names a reference may resolve to, from one sequence's point of view.
-struct Names<'a> {
+///
+/// Built only by [`global_scope_names`] and [`match_scope_names`].
+pub(crate) struct Names<'a> {
     /// The sequence's own names.
     locals: &'a HashMap<&'a str, Vec<usize>>,
     /// The match's regex captures.
@@ -584,7 +631,7 @@ struct Names<'a> {
 }
 
 /// What a name resolved to.
-enum Resolution {
+pub(crate) enum Resolution {
     /// Exactly one declaration of this sequence.
     Local(usize),
     /// Several declarations of this sequence.
@@ -602,7 +649,7 @@ enum Resolution {
 impl Names<'_> {
     /// Resolves `name`: locals first, then captures, then globals, then the
     /// synthesised form.
-    fn resolve(&self, name: &str) -> Resolution {
+    pub(crate) fn resolve(&self, name: &str) -> Resolution {
         if let Some(positions) = self.locals.get(name) {
             return match positions.as_slice() {
                 [only] => Resolution::Local(*only),

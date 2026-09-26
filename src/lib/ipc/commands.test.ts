@@ -87,6 +87,7 @@ const {
   moveMatch,
   moveVariable,
   openWorkspace,
+  previewMatch,
   readBackupText,
   reloadDocument,
   saveMatch,
@@ -103,6 +104,9 @@ const EXPORTED_FUNCTIONS = Object.entries(commands)
 
 /** A match identity, exactly as it would have arrived from Rust. */
 const IDENTITY = { document: 3, revision: 'a'.repeat(64), node: 11 };
+
+/** A preview request with no sample at all. */
+const NO_SAMPLES = { selections: [], form_values: [], captures: [] } as const;
 
 /**
  * A backup batch identity, exactly as a listing would have produced it.
@@ -189,7 +193,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the twenty-five wire names, in order, and export no twenty-sixth wrapper', async () => {
+  it('call the twenty-six wire names, in order, and export no twenty-seventh wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -225,6 +229,7 @@ describe('the command wrappers', () => {
       { accepted: [] }
     );
     await moveVariable(IDENTITY, 1, { Front: {} }, 'a'.repeat(64), { accepted: [] });
+    await previewMatch(IDENTITY, NO_SAMPLES);
     await loadSidecar();
     await updateSidecar(SIDECAR_REQUEST);
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
@@ -248,6 +253,7 @@ describe('the command wrappers', () => {
       'moveMatch',
       'moveVariable',
       'openWorkspace',
+      'previewMatch',
       'readBackupText',
       'reloadDocument',
       'saveMatch',
@@ -255,7 +261,7 @@ describe('the command wrappers', () => {
       'saveRawDocument',
       'updateSidecar'
     ]);
-  }); // End of the "call the twenty-five wire names" case
+  }); // End of the "call the twenty-six wire names" case
 
   it('sends a variable reorder as an identity, a position, a placement, a base revision and an acknowledgement', async () => {
     // Phase 4-8's writer. Every address is a position in the revision sent
@@ -289,6 +295,20 @@ describe('the command wrappers', () => {
     await matchAuthoringSnapshot(IDENTITY);
     expect(calls[1]).toEqual({ command: 'match_authoring_snapshot', args: { id: IDENTITY } });
   }); // End of the "sends a candidate analysis" case
+
+  it('sends a preview as an identity and a closed set of samples, and nothing else', async () => {
+    // Phase 4-17's reader: the example travels as positions, field names and
+    // sample text — no span, no base revision beyond the identity's own, and
+    // no execution or clipboard flag of any kind.
+    const samples = {
+      selections: [{ variable: { Local: { index: 0 } }, index: 2 }],
+      form_values: [{ form: { ShorthandForm: {} }, field: 'name', value: '<b>x</b>' }],
+      captures: [{ name: 'num', value: '42' }]
+    } as const;
+    await previewMatch(IDENTITY, samples);
+    expect(calls[0]).toEqual({ command: 'preview_match', args: { id: IDENTITY, samples } });
+    expect(JSON.stringify(calls[0]?.args)).not.toContain('"span"');
+  }); // End of the "sends a preview" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence

@@ -100,10 +100,12 @@ import type {
   MatchCandidate,
   MatchDraft,
   MatchId,
+  MatchPreview,
   MatchView,
   NewMatch,
   NewMatchPosition,
   OwnedItemText,
+  PreviewSamples,
   ReconciliationBatch,
   SaveResult,
   SidecarState,
@@ -149,6 +151,7 @@ export const COMMAND_NAMES = [
   'match_authoring_snapshot',
   'analyze_match_candidate',
   'move_variable',
+  'preview_match',
   'load_sidecar',
   'update_sidecar'
 ] as const;
@@ -1019,6 +1022,37 @@ export async function moveVariable(
     acknowledgement
   });
 } // End of function moveVariable()
+
+/**
+ * Previews one snippet for one example (Phase 4-17).
+ *
+ * **A reader, and an illustration — never an espanso expansion.** Rust
+ * resolves the snippet's `{{references}}` with the analysis's own scanner and
+ * resolver, takes each `choice`/`random` entry, form field and regex capture
+ * from `samples` (a random example is the entry named, never a random draw),
+ * and answers every value it does not produce as a structured segment: a
+ * placeholder for `clipboard`, `shell`, `script` and `match` — **no command is
+ * run and the clipboard is never read** — or an unresolved segment with a code
+ * (a cycle, a missing sample, a date, which a later step previews, …). The
+ * answer is bounded; a limit reached is its `limit`. Identical requests give
+ * identical answers.
+ *
+ * **Every segment's text is the file's or the sample's characters, unchanged,
+ * markup included**: a renderer must draw it as text and escape it itself.
+ *
+ * @param id - The snippet, by identity. Every position in `samples` belongs to
+ *   the revision it carries.
+ * @param samples - The example: selections, form field values and capture
+ *   values. Pass empty lists for none.
+ * @returns The preview, or a failure — `noWorkspaceOpen` or an identity code,
+ *   `identityStaleRevision` among them.
+ */
+export async function previewMatch(
+  id: MatchId,
+  samples: PreviewSamples
+): Promise<CommandResult<MatchPreview>> {
+  return call<MatchPreview>('preview_match', { id, samples });
+} // End of function previewMatch()
 
 /**
  * Reads the open workspace's sidecar preferences (Phase 3-12, rulings 25-28).

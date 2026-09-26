@@ -305,7 +305,10 @@ import type {
   EdgeKind,
   IncompleteReason,
   Injection,
-  MalformedPlaceholder
+  MalformedPlaceholder,
+  PreviewLimit,
+  PreviewPlaceholder,
+  PreviewUnresolved
 } from '../ipc/types';
 import { locale } from '../stores/locale.svelte';
 import type { Locale } from './locale';
@@ -388,7 +391,10 @@ import {
   describeEdgeKind,
   describeIncompleteReason,
   describeInjection,
-  describeMalformedPlaceholder
+  describeMalformedPlaceholder,
+  describePreviewLimit,
+  describePreviewPlaceholder,
+  describePreviewUnresolved
 } from './codes';
 import type { DefaultRefusal, DisplayNameRefusal } from '../browser/preferences';
 import { translate, type TranslationKey, type TranslationParams } from './dictionaries';
@@ -468,6 +474,9 @@ export {
   describePathError,
   describeNotReencodable,
   describePresentationNote,
+  describePreviewLimit,
+  describePreviewPlaceholder,
+  describePreviewUnresolved,
   describeReapplyPlacement,
   describeReapplyRefusal,
   describeReapplyResolution,
@@ -515,6 +524,9 @@ export {
   moveSeamKey,
   nodeKindKey,
   pathErrorKey,
+  previewLimitKey,
+  previewPlaceholderKey,
+  previewUnresolvedKey,
   notReencodableKey,
   presentationNoteKey,
   reapplyPlacementKey,
@@ -766,6 +778,39 @@ export function tEdgeKind(kind: EdgeKind): string {
 export function tMalformedPlaceholder(reason: MalformedPlaceholder): string {
   return describeMalformedPlaceholder(locale.current, reason);
 } // End of function tMalformedPlaceholder()
+
+/**
+ * Renders why a preview segment is unresolved, in the current language (Phase
+ * 4-17).
+ *
+ * @param reason - A preview unresolved code as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tPreviewUnresolved(reason: PreviewUnresolved): string {
+  return describePreviewUnresolved(locale.current, reason);
+} // End of function tPreviewUnresolved()
+
+/**
+ * Renders what a preview placeholder stands for, in the current language
+ * (Phase 4-17). The authored command, arguments or trigger are not part of the
+ * sentence.
+ *
+ * @param placeholder - A preview placeholder as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tPreviewPlaceholder(placeholder: PreviewPlaceholder): string {
+  return describePreviewPlaceholder(locale.current, placeholder);
+} // End of function tPreviewPlaceholder()
+
+/**
+ * Renders which limit a preview reached, in the current language (Phase 4-17).
+ *
+ * @param limit - A preview limit as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tPreviewLimit(limit: PreviewLimit): string {
+  return describePreviewLimit(locale.current, limit);
+} // End of function tPreviewLimit()
 
 /**
  * Renders what became of a selection whose document moved on.

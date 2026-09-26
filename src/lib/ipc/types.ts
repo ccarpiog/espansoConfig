@@ -4733,6 +4733,162 @@ export interface MatchCandidate {
 }
 
 // ---------------------------------------------------------------------------
+// The illustrative preview — Phase 4-17
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a previewed value comes from — Rust's `PreviewSource`. A variable by
+ * position (in the revision the request's identity carries), the form a
+ * shorthand `form:` synthesises, or a regex capture by its own name. Never a
+ * byte offset.
+ */
+export type PreviewSource =
+  | { readonly Local: { readonly index: number } }
+  | { readonly Global: { readonly index: number } }
+  | { readonly ShorthandForm: Record<string, never> }
+  | { readonly Capture: { readonly name: string } };
+
+/** Which entry a `choice` or `random` variable yields for one example — Rust's `SelectionSample`. */
+export interface SelectionSample {
+  /** The variable. */
+  readonly variable: PreviewSource;
+  /** The entry's position in its `values` or `choices` list. */
+  readonly index: number;
+}
+
+/** What one form field holds for one example — Rust's `FormValueSample`. */
+export interface FormValueSample {
+  /** A `type: form` variable, or `{ ShorthandForm: {} }`. */
+  readonly form: PreviewSource;
+  /** The field's name. */
+  readonly field: string;
+  /** The sample value, used as given. */
+  readonly value: string;
+}
+
+/** What one regex capture matched for one example — Rust's `CaptureSample`. */
+export interface CaptureSample {
+  /** The capture group's name. */
+  readonly name: string;
+  /** The sample value, used as given. */
+  readonly value: string;
+}
+
+/**
+ * Every sample one preview request carries — Rust's `PreviewSamples`, read
+ * with unknown fields refused. When two samples address the same thing the
+ * first is used; a sample addressing nothing is ignored.
+ */
+export interface PreviewSamples {
+  /** Which entry each `choice` and `random` variable yields. */
+  readonly selections: readonly SelectionSample[];
+  /** What form fields hold. */
+  readonly form_values: readonly FormValueSample[];
+  /** What regex captures matched. */
+  readonly captures: readonly CaptureSample[];
+}
+
+/** The variant names of {@link PreviewPlaceholder}. */
+export type PreviewPlaceholderName = 'Clipboard' | 'Shell' | 'Script' | 'Match';
+
+/**
+ * What a placeholder stands for — Rust's `PreviewPlaceholder`. The clipboard is
+ * never read and no command or script is ever run; the operands are the
+ * authored text, for display beside the sentence.
+ */
+export type PreviewPlaceholder =
+  | { readonly Clipboard: Record<string, never> }
+  | { readonly Shell: { readonly command: string | null } }
+  | { readonly Script: { readonly args: readonly string[] | null } }
+  | { readonly Match: { readonly trigger: string | null } };
+
+/** Why a preview segment is unresolved — Rust's `PreviewUnresolved`. */
+export type PreviewUnresolved =
+  | 'UnknownName'
+  | 'AmbiguousName'
+  | 'Cycle'
+  | 'DepthLimit'
+  | 'WorkLimit'
+  | 'MissingSample'
+  | 'SampleOutOfRange'
+  | 'FormIsNotAScalar'
+  | 'FieldNotInLayout'
+  | 'SubnameUnsupported'
+  | 'InjectionUncertain'
+  | 'ValueUnreadable'
+  | 'AmbiguousScalar'
+  | 'DateNotPreviewed'
+  | 'KindNotPreviewed'
+  | 'UnverifiedLayoutReference'
+  | 'UnsupportedLayoutSyntax';
+
+/** Which limit a preview reached — Rust's `PreviewLimit`. */
+export type PreviewLimit = 'OutputBytes' | 'Segments' | 'Work';
+
+/**
+ * One piece of a previewed text — Rust's `PreviewSegment`. **Every `text` is
+ * the file's or the sample's characters, unchanged, markup included**: a
+ * renderer must draw it as text and escape it itself.
+ */
+export type PreviewSegment =
+  | { readonly Literal: { readonly text: string } }
+  | {
+      readonly Sample: {
+        /** The text this example produced. */
+        readonly text: string;
+        /** Where it came from. */
+        readonly source: PreviewSource;
+      };
+    }
+  | {
+      readonly Choice: {
+        /** The choice variable. */
+        readonly source: PreviewSource;
+        /** The selected `{label, id}` record's displayed label. */
+        readonly label: string;
+        /** Everything its returned id produced, substituted segments included. */
+        readonly segments: readonly PreviewSegment[];
+      };
+    }
+  | {
+      readonly Placeholder: {
+        /** The variable. */
+        readonly source: PreviewSource;
+        /** What it stands for. */
+        readonly placeholder: PreviewPlaceholder;
+      };
+    }
+  | {
+      readonly Unresolved: {
+        /** The text as written where it stands: a token, a placeholder or a field. */
+        readonly text: string;
+        /** What it resolved to, when it resolved to anything. */
+        readonly source: PreviewSource | null;
+        /** Why it is not previewed. */
+        readonly reason: PreviewUnresolved;
+      };
+    };
+
+/** One content field, previewed — Rust's `PreviewBody`. */
+export interface PreviewBody {
+  /** `Replace`, `Markdown`, `Html`, or `Form` for a shorthand layout. */
+  readonly field: ContentKind;
+  /** Its segments, in text order. */
+  readonly segments: readonly PreviewSegment[];
+}
+
+/**
+ * One snippet previewed for one example — `preview_match`'s answer (Phase
+ * 4-17). An illustration, never an espanso expansion.
+ */
+export interface MatchPreview {
+  /** Each rendered content field, or the shorthand layout; empty for none. */
+  readonly bodies: readonly PreviewBody[];
+  /** The first limit reached, when one was. */
+  readonly limit: PreviewLimit | null;
+}
+
+// ---------------------------------------------------------------------------
 // Projections onto the name unions
 // ---------------------------------------------------------------------------
 

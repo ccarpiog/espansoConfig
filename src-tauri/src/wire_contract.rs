@@ -1611,8 +1611,11 @@ fn every_edit_error_variant_crosses_as_an_object() {
 /// writer, the dedicated variable-reorder writer ruling 10 of
 /// `docs/decisions/4-split-notes.md` names, and ends in the same `run_one_save`
 /// ([`the_variable_reorder_writer_reaches_the_one_tail_and_no_lock`]).
+///
+/// Phase 4-17 adds `preview_match`, a reader, taking the workspace surface to
+/// twenty-six and the whole to twenty-seven.
 #[test]
-fn the_registered_commands_are_the_workspace_twenty_five_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_twenty_six_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1621,8 +1624,8 @@ fn the_registered_commands_are_the_workspace_twenty_five_and_the_menu_command() 
     );
     assert_eq!(
         workspace.len(),
-        25,
-        "the frontend declares fourteen read-only commands, nine that write a user's file \
+        26,
+        "the frontend declares fifteen read-only commands, nine that write a user's file \
          and the two sidecar commands: {workspace:?}"
     );
     assert!(
@@ -1662,6 +1665,10 @@ fn the_registered_commands_are_the_workspace_twenty_five_and_the_menu_command() 
         );
     } // End of the loop over Phase 4-8's two readers
     assert!(
+        workspace.contains("preview_match") && !writing.contains(&"preview_match"),
+        "preview_match is Phase 4-17's reader and must be declared, never as a writer"
+    );
+    assert!(
         workspace.contains("match_item_text") && !writing.contains(&"match_item_text"),
         "match_item_text is Phase 3-7's reader and must be declared, never as a writer"
     );
@@ -1699,8 +1706,8 @@ fn the_registered_commands_are_the_workspace_twenty_five_and_the_menu_command() 
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        26,
-        "Phase 4-8 registers twenty-five workspace commands and one menu command, and no more: {registered:?}"
+        27,
+        "Phase 4-17 registers twenty-six workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1708,7 +1715,7 @@ fn the_registered_commands_are_the_workspace_twenty_five_and_the_menu_command() 
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_twenty_five_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_twenty_six_and_the_menu_command()
 
 /// The lock and write primitives no single-save writer and no reader of Phase
 /// 4-8 may name: each would be a second lock or a second route to the disk.
@@ -1757,6 +1764,7 @@ fn the_variable_reorder_writer_reaches_the_one_tail_and_no_lock() {
         "analyze_one_candidate",
         "match_authoring_snapshot",
         "analyze_match_candidate",
+        "preview_match",
     ] {
         let body = function_body(&commands, name);
         for forbidden in SECOND_LOCK_IDENTIFIERS {
@@ -1771,6 +1779,7 @@ fn the_variable_reorder_writer_reaches_the_one_tail_and_no_lock() {
         "analyze_one_candidate",
         "match_authoring_snapshot",
         "analyze_match_candidate",
+        "preview_match",
     ] {
         let body = function_body(&commands, reader);
         for tail in ["run_one_save", "with_open", "BackupSession"] {
@@ -2051,6 +2060,161 @@ fn the_authoring_shapes_declare_exactly_what_rust_writes_and_reads() {
         );
     } // End of the loop over the inbound operations
 } // End of function the_authoring_shapes_declare_exactly_what_rust_writes_and_reads()
+
+/// Phase 4-17's preview shapes are declared in `types.ts` exactly as `serde`
+/// writes them, and the inbound samples exactly as they read.
+///
+/// The answer is sampled from a real preview of an inline synthetic fixture
+/// that produces every segment kind; each tagged union is compared variant by
+/// variant against the Rust declaration, and each string union member by
+/// member.
+#[test]
+fn the_preview_shapes_declare_exactly_what_rust_writes_and_reads() {
+    use espansoconfig_core::preview::{
+        preview_match, CaptureSample, FormValueSample, PreviewPlaceholder, PreviewSamples,
+        PreviewSource, SelectionSample,
+    };
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let fixture = concat!(
+        "matches:\n",
+        "  - trigger: ':p'\n",
+        "    replace: 'a {{pick}} {{clip}} {{nobody}} {{e}}'\n",
+        "    vars:\n",
+        "      - name: pick\n",
+        "        type: choice\n",
+        "        params:\n",
+        "          values:\n",
+        "            - label: Shown\n",
+        "              id: returned\n",
+        "      - name: clip\n",
+        "        type: clipboard\n",
+        "      - name: e\n",
+        "        type: echo\n",
+        "        params:\n",
+        "          echo: echoed\n",
+    );
+    let context = DocumentContext {
+        id: DocumentId(0),
+        path: PathBuf::from("/nowhere/match/preview.yml"),
+        relative_path: PathBuf::from("match/preview.yml"),
+        kind: FileKind::MatchFile,
+        disabled: false,
+    };
+    let document = project_source(&context, fixture);
+    let samples = PreviewSamples {
+        selections: vec![SelectionSample {
+            variable: PreviewSource::Local { index: 0 },
+            index: 0,
+        }],
+        form_values: vec![FormValueSample {
+            form: PreviewSource::ShorthandForm {},
+            field: "f".to_owned(),
+            value: "v".to_owned(),
+        }],
+        captures: vec![CaptureSample {
+            name: "c".to_owned(),
+            value: "v".to_owned(),
+        }],
+    };
+    let preview = preview_match(&document.view, &document.view.matches[0], &samples);
+    let structs: Vec<(&str, Value)> = vec![
+        ("MatchPreview", json_of(&preview)),
+        ("PreviewBody", json_of(&preview.bodies[0])),
+        ("PreviewSamples", json_of(&samples)),
+        ("SelectionSample", json_of(&samples.selections[0])),
+        ("FormValueSample", json_of(&samples.form_values[0])),
+        ("CaptureSample", json_of(&samples.captures[0])),
+    ];
+    for (interface, value) in &structs {
+        assert_same_names(
+            &format!("interface {interface}"),
+            &json_keys(value),
+            &interface_fields(&source, interface),
+        );
+    } // End of the loop over the written structs
+
+    // One segment of each kind, from the real preview.
+    let mut segments: Vec<Value> = Vec::new();
+    for segment in &preview.bodies[0].segments {
+        let json = json_of(segment);
+        if !segments
+            .iter()
+            .any(|seen| variant_name(seen) == variant_name(&json))
+        {
+            segments.push(json);
+        }
+    } // End of the loop over the preview's segments
+    let sources: Vec<Value> = [
+        PreviewSource::Local { index: 0 },
+        PreviewSource::Global { index: 0 },
+        PreviewSource::ShorthandForm {},
+        PreviewSource::Capture {
+            name: "c".to_owned(),
+        },
+    ]
+    .iter()
+    .map(json_of)
+    .collect();
+    let placeholders: Vec<Value> = [
+        PreviewPlaceholder::Clipboard {},
+        PreviewPlaceholder::Shell {
+            command: Some("c".to_owned()),
+        },
+        PreviewPlaceholder::Script {
+            args: Some(vec!["a".to_owned()]),
+        },
+        PreviewPlaceholder::Match {
+            trigger: Some(":t".to_owned()),
+        },
+    ]
+    .iter()
+    .map(json_of)
+    .collect();
+    let tables: [(&str, Vec<Value>); 3] = [
+        ("PreviewSegment", segments),
+        ("PreviewSource", sources),
+        ("PreviewPlaceholder", placeholders),
+    ];
+    let preview_rs = read_repository_file("crates/espansoconfig-core/src/preview.rs");
+    let mut checked = 0usize;
+    for (union, samples) in tables {
+        let declared = declared_variants(&preview_rs, union);
+        let sampled: BTreeSet<String> = samples.iter().map(variant_name).collect();
+        assert_eq!(declared, sampled, "one sample per {union} variant");
+        let tags: BTreeSet<String> = object_union_tags(&source, union).into_keys().collect();
+        assert_same_names(&format!("type {union}"), &sampled, &tags);
+        for sample in &samples {
+            let variant = variant_name(sample);
+            let fields = tagged_variant_fields(&source, union, &variant)
+                .unwrap_or_else(|| panic!("type {union} declares no payload for {variant}"));
+            assert_same_names(
+                &format!("the {variant} payload of type {union}"),
+                &json_keys(&sample[&variant]),
+                &fields,
+            );
+            checked += 1;
+        } // End of the loop over one union's samples
+    } // End of the loop over the three tagged unions
+    assert_eq!(checked, 5 + 4 + 4, "every variant was compared");
+    assert_same_names(
+        "type PreviewPlaceholderName",
+        &declared_variants(&preview_rs, "PreviewPlaceholder"),
+        &union_members(&source, "PreviewPlaceholderName"),
+    );
+    for union in ["PreviewUnresolved", "PreviewLimit"] {
+        assert_same_names(
+            &format!("type {union}"),
+            &declared_variants(&preview_rs, union),
+            &union_members(&source, union),
+        );
+    } // End of the loop over the two string unions
+
+    // The inbound samples read back exactly as written.
+    let written = json_of(&samples);
+    let read: PreviewSamples =
+        serde_json::from_value(written.clone()).expect("the samples read back");
+    assert_eq!(json_of(&read), written);
+} // End of function the_preview_shapes_declare_exactly_what_rust_writes_and_reads()
 
 /// The names no read of the backup tree may so much as mention.
 ///
@@ -5341,8 +5505,8 @@ fn the_sidecar_commands_run_off_the_main_thread() {
         } // End of the loop over one function's attributes
     } // End of the loop over the items of commands.rs
     assert_eq!(
-        commands, 25,
-        "the twenty-five workspace commands were all read"
+        commands, 26,
+        "the twenty-six workspace commands were all read"
     );
     assert_eq!(
         asynchronous,

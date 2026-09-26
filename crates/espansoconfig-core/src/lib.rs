@@ -155,6 +155,13 @@
 //!   the candidate plus the match's analysis in it. Pure: no lock, no I/O, and
 //!   nothing in it is accepted back as an address.
 //!
+//! - **4-17** — [`preview`]: the pure, bounded illustrative preview of one
+//!   match for one example — references resolved through the analysis's own
+//!   scanner and resolver, `choice`/`random` entries and form fields from the
+//!   request's samples, placeholders (never execution, never a clipboard read)
+//!   for `clipboard`, `shell`, `script` and `match`, and structured unresolved
+//!   segments for everything else. No I/O, no clock, no random draw.
+//!
 //! [`persist`] holds the write primitive, the transaction around it and the
 //! backup step.
 
@@ -174,6 +181,7 @@ pub mod emit;
 pub mod model;
 pub mod patch;
 pub mod persist;
+pub mod preview;
 pub mod reconcile;
 pub mod syntax;
 pub mod validate;
