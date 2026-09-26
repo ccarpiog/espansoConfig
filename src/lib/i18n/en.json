@@ -1125,6 +1125,8 @@
   "code.findingCode.documentDoesNotParse": "espansoConfig’s YAML parser cannot read this text. It parses with a different library than espanso does, so this is a warning rather than a verdict — but a file espanso cannot read does not load.",
   "code.findingCode.duplicateKeepsTriggerDefinition": "The duplicate keeps the same trigger definition as its source, and espansoConfig cannot determine how espanso chooses between overlapping definitions.",
   "code.findingCode.newMatchRepeatsLiteralTrigger": "The new snippet repeats trigger text another snippet in this list already writes, and espansoConfig cannot determine how espanso will handle overlapping definitions.",
+  "code.findingCode.variableDependencyCycle": "This change puts the variable “{name}” in a dependency cycle (variables involved: {size}), as espansoConfig reads depends_on and the references inside parameters. espansoConfig cannot determine how espanso will evaluate it.",
+  "code.findingCode.dependencyHasNoDeclaration": "This change makes a variable depend on “{name}”, and nothing this app can see declares a variable of that name.",
 
   "code.editError.sourceDoesNotParse": "espansoConfig’s YAML parser could not read this file, so nothing in it can be located.",
   "code.editError.unresolvable": "The place this change names does not exist in the file.",

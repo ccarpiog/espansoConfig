@@ -1125,6 +1125,8 @@
   "code.findingCode.documentDoesNotParse": "El analizador de YAML de espansoConfig no puede leer este texto. Analiza con una biblioteca distinta de la que usa espanso, así que esto es un aviso y no un veredicto, pero un archivo que espanso no pueda leer no se carga.",
   "code.findingCode.duplicateKeepsTriggerDefinition": "El duplicado mantiene la misma definición de disparador que su origen, y espansoConfig no puede determinar cómo elige espanso entre definiciones superpuestas.",
   "code.findingCode.newMatchRepeatsLiteralTrigger": "El fragmento nuevo repite un texto de disparador que ya escribe otro fragmento de esta lista, y espansoConfig no puede determinar cómo tratará espanso las definiciones superpuestas.",
+  "code.findingCode.variableDependencyCycle": "Este cambio deja la variable «{name}» en un ciclo de dependencias (variables implicadas: {size}), según lee espansoConfig depends_on y las referencias dentro de los parámetros. espansoConfig no puede determinar cómo lo evaluará espanso.",
+  "code.findingCode.dependencyHasNoDeclaration": "Este cambio hace que una variable dependa de «{name}», y nada de lo que esta aplicación puede ver declara una variable con ese nombre.",
 
   "code.editError.sourceDoesNotParse": "El analizador de YAML de espansoConfig no pudo leer este archivo, así que no se puede localizar nada dentro de él.",
   "code.editError.unresolvable": "El lugar que nombra este cambio no existe en el archivo.",

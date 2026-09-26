@@ -140,6 +140,7 @@ use serde::de::Deserializer;
 use serde::ser::{SerializeStructVariant, Serializer};
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::{batch_operates_on_variables, variable_operation_findings};
 use crate::model::{DocumentContext, DocumentView, MatchView, TriggerKind, ValueView};
 use crate::patch::{
     apply_edits, insertion_landings, DocumentEdit, DocumentPath, DuplicateItem, EditError,
@@ -1253,7 +1254,7 @@ pub fn save_document(request: SaveRequest<'_>) -> Result<SavedDocument, SaveErro
                 SaveContent::Edits(edits) => edits,
                 SaveContent::ReplaceText(_) => &[],
             };
-            findings_of(context, &target, candidate, edits)?
+            findings_of(context, &target, source, candidate, edits)?
         }
         Candidate::Replaced(_) => findings_of_replacement(context, candidate),
     };
@@ -1379,7 +1380,7 @@ pub fn preflight_edits(
     }
     let patched = apply_edits(source, edits).map_err(SaveError::Patch)?;
     let candidate = patched.text();
-    let findings = findings_of(context, &context.path, candidate, edits)?;
+    let findings = findings_of(context, &context.path, source, candidate, edits)?;
     let verdict = verdict(&findings, acknowledgement);
     Ok(SavePreflight {
         candidate: ContentRevision::of_bytes(candidate.as_bytes()),
@@ -1541,6 +1542,7 @@ fn read_target_under_the_lock(
 fn findings_of(
     context: &DocumentContext,
     target: &Path,
+    source: &str,
     candidate: &str,
     edits: &[DocumentEdit],
 ) -> Result<Vec<Finding>, SaveError> {
@@ -1553,7 +1555,7 @@ fn findings_of(
     let revision = ContentRevision::of_bytes(candidate.as_bytes());
     let view = DocumentView::project(context, candidate, revision, &index, &trivia);
     let mut findings = validate(&view);
-    // The two operation-specific findings, appended after the projection pass so
+    // The operation-specific findings, appended after the projection pass so
     // that the editor-model findings keep their precedence in `verdict`: an
     // `EditorModelError` anywhere refuses the save whatever else is present.
     for edit in edits {
@@ -1584,6 +1586,24 @@ fn findings_of(
             findings.extend(new_match_repeats_literal_trigger(&items, landed, revision));
         } // End of the loop over the items this insertion wrote
     } // End of the loop over the batch's insertions
+      // Phase 4-7: the dependency suspicions a variable operation owes, and only a
+      // variable operation — an unrelated batch never pays for the original's
+      // projection and never acquires one. The original is `source`, the text the
+      // batch was applied to; a finding needs it because only a condition the
+      // candidate has and the original did not is reported.
+    if batch_operates_on_variables(edits) {
+        let original = SyntaxIndex::parse(source).ok().map(|index| {
+            let trivia = TriviaIndex::scan(source, &index);
+            let before = ContentRevision::of_bytes(source.as_bytes());
+            DocumentView::project(context, source, before, &index, &trivia)
+        });
+        findings.extend(variable_operation_findings(
+            original.as_ref(),
+            &view,
+            edits,
+            revision,
+        ));
+    }
     Ok(findings)
 } // End of function findings_of()
 

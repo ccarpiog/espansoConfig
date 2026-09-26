@@ -2654,6 +2654,15 @@ fn finding_code_samples() -> Vec<FindingCode> {
         FindingCode::NewMatchRepeatsLiteralTrigger {
             revision: a_revision(),
         },
+        FindingCode::VariableDependencyCycle {
+            revision: a_revision(),
+            name: "greeting".to_owned(),
+            size: 2,
+        },
+        FindingCode::DependencyHasNoDeclaration {
+            revision: a_revision(),
+            name: "greeting".to_owned(),
+        },
     ]
 } // End of function finding_code_samples()
 
@@ -2984,7 +2993,7 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
         variants += samples.len();
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        variants, 227,
+        variants, 229,
         "Phase 2b-1 put 157 variants on the wire, Phase 2b-2a added NotReencodable's \
          eight, Phase 2b-2c-1 added EditError's eight sequence-item refusals, \
          Phase 2b-2c-2's fix round made PresentationNote a two-variant union, \
@@ -3005,7 +3014,9 @@ fn every_save_transaction_sample_list_is_its_enums_declaration() {
          VerificationFailure::SequenceStyleChanged, and Phase 3-7 added the local \
          raw-item edit's thirteen — six EditError refusals and seven \
          VerificationFailure properties, and Phase 3-10 added \
-         VerificationFailure::PlainSourceNotReadBack; \
+         VerificationFailure::PlainSourceNotReadBack, and Phase 4-7 added \
+         FindingCode::VariableDependencyCycle and \
+         FindingCode::DependencyHasNoDeclaration; \
          this list now holds {variants}"
     );
 } // End of function every_save_transaction_sample_list_is_its_enums_declaration()
@@ -3339,7 +3350,7 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
     } // End of the loop over the save-transaction enums
     assert_eq!(
         (checked, nested, unit),
-        (144, 12, 71),
+        (146, 12, 71),
         "Phase 2b-1 put 94 struct variants, 11 newtype variants and 52 unit \
          variants on this wire, Phase 2b-2a's NotReencodable added one newtype \
          and seven unit ones, Phase 2b-2c-1's eight sequence-item refusals are \
@@ -3359,8 +3370,9 @@ fn every_save_transaction_variant_declares_exactly_the_operands_serde_writes() {
          ShapeSwitchUnsupported and ItemNotInserted, and so are Phase 3-3's \
          FlowListTriviaAmbiguous, FlowListLayoutUnsupported and \
          SequenceStyleChanged, and Phase 3-7's thirteen raw-item variants are \
-         thirteen more, and Phase 3-10's PlainSourceNotReadBack is one more; \
-         a struct variant that became a skip is a hole"
+         thirteen more, and Phase 3-10's PlainSourceNotReadBack is one more, \
+         and Phase 4-7's VariableDependencyCycle and DependencyHasNoDeclaration \
+         are two more; a struct variant that became a skip is a hole"
     );
 } // End of function every_save_transaction_variant_declares_exactly_the_operands_serde_writes()
 
@@ -3638,7 +3650,7 @@ fn every_save_transaction_placeholder_names_an_operand_serde_writes() {
         } // End of the loop over one enum's samples
     } // End of the loop over the save-transaction enums
     assert_eq!(
-        checked, 227,
+        checked, 229,
         "the placeholder check stopped covering every variant"
     );
 } // End of function every_save_transaction_placeholder_names_an_operand_serde_writes()

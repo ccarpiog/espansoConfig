@@ -1376,7 +1376,9 @@ export type FindingCodeName =
   | 'RegexDoesNotCompile'
   | 'DocumentDoesNotParse'
   | 'DuplicateKeepsTriggerDefinition'
-  | 'NewMatchRepeatsLiteralTrigger';
+  | 'NewMatchRepeatsLiteralTrigger'
+  | 'VariableDependencyCycle'
+  | 'DependencyHasNoDeclaration';
 
 /** What the semantic gate noticed about a candidate, as a code plus operands. */
 export type FindingCode =
@@ -1495,6 +1497,40 @@ export type FindingCode =
          * Opaque, and never rendered.
          */
         readonly revision: ContentRevision;
+      };
+    }
+  | {
+      /**
+       * A variable change leaves a local variable in a dependency cycle the
+       * file did not have before — a new cycle, or one that grew or merged.
+       *
+       * Produced only for a save that changes a snippet's variables, never by
+       * the semantic rules, and it is **acknowledgeable**: the graph is this
+       * app's reading (explicit `depends_on` plus references inside injected
+       * parameter values), not espanso's resolver.
+       */
+      readonly VariableDependencyCycle: {
+        /** The content revision of the exact candidate. Opaque, never rendered. */
+        readonly revision: ContentRevision;
+        /** The cycle's first variable in authored order, as the file writes it. */
+        readonly name: string;
+        /** How many variables the cycle holds; `1` is a self-dependency. */
+        readonly size: number;
+      };
+    }
+  | {
+      /**
+       * A variable change makes a `depends_on` entry name something no visible
+       * declaration carries, under a scope this app can see is closed.
+       *
+       * Produced only for a save that adds such an entry, never under an open
+       * scope (imports among them), and it is **acknowledgeable**.
+       */
+      readonly DependencyHasNoDeclaration: {
+        /** The content revision of the exact candidate. Opaque, never rendered. */
+        readonly revision: ContentRevision;
+        /** The named dependency, as the file writes it. */
+        readonly name: string;
       };
     };
 

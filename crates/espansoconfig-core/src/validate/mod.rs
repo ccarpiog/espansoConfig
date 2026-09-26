@@ -97,7 +97,15 @@
 //! while a check that lived only in the window would be bypassable by any other
 //! caller of the command.
 //!
-//! `tests/validate_semantics.rs`'s reachability check names all three as its
+//! Phase 4-7 added [`FindingCode::VariableDependencyCycle`] and
+//! [`FindingCode::DependencyHasNoDeclaration`] on the same terms once more:
+//! produced only by the save transaction, for a batch holding a **variable
+//! operation** that introduces or worsens the condition, content-addressed by the
+//! candidate's own [`ContentRevision`] — see [`crate::analysis::findings`]. An
+//! unrelated save of a file whose dependency graph is already imperfect acquires
+//! no new acknowledgement.
+//!
+//! `tests/validate_semantics.rs`'s reachability check names all five as its
 //! exemptions rather than losing the check, and asserts that no fixture reaches
 //! any of them through [`validate`].
 //!
@@ -219,13 +227,15 @@ impl fmt::Display for FindingClass {
 /// What a save transaction noticed about a candidate, as a code plus its
 /// operands.
 ///
-/// **Ten of the thirteen are [`validate`]'s.** The other three —
+/// **Ten of the fifteen are [`validate`]'s.** The other five —
 /// [`FindingCode::DocumentDoesNotParse`], produced only by
 /// [`crate::persist::save_document`]'s whole-text replacement mode,
 /// [`FindingCode::DuplicateKeepsTriggerDefinition`], produced only by the same
-/// transaction's duplicate batches, and
+/// transaction's duplicate batches,
 /// [`FindingCode::NewMatchRepeatsLiteralTrigger`], produced only by its
-/// insertion batches — live here because they must be acknowledgeable, and an
+/// insertion batches, and [`FindingCode::VariableDependencyCycle`] and
+/// [`FindingCode::DependencyHasNoDeclaration`], produced only by its variable
+/// operations — live here because they must be acknowledgeable, and an
 /// acknowledgement is a multiset of [`Finding`]s; the module documentation says
 /// the rest.
 ///
@@ -470,6 +480,49 @@ pub enum FindingCode {
         /// names it.
         revision: ContentRevision,
     },
+    /// A variable operation leaves a local variable in a dependency cycle the
+    /// original did not have — a new cycle, or one that grew or merged.
+    ///
+    /// Produced only by [`crate::persist::save_document`] (and its preflight),
+    /// through [`crate::analysis::variable_operation_findings`], for a batch
+    /// that operates on a match's `vars`. The graph is the analysis's: explicit
+    /// `depends_on` edges and edges inferred from references inside parameter
+    /// values when injection is certainly enabled.
+    ///
+    /// [`FindingClass::SuspiciousButPermitted`]: the graph is this crate's
+    /// model, not espanso's resolver, so the sentence claims a cycle in what
+    /// this application reads and the inability to determine how espanso will
+    /// evaluate it — never that espanso will fail.
+    VariableDependencyCycle {
+        /// The [`ContentRevision`] of the **exact candidate** this finding is
+        /// about, so consent for one candidate cannot be spent on another.
+        ///
+        /// **Never rendered.**
+        revision: ContentRevision,
+        /// The name of the cycle's first member in authored order, as the file
+        /// writes it — the variable the finding is attached to.
+        name: String,
+        /// How many variables the cycle holds; `1` is a self-dependency.
+        size: usize,
+    },
+    /// A variable operation makes a `depends_on` entry name something no
+    /// visible declaration carries, under a scope this crate can see is closed.
+    ///
+    /// Produced only by [`crate::persist::save_document`] (and its preflight),
+    /// through [`crate::analysis::variable_operation_findings`], and only when
+    /// the operation adds an occurrence of such a name. Under an open scope —
+    /// imports, an unreadable `vars` or `global_vars`, unknown regex captures —
+    /// it is never produced.
+    ///
+    /// [`FindingClass::SuspiciousButPermitted`], for rule 5's reason: whether a
+    /// name is in scope rests on this crate's model of espanso's scoping.
+    DependencyHasNoDeclaration {
+        /// The [`ContentRevision`] of the **exact candidate** this finding is
+        /// about. **Never rendered.**
+        revision: ContentRevision,
+        /// The named dependency, as the file writes it.
+        name: String,
+    },
 } // End of enum FindingCode
 
 impl FindingCode {
@@ -479,13 +532,15 @@ impl FindingCode {
     /// variant is a compile error there and a length error here, so a code no
     /// fixture reaches cannot hide.
     ///
-    /// **Ten of the thirteen are [`validate`]'s**, and the other three —
+    /// **Ten of the fifteen are [`validate`]'s**, and the other five —
     /// [`FindingCode::DocumentDoesNotParse`],
-    /// [`FindingCode::DuplicateKeepsTriggerDefinition`] and
-    /// [`FindingCode::NewMatchRepeatsLiteralTrigger`] — are the save
+    /// [`FindingCode::DuplicateKeepsTriggerDefinition`],
+    /// [`FindingCode::NewMatchRepeatsLiteralTrigger`],
+    /// [`FindingCode::VariableDependencyCycle`] and
+    /// [`FindingCode::DependencyHasNoDeclaration`] — are the save
     /// transaction's. The reachability test that reads this table names all
-    /// three explicitly rather than skipping any code it cannot produce.
-    pub const ALL_NAMES: [&'static str; 13] = [
+    /// five explicitly rather than skipping any code it cannot produce.
+    pub const ALL_NAMES: [&'static str; 15] = [
         "MatchHasNoContentField",
         "MatchHasSeveralContentFields",
         "MatchHasNoTriggerField",
@@ -499,6 +554,8 @@ impl FindingCode {
         "DocumentDoesNotParse",
         "DuplicateKeepsTriggerDefinition",
         "NewMatchRepeatsLiteralTrigger",
+        "VariableDependencyCycle",
+        "DependencyHasNoDeclaration",
     ];
 
     /// A stable identifier for this code, without its operands.
@@ -521,6 +578,8 @@ impl FindingCode {
                 "DuplicateKeepsTriggerDefinition"
             }
             FindingCode::NewMatchRepeatsLiteralTrigger { .. } => "NewMatchRepeatsLiteralTrigger",
+            FindingCode::VariableDependencyCycle { .. } => "VariableDependencyCycle",
+            FindingCode::DependencyHasNoDeclaration { .. } => "DependencyHasNoDeclaration",
         }
     } // End of function name() for FindingCode
 
@@ -566,7 +625,11 @@ impl FindingCode {
     ///   the same rule: espanso has no trigger-uniqueness rule this crate can
     ///   read, so the finding claims repetition of text and the inability to
     ///   determine what espanso will do with overlapping definitions, and
-    ///   nothing more.
+    ///   nothing more;
+    /// - a variable operation that **introduces a dependency cycle** or **a
+    ///   `depends_on` name nothing visible declares** is **suspicious**: the
+    ///   graph and the scope are this crate's model of espanso's resolver, not a
+    ///   measurement of it.
     pub fn class(&self) -> FindingClass {
         match self {
             FindingCode::MatchHasNoContentField
@@ -581,7 +644,9 @@ impl FindingCode {
             | FindingCode::ReferenceHasNoDeclaration { .. }
             | FindingCode::DocumentDoesNotParse { .. }
             | FindingCode::DuplicateKeepsTriggerDefinition { .. }
-            | FindingCode::NewMatchRepeatsLiteralTrigger { .. } => {
+            | FindingCode::NewMatchRepeatsLiteralTrigger { .. }
+            | FindingCode::VariableDependencyCycle { .. }
+            | FindingCode::DependencyHasNoDeclaration { .. } => {
                 FindingClass::SuspiciousButPermitted
             }
         }
@@ -603,6 +668,15 @@ impl fmt::Display for FindingCode {
             }
             FindingCode::ReferenceHasNoDeclaration { name } => {
                 write!(formatter, "reference {name:?} has no declaration")
+            }
+            FindingCode::VariableDependencyCycle { name, size, .. } => {
+                write!(
+                    formatter,
+                    "variable {name:?} is in a dependency cycle of {size}"
+                )
+            }
+            FindingCode::DependencyHasNoDeclaration { name, .. } => {
+                write!(formatter, "dependency {name:?} has no declaration")
             }
             FindingCode::RegexDoesNotCompile { detail } => {
                 write!(formatter, "regex does not compile: {detail}")
@@ -869,7 +943,7 @@ fn check_variable_type(variable: &VariableView, findings: &mut Vec<Finding>) {
 /// The second gap is the YAML merge key `<<` inside a `params` mapping that
 /// *was* read: it takes entries from an anchor defined elsewhere, so the
 /// visible keys are not all the keys.
-fn params_are_readable(variable: &VariableView) -> bool {
+pub(crate) fn params_are_readable(variable: &VariableView) -> bool {
     let unreadable_shape = variable.unknown_entries.iter().any(|entry| {
         entry.key.as_deref() == Some("params")
             && !matches!(entry.value_kind, ValueKind::Scalar | ValueKind::Sequence)
@@ -891,18 +965,12 @@ fn params_are_readable(variable: &VariableView) -> bool {
 /// `regex` at all — `Some(empty)` is returned instead, which is a different
 /// answer.
 fn check_regex(entry: &MatchView, findings: &mut Vec<Finding>) -> Option<Vec<String>> {
-    let Some(pattern) = &entry.trigger.regex else {
-        return Some(Vec::new());
-    };
-    match Regex::new(&pattern.text) {
-        Ok(compiled) => Some(
-            compiled
-                .capture_names()
-                .flatten()
-                .map(str::to_owned)
-                .collect(),
-        ),
+    match regex_capture_names(entry) {
+        Ok(captures) => Some(captures),
         Err(error) => {
+            let Some(pattern) = &entry.trigger.regex else {
+                return None;
+            };
             findings.push(Finding {
                 code: FindingCode::RegexDoesNotCompile {
                     detail: error.to_string(),
@@ -915,6 +983,24 @@ fn check_regex(entry: &MatchView, findings: &mut Vec<Finding>) -> Option<Vec<Str
         }
     }
 } // End of function check_regex()
+
+/// The named capture groups of `entry`'s `regex` trigger — empty when it has
+/// none — or the `regex` crate's error when the pattern does not compile here.
+///
+/// Shared by rule 6 and [`crate::analysis`], so the two read one set of
+/// captures.
+pub(crate) fn regex_capture_names(entry: &MatchView) -> Result<Vec<String>, regex::Error> {
+    let Some(pattern) = &entry.trigger.regex else {
+        return Ok(Vec::new());
+    };
+    Regex::new(&pattern.text).map(|compiled| {
+        compiled
+            .capture_names()
+            .flatten()
+            .map(str::to_owned)
+            .collect()
+    })
+} // End of function regex_capture_names()
 
 /// Rule 5 — `{{references}}` that resolve, **where statically knowable**.
 ///
@@ -940,36 +1026,31 @@ fn check_references(
     let Some(scope) = closed_name_scope(view, entry, globals, captures) else {
         return;
     };
-    let Some(pattern) = reference_pattern() else {
-        return;
-    };
     for (key, scalar) in rendered_content(entry) {
-        report_unresolved(pattern, &scope, scalar, field_path(entry, key), findings);
+        report_unresolved(&scope, scalar, field_path(entry, key), findings);
     }
     for variable in &entry.vars {
-        check_parameter_references(pattern, &scope, variable, findings);
+        check_parameter_references(&scope, variable, findings);
     }
 } // End of function check_references()
 
 /// Reports every reference of one scalar that `scope` cannot account for.
+///
+/// The references are read by [`crate::analysis::scan_references`], the one
+/// scanner over [`REFERENCE_PATTERN`], so rule 5 and the dependency analysis
+/// cannot disagree about what a reference is.
 fn report_unresolved(
-    pattern: &Regex,
     scope: &NameScope<'_>,
     scalar: &ScalarView,
     path: Option<DocumentPath>,
     findings: &mut Vec<Finding>,
 ) {
-    for capture in pattern.captures_iter(&scalar.text) {
-        let Some(name) = capture.name("name") else {
-            continue;
-        };
-        if scope.contains(name.as_str()) {
+    for token in crate::analysis::scan_references(&scalar.text) {
+        if scope.contains(&token.name) {
             continue;
         }
         findings.push(Finding {
-            code: FindingCode::ReferenceHasNoDeclaration {
-                name: name.as_str().to_owned(),
-            },
+            code: FindingCode::ReferenceHasNoDeclaration { name: token.name },
             span: Some(scalar.span),
             node: Some(scalar.node),
             path: path.clone(),
@@ -1001,7 +1082,6 @@ fn report_unresolved(
 /// `vars`, not by parameters, so text this crate did not read cannot turn a
 /// reference it *did* read into a resolved one.
 fn check_parameter_references(
-    pattern: &Regex,
     scope: &NameScope<'_>,
     variable: &VariableView,
     findings: &mut Vec<Finding>,
@@ -1015,7 +1095,7 @@ fn check_parameter_references(
             Some(key) => base.clone().map(|path| path.with_key(key.text.clone())),
             None => None,
         };
-        scan_value_references(pattern, scope, &field.value, path, findings);
+        scan_value_references(scope, &field.value, path, findings);
     } // End of the loop over one variable's parameters
 } // End of function check_parameter_references()
 
@@ -1026,18 +1106,17 @@ fn check_parameter_references(
 /// anything else contributes nothing. Depth is bounded by the projection's own
 /// [`crate::model::MAX_VALUE_DEPTH`], past which a value is elided.
 fn scan_value_references(
-    pattern: &Regex,
     scope: &NameScope<'_>,
     value: &ValueView,
     path: Option<DocumentPath>,
     findings: &mut Vec<Finding>,
 ) {
     match value {
-        ValueView::Scalar(scalar) => report_unresolved(pattern, scope, scalar, path, findings),
+        ValueView::Scalar(scalar) => report_unresolved(scope, scalar, path, findings),
         ValueView::Sequence(items) => {
             for (position, item) in items.iter().enumerate() {
                 let child = path.clone().map(|path| path.with_index(position));
-                scan_value_references(pattern, scope, item, child, findings);
+                scan_value_references(scope, item, child, findings);
             }
         } // End of the sequence arm
         ValueView::Mapping(fields) => {
@@ -1046,7 +1125,7 @@ fn scan_value_references(
                     Some(key) => path.clone().map(|path| path.with_key(key.text.clone())),
                     None => None,
                 };
-                scan_value_references(pattern, scope, &field.value, child, findings);
+                scan_value_references(scope, &field.value, child, findings);
             }
         } // End of the mapping arm
         ValueView::Alias(_) | ValueView::Elided { .. } => {}
@@ -1063,7 +1142,7 @@ fn scan_value_references(
 /// (D2u: nothing here resolves a YAML type), and answers `true` only for the
 /// spellings it recognises as true. Any other text, `false` included, is
 /// treated as injection off, which is the direction that stays silent.
-fn injection_is_certainly_enabled(variable: &VariableView) -> bool {
+pub(crate) fn injection_is_certainly_enabled(variable: &VariableView) -> bool {
     let Some(written) = &variable.inject_vars else {
         return true;
     };
@@ -1079,7 +1158,7 @@ fn injection_is_certainly_enabled(variable: &VariableView) -> bool {
 /// `form` is not one either — espanso's loader turns a `form:` shorthand into a
 /// synthesised `form1` variable **and a rewritten `replace`**, so the field
 /// itself is never a template.
-fn rendered_content(entry: &MatchView) -> Vec<(&'static str, &ScalarView)> {
+pub(crate) fn rendered_content(entry: &MatchView) -> Vec<(&'static str, &ScalarView)> {
     let mut out = Vec::new();
     if let Some(scalar) = &entry.content.replace {
         out.push(("replace", scalar));
@@ -1160,13 +1239,9 @@ fn closed_name_scope<'a>(
     captures: Option<&'a [String]>,
 ) -> Option<NameScope<'a>> {
     let captures = captures?;
-    if !view.imports.is_empty() {
-        return None;
-    }
-    if unknown_key(&view.unknown_entries, "global_vars")
-        || unknown_key(&view.unknown_entries, "imports")
-        || unknown_key(&entry.unknown_entries, "vars")
-    {
+    // The openers are the analysis's own list, shared so that
+    // `crate::analysis` can never call a scope closed that this rule calls open.
+    if !crate::analysis::dependency::scope_openers(view, Some(entry), true).is_empty() {
         return None;
     }
     Some(NameScope {
@@ -1175,13 +1250,6 @@ fn closed_name_scope<'a>(
         captures: captures.iter().map(String::as_str).collect(),
     })
 } // End of function closed_name_scope()
-
-/// Whether `entries` holds an unknown entry under `key`.
-fn unknown_key(entries: &[crate::model::UnknownEntry], key: &str) -> bool {
-    entries
-        .iter()
-        .any(|entry| entry.key.as_deref() == Some(key))
-}
 
 /// The `name` text of every variable of a sequence that has one.
 ///
@@ -1227,7 +1295,7 @@ fn field_path(entry: &MatchView, key: &str) -> Option<DocumentPath> {
 /// `the_reference_pattern_compiles` fails the build before that could reach a
 /// user. Answering `None` rather than panicking is what keeps [`validate`]
 /// total on every input, which is this crate's standing rule.
-fn reference_pattern() -> Option<&'static Regex> {
+pub(crate) fn reference_pattern() -> Option<&'static Regex> {
     static COMPILED: OnceLock<Option<Regex>> = OnceLock::new();
     COMPILED
         .get_or_init(|| Regex::new(REFERENCE_PATTERN).ok())
@@ -1351,6 +1419,15 @@ mod tests {
             },
             FindingCode::NewMatchRepeatsLiteralTrigger {
                 revision: crate::ContentRevision::of_bytes(b""),
+            },
+            FindingCode::VariableDependencyCycle {
+                revision: crate::ContentRevision::of_bytes(b""),
+                name: String::new(),
+                size: 1,
+            },
+            FindingCode::DependencyHasNoDeclaration {
+                revision: crate::ContentRevision::of_bytes(b""),
+                name: String::new(),
             },
         ];
         let names: Vec<&str> = codes.iter().map(FindingCode::name).collect();

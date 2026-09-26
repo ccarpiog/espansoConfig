@@ -159,6 +159,7 @@
 // never give and a compile-checked intra-doc link does.
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod analysis;
 pub mod discovery;
 pub mod draft;
 pub mod emit;
