@@ -2865,8 +2865,16 @@ describe('the operation panels’ drawn sentences through the pane, in English a
     await settleWake();
 
     const panel = drawn(pane.target, '.panel.external');
-    expect(panel).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
-    expect(panel).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    if (kind === 'matchDeleter') {
+      // The deleter draws one merged opening paragraph in place of the two
+      // shared ones since Phase 3-14 (the owner's CF-54 ruling).
+      expect(panel).toContain(translate(lang, 'browser.matchDeletion.changedWhileOpen'));
+      expect(panel).not.toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+      expect(panel).not.toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    } else {
+      expect(panel).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+      expect(panel).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    }
     expect(panel).toContain(
       translate(lang, 'browser.externalConflict.revisionObserved', { revision: 'c'.repeat(64) })
     );

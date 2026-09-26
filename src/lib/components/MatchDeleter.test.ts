@@ -1619,11 +1619,14 @@ describe('the deletion panel under an external conflict, in English and Spanish 
     expect(offersIn(panel.target, lang, 'browser.matchDeletion.confirm')).toBe(false);
     expect(offersIn(panel.target, lang, 'browser.matchDeletion.request')).toBe(false);
     // The origin, the observation's own lines, its one revision — and none of the
-    // save arm's: there was no save, so no *expected* and no *found*.
+    // save arm's: there was no save, so no *expected* and no *found*. The origin
+    // and the model's first line are one merged paragraph since Phase 3-14 (CF-54),
+    // pinned by the suite at the end of this file.
     const shown = externalText(panel.target);
     expect(shown).not.toBeNull();
-    expect(shown).toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
-    expect(shown).toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
+    expect(shown).toContain(translate(lang, 'browser.matchDeletion.changedWhileOpen'));
+    expect(shown).not.toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(shown).not.toContain(translate(lang, 'browser.externalConflict.fileChangedWhileOpen'));
     expect(shown).toContain(translate(lang, 'browser.saveOutcome.operationKeptInMemory'));
     expect(shown).toContain(translate(lang, 'browser.saveOutcome.reloadAbandonsOperation'));
     expect(shown).toContain(
@@ -1813,7 +1816,7 @@ describe('the deletion panel under an external conflict, in English and Spanish 
 
     // The same step of the same conflict, now in the other language.
     const shown = externalText(panel.target) ?? '';
-    expect(shown).toContain(translate(other, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(shown).toContain(translate(other, 'browser.matchDeletion.changedWhileOpen'));
     expect(shown).toContain(translate(other, 'browser.matchDeletion.reloadIdentifiesNoSnippet'));
     expect(offersIn(externalPanel(panel.target), other, conflictChoiceKey('confirmReload', 'operationChoice'))).toBe(true);
     panel.stop();
@@ -1827,6 +1830,7 @@ describe('the deletion panel under an external conflict, in English and Spanish 
 
     expect(panel.target.textContent).toContain(translate(lang, 'browser.conflictOrigin.refusedSave'));
     expect(panel.target.textContent).not.toContain(translate(lang, 'browser.conflictOrigin.changedWhileOpen'));
+    expect(panel.target.textContent).not.toContain(translate(lang, 'browser.matchDeletion.changedWhileOpen'));
     expect(externalText(panel.target)).toBeNull();
     panel.stop();
   }); // End of the "save origin" case
@@ -1980,3 +1984,168 @@ describe('The deletion panel acknowledges an unknown write outcome on its own pa
     mounted.stop();
   }); // End of the "nothing owed" case
 }); // End of the "own acknowledgement" suite
+
+/**
+ * The labels of every button under `scope`, in document order — which is the order
+ * Tab reaches them in, because nothing in this panel sets a `tabindex`.
+ *
+ * @param scope - Where to look.
+ * @returns The trimmed labels.
+ */
+function buttonOrder(scope: HTMLElement): readonly string[] {
+  return [...scope.querySelectorAll('button')].map((each) => each.textContent?.trim() ?? '');
+} // End of function buttonOrder()
+
+/**
+ * The conflict panel's choice row and its disk-version heading, insisted upon.
+ *
+ * @param scope - The conflict panel of either origin.
+ * @param lang - The language the case runs in.
+ * @returns The row and the heading.
+ */
+function choicesAndDisk(scope: HTMLElement, lang: Locale): { choices: HTMLElement; disk: HTMLElement } {
+  const heading = translate(lang, 'browser.saveOutcome.diskVersion');
+  const disk = [...scope.querySelectorAll<HTMLElement>('h3')].find(
+    (each) => each.textContent?.trim() === heading
+  );
+  const choices = [...scope.querySelectorAll<HTMLElement>('p.choices')].find(
+    (each) => each.querySelector('button') !== null
+  );
+  if (disk === undefined || choices === undefined) {
+    throw new Error('this case needs the choice row and the disk-version heading');
+  }
+  return { choices, disk };
+} // End of function choicesAndDisk()
+
+/**
+ * Whether `first` comes before `second` in document order.
+ *
+ * @param first - The element expected first.
+ * @param second - The element expected second.
+ * @returns `true` when it does.
+ */
+function precedes(first: Node, second: Node): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+} // End of function precedes()
+
+/**
+ * The save-origin conflict panel: the outcome panel, which is neither the external
+ * panel nor the reapply report.
+ *
+ * @param target - Where the component was mounted.
+ * @returns The panel.
+ */
+function saveConflictPanel(target: HTMLElement): HTMLElement {
+  const found = target.querySelector<HTMLElement>('.panel[role="status"]:not(.external):not(.reapply)');
+  if (found === null) {
+    throw new Error('this case needs the save conflict panel');
+  }
+  return found;
+} // End of function saveConflictPanel()
+
+describe('the delete-conflict panels put the choices first and say the external opening once, in English and Spanish — Phase 3-14', () => {
+  // The owner's two rulings (`docs/decisions/3-14-notes.md` §0). CF-52: the choice
+  // row is drawn before the long disk-version comparison, keyboard order and focus
+  // unchanged. CF-54: the external panel's two repeated opening paragraphs are one.
+  // **What jsdom cannot show** is where anything lands in a 1180x728 window; these
+  // cases pin the document order and the Tab order, and the window reading
+  // (`3-14-window-reading.md`) is the evidence for visibility.
+
+  it.each(LOCALES)('draws the save conflict’s choices before the disk version, at both reload steps (%s)', async (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter([{ result: CONFLICTED }]);
+    controlIn(panel.target, lang, 'browser.matchDeletion.confirm').click();
+    await settle();
+    const outcome = saveConflictPanel(panel.target);
+    const first = choicesAndDisk(outcome, lang);
+    expect(precedes(first.choices, first.disk)).toBe(true);
+    expect(precedes(first.choices, outcome.querySelector('.sourceText')!)).toBe(true);
+    // Tab order: the header's close control, then the row in its own order —
+    // the order these controls had before the move, since the disk side holds
+    // none.
+    expect(buttonOrder(panel.target)).toEqual([
+      translate(lang, 'browser.matchDeletion.close'),
+      translate(lang, conflictChoiceKey('keepEditing', 'operationChoice')),
+      translate(lang, KEEP_MY_DRAFT),
+      translate(lang, conflictChoiceKey('reloadDiskVersion', 'operationChoice'))
+    ]);
+
+    controlIn(outcome, lang, conflictChoiceKey('reloadDiskVersion', 'operationChoice')).click();
+    flushSync();
+    // The second step's warning stands beside the row, above the disk version too.
+    const second = choicesAndDisk(saveConflictPanel(panel.target), lang);
+    expect(precedes(second.choices, second.disk)).toBe(true);
+    const warning = [...saveConflictPanel(panel.target).querySelectorAll('p')].find(
+      (each) => each.textContent === translate(lang, 'browser.matchDeletion.reloadIdentifiesNoSnippet')
+    );
+    expect(warning).toBeDefined();
+    expect(precedes(warning!, second.choices)).toBe(true);
+    expect(offersIn(second.choices, lang, conflictChoiceKey('confirmReload', 'operationChoice'))).toBe(true);
+    panel.stop();
+  }); // End of the "save conflict order" case
+
+  it.each(LOCALES)('draws the external conflict’s choices before the disk version, and the readiness line under it (%s)', (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter();
+    panel.deliver(raisedBy(observed(5)));
+    const external = externalPanel(panel.target);
+    const { choices, disk } = choicesAndDisk(external, lang);
+    expect(precedes(choices, disk)).toBe(true);
+    const readiness = [...external.querySelectorAll('p')].find(
+      (each) => each.textContent === translate(lang, 'browser.reapply.readyOperation')
+    );
+    expect(readiness).toBeDefined();
+    // The readiness sentence speaks of "the version of this file on disk shown
+    // above", so it stays under the disk text while the row moves above it.
+    expect(precedes(external.querySelector('.sourceText')!, readiness!)).toBe(true);
+    expect(buttonOrder(external)).toEqual(
+      (['keepEditing', 'keepMyDraft', 'reloadDiskVersion'] as const).map((choice) =>
+        translate(lang, conflictChoiceKey(choice, 'operationChoice'))
+      )
+    );
+    panel.stop();
+  }); // End of the "external conflict order" case
+
+  it.each(LOCALES)('keeps the acknowledgement under the snapshot, after the row, in Tab order as on screen (%s)', (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter();
+    panel.deliver(arbitratedDelivery(null, observed(5), true));
+    const external = externalPanel(panel.target);
+    const { choices, disk } = choicesAndDisk(external, lang);
+    const acknowledge = labelledIn(external, lang, ACKNOWLEDGE_SNAPSHOT);
+    expect(acknowledge).not.toBeNull();
+    // The one relative change the move makes (`3-14-notes.md` §1): the
+    // acknowledgement stays directly under the snapshot it is about, so the row,
+    // now above the disk version, comes before it on screen and in Tab order.
+    expect(precedes(choices, disk)).toBe(true);
+    expect(precedes(external.querySelector('.sourceText')!, acknowledge!)).toBe(true);
+    expect(buttonOrder(external)).toEqual([
+      translate(lang, conflictChoiceKey('keepEditing', 'operationChoice')),
+      translate(lang, ACKNOWLEDGE_SNAPSHOT)
+    ]);
+    panel.stop();
+  }); // End of the "acknowledgement order" case
+
+  it.each(LOCALES)('draws one opening paragraph, first, carrying every fact of the two it replaces (%s)', (lang) => {
+    locale.setOverride(lang);
+    const panel = mountDeleter();
+    panel.deliver(raisedBy(observed(5)));
+    const external = externalPanel(panel.target);
+    const merged = translate(lang, 'browser.matchDeletion.changedWhileOpen');
+    const paragraphs = [...external.querySelectorAll('p')].map((each) => each.textContent ?? '');
+    // Drawn once, and first.
+    expect(paragraphs.filter((each) => each === merged)).toHaveLength(1);
+    expect(paragraphs[0]).toBe(merged);
+    // Neither of the two repeated paragraphs is drawn any more.
+    for (const gone of [
+      'browser.conflictOrigin.changedWhileOpen',
+      'browser.externalConflict.fileChangedWhileOpen'
+    ] as const) {
+      expect(external.textContent ?? '').not.toContain(translate(lang, gone));
+    } // End of the loop over the two replaced paragraphs
+    // The model's remaining lines follow it, in their own order.
+    expect(paragraphs[1]).toBe(translate(lang, 'browser.saveOutcome.operationKeptInMemory'));
+    expect(paragraphs[2]).toBe(translate(lang, 'browser.saveOutcome.reloadAbandonsOperation'));
+    panel.stop();
+  }); // End of the "merged opening" case
+}); // End of the "Phase 3-14" suite

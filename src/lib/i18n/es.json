@@ -678,6 +678,7 @@
   "browser.matchDeletion.revisionExpected": "Este fragmento se leyó de la versión {revision}.",
   "browser.matchDeletion.revisionFound": "El archivo tenía la versión {revision} cuando se rechazó el guardado.",
   "browser.matchDeletion.revisionDisk": "La versión leída del disco después es {revision}.",
+  "browser.matchDeletion.changedWhileOpen": "Lo que se compara aquí viene de la vigilancia del archivo: cambió en el disco mientras este panel estaba abierto. No se ha iniciado ningún guardado como respuesta a esta observación, así que desde aquí no se ha escrito nada como respuesta a ella, y esta aplicación no puede decir qué cambió el archivo ni cuándo.",
   "browser.matchDeletion.reloadIdentifiesNoSnippet": "Esta aplicación no va a adivinar qué fragmento de la versión del disco es el que pediste borrar. Vuelve a abrir el fragmento desde la lista después.",
   "browser.matchDeletion.spent": "Este fragmento se ha eliminado. Desde aquí ya no se puede eliminar nada más: elige antes otro fragmento en la lista.",
   "browser.matchDeletion.done": "Listo",

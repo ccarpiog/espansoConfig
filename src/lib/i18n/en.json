@@ -678,6 +678,7 @@
   "browser.matchDeletion.revisionExpected": "This snippet was read from version {revision}.",
   "browser.matchDeletion.revisionFound": "The file held version {revision} when the save was refused.",
   "browser.matchDeletion.revisionDisk": "The version read from disk afterwards is {revision}.",
+  "browser.matchDeletion.changedWhileOpen": "What is compared here came from watching the file: it changed on disk while this panel was open. No save was initiated in response to this observation, so nothing was written from here in response to it, and this app cannot say what changed the file or when.",
   "browser.matchDeletion.reloadIdentifiesNoSnippet": "This app will not guess which snippet in the version on disk is the one you asked to delete. Open the snippet again from the list afterwards.",
   "browser.matchDeletion.spent": "This snippet has been deleted. Nothing more can be deleted from here: pick another snippet in the list first.",
   "browser.matchDeletion.done": "Done",

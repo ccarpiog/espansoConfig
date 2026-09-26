@@ -55,6 +55,7 @@ import {
   deletionReapplyObstacleKey,
   deletionRefusalKey,
   dismissDeletionOutcome,
+  externalLinesUnderMergedOpening,
   identityInProjection,
   matchDeletionView,
   reapplyToDiskVersion,
@@ -83,7 +84,7 @@ import {
 } from './observationDelivery';
 import { attemptOfReapply, reapplyToShow, type StandingOriginGuard } from './reapply';
 import { isExternalConflict, isSaveConflict, type DiskAdoptionOutcome } from './saveOutcome';
-import type { ConflictChoice, ConflictModel, ExternalConflictModel } from './saveOutcome';
+import type { ConflictChoice, ConflictMessage, ConflictModel, ExternalConflictModel } from './saveOutcome';
 
 /*
  * **`((onHand) => door(onHand, …, () => onHand))(value)`** is a door, a settling
@@ -2146,3 +2147,26 @@ describe('the external session — Phase 2d-6-4', () => {
     }); // End of the "read of the reload step" case
   }); // End of the "reload against the installed session" suite
 }); // End of the "external session" suite
+
+describe('the lines under the deletion panel’s merged external opening — Phase 3-14 (CF-54)', () => {
+  it('drops fileChangedWhileOpen wherever it stands and keeps every other line in order', () => {
+    const lines: readonly ConflictMessage[] = [
+      { kind: 'fileChangedWhileOpen' },
+      { kind: 'operationKeptInMemory' },
+      { kind: 'fileChangedWhileOpen' },
+      { kind: 'reloadAbandonsOperation' }
+    ];
+    expect(externalLinesUnderMergedOpening(lines)).toEqual<readonly ConflictMessage[]>([
+      { kind: 'operationKeptInMemory' },
+      { kind: 'reloadAbandonsOperation' }
+    ]);
+    expect(externalLinesUnderMergedOpening([])).toEqual([]);
+  }); // End of the "drops the repeated line" case
+
+  it('leaves the model’s own list untouched', () => {
+    const lines: readonly ConflictMessage[] = [{ kind: 'fileChangedWhileOpen' }, { kind: 'operationKeptInMemory' }];
+    const before = [...lines];
+    externalLinesUnderMergedOpening(lines);
+    expect(lines).toEqual(before);
+  }); // End of the "untouched list" case
+}); // End of the "merged external opening" suite

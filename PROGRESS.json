@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T09:31:30Z",
+  "updated": "2026-09-26T09:55:35Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1177,9 +1177,10 @@
     {
       "id": "3-14",
       "title": "Delete-conflict wording and action placement",
-      "status": "queued",
-      "summary": "Owner rulings given 2026-09-26: move the delete-conflict choices up and merge the repeated opening paragraphs.",
-      "risk": "routine"
+      "status": "done",
+      "summary": "Delete-conflict choices drawn above the disk comparison and the repeated opening merged, read in EN and ES.",
+      "risk": "routine",
+      "review": "ship (Codex)"
     },
     {
       "id": "3-15",

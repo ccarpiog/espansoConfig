@@ -20,6 +20,7 @@
     confirmDiskReload,
     deletionCouldNotBeSent,
     dismissDeletionOutcome,
+    externalLinesUnderMergedOpening,
     identityInProjection,
     matchDeletionView,
     reapplyToDiskVersion,
@@ -613,6 +614,40 @@
   {/if}
   <p class="kind">{t('browser.saveOutcome.operationIdentityIsOld')}</p>
 
+  <!-- **The choices, with the lines that stand beside them, before the disk
+       version** — Phase 3-14, the owner's CF-52 ruling. The disk side is the
+       whole file and runs past the bottom of a 1180x728 window, which is where
+       2d-7-9's reading found this row (its §5.1). Drawn here, in the markup and
+       not by a CSS `order`, so what the screen shows first is also what Tab
+       reaches first. The row's own order, every control's reach and the reveal's
+       target are unchanged, and nothing here moves focus; the one relative change
+       is that the acknowledgement under the snapshot now follows this row in Tab
+       order, as it does on the screen (`3-14-notes.md` §1). The readiness line
+       stays under the disk version, because its shared sentence speaks of "the
+       version of this file on disk shown above". Where the row lands in a
+       window is a window reading's answer, never this markup's. -->
+  <!-- The second step's warning. The shared line above is the whole
+       close/abandon guarantee and this one never restates it (2c-4a-3b
+       review, finding 3); it says only what this surface alone can say —
+       that no snippet in the new version will be guessed at, and what to do
+       about that afterwards. -->
+  {#if view.awaitingReloadConfirmation}
+    <p class="kind">{t('browser.matchDeletion.reloadIdentifiesNoSnippet')}</p>
+  {/if}
+
+  <!-- A control that has just gone, with the reason in its place. -->
+  {#if view.reloadUnavailable}
+    <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
+  {/if}
+
+  <p class="choices" bind:this={outcomeChoices}>
+    {#each view.conflictChoices as choice (choice)}
+      <button type="button" onclick={() => conflictAction(choice)}>
+        {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
+      </button>
+    {/each}
+  </p>
+
   <h3>{t('browser.saveOutcome.diskVersion')}</h3>
   <!-- The whole file as the command layer (or the observation) read it, and
        never a projection of "the same snippet" — which this application will not
@@ -636,36 +671,16 @@
     />
   {/if}
 
-  <!-- The second step's warning. The shared line above is the whole
-       close/abandon guarantee and this one never restates it (2c-4a-3b
-       review, finding 3); it says only what this surface alone can say —
-       that no snippet in the new version will be guessed at, and what to do
-       about that afterwards. -->
-  {#if view.awaitingReloadConfirmation}
-    <p class="kind">{t('browser.matchDeletion.reloadIdentifiesNoSnippet')}</p>
-  {/if}
-
-  <!-- A control that has just gone, with the reason in its place. -->
-  {#if view.reloadUnavailable}
-    <p class="kind">{tReloadUnavailable(CONFLICT_CAPABILITIES.draftKind)}</p>
-  {/if}
-
-  <!-- The line beside *Keep my draft*: what this app will **try**, what it
+  <!-- The line about *Keep my draft*: what this app will **try**, what it
        works from, when it writes nothing, and what a later save may still
        do. Drawn when the model names that choice and never from this
        surface's own declaration, so the sentence and the control cannot
-       disagree (consult Q6). -->
+       disagree (consult Q6). **Under the disk version since Phase 3-14**, when
+       the choice row moved above it: the sentence names "the version of this
+       file on disk shown above", which is true only here. -->
   {#if view.reapplyOffered}
     <p class="kind">{tReapplyReadiness(CONFLICT_CAPABILITIES.draftKind)}</p>
   {/if}
-
-  <p class="choices" bind:this={outcomeChoices}>
-    {#each view.conflictChoices as choice (choice)}
-      <button type="button" onclick={() => conflictAction(choice)}>
-        {tConflictChoice(choice, CONFLICT_CAPABILITIES.draftKind)}
-      </button>
-    {/each}
-  </p>
 {/snippet}
 
 <section class="deleter" aria-label={t('browser.matchDeletion.label')}>
@@ -798,16 +813,23 @@
   <RecoveryWithoutCreation kind="operationChoice" conflict={view.conflict} />
 
   <!-- **The external conflict, outside the save-outcome branch** (the 2d-6
-       record's §3 entry 10) — Phase 2d-6-7b. The origin line first, then the
-       model's own lines for this origin — never `view.messages`, which are a
+       record's §3 entry 10) — Phase 2d-6-7b. The origin paragraph first (one,
+       merged with the model's first line since Phase 3-14), then the model's
+       remaining lines for this origin — never `view.messages`, which are a
        save's — then the one revision an observation has, then everything the
        save panel shows (entry 23). No *expected* and no *found*: there was no
        save. -->
   {#if external !== null}
     {@const revisions = conflictRevisionsOf(external.source)}
     <div class="panel external" role="status" bind:this={externalPanel}>
-      <p>{tConflictOriginMessage(conflictOriginMessage(external.source))}</p>
-      {#each view.externalMessages as message, index (index)}
+      <!-- **One opening paragraph, not two** — Phase 3-14, the owner's CF-54
+           ruling. The origin line and the model's `fileChangedWhileOpen` line
+           said the same thing twice; this paragraph carries every fact of both,
+           and `externalLinesUnderMergedOpening` in `../browser/matchDeletion.ts`
+           drops the second from the lines drawn under it. The shared keys stay
+           as they are for the other surfaces that draw them. -->
+      <p>{t('browser.matchDeletion.changedWhileOpen')}</p>
+      {#each externalLinesUnderMergedOpening(view.externalMessages) as message, index (index)}
         <p>{tConflictMessage(message)}</p>
       {/each}
       {#if revisions.kind === 'externalChange'}

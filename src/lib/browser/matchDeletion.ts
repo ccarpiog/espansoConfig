@@ -2168,6 +2168,33 @@ export function matchDeletionView(session: MatchDeletionSession): MatchDeletionV
 } // End of function matchDeletionView()
 
 /**
+ * The external conflict's lines the deletion panel draws **under its merged
+ * opening paragraph** — Phase 3-14, the owner's CF-54 ruling.
+ *
+ * The external arm opens with two paragraphs that said the same thing twice: the
+ * origin line (`browser.conflictOrigin.changedWhileOpen`) and the external model's
+ * own first line (`browser.externalConflict.fileChangedWhileOpen`). The deletion
+ * panel draws one paragraph in their place, `browser.matchDeletion.changedWhileOpen`,
+ * which carries every fact of both, and then these lines: every line the model gave
+ * except `fileChangedWhileOpen`. The two shared keys and the model are unchanged,
+ * because the other surfaces that draw them are not this ruling's subject.
+ *
+ * **What this forces, and what it does not.** It removes that one code wherever it
+ * stands, so no position can bring the repeated sentence back. Nothing in
+ * TypeScript forces `MatchDeleter.svelte` to call this rather than walk
+ * `externalMessages` itself, or to draw the merged paragraph instead of the origin
+ * line; its mounted suite is what establishes both.
+ *
+ * @param messages - {@link MatchDeletionView.externalMessages}.
+ * @returns The same lines, in the same order, without `fileChangedWhileOpen`.
+ */
+export function externalLinesUnderMergedOpening(
+  messages: readonly ConflictMessage[]
+): readonly ConflictMessage[] {
+  return messages.filter((message) => message.kind !== 'fileChangedWhileOpen');
+} // End of function externalLinesUnderMergedOpening()
+
+/**
  * The dictionary key holding one deletion refusal's sentence.
  *
  * A `switch` over literal keys rather than a template, the idiom of every other
