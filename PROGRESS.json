@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-24T21:18:47Z",
+  "updated": "2026-09-26T09:31:30Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
@@ -1143,8 +1143,8 @@
     {
       "id": "3-13",
       "title": "Display names and visible creation defaults",
-      "status": "in_progress",
-      "summary": "Display names and visible creation defaults; 3-13-1 and 3-13-2 done, 3-13-3 owed to an attended session.",
+      "status": "done",
+      "summary": "Display names and visible creation defaults, all three pieces closed on 2026-09-26.",
       "risk": "high"
     },
     {
@@ -1169,15 +1169,16 @@
     {
       "id": "3-13-3",
       "title": "Display names and defaults: the window half",
-      "status": "blocked",
+      "status": "done",
       "risk": "high",
-      "summary": "Owed to an attended session: the window reading needs an unlocked screen, so driven runs set it aside (owner ruling 2026-09-24)."
+      "summary": "Window half read in EN and ES on synthetic data; a quoted word default on Create found and left open.",
+      "review": "ship-with-fixes (Codex), 2 should-fix fixed"
     },
     {
       "id": "3-14",
       "title": "Delete-conflict wording and action placement",
-      "status": "blocked",
-      "summary": "Owed to an attended session: needs the owner's CF-52/CF-54 rulings and a window reading, so driven runs set it aside.",
+      "status": "queued",
+      "summary": "Owner rulings given 2026-09-26: move the delete-conflict choices up and merge the repeated opening paragraphs.",
       "risk": "routine"
     },
     {
