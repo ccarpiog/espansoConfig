@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T10:04:24Z",
+  "updated": "2026-09-26T10:36:18Z",
   "plan": "IMPLEMENTATION_PLAN.md",
-  "goal": "Build Phase 3, complete match editing, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
+  "goal": "Build Phase 4, variables and forms, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
   "phases": [
     {
       "id": "0",
@@ -1211,10 +1211,163 @@
       "commit": "de08385"
     },
     {
+      "id": "4-design",
+      "title": "Phase 4 design consult",
+      "status": "done",
+      "risk": "high",
+      "summary": "Codex consult cut Phase 4 into 24 steps 4-1 to 4-24 and mapped all 48 carried items; records only.",
+      "review": "docs/reviews/phase-4-design-record.md",
+      "narrative": "docs/decisions/4-split-notes.md"
+    },
+    {
+      "id": "4-1",
+      "title": "A1 across creation and single-match editing",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-2",
+      "title": "B1 reproduction and bounded repair",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-3",
+      "title": "Nested presence and author-key foundation",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-4",
+      "title": "Local variable insertion, deletion and movement",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-5",
+      "title": "Variable lists and labelled choices",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-6",
+      "title": "Form-definition structural core",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-7",
+      "title": "Placeholder, reference and dependency analysis",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-8",
+      "title": "Revision-bound snapshots and command integration",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-9",
+      "title": "Shared variable editor lifecycle",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-10",
+      "title": "Form editor model",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-11",
+      "title": "Variable group, chips and choice controls",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-12",
+      "title": "Visual form builder",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-13",
+      "title": "Early authoring window half",
+      "status": "queued",
+      "summary": "Needs a visible window; set aside by driven runs. Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-14",
+      "title": "Remaining variable-kind authoring models",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-15",
+      "title": "Remaining popovers",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-16",
+      "title": "Remaining authoring window half",
+      "status": "queued",
+      "summary": "Needs a visible window; set aside by driven runs. Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-17",
+      "title": "Pure illustrative preview core",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-18",
+      "title": "Date preview",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-19",
+      "title": "Preview controls and popover samples",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-20",
+      "title": "Preview window half",
+      "status": "queued",
+      "summary": "Needs a visible window; set aside by driven runs. Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-21",
+      "title": "Regex bench core and read-only wire",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-22",
+      "title": "Regex bench UI and capture insertion",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-23",
+      "title": "Regex window half",
+      "status": "queued",
+      "summary": "Needs a visible window; set aside by driven runs. Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
+      "id": "4-24",
+      "title": "Inventory, reconciliation and closure record",
+      "status": "queued",
+      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+    },
+    {
       "id": "4",
       "title": "Variables and forms",
       "status": "queued",
-      "summary": "Not started."
+      "summary": "Variables and forms, cut into 24 steps 4-1 to 4-24 by the design consult."
     },
     {
       "id": "5",
