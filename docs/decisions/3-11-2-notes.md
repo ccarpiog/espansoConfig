@@ -79,8 +79,9 @@ top-level chain, after the eight write surfaces). It holds only session state โ€
 
 ### 1.5 i18n
 
-53 new keys in each language: `browser.list.bulk.*` (7) and `browser.bulkInspector.*` (46, of which 7
-are `count.*`), plus the typed accessor `describeBulkCount` (`codes.ts`) / `tBulkCount` (`index.ts`).
+54 new keys in each language: `browser.list.bulk.*` (7) and `browser.bulkInspector.*` (47, of which 7
+are `count.*`) *(corrected 2026-09-27 at 4-24 from "53" and "46": commit `fc728ec`'s `en.json` holds 47
+`browser.bulkInspector.*` keys and its parent none; `4-24-notes.md` ยง3, E1)*, plus the typed accessor `describeBulkCount` (`codes.ts`) / `tBulkCount` (`index.ts`).
 The 15 `browser.bulkEdit.*` keys are unchanged. The draft's *Undo*/*Redo* labels are deliberately under
 `browser.bulkInspector.*`, so 3-11-1's check that no `browser.bulkEdit.*` sentence names an undo still
 holds; a new test pins that only `draftUndo`, `draftOnly` and `noDiskUndo` may name one.
