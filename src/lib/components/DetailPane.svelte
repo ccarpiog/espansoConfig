@@ -1489,6 +1489,7 @@
       standingConflictFor={(document) => browser.standingConflictFor(document)}
       variables={variablePort}
       previewCommands={browser.previewCommands}
+      regexBenchCommands={browser.regexBenchCommands}
       close={() => (editingMatch = null)}
     />
   {:else if editingSnippetText !== null}

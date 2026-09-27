@@ -278,7 +278,9 @@ export function heldAfterReply(
  *   variable of one of seven kinds with no reference inserted anywhere (ruling
  *   20: Echo is authored through *Add variable*; Phase 4-14-1 widened it);
  * - `insert` — one `+ Insert` row's popover (Phase 4-15,
- *   `../components/KindInsertion.svelte`), by the row's kind.
+ *   `../components/KindInsertion.svelte`), by the row's kind;
+ * - `capture` — the *Regex capture* row's panel (Phase 4-22,
+ *   `./regexBench.ts`), which inserts a reference and creates no variable.
  *
  * `null` is nothing selected: no box of the group is mounted.
  */
@@ -288,6 +290,7 @@ export type GroupSelection =
   | { readonly kind: 'choice' }
   | { readonly kind: 'add' }
   | { readonly kind: 'insert'; readonly row: InsertRowKind }
+  | { readonly kind: 'capture' }
   | null;
 
 /**
@@ -310,7 +313,7 @@ export function sameSelection(one: GroupSelection, other: GroupSelection): boole
   if (one.kind === 'insert' && other.kind === 'insert') {
     return one.row === other.row;
   }
-  return one.kind === other.kind && (one.kind === 'choice' || one.kind === 'add');
+  return one.kind === other.kind && (one.kind === 'choice' || one.kind === 'add' || one.kind === 'capture');
 } // End of function sameSelection()
 
 /**
@@ -367,7 +370,13 @@ export function selectionOfSeed(session: MatchEditorSession, seeded: SeededSelec
  * @returns The selection, or `null`.
  */
 export function liveSelection(session: MatchEditorSession, selection: GroupSelection): GroupSelection {
-  if (selection === null || selection.kind === 'choice' || selection.kind === 'add' || selection.kind === 'insert') {
+  if (
+    selection === null ||
+    selection.kind === 'choice' ||
+    selection.kind === 'add' ||
+    selection.kind === 'insert' ||
+    selection.kind === 'capture'
+  ) {
     return selection;
   }
   if (selection.kind === 'variable') {
@@ -817,7 +826,13 @@ function selectedOf(
 ): SelectedVariable | SelectedAddition | null {
   const editable = isVariablesEditable(session);
   const buffer = capturedVariables(session.draft.value.variables);
-  if (selection === null || selection.kind === 'choice' || selection.kind === 'add' || selection.kind === 'insert') {
+  if (
+    selection === null ||
+    selection.kind === 'choice' ||
+    selection.kind === 'add' ||
+    selection.kind === 'insert' ||
+    selection.kind === 'capture'
+  ) {
     return null;
   }
   if (selection.kind === 'added') {

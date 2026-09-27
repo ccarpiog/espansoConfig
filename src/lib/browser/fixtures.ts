@@ -74,6 +74,7 @@ import type { ReconciliationRefusal, SurfaceAcknowledgementPort } from './reconc
 import { variableStructureReadOf } from './variableEditor';
 import type { VariableGroupPort } from './variableGroup';
 import type { PreviewCommands } from './preview';
+import type { RegexBenchCommands } from './regexBench';
 
 /**
  * A plain scalar carrying source text.
@@ -913,3 +914,13 @@ export function inertPreviewCommands(): PreviewCommands {
     previewMatchCandidate: () => new Promise(() => undefined)
   };
 } // End of function inertPreviewCommands()
+
+/**
+ * A regex bench reader that never answers — Phase 4-22: for a suite that
+ * mounts the match editor and never presses *Test*.
+ *
+ * @returns The reader.
+ */
+export function inertRegexBenchCommands(): RegexBenchCommands {
+  return { testRegex: () => new Promise(() => undefined) };
+} // End of function inertRegexBenchCommands()

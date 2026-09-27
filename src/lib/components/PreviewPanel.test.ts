@@ -33,7 +33,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeDocument, makeMatch, makeSummary, scriptedAcknowledgement } from '../browser/fixtures';
+import { inertRegexBenchCommands, makeDocument, makeMatch, makeSummary, scriptedAcknowledgement } from '../browser/fixtures';
 import type { CreationBuffers } from '../browser/matchCreation';
 import type { MatchBuffers } from '../browser/matchEditor';
 import type { PreviewCommands, PreviewTarget, SampleClock } from '../browser/preview';
@@ -816,6 +816,7 @@ function mountEditor(commands: PreviewCommands): MountedEditor {
       variables,
       close: (): void => undefined,
       previewCommands: commands,
+      regexBenchCommands: inertRegexBenchCommands(),
       sampleClock: fixedClock()
     }
   });

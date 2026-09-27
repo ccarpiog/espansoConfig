@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-27T01:59:26Z",
+  "updated": "2026-09-27T02:33:18Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build espansoConfig, a macOS app that edits espanso YAML config without reformatting untouched text; now finishing Phase 4, variables and forms.",
   "phases": [
@@ -1433,13 +1433,17 @@
       "risk": "high",
       "summary": "Core first-match regex search with declared named captures and a stateless test_regex command with typed limits; no UI.",
       "review": "docs/reviews/4-21.md",
-      "narrative": "docs/decisions/4-21-notes.md"
+      "narrative": "docs/decisions/4-21-notes.md",
+      "commit": "3cb45d8"
     },
     {
       "id": "4-22",
       "title": "Regex bench UI and capture insertion",
-      "status": "queued",
-      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "status": "done",
+      "summary": "Regex bench and capture insertion drawn in the match editor; D11 wording proposed to the owner, not adopted.",
+      "risk": "routine",
+      "review": "docs/reviews/4-22.md",
+      "narrative": "docs/decisions/4-22-notes.md"
     },
     {
       "id": "4-23",

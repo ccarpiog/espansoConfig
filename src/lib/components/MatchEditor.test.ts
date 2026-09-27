@@ -54,7 +54,8 @@ import {
   makeSummary,
   scriptedAcknowledgement,
   type ScriptedAcknowledgement,
-  inertPreviewCommands
+  inertPreviewCommands,
+inertRegexBenchCommands
 } from '../browser/fixtures';
 import type { InvalidationStatus } from '../browser/invalidation';
 import type { CreationBuffers } from '../browser/matchCreation';
@@ -594,6 +595,7 @@ function mountEditor(
       reportRecovery: inertBinding,
       variables: inertVariablePort(() => views),
       previewCommands: inertPreviewCommands(),
+      regexBenchCommands: inertRegexBenchCommands(),
       standingConflictFor: (document: DocumentId): ConflictSource | null =>
         standing.get(document) ?? null,
       close: (): void => {

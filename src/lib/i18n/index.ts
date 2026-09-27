@@ -209,6 +209,7 @@ import {
   type InsertRefusal,
   type NameVerdict
 } from '../browser/variableInsertion';
+import { captureInsertRefusalKey, type CaptureInsertRefusal } from '../browser/regexBench';
 import {
   analysisStateKey,
   choiceProblemKey,
@@ -1076,6 +1077,16 @@ export function tNameVerdict(verdict: NameVerdict): string {
 export function tInsertRefusal(refusal: InsertRefusal): string {
   return translate(locale.current, insertRefusalKey(refusal));
 } // End of function tInsertRefusal()
+
+/**
+ * Why the *Regex capture* row inserted nothing — Phase 4-22.
+ *
+ * @param refusal - The refusal, from `../browser/regexBench.ts`.
+ * @returns The translated sentence.
+ */
+export function tCaptureInsertRefusal(refusal: CaptureInsertRefusal): string {
+  return translate(locale.current, captureInsertRefusalKey(refusal));
+} // End of function tCaptureInsertRefusal()
 
 /**
  * Whether the variable analysis shown is current — Phase 4-11.

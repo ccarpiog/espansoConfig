@@ -180,6 +180,20 @@ export type NameVerdict =
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
+ * Whether a name is an identifier of the supported placeholder subset
+ * (`[A-Za-z_][A-Za-z0-9_]*`, ruling 16) — the rule every name inserted as a
+ * `{{reference}}` meets, a new variable's here and, since Phase 4-22, a regex
+ * capture's (`./regexBench.ts`). This application's rule, not a claim about
+ * which names espanso accepts.
+ *
+ * @param name - The name, as decoded text.
+ * @returns `true` when it may be written as `{{name}}`.
+ */
+export function isReferenceIdentifier(name: string): boolean {
+  return IDENTIFIER.test(name);
+} // End of function isReferenceIdentifier()
+
+/**
  * Checks one name against a context.
  *
  * @param name - The proposed name, as decoded text.
@@ -192,7 +206,7 @@ export function nameVerdictOf(name: string, context: NameContext, asReference: b
   if (name === '') {
     return { kind: 'refused', reason: 'empty' };
   }
-  if ((asReference && !IDENTIFIER.test(name)) || name.includes('\r') || name.includes('\n')) {
+  if ((asReference && !isReferenceIdentifier(name)) || name.includes('\r') || name.includes('\n')) {
     return { kind: 'refused', reason: 'notAnIdentifier' };
   }
   const taken: readonly (readonly [readonly string[], NameRefusal])[] = [

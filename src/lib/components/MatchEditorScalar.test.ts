@@ -26,7 +26,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConflictSource } from '../browser/conflictSource';
 import { detailFieldKey, optionGroupKey } from '../browser/detail';
-import { inertVariablePort, makeMatch, makeSummary, scriptedAcknowledgement, inertPreviewCommands } from '../browser/fixtures';
+import { inertVariablePort, makeMatch, makeSummary, scriptedAcknowledgement, inertPreviewCommands, inertRegexBenchCommands } from '../browser/fixtures';
 import type { CreationBuffers } from '../browser/matchCreation';
 import {
   CURSOR_MARKER,
@@ -150,6 +150,7 @@ function mountEditor(match: MatchView = projection()): Mounted {
       reportRecovery: inertBinding,
       variables: inertVariablePort(),
       previewCommands: inertPreviewCommands(),
+      regexBenchCommands: inertRegexBenchCommands(),
       standingConflictFor: (): ConflictSource | null => null,
       close: (): void => undefined
     }

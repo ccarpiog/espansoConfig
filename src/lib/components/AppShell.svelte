@@ -12,6 +12,7 @@
     REAL_COMMANDS
   } from '../browser/workspace.svelte';
   import { REAL_PREVIEW_COMMANDS } from '../browser/preview';
+  import { REAL_REGEX_BENCH_COMMANDS } from '../browser/regexBench';
   import { t, tIpcFailure, tLocaleName } from '../i18n';
   import { reportIpcFailure } from '../ipc/errors';
   import type { IpcFailure } from '../ipc/errors';
@@ -61,6 +62,10 @@
    * The sixth is the preview's two readers — Phase 4-19-2: `preview_match` and
    * `preview_match_candidate`, which the match editor's preview panel reaches
    * through `BrowserState.previewCommands` and nothing else.
+   *
+   * The seventh is the regex bench's one reader — Phase 4-22: `test_regex`,
+   * which the match editor's regex bench reaches through
+   * `BrowserState.regexBenchCommands` and nothing else.
    */
   const browser = createBrowserState(
     REAL_COMMANDS,
@@ -68,7 +73,8 @@
     REAL_BACKUP_COMMANDS,
     REAL_RECONCILIATION_EVENTS,
     createDomForegroundSource(document, window),
-    REAL_PREVIEW_COMMANDS
+    REAL_PREVIEW_COMMANDS,
+    REAL_REGEX_BENCH_COMMANDS
   );
 
   onMount(() => {

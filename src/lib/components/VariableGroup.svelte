@@ -22,6 +22,7 @@
     analysisOf,
     choiceDraftOf,
     choiceInsertionViewOf,
+    choiceTargetsOf,
     insertChoice,
     NO_SELECTION,
     sameSelection,
@@ -59,8 +60,16 @@
   } from '../browser/variableInsertion';
   import { fieldLabelName } from '../browser/matchEditor';
   import {
+    captureOfferOf,
+    captureTargetOf,
+    insertCaptureReference,
+    type CaptureInsertRefusal,
+    type RegexBenchState
+  } from '../browser/regexBench';
+  import {
     t,
     tAnalysisState,
+    tCaptureInsertRefusal,
     tChoiceProblem,
     tDeclarationStatus,
     tDetailField,
@@ -134,6 +143,14 @@
    * the selection. Each row's popover value is held here, one per row, so it is
    * retained while anything else is looked at; *Cancel* and a successful
    * *Insert* drop it. Echo has no row (ruling 20): it stays in *Add a variable*.
+   *
+   * **The *Regex capture* row** (Phase 4-22) comes last, and is drawn only while
+   * `captureOfferOf` in `../browser/regexBench.ts` offers it — a current,
+   * compiling regex trigger, tested by the editor's regex bench. Its panel lists
+   * the pattern's named groups; a press inserts `{{name}}` into the chosen
+   * content key and **creates no variable**, so it spends no structure grant.
+   * The bench's state is read through `regexBench` at the press, and the
+   * offer is re-derived from it there.
    */
 
   const {
@@ -142,7 +159,9 @@
     port,
     apply,
     move,
-    selectionOf
+    selectionOf,
+    regexBench,
+    placeCaret
   }: {
     /** The editor's session, as it stands now. */
     session: MatchEditorSession;
@@ -173,6 +192,23 @@
      * @returns Its selection.
      */
     selectionOf: (field: ReferenceField) => TextSelection;
+    /**
+     * The editor's regex bench state, read now — Phase 4-22. A function so the
+     * *Regex capture* press reads the state at the press.
+     *
+     * @returns The state.
+     */
+    regexBench: () => RegexBenchState;
+    /**
+     * Focuses one content key's box and selects a range in it once the box has
+     * been redrawn — `MatchEditor.svelte`'s `placeCaret` (review 4-22): a box
+     * whose value is replaced puts its caret at the end, so without this a
+     * second insertion from the open panel would land after the text.
+     *
+     * @param field - The content key.
+     * @param selection - The range, in UTF-16 code units.
+     */
+    placeCaret: (field: ReferenceField, selection: TextSelection) => void;
   } = $props();
 
   /**
@@ -274,6 +310,26 @@
     readonly session: MatchEditorSession;
     readonly refusal: InsertRefusal;
   } | null>(null);
+
+  /** The content key the *Regex capture* panel's reference goes into, as chosen. */
+  let captureChosen = $state.raw<ReferenceField | null>(null);
+  /**
+   * What the last *Regex capture* press answered, held with the session it
+   * answered over, so it stops drawing the moment anything changes — except
+   * the success line, which is held with the session the insertion produced.
+   */
+  let captureAnswer = $state.raw<{
+    readonly session: MatchEditorSession;
+    readonly answer: { readonly kind: 'refused'; readonly refusal: CaptureInsertRefusal } | { readonly kind: 'inserted'; readonly field: ReferenceField };
+  } | null>(null);
+  /** The *Regex capture* row's offer, drawn now. */
+  const captureOffer = $derived(captureOfferOf(session, regexBench()));
+  /** Where the panel's reference would go now. */
+  const captureTarget = $derived(captureTargetOf(session, captureChosen, lastContent));
+  /** The last capture press's answer, while the session it was about is the one held. */
+  const captureSaid = $derived(
+    captureAnswer !== null && captureAnswer.session === session ? captureAnswer.answer : null
+  );
 
   /** The window, read for this drawing (the view's refusals and offers). */
   const read = $derived(port.structureRead(session.match.document));
@@ -383,6 +439,38 @@
     dropRow(row);
     select({ kind: 'added', position: next.draft.value.variables.added.length - 1 });
   } // End of function rowInserted()
+
+  /** Opens the *Regex capture* panel. */
+  function openCapture(): void {
+    select({ kind: 'capture' });
+    captureChosen = null;
+    captureAnswer = null;
+    choice = null;
+    adding = null;
+  } // End of function openCapture()
+
+  /**
+   * *Insert* on one capture: `{{name}}` into the target's selection, over the
+   * bench state read now. Creates no variable; the panel stays open so another
+   * capture can follow.
+   *
+   * @param name - The capture's name.
+   */
+  function insertTheCapture(name: string): void {
+    const field = captureTargetOf(session, captureChosen, lastContent);
+    if (field === null) {
+      captureAnswer = { session, answer: { kind: 'refused', refusal: 'noTarget' } };
+      return;
+    }
+    const outcome = insertCaptureReference(session, regexBench(), name, field, selectionOf(field));
+    if (outcome.kind === 'inserted') {
+      apply(outcome.session);
+      captureAnswer = { session: outcome.session, answer: { kind: 'inserted', field } };
+      placeCaret(field, outcome.selection);
+      return;
+    }
+    captureAnswer = { session, answer: { kind: 'refused', refusal: outcome.refusal } };
+  } // End of function insertTheCapture()
 
   /** Closes whichever form or controls are open. */
   function closeSelection(): void {
@@ -867,6 +955,16 @@
         {tInsertRow(row)}
       </button>
     {/each}
+    {#if captureOffer.kind === 'offered'}
+      <button
+        type="button"
+        data-row="capture"
+        disabled={view.selection?.kind === 'capture'}
+        onclick={() => openCapture()}
+      >
+        {t('browser.variableGroup.capture.open')}
+      </button>
+    {/if}
   </p>
   <p class="choices">
     <button type="button" disabled={view.selection?.kind === 'add'} onclick={() => openAdding()}>
@@ -1132,6 +1230,69 @@
         </button>
         <button type="button" onclick={() => closeSelection()}>
           {t('browser.variableGroup.cancel')}
+        </button>
+      </p>
+    </div>
+  {:else if view.selection?.kind === 'capture' && captureOffer.kind === 'offered'}
+    {@const offer = captureOffer}
+    <!-- **The Regex capture row's panel** (Phase 4-22): the current pattern's
+         named groups, the content key the reference goes into, and one press
+         per group that inserts `{{name}}` and creates no variable. -->
+    <div class="panel controls" role="group" aria-label={t('browser.variableGroup.capture.heading')}>
+      <p class="name">{t('browser.variableGroup.capture.heading')}</p>
+      <p class="kind">{t('browser.variableGroup.capture.explain')}</p>
+      {#if captureTarget !== null}
+        {@const chosenTarget = captureTarget}
+        <p class="name">{t('browser.variableGroup.choice.target')}</p>
+        <p class="choices">
+          {#each choiceTargetsOf(session) as target (target)}
+            <button
+              type="button"
+              aria-pressed={chosenTarget === target}
+              onclick={() => (captureChosen = target)}
+            >
+              {tDetailField(fieldLabelName(target))}
+            </button>
+          {/each}
+        </p>
+      {:else}
+        <p class="kind">{t('browser.variableGroup.choice.noTarget')}</p>
+      {/if}
+      {#if offer.captures.length === 0}
+        <p class="kind">{t('browser.variableGroup.capture.none')}</p>
+      {/if}
+      <p class="choices">
+        {#each offer.captures as capture, index (index)}
+          {#if capture.reference !== null}
+            <button
+              type="button"
+              data-capture={capture.name}
+              disabled={captureTarget === null}
+              onclick={() => insertTheCapture(capture.name)}
+            >
+              {t('browser.variableGroup.capture.insertOne', { reference: capture.reference })}
+            </button>
+          {/if}
+        {/each}
+      </p>
+      {#each offer.captures as capture, index (index)}
+        {#if capture.reference === null}
+          <p class="rowHead" data-capture-refused={capture.name}>
+            <code class="source">{capture.name}</code>
+            <span class="kind">{t('browser.regexBench.notAReference')}</span>
+          </p>
+        {/if}
+      {/each}
+      {#if captureSaid !== null}
+        <p class="kind" role="status">
+          {captureSaid.kind === 'inserted'
+            ? t('browser.variableGroup.capture.inserted', { field: tDetailField(fieldLabelName(captureSaid.field)) })
+            : tCaptureInsertRefusal(captureSaid.refusal)}
+        </p>
+      {/if}
+      <p class="choices">
+        <button type="button" onclick={() => closeSelection()}>
+          {t('browser.variableGroup.close')}
         </button>
       </p>
     </div>

@@ -145,6 +145,14 @@
   import PreviewPanel from './PreviewPanel.svelte';
   import { SYSTEM_SAMPLE_CLOCK, type PreviewCommands, type SampleClock } from '../browser/preview';
   import { draftPreviewTargetOf } from '../browser/previewView';
+  import RegexBench from './RegexBench.svelte';
+  import {
+    benchPatternOf,
+    createRegexBenchCoordinator,
+    REGEX_BENCH_IDLE,
+    type RegexBenchCommands,
+    type RegexBenchState
+  } from '../browser/regexBench';
 
   /*
    * The small editor: one snippet's editable fields, drafted and saved — seventeen
@@ -156,7 +164,10 @@
    * under the content keys, and the variable reorder's save (`runVariableMove`);
    * since Phase 4-12 the visual form builder (`FormBuilder.svelte`) beside it;
    * since Phase 4-19-2 the illustrative preview of the open draft
-   * (`PreviewPanel.svelte`), which reads the draft and writes nothing.
+   * (`PreviewPanel.svelte`), which reads the draft and writes nothing; since
+   * Phase 4-22 the regex bench (`RegexBench.svelte`) under a drafted `regex`
+   * trigger, whose state this file owns so the *Regex capture* row of the
+   * variables group reads the same answer.
    *
    * **This file is presentation.** Every decision about what may be edited, what
    * a draft means, when a save may start, what it says and what a commit moves is
@@ -298,7 +309,8 @@
     close,
     clock = () => Date.now(),
     previewCommands,
-    sampleClock = SYSTEM_SAMPLE_CLOCK
+    sampleClock = SYSTEM_SAMPLE_CLOCK,
+    regexBenchCommands
   }: {
     /** The snippet being edited, exactly as this window projects it. */
     match: MatchView;
@@ -476,6 +488,13 @@
      * reason `clock` above has a default; a test injects one.
      */
     sampleClock?: SampleClock;
+    /**
+     * The regex bench's one reader — Phase 4-22: `BrowserState.regexBenchCommands`,
+     * handed on by `DetailPane.svelte`. **Required, and what that forces is only
+     * that a host supplies one**; the type holds no writer, and nothing in
+     * TypeScript forces it to be the real `test_regex`.
+     */
+    regexBenchCommands: RegexBenchCommands;
   } = $props();
 
   // `$state.raw`, not `$state`: a session is an immutable value replaced whole on
@@ -536,6 +555,37 @@
   onDestroy(() => {
     receiving.withdraw();
   });
+
+  /**
+   * The regex bench's state — Phase 4-22. Owned here rather than by
+   * `RegexBench.svelte` so the bench and the *Regex capture* row of
+   * `VariableGroup.svelte` read one answer; which answer is current is the
+   * coordinator's (`createRegexBenchCoordinator` in `../browser/regexBench.ts`),
+   * which drops a reply to a superseded request.
+   */
+  let benchState = $state.raw<RegexBenchState>(REGEX_BENCH_IDLE);
+  // svelte-ignore state_referenced_locally
+  const bench = createRegexBenchCoordinator(regexBenchCommands, (next) => {
+    benchState = next;
+  });
+  onDestroy(() => {
+    bench.clear();
+  });
+  /** The pattern the bench tests: the drafted `regex` trigger, or `null`. */
+  const benchPattern = $derived(benchPatternOf(session));
+
+  /**
+   * *Test* on the bench: one request for the drafted pattern as it stands now
+   * and the sample handed in.
+   *
+   * @param sample - The sample box's text.
+   */
+  function runBench(sample: string): void {
+    const pattern = benchPatternOf(session);
+    if (pattern !== null) {
+      void bench.request(pattern, sample);
+    }
+  } // End of function runBench()
 
   /**
    * The last *Keep my draft* attempt, or `null` when this panel has made none.
@@ -1067,6 +1117,25 @@
       ? { start: box.selectionStart, end: box.selectionEnd }
       : { start: Number.NaN, end: Number.NaN };
   } // End of function selectionOf()
+
+  /**
+   * Focuses one content key's box and selects a range in it after the box has
+   * been redrawn — review 4-22, for the *Regex capture* insertion, the way
+   * `onInsertCursor` restores its range: replacing a box's value moves its caret
+   * to the end, so the answered selection is put back once the DOM is updated.
+   * Nothing happens when the box is not drawn.
+   *
+   * @param field - The content key.
+   * @param selection - The range, in UTF-16 code units.
+   */
+  async function placeCaret(field: ReferenceField, selection: TextSelection): Promise<void> {
+    await tick();
+    const box = editorElement?.querySelector(`textarea[data-field="${field}"]`);
+    if (box instanceof HTMLTextAreaElement) {
+      box.focus();
+      box.setSelectionRange(selection.start, selection.end);
+    }
+  } // End of function placeCaret()
 
   /** The editor's own element, where `selectionOf` looks for a box. */
   let editorElement = $state<HTMLElement | null>(null);
@@ -1670,6 +1739,11 @@
     {:else if side.control === 'triggers'}
       {@render listBlock(side.triggers)}
     {/if}
+    <!-- **The regex bench** (Phase 4-22), while the drafted trigger form is
+         `regex`: it tests the box above exactly as it stands, on request. -->
+    {#if benchPattern !== null}
+      <RegexBench pattern={benchPattern} {benchState} run={(sample) => runBench(sample)} />
+    {/if}
     {#if side.choices.length > 0}
       <p class="kind">{t('browser.matchEditor.triggerForm.offer')}</p>
       <p class="choices">
@@ -1872,6 +1946,8 @@
         apply={(next) => (session = next)}
         move={(variable, to) => void runVariableMove(variable, to)}
         {selectionOf}
+        regexBench={() => benchState}
+        placeCaret={(field, selection) => void placeCaret(field, selection)}
       />
       <!-- **The visual form builder** (Phase 4-12), beside the group: every form
            of the snippet, both storage shapes, and the Form insertion. -->

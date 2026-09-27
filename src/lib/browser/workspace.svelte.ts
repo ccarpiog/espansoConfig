@@ -205,6 +205,7 @@ import {
 } from './reconciliationCoordinator';
 import { filterMatches } from './search';
 import { REAL_PREVIEW_COMMANDS, type PreviewCommands } from './preview';
+import { REAL_REGEX_BENCH_COMMANDS, type RegexBenchCommands } from './regexBench';
 import { variableStructureReadOf, type VariableStructureRead } from './variableEditor';
 import type { SelectedMatch, SelectionRepair } from './selection';
 import { positionOf, repairSelection, reresolve, selectMatch } from './selection';
@@ -1538,6 +1539,11 @@ export interface BrowserState {
    * for the match editor's preview panel. Readers only; the type holds no writer.
    */
   readonly previewCommands: PreviewCommands;
+  /**
+   * The regex bench's one reader — Phase 4-22: what `createBrowserState` was
+   * handed, for the match editor's regex bench. A reader only.
+   */
+  readonly regexBenchCommands: RegexBenchCommands;
   /** Where the load has got to. */
   readonly status: BrowserStatus;
   /** Why the load failed, when it did. */
@@ -3652,6 +3658,9 @@ const ALWAYS_PERMITTED = (): boolean => true;
  * @param preview - The two read-only preview commands — Phase 4-19-2; defaults
  *   to the real ones, as `commands` and `backup` do. Nothing in this state calls
  *   them; they are handed on to the preview panel.
+ * @param regexBench - The regex bench's one reader, `test_regex` — Phase 4-22;
+ *   defaults to the real one, as `preview` does. Nothing in this state calls it;
+ *   it is handed on to the match editor's regex bench.
  * @returns Reactive state a component can read directly.
  */
 export function createBrowserState(
@@ -3660,7 +3669,8 @@ export function createBrowserState(
   backup: BackupCommands = REAL_BACKUP_COMMANDS,
   events: ReconciliationEventSource = INERT_RECONCILIATION_EVENTS,
   foreground: ForegroundSource = INERT_FOREGROUND_EVENTS,
-  preview: PreviewCommands = REAL_PREVIEW_COMMANDS
+  preview: PreviewCommands = REAL_PREVIEW_COMMANDS,
+  regexBench: RegexBenchCommands = REAL_REGEX_BENCH_COMMANDS
 ): BrowserState {
   let status = $state<BrowserStatus>('loading');
   let failure = $state<IpcFailure | null>(null);
@@ -6373,6 +6383,7 @@ export function createBrowserState(
 
   const state: BrowserState = {
     previewCommands: preview,
+    regexBenchCommands: regexBench,
     get status(): BrowserStatus {
       return status;
     },

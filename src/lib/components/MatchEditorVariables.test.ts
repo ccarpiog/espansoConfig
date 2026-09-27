@@ -41,7 +41,7 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveConflictSource, type ConflictSource } from '../browser/conflictSource';
-import { makeConflict, makeDocument, makeMatch, makeSummary, makeVariable, field, scalarItem, scriptedAcknowledgement, styledScalar, inertPreviewCommands } from '../browser/fixtures';
+import { makeConflict, makeDocument, makeMatch, makeSummary, makeVariable, field, scalarItem, scriptedAcknowledgement, styledScalar, inertPreviewCommands, inertRegexBenchCommands } from '../browser/fixtures';
 import type { CreationBuffers } from '../browser/matchCreation';
 import type { MatchBuffers } from '../browser/matchEditor';
 import type { ConflictModel, DiskAdoptionOutcome } from '../browser/saveOutcome';
@@ -289,6 +289,7 @@ function mountEditor(script: Script = {}): Mounted {
       standingConflictFor: (document: DocumentId): ConflictSource | null => standing.get(document) ?? null,
       variables,
       previewCommands: inertPreviewCommands(),
+      regexBenchCommands: inertRegexBenchCommands(),
       close: (): void => undefined
     }
   });
