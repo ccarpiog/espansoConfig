@@ -106,7 +106,7 @@ const EXPORTED_FUNCTIONS = Object.entries(commands)
 const IDENTITY = { document: 3, revision: 'a'.repeat(64), node: 11 };
 
 /** A preview request with no sample at all. */
-const NO_SAMPLES = { selections: [], form_values: [], captures: [] } as const;
+const NO_SAMPLES = { selections: [], form_values: [], captures: [], instant: null } as const;
 
 /**
  * A backup batch identity, exactly as a listing would have produced it.
@@ -303,7 +303,8 @@ describe('the command wrappers', () => {
     const samples = {
       selections: [{ variable: { Local: { index: 0 } }, index: 2 }],
       form_values: [{ form: { ShorthandForm: {} }, field: 'name', value: '<b>x</b>' }],
-      captures: [{ name: 'num', value: '42' }]
+      captures: [{ name: 'num', value: '42' }],
+      instant: { unix_seconds: 1711843200, zone: { Named: { name: 'Europe/Madrid' } } }
     } as const;
     await previewMatch(IDENTITY, samples);
     expect(calls[0]).toEqual({ command: 'preview_match', args: { id: IDENTITY, samples } });

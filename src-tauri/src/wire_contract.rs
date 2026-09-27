@@ -2062,7 +2062,8 @@ fn the_authoring_shapes_declare_exactly_what_rust_writes_and_reads() {
 } // End of function the_authoring_shapes_declare_exactly_what_rust_writes_and_reads()
 
 /// Phase 4-17's preview shapes are declared in `types.ts` exactly as `serde`
-/// writes them, and the inbound samples exactly as they read.
+/// writes them, and the inbound samples exactly as they read — Phase 4-18's
+/// sample instant and zone among them.
 ///
 /// The answer is sampled from a real preview of an inline synthetic fixture
 /// that produces every segment kind; each tagged union is compared variant by
@@ -2072,7 +2073,7 @@ fn the_authoring_shapes_declare_exactly_what_rust_writes_and_reads() {
 fn the_preview_shapes_declare_exactly_what_rust_writes_and_reads() {
     use espansoconfig_core::preview::{
         preview_match, CaptureSample, FormValueSample, PreviewPlaceholder, PreviewSamples,
-        PreviewSource, SelectionSample,
+        PreviewSource, SampleInstant, SampleZone, SelectionSample,
     };
     let source = read_without_comments("src/lib/ipc/types.ts");
     let fixture = concat!(
@@ -2115,6 +2116,10 @@ fn the_preview_shapes_declare_exactly_what_rust_writes_and_reads() {
             name: "c".to_owned(),
             value: "v".to_owned(),
         }],
+        instant: Some(SampleInstant {
+            unix_seconds: 0,
+            zone: SampleZone::Fixed { offset_seconds: 0 },
+        }),
     };
     let preview = preview_match(&document.view, &document.view.matches[0], &samples);
     let structs: Vec<(&str, Value)> = vec![
@@ -2124,6 +2129,10 @@ fn the_preview_shapes_declare_exactly_what_rust_writes_and_reads() {
         ("SelectionSample", json_of(&samples.selections[0])),
         ("FormValueSample", json_of(&samples.form_values[0])),
         ("CaptureSample", json_of(&samples.captures[0])),
+        (
+            "SampleInstant",
+            json_of(samples.instant.as_ref().expect("an instant")),
+        ),
     ];
     for (interface, value) in &structs {
         assert_same_names(
@@ -2170,10 +2179,20 @@ fn the_preview_shapes_declare_exactly_what_rust_writes_and_reads() {
     .iter()
     .map(json_of)
     .collect();
-    let tables: [(&str, Vec<Value>); 3] = [
+    let zones: Vec<Value> = [
+        SampleZone::Named {
+            name: "UTC".to_owned(),
+        },
+        SampleZone::Fixed { offset_seconds: 0 },
+    ]
+    .iter()
+    .map(json_of)
+    .collect();
+    let tables: [(&str, Vec<Value>); 4] = [
         ("PreviewSegment", segments),
         ("PreviewSource", sources),
         ("PreviewPlaceholder", placeholders),
+        ("SampleZone", zones),
     ];
     let preview_rs = read_repository_file("crates/espansoconfig-core/src/preview.rs");
     let mut checked = 0usize;
@@ -2194,8 +2213,8 @@ fn the_preview_shapes_declare_exactly_what_rust_writes_and_reads() {
             );
             checked += 1;
         } // End of the loop over one union's samples
-    } // End of the loop over the three tagged unions
-    assert_eq!(checked, 5 + 4 + 4, "every variant was compared");
+    } // End of the loop over the four tagged unions
+    assert_eq!(checked, 5 + 4 + 4 + 2, "every variant was compared");
     assert_same_names(
         "type PreviewPlaceholderName",
         &declared_variants(&preview_rs, "PreviewPlaceholder"),

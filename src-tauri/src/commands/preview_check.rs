@@ -9,7 +9,9 @@
 //! - a stale identity is refused with `identityStaleRevision` (D2v), never
 //!   unwrapped;
 //! - the preview takes no path lock, writes no byte, and runs neither the
-//!   authored shell command nor the script.
+//!   authored shell command nor the script;
+//! - a date variable (Phase 4-18) is shown at the instant and zone the request
+//!   carries, and answers `DateInstantMissing` without one.
 //!
 //! Every fixture is synthetic and neutral (`CLAUDE.md` section 1).
 
@@ -21,7 +23,8 @@ use espansoconfig_core::draft::ListPlacement;
 use espansoconfig_core::model::MatchId;
 use espansoconfig_core::persist::{lock_path, Acknowledgement};
 use espansoconfig_core::preview::{
-    PreviewPlaceholder, PreviewSamples, PreviewSegment, PreviewSource, SelectionSample,
+    PreviewPlaceholder, PreviewSamples, PreviewSegment, PreviewSource, PreviewUnresolved,
+    SampleInstant, SampleZone, SelectionSample,
 };
 use espansoconfig_core::{ContentRevision, DocumentId};
 use tempfile::TempDir;
@@ -202,3 +205,55 @@ fn a_preview_takes_no_path_lock_and_writes_nothing() {
         "no backup, no temporary file, nothing beside the file"
     );
 } // End of function a_preview_takes_no_path_lock_and_writes_nothing()
+
+#[test]
+fn a_date_is_shown_at_the_request_instant_and_zone() {
+    let source = "\
+matches:
+  - trigger: ':d'
+    replace: '{{d}}'
+    vars:
+      - name: d
+        type: date
+        params:
+          format: '%Y-%m-%d %H:%M %:z'
+";
+    let dir = tree(source);
+    let session = open(&dir);
+    let (held, _) = first(&session);
+    // 2024-03-31T01:00:00Z, the first instant of summer time in Madrid.
+    let samples = PreviewSamples {
+        instant: Some(SampleInstant {
+            unix_seconds: 1_711_846_800,
+            zone: SampleZone::Named {
+                name: "Europe/Madrid".to_owned(),
+            },
+        }),
+        ..PreviewSamples::default()
+    };
+    let preview = session
+        .preview_match(held, &samples)
+        .expect("the preview answers");
+    assert_eq!(
+        preview.bodies[0].segments,
+        vec![PreviewSegment::Sample {
+            text: "2024-03-31 03:00 +02:00".to_owned(),
+            source: PreviewSource::Local { index: 0 },
+        }]
+    );
+    let without = session
+        .preview_match(held, &PreviewSamples::default())
+        .expect("the preview answers");
+    assert_eq!(
+        without.bodies[0].segments,
+        vec![PreviewSegment::Unresolved {
+            text: "{{d}}".to_owned(),
+            source: Some(PreviewSource::Local { index: 0 }),
+            reason: PreviewUnresolved::DateInstantMissing,
+        }]
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("match/base.yml")).expect("reads"),
+        source
+    );
+} // End of function a_date_is_shown_at_the_request_instant_and_zone()

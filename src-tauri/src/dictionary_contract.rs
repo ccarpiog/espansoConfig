@@ -549,7 +549,7 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("injection", 3),
     ("edgeKind", 2),
     ("malformedPlaceholder", 3),
-    ("previewUnresolved", 17),
+    ("previewUnresolved", 22),
     ("previewPlaceholder", 4),
     ("previewLimit", 3),
 ];
@@ -589,6 +589,13 @@ const NOT_A_CODE: &[(&str, &str)] = &[
          position, the shorthand form, or a capture by its own name (Phase 4-17), \
          which a screen resolves to the declaration it points at rather than \
          rendering as a sentence",
+    ),
+    (
+        "SampleZone",
+        "a request value, not a code: `Named` and `Fixed` say how the zone a date \
+         is previewed in is written (Phase 4-18) — an IANA name or an offset in \
+         seconds — and a screen shows that name or offset beside the result, never \
+         the variant's name",
     ),
     (
         "ValueView",

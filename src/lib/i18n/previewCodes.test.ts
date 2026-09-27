@@ -50,7 +50,12 @@ const UNRESOLVED = [
   'InjectionUncertain',
   'ValueUnreadable',
   'AmbiguousScalar',
-  'DateNotPreviewed',
+  'DateInstantMissing',
+  'DateFormatMalformed',
+  'DateOffsetMalformed',
+  'DateOutOfRange',
+  'ZoneUnsupported',
+  'LocaleUnsupported',
   'KindNotPreviewed',
   'UnverifiedLayoutReference',
   'UnsupportedLayoutSyntax'
@@ -117,7 +122,7 @@ describe('the preview accessors', () => {
   it('render a sentence in both languages, with no brace and no operand spliced in', () => {
     for (const locale of LOCALES) {
       const sentences = everySentence(locale);
-      expect(sentences).toHaveLength(17 + 4 + 3);
+      expect(sentences).toHaveLength(22 + 4 + 3);
       for (const sentence of sentences) {
         expect(sentence.trim().length, `${locale}: ${sentence}`).toBeGreaterThan(0);
         expect(sentence, `${locale}: ${sentence}`).not.toMatch(/[{}<>]/);

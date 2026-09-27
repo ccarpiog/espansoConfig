@@ -23,14 +23,16 @@
 //! | `shell` | a placeholder carrying the authored command; **never executed** |
 //! | `script` | a placeholder carrying the authored argument list; **never executed** |
 //! | `match` | a placeholder carrying the nested trigger; no recursive rendering |
-//! | `date` | not previewed yet ([`PreviewUnresolved::DateNotPreviewed`]); Phase 4-18 adds it |
+//! | `date` | its text at the request's [`SampleInstant`] and zone (Phase 4-18, the `date` submodule); a malformed format or offset, an unknown zone, an out-of-range instant or a locale-dependent format is a code |
 //!
 //! # Pure and deterministic
 //!
 //! No I/O, no clock, no process, no clipboard, no random-number generator and
 //! no environment read: the answer is a function of the projection and the
 //! request alone, so **identical requests give identical output**. A random
-//! variable's "example" is the index the request names.
+//! variable's "example" is the index the request names, and a date's "now" is
+//! the instant the request names, in the zone the request names — never the
+//! system clock or the system zone.
 //!
 //! # One reference grammar, one resolver
 //!
@@ -99,6 +101,8 @@ use crate::model::{
     ContentKind, DocumentView, MatchView, ScalarView, ValueView, VariableKind, VariableView,
 };
 use crate::validate::{params_are_readable, regex_capture_names, rendered_content};
+
+mod date;
 
 /// The most bytes of text a whole preview answers: 64 KiB.
 pub const MAX_PREVIEW_OUTPUT_BYTES: usize = 64 * 1024;
@@ -193,6 +197,39 @@ pub struct CaptureSample {
     pub value: String,
 }
 
+/// The zone a date is previewed in when its variable names none — the stand-in
+/// for the system zone espanso would use. Never read from this machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum SampleZone {
+    /// An IANA zone name, matched exactly against the database `chrono-tz`
+    /// compiles in (tzdb 2025b), such as `Europe/Madrid`. The date is written
+    /// with that zone's offset at the instant, as a fixed offset.
+    Named {
+        /// The zone's name.
+        name: String,
+    },
+    /// A fixed offset east of UTC, in seconds; strictly between −86 400 and
+    /// 86 400.
+    Fixed {
+        /// The offset.
+        offset_seconds: i32,
+    },
+}
+
+/// The "now" a date variable is previewed at (Phase 4-18). One instant serves
+/// every date variable of one preview.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SampleInstant {
+    /// Whole seconds since 1970-01-01T00:00:00Z, leap seconds not counted.
+    /// **A JavaScript `number` holds this exactly only within ±2⁵³**; every
+    /// instant chrono can represent is far inside that.
+    pub unix_seconds: i64,
+    /// The zone standing in for the system zone.
+    pub zone: SampleZone,
+}
+
 /// Every sample one preview request carries. When two samples address the same
 /// thing, the first one is used; a sample addressing nothing is ignored.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -204,6 +241,10 @@ pub struct PreviewSamples {
     pub form_values: Vec<FormValueSample>,
     /// What regex captures matched.
     pub captures: Vec<CaptureSample>,
+    /// The instant and zone every date variable is previewed at; with none, a
+    /// date answers [`PreviewUnresolved::DateInstantMissing`]. Written as
+    /// `null` when absent; an absent key reads as `None`.
+    pub instant: Option<SampleInstant>,
 }
 
 /// A value this preview shows as a placeholder, because producing it would
@@ -264,8 +305,23 @@ pub enum PreviewUnresolved {
     /// The text is a plain scalar YAML 1.1 may read as something other than a
     /// string; the preview does not pick a reading.
     AmbiguousScalar,
-    /// A date variable. Date preview is a later step's.
-    DateNotPreviewed,
+    /// A date variable, and the request carries no [`SampleInstant`].
+    DateInstantMissing,
+    /// A date's `format` is not a strftime format chrono accepts.
+    DateFormatMalformed,
+    /// A date's `offset` is not written as a plain whole number of seconds
+    /// (`0` or `-?[1-9][0-9]*`).
+    DateOffsetMalformed,
+    /// A date's instant, or the instant plus its offset, is outside the range
+    /// the preview writes (chrono's range, kept two days clear at each end;
+    /// years 0 to 9999 for the RFC 2822 default).
+    DateOutOfRange,
+    /// A date's `tz`, or the request's zone, names no zone the preview knows.
+    ZoneUnsupported,
+    /// A date's format depends on a locale — day or month names, a locale
+    /// layout, an AM/PM marker — and the preview does not simulate that
+    /// locale.
+    LocaleUnsupported,
     /// The variable's `type` is absent or names no kind this preview knows.
     KindNotPreviewed,
     /// A `{{…}}` inside a shorthand `form:` layout, which espanso's loader
@@ -684,6 +740,8 @@ struct SampleIndex<'a> {
     form_values: HashMap<&'a PreviewSource, HashMap<&'a str, &'a str>>,
     /// Capture values by name.
     captures: HashMap<&'a str, &'a str>,
+    /// The instant and zone dates are previewed at.
+    instant: Option<&'a SampleInstant>,
 }
 
 impl<'a> SampleIndex<'a> {
@@ -693,6 +751,7 @@ impl<'a> SampleIndex<'a> {
             selections: HashMap::new(),
             form_values: HashMap::new(),
             captures: HashMap::new(),
+            instant: samples.instant.as_ref(),
         };
         for sample in &samples.selections {
             index
@@ -922,6 +981,7 @@ impl<'a> Evaluator<'a> {
         let source = node.source();
         let (scope, injection) = self.scope_of(node);
         let mut buffer = Buffer::new(self.limits.output_bytes, self.limits.segments);
+        let mut date_work = 0;
         match variable.kind {
             VariableKind::Echo => {
                 let text = readable_scalar(variable, "echo")?;
@@ -1005,12 +1065,35 @@ impl<'a> Evaluator<'a> {
                 },
             }),
             VariableKind::Form => return Err(PreviewUnresolved::FormIsNotAScalar),
-            VariableKind::Date => return Err(PreviewUnresolved::DateNotPreviewed),
+            VariableKind::Date => {
+                let date = match date::preview_date(
+                    variable,
+                    self.samples.instant,
+                    injection,
+                    self.limits.output_bytes,
+                    self.limits.work - self.work,
+                ) {
+                    Ok(date) => date,
+                    Err(PreviewUnresolved::WorkLimit) => {
+                        self.work_limited = true;
+                        return Err(PreviewUnresolved::WorkLimit);
+                    }
+                    Err(reason) => return Err(reason),
+                };
+                // Validating the format is charged besides the text (the
+                // review of 4-18).
+                date_work = date.work;
+                buffer.push(PreviewSegment::Sample {
+                    text: date.text,
+                    source,
+                });
+                buffer.limit = buffer.limit.or(date.limit);
+            } // End of the date arm
             VariableKind::Unrecognised | VariableKind::Absent => {
                 return Err(PreviewUnresolved::KindNotPreviewed)
             }
         }
-        let cost = buffer.bytes + buffer.segments.len();
+        let cost = buffer.bytes + buffer.segments.len() + date_work;
         if self.work + cost > self.limits.work {
             self.work_limited = true;
             return Err(PreviewUnresolved::WorkLimit);

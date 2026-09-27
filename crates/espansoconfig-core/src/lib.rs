@@ -162,6 +162,12 @@
 //!   for `clipboard`, `shell`, `script` and `match`, and structured unresolved
 //!   segments for everything else. No I/O, no clock, no random draw.
 //!
+//! - **4-18** — the `date` submodule of [`preview`]: a `type: date` variable
+//!   written with pinned `chrono` (default features off, no `clock`) and
+//!   `chrono-tz`, at the instant and zone the request carries
+//!   ([`preview::SampleInstant`]); malformed formats and offsets, unknown
+//!   zones, out-of-range instants and locale-dependent formats are codes.
+//!
 //! [`persist`] holds the write primitive, the transaction around it and the
 //! backup step.
 

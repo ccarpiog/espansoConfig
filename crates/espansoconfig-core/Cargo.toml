@@ -37,6 +37,12 @@ regex.workspace = true
 # tauri (the architecture check `cargo tree -p espansoconfig-core | rg tauri`
 # is unchanged and must find nothing).
 notify.workspace = true
+# Phase 4-18: the date preview (`crate::preview::date`). Pinned in the
+# workspace manifest with default features off — no clock, no local zone; the
+# instant and zone come in the request. Confined to `crate::preview::date`.
+# Neither pulls in tauri.
+chrono.workspace = true
+chrono-tz.workspace = true
 
 # ---------------------------------------------------------------------------
 # macOS only, and for exactly one call: `fcopyfile(3)` with

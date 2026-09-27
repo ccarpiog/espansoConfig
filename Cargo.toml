@@ -51,6 +51,23 @@ notify = "8"
 # architecture check is unchanged and is
 #   cargo tree -p espansoconfig-core | rg tauri   # must find nothing
 libc = "0.2"
+# Phase 4-18, ruling 27 of docs/decisions/4-split-notes.md: date preview in the
+# core. **Pinned exactly** (`=`) and recorded in docs/decisions/4-18-notes.md.
+# `chrono` with **default features off** and `alloc` alone: no `clock` (so no
+# `Utc::now`/`Local` and no `iana-time-zone` in the core's own feature set),
+# no `std`, no `wasmbind`, no `unstable-locales`. The instant and zone come in
+# the preview request. `chrono-tz` is the bounded time-zone crate: the IANA
+# database compiled into the crate (tzdb 2025b), no file read, no build script
+# run with its default features off. Neither pulls in tauri; the architecture
+# check is unchanged and is
+#   cargo tree -p espansoconfig-core | rg tauri   # must find nothing
+# A workspace build unifies features: at 4-18 `cargo tree --workspace -e
+# features -i chrono` shows `alloc` alone, but a later dependency could unify
+# `clock` in without anything failing, so the core's never reading a clock is
+# pinned by a source scan in crates/espansoconfig-core/tests/date_preview.rs,
+# not by the feature set alone.
+chrono = { version = "=0.4.45", default-features = false, features = ["alloc"] }
+chrono-tz = { version = "=0.10.4", default-features = false }
 # The application shell only. Declared here, not in `src-tauri/Cargo.toml`,
 # purely so the version lives with every other pinned version — it must never
 # be inherited by `espansoconfig-core` (CLAUDE.md section 3).

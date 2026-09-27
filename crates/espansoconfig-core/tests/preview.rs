@@ -157,6 +157,7 @@ fn kinds_samples() -> PreviewSamples {
             name: "num".to_owned(),
             value: "42".to_owned(),
         }],
+        instant: None,
     }
 } // End of function kinds_samples()
 
@@ -844,7 +845,11 @@ matches:
             Some(local(3)),
             PreviewUnresolved::AmbiguousScalar,
         ),
-        ("{{d}}", Some(local(4)), PreviewUnresolved::DateNotPreviewed),
+        (
+            "{{d}}",
+            Some(local(4)),
+            PreviewUnresolved::DateInstantMissing,
+        ),
         ("{{k}}", Some(local(5)), PreviewUnresolved::KindNotPreviewed),
         ("{{dup}}", None, PreviewUnresolved::AmbiguousName),
     ] {
@@ -861,6 +866,7 @@ fn the_samples_refuse_unknown_fields() {
         "selections": [{ "variable": { "Local": { "index": 0 } }, "index": 1 }],
         "form_values": [{ "form": { "ShorthandForm": {} }, "field": "a", "value": "b" }],
         "captures": [{ "name": "n", "value": "v" }],
+        "instant": null,
     });
     let read: PreviewSamples = serde_json::from_value(good.clone()).expect("reads");
     assert_eq!(serde_json::to_value(&read).expect("writes"), good);

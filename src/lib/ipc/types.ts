@@ -4775,6 +4775,42 @@ export interface CaptureSample {
 }
 
 /**
+ * The zone a date is previewed in when its variable names no `tz` — Rust's
+ * `SampleZone` (Phase 4-18), standing in for the system zone. Never read from
+ * this machine: the caller chooses it.
+ */
+export type SampleZone =
+  | {
+      readonly Named: {
+        /** An IANA name, matched exactly against the core's tzdb 2025b, such as `Europe/Madrid`. */
+        readonly name: string;
+      };
+    }
+  | {
+      readonly Fixed: {
+        /** Seconds east of UTC, strictly between −86 400 and 86 400. */
+        readonly offset_seconds: number;
+      };
+    };
+
+/**
+ * The "now" every date variable of one preview is shown at — Rust's
+ * `SampleInstant` (Phase 4-18). The core never reads a clock; a caller that
+ * wants the current time reads it and sends it here, and should draw it beside
+ * the result.
+ */
+export interface SampleInstant {
+  /**
+   * Whole seconds since 1970-01-01T00:00:00Z, leap seconds not counted. An
+   * integer; exact in a JavaScript `number` within ±2⁵³, which covers every
+   * instant the preview writes.
+   */
+  readonly unix_seconds: number;
+  /** The zone standing in for the system zone. */
+  readonly zone: SampleZone;
+}
+
+/**
  * Every sample one preview request carries — Rust's `PreviewSamples`, read
  * with unknown fields refused. When two samples address the same thing the
  * first is used; a sample addressing nothing is ignored.
@@ -4786,6 +4822,8 @@ export interface PreviewSamples {
   readonly form_values: readonly FormValueSample[];
   /** What regex captures matched. */
   readonly captures: readonly CaptureSample[];
+  /** The instant and zone dates are shown at; with `null`, a date is `DateInstantMissing`. */
+  readonly instant: SampleInstant | null;
 }
 
 /** The variant names of {@link PreviewPlaceholder}. */
@@ -4817,7 +4855,12 @@ export type PreviewUnresolved =
   | 'InjectionUncertain'
   | 'ValueUnreadable'
   | 'AmbiguousScalar'
-  | 'DateNotPreviewed'
+  | 'DateInstantMissing'
+  | 'DateFormatMalformed'
+  | 'DateOffsetMalformed'
+  | 'DateOutOfRange'
+  | 'ZoneUnsupported'
+  | 'LocaleUnsupported'
   | 'KindNotPreviewed'
   | 'UnverifiedLayoutReference'
   | 'UnsupportedLayoutSyntax';

@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-26T23:20:36Z",
+  "updated": "2026-09-27T00:08:29Z",
   "plan": "IMPLEMENTATION_PLAN.md",
-  "goal": "Build Phase 4, variables and forms, for the espanso config editor, starting with a design consult that cuts it into bounded steps.",
+  "goal": "Build espansoConfig, a macOS app that edits espanso YAML config without reformatting untouched text; now finishing Phase 4, variables and forms.",
   "phases": [
     {
       "id": "0",
@@ -1383,13 +1383,17 @@
       "summary": "Pure bounded Rust preview of a snippet with samples, structured segments and codes, and a read-only preview command.",
       "risk": "high",
       "review": "docs/reviews/4-17.md",
-      "narrative": "docs/decisions/4-17-notes.md"
+      "narrative": "docs/decisions/4-17-notes.md",
+      "commit": "c424d69"
     },
     {
       "id": "4-18",
       "title": "Date preview",
-      "status": "queued",
-      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "status": "done",
+      "summary": "Date variables previewed in the core from an explicit instant and zone, pinned chrono without a clock, six typed date codes.",
+      "risk": "high",
+      "review": "docs/reviews/4-18.md",
+      "narrative": "docs/decisions/4-18-notes.md"
     },
     {
       "id": "4-19",
