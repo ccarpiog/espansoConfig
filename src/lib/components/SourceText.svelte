@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { sourceSegments } from '../browser/sourceText';
+  import { sourceSegments, startsFileLine } from '../browser/sourceText';
   import { t, tInvisible } from '../i18n';
 
   /*
@@ -29,14 +29,32 @@
    * exactly the kind of thing this pane exists not to do; the container scrolls
    * sideways instead. That costs a long line a scroll gesture, and it is the
    * cost this project's whole premise implies.
+   *
+   * **`wrap` is the one exception, and it keeps the premise by marking lines.**
+   * The owner ruled at 4-13 (B5) that the disk-version box wraps long lines. A
+   * wrapping box draws the **same segments and the same `<br>` per break** as
+   * the box that does not wrap, so its DOM text and a copy of it are the
+   * same. Before each segment that starts a file line (`startsFileLine`) it
+   * adds an **empty** `lineStart` element whose `›` is CSS generated content:
+   * drawn, never part of the text, never copied. A visual row with no `›` is a
+   * soft wrap and never a line the file has; a sentence under the box says so.
+   * Only the disk-version boxes pass `wrap`; nothing in TypeScript forces a
+   * caller to choose, and every other box keeps `pre` and the scroll.
    */
 
-  const { text, documentStart = false }: { text: string; documentStart?: boolean } = $props();
+  const {
+    text,
+    documentStart = false,
+    wrap = false
+  }: { text: string; documentStart?: boolean; wrap?: boolean } = $props();
 
   const segments = $derived(sourceSegments(text, documentStart));
 </script>
 
-<div class="sourceText">{#each segments as segment, index (index)}{#if segment.kind === 'text'}{segment.text}{:else if segment.kind === 'break'}<br />{:else}<span class="invisible" title={t('browser.source.invisibleDetail')}>{tInvisible(segment)}</span>{/if}{/each}</div>
+<div class="sourceText" class:wrap>{#each segments as segment, index (index)}{#if wrap && startsFileLine(segments, index)}<span class="lineStart" aria-hidden="true"></span>{/if}{#if segment.kind === 'text'}{segment.text}{:else if segment.kind === 'break'}<br />{:else}<span class="invisible" title={t('browser.source.invisibleDetail')}>{tInvisible(segment)}</span>{/if}{/each}</div>
+{#if wrap}
+  <p class="wrapLegend">{t('browser.source.wrapLegend')}</p>
+{/if}
 
 <style>
   /* The face that means "this is what the document holds" (`src/app.css`), and
@@ -55,6 +73,39 @@
     background: var(--surface-raised);
   }
 
+  /* The wrapping variant (B5). `break-spaces` keeps every space the file has,
+     wraps where it must, and lets a trailing space take room rather than hang;
+     `overflow-wrap: anywhere` breaks a word with no space in it rather than
+     cutting it at the edge. Every file line starts with a `.lineStart` marker;
+     a continuation row has none, which is what keeps a soft wrap from passing
+     for a line the file has. */
+  .sourceText.wrap {
+    white-space: break-spaces;
+    overflow-wrap: anywhere;
+    overflow-x: visible;
+  }
+
+  /* An empty element: its `›` is generated content, so it is drawn but is not
+     text, and a selection or a copy of the box never carries it. */
+  .lineStart {
+    display: inline-block;
+    width: 1.25rem;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .lineStart::before {
+    content: '›';
+    font-family: var(--font-ui);
+    color: var(--muted);
+  }
+
+  .wrapLegend {
+    margin: 0.25rem 0 0;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+
   /* A character the file holds and no font draws. Bordered like the other
      things this app says *about* a value rather than the value itself, and in
      the body face so it cannot be mistaken for the document's own text. */
@@ -71,7 +122,9 @@
        marker's words would start the rest of the file line on a new visual line,
        which is the false line break the container's rule exists to forbid. The
        boundaries around the marker take the container's `pre`, which offers no
-       wrap opportunity, so with `nowrap` here nothing in a file line can wrap. */
+       wrap opportunity, so with `nowrap` here nothing in a file line can wrap —
+       in the default container. In the wrapping one (`wrap`) a row may break
+       beside the marker, and the missing `›` on the next row says so. */
     white-space: nowrap;
   }
 </style>

@@ -28,6 +28,7 @@ import {
   invisibleKey,
   sourceCharacters,
   sourceSegments,
+  startsFileLine,
   type InvisibleName,
   type SourceSegment
 } from './sourceText';
@@ -358,6 +359,47 @@ describe('every hazard at once', () => {
   });
 }); // End of the "every hazard at once" suite
 
+describe('where a file line starts, for a box that wraps', () => {
+  /**
+   * The indices at which the wrapping box puts a line marker.
+   *
+   * @param text - The input.
+   * @returns Every index {@link startsFileLine} answers true for.
+   */
+  const starts = (text: string): number[] => {
+    const segments = sourceSegments(text);
+    return segments.map((_, index) => index).filter((index) => startsFileLine(segments, index));
+  };
+
+  it('marks the first segment and each one after a break', () => {
+    // text a, break, text b
+    expect(starts('a\nb')).toEqual([0, 2]);
+    expect(starts('a\r\nb')).toEqual([0, 2]);
+  });
+
+  it('opens no marked line after a trailing break', () => {
+    expect(starts('a\n')).toEqual([0]);
+  });
+
+  it('marks an empty line between two breaks', () => {
+    // text a, break, break, text b: the second break is the empty line
+    expect(starts('a\n\nb')).toEqual([0, 2, 3]);
+    expect(starts('\n')).toEqual([0]);
+  });
+
+  it('marks nothing in empty text, and nothing outside the segments', () => {
+    expect(starts('')).toEqual([]);
+    const segments = sourceSegments('a');
+    expect(startsFileLine(segments, -1)).toBe(false);
+    expect(startsFileLine(segments, 1)).toBe(false);
+  });
+
+  it('marks a line that starts with an invisible character', () => {
+    // break, invisible (U+200B), text
+    expect(starts('\n\u{200B}x')).toEqual([0, 1]);
+  });
+}); // End of the line-start suite
+
 describe('the code point label', () => {
   it.each([
     ['\u{0}', 'U+0000'],
@@ -423,10 +465,26 @@ describe('the source of the component that renders these segments', () => {
     expect(source).toContain('<br />');
   });
 
-  it('does not wrap, so a soft wrap cannot pass for a line the file does not have', () => {
-    expect(source).toContain('white-space: pre;');
+  it('does not wrap by default, so a soft wrap cannot pass for a line the file does not have', () => {
+    // The default container's own rule, sliced out so the wrapping variant's
+    // rule below cannot satisfy it.
+    const rule = source.slice(source.indexOf('.sourceText {'));
+    const body = rule.slice(0, rule.indexOf('}'));
+    expect(body).toContain('white-space: pre;');
+    expect(body).toContain('overflow-x: auto;');
     expect(source).not.toContain('white-space: pre-wrap;');
-    expect(source).toContain('overflow-x: auto;');
+  });
+
+  it('wraps only when asked, and then marks the start of every file line (B5)', () => {
+    // The owner's 4-13 ruling: the disk-version box wraps. A continuation row
+    // carries no marker, so it cannot pass for a line the file has.
+    expect(source).toContain('wrap = false');
+    expect(source).toContain('startsFileLine(segments, index)');
+    expect(source).toContain('<span class="lineStart" aria-hidden="true"></span>');
+    const rule = source.slice(source.indexOf('.lineStart::before {'));
+    const body = rule.slice(0, rule.indexOf('}'));
+    expect(body).toContain("content: '›';");
+    expect(source).toContain("t('browser.source.wrapLegend')");
   });
 
   it('keeps an invisible-character marker on one visual line', () => {
@@ -443,7 +501,7 @@ describe('the source of the component that renders these segments', () => {
     // `white-space: pre` preserves everything inside the container, so a newline
     // written here for legibility would be a newline the file does not have.
     // This is the assertion that fires if anyone reformats the markup.
-    expect(source).toContain('<div class="sourceText">{#each');
+    expect(source).toContain('<div class="sourceText" class:wrap>{#each');
     expect(source).toContain('{/each}</div>');
   });
 

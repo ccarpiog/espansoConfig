@@ -828,7 +828,7 @@
        `conflictDiskText`'s decision and not this markup's (2c-4a-3a review,
        finding 5). -->
   {#if current.view.diskText !== null && current.view.diskText.kind === 'text'}
-    <SourceText text={current.view.diskText.text} documentStart />
+    <SourceText text={current.view.diskText.text} documentStart wrap />
   {:else}
     <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
   {/if}

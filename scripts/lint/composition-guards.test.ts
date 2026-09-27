@@ -108,6 +108,7 @@ const MOUNTED_SUITES: ReadonlyMap<string, { readonly guard: SuiteGuard; readonly
       'src/lib/components/PreviewPanel.test.ts',
       { guard: 'invokeZero', reason: 'injected props only; the preview readers are fakes' }
     ],
+    ['src/lib/components/SourceText.test.ts', { guard: 'invokeZero', reason: 'props only; draws text' }],
     [
       'src/lib/components/RegexBench.test.ts',
       { guard: 'invokeZero', reason: 'injected props only; the regex bench reader is a fake' }

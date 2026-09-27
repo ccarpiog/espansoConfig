@@ -599,7 +599,7 @@
 {#snippet comparison(shown: RawSnippetView)}
   <h3>{t('browser.rawSnippet.diskVersion')}</h3>
   {#if shown.diskText !== null && shown.diskText.kind === 'text'}
-    <SourceText text={shown.diskText.text} documentStart />
+    <SourceText text={shown.diskText.text} documentStart wrap />
   {:else}
     <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
   {/if}

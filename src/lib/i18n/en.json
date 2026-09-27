@@ -121,6 +121,7 @@
   "browser.detail.field.injectVars": "Inject variables",
 
   "browser.source.invisibleDetail": "The file holds this character here. It draws nothing of its own, so this app names it rather than showing you nothing.",
+  "browser.source.wrapLegend": "Each line of the file starts at a ›. A row without one continues the line above: the box wraps long lines, and the file has no line break there.",
   "browser.source.invisible.bom": "byte order mark {code}",
   "browser.source.invisible.nul": "null character {code}",
   "browser.source.invisible.carriageReturn": "carriage return {code}",

@@ -349,6 +349,32 @@ export function sourceSegments(text: string, atDocumentStart = false): readonly 
 } // End of function sourceSegments()
 
 /**
+ * Whether the segment at `index` is the first thing drawn on a file line.
+ *
+ * A box that wraps puts a marker before each such segment, so a soft wrap (a
+ * visual row with no marker) cannot pass for a line the file has. The segments
+ * themselves, and their `<br>` for each break, are drawn exactly as the box
+ * that does not wrap draws them, so the DOM text and a copy of it are the
+ * same; the marker is an empty element. A line starts at the first segment
+ * and at every segment that follows a break, which is what the `<br>`
+ * rendering shows: a trailing break opens no marked line, and a break after a
+ * break is an empty line with its own marker.
+ *
+ * Nothing in TypeScript forces the renderer to call this; the
+ * component-source suite in `sourceText.test.ts` checks that it does.
+ *
+ * @param segments - Segments {@link sourceSegments} produced.
+ * @param index - A position in `segments`.
+ * @returns True when a file line starts at that segment.
+ */
+export function startsFileLine(segments: readonly SourceSegment[], index: number): boolean {
+  if (index < 0 || index >= segments.length) {
+    return false;
+  }
+  return index === 0 || segments[index - 1]?.kind === 'break';
+} // End of function startsFileLine()
+
+/**
  * The characters one segment stands for.
  *
  * @param segment - A segment {@link sourceSegments} produced.

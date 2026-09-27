@@ -705,7 +705,7 @@
        `diskRevision`, and never a projection of "the same snippet". Which
        arm is drawn is `conflictDiskText`'s decision and not this markup's. -->
   {#if form.diskText !== null && form.diskText.kind === 'text'}
-    <SourceText text={form.diskText.text} documentStart />
+    <SourceText text={form.diskText.text} documentStart wrap />
   {:else}
     <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
   {/if}

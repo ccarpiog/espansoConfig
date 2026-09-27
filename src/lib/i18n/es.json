@@ -121,6 +121,7 @@
   "browser.detail.field.injectVars": "Inyectar variables",
 
   "browser.source.invisibleDetail": "El archivo contiene este carácter aquí. No dibuja nada por sí mismo, así que esta aplicación lo nombra en vez de no mostrarte nada.",
+  "browser.source.wrapLegend": "Cada línea del archivo empieza con ›. Una fila sin él continúa la línea de arriba: la caja parte las líneas largas y el archivo no tiene ahí ningún salto de línea.",
   "browser.source.invisible.bom": "marca de orden de bytes {code}",
   "browser.source.invisible.nul": "carácter nulo {code}",
   "browser.source.invisible.carriageReturn": "retorno de carro {code}",

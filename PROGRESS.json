@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-27T02:53:08Z",
+  "updated": "2026-09-27T10:45:00Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build espansoConfig, a macOS app that edits espanso YAML config without reformatting untouched text; now finishing Phase 4, variables and forms.",
   "phases": [
@@ -1334,8 +1334,11 @@
     {
       "id": "4-13",
       "title": "Early authoring window half",
-      "status": "queued",
-      "summary": "Needs a visible window; set aside by driven runs. Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "status": "done",
+      "summary": "Read in the attended owner session, EN and ES, with the owner's real input; B5 repaired (disk-version boxes wrap, every file line marked); owner rulings D15, O3, O2 and clarity over design carried.",
+      "risk": "high",
+      "review": "docs/reviews/4-13.md",
+      "narrative": "docs/decisions/4-13-notes.md"
     },
     {
       "id": "4-14",

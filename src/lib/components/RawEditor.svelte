@@ -691,7 +691,7 @@
        character, and a `<textarea>` would silently draw it as a line break
        (`CLAUDE.md` §6). -->
   {#if shown.diskText !== null && shown.diskText.kind === 'text'}
-    <SourceText text={shown.diskText.text} documentStart />
+    <SourceText text={shown.diskText.text} documentStart wrap />
   {:else}
     <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
   {/if}

@@ -1353,7 +1353,7 @@
        about the file rather than a failure to obtain it* was written into
        three renderers until the 2c-4a-3a review's finding 5. -->
   {#if view.diskText !== null && view.diskText.kind === 'text'}
-    <SourceText text={view.diskText.text} documentStart />
+    <SourceText text={view.diskText.text} documentStart wrap />
   {:else}
     <p class="marker">{t('browser.detail.fileTextEmpty')}</p>
   {/if}
