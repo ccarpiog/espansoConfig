@@ -16,8 +16,10 @@
 //! [`espansoconfig_core::authoring`], Phase 4-17 one more reader,
 //! `preview_match`, over [`espansoconfig_core::preview`], and Phase 4-19-1
 //! its twin for an unsaved draft, `preview_match_candidate`, over
-//! [`espansoconfig_core::authoring::preview_candidate`]. Each is
-//! one line over a [`WorkspaceSession`] method; each of the original six readers
+//! [`espansoconfig_core::authoring::preview_candidate`]. Phase 4-21 adds
+//! `test_regex`, the regex bench over [`espansoconfig_core::regex_bench`],
+//! which is **not** a workspace command: it takes no session at all. Each
+//! workspace command is one line over a [`WorkspaceSession`] method; each of the original six readers
 //! is one call into `crate::workspace`, which Phase 1a built to be wrapped this
 //! way, and each of the three backup readers is one call into `crate::backup`.
 //!
@@ -235,7 +237,7 @@
 //!   the webview as `serde`'s own English prose and there is no second error to
 //!   send instead.
 //!
-//! # Why every command but two is synchronous
+//! # Why every command but three is synchronous
 //!
 //! Tauri runs a command written without `async` on the main thread, and an
 //! `async` one on its own runtime. An `async` command here would have to hold
@@ -260,6 +262,11 @@
 //! most one load and one update outstanding (`src/lib/browser/workspace.svelte.ts`),
 //! and `the_sidecar_commands_run_off_the_main_thread` in
 //! `crate::wire_contract` fails if either loses the attribute.
+//!
+//! **Phase 4-21's [`test_regex`] is the third**, for a different reason: it
+//! holds no lock at all, but one search over a 64 KiB sample with a program
+//! near `regex`'s 1 MiB compiled-size limit can take long enough to freeze the
+//! window. The same check pins its attribute.
 //!
 //! # Why a poisoned lock is absorbed rather than reported
 //!
@@ -300,6 +307,9 @@ use espansoconfig_core::preview::{
 };
 use espansoconfig_core::reconcile::{
     reconcile, PlacementMode, ReapplyConfidence, ReapplyMode, ReapplyRequest,
+};
+use espansoconfig_core::regex_bench::{
+    test_regex as test_one_regex, RegexBenchAnswer, RegexBenchRequest,
 };
 use espansoconfig_core::workspace::{DocumentSummary, Workspace, WorkspaceSummary};
 use espansoconfig_core::{ContentRevision, DocumentId, NodeKind, SourceDocument};
@@ -4414,6 +4424,40 @@ pub fn preview_match_candidate(
 ) -> Result<CandidatePreview, CommandError> {
     session.preview_match_candidate(id, &operation, base_revision, &samples)
 } // End of function preview_match_candidate()
+
+/// Tries one regex pattern against one sample — the regex bench (Phase 4-21,
+/// ruling 28).
+///
+/// **The twenty-eighth command in this module, and not a workspace command**:
+/// it takes no [`WorkspaceSession`], so it needs no open workspace and reads no
+/// document, identity, lock or file. It is one call into
+/// [`espansoconfig_core::regex_bench::test_regex`], which compiles the pattern
+/// with this crate's `regex` and searches the sample once; the answer echoes
+/// `request_id`, names the engine, and carries the whole match and every named
+/// group cut in Rust, or a refusal code. **The pattern and the sample are never
+/// logged**: this body and the core module name no logging or printing
+/// facility (`the_regex_bench_is_stateless_and_logs_nothing` in
+/// `crate::wire_contract` scans both), which is a text check — a facility
+/// reached under another name is not seen.
+///
+/// **Runs off the main thread** (`async` in the attribute), because a search is
+/// linear in the sample but its constant grows with the compiled program, and
+/// a 64 KiB sample against a program near the 1 MiB limit is long enough to be
+/// felt as a frozen window. Nothing is awaited inside.
+///
+/// The frontend sends `requestId` in camel case, as every multi-word argument
+/// on this boundary is sent.
+///
+/// Infallible past argument deserialization: a refusal is an answer, not a
+/// [`CommandError`], so the id is echoed on every answer.
+#[tauri::command(async)]
+pub fn test_regex(request_id: u64, pattern: String, sample: String) -> RegexBenchAnswer {
+    test_one_regex(&RegexBenchRequest {
+        request_id,
+        pattern,
+        sample,
+    })
+} // End of function test_regex()
 
 /// Moves one local variable within its own `vars` list and saves the file
 /// (Phase 4-8, ruling 10).

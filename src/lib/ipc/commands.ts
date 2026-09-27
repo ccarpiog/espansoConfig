@@ -108,6 +108,7 @@ import type {
   OwnedItemText,
   PreviewSamples,
   ReconciliationBatch,
+  RegexBenchAnswer,
   SaveResult,
   SidecarState,
   SidecarUpdateRequest,
@@ -155,7 +156,8 @@ export const COMMAND_NAMES = [
   'preview_match',
   'preview_match_candidate',
   'load_sidecar',
-  'update_sidecar'
+  'update_sidecar',
+  'test_regex'
 ] as const;
 
 /** One of {@link COMMAND_NAMES}. */
@@ -1094,6 +1096,37 @@ export async function previewMatchCandidate(
     samples
   });
 } // End of function previewMatchCandidate()
+
+/**
+ * Tries one regex pattern against one sample — the regex bench (Phase 4-21).
+ *
+ * **Stateless, and not a workspace command**: it needs no open workspace and
+ * reads no file. Rust compiles `pattern` with its own `regex` crate (the
+ * answer's `engine` names the version) — JavaScript's `RegExp` is never used —
+ * and searches `sample` once for the first match, with no anchor added. The
+ * answer carries the whole match and every named group, an unmatched optional
+ * one as `null`, each text cut in Rust and positioned in UTF-16 code units; or
+ * a refusal code when a limit is passed (8 KiB pattern, 64 KiB sample, 128
+ * named groups, 1 MiB compiled size, 128 KiB answer) or the pattern does not
+ * compile. A refusal is an answer, not a failure.
+ *
+ * `requestId` is echoed on every answer so a caller with several requests in
+ * flight can ignore a stale one; this function does not do that itself. It
+ * must be a non-negative safe integer: anything else fails to deserialize and
+ * comes back as an unexpected failure.
+ *
+ * @param requestId - The caller's number for this request.
+ * @param pattern - The pattern, as written.
+ * @param sample - The text to search.
+ * @returns The answer, or a failure only when the call itself fails.
+ */
+export async function testRegex(
+  requestId: number,
+  pattern: string,
+  sample: string
+): Promise<CommandResult<RegexBenchAnswer>> {
+  return call<RegexBenchAnswer>('test_regex', { requestId, pattern, sample });
+} // End of function testRegex()
 
 /**
  * Reads the open workspace's sidecar preferences (Phase 3-12, rulings 25-28).

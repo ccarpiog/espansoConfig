@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-27T01:12:59Z",
+  "updated": "2026-09-27T01:59:26Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build espansoConfig, a macOS app that edits espanso YAML config without reformatting untouched text; now finishing Phase 4, variables and forms.",
   "phases": [
@@ -1417,7 +1417,8 @@
       "risk": "high",
       "summary": "Preview panel in the match editor draws sample inputs, illustrative output, unresolved values, limitations, instant and zone.",
       "review": "docs/reviews/4-19-2.md",
-      "narrative": "docs/decisions/4-19-2-notes.md"
+      "narrative": "docs/decisions/4-19-2-notes.md",
+      "commit": "724dbf3"
     },
     {
       "id": "4-20",
@@ -1428,8 +1429,11 @@
     {
       "id": "4-21",
       "title": "Regex bench core and read-only wire",
-      "status": "queued",
-      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "status": "done",
+      "risk": "high",
+      "summary": "Core first-match regex search with declared named captures and a stateless test_regex command with typed limits; no UI.",
+      "review": "docs/reviews/4-21.md",
+      "narrative": "docs/decisions/4-21-notes.md"
     },
     {
       "id": "4-22",

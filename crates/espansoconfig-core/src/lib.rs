@@ -172,6 +172,12 @@
 //!   operation previewed over its candidate — planned, patched and reparsed by
 //!   the same preflight a save runs, then [`preview`]ed — with nothing written.
 //!
+//! - **4-21** — [`regex_bench`]: the stateless regex bench — one pattern
+//!   compiled with this crate's `regex` and searched once over one sample,
+//!   the whole match and every named group cut in Rust and positioned in
+//!   UTF-16 code units, under inclusive size limits that refuse by code. No
+//!   document, no lock, no I/O; the pattern and sample are never logged.
+//!
 //! [`persist`] holds the write primitive, the transaction around it and the
 //! backup step.
 
@@ -193,6 +199,7 @@ pub mod patch;
 pub mod persist;
 pub mod preview;
 pub mod reconcile;
+pub mod regex_bench;
 pub mod syntax;
 pub mod validate;
 pub mod watch;

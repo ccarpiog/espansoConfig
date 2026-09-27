@@ -85,6 +85,9 @@ import type {
   PreviewPlaceholder,
   PreviewPlaceholderName,
   PreviewUnresolved,
+  RegexCompileFailure,
+  RegexRefusal,
+  RegexRefusalName,
   BulkFileOutcome,
   BulkFileOutcomeName,
   BulkPlanError,
@@ -2174,6 +2177,58 @@ export function describePreviewLimit(locale: Locale, limit: PreviewLimit): strin
 } // End of function describePreviewLimit()
 
 // ---------------------------------------------------------------------------
+// The regex bench on the wire — Phase 4-21
+// ---------------------------------------------------------------------------
+//
+// Two namespaces `test_regex` answers with. No sentence interpolates an
+// operand, and none quotes the pattern or the sample. Every sentence describes
+// this application's test with its own `regex` version, never what espanso
+// accepts or triggers on (Phase 4 ruling 28).
+
+/**
+ * The dictionary key for why the regex bench refused a request.
+ *
+ * @param name - The variant name of a `RegexRefusal`.
+ * @returns The key holding that refusal's sentence.
+ */
+export function regexRefusalKey(name: RegexRefusalName): TranslationKey {
+  return `code.regexRefusal.${uncapitalize(name)}`;
+} // End of function regexRefusalKey()
+
+/**
+ * The sentence for why the regex bench refused a request. A compile failure's
+ * reason has a sentence of its own ({@link describeRegexCompileFailure}).
+ *
+ * @param locale - The dictionary to read from.
+ * @param refusal - A `RegexRefusal` as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeRegexRefusal(locale: Locale, refusal: RegexRefusal): string {
+  return translate(locale, regexRefusalKey(wireVariantName<RegexRefusalName>(refusal)));
+} // End of function describeRegexRefusal()
+
+/**
+ * The dictionary key for why `regex` did not compile a pattern.
+ *
+ * @param reason - A `RegexCompileFailure` as it crossed the boundary.
+ * @returns The key holding that reason's sentence.
+ */
+export function regexCompileFailureKey(reason: RegexCompileFailure): TranslationKey {
+  return `code.regexCompileFailure.${uncapitalize(reason)}`;
+} // End of function regexCompileFailureKey()
+
+/**
+ * The sentence for why `regex` did not compile a pattern.
+ *
+ * @param locale - The dictionary to read from.
+ * @param reason - A `RegexCompileFailure` as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function describeRegexCompileFailure(locale: Locale, reason: RegexCompileFailure): string {
+  return translate(locale, regexCompileFailureKey(reason));
+} // End of function describeRegexCompileFailure()
+
+// ---------------------------------------------------------------------------
 // Every `code.` namespace, and the builder that reaches it — Phase 2d-4b
 // ---------------------------------------------------------------------------
 
@@ -2266,6 +2321,8 @@ export const CODE_NAMESPACE_KEY_BUILDERS = {
   reapplyPlacement: reapplyPlacementKey,
   reapplyRefusal: reapplyRefusalKey,
   reapplyResolution: reapplyResolutionKey,
+  regexCompileFailure: regexCompileFailureKey,
+  regexRefusal: regexRefusalKey,
   rotationOutcome: rotationOutcomeKey,
   saveError: saveErrorKey,
   saveResult: saveResultKey,

@@ -1086,6 +1086,8 @@ const CODE_NAMESPACE_SAMPLES: {
   reapplyPlacement: 'NotAnchored',
   reapplyRefusal: 'NoAnchorInBase',
   reapplyResolution: 'Unsupported',
+  regexCompileFailure: 'Syntax',
+  regexRefusal: 'CaptureLimit',
   rotationOutcome: 'NotAttempted',
   saveError: 'DocumentIsReadOnly',
   saveResult: 'saved',

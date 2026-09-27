@@ -478,6 +478,16 @@ const CODE_ENUMS: &[CodeEnum] = &[
         source: "crates/espansoconfig-core/src/preview.rs",
         name: "PreviewLimit",
     },
+    // Phase 4-21's two: why the regex bench refused a request, and why `regex`
+    // did not compile a pattern.
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/regex_bench.rs",
+        name: "RegexRefusal",
+    },
+    CodeEnum {
+        source: "crates/espansoconfig-core/src/regex_bench.rs",
+        name: "RegexCompileFailure",
+    },
 ];
 
 /// How many variants each namespace's enum declares, as this phase measured it.
@@ -552,6 +562,8 @@ const VARIANT_COUNTS: &[(&str, usize)] = &[
     ("previewUnresolved", 22),
     ("previewPlaceholder", 4),
     ("previewLimit", 3),
+    ("regexRefusal", 5),
+    ("regexCompileFailure", 3),
 ];
 
 /// Source trees walked when asking whether an enum was registered at all.
@@ -576,6 +588,13 @@ const SCANNED_TREES: &[&str] = &["crates/espansoconfig-core/src", "src-tauri/src
 /// reaches a screen, and a claim answered differently depending on which language
 /// asks is not one claim.
 const NOT_A_CODE: &[(&str, &str)] = &[
+    (
+        "RegexOutcome",
+        "a value shape, not a code: `Tested` and `Refused` say whether the regex \
+         bench searched (Phase 4-21), and a screen shows what is inside — the match \
+         and its groups, or the sentence of the `RegexRefusal` code — never the \
+         variant's name",
+    ),
     (
         "PreviewSegment",
         "a value shape, not a code: `Literal`, `Sample`, `Choice`, `Placeholder` \

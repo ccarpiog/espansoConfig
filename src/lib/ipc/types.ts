@@ -4950,6 +4950,114 @@ export interface CandidatePreview {
 }
 
 // ---------------------------------------------------------------------------
+// The regex bench — Phase 4-21
+// ---------------------------------------------------------------------------
+
+/**
+ * The engine the regex bench ran — Rust's `RegexEngine`: `regex` at the
+ * version `Cargo.lock` pins (1.13.1). espanso 2.3.0 uses `regex` 1.5.5, so an
+ * answer establishes nothing about what espanso accepts or triggers on.
+ */
+export interface RegexEngine {
+  /** The crate's name, `regex`. */
+  readonly name: string;
+  /** The crate's version. */
+  readonly version: string;
+}
+
+/** Why `regex` did not compile a pattern — Rust's `RegexCompileFailure`. */
+export type RegexCompileFailure = 'Syntax' | 'CompiledTooBig' | 'Other';
+
+/**
+ * Why the regex bench refused a request — Rust's `RegexRefusal`. Every limit
+ * is inclusive: a request at it is answered, one unit past it is refused.
+ * `regex`'s own compile message is never carried, because it quotes the
+ * pattern.
+ */
+export type RegexRefusal =
+  | 'PatternTooLarge'
+  | 'SampleTooLarge'
+  | 'CaptureLimit'
+  | {
+      readonly CompileRejected: {
+        /** Which kind of compile failure. */
+        readonly reason: RegexCompileFailure;
+      };
+    }
+  | 'OutputLimit';
+
+/** The variant name of a {@link RegexRefusal}. */
+export type RegexRefusalName =
+  | 'PatternTooLarge'
+  | 'SampleTooLarge'
+  | 'CaptureLimit'
+  | 'CompileRejected'
+  | 'OutputLimit';
+
+/**
+ * One piece of the sample a match or a group covered — Rust's `RegexSpan`.
+ *
+ * `text` was cut in Rust. The positions are **UTF-16 code units**, the unit a
+ * JavaScript string index counts, so `sample.slice(utf16_start, utf16_end)`
+ * on the exact string sent equals `text`; TypeScript cannot check that a
+ * caller slices the same string it sent.
+ */
+export interface RegexSpan {
+  /** The text, exactly as the sample holds it; empty for a zero-width match. */
+  readonly text: string;
+  /** Where it starts, in UTF-16 code units. */
+  readonly utf16_start: number;
+  /** Where it ends, in UTF-16 code units; equal to the start when zero-width. */
+  readonly utf16_end: number;
+}
+
+/** One named group of a found match — Rust's `RegexGroup`. */
+export interface RegexGroup {
+  /** The group's name, as the pattern writes it. */
+  readonly name: string;
+  /** What it captured, or `null` when it did not take part in the match. */
+  readonly capture: RegexSpan | null;
+}
+
+/** The first match in the sample — Rust's `RegexFound`. */
+export interface RegexFound {
+  /** The whole match. */
+  readonly whole: RegexSpan;
+  /** Every named group, in the order the pattern opens them. */
+  readonly groups: readonly RegexGroup[];
+}
+
+/** What the regex bench did with a request — Rust's `RegexOutcome`. */
+export type RegexOutcome =
+  | {
+      readonly Tested: {
+        /** Every named group's name, in pattern order, whether or not anything matched. */
+        readonly group_names: readonly string[];
+        /** The first match, or `null` when the pattern matches nowhere. */
+        readonly found: RegexFound | null;
+      };
+    }
+  | {
+      readonly Refused: {
+        /** Why. */
+        readonly refusal: RegexRefusal;
+      };
+    };
+
+/**
+ * The regex bench's answer — `test_regex`'s (Phase 4-21). Every text in it
+ * is the sample's characters, unchanged: a renderer must draw it as text.
+ */
+export interface RegexBenchAnswer {
+  /** The request's own number, echoed on every answer, a refusal included. */
+  readonly request_id: number;
+  /** The engine that ran the search. */
+  readonly engine: RegexEngine;
+  /** What happened. */
+  readonly outcome: RegexOutcome;
+}
+
+// ---------------------------------------------------------------------------
 // Projections onto the name unions
 // ---------------------------------------------------------------------------
 

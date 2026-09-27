@@ -785,6 +785,7 @@ dependencies = [
  "marked-yaml",
  "notify",
  "regex",
+ "regex-syntax",
  "saphyr-parser",
  "serde",
  "serde_json",

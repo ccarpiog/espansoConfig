@@ -309,7 +309,9 @@ import type {
   PreviewLimit,
   PreviewPlaceholder,
   PreviewPlaceholderName,
-  PreviewUnresolved
+  PreviewUnresolved,
+  RegexCompileFailure,
+  RegexRefusal
 } from '../ipc/types';
 import {
   previewNoticeKey,
@@ -401,7 +403,9 @@ import {
   describePreviewLimit,
   describePreviewPlaceholder,
   describePreviewPlaceholderName,
-  describePreviewUnresolved
+  describePreviewUnresolved,
+  describeRegexCompileFailure,
+  describeRegexRefusal
 } from './codes';
 import type { DefaultRefusal, DisplayNameRefusal } from '../browser/preferences';
 import { translate, type TranslationKey, type TranslationParams } from './dictionaries';
@@ -485,6 +489,8 @@ export {
   describePreviewPlaceholder,
   describePreviewPlaceholderName,
   describePreviewUnresolved,
+  describeRegexCompileFailure,
+  describeRegexRefusal,
   describeReapplyPlacement,
   describeReapplyRefusal,
   describeReapplyResolution,
@@ -535,6 +541,8 @@ export {
   previewLimitKey,
   previewPlaceholderKey,
   previewUnresolvedKey,
+  regexCompileFailureKey,
+  regexRefusalKey,
   notReencodableKey,
   presentationNoteKey,
   reapplyPlacementKey,
@@ -830,6 +838,28 @@ export function tPreviewLimit(limit: PreviewLimit): string {
 export function tPreviewPlaceholderName(name: PreviewPlaceholderName): string {
   return describePreviewPlaceholderName(locale.current, name);
 } // End of function tPreviewPlaceholderName()
+
+/**
+ * Renders why the regex bench refused a request, in the current language
+ * (Phase 4-21).
+ *
+ * @param refusal - A regex refusal as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tRegexRefusal(refusal: RegexRefusal): string {
+  return describeRegexRefusal(locale.current, refusal);
+} // End of function tRegexRefusal()
+
+/**
+ * Renders why `regex` did not compile a pattern, in the current language
+ * (Phase 4-21).
+ *
+ * @param reason - A compile failure as it crossed the boundary.
+ * @returns The translated sentence.
+ */
+export function tRegexCompileFailure(reason: RegexCompileFailure): string {
+  return describeRegexCompileFailure(locale.current, reason);
+} // End of function tRegexCompileFailure()
 
 /**
  * A placeholder's short label, drawn where it stands in the illustrative output

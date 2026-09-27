@@ -1,4 +1,4 @@
-//! The twenty-eight commands, invoked through the real dispatcher.
+//! The twenty-nine commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -27,7 +27,7 @@
 //!    the local origin, `plugin:event|emit` and `plugin:event|emit_to` — which
 //!    `core:event:default` would also have granted — are asserted refused
 //!    through the resolved access-control list, and every plugin command is in
-//!    the remote-origin sweep beside the twenty-eight application commands.
+//!    the remote-origin sweep beside the twenty-nine application commands.
 //!
 //! `mock_builder()` swaps the platform webview for a mock; it does **not** swap
 //! the IPC dispatcher, the access-control resolution or the command macros, all
@@ -1352,6 +1352,80 @@ fn the_preview_reader_is_reachable_and_refuses_a_stale_identity() {
     assert_eq!(stale["code"], "identityStaleRevision", "{stale}");
 } // End of function the_preview_reader_is_reachable_and_refuses_a_stale_identity()
 
+/// Phase 4-21's regex bench is reachable **with no workspace open** — it takes
+/// no session — its three arguments deserialize from the JSON the frontend
+/// sends (`requestId` in camel case), it answers a match, a refusal and a
+/// compile failure as values echoing the id, and a missing argument is refused
+/// while the arguments are read.
+#[test]
+fn the_regex_bench_is_reachable_with_no_workspace_open() {
+    let _app = mock_app();
+    let webview = main_window(&_app);
+    let answer = invoke(
+        &webview,
+        "test_regex",
+        json!({ "requestId": 5, "pattern": "(?P<word>\\w+)(?P<num>\\d)?", "sample": "¡héllo 😀" }),
+    )
+    .expect("the bench answers with no workspace open");
+    assert_eq!(answer["request_id"], 5);
+    assert_eq!(
+        answer["engine"],
+        json!({ "name": "regex", "version": "1.13.1" })
+    );
+    assert_eq!(
+        answer["outcome"],
+        json!({ "Tested": {
+            "group_names": ["word", "num"],
+            "found": {
+                "whole": { "text": "héllo", "utf16_start": 1, "utf16_end": 6 },
+                "groups": [
+                    { "name": "word", "capture": { "text": "héllo", "utf16_start": 1, "utf16_end": 6 } },
+                    { "name": "num", "capture": null },
+                ],
+            },
+        } })
+    );
+    let refused = invoke(
+        &webview,
+        "test_regex",
+        json!({ "requestId": 6, "pattern": "a", "sample": "s".repeat(65_537) }),
+    )
+    .expect("a refusal is an answer, not an error");
+    assert_eq!(
+        refused,
+        json!({
+            "request_id": 6,
+            "engine": { "name": "regex", "version": "1.13.1" },
+            "outcome": { "Refused": { "refusal": "SampleTooLarge" } },
+        })
+    );
+    let rejected = invoke(
+        &webview,
+        "test_regex",
+        json!({ "requestId": 7, "pattern": "SECRET(", "sample": "" }),
+    )
+    .expect("a compile failure is an answer");
+    assert_eq!(
+        rejected["outcome"],
+        json!({ "Refused": { "refusal": { "CompileRejected": { "reason": "Syntax" } } } })
+    );
+    assert!(!rejected.to_string().contains("SECRET"), "{rejected}");
+    let missing = invoke(
+        &webview,
+        "test_regex",
+        json!({ "requestId": 8, "pattern": "a" }),
+    )
+    .expect_err("a missing sample is refused while the arguments are read");
+    assert!(missing.is_string(), "{missing}");
+    let snake = invoke(
+        &webview,
+        "test_regex",
+        json!({ "request_id": 9, "pattern": "a", "sample": "a" }),
+    )
+    .expect_err("the id is read in camel case, as every multi-word argument is");
+    assert!(snake.is_string(), "{snake}");
+} // End of function the_regex_bench_is_reachable_with_no_workspace_open()
+
 /// Phase 4-19-1's candidate reader is reachable, its operation and samples
 /// deserialize from the JSON the frontend sends (`baseRevision` in camel case,
 /// as every writer's), it previews the draft rather than the saved text, it
@@ -2344,7 +2418,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// resolved command carries `ExecutionContext::Local`, the remote origin
 /// resolves neither, and a window that is not `main` resolves neither.
 ///
-/// And the twenty-eight application commands resolve to nothing from either
+/// And the twenty-nine application commands resolve to nothing from either
 /// origin, which is the other half of what "names no application command"
 /// means: a local origin reaches them because the dispatcher does not consult
 /// this list for an application command, not because the list allows them, and
@@ -2439,7 +2513,7 @@ fn the_capability_grants_exactly_the_two_event_permissions() {
                 .is_none(),
             "{command} must resolve to nothing for a remote origin"
         );
-    } // End of the loop over the twenty-eight application commands
+    } // End of the loop over the twenty-nine application commands
 } // End of function the_capability_grants_exactly_the_two_event_permissions()
 
 /// A local `main` webview registers the wake listener through the event plugin.
@@ -2512,7 +2586,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
     );
 } // End of function the_registered_listener_is_removable_through_the_event_plugin()
 
-/// A page that is not this application cannot reach any of the twenty-eight
+/// A page that is not this application cannot reach any of the twenty-nine
 /// commands, nor either event-plugin command.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
@@ -2530,7 +2604,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All twenty-eight are attempted, and the count is asserted against the registered
+/// **All twenty-nine are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -2538,7 +2612,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// parsed out of `generate_handler!` by [`crate::rust_source`], so a command
 /// added to the application and forgotten here fails this test rather than
 /// silently leaving the sweep. **The two plugin commands are a second table**,
-/// kept apart so that the application count stays twenty-eight: they are not in
+/// kept apart so that the application count stays twenty-nine: they are not in
 /// `generate_handler!`, this test asserts they are not, and folding them into
 /// the first table would make the count claim about two different things.
 #[test]
@@ -2751,6 +2825,12 @@ fn a_remote_origin_is_refused() {
                 },
             }),
         ),
+        // Phase 4-21's regex bench. It reads no file, but it is still an
+        // application command, and a navigated webview reaches none of them.
+        (
+            "test_regex",
+            json!({ "requestId": 1, "pattern": "a", "sample": "a" }),
+        ),
         ("set_menu_labels", json!({ "labels": every_label() })),
     ];
 
@@ -2765,7 +2845,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 28, "the surface is twenty-eight commands");
+    assert_eq!(attempted.len(), 29, "the surface is twenty-nine commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, REMOTE_ORIGIN, command, args)

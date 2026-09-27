@@ -23,9 +23,18 @@ sha2.workspace = true
 saphyr-parser.workspace = true
 # Plan section 6.6 step 5 names this crate by name: a `regex:` trigger must
 # compile under the Rust `regex` crate. Added at Phase 2a-2a, the first
-# production dependency since Phase 0a, and confined to `crate::validate`.
+# production dependency since Phase 0a, and confined to `crate::validate` and,
+# since Phase 4-21, to `crate::regex_bench`, the stateless regex bench.
 # It pulls in no platform code and no tauri.
 regex.workspace = true
+# Phase 4-21's review fix: the parser `regex` itself uses, for the declared
+# named groups of a pattern before compilation drops any (`{0}`). Confined to
+# `crate::regex_bench`. No new crate in the lockfile; pulls in no tauri.
+regex-syntax.workspace = true
+# Phase 4-21: `crate::regex_bench` measures its answer's size with the same
+# serializer Tauri answers a command with. Already in the lockfile through the
+# tests and `src-tauri`; confined to `crate::regex_bench`. Pulls in no tauri.
+serde_json.workspace = true
 # The native filesystem watcher (Phase 2d-1, plan section 6.5). Confined to
 # `crate::watch::native`; no other module may import it. The callback
 # contributes only path hints — debounce, stability, hashing, projection and
@@ -61,9 +70,9 @@ chrono-tz.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
-# Only the tests need a concrete format: they assert the read model actually
-# serializes, which a `derive` alone does not prove.
-serde_json.workspace = true
+# The tests also use `serde_json` (a normal dependency since Phase 4-21) to
+# assert the read model actually serializes, which a `derive` alone does not
+# prove.
 tempfile.workspace = true
 yaml-rust2.workspace = true
 marked-yaml.workspace = true

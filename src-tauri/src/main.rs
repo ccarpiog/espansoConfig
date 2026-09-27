@@ -48,7 +48,9 @@
 //! example, which runs no command and reads no clipboard. Phase 4-19-1 adds its
 //! twin for an unsaved draft, `commands::preview_match_candidate`: the draft
 //! planned, patched in memory and reparsed as `analyze_match_candidate` does,
-//! then previewed, with no lock and no write.
+//! then previewed, with no lock and no write. Phase 4-21 adds
+//! `commands::test_regex`, the regex bench, which is not a workspace command:
+//! it takes no session and reads no document, identity, lock or file.
 //!
 //! Phase 3-12 adds `commands::load_sidecar` and `commands::update_sidecar`,
 //! and **neither writes a user file**: `sidecar` is the application-owned
@@ -218,9 +220,9 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
-/// Registers the fourteen read-only workspace commands, the nine commands that
-/// write a user's file, the two sidecar commands, the menu command, and the
-/// state they share.
+/// Registers the read-only workspace commands, the nine commands that write a
+/// user's file, the two sidecar commands, the stateless regex bench, the menu
+/// command, and the state they share.
 ///
 /// Shared with `dispatch_check.rs` so that the tested application is the built
 /// application: a command registered in `main` and absent from the test's
@@ -245,7 +247,8 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// menu command, `set_menu_labels`, does not write a user file either: it hands
 /// the macOS menu the strings the frontend translated, because Tauri builds that
 /// menu in Rust and hardcoding either language here is what plan section 9
-/// forbids. See `crate::menu`.
+/// forbids. See `crate::menu`. Phase 4-21's `test_regex` reads no state and
+/// writes nothing: it searches the sample it is handed.
 ///
 /// `capabilities/default.json` grants exactly two permissions,
 /// `core:event:allow-listen` and `core:event:allow-unlisten`, and nothing
@@ -255,7 +258,7 @@ fn context<R: tauri::Runtime>() -> tauri::Context<R> {
 /// the application publishes an ACL manifest of its own (`tauri::webview`'s
 /// dispatcher checks `plugin_command.is_some() || has_app_acl_manifest ||
 /// !is_local`). This crate publishes none, the webview's origin is local, and
-/// none of the twenty-eight commands is a plugin command, so none of them needs a
+/// none of the twenty-nine commands is a plugin command, so none of them needs a
 /// permission. The two event permissions are for the frontend's one event
 /// listener: Tauri's `listen` invokes the plugin command `plugin:event|listen`,
 /// and the unlisten function it resolves with invokes `plugin:event|unlisten`.
@@ -323,6 +326,7 @@ fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> 
             commands::preview_match_candidate,
             commands::load_sidecar,
             commands::update_sidecar,
+            commands::test_regex,
             menu::set_menu_labels,
         ])
 } // End of function register()

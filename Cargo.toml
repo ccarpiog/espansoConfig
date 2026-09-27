@@ -27,6 +27,12 @@ marked-yaml = "0.8"
 # real and is recorded in docs/decisions/2a-2a-notes.md section 5: a successful
 # compile here is not proof of a successful compile there.
 regex = "1.13"
+# Phase 4-21's review fix: `crate::regex_bench` reads a pattern's declared
+# named groups from the parser's AST, because `regex` drops a `{0}`
+# subexpression while compiling and its compiled names are not every declared
+# one. Already locked (0.8.11) as `regex`'s own dependency, so no new crate;
+# default features off here, and `regex`'s own features still unify onto it.
+regex-syntax = { version = "0.8", default-features = false, features = ["std"] }
 # Phase 2d-1, plan section 6.5 and the 2d design consult's Q1: the native
 # filesystem watcher. **Confined to `crate::watch::native`**, exactly as
 # `saphyr-parser` is confined to `crate::syntax`: the native callback

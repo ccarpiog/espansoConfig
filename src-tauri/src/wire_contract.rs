@@ -1617,8 +1617,14 @@ fn every_edit_error_variant_crosses_as_an_object() {
 ///
 /// Phase 4-19-1 adds `preview_match_candidate`, a reader, taking the workspace
 /// surface to twenty-seven and the whole to twenty-eight.
+///
+/// Phase 4-21 adds `test_regex`, the stateless regex bench, taking the
+/// frontend's `COMMAND_NAMES` to twenty-eight and the whole to twenty-nine. It
+/// is declared beside the workspace commands because it is called the same
+/// way, but it is not one: it takes no session
+/// ([`the_regex_bench_is_stateless_and_logs_nothing`]).
 #[test]
-fn the_registered_commands_are_the_workspace_twenty_seven_and_the_menu_command() {
+fn the_registered_commands_are_the_frontend_twenty_eight_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1627,9 +1633,9 @@ fn the_registered_commands_are_the_workspace_twenty_seven_and_the_menu_command()
     );
     assert_eq!(
         workspace.len(),
-        27,
-        "the frontend declares sixteen read-only commands, nine that write a user's file \
-         and the two sidecar commands: {workspace:?}"
+        28,
+        "the frontend declares sixteen read-only workspace commands, nine that write a \
+         user's file, the two sidecar commands and the regex bench: {workspace:?}"
     );
     assert!(
         workspace.contains("drain_external_changes"),
@@ -1677,6 +1683,10 @@ fn the_registered_commands_are_the_workspace_twenty_seven_and_the_menu_command()
         "preview_match_candidate is Phase 4-19-1's reader and must be declared, never as a writer"
     );
     assert!(
+        workspace.contains("test_regex") && !writing.contains(&"test_regex"),
+        "test_regex is Phase 4-21's stateless regex bench and must be declared, never as a writer"
+    );
+    assert!(
         workspace.contains("match_item_text") && !writing.contains(&"match_item_text"),
         "match_item_text is Phase 3-7's reader and must be declared, never as a writer"
     );
@@ -1714,8 +1724,9 @@ fn the_registered_commands_are_the_workspace_twenty_seven_and_the_menu_command()
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        28,
-        "Phase 4-19-1 registers twenty-seven workspace commands and one menu command, and no more: {registered:?}"
+        29,
+        "Phase 4-21 registers twenty-seven workspace commands, the regex bench and one menu \
+         command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1723,7 +1734,7 @@ fn the_registered_commands_are_the_workspace_twenty_seven_and_the_menu_command()
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_twenty_seven_and_the_menu_command()
+} // End of function the_registered_commands_are_the_frontend_twenty_eight_and_the_menu_command()
 
 /// The lock and write primitives no single-save writer and no reader of Phase
 /// 4-8 may name: each would be a second lock or a second route to the disk.
@@ -2267,6 +2278,233 @@ fn the_preview_shapes_declare_exactly_what_rust_writes_and_reads() {
         serde_json::from_value(written.clone()).expect("the samples read back");
     assert_eq!(json_of(&read), written);
 } // End of function the_preview_shapes_declare_exactly_what_rust_writes_and_reads()
+
+/// Phase 4-21's regex bench shapes are declared in `types.ts` exactly as
+/// `serde` writes them.
+///
+/// Every struct is sampled from a real answer — one with a matched and an
+/// unmatched named group — and every variant of the two tagged unions and the
+/// two string unions is compared against the Rust declaration.
+#[test]
+fn the_regex_bench_shapes_declare_exactly_what_rust_writes() {
+    use espansoconfig_core::regex_bench::{
+        test_regex, RegexBenchRequest, RegexCompileFailure, RegexOutcome, RegexRefusal,
+    };
+    let source = read_without_comments("src/lib/ipc/types.ts");
+    let answer = test_regex(&RegexBenchRequest {
+        request_id: 7,
+        pattern: "(?P<one>a)(?P<two>b)?".to_owned(),
+        sample: "xa".to_owned(),
+    });
+    let RegexOutcome::Tested {
+        found: Some(found), ..
+    } = &answer.outcome
+    else {
+        panic!("the sample matches: {answer:?}");
+    };
+    assert!(found.groups[0].capture.is_some() && found.groups[1].capture.is_none());
+    let structs: Vec<(&str, Value)> = vec![
+        ("RegexBenchAnswer", json_of(&answer)),
+        ("RegexEngine", json_of(&answer.engine)),
+        ("RegexFound", json_of(found)),
+        ("RegexSpan", json_of(&found.whole)),
+        ("RegexGroup", json_of(&found.groups[0])),
+        ("RegexGroup", json_of(&found.groups[1])),
+    ];
+    for (interface, value) in &structs {
+        assert_same_names(
+            &format!("interface {interface}"),
+            &json_keys(value),
+            &interface_fields(&source, interface),
+        );
+    } // End of the loop over the written structs
+
+    let refused = test_regex(&RegexBenchRequest {
+        request_id: 7,
+        pattern: "(".to_owned(),
+        sample: String::new(),
+    });
+    let outcomes: Vec<Value> = vec![json_of(&answer.outcome), json_of(&refused.outcome)];
+    let refusals: Vec<Value> = [
+        RegexRefusal::PatternTooLarge,
+        RegexRefusal::SampleTooLarge,
+        RegexRefusal::CaptureLimit,
+        RegexRefusal::CompileRejected {
+            reason: RegexCompileFailure::Syntax,
+        },
+        RegexRefusal::OutputLimit,
+    ]
+    .iter()
+    .map(json_of)
+    .collect();
+    let module = read_repository_file("crates/espansoconfig-core/src/regex_bench.rs");
+    let declared = declared_variants(&module, "RegexOutcome");
+    let sampled: BTreeSet<String> = outcomes.iter().map(variant_name).collect();
+    assert_eq!(declared, sampled, "one sample per RegexOutcome variant");
+    let tags: BTreeSet<String> = object_union_tags(&source, "RegexOutcome")
+        .into_keys()
+        .collect();
+    assert_same_names("type RegexOutcome", &sampled, &tags);
+    for sample in &outcomes {
+        let variant = variant_name(sample);
+        let fields = tagged_variant_fields(&source, "RegexOutcome", &variant)
+            .unwrap_or_else(|| panic!("type RegexOutcome declares no payload for {variant}"));
+        assert_same_names(
+            &format!("the {variant} payload of type RegexOutcome"),
+            &json_keys(&sample[&variant]),
+            &fields,
+        );
+    } // End of the loop over the outcomes
+
+    // `RegexRefusal` is mixed: four bare names and one tagged payload.
+    let declared = declared_variants(&module, "RegexRefusal");
+    let sampled: BTreeSet<String> = refusals.iter().map(variant_name).collect();
+    assert_eq!(declared, sampled, "one sample per RegexRefusal variant");
+    let bare: BTreeSet<String> = refusals
+        .iter()
+        .filter_map(|value| value.as_str().map(str::to_owned))
+        .collect();
+    assert_same_names(
+        "the bare members of type RegexRefusal",
+        &bare,
+        &union_members(&source, "RegexRefusal"),
+    );
+    let tagged: BTreeSet<String> = refusals
+        .iter()
+        .filter(|value| value.is_object())
+        .map(variant_name)
+        .collect();
+    let tags: BTreeSet<String> = object_union_tags(&source, "RegexRefusal")
+        .into_keys()
+        .collect();
+    assert_same_names("the tagged members of type RegexRefusal", &tagged, &tags);
+    let compile = &refusals[3]["CompileRejected"];
+    assert_same_names(
+        "the CompileRejected payload of type RegexRefusal",
+        &json_keys(compile),
+        &tagged_variant_fields(&source, "RegexRefusal", "CompileRejected")
+            .expect("a CompileRejected payload"),
+    );
+    assert_same_names(
+        "type RegexRefusalName",
+        &declared,
+        &union_members(&source, "RegexRefusalName"),
+    );
+    assert_same_names(
+        "type RegexCompileFailure",
+        &declared_variants(&module, "RegexCompileFailure"),
+        &union_members(&source, "RegexCompileFailure"),
+    );
+} // End of function the_regex_bench_shapes_declare_exactly_what_rust_writes()
+
+/// Identifiers that would put a pattern or a sample somewhere other than the
+/// answer: a printing or logging macro, a logging crate, a standard stream.
+///
+/// A fixed vocabulary, and therefore a tripwire as [`NO_WRITER_IDENTIFIERS`]
+/// is: a facility reached under another name is not seen.
+const LOGGING_IDENTIFIERS: &[&str] = &[
+    "println",
+    "eprintln",
+    "print",
+    "eprint",
+    "dbg",
+    "log",
+    "tracing",
+    "env_logger",
+    "info",
+    "debug",
+    "warn",
+    "trace",
+    "stdout",
+    "stderr",
+];
+
+/// Identifiers that would give the regex bench state: a session, a document or
+/// an identity, a lock, or the filesystem.
+const STATEFUL_IDENTIFIERS: &[&str] = &[
+    "WorkspaceSession",
+    "State",
+    "session",
+    "with_workspace",
+    "DocumentId",
+    "MatchId",
+    "ContentRevision",
+    "fs",
+    "File",
+    "OpenOptions",
+    "Path",
+    "PathBuf",
+    "lock_path",
+    "PathWriteLock",
+];
+
+/// **Phase 4-21's regex bench is stateless and logs nothing** (step 4-21:
+/// "no document, identity, lock or file I/O"; "pattern and sample never
+/// logged").
+///
+/// Two scopes: the whole core module, and the command's own signature and
+/// body in `commands.rs`. Neither names a logging or printing facility, a
+/// session, a document identity, a lock, a writer or the filesystem. The
+/// controls make the negatives mean something: the same scanner finds
+/// `println` in `dispatch_check.rs`, the core module does name `RegexBuilder`,
+/// and the command's body does name the core call. The behavioural half —
+/// nothing in an answer or a request's `Debug` echoes the texts — is in
+/// `crates/espansoconfig-core/tests/regex_bench.rs`; the reachability without
+/// an open workspace is `crate::dispatch_check`'s.
+///
+/// **What it cannot see**: it is a text scan, not a call graph. A facility
+/// reached under a name not on these lists, or inside `regex` itself, is not
+/// seen, and nothing here observes whether Tauri's own IPC layer logs a
+/// command's arguments.
+#[test]
+fn the_regex_bench_is_stateless_and_logs_nothing() {
+    let module = read_repository_file("crates/espansoconfig-core/src/regex_bench.rs");
+    let commands = read_repository_file("src-tauri/src/commands.rs");
+    let at = commands
+        .find("fn test_regex(")
+        .expect("commands.rs declares test_regex");
+    let signature = &commands[at..at + commands[at..].find('{').expect("a body")];
+    let body = function_body(&commands, "test_regex");
+    let scopes: [(&str, &str); 3] = [
+        ("crates/espansoconfig-core/src/regex_bench.rs", &module),
+        ("the signature of test_regex", signature),
+        ("the body of test_regex", body),
+    ];
+    for (scope, text) in scopes {
+        let text = if scope.starts_with("the signature") {
+            format!("{text} {{}}")
+        } else {
+            text.to_owned()
+        };
+        for forbidden in LOGGING_IDENTIFIERS
+            .iter()
+            .chain(STATEFUL_IDENTIFIERS)
+            .chain(SECOND_LOCK_IDENTIFIERS)
+            .chain(NO_WRITER_IDENTIFIERS)
+        {
+            assert!(
+                !crate::rust_source::mentions_identifier(&text, forbidden),
+                "{scope} names {forbidden}: the regex bench must stay stateless and must \
+                 never log a pattern or a sample"
+            );
+        } // End of the loop over the forbidden identifiers
+    } // End of the loop over the scopes
+    assert!(
+        crate::rust_source::mentions_identifier(
+            &read_repository_file("src-tauri/src/dispatch_check.rs"),
+            "println"
+        ),
+        "the scanner stopped seeing a printing macro"
+    );
+    assert!(
+        crate::rust_source::mentions_identifier(&module, "RegexBuilder"),
+        "the scanner stopped reading the core module"
+    );
+    assert!(
+        crate::rust_source::mentions_identifier(body, "test_one_regex"),
+        "the command no longer calls the core bench"
+    );
+} // End of function the_regex_bench_is_stateless_and_logs_nothing()
 
 /// The names no read of the backup tree may so much as mention.
 ///
@@ -5509,14 +5747,16 @@ fn the_sidecar_route_names_no_user_file_writer() {
 } // End of function the_sidecar_route_names_no_user_file_writer()
 
 /// The two sidecar commands run off the main thread, and every other command
-/// stays synchronous — Phase 3-13-1.
+/// stays synchronous — Phase 3-13-1 — except Phase 4-21's regex bench, whose
+/// search over a 64 KiB sample may be long enough to freeze the window.
 ///
 /// The sidecar store's cross-process lock has no timeout (3-12 notes §5), so a
 /// stalled second instance would freeze the window if either sidecar command ran
 /// on the main thread, where Tauri runs a command declared without `async`.
 /// This reads `commands.rs` with `syn` and checks each `#[tauri::command]`'s
-/// argument list: `async` on exactly `load_sidecar` and `update_sidecar`, and on
-/// nothing else, which is what the module header of `commands.rs` states.
+/// argument list: `async` on exactly `load_sidecar`, `update_sidecar` and
+/// `test_regex`, and on nothing else, which is what the module header of
+/// `commands.rs` states.
 ///
 /// **What it cannot see**: it checks the declaration, not Tauri's behaviour — a
 /// Tauri release that ran such a command on the main thread anyway would pass.
@@ -5557,13 +5797,17 @@ fn the_sidecar_commands_run_off_the_main_thread() {
         } // End of the loop over one function's attributes
     } // End of the loop over the items of commands.rs
     assert_eq!(
-        commands, 27,
-        "the twenty-seven workspace commands were all read"
+        commands, 28,
+        "the twenty-seven workspace commands and the regex bench were all read"
     );
     assert_eq!(
         asynchronous,
-        BTreeSet::from(["load_sidecar".to_owned(), "update_sidecar".to_owned()]),
-        "exactly the two sidecar commands run off the main thread"
+        BTreeSet::from([
+            "load_sidecar".to_owned(),
+            "update_sidecar".to_owned(),
+            "test_regex".to_owned(),
+        ]),
+        "exactly the two sidecar commands and the regex bench run off the main thread"
     );
 } // End of function the_sidecar_commands_run_off_the_main_thread()
 

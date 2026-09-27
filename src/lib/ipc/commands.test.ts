@@ -94,6 +94,7 @@ const {
   saveMatch,
   saveMatchItemText,
   saveRawDocument,
+  testRegex,
   updateSidecar
 } = commands;
 
@@ -194,7 +195,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the twenty-seven wire names, in order, and export no twenty-eighth wrapper', async () => {
+  it('call the twenty-eight wire names, in order, and export no twenty-ninth wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -234,6 +235,7 @@ describe('the command wrappers', () => {
     await previewMatchCandidate(IDENTITY, { Draft: { draft: UNCHANGED_DRAFT } }, 'a'.repeat(64), NO_SAMPLES);
     await loadSidecar();
     await updateSidecar(SIDECAR_REQUEST);
+    await testRegex(1, 'a', 'a');
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
     expect(EXPORTED_FUNCTIONS).toEqual([
       'analyzeMatchCandidate',
@@ -262,9 +264,10 @@ describe('the command wrappers', () => {
       'saveMatch',
       'saveMatchItemText',
       'saveRawDocument',
+      'testRegex',
       'updateSidecar'
     ]);
-  }); // End of the "call the twenty-seven wire names" case
+  }); // End of the "call the twenty-eight wire names" case
 
   it('sends a variable reorder as an identity, a position, a placement, a base revision and an acknowledgement', async () => {
     // Phase 4-8's writer. Every address is a position in the revision sent
@@ -329,6 +332,25 @@ describe('the command wrappers', () => {
     expect(sent).not.toContain('"force"');
     expect(sent).not.toContain('"span"');
   }); // End of the "sends a candidate preview" case
+
+  it('sends a regex test as an id, a pattern and a sample, and nothing else', async () => {
+    // Phase 4-21's stateless bench: no identity, no document, no revision —
+    // the pattern and sample travel unchanged, the id in camel case as every
+    // multi-word argument does, and the answer comes back as a value.
+    const answer = {
+      request_id: 9,
+      engine: { name: 'regex', version: '1.13.1' },
+      outcome: { Refused: { refusal: 'SampleTooLarge' } }
+    } as const;
+    outcome = { resolve: answer };
+    const result = await testRegex(9, '(?P<n>\\d+)\u00e9', 'é 😀 <b>');
+    expect(calls[0]).toEqual({
+      command: 'test_regex',
+      args: { requestId: 9, pattern: '(?P<n>\\d+)\u00e9', sample: 'é 😀 <b>' }
+    });
+    expect(Object.keys(calls[0]?.args ?? {})).toEqual(['requestId', 'pattern', 'sample']);
+    expect(result).toEqual({ ok: true, value: answer });
+  }); // End of the "sends a regex test" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence

@@ -1477,6 +1477,15 @@
   "code.previewLimit.segments": "The preview has more pieces than it shows: it stops at its limit.",
   "code.previewLimit.work": "The preview reached its work limit, so some values are not shown.",
 
+  "code.regexRefusal.patternTooLarge": "This pattern is longer than the regex test accepts, so it was not tried.",
+  "code.regexRefusal.sampleTooLarge": "This sample text is longer than the regex test accepts, so the pattern was not tried on it.",
+  "code.regexRefusal.captureLimit": "This pattern names more groups than the regex test accepts, so it was not tried.",
+  "code.regexRefusal.compileRejected": "This regular expression did not compile under the version espansoConfig uses.",
+  "code.regexRefusal.outputLimit": "The match is too long for the regex test to show, so it is not shown.",
+  "code.regexCompileFailure.syntax": "The pattern is not valid syntax for the version espansoConfig uses.",
+  "code.regexCompileFailure.compiledTooBig": "The pattern would compile to a program larger than the regex test allows.",
+  "code.regexCompileFailure.other": "The pattern was refused for a reason the regex test does not recognise.",
+
   "code.editError.sourceDoesNotParse": "espansoConfig’s YAML parser could not read this file, so nothing in it can be located.",
   "code.editError.unresolvable": "The place this change names does not exist in the file.",
   "code.editError.notAScalar": "The place this change names is not a single value, so it cannot be given one.",

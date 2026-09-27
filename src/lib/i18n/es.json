@@ -1477,6 +1477,15 @@
   "code.previewLimit.segments": "La vista previa tiene más partes de las que muestra: se detiene en su límite.",
   "code.previewLimit.work": "La vista previa alcanzó su límite de trabajo, así que algunos valores no se muestran.",
 
+  "code.regexRefusal.patternTooLarge": "Este patrón es más largo de lo que admite la prueba de expresiones regulares, así que no se ha probado.",
+  "code.regexRefusal.sampleTooLarge": "Este texto de ejemplo es más largo de lo que admite la prueba de expresiones regulares, así que el patrón no se ha probado con él.",
+  "code.regexRefusal.captureLimit": "Este patrón nombra más grupos de los que admite la prueba de expresiones regulares, así que no se ha probado.",
+  "code.regexRefusal.compileRejected": "Esta expresión regular no compiló con la versión que usa espansoConfig.",
+  "code.regexRefusal.outputLimit": "La coincidencia es demasiado larga para que la prueba de expresiones regulares la muestre, así que no se muestra.",
+  "code.regexCompileFailure.syntax": "El patrón no tiene una sintaxis válida para la versión que usa espansoConfig.",
+  "code.regexCompileFailure.compiledTooBig": "El patrón se compilaría en un programa más grande de lo que permite la prueba de expresiones regulares.",
+  "code.regexCompileFailure.other": "El patrón se rechazó por un motivo que la prueba de expresiones regulares no reconoce.",
+
   "code.editError.sourceDoesNotParse": "El analizador de YAML de espansoConfig no pudo leer este archivo, así que no se puede localizar nada dentro de él.",
   "code.editError.unresolvable": "El lugar que nombra este cambio no existe en el archivo.",
   "code.editError.notAScalar": "El lugar que nombra este cambio no es un valor suelto, así que no se le puede asignar uno.",
