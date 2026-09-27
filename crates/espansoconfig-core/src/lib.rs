@@ -168,6 +168,10 @@
 //!   ([`preview::SampleInstant`]); malformed formats and offsets, unknown
 //!   zones, out-of-range instants and locale-dependent formats are codes.
 //!
+//! - **4-19-1** — [`authoring::preview_candidate`]: an unsaved drafted
+//!   operation previewed over its candidate — planned, patched and reparsed by
+//!   the same preflight a save runs, then [`preview`]ed — with nothing written.
+//!
 //! [`persist`] holds the write primitive, the transaction around it and the
 //! backup step.
 

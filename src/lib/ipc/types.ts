@@ -4931,6 +4931,24 @@ export interface MatchPreview {
   readonly limit: PreviewLimit | null;
 }
 
+/**
+ * One drafted operation previewed for one example —
+ * `preview_match_candidate`'s answer (Phase 4-19-1). The candidate is never
+ * written anywhere.
+ *
+ * Every position a request's samples address belongs to this candidate, which
+ * `analysis` describes; nothing in Rust or TypeScript checks which revision a
+ * caller built its samples for.
+ */
+export interface CandidatePreview {
+  /** The revision the candidate would have. Opaque. */
+  readonly candidate: ContentRevision;
+  /** The snippet's preview in the candidate, or `null` when it holds none at that place. */
+  readonly preview: MatchPreview | null;
+  /** The snippet's analysis in the same candidate; `null` exactly when `preview` is. */
+  readonly analysis: AnalysisSummary | null;
+}
+
 // ---------------------------------------------------------------------------
 // Projections onto the name unions
 // ---------------------------------------------------------------------------

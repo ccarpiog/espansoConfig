@@ -373,6 +373,31 @@ cannot overwrite current ones; preview changes no draft and no file; unresolved 
 HTML is escaped; no execution or clipboard-read control. **Risk `high`. Driven:** yes; **window half owed
 to 4-20.** **Depends on** 4-12, 4-15, 4-17, 4-18.
 
+**Addendum, 2026-09-27 — cut into two pieces before starting.** The step joins a browser model with
+supersession and an injected clock, 4-17's open item (`4-17-notes.md` §5 item 1: `preview_match` previews
+saved text only, so an unsaved draft needs a candidate route, which is Rust and wire work), and mounted
+components with their strings. The orchestrator cut it along 3-6's shape:
+
+- **4-19-1 — the model and the coordination.** `preview.ts` in `src/lib/browser/`: the sample inputs the
+  4-17 request accepts, the request built with a sample instant and zone the **frontend** reads through an
+  injectable clock and zone source (no test reads the real clock), the instant and zone exposed for drawing
+  beside the result, illustrative output and limitation states as values (unresolved values identifiable,
+  codes typed for the `describe*` accessors of `src/lib/i18n/codes.ts`), a generation scheme under which
+  a superseded answer never overwrites a current one, and no draft, file or writing command touched; the
+  candidate route for an open, possibly dirty draft — a read-only preview over the planned candidate that
+  never reaches a writer, the core staying tauri-free — with its wire mirror and contract tests. Model
+  tests per clause, with failing-first evidence by mutation for supersession, no draft mutation, the
+  instant and zone injection and the candidate route's read-only nature. **No window half** — it draws
+  nothing.
+- **4-19-2 — the components and the i18n.** The preview components drawing 4-19-1's values: sample
+  inputs, the instant and zone beside the result, illustrative output, limitation states, any new EN and
+  ES keys; the mounted acceptance above (superseded responses, no draft and no file changed, unresolved
+  values identifiable, HTML escaped, no execution or clipboard-read control). Its record says: *"No
+  window reading was performed or claimed."* The window half stays 4-20's.
+
+Each piece is one phase with one worker and one review. The acceptance list above is the union of the
+two.
+
 ### 4-20 — Preview window half
 
 EN and ES readings of supported examples and uncertainty: sample instant and zone, choice label versus id,

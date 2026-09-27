@@ -13,8 +13,10 @@
 //! workspace's file list and hand it to `crate::sidecar`; neither writes a user
 //! file. Phase 4-8 adds a ninth writer, `move_variable`, and two readers,
 //! `match_authoring_snapshot` and `analyze_match_candidate`, over
-//! [`espansoconfig_core::authoring`], and Phase 4-17 one more reader,
-//! `preview_match`, over [`espansoconfig_core::preview`]. Each is
+//! [`espansoconfig_core::authoring`], Phase 4-17 one more reader,
+//! `preview_match`, over [`espansoconfig_core::preview`], and Phase 4-19-1
+//! its twin for an unsaved draft, `preview_match_candidate`, over
+//! [`espansoconfig_core::authoring::preview_candidate`]. Each is
 //! one line over a [`WorkspaceSession`] method; each of the original six readers
 //! is one call into `crate::workspace`, which Phase 1a built to be wrapped this
 //! way, and each of the three backup readers is one call into `crate::backup`.
@@ -36,7 +38,7 @@
 //! crossing, and what cannot cross at all, is written down on
 //! [`WorkspaceSession::text`] and measured in `crate::dispatch_check`.
 //!
-//! # Nine of the twenty-six workspace commands write, and they write the same way
+//! # Nine of the twenty-seven workspace commands write, and they write the same way
 //!
 //! Phase 2b-2a added `move_match`, 2b-2b-3 `save_match`, 2b-2c-2 `create_match`
 //! and `delete_match`, 2b-2c-3b `save_raw_document`, 2c-3c-2
@@ -276,7 +278,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use espansoconfig_core::authoring::{
-    analyze_candidate, authoring_snapshot, AuthoringSnapshot, CandidateOperation, MatchCandidate,
+    analyze_candidate, authoring_snapshot, preview_candidate, AuthoringSnapshot,
+    CandidateOperation, CandidatePreview, MatchCandidate,
 };
 use espansoconfig_core::draft::{
     check_bulk_changes, check_bulk_documents, option_spellings, plan_bulk_option_edits,
@@ -1511,6 +1514,26 @@ impl WorkspaceSession {
         })
     } // End of function preview_match()
 
+    /// Previews one drafted operation — an open, possibly unsaved draft — for
+    /// the example `samples` describe, and writes nothing (Phase 4-19-1).
+    ///
+    /// **A reader**, exactly as [`WorkspaceSession::analyze_match_candidate`]
+    /// is and through the same first two steps: see
+    /// [`preview_one_candidate`]. The positions in `samples` belong to the
+    /// **candidate** (the answer's `analysis` lists them), not to `id`'s
+    /// revision.
+    pub fn preview_match_candidate(
+        &self,
+        id: MatchId,
+        operation: &CandidateOperation,
+        base_revision: ContentRevision,
+        samples: &PreviewSamples,
+    ) -> Result<CandidatePreview, CommandError> {
+        self.with_workspace(|workspace| {
+            preview_one_candidate(workspace, id, operation, base_revision, samples)
+        })
+    } // End of function preview_match_candidate()
+
     /// Judges and analyses one drafted operation against the parse this
     /// session holds, and writes nothing (Phase 4-8).
     ///
@@ -2561,6 +2584,39 @@ fn analyze_one_candidate(
     analyze_candidate(&context, &base.source, found, &edits, acknowledgement)
         .map_err(|error| CommandError::CandidateRefused { error })
 } // End of function analyze_one_candidate()
+
+/// Previews one drafted operation over the session's cached parse, and writes
+/// nothing (Phase 4-19-1; `4-17-notes.md` §5 item 1).
+///
+/// The steps are [`analyze_one_candidate`]'s first two — refuse a stale base
+/// revision or identity (D2v), plan with the writer's own planner or refuse as
+/// [`CommandError::DraftRefused`] — and then
+/// [`espansoconfig_core::authoring::preview_candidate`], whose refusal is
+/// [`CommandError::CandidateRefused`]. **No path lock, no read, no write, no
+/// backup, and no acknowledgement**: a preview consents to nothing, so it
+/// passes none and answers no verdict. The lexical scan
+/// `the_variable_reorder_writer_reaches_the_one_tail_and_no_lock` in
+/// `crate::wire_contract` pins that this body names no lock, write primitive or
+/// save tail — a fixed vocabulary, so a writer reached under another name is not
+/// seen by it; `crate::commands::preview_check` is the behavioural half.
+fn preview_one_candidate(
+    workspace: &mut Workspace,
+    id: MatchId,
+    operation: &CandidateOperation,
+    base_revision: ContentRevision,
+    samples: &PreviewSamples,
+) -> Result<CandidatePreview, CommandError> {
+    // Cloned so that the immutable borrow ends before the snapshot is taken, as
+    // `analyze_one_candidate` does.
+    let context = workspace.document_context(id.document)?.clone();
+    let base = document_at(workspace, id.document, base_revision)?;
+    let found = base.view.match_by_id(id)?;
+    let edits = operation
+        .plan(found)
+        .map_err(|error| CommandError::DraftRefused { error })?;
+    preview_candidate(&context, &base.source, found, &edits, samples)
+        .map_err(|error| CommandError::CandidateRefused { error })
+} // End of function preview_one_candidate()
 
 /// The document's top-level `matches` list, or the refusal that it has none.
 ///
@@ -4328,6 +4384,36 @@ pub fn preview_match(
 ) -> Result<MatchPreview, CommandError> {
     session.preview_match(id, &samples)
 } // End of function preview_match()
+
+/// Previews one drafted operation — an open snippet editor's draft, saved or
+/// not — for one example, as an illustration (Phase 4-19-1).
+///
+/// **The twenty-seventh workspace command, and a reader**: `preview_match` for
+/// a candidate rather than for the saved text. It takes a writer's addressing —
+/// `id` and `base_revision`, because the operation's addresses are positions in
+/// that parse — and plans `operation` with the writer's own planner, patches it
+/// in memory, reparses it and previews the match there. It writes nothing,
+/// takes no path lock, runs no command and reads no clipboard; there is no
+/// acknowledgement and no `force` flag, because nothing is committed. See
+/// [`WorkspaceSession::preview_match_candidate`].
+///
+/// # Errors
+///
+/// [`CommandError::NoWorkspaceOpen`], the identity codes (a stale base revision
+/// or identity among them), [`CommandError::DraftRefused`] when the operation
+/// cannot be planned, and [`CommandError::CandidateRefused`] when the planned
+/// batch cannot be patched. A candidate holding no match at the snippet's path
+/// is not an error: the answer's `preview` is then `None`.
+#[tauri::command]
+pub fn preview_match_candidate(
+    session: State<'_, WorkspaceSession>,
+    id: MatchId,
+    operation: CandidateOperation,
+    base_revision: ContentRevision,
+    samples: PreviewSamples,
+) -> Result<CandidatePreview, CommandError> {
+    session.preview_match_candidate(id, &operation, base_revision, &samples)
+} // End of function preview_match_candidate()
 
 /// Moves one local variable within its own `vars` list and saves the file
 /// (Phase 4-8, ruling 10).

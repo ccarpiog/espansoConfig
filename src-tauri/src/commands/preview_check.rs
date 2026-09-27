@@ -11,7 +11,11 @@
 //! - the preview takes no path lock, writes no byte, and runs neither the
 //!   authored shell command nor the script;
 //! - a date variable (Phase 4-18) is shown at the instant and zone the request
-//!   carries, and answers `DateInstantMissing` without one.
+//!   carries, and answers `DateInstantMissing` without one;
+//! - `preview_match_candidate` (Phase 4-19-1) previews an unsaved draft over its
+//!   candidate — the draft's text, not the saved text — and, like the saved
+//!   preview, takes no path lock, writes no byte, runs nothing, and refuses a
+//!   stale base revision and an unplannable draft by code.
 //!
 //! Every fixture is synthetic and neutral (`CLAUDE.md` section 1).
 
@@ -19,7 +23,8 @@ use std::fs;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use espansoconfig_core::draft::ListPlacement;
+use espansoconfig_core::authoring::CandidateOperation;
+use espansoconfig_core::draft::{DraftField, ListPlacement, MatchDraft};
 use espansoconfig_core::model::MatchId;
 use espansoconfig_core::persist::{lock_path, Acknowledgement};
 use espansoconfig_core::preview::{
@@ -257,3 +262,112 @@ matches:
         source
     );
 } // End of function a_date_is_shown_at_the_request_instant_and_zone()
+
+/// A draft replacing the fixture's content with one that also uses the shell.
+fn drafted() -> CandidateOperation {
+    CandidateOperation::Draft {
+        draft: Box::new(MatchDraft {
+            replace: DraftField::Set("<i>{{pick}}</i> {{sh}}".to_owned()),
+            ..MatchDraft::default()
+        }),
+    }
+}
+
+#[test]
+fn a_candidate_preview_shows_the_draft_and_writes_nothing() {
+    let scratch = TempDir::new().expect("a scratch directory");
+    let marker = scratch.path().join("ran");
+    let source = fixture(&marker);
+    let dir = tree(&source);
+    let session = open(&dir);
+    let (held, base) = first(&session);
+    // Held for the whole preview: a candidate preview that tried to take it
+    // would wait forever, and the bounded wait turns that into a failure.
+    let _lock = lock_path(&dir.path().join("match").join("base.yml")).expect("the lock is taken");
+    let answer = std::thread::scope(|scope| {
+        let (sender, receiver) = mpsc::channel();
+        let session = &session;
+        scope.spawn(move || {
+            let _ = sender.send(session.preview_match_candidate(
+                held,
+                &drafted(),
+                base,
+                &second_choice(),
+            ));
+        });
+        receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the candidate preview returns while the path lock is held elsewhere")
+            .expect("previewed")
+    });
+    let preview = answer.preview.expect("the candidate holds the match");
+    assert_eq!(
+        preview.bodies[0].segments[..3],
+        [
+            PreviewSegment::Literal {
+                text: "<i>".to_owned()
+            },
+            PreviewSegment::Sample {
+                text: "two".to_owned(),
+                source: PreviewSource::Local { index: 0 },
+            },
+            PreviewSegment::Literal {
+                text: "</i> ".to_owned()
+            },
+        ],
+        "the draft's text, not the saved text"
+    );
+    assert!(matches!(
+        preview.bodies[0].segments[3],
+        PreviewSegment::Placeholder {
+            placeholder: PreviewPlaceholder::Shell { .. },
+            ..
+        }
+    ));
+    assert_ne!(
+        answer.candidate, base,
+        "a candidate, not the saved revision"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("match/base.yml")).expect("reads"),
+        source,
+        "the file is byte-identical"
+    );
+    assert!(!marker.exists(), "no command or script was run");
+    let entries: Vec<_> = fs::read_dir(dir.path().join("match"))
+        .expect("the directory reads")
+        .collect();
+    assert_eq!(entries.len(), 1, "no backup, no temporary file");
+    // The session still holds the saved revision: nothing was adopted.
+    assert_eq!(first(&session), (held, base));
+} // End of function a_candidate_preview_shows_the_draft_and_writes_nothing()
+
+#[test]
+fn a_candidate_preview_refuses_a_stale_base_and_an_unplannable_draft() {
+    let scratch = TempDir::new().expect("a scratch directory");
+    let source = fixture(&scratch.path().join("ran"));
+    let dir = tree(&source);
+    let session = open(&dir);
+    let (held, base) = first(&session);
+    let unplannable = CandidateOperation::VariableMove {
+        variable: 9,
+        to: ListPlacement::End {},
+    };
+    let refused = session
+        .preview_match_candidate(held, &unplannable, base, &PreviewSamples::default())
+        .expect_err("no variable at position 9");
+    assert_eq!(refused.code(), "draftRefused");
+    session
+        .move_variable(
+            held,
+            1,
+            ListPlacement::Front {},
+            base,
+            &Acknowledgement::none(),
+        )
+        .expect("the move runs");
+    let stale = session
+        .preview_match_candidate(held, &drafted(), base, &PreviewSamples::default())
+        .expect_err("the base revision was replaced");
+    assert_eq!(stale.code(), "identityStaleRevision");
+} // End of function a_candidate_preview_refuses_a_stale_base_and_an_unplannable_draft()

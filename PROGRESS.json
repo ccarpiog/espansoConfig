@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-09-27T00:08:29Z",
+  "updated": "2026-09-27T00:40:53Z",
   "plan": "IMPLEMENTATION_PLAN.md",
   "goal": "Build espansoConfig, a macOS app that edits espanso YAML config without reformatting untouched text; now finishing Phase 4, variables and forms.",
   "phases": [
@@ -1398,8 +1398,24 @@
     {
       "id": "4-19",
       "title": "Preview controls and popover samples",
+      "status": "in_progress",
+      "summary": "Cut into 4-19-1 (preview model and coordination) and 4-19-2 (preview components and i18n)."
+    },
+    {
+      "id": "4-19-1",
+      "title": "Preview model and coordination",
+      "status": "done",
+      "risk": "high",
+      "summary": "Frontend preview model with injectable clock, supersession and a read-only preview route for unsaved drafts.",
+      "review": "docs/reviews/4-19-1.md",
+      "narrative": "docs/decisions/4-19-1-notes.md"
+    },
+    {
+      "id": "4-19-2",
+      "title": "Preview components and i18n",
       "status": "queued",
-      "summary": "Step of Phase 4 per docs/decisions/4-split-notes.md section 2."
+      "risk": "high",
+      "summary": "Preview components drawing samples, instant, zone, illustrative output and limitation states, mounted."
     },
     {
       "id": "4-20",

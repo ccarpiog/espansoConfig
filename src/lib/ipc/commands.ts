@@ -92,6 +92,7 @@ import type {
   BulkOptionsRequest,
   BulkResult,
   CandidateOperation,
+  CandidatePreview,
   ContentRevision,
   DocumentId,
   DocumentSummary,
@@ -152,6 +153,7 @@ export const COMMAND_NAMES = [
   'analyze_match_candidate',
   'move_variable',
   'preview_match',
+  'preview_match_candidate',
   'load_sidecar',
   'update_sidecar'
 ] as const;
@@ -1033,7 +1035,7 @@ export async function moveVariable(
  * and answers every value it does not produce as a structured segment: a
  * placeholder for `clipboard`, `shell`, `script` and `match` — **no command is
  * run and the clipboard is never read** — or an unresolved segment with a code
- * (a cycle, a missing sample, a date, which a later step previews, …). The
+ * (a cycle, a missing sample, a date with no sample instant, …). The
  * answer is bounded; a limit reached is its `limit`. Identical requests give
  * identical answers.
  *
@@ -1053,6 +1055,45 @@ export async function previewMatch(
 ): Promise<CommandResult<MatchPreview>> {
   return call<MatchPreview>('preview_match', { id, samples });
 } // End of function previewMatch()
+
+/**
+ * Previews one drafted operation — an open, possibly unsaved snippet draft —
+ * for one example (Phase 4-19-1).
+ *
+ * **A reader, and an illustration.** Rust plans `operation` with the writer's
+ * own planner against `baseRevision`, patches the result in memory, reparses
+ * it and previews the snippet there exactly as {@link previewMatch} previews a
+ * saved one. Nothing is written, no lock is taken, no command is run and the
+ * clipboard is never read; there is no acknowledgement and no force flag,
+ * because nothing is committed.
+ *
+ * **Every position in `samples` belongs to the candidate**, which the answer's
+ * `analysis` lists — a draft that inserts or removes a variable moves the
+ * positions after it. Every segment's text is the draft's, the file's or the
+ * sample's characters, unchanged, markup included: a renderer must escape it.
+ *
+ * @param id - The snippet, by identity.
+ * @param operation - A whole draft, or a variable position and placement.
+ * @param baseRevision - The revision the operation's positions belong to.
+ * @param samples - The example, addressed by the candidate's positions.
+ * @returns The candidate preview (its `preview` is `null` when the candidate
+ *   holds no snippet at that place), or a failure — `noWorkspaceOpen`, an
+ *   identity code (`identityStaleRevision` among them), `draftRefused` or
+ *   `candidateRefused`.
+ */
+export async function previewMatchCandidate(
+  id: MatchId,
+  operation: CandidateOperation,
+  baseRevision: ContentRevision,
+  samples: PreviewSamples
+): Promise<CommandResult<CandidatePreview>> {
+  return call<CandidatePreview>('preview_match_candidate', {
+    id,
+    operation,
+    baseRevision,
+    samples
+  });
+} // End of function previewMatchCandidate()
 
 /**
  * Reads the open workspace's sidecar preferences (Phase 3-12, rulings 25-28).

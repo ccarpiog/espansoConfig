@@ -88,6 +88,7 @@ const {
   moveVariable,
   openWorkspace,
   previewMatch,
+  previewMatchCandidate,
   readBackupText,
   reloadDocument,
   saveMatch,
@@ -193,7 +194,7 @@ beforeEach(() => {
 });
 
 describe('the command wrappers', () => {
-  it('call the twenty-six wire names, in order, and export no twenty-seventh wrapper', async () => {
+  it('call the twenty-seven wire names, in order, and export no twenty-eighth wrapper', async () => {
     // Two claims, because the first alone is what the review of Phase 1b-2a
     // objected to: calling the known wrappers says nothing about whether another
     // exists. The second reads the module's exports rather than the names this
@@ -230,6 +231,7 @@ describe('the command wrappers', () => {
     );
     await moveVariable(IDENTITY, 1, { Front: {} }, 'a'.repeat(64), { accepted: [] });
     await previewMatch(IDENTITY, NO_SAMPLES);
+    await previewMatchCandidate(IDENTITY, { Draft: { draft: UNCHANGED_DRAFT } }, 'a'.repeat(64), NO_SAMPLES);
     await loadSidecar();
     await updateSidecar(SIDECAR_REQUEST);
     expect(calls.map((call) => call.command)).toEqual([...COMMAND_NAMES]);
@@ -254,6 +256,7 @@ describe('the command wrappers', () => {
       'moveVariable',
       'openWorkspace',
       'previewMatch',
+      'previewMatchCandidate',
       'readBackupText',
       'reloadDocument',
       'saveMatch',
@@ -261,7 +264,7 @@ describe('the command wrappers', () => {
       'saveRawDocument',
       'updateSidecar'
     ]);
-  }); // End of the "call the twenty-six wire names" case
+  }); // End of the "call the twenty-seven wire names" case
 
   it('sends a variable reorder as an identity, a position, a placement, a base revision and an acknowledgement', async () => {
     // Phase 4-8's writer. Every address is a position in the revision sent
@@ -310,6 +313,22 @@ describe('the command wrappers', () => {
     expect(calls[0]).toEqual({ command: 'preview_match', args: { id: IDENTITY, samples } });
     expect(JSON.stringify(calls[0]?.args)).not.toContain('"span"');
   }); // End of the "sends a preview" case
+
+  it('sends a candidate preview with a writer\'s addressing, samples, and no acknowledgement or force flag', async () => {
+    // Phase 4-19-1's reader: the identity and base revision a save takes, the
+    // same closed operation a candidate analysis takes, and the samples — but
+    // no acknowledgement, because a preview consents to nothing.
+    const operation = { Draft: { draft: UNCHANGED_DRAFT } } as const;
+    await previewMatchCandidate(IDENTITY, operation, 'e'.repeat(64), NO_SAMPLES);
+    expect(calls[0]).toEqual({
+      command: 'preview_match_candidate',
+      args: { id: IDENTITY, operation, baseRevision: 'e'.repeat(64), samples: NO_SAMPLES }
+    });
+    const sent = JSON.stringify(calls[0]?.args);
+    expect(sent).not.toContain('"acknowledgement"');
+    expect(sent).not.toContain('"force"');
+    expect(sent).not.toContain('"span"');
+  }); // End of the "sends a candidate preview" case
 
   it('exports no wrapper for the Phase 2 command that does not exist', () => {
     // `validateMatch` has no phase yet. `wire_contract.rs` asserts its absence

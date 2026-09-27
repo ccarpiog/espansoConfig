@@ -16,7 +16,11 @@
 //!   candidate revision, the save gate's findings and verdict over it (the
 //!   same findings pass [`crate::persist::save_document`] runs, through
 //!   [`crate::persist::preflight_candidate`]), and the analysis summary of the
-//!   match in that candidate.
+//!   match in that candidate;
+//! - a **candidate preview** (Phase 4-19-1): the same candidate, planned and
+//!   patched the same way, previewed by [`crate::preview::preview_match`] for
+//!   one example — so an open, unsaved draft can be illustrated without being
+//!   written ([`preview_candidate`]).
 //!
 //! # Bound to one revision, and never trusted back
 //!
@@ -57,6 +61,7 @@ use crate::patch::DocumentEdit;
 use crate::persist::{
     preflight_candidate, Acknowledgement, CandidatePreflight, SaveError, SaveVerdict,
 };
+use crate::preview::{preview_match, MatchPreview, PreviewSamples};
 use crate::validate::Finding;
 use crate::workspace::project_source;
 use crate::{ContentRevision, SourceDocument};
@@ -338,14 +343,8 @@ pub fn analyze_candidate(
     let CandidatePreflight { preflight, text } =
         preflight_candidate(context, source, edits, acknowledgement)?;
     let candidate = project_source(context, &text);
-    let analysis = found.path.as_ref().and_then(|path| {
-        candidate
-            .view
-            .matches
-            .iter()
-            .find(|entry| entry.path.as_ref() == Some(path))
-            .map(|entry| summarize(&candidate.view, entry))
-    });
+    let analysis =
+        candidate_entry(&candidate.view, found).map(|entry| summarize(&candidate.view, entry));
     Ok(MatchCandidate {
         candidate: preflight.candidate,
         changes: preflight.changes,
@@ -354,6 +353,77 @@ pub fn analyze_candidate(
         analysis,
     })
 } // End of function analyze_candidate()
+
+/// The match at `found`'s own path in a candidate's projection, if the
+/// candidate holds one there — the one lookup [`analyze_candidate`] and
+/// [`preview_candidate`] share, so the two cannot disagree about which match
+/// of a candidate they describe.
+fn candidate_entry<'a>(candidate: &'a DocumentView, found: &MatchView) -> Option<&'a MatchView> {
+    let path = found.path.as_ref()?;
+    candidate
+        .matches
+        .iter()
+        .find(|entry| entry.path.as_ref() == Some(path))
+} // End of function candidate_entry()
+
+/// One drafted operation, previewed for one example (Phase 4-19-1) —
+/// [`preview_candidate`]'s answer.
+///
+/// Every position in the request's samples (`PreviewSource::Local { index }`)
+/// belongs to the **candidate**, which is what [`CandidatePreview::analysis`]
+/// describes: a draft that inserts, removes or reorders a variable moves the
+/// positions after it, and a caller that addresses samples by the saved
+/// revision's positions previews the wrong variable. Nothing in Rust checks
+/// which revision a caller had in mind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CandidatePreview {
+    /// The revision the candidate would have. Opaque; never written anywhere.
+    pub candidate: ContentRevision,
+    /// The match's preview in the candidate, or `None` when the candidate's
+    /// projection holds no match at the match's path (a candidate that does
+    /// not parse, for instance).
+    pub preview: Option<MatchPreview>,
+    /// The match's analysis in the same candidate, or `None` exactly when
+    /// `preview` is: the positions a caller's samples must address.
+    pub analysis: Option<AnalysisSummary>,
+}
+
+/// Previews the batch `edits` over `source` for the example `samples`, as a
+/// save of it would produce the match, **and writes nothing** (Phase 4-19-1;
+/// `4-17-notes.md` §5 item 1).
+///
+/// The candidate is made by [`crate::persist::preflight_candidate`] — the one
+/// body a save's preflight and [`analyze_candidate`] run, so a preview cannot
+/// patch a batch differently from the save that would follow — and projected
+/// with [`project_source`]. The gate's findings and verdict are computed by
+/// that body and **dropped**: a preview is an illustration and consents to
+/// nothing, so it passes no acknowledgement and answers no verdict. The match
+/// is then previewed by [`preview_match`] exactly as a saved one is.
+///
+/// **No lock, no read, no write, no backup, no clock**: everything here is a
+/// function of `source`, `edits` and `samples`.
+///
+/// # Errors
+///
+/// The preflight's own [`SaveError`]: a read-only document, a batch the engine
+/// refuses, or a candidate whose reparse contradicts the patch.
+pub fn preview_candidate(
+    context: &DocumentContext,
+    source: &str,
+    found: &MatchView,
+    edits: &[DocumentEdit],
+    samples: &PreviewSamples,
+) -> Result<CandidatePreview, SaveError> {
+    let CandidatePreflight { preflight, text } =
+        preflight_candidate(context, source, edits, &Acknowledgement::none())?;
+    let candidate = project_source(context, &text);
+    let entry = candidate_entry(&candidate.view, found);
+    Ok(CandidatePreview {
+        candidate: preflight.candidate,
+        preview: entry.map(|entry| preview_match(&candidate.view, entry, samples)),
+        analysis: entry.map(|entry| summarize(&candidate.view, entry)),
+    })
+} // End of function preview_candidate()
 
 /// Summarises `entry`'s analysis in `view` for the wire.
 pub fn summarize(view: &DocumentView, entry: &MatchView) -> AnalysisSummary {

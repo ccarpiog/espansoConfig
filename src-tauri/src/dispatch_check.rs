@@ -1,4 +1,4 @@
-//! The twenty-seven commands, invoked through the real dispatcher.
+//! The twenty-eight commands, invoked through the real dispatcher.
 //!
 //! Everything else in this crate's tests calls [`WorkspaceSession`] directly,
 //! which is where the behaviour lives — but it says nothing about the three
@@ -27,7 +27,7 @@
 //!    the local origin, `plugin:event|emit` and `plugin:event|emit_to` — which
 //!    `core:event:default` would also have granted — are asserted refused
 //!    through the resolved access-control list, and every plugin command is in
-//!    the remote-origin sweep beside the twenty-seven application commands.
+//!    the remote-origin sweep beside the twenty-eight application commands.
 //!
 //! `mock_builder()` swaps the platform webview for a mock; it does **not** swap
 //! the IPC dispatcher, the access-control resolution or the command macros, all
@@ -1352,6 +1352,69 @@ fn the_preview_reader_is_reachable_and_refuses_a_stale_identity() {
     assert_eq!(stale["code"], "identityStaleRevision", "{stale}");
 } // End of function the_preview_reader_is_reachable_and_refuses_a_stale_identity()
 
+/// Phase 4-19-1's candidate reader is reachable, its operation and samples
+/// deserialize from the JSON the frontend sends (`baseRevision` in camel case,
+/// as every writer's), it previews the draft rather than the saved text, it
+/// writes nothing, and a stale base revision is refused by code.
+#[test]
+fn the_candidate_preview_reader_is_reachable_and_writes_nothing() {
+    let source = "matches:\n  - trigger: ':one'\n    replace: 'saved'\n";
+    let OverIpc {
+        webview,
+        view,
+        _app,
+        _dir: dir,
+        ..
+    } = opened_over_ipc(source);
+    let target = dir.path().join("match").join("base.yml");
+    let held = view["matches"][0]["id"].clone();
+    let base = view["revision"].clone();
+    let operation = json!({ "Draft": { "draft": { "replace": { "Set": "<b>drafted</b>" } } } });
+    let samples = json!({ "selections": [], "form_values": [], "captures": [], "instant": null });
+    let answer = invoke(
+        &webview,
+        "preview_match_candidate",
+        json!({ "id": held, "operation": operation, "baseRevision": base, "samples": samples }),
+    )
+    .expect("the candidate preview reads");
+    assert_eq!(
+        answer["preview"]["bodies"][0]["segments"],
+        json!([{ "Literal": { "text": "<b>drafted</b>" } }]),
+        "{answer}"
+    );
+    assert!(answer["candidate"].is_string(), "{answer}");
+    assert!(answer["analysis"].is_object(), "{answer}");
+    assert_eq!(
+        fs::read_to_string(&target).expect("the file reads back"),
+        source,
+        "a candidate preview writes nothing"
+    );
+    let entries = fs::read_dir(dir.path().join("match"))
+        .expect("the directory reads")
+        .count();
+    assert_eq!(
+        entries, 1,
+        "no backup, no temporary file, nothing beside the file"
+    );
+
+    let stale = invoke(
+        &webview,
+        "preview_match_candidate",
+        json!({
+            "id": held,
+            "operation": operation,
+            "baseRevision": "0".repeat(64),
+            "samples": samples,
+        }),
+    )
+    .expect_err("a base revision the session does not hold is refused");
+    assert_eq!(stale["code"], "identityStaleRevision", "{stale}");
+    assert_eq!(
+        fs::read_to_string(&target).expect("the file reads back"),
+        source
+    );
+} // End of function the_candidate_preview_reader_is_reachable_and_writes_nothing()
+
 /// Phase 3-12's sidecar pair is reachable, its request deserializes from the
 /// JSON the frontend sends, and what it writes lands under the storage root the
 /// test installed — never in the workspace.
@@ -2281,7 +2344,7 @@ fn a_menu_envelope_that_is_not_an_object_is_refused_with_a_code() {
 /// resolved command carries `ExecutionContext::Local`, the remote origin
 /// resolves neither, and a window that is not `main` resolves neither.
 ///
-/// And the twenty-seven application commands resolve to nothing from either
+/// And the twenty-eight application commands resolve to nothing from either
 /// origin, which is the other half of what "names no application command"
 /// means: a local origin reaches them because the dispatcher does not consult
 /// this list for an application command, not because the list allows them, and
@@ -2376,7 +2439,7 @@ fn the_capability_grants_exactly_the_two_event_permissions() {
                 .is_none(),
             "{command} must resolve to nothing for a remote origin"
         );
-    } // End of the loop over the twenty-seven application commands
+    } // End of the loop over the twenty-eight application commands
 } // End of function the_capability_grants_exactly_the_two_event_permissions()
 
 /// A local `main` webview registers the wake listener through the event plugin.
@@ -2449,7 +2512,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
     );
 } // End of function the_registered_listener_is_removable_through_the_event_plugin()
 
-/// A page that is not this application cannot reach any of the twenty-seven
+/// A page that is not this application cannot reach any of the twenty-eight
 /// commands, nor either event-plugin command.
 ///
 /// The other side of the condition the tests above depend on (`PROGRESS.md`
@@ -2467,7 +2530,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// `src/lib/ipc/errors.ts` has an `unexpected` arm instead of assuming every
 /// rejection is ours.
 ///
-/// **All twenty-seven are attempted, and the count is asserted against the registered
+/// **All twenty-eight are attempted, and the count is asserted against the registered
 /// set.** The review of Phase 1c-2b-2a found this test claiming seven while
 /// invoking three, which is a real security claim carried by a body that could
 /// not falsify it: remote access accidentally permitted for `get_document`
@@ -2475,7 +2538,7 @@ fn the_registered_listener_is_removable_through_the_event_plugin() {
 /// parsed out of `generate_handler!` by [`crate::rust_source`], so a command
 /// added to the application and forgotten here fails this test rather than
 /// silently leaving the sweep. **The two plugin commands are a second table**,
-/// kept apart so that the application count stays twenty-seven: they are not in
+/// kept apart so that the application count stays twenty-eight: they are not in
 /// `generate_handler!`, this test asserts they are not, and folding them into
 /// the first table would make the count claim about two different things.
 #[test]
@@ -2664,6 +2727,17 @@ fn a_remote_origin_is_refused() {
                 "samples": { "selections": [], "form_values": [], "captures": [] },
             }),
         ),
+        // Phase 4-19-1's reader, for the same reason: a candidate preview
+        // hands out a snippet's own text as a draft would change it.
+        (
+            "preview_match_candidate",
+            json!({
+                "id": identity,
+                "operation": { "VariableMove": { "variable": 0, "to": { "End": {} } } },
+                "baseRevision": "0".repeat(64),
+                "samples": { "selections": [], "form_values": [], "captures": [] },
+            }),
+        ),
         // Phase 3-12's pair. The reader hands out the person's display names
         // and defaults, and the writer changes the application's own store, so
         // a navigated webview must reach neither.
@@ -2691,7 +2765,7 @@ fn a_remote_origin_is_refused() {
         crate::wire_contract::registered_commands(),
         "every registered command must be attempted from the remote origin"
     );
-    assert_eq!(attempted.len(), 27, "the surface is twenty-seven commands");
+    assert_eq!(attempted.len(), 28, "the surface is twenty-eight commands");
 
     for (command, args) in attempts {
         let error = invoke_from(&webview, REMOTE_ORIGIN, command, args)

@@ -1614,8 +1614,11 @@ fn every_edit_error_variant_crosses_as_an_object() {
 ///
 /// Phase 4-17 adds `preview_match`, a reader, taking the workspace surface to
 /// twenty-six and the whole to twenty-seven.
+///
+/// Phase 4-19-1 adds `preview_match_candidate`, a reader, taking the workspace
+/// surface to twenty-seven and the whole to twenty-eight.
 #[test]
-fn the_registered_commands_are_the_workspace_twenty_six_and_the_menu_command() {
+fn the_registered_commands_are_the_workspace_twenty_seven_and_the_menu_command() {
     let frontend = read_without_comments("src/lib/ipc/commands.ts");
     let workspace = const_array_members(&frontend, "COMMAND_NAMES");
     let menu = const_array_members(
@@ -1624,8 +1627,8 @@ fn the_registered_commands_are_the_workspace_twenty_six_and_the_menu_command() {
     );
     assert_eq!(
         workspace.len(),
-        26,
-        "the frontend declares fifteen read-only commands, nine that write a user's file \
+        27,
+        "the frontend declares sixteen read-only commands, nine that write a user's file \
          and the two sidecar commands: {workspace:?}"
     );
     assert!(
@@ -1669,6 +1672,11 @@ fn the_registered_commands_are_the_workspace_twenty_six_and_the_menu_command() {
         "preview_match is Phase 4-17's reader and must be declared, never as a writer"
     );
     assert!(
+        workspace.contains("preview_match_candidate")
+            && !writing.contains(&"preview_match_candidate"),
+        "preview_match_candidate is Phase 4-19-1's reader and must be declared, never as a writer"
+    );
+    assert!(
         workspace.contains("match_item_text") && !writing.contains(&"match_item_text"),
         "match_item_text is Phase 3-7's reader and must be declared, never as a writer"
     );
@@ -1706,8 +1714,8 @@ fn the_registered_commands_are_the_workspace_twenty_six_and_the_menu_command() {
     assert_same_names("the registered commands", &registered, &declared);
     assert_eq!(
         registered.len(),
-        27,
-        "Phase 4-17 registers twenty-six workspace commands and one menu command, and no more: {registered:?}"
+        28,
+        "Phase 4-19-1 registers twenty-seven workspace commands and one menu command, and no more: {registered:?}"
     );
     for forbidden in FORBIDDEN_COMMANDS {
         assert!(
@@ -1715,7 +1723,7 @@ fn the_registered_commands_are_the_workspace_twenty_six_and_the_menu_command() {
             "{forbidden} is a Phase 2 mutating command and must not be on this surface"
         );
     }
-} // End of function the_registered_commands_are_the_workspace_twenty_six_and_the_menu_command()
+} // End of function the_registered_commands_are_the_workspace_twenty_seven_and_the_menu_command()
 
 /// The lock and write primitives no single-save writer and no reader of Phase
 /// 4-8 may name: each would be a second lock or a second route to the disk.
@@ -1765,6 +1773,8 @@ fn the_variable_reorder_writer_reaches_the_one_tail_and_no_lock() {
         "match_authoring_snapshot",
         "analyze_match_candidate",
         "preview_match",
+        "preview_one_candidate",
+        "preview_match_candidate",
     ] {
         let body = function_body(&commands, name);
         for forbidden in SECOND_LOCK_IDENTIFIERS {
@@ -1780,6 +1790,8 @@ fn the_variable_reorder_writer_reaches_the_one_tail_and_no_lock() {
         "match_authoring_snapshot",
         "analyze_match_candidate",
         "preview_match",
+        "preview_one_candidate",
+        "preview_match_candidate",
     ] {
         let body = function_body(&commands, reader);
         for tail in ["run_one_save", "with_open", "BackupSession"] {
@@ -2063,7 +2075,9 @@ fn the_authoring_shapes_declare_exactly_what_rust_writes_and_reads() {
 
 /// Phase 4-17's preview shapes are declared in `types.ts` exactly as `serde`
 /// writes them, and the inbound samples exactly as they read — Phase 4-18's
-/// sample instant and zone among them.
+/// sample instant and zone among them — and Phase 4-19-1's
+/// `CandidatePreview`, sampled from a real candidate preview of the same
+/// fixture.
 ///
 /// The answer is sampled from a real preview of an inline synthetic fixture
 /// that produces every segment kind; each tagged union is compared variant by
@@ -2122,8 +2136,27 @@ fn the_preview_shapes_declare_exactly_what_rust_writes_and_reads() {
         }),
     };
     let preview = preview_match(&document.view, &document.view.matches[0], &samples);
+    let edits = espansoconfig_core::authoring::CandidateOperation::VariableMove {
+        variable: 1,
+        to: espansoconfig_core::draft::ListPlacement::Front {},
+    }
+    .plan(&document.view.matches[0])
+    .expect("the move plans");
+    let candidate = espansoconfig_core::authoring::preview_candidate(
+        &context,
+        fixture,
+        &document.view.matches[0],
+        &edits,
+        &samples,
+    )
+    .expect("the candidate previews");
+    assert!(
+        candidate.preview.is_some() && candidate.analysis.is_some(),
+        "{candidate:?}"
+    );
     let structs: Vec<(&str, Value)> = vec![
         ("MatchPreview", json_of(&preview)),
+        ("CandidatePreview", json_of(&candidate)),
         ("PreviewBody", json_of(&preview.bodies[0])),
         ("PreviewSamples", json_of(&samples)),
         ("SelectionSample", json_of(&samples.selections[0])),
@@ -5524,8 +5557,8 @@ fn the_sidecar_commands_run_off_the_main_thread() {
         } // End of the loop over one function's attributes
     } // End of the loop over the items of commands.rs
     assert_eq!(
-        commands, 26,
-        "the twenty-six workspace commands were all read"
+        commands, 27,
+        "the twenty-seven workspace commands were all read"
     );
     assert_eq!(
         asynchronous,
