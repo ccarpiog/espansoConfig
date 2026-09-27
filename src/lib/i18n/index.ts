@@ -308,8 +308,14 @@ import type {
   MalformedPlaceholder,
   PreviewLimit,
   PreviewPlaceholder,
+  PreviewPlaceholderName,
   PreviewUnresolved
 } from '../ipc/types';
+import {
+  previewNoticeKey,
+  previewPlaceholderChipKey,
+  type PreviewNotice
+} from '../browser/previewView';
 import { locale } from '../stores/locale.svelte';
 import type { Locale } from './locale';
 import {
@@ -394,6 +400,7 @@ import {
   describeMalformedPlaceholder,
   describePreviewLimit,
   describePreviewPlaceholder,
+  describePreviewPlaceholderName,
   describePreviewUnresolved
 } from './codes';
 import type { DefaultRefusal, DisplayNameRefusal } from '../browser/preferences';
@@ -476,6 +483,7 @@ export {
   describePresentationNote,
   describePreviewLimit,
   describePreviewPlaceholder,
+  describePreviewPlaceholderName,
   describePreviewUnresolved,
   describeReapplyPlacement,
   describeReapplyRefusal,
@@ -811,6 +819,38 @@ export function tPreviewPlaceholder(placeholder: PreviewPlaceholder): string {
 export function tPreviewLimit(limit: PreviewLimit): string {
   return describePreviewLimit(locale.current, limit);
 } // End of function tPreviewLimit()
+
+/**
+ * Renders what a preview placeholder stands for, by its variant name, in the
+ * current language — the preview panel's limitation list (Phase 4-19-2).
+ *
+ * @param name - The placeholder's variant name.
+ * @returns The translated sentence.
+ */
+export function tPreviewPlaceholderName(name: PreviewPlaceholderName): string {
+  return describePreviewPlaceholderName(locale.current, name);
+} // End of function tPreviewPlaceholderName()
+
+/**
+ * A placeholder's short label, drawn where it stands in the illustrative output
+ * (Phase 4-19-2).
+ *
+ * @param name - The placeholder's variant name.
+ * @returns The translated label.
+ */
+export function tPreviewPlaceholderChip(name: PreviewPlaceholderName): string {
+  return translate(locale.current, previewPlaceholderChipKey(name));
+} // End of function tPreviewPlaceholderChip()
+
+/**
+ * A preview panel's notice, in the current language (Phase 4-19-2).
+ *
+ * @param notice - The notice, from `../browser/previewView.ts`.
+ * @returns The translated sentence.
+ */
+export function tPreviewNotice(notice: PreviewNotice): string {
+  return translate(locale.current, previewNoticeKey(notice));
+} // End of function tPreviewNotice()
 
 /**
  * Renders what became of a selection whose document moved on.

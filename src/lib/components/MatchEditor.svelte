@@ -142,6 +142,9 @@
   import SourceText from './SourceText.svelte';
   import VariableGroup from './VariableGroup.svelte';
   import FormBuilder from './FormBuilder.svelte';
+  import PreviewPanel from './PreviewPanel.svelte';
+  import { SYSTEM_SAMPLE_CLOCK, type PreviewCommands, type SampleClock } from '../browser/preview';
+  import { draftPreviewTargetOf } from '../browser/previewView';
 
   /*
    * The small editor: one snippet's editable fields, drafted and saved — seventeen
@@ -151,7 +154,9 @@
    * choices of form and a change's preview) and `search_terms` as list controls;
    * since Phase 4-11 the *Variables and fill-ins* group (`VariableGroup.svelte`)
    * under the content keys, and the variable reorder's save (`runVariableMove`);
-   * since Phase 4-12 the visual form builder (`FormBuilder.svelte`) beside it.
+   * since Phase 4-12 the visual form builder (`FormBuilder.svelte`) beside it;
+   * since Phase 4-19-2 the illustrative preview of the open draft
+   * (`PreviewPanel.svelte`), which reads the draft and writes nothing.
    *
    * **This file is presentation.** Every decision about what may be edited, what
    * a draft means, when a save may start, what it says and what a commit moves is
@@ -291,7 +296,9 @@
     standingConflictFor,
     variables,
     close,
-    clock = () => Date.now()
+    clock = () => Date.now(),
+    previewCommands,
+    sampleClock = SYSTEM_SAMPLE_CLOCK
   }: {
     /** The snippet being edited, exactly as this window projects it. */
     match: MatchView;
@@ -456,6 +463,19 @@
      * to drive the boundary passes its own.
      */
     clock?: Clock;
+    /**
+     * The two preview readers the preview panel may reach — Phase 4-19-2:
+     * `BrowserState.previewCommands`, handed on by `DetailPane.svelte`. **Required,
+     * and what that forces is only that a host supplies one**; the type holds no
+     * writer, and nothing in TypeScript forces them to be the real readers.
+     */
+    previewCommands: PreviewCommands;
+    /**
+     * Where the preview's sample instant and zone come from — the machine's
+     * (`SYSTEM_SAMPLE_CLOCK` in `../browser/preview.ts`) when absent, for the
+     * reason `clock` above has a default; a test injects one.
+     */
+    sampleClock?: SampleClock;
   } = $props();
 
   // `$state.raw`, not `$state`: a session is an immutable value replaced whole on
@@ -1869,6 +1889,11 @@
       {/each}
     {/if}
   {/each}
+
+  <!-- **The illustrative preview** (Phase 4-19-2): the draft as the controls
+       hold it now, through the candidate route, on request. It reads the
+       session and never writes it. -->
+  <PreviewPanel target={() => draftPreviewTargetOf(session)} commands={previewCommands} clock={sampleClock} />
 
   <p class="choices">
     <button type="button" disabled={!view.canUndo} onclick={() => onUndo()}>

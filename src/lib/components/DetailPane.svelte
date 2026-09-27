@@ -1488,6 +1488,7 @@
       reportRecovery={bindReceiver('recovery')}
       standingConflictFor={(document) => browser.standingConflictFor(document)}
       variables={variablePort}
+      previewCommands={browser.previewCommands}
       close={() => (editingMatch = null)}
     />
   {:else if editingSnippetText !== null}

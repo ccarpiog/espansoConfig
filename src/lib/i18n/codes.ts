@@ -2140,6 +2140,19 @@ export function describePreviewPlaceholder(
 } // End of function describePreviewPlaceholder()
 
 /**
+ * The same sentence as {@link describePreviewPlaceholder}, by the placeholder's
+ * variant name — what a preview's limitation list holds (`limitationsOf` in
+ * `../browser/preview.ts`, Phase 4-19-2).
+ *
+ * @param locale - The dictionary to read from.
+ * @param name - The variant name of a `PreviewPlaceholder`.
+ * @returns The translated sentence.
+ */
+export function describePreviewPlaceholderName(locale: Locale, name: PreviewPlaceholderName): string {
+  return translate(locale, previewPlaceholderKey(name));
+} // End of function describePreviewPlaceholderName()
+
+/**
  * The dictionary key for which limit a preview reached.
  *
  * @param limit - A `PreviewLimit` as it crossed the boundary.

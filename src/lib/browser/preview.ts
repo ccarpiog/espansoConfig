@@ -311,6 +311,33 @@ export function withPinnedInstant(inputs: PreviewInputs, instant: SampleInstant 
 } // End of function withPinnedInstant()
 
 /**
+ * Whether a source names a variable by its position in a `vars` list.
+ *
+ * @param source - A source.
+ * @returns `true` for a `Local` or `Global` variable.
+ */
+export function isPositionalSource(source: PreviewSource): boolean {
+  return 'Local' in source || 'Global' in source;
+} // End of function isPositionalSource()
+
+/**
+ * `inputs` without any sample that names a variable by position — every
+ * selection, and every form value of a `type: form` variable. The shorthand
+ * form's values (by field name), the captures (by name) and the pinned
+ * instant are kept.
+ *
+ * @param inputs - The current inputs.
+ * @returns The new inputs.
+ */
+export function withoutPositionalSamples(inputs: PreviewInputs): PreviewInputs {
+  return frozenInputs({
+    ...inputs,
+    selections: inputs.selections.filter((sample) => !isPositionalSource(sample.variable)),
+    formValues: inputs.formValues.filter((sample) => !isPositionalSource(sample.form))
+  });
+} // End of function withoutPositionalSamples()
+
+/**
  * A frozen, shallow-copied inputs value.
  *
  * @param inputs - The inputs.
@@ -547,12 +574,13 @@ export function limitationsOf(preview: MatchPreview): PreviewLimitations {
 } // End of function limitationsOf()
 
 /**
- * The variant name of a placeholder.
+ * The variant name of a placeholder — the code a component draws a
+ * placeholder's short label and sentence through (Phase 4-19-2).
  *
  * @param placeholder - A placeholder as it crossed the boundary.
  * @returns Its name.
  */
-function placeholderName(
+export function placeholderName(
   placeholder: Extract<PreviewSegment, { readonly Placeholder: unknown }>['Placeholder']['placeholder']
 ): PreviewPlaceholderName {
   if ('Clipboard' in placeholder) {

@@ -54,7 +54,7 @@ const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const COMPOSITION_ROOTS: ReadonlyMap<string, string> = new Map([
   [
     'src/lib/components/AppShell.svelte',
-    'the composition root: builds the BrowserState over REAL_COMMANDS, REAL_BACKUP_COMMANDS and REAL_RECONCILIATION_EVENTS'
+    'the composition root: builds the BrowserState over REAL_COMMANDS, REAL_BACKUP_COMMANDS, REAL_RECONCILIATION_EVENTS and REAL_PREVIEW_COMMANDS'
   ]
 ]);
 
@@ -103,6 +103,10 @@ const MOUNTED_SUITES: ReadonlyMap<string, { readonly guard: SuiteGuard; readonly
     [
       'src/lib/components/MatchEditorForms.test.ts',
       { guard: 'invokeZero', reason: 'injected props only' }
+    ],
+    [
+      'src/lib/components/PreviewPanel.test.ts',
+      { guard: 'invokeZero', reason: 'injected props only; the preview readers are fakes' }
     ],
     ['src/lib/components/MatchCreator.test.ts', { guard: 'invokeZero', reason: 'injected props only' }],
     [

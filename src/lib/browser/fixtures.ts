@@ -73,6 +73,7 @@ import type { ExternalChangeConflictSource } from './conflictSource';
 import type { ReconciliationRefusal, SurfaceAcknowledgementPort } from './reconciliationStatus';
 import { variableStructureReadOf } from './variableEditor';
 import type { VariableGroupPort } from './variableGroup';
+import type { PreviewCommands } from './preview';
 
 /**
  * A plain scalar carrying source text.
@@ -899,3 +900,16 @@ export function inertVariablePort(views: () => readonly DocumentView[] = () => [
     moveVariable: () => Promise.resolve({ kind: 'notAttempted' })
   };
 } // End of function inertVariablePort()
+
+/**
+ * Preview readers that never answer — Phase 4-19-2: for a suite that mounts the
+ * match editor and never presses *Preview this draft*.
+ *
+ * @returns The readers.
+ */
+export function inertPreviewCommands(): PreviewCommands {
+  return {
+    previewMatch: () => new Promise(() => undefined),
+    previewMatchCandidate: () => new Promise(() => undefined)
+  };
+} // End of function inertPreviewCommands()

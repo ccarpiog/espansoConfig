@@ -23,7 +23,9 @@
  *   `navigator.clipboard.writeText`, and nothing here matches it. Phase 4-15's
  *   `+ Insert` popovers (`src/lib/components/KindInsertion.svelte`) and the
  *   model they draw are asserted to be among the files read, and so are Phase
- *   4-19-1's preview model (`src/lib/browser/preview.ts`) and its wrappers;
+ *   4-19-1's preview model (`src/lib/browser/preview.ts`) and its wrappers,
+ *   and 4-19-2's panel (`src/lib/components/PreviewPanel.svelte`) and the
+ *   model it draws (`src/lib/browser/previewView.ts`);
  * - the two Cargo manifests and `package.json` for a shell, process or
  *   clipboard dependency, and `src-tauri/capabilities/` for a shell or
  *   clipboard permission.
@@ -273,8 +275,13 @@ describe('no command in the tree runs a process or reads the clipboard for a var
     } // End of the loop over the popover sources
   });
 
-  it('reads the Phase 4-19-1 preview model and its IPC wrappers: the preview is scanned like everything else', () => {
-    for (const source of [join('src', 'lib', 'browser', 'preview.ts'), join('src', 'lib', 'ipc', 'commands.ts')]) {
+  it('reads the preview model, its IPC wrappers and the panel drawing it: the preview is scanned like everything else', () => {
+    for (const source of [
+      join('src', 'lib', 'browser', 'preview.ts'),
+      join('src', 'lib', 'ipc', 'commands.ts'),
+      join('src', 'lib', 'browser', 'previewView.ts'),
+      join('src', 'lib', 'components', 'PreviewPanel.svelte')
+    ]) {
       expect(FRONTEND_SOURCES).toContain(source);
       expect(scan([source], FRONTEND_FORBIDDEN)).toEqual([]);
     } // End of the loop over the preview sources

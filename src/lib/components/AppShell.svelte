@@ -11,6 +11,7 @@
     REAL_BACKUP_COMMANDS,
     REAL_COMMANDS
   } from '../browser/workspace.svelte';
+  import { REAL_PREVIEW_COMMANDS } from '../browser/preview';
   import { t, tIpcFailure, tLocaleName } from '../i18n';
   import { reportIpcFailure } from '../ipc/errors';
   import type { IpcFailure } from '../ipc/errors';
@@ -56,13 +57,18 @@
    * capability. A mounted test proves a dispatched event requests a drain; it
    * cannot prove WKWebView dispatches one when the application really comes
    * forward — that is the window reading's, and only as far as it saw.
+   *
+   * The sixth is the preview's two readers — Phase 4-19-2: `preview_match` and
+   * `preview_match_candidate`, which the match editor's preview panel reaches
+   * through `BrowserState.previewCommands` and nothing else.
    */
   const browser = createBrowserState(
     REAL_COMMANDS,
     reportIpcFailure,
     REAL_BACKUP_COMMANDS,
     REAL_RECONCILIATION_EVENTS,
-    createDomForegroundSource(document, window)
+    createDomForegroundSource(document, window),
+    REAL_PREVIEW_COMMANDS
   );
 
   onMount(() => {

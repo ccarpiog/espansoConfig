@@ -27,7 +27,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConflictSource } from '../browser/conflictSource';
-import { inertVariablePort, makeMatch, makeSummary, scriptedAcknowledgement } from '../browser/fixtures';
+import { inertVariablePort, makeMatch, makeSummary, scriptedAcknowledgement, inertPreviewCommands } from '../browser/fixtures';
 import type { CreationBuffers } from '../browser/matchCreation';
 import type { MatchBuffers } from '../browser/matchEditor';
 import { rawSaveChoiceKey } from '../browser/rawSave';
@@ -170,6 +170,7 @@ function mountEditor(match: MatchView = projection(), answers: readonly SaveResu
       reportReceiver: () => inertBinding(),
       reportRecovery: inertBinding,
       variables: inertVariablePort(),
+      previewCommands: inertPreviewCommands(),
       standingConflictFor: (): ConflictSource | null => null,
       close: (): void => undefined
     }

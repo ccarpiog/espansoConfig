@@ -43,7 +43,8 @@ import {
   makeSummary,
   makeVariable,
   scalarItem,
-  scriptedAcknowledgement
+  scriptedAcknowledgement,
+  inertPreviewCommands
 } from '../browser/fixtures';
 import type { CreationBuffers } from '../browser/matchCreation';
 import type { MatchBuffers } from '../browser/matchEditor';
@@ -359,6 +360,7 @@ function mountEditor(script: Script = {}): Mounted {
       reportRecovery: inertBinding,
       standingConflictFor: (document: DocumentId): ConflictSource | null => standing.get(document) ?? null,
       variables,
+      previewCommands: inertPreviewCommands(),
       close: (): void => undefined
     }
   });

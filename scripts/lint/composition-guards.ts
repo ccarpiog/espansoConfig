@@ -72,10 +72,12 @@ export const BOUNDARY_MODULES: readonly string[] = [
  * Value bindings that carry the real boundary although their module is not in
  * {@link BOUNDARY_MODULES}: `workspace.svelte.ts` assembles `REAL_COMMANDS` and
  * `REAL_BACKUP_COMMANDS`, and `createBrowserState` defaults to them when an
- * argument is omitted, so calling it is an act of composition.
+ * argument is omitted, so calling it is an act of composition; `preview.ts`
+ * assembles `REAL_PREVIEW_COMMANDS`, the two preview readers (Phase 4-19-2).
  */
 export const BOUNDARY_BINDINGS: ReadonlyMap<string, readonly string[]> = new Map([
-  ['src/lib/browser/workspace.svelte', ['REAL_COMMANDS', 'REAL_BACKUP_COMMANDS', 'createBrowserState']]
+  ['src/lib/browser/workspace.svelte', ['REAL_COMMANDS', 'REAL_BACKUP_COMMANDS', 'createBrowserState']],
+  ['src/lib/browser/preview', ['REAL_PREVIEW_COMMANDS']]
 ]);
 
 /** Comments, blanked before scanning so a sentence about an import is not one. */

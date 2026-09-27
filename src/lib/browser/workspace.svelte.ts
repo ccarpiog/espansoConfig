@@ -204,6 +204,7 @@ import {
   type RegistrationState
 } from './reconciliationCoordinator';
 import { filterMatches } from './search';
+import { REAL_PREVIEW_COMMANDS, type PreviewCommands } from './preview';
 import { variableStructureReadOf, type VariableStructureRead } from './variableEditor';
 import type { SelectedMatch, SelectionRepair } from './selection';
 import { positionOf, repairSelection, reresolve, selectMatch } from './selection';
@@ -1532,6 +1533,11 @@ const PREFERENCES_SAVING: PreferenceSaveState = Object.freeze({ kind: 'saving' a
 
 /** The browser's reactive state. */
 export interface BrowserState {
+  /**
+   * The two preview readers — Phase 4-19-2: what `createBrowserState` was handed,
+   * for the match editor's preview panel. Readers only; the type holds no writer.
+   */
+  readonly previewCommands: PreviewCommands;
   /** Where the load has got to. */
   readonly status: BrowserStatus;
   /** Why the load failed, when it did. */
@@ -3643,6 +3649,9 @@ const ALWAYS_PERMITTED = (): boolean => true;
  *   nothing ever calls; `AppShell.svelte` passes the DOM source of
  *   `./domForeground.ts` explicitly (Phase 2d-6-10). Its type names neither the
  *   DOM nor Tauri, exactly as `ReconciliationEventSource` does not.
+ * @param preview - The two read-only preview commands — Phase 4-19-2; defaults
+ *   to the real ones, as `commands` and `backup` do. Nothing in this state calls
+ *   them; they are handed on to the preview panel.
  * @returns Reactive state a component can read directly.
  */
 export function createBrowserState(
@@ -3650,7 +3659,8 @@ export function createBrowserState(
   report: (failure: IpcFailure) => void = reportIpcFailure,
   backup: BackupCommands = REAL_BACKUP_COMMANDS,
   events: ReconciliationEventSource = INERT_RECONCILIATION_EVENTS,
-  foreground: ForegroundSource = INERT_FOREGROUND_EVENTS
+  foreground: ForegroundSource = INERT_FOREGROUND_EVENTS,
+  preview: PreviewCommands = REAL_PREVIEW_COMMANDS
 ): BrowserState {
   let status = $state<BrowserStatus>('loading');
   let failure = $state<IpcFailure | null>(null);
@@ -6362,6 +6372,7 @@ export function createBrowserState(
   } // End of function enqueuePreferenceRequest()
 
   const state: BrowserState = {
+    previewCommands: preview,
     get status(): BrowserStatus {
       return status;
     },
